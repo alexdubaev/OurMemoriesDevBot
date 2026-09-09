@@ -176,4 +176,3 @@ git commit -m "docs(foundation): record validation results"
 - [ ] **Step 5: Request independent review and report without merge**
 
 Report the branch, base/head SHAs, changed paths, exact checks, GitHub limitations, and no migration/contract changes beyond the new verification planner.
-

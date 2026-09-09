@@ -1,4 +1,4 @@
-# Install Checklist
+# «Наши воспоминания» — foundation checklist
 
 This file is the intake record for this repository. The installing agent fills it in during first-run setup and keeps it current afterwards.
 
@@ -10,7 +10,7 @@ Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the
 
 **When working on the template itself** (not installing it for a project), there is nothing to record: leave every answer cell at `_unanswered_` and every checkbox unchecked - those would otherwise ship to each future install. The capability ledger is the exception: it always describes the current branch, so keep it current when template work adds or removes a capability.
 
-**Install status:** `not started`
+**Install status:** `in progress`
 <!-- Set to: not started | in progress | completed YYYY-MM-DD -->
 
 ---
@@ -19,9 +19,9 @@ Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the
 
 | Question                                                        | Answer       |
 | --------------------------------------------------------------- | ------------ |
-| New project from this template, or work on the template itself? | _unanswered_ |
-| Project name / slug                                             | _unanswered_ |
-| Your own GitHub repository URL, if you have one                 | _unanswered_ |
+| New project from this template, or work on the template itself? | New project from Vibe |
+| Project name / slug                                             | OurMemoriesDevBot |
+| Your own GitHub repository URL, if you have one                 | https://github.com/alexdubaev/OurMemoriesDevBot.git |
 
 If no GitHub destination is chosen, the repository is left without `origin` and publishing stays unconfigured. The template remote is detached during setup unless this checkout is explicitly for improving the template.
 
@@ -29,22 +29,22 @@ If no GitHub destination is chosen, the repository is left without `origin` and 
 
 | Question                                                  | Answer       |
 | --------------------------------------------------------- | ------------ |
-| What product do you want to build first?                  | _unanswered_ |
-| What is the first user journey that must work end to end? | _unanswered_ |
+| What product do you want to build first?                  | Private family memories feed through a Telegram bot and Mini App |
+| What is the first user journey that must work end to end? | An authorized family member sends a photo, video, voice, or note and sees it in the private feed |
 
 ## 3. Active surfaces
 
 Mark what is active now, and set the install status to `in progress` as soon as this section is answered. From then on, everything unmarked is deferred and must be left alone: no features, no setup, no test flows. While the status is still `not started` nothing has been decided yet, so unmarked boxes mean "not asked", not "forbidden".
 
-- [ ] `backend` - API, database, auth
-- [ ] `webapp` - browser screens behind sign-in (no SEO)
+- [x] `backend` - API, database, auth
+- [x] `webapp` - browser screens behind sign-in (no SEO)
 - [ ] `website` - public pages that must rank in search or preview when shared
 - [ ] `mobile` - Expo app (lives on the `mobile` branch; switch branches before setup)
 
 | Question                                                                                                             | Answer       |
 | -------------------------------------------------------------------------------------------------------------------- | ------------ |
-| Why the unmarked surfaces are deferred, if it needs explaining                                                       | _unanswered_ |
-| If `mobile` is active: are Expo/EAS builds, Expo Push, and Maestro E2E needed now, or left unconfigured until later? | _unanswered_ |
+| Why the unmarked surfaces are deferred, if it needs explaining                                                       | MVP uses Telegram Mini App only; public website and native apps are out of scope |
+| If `mobile` is active: are Expo/EAS builds, Expo Push, and Maestro E2E needed now, or left unconfigured until later? | n/a |
 
 The split between `webapp` and `website` is the agent's call, not the user's; `README.md` explains how to route a feature between them.
 
@@ -52,17 +52,17 @@ The split between `webapp` and `website` is the agent's call, not the user's; `R
 
 Ask about product needs, not implementations. Mark what the first version actually needs, then fill the row below even when nothing was ticked, so a later session can tell "asked, and the answer was no" from "not asked yet".
 
-- [ ] Accounts / sign-in
-- [ ] Saved data that survives a restart
-- [ ] File, image, or media uploads → also answer _Files, images, and media_
+- [x] Accounts / sign-in
+- [x] Saved data that survives a restart
+- [x] File, image, or media uploads → also answer _Files, images, and media_
 - [ ] Paid subscriptions or one-off payments → also answer _Payments_
-- [ ] Admin tools or roles
-- [ ] External integrations (which: _unanswered_)
+- [x] Admin tools or roles
+- [x] External integrations (which: Telegram Bot API)
 - [ ] Real-time chat, presence, collaboration, or live updates
 
 | Question                                                                                          | Answer       |
 | ------------------------------------------------------------------------------------------------- | ------------ |
-| What the first version explicitly should NOT do (write "nothing ruled out" if that is the answer) | _unanswered_ |
+| What the first version explicitly should NOT do (write "nothing ruled out" if that is the answer) | AI, groups, payments, calendar, comments, search, public social features, iOS, Android, and VK |
 
 ## 5. Files, images, and media
 
