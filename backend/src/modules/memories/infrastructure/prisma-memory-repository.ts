@@ -8,6 +8,7 @@ import type {
 import { memoryDtoSchema } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import { insertTask } from '../../../outbox/store'
 import type {
   IdempotencyExecutor,
   JsonObject,
@@ -53,7 +54,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
         })
         if (!author) throw new MemoryFailure('not_found', 'Пользователь не найден')
 
-        const memory = await tx.memory.create({
+        const created = await tx.memory.create({
           data: {
             familyId: scope.familyId,
             childId: input.childId,
@@ -68,15 +69,18 @@ export class PrismaMemoryRepository implements MemoryRepository {
           await tx.memoryMedia.createMany({
             data: input.mediaIds.map((mediaId, position) => ({
               familyId: scope.familyId,
-              memoryId: memory.id,
+              memoryId: created.id,
               mediaId,
               position,
             })),
           })
         }
+        const memory = input.kind === 'note' ? created : await tx.memory.findUniqueOrThrow({
+          where: { id: created.id }, include: memoryInclude(),
+        })
         const response = dto(memory, scope.principal.userId, role)
         return {
-          resourceId: memory.id,
+          resourceId: created.id,
           response,
           responseSnapshot: jsonSnapshot(response),
         }
@@ -168,6 +172,12 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (concurrent?.deletedAt) return
         if (!concurrent) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         throw versionConflict()
+      }
+      const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } })
+      for (const { mediaId } of linked) {
+        await tx.mediaAsset.updateMany({ where: { id: mediaId, familyId: scope.familyId, deletedAt: null }, data: { deletedAt: now } })
+        await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${mediaId}`,
+          payload: { mediaId }, scheduledFor: now })
       }
     })
   }
@@ -330,6 +340,10 @@ function memoryInclude() {
       where: { member: { revokedAt: null, family: { status: 'active' as const } } },
       select: { userId: true },
     },
+    media: {
+      orderBy: { position: 'asc' as const },
+      include: { asset: { include: { variants: true } } },
+    },
   } as const
 }
 
@@ -347,6 +361,15 @@ function dto(
     status: 'processing' | 'published' | 'failed' | 'deleted'
     author: { displayName: string | null }
     likes: Array<{ userId: string }>
+    media: Array<{ asset: {
+      id: string
+      mediaKind: 'photo' | 'video' | 'voice'
+      width: number | null
+      height: number | null
+      durationMs: number | null
+      renditionStatus: 'pending' | 'ready' | 'failed'
+      variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
+    } }>
   },
   principalUserId: string,
   role: MemberRole,
@@ -362,7 +385,23 @@ function dto(
     createdAt: memory.createdAt.toISOString(),
     version: memory.version,
     status: memory.status,
-    attachments: [],
+    attachments: memory.media.map(({ asset }) => {
+      const path = (variant: string) => `/api/v1/families/${memory.familyId}/media/${asset.id}/content?variant=${variant}`
+      const variants = new Set(asset.variants.map(({ variant }) => variant))
+      return {
+        id: asset.id,
+        kind: asset.mediaKind,
+        width: asset.width,
+        height: asset.height,
+        durationMs: asset.durationMs,
+        renditionStatus: asset.renditionStatus,
+        previewPath: variants.has('preview') ? path('preview') : null,
+        displayPath: variants.has('display') ? path('display') : null,
+        playbackPath: variants.has('playback') ? path('playback') : null,
+        originalDownloadPath: path('original'),
+        waveform: null,
+      }
+    }),
     likes: {
       count: memory.likes.length,
       likedByMe: memory.likes.some((like) => like.userId === principalUserId),

@@ -4,3 +4,6 @@ Copyright 2026 Dima Sukharev
 Original author: Dima Sukharev
 GitHub: https://github.com/di-sukharev
 Original repository: https://github.com/di-sukharev/vibe
+
+Backend test fixture `heic-exif-orientation.heic` derives from gen2brain/heic
+(https://github.com/gen2brain/heic), MIT License.

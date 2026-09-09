@@ -59,12 +59,37 @@ export type ReadRangeInput = {
   end: number
 }
 
+export type WriteObjectInput = {
+  key: string
+  body: ReadableStream<Uint8Array>
+  contentLength: number
+  contentType: string
+}
+
+export type ReadObjectInput = {
+  key: string
+  range?: ReadRangeInput
+}
+
+export type StorageObjectRead = StorageObjectHead & {
+  body: ReadableStream<Uint8Array>
+  /** Present only for a ranged read. All offsets are inclusive. */
+  contentRange?: { start: number; end: number; total: number }
+}
+export type ListedStorageObject = { key: string; lastModified: Date }
+
 export interface PrivateStorage {
   readonly driver: StorageDriverName
 
   createUploadUrl(input: CreateUploadUrlInput): Promise<PresignedUpload>
 
   createDownloadUrl(input: CreateDownloadUrlInput): Promise<PresignedDownload>
+
+  /** Streams a new immutable object. A driver must never replace an existing key. */
+  writeObject(input: WriteObjectInput): Promise<StorageObjectHead>
+
+  /** Streams an object, optionally as one inclusive byte range, or returns null when missing. */
+  readObject(input: ReadObjectInput): Promise<StorageObjectRead | null>
 
   /** Resolves to `null` for a missing object rather than throwing, on every driver. */
   headObject(key: string): Promise<StorageObjectHead | null>
@@ -74,4 +99,7 @@ export interface PrivateStorage {
 
   /** Idempotent: deleting a key that is not there succeeds. */
   deleteObject(key: string): Promise<void>
+
+  /** Bounded reconciliation inventory; callers scope it to a structural namespace prefix. */
+  listObjects(prefix: string): Promise<ListedStorageObject[]>
 }

@@ -17,6 +17,7 @@
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1101.0",
         "@aws-sdk/s3-request-presigner": "^3.1101.0",
+        "@ffprobe-installer/ffprobe": "2.1.2",
         "@hono/zod-openapi": "^1.4.0",
         "@hono/zod-validator": "^0.9.0",
         "@prisma/adapter-pg": "7.9.0",
@@ -25,10 +26,12 @@
         "@web-app-demo/contracts": "workspace:*",
         "croner": "^10.0.1",
         "dotenv": "^17.4.2",
+        "heic-decode": "2.1.0",
         "hono": "4.13.6",
         "jose": "^6.2.7",
         "pg": "^8.20.0",
         "prisma": "7.9.0",
+        "sharp": "0.35.4",
         "zod": "^4.5.4",
       },
       "devDependencies": {
@@ -439,6 +442,24 @@
     "@eslint/object-schema": ["@eslint/object-schema@3.0.5", "", {}, "sha512-vqTaUEgxzm+YDSdElad6PiRoX4t8VGDjCtt05zn4nU810UIx/uNEV7/lZJ6KwFThKZOzOxzXy48da+No7HZaMw=="],
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.7.2", "", { "dependencies": { "@eslint/core": "^1.2.1", "levn": "^0.4.1" } }, "sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A=="],
+
+    "@ffprobe-installer/darwin-arm64": ["@ffprobe-installer/darwin-arm64@5.0.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-vwNCNjokH8hfkbl6m95zICHwkSzhEvDC3GVBcUp5HX8+4wsX10SP3B+bGur7XUzTIZ4cQpgJmEIAx6TUwRepMg=="],
+
+    "@ffprobe-installer/darwin-x64": ["@ffprobe-installer/darwin-x64@5.1.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-J+YGscZMpQclFg31O4cfVRGmDpkVsQ2fZujoUdMAAYcP0NtqpC49Hs3SWJpBdsGB4VeqOt5TTm1vSZQzs1NkhA=="],
+
+    "@ffprobe-installer/ffprobe": ["@ffprobe-installer/ffprobe@2.1.2", "", { "optionalDependencies": { "@ffprobe-installer/darwin-arm64": "5.0.1", "@ffprobe-installer/darwin-x64": "5.1.0", "@ffprobe-installer/linux-arm": "5.2.0", "@ffprobe-installer/linux-arm64": "5.2.0", "@ffprobe-installer/linux-ia32": "5.2.0", "@ffprobe-installer/linux-x64": "5.2.0", "@ffprobe-installer/win32-ia32": "5.1.0", "@ffprobe-installer/win32-x64": "5.1.0" } }, "sha512-ZNvwk4f2magF42Zji2Ese16SMj9BS7Fui4kRjg6gTYTxY3gWZNpg85n4MIfQyI9nimHg4x/gT6FVkp/bBDuBwg=="],
+
+    "@ffprobe-installer/linux-arm": ["@ffprobe-installer/linux-arm@5.2.0", "", { "os": "linux", "cpu": "arm" }, "sha512-PF5HqEhCY7WTWHtLDYbA/+rLS+rhslWvyBlAG1Fk8VzVlnRdl93o6hy7DE2kJgxWQbFaR3ZktPQGEzfkrmQHvQ=="],
+
+    "@ffprobe-installer/linux-arm64": ["@ffprobe-installer/linux-arm64@5.2.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-X1VvWtlLs6ScP73biVLuHD5ohKJKsMTa0vafCESOen4mOoNeLAYbxOVxDWAdFz9cpZgRiloFj5QD6nDj8E28yQ=="],
+
+    "@ffprobe-installer/linux-ia32": ["@ffprobe-installer/linux-ia32@5.2.0", "", { "os": "linux", "cpu": "ia32" }, "sha512-TFVK5sasXyXhbIG7LtPRDmtkrkOsInwKcL43iEvEw+D9vCS2rc//mn9/0Q+BR0UoJEiMK4+ApYr/3LLVUBPOCQ=="],
+
+    "@ffprobe-installer/linux-x64": ["@ffprobe-installer/linux-x64@5.2.0", "", { "os": "linux", "cpu": "x64" }, "sha512-D3UeqTLYPNs7pBWPLUYGehPdRVqU8eACox4OZy3pZUZatxye2YKlvBwEfaLdL1v2Z4FOAlLUhms0kY8m8kqSRA=="],
+
+    "@ffprobe-installer/win32-ia32": ["@ffprobe-installer/win32-ia32@5.1.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-5O3vOoNRxmut0/Nu9vSazTdSHasrr+zPT2B3Hm7kjmO3QVFcIfVImS6ReQnZeSy8JPJOqXts5kX5x/3KOX54XQ=="],
+
+    "@ffprobe-installer/win32-x64": ["@ffprobe-installer/win32-x64@5.1.0", "", { "os": "win32", "cpu": "x64" }, "sha512-jMGYeAgkrdn4e2vvYt/qakgHRE3CPju4bn5TmdPfoAm1BlX1mY9cyMd8gf5vSzI8gH8Zq5WQAyAkmekX/8TSTg=="],
 
     "@floating-ui/core": ["@floating-ui/core@1.8.0", "", { "dependencies": { "@floating-ui/utils": "^0.2.12" } }, "sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ=="],
 
@@ -1562,6 +1583,8 @@
 
     "hast-util-whitespace": ["hast-util-whitespace@3.0.0", "", { "dependencies": { "@types/hast": "^3.0.0" } }, "sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw=="],
 
+    "heic-decode": ["heic-decode@2.1.0", "", { "dependencies": { "libheif-js": "^1.19.8" } }, "sha512-0fB3O3WMk38+PScbHLVp66jcNhsZ/ErtQ6u2lMYu/YxXgbBtl+oKOhGQHa4RpvE68k8IzbWkABzHnyAIjR758A=="],
+
     "hermes-estree": ["hermes-estree@0.25.1", "", {}, "sha512-0wUoCcLp+5Ev5pDW2OriHC2MJCbwLwuRx+gAqMTOkGKJJiBCLjtrvy4PWUGn6MIVefecRpzoOZ/UV6iGdOr+Cw=="],
 
     "hermes-parser": ["hermes-parser@0.25.1", "", { "dependencies": { "hermes-estree": "0.25.1" } }, "sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA=="],
@@ -1675,6 +1698,8 @@
     "kleur": ["kleur@4.1.5", "", {}, "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ=="],
 
     "levn": ["levn@0.4.1", "", { "dependencies": { "prelude-ls": "^1.2.1", "type-check": "~0.4.0" } }, "sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ=="],
+
+    "libheif-js": ["libheif-js@1.23.2", "", {}, "sha512-qvHIXtggEsw1lCNCWBYKloL2Z36DJBm0R9ThGiH2JnhKYdeZFLPFkP30Lw4yMskxxhx0bKg1gLrBHX1D2w2pSw=="],
 
     "lightningcss": ["lightningcss@1.33.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.33.0", "lightningcss-darwin-arm64": "1.33.0", "lightningcss-darwin-x64": "1.33.0", "lightningcss-freebsd-x64": "1.33.0", "lightningcss-linux-arm-gnueabihf": "1.33.0", "lightningcss-linux-arm64-gnu": "1.33.0", "lightningcss-linux-arm64-musl": "1.33.0", "lightningcss-linux-x64-gnu": "1.33.0", "lightningcss-linux-x64-musl": "1.33.0", "lightningcss-win32-arm64-msvc": "1.33.0", "lightningcss-win32-x64-msvc": "1.33.0" } }, "sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA=="],
 

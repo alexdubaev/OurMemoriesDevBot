@@ -2,12 +2,20 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 import type { S3StorageConfig } from './config'
+import { StorageError } from './errors'
 import { assertSafeObjectKey } from './object-keys'
 import type {
   CreateDownloadUrlInput,
@@ -15,8 +23,11 @@ import type {
   PresignedDownload,
   PresignedUpload,
   PrivateStorage,
+  ReadObjectInput,
   ReadRangeInput,
   StorageObjectHead,
+  StorageObjectRead,
+  WriteObjectInput,
 } from './port'
 import {
   assertByteSize,
@@ -115,6 +126,77 @@ export class S3PrivateStorage implements PrivateStorage {
     }
   }
 
+  async writeObject(input: WriteObjectInput): Promise<StorageObjectHead> {
+    const key = assertSafeObjectKey(input.key)
+    const contentType = assertContentType(input.contentType)
+    const contentLength = assertByteSize(input.contentLength, this.config.uploadMaxBytes)
+    const directory = await mkdtemp(join(tmpdir(), 'private-storage-s3-'))
+    const bufferedPath = join(directory, 'object')
+    try {
+      let received = 0
+      const exactLength = new Transform({
+        transform(chunk, _encoding, callback) {
+          received += chunk.length
+          callback(received <= contentLength ? null : new StorageError('invalid_request', 'Object body exceeds its declared length'), chunk)
+        },
+        flush(callback) {
+          callback(received === contentLength ? null : new StorageError('invalid_request', 'Object body length differs from its declaration'))
+        },
+      })
+      await pipeline(Readable.fromWeb(input.body as never), exactLength, createWriteStream(bufferedPath))
+      const response = await this.s3.send(new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        Body: createReadStream(bufferedPath),
+        ContentLength: contentLength,
+        ContentType: contentType,
+        IfNoneMatch: '*',
+      }))
+      return {
+        key,
+        contentLength,
+        contentType,
+        ...(response.ETag ? { etag: response.ETag } : {}),
+      }
+    } catch (error) {
+      if (error instanceof StorageError) throw error
+      if (isPreconditionFailure(error)) {
+        throw new StorageError('already_exists', 'Storage object key already exists')
+      }
+      throw error
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+
+  async readObject(input: ReadObjectInput): Promise<StorageObjectRead | null> {
+    const key = assertSafeObjectKey(input.key)
+    const range = input.range ? assertReadRange(input.range) : undefined
+    try {
+      const response = await this.s3.send(new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+      }))
+      const body = response.Body?.transformToWebStream()
+      if (!body) throw new Error('S3 returned an object without a response body')
+      const total = range ? parseContentRangeTotal(response.ContentRange) : undefined
+      return {
+        key,
+        body,
+        contentLength: response.ContentLength ?? 0,
+        contentType: response.ContentType ?? 'application/octet-stream',
+        ...(response.ETag ? { etag: response.ETag } : {}),
+        ...(range && total !== undefined
+          ? { contentRange: { start: range.start, end: range.end, total } }
+          : {}),
+      }
+    } catch (error) {
+      if (isMissingObject(error)) return null
+      throw error
+    }
+  }
+
   async headObject(key: string): Promise<StorageObjectHead | null> {
     const safeKey = assertSafeObjectKey(key)
 
@@ -160,6 +242,22 @@ export class S3PrivateStorage implements PrivateStorage {
       new DeleteObjectCommand({ Bucket: this.config.bucket, Key: assertSafeObjectKey(key) }),
     )
   }
+
+
+  async listObjects(prefix: string) {
+    const safePrefix = assertSafeObjectKey(prefix)
+    const found: Array<{ key: string; lastModified: Date }> = []
+    let continuationToken: string | undefined
+    do {
+      const page = await this.s3.send(new ListObjectsV2Command({ Bucket: this.config.bucket,
+        Prefix: safePrefix, ContinuationToken: continuationToken }))
+      for (const object of page.Contents ?? []) {
+        if (object.Key && object.LastModified) found.push({ key: object.Key, lastModified: object.LastModified })
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+    } while (continuationToken)
+    return found
+  }
 }
 
 /**
@@ -175,4 +273,15 @@ function isMissingObject(error: unknown) {
     candidate.name === 'NoSuchKey' ||
     candidate.$metadata?.httpStatusCode === 404
   )
+}
+
+function isPreconditionFailure(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+  return candidate.name === 'PreconditionFailed' || candidate.$metadata?.httpStatusCode === 412
+}
+
+function parseContentRangeTotal(value: string | undefined) {
+  const match = value?.match(/^bytes \d+-\d+\/(\d+)$/)
+  return match ? Number(match[1]) : undefined
 }

@@ -44,6 +44,8 @@ test('the production scheduler runs every required maintenance job in UTC', () =
       job: 'auth:sessions:cleanup',
       timeoutMs: 240_000,
     },
+    { expression: '37 * * * *', job: 'media:pending:cleanup', timeoutMs: 900_000 },
+    { expression: '25 4 * * *', job: 'media:orphans:reconcile', timeoutMs: 900_000 },
   ])
   expect(
     scheduleDefinitions.every(

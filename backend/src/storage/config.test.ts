@@ -17,7 +17,7 @@ describe('privateStorageConfigFromEnv', () => {
     if (config.driver !== 'filesystem') throw new Error('unreachable')
     expect(config.root).toBe(resolve(process.cwd(), '.storage'))
     expect(config.publicBaseUrl).toBe('http://127.0.0.1:3000')
-    expect(config.uploadMaxBytes).toBe(5 * 1024 * 1024)
+    expect(config.uploadMaxBytes).toBe(100_000_000)
   })
 
   test('follows PORT so the signed local URLs point back at this backend', () => {

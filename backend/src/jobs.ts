@@ -93,6 +93,63 @@ export const backgroundJobs = {
       `Job uploads:pending:cleanup removed ${rows.count} abandoned uploads, and left ${abandoned.length - deletedIds.length} to retry.`,
     )
   },
+  'media:pending:cleanup': async ({ prisma }, now) => {
+    const expired = await prisma.uploadReservation.findMany({
+      where: { releasedAt: null, expiresAt: { lt: now } },
+      select: { id: true, mediaId: true, familyId: true, bytes: true }, take: 500,
+    })
+    for (const reservation of expired) {
+      await prisma.$transaction(async (tx) => {
+        const released = await tx.uploadReservation.updateMany({ where: { id: reservation.id, releasedAt: null }, data: { releasedAt: now } })
+        if (released.count === 0) return
+        await tx.family.update({ where: { id: reservation.familyId }, data: { storageReservedBytes: { decrement: reservation.bytes } } })
+        await tx.mediaAsset.updateMany({ where: { id: reservation.mediaId, deletedAt: null },
+          data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' } })
+        const { insertTask } = await import('./outbox/store')
+        await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${reservation.mediaId}`,
+          payload: { mediaId: reservation.mediaId }, scheduledFor: now })
+      })
+    }
+    const abandoned = await prisma.mediaAsset.findMany({
+      where: { originalStatus: 'stored', deletedAt: null, createdAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+        memories: { none: {} }, avatarForChildren: { none: {} } }, select: { id: true }, take: 500,
+    })
+    for (const asset of abandoned) {
+      await prisma.$transaction(async (tx) => {
+        const marked = await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null,
+          memories: { none: {} }, avatarForChildren: { none: {} } }, data: { deletedAt: now } })
+        if (marked.count === 0) return
+        const { insertTask } = await import('./outbox/store')
+        await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`,
+          payload: { mediaId: asset.id }, scheduledFor: now })
+      })
+    }
+    console.log(`Job media:pending:cleanup released ${expired.length} expired reservations and retired ${abandoned.length} unattached assets.`)
+  },
+  'media:orphans:reconcile': async (runtime, now) => {
+    const { prisma, privateStorage } = runtime
+    const { createMediaTasks } = await import('./modules/media')
+    const pendingDeletes = await prisma.mediaAsset.findMany({
+      where: { deletedAt: { not: null }, storageDeletedAt: null }, select: { id: true }, take: 500,
+    })
+    for (const asset of pendingDeletes) {
+      try { await createMediaTasks(runtime).deleteAsset({ mediaId: asset.id }) }
+      catch (error) { console.error(`Job media:orphans:reconcile could not delete media ${asset.id}:`, error) }
+    }
+    const graceCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
+    for (const prefix of ['media-originals', 'media-display', 'media-preview', 'media-playback']) {
+      const objects = await privateStorage.storage.listObjects(prefix)
+      for (const object of objects) {
+        if (object.lastModified >= graceCutoff) continue
+        const [asset, variant] = await Promise.all([
+          prisma.mediaAsset.findFirst({ where: { originalKey: object.key }, select: { id: true } }),
+          prisma.mediaVariant.findFirst({ where: { objectKey: object.key }, select: { id: true } }),
+        ])
+        if (!asset && !variant) await privateStorage.storage.deleteObject(object.key)
+      }
+    }
+    console.log('Job media:orphans:reconcile completed.')
+  },
   'outbox:drain': async (runtime, now) => {
     const { drainOptionsFromEnv, drainTaskOutbox } = await import('./outbox')
     const metrics = await drainTaskOutbox(runtime, {

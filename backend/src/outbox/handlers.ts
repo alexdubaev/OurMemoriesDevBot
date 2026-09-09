@@ -16,6 +16,17 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
  */
 export const taskHandlers = {
+  'media:delete': {
+    maxAttempts: 5,
+    run: async ({ payload }, runtime) => {
+      const mediaId = (payload as { mediaId?: unknown })?.mediaId
+      if (typeof mediaId !== 'string' || !/^[0-9a-f-]{36}$/i.test(mediaId)) {
+        throw new TerminalTaskError('Task payload is missing a usable media id')
+      }
+      const { createMediaTasks } = await import('../modules/media')
+      await createMediaTasks(runtime).deleteAsset({ mediaId })
+    },
+  },
   /**
    * The account-dependent half of a password reset: look the address up, mint a token, send it.
    *

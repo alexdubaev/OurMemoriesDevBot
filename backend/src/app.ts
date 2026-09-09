@@ -22,7 +22,8 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
-import { createMemoriesModule } from './modules/memories'
+import { createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
+import { createMediaModule } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
@@ -66,12 +67,15 @@ export function createApp({
     idempotencySecret: env.JWT_SECRET,
     requireAuth: auth.requireAuth,
   })
+  const media = createMediaModule({ db: prisma, env, familyAccess: families.access,
+    requireAuth: auth.requireAuth, storage: storage.storage })
   const memories = createMemoriesModule({
     db: prisma,
     idempotencyExecutor,
     familyAccess: families.access,
     idempotencySecret: env.JWT_SECRET,
     requireAuth: auth.requireAuth,
+    mediaCatalog: createMediaMemoryCatalog((scope, ids) => media.service.assertReadyForMemory(scope, ids)),
   })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Слишком много запросов. Попробуйте позже',
@@ -180,6 +184,7 @@ export function createApp({
   app.route('/api/v1', auth.routes)
   if (auth.legacyTestRoutes) app.route('/api/auth', auth.legacyTestRoutes)
   app.route('/api/v1', families.routes)
+  app.route('/api/v1', media.routes)
   app.route('/api/v1', memories.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)

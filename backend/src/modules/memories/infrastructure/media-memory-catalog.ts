@@ -10,3 +10,16 @@ export const unavailableMediaMemoryCatalog: MediaMemoryCatalog = {
     )
   },
 }
+
+export function createMediaMemoryCatalog(isReady: MediaMemoryCatalog['assertReadyForPublication']): MediaMemoryCatalog {
+  return {
+    async assertReadyForPublication(scope, mediaIds) {
+      try { await isReady(scope, mediaIds) } catch (error) {
+        if (typeof error === 'object' && error && 'kind' in error) {
+          throw new MemoryFailure('media_unavailable', 'Медиа недоступно для публикации')
+        }
+        throw error
+      }
+    },
+  }
+}

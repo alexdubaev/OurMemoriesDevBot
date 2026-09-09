@@ -8,23 +8,25 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  email        String?       @unique
-  passwordHash String?       @map("password_hash")
-  displayName  String?       @map("display_name")
-  role         UserRole      @default(user)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  id                  String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email               String?              @unique
+  passwordHash        String?              @map("password_hash")
+  displayName         String?              @map("display_name")
+  role                UserRole             @default(user)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
   sessions            AuthSession[]
   passwordResetTokens PasswordResetToken[]
   avatars             UserAvatar[]
   externalIdentities  ExternalIdentity[]
-  ownedFamilies       Family[]         @relation("FamilyOwner")
+  ownedFamilies       Family[]             @relation("FamilyOwner")
   familyMemberships   FamilyMember[]
-  createdInvites      FamilyInvite[]   @relation("InviteCreator")
-  acceptedInvites     FamilyInvite[]   @relation("InviteAcceptor")
+  createdInvites      FamilyInvite[]       @relation("InviteCreator")
+  acceptedInvites     FamilyInvite[]       @relation("InviteAcceptor")
   idempotencyRecords  IdempotencyRecord[]
-  authoredMemories    Memory[]         @relation("MemoryAuthor")
+  authoredMemories    Memory[]             @relation("MemoryAuthor")
+  uploadedMedia       MediaAsset[]         @relation("MediaUploader")
+  mediaReservations   UploadReservation[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -45,10 +47,10 @@ model ExternalIdentity {
 }
 
 model TelegramAuthReplay {
-  fingerprintHash String      @id @map("fingerprint_hash")
-  sessionId       String?     @map("session_id") @db.Uuid
-  expiresAt       DateTime    @map("expires_at")
-  createdAt       DateTime    @default(now()) @map("created_at")
+  fingerprintHash String       @id @map("fingerprint_hash")
+  sessionId       String?      @map("session_id") @db.Uuid
+  expiresAt       DateTime     @map("expires_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
   session         AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "telegram_auth_replays_session_id_fkey")
 
   @@index([expiresAt], map: "telegram_auth_replays_expires_at_idx")
@@ -70,38 +72,42 @@ model PilotAdmission {
 }
 
 model Family {
-  id                   String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  ownerUserId          String       @map("owner_user_id") @db.Uuid
+  id                   String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ownerUserId          String              @map("owner_user_id") @db.Uuid
   name                 String
   timezone             String
-  status               FamilyStatus @default(active)
-  storageUsedBytes     BigInt       @default(0) @map("storage_used_bytes")
-  storageReservedBytes BigInt       @default(0) @map("storage_reserved_bytes")
-  createdAt            DateTime     @default(now()) @map("created_at")
-  updatedAt            DateTime     @updatedAt @map("updated_at")
-  owner                User         @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")
-  members              FamilyMember[] @relation("FamilyMembers")
-  ownerMembership      FamilyMember   @relation("FamilyOwnerMembership", fields: [id, ownerUserId], references: [familyId, userId], onDelete: Restrict, map: "families_owner_membership_fkey")
+  status               FamilyStatus        @default(active)
+  storageUsedBytes     BigInt              @default(0) @map("storage_used_bytes")
+  storageReservedBytes BigInt              @default(0) @map("storage_reserved_bytes")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  owner                User                @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")
+  members              FamilyMember[]      @relation("FamilyMembers")
+  ownerMembership      FamilyMember        @relation("FamilyOwnerMembership", fields: [id, ownerUserId], references: [familyId, userId], onDelete: Restrict, map: "families_owner_membership_fkey")
   children             Child[]
   invites              FamilyInvite[]
   memories             Memory[]
+  mediaAssets          MediaAsset[]
+  mediaReservations    UploadReservation[]
 
-  @@index([ownerUserId], map: "families_owner_user_id_idx")
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
+  @@index([ownerUserId], map: "families_owner_user_id_idx")
   @@map("families")
 }
 
 model FamilyMember {
-  familyId String     @map("family_id") @db.Uuid
-  userId   String     @map("user_id") @db.Uuid
-  role     FamilyRole
-  joinedAt DateTime   @default(now()) @map("joined_at")
-  revokedAt DateTime? @map("revoked_at")
-  family   Family     @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: Cascade, map: "family_members_family_id_fkey")
-  ownedFamily Family? @relation("FamilyOwnerMembership")
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
-  memoryLikes MemoryLike[]
-  authoredMemories Memory[] @relation("MemoryAuthorMembership")
+  familyId          String              @map("family_id") @db.Uuid
+  userId            String              @map("user_id") @db.Uuid
+  role              FamilyRole
+  joinedAt          DateTime            @default(now()) @map("joined_at")
+  revokedAt         DateTime?           @map("revoked_at")
+  family            Family              @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: Cascade, map: "family_members_family_id_fkey")
+  ownedFamily       Family?             @relation("FamilyOwnerMembership")
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
+  memoryLikes       MemoryLike[]
+  authoredMemories  Memory[]            @relation("MemoryAuthorMembership")
+  uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
+  mediaReservations UploadReservation[] @relation("MediaReservationMembership")
 
   @@id([familyId, userId])
   @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
@@ -109,17 +115,19 @@ model FamilyMember {
 }
 
 model Child {
-  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  familyId    String    @map("family_id") @db.Uuid
-  displayName String    @map("display_name")
-  birthDate   DateTime? @map("birth_date") @db.Date
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  family      Family    @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
-  memories    Memory[]
+  id            String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId      String      @map("family_id") @db.Uuid
+  displayName   String      @map("display_name")
+  birthDate     DateTime?   @map("birth_date") @db.Date
+  avatarMediaId String?     @unique(map: "children_avatar_media_id_key") @map("avatar_media_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
+  memories      Memory[]
+  avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
 
-  @@index([familyId], map: "children_family_id_idx")
   @@unique([id, familyId], map: "children_id_family_id_key")
+  @@index([familyId], map: "children_family_id_idx")
   @@map("children")
 }
 
@@ -144,16 +152,16 @@ model FamilyInvite {
 }
 
 model IdempotencyRecord {
-  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  actorUserId String   @map("actor_user_id") @db.Uuid
-  operation   String
-  key         String   @db.Uuid
-  payloadHash String   @map("payload_hash")
-  resourceId  String   @map("resource_id") @db.Uuid
-  responseSnapshot Json @map("response_snapshot")
-  expiresAt   DateTime @map("expires_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Cascade, map: "idempotency_records_actor_user_id_fkey")
+  id               String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorUserId      String   @map("actor_user_id") @db.Uuid
+  operation        String
+  key              String   @db.Uuid
+  payloadHash      String   @map("payload_hash")
+  resourceId       String   @map("resource_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  actor            User     @relation(fields: [actorUserId], references: [id], onDelete: Cascade, map: "idempotency_records_actor_user_id_fkey")
 
   @@unique([actorUserId, operation, key], map: "idempotency_records_actor_operation_key_key")
   @@index([expiresAt], map: "idempotency_records_expires_at_idx")
@@ -161,25 +169,25 @@ model IdempotencyRecord {
 }
 
 model Memory {
-  id         String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  familyId   String       @map("family_id") @db.Uuid
-  childId    String       @map("child_id") @db.Uuid
-  authorId   String       @map("author_id") @db.Uuid
-  kind       MemoryKind
-  body       String
-  occurredAt DateTime     @map("occurred_at") @db.Timestamptz(6)
-  status     MemoryStatus @default(published)
-  version    Int          @default(1)
-  createdSequence BigInt   @default(autoincrement()) @map("created_sequence")
-  deletedAt  DateTime?    @map("deleted_at") @db.Timestamptz(6)
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  family     Family       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "memories_family_id_fkey")
-  child      Child        @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "memories_child_id_family_id_fkey")
-  author     User         @relation("MemoryAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "memories_author_id_fkey")
-  authorMembership FamilyMember @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
-  likes      MemoryLike[]
-  media      MemoryMedia[]
+  id               String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId         String        @map("family_id") @db.Uuid
+  childId          String        @map("child_id") @db.Uuid
+  authorId         String        @map("author_id") @db.Uuid
+  kind             MemoryKind
+  body             String
+  occurredAt       DateTime      @map("occurred_at") @db.Timestamptz(6)
+  status           MemoryStatus  @default(published)
+  version          Int           @default(1)
+  createdSequence  BigInt        @default(autoincrement()) @map("created_sequence")
+  deletedAt        DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family           Family        @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "memories_family_id_fkey")
+  child            Child         @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "memories_child_id_family_id_fkey")
+  author           User          @relation("MemoryAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "memories_author_id_fkey")
+  authorMembership FamilyMember  @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
+  likes            MemoryLike[]
+  media            MemoryMedia[]
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
@@ -201,16 +209,91 @@ model MemoryLike {
 }
 
 model MemoryMedia {
-  familyId String @map("family_id") @db.Uuid
-  memoryId String @map("memory_id") @db.Uuid
-  mediaId  String @map("media_id") @db.Uuid
+  familyId String     @map("family_id") @db.Uuid
+  memoryId String     @map("memory_id") @db.Uuid
+  mediaId  String     @map("media_id") @db.Uuid
   position Int
-  memory   Memory @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_media_memory_id_family_id_fkey")
+  memory   Memory     @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_media_memory_id_family_id_fkey")
+  asset    MediaAsset @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "memory_media_media_id_family_id_fkey")
 
   @@id([memoryId, position])
   @@unique([mediaId], map: "memory_media_media_id_key")
   @@index([familyId, mediaId], map: "memory_media_family_id_media_id_idx")
   @@map("memory_media")
+}
+
+model MediaAsset {
+  id                 String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId           String               @map("family_id") @db.Uuid
+  uploaderId         String               @map("uploader_id") @db.Uuid
+  sourceKind         MediaSourceKind      @map("source_kind")
+  purpose            MediaAssetPurpose
+  mediaKind          MediaAssetKind       @map("media_kind")
+  originalKey        String               @unique(map: "media_assets_original_key_key") @map("original_key")
+  declaredMime       String               @map("declared_mime")
+  verifiedMime       String?              @map("verified_mime")
+  sha256             String?
+  byteSize           BigInt               @map("byte_size")
+  width              Int?
+  height             Int?
+  durationMs         Int?                 @map("duration_ms")
+  originalStatus     MediaOriginalStatus  @default(pending) @map("original_status")
+  renditionStatus    MediaRenditionStatus @default(pending) @map("rendition_status")
+  deletedAt          DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  storageDeletedAt   DateTime?            @map("storage_deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family             Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "media_assets_family_id_fkey")
+  uploader           User                 @relation("MediaUploader", fields: [uploaderId], references: [id], onDelete: Restrict, map: "media_assets_uploader_id_fkey")
+  uploaderMembership FamilyMember         @relation("MediaUploaderMembership", fields: [familyId, uploaderId], references: [familyId, userId], onDelete: Restrict, map: "media_assets_uploader_membership_fkey")
+  variants           MediaVariant[]
+  reservation        UploadReservation?
+  memories           MemoryMedia[]
+  avatarForChildren  Child[]              @relation("ChildAvatar")
+
+  @@unique([id, familyId], map: "media_assets_id_family_id_key")
+  @@index([familyId, originalStatus, deletedAt], map: "media_assets_family_status_idx")
+  @@map("media_assets")
+}
+
+model MediaVariant {
+  id         String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId   String           @map("family_id") @db.Uuid
+  mediaId    String           @map("media_id") @db.Uuid
+  variant    MediaVariantKind
+  objectKey  String           @unique(map: "media_variants_object_key_key") @map("object_key")
+  sha256     String
+  byteSize   BigInt           @map("byte_size")
+  mime       String
+  width      Int?
+  height     Int?
+  durationMs Int?             @map("duration_ms")
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  asset      MediaAsset       @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Cascade, map: "media_variants_media_id_family_id_fkey")
+
+  @@unique([mediaId, variant], map: "media_variants_media_id_variant_key")
+  @@index([familyId, mediaId], map: "media_variants_family_id_media_id_idx")
+  @@map("media_variants")
+}
+
+model UploadReservation {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId    String       @map("family_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  mediaId     String       @map("media_id") @db.Uuid
+  bytes       BigInt
+  expiresAt   DateTime     @map("expires_at") @db.Timestamptz(6)
+  finalizedAt DateTime?    @map("finalized_at") @db.Timestamptz(6)
+  releasedAt  DateTime?    @map("released_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  family      Family       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "upload_reservations_family_id_fkey")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict, map: "upload_reservations_user_id_fkey")
+  membership  FamilyMember @relation("MediaReservationMembership", fields: [familyId, userId], references: [familyId, userId], onDelete: Restrict, map: "upload_reservations_membership_fkey")
+  asset       MediaAsset   @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Cascade, map: "upload_reservations_media_id_family_id_fkey")
+
+  @@unique([mediaId, familyId], map: "upload_reservations_media_id_family_id_key")
+  @@index([familyId, expiresAt], map: "upload_reservations_family_expires_idx")
+  @@map("upload_reservations")
 }
 
 enum ExternalIdentityProvider {
@@ -250,6 +333,52 @@ enum MemoryStatus {
   deleted
 
   @@map("memory_status")
+}
+
+enum MediaSourceKind {
+  upload
+  telegram
+
+  @@map("media_source_kind")
+}
+
+enum MediaAssetPurpose {
+  memory
+  child_avatar
+
+  @@map("media_asset_purpose")
+}
+
+enum MediaAssetKind {
+  photo
+  video
+  voice
+
+  @@map("media_asset_kind")
+}
+
+enum MediaOriginalStatus {
+  pending
+  stored
+  failed
+
+  @@map("media_original_status")
+}
+
+enum MediaRenditionStatus {
+  pending
+  ready
+  failed
+
+  @@map("media_rendition_status")
+}
+
+enum MediaVariantKind {
+  preview
+  display
+  playback
+
+  @@map("media_variant_kind")
 }
 
 /// One row per avatar upload attempt. The object itself lives in private storage; this table
@@ -361,19 +490,19 @@ enum TaskOutboxStatus {
 }
 
 model AuthSession {
-  id                       String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  userId                   String    @map("user_id") @db.Uuid
-  refreshTokenHash         String    @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash")
-  refreshTokenFamilyHash   String?   @unique(map: "auth_sessions_refresh_token_family_hash_key") @map("refresh_token_family_hash")
-  previousRefreshTokenHash String?   @unique(map: "auth_sessions_previous_refresh_token_hash_key") @map("previous_refresh_token_hash")
-  refreshRotatedAt         DateTime? @map("refresh_rotated_at")
-  expiresAt                DateTime  @map("expires_at")
-  revokedAt                DateTime? @map("revoked_at")
-  userAgent                String?   @map("user_agent")
-  ipAddress                String?   @map("ip_address")
-  createdAt                DateTime  @default(now()) @map("created_at")
-  updatedAt                DateTime  @updatedAt @map("updated_at")
-  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
+  id                       String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                   String               @map("user_id") @db.Uuid
+  refreshTokenHash         String               @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash")
+  refreshTokenFamilyHash   String?              @unique(map: "auth_sessions_refresh_token_family_hash_key") @map("refresh_token_family_hash")
+  previousRefreshTokenHash String?              @unique(map: "auth_sessions_previous_refresh_token_hash_key") @map("previous_refresh_token_hash")
+  refreshRotatedAt         DateTime?            @map("refresh_rotated_at")
+  expiresAt                DateTime             @map("expires_at")
+  revokedAt                DateTime?            @map("revoked_at")
+  userAgent                String?              @map("user_agent")
+  ipAddress                String?              @map("ip_address")
+  createdAt                DateTime             @default(now()) @map("created_at")
+  updatedAt                DateTime             @updatedAt @map("updated_at")
+  user                     User                 @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
   telegramAuthReplays      TelegramAuthReplay[]
 
   @@index([userId], map: "auth_sessions_user_id_idx")
