@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 
 import type { DbClient } from '../../db'
+import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempotency'
 import type { AuthHttpEnv } from '../auth'
 import { FamilyService } from './application/family-service'
 import { createPrismaFamilyAccess } from './infrastructure/family-access'
@@ -9,10 +10,12 @@ import { createFamilyRoutes } from './transport/routes'
 
 export function createFamiliesModule({
   db,
+  idempotencyExecutor,
   idempotencySecret,
   requireAuth,
 }: {
   db: DbClient
+  idempotencyExecutor: IdempotencyExecutor<PrismaTransactionClient>
   idempotencySecret: string
   requireAuth: MiddlewareHandler<AuthHttpEnv>
 }) {
@@ -21,7 +24,13 @@ export function createFamiliesModule({
     access,
     routes: createFamilyRoutes({
       requireAuth,
-      service: new FamilyService(db, access, prismaPersistenceErrors, idempotencySecret),
+      service: new FamilyService(
+        db,
+        access,
+        prismaPersistenceErrors,
+        idempotencyExecutor,
+        idempotencySecret,
+      ),
     }),
   }
 }

@@ -10,6 +10,7 @@ import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
+import { createPrismaIdempotencyExecutor } from './idempotency'
 import {
   createRequestContext,
   errorResponse,
@@ -21,6 +22,7 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
+import { createMemoriesModule } from './modules/memories'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
@@ -56,9 +58,18 @@ export function createApp({
     throw new Error('Legacy password auth test routes cannot be mounted in production')
   }
   const storage = privateStorage ?? createPrivateStorage(env)
+  const idempotencyExecutor = createPrismaIdempotencyExecutor(prisma)
   const auth = createAuthModule({ db: prisma, emailDelivery, env, legacyPasswordAuthForTests })
   const families = createFamiliesModule({
     db: prisma,
+    idempotencyExecutor,
+    idempotencySecret: env.JWT_SECRET,
+    requireAuth: auth.requireAuth,
+  })
+  const memories = createMemoriesModule({
+    db: prisma,
+    idempotencyExecutor,
+    familyAccess: families.access,
     idempotencySecret: env.JWT_SECRET,
     requireAuth: auth.requireAuth,
   })
@@ -169,6 +180,7 @@ export function createApp({
   app.route('/api/v1', auth.routes)
   if (auth.legacyTestRoutes) app.route('/api/auth', auth.legacyTestRoutes)
   app.route('/api/v1', families.routes)
+  app.route('/api/v1', memories.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
