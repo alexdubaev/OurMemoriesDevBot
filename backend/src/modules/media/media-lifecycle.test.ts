@@ -38,7 +38,7 @@ describe('media durable lifecycle', () => {
         deleteObject: async (key: string) => { deleted.push(key) },
       } },
       prisma: {
-        mediaAsset: { findFirst: async () => null },
+        mediaAsset: { findFirst: async () => null, findMany: async () => [] },
         mediaVariant: { findFirst: async () => null },
       },
     }

@@ -8,6 +8,7 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import { createPrivateStorage } from '../../storage'
+import { runBackgroundJob } from '../../jobs'
 import { pngFixture } from '../../storage/storage-contract'
 import { signAccessToken } from '../auth'
 
@@ -146,6 +147,31 @@ maybeDescribe('Private media API', () => {
     expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
     expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: upload.reserved.body.assetId } })).deletedAt)
       .not.toBeNull()
+  })
+
+  test('revocation cannot turn an already finalized asset into a deletion', async () => {
+    const owner = await admittedUser('Владелец', '43211')
+    const member = await admittedUser('Участник', '43212')
+    const family = await createFamily(owner.token, 'Семья')
+    await inviteMember(owner.token, member.token, family.body.family.id, 'full')
+    const uploaded = await uploadPhoto(member.token, family.body.family.id, 'memory', pngFixture)
+    await jsonRequest(`/api/v1/families/${family.body.family.id}/members/${member.userId}`, owner.token, 'DELETE')
+    const repeated = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/uploads/${uploaded.reserved.body.upload.uploadId}/finalize`, member.token, 'POST', {},
+    )
+    expect(repeated.response.status).toBe(403)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: uploaded.reserved.body.assetId } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.reserved.body.assetId}` } })).toBe(0)
+  })
+
+  test('retires finalized media that was never attached after the grace period', async () => {
+    const owner = await admittedUser('Владелец', '43221')
+    const family = await createFamily(owner.token, 'Семья')
+    const uploaded = await uploadPhoto(owner.token, family.body.family.id, 'memory', pngFixture)
+    await prisma.mediaAsset.update({ where: { id: uploaded.reserved.body.assetId }, data: { createdAt: new Date('2026-09-01T00:00:00Z') } })
+    await runBackgroundJob('media:pending:cleanup', { prisma } as any, new Date('2026-09-10T00:00:00Z'))
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: uploaded.reserved.body.assetId } })).deletedAt).not.toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.reserved.body.assetId}` } })).toBe(1)
   })
 
   test('rejects spoofed image bytes and keeps the cleanup key durable', async () => {

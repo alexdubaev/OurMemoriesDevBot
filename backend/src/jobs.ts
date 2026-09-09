@@ -110,9 +110,32 @@ export const backgroundJobs = {
           payload: { mediaId: reservation.mediaId }, scheduledFor: now })
       })
     }
-    console.log(`Job media:pending:cleanup released ${expired.length} expired reservations.`)
+    const abandoned = await prisma.mediaAsset.findMany({
+      where: { originalStatus: 'stored', deletedAt: null, createdAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+        memories: { none: {} }, avatarForChildren: { none: {} } }, select: { id: true }, take: 500,
+    })
+    for (const asset of abandoned) {
+      await prisma.$transaction(async (tx) => {
+        const marked = await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null,
+          memories: { none: {} }, avatarForChildren: { none: {} } }, data: { deletedAt: now } })
+        if (marked.count === 0) return
+        const { insertTask } = await import('./outbox/store')
+        await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`,
+          payload: { mediaId: asset.id }, scheduledFor: now })
+      })
+    }
+    console.log(`Job media:pending:cleanup released ${expired.length} expired reservations and retired ${abandoned.length} unattached assets.`)
   },
-  'media:orphans:reconcile': async ({ prisma, privateStorage }, now) => {
+  'media:orphans:reconcile': async (runtime, now) => {
+    const { prisma, privateStorage } = runtime
+    const { createMediaTasks } = await import('./modules/media')
+    const pendingDeletes = await prisma.mediaAsset.findMany({
+      where: { deletedAt: { not: null }, storageDeletedAt: null }, select: { id: true }, take: 500,
+    })
+    for (const asset of pendingDeletes) {
+      try { await createMediaTasks(runtime).deleteAsset({ mediaId: asset.id }) }
+      catch (error) { console.error(`Job media:orphans:reconcile could not delete media ${asset.id}:`, error) }
+    }
     const graceCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
     for (const prefix of ['media-originals', 'media-display', 'media-preview', 'media-playback']) {
       const objects = await privateStorage.storage.listObjects(prefix)

@@ -69,7 +69,7 @@ export class PrismaMediaRepository implements MediaRepository {
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, scope)
       if (!access || access.role !== 'full') {
-        await abandon(tx, reservation.mediaId, now)
+        if (!reservation.finalizedAt) await abandon(tx, reservation.mediaId, now)
         return { kind: 'forbidden' }
       }
       if (reservation.finalizedAt) return { kind: 'ready', asset: assetDto(reservation.asset) }
@@ -105,7 +105,7 @@ export class PrismaMediaRepository implements MediaRepository {
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, input.scope)
       if (!access || access.role !== 'full') {
-        await abandon(tx, reservation.mediaId, input.now)
+        if (!reservation.finalizedAt) await abandon(tx, reservation.mediaId, input.now)
         return { kind: 'forbidden' }
       }
       if (reservation.finalizedAt) return { kind: 'ready', asset: assetDto(reservation.asset) }
@@ -235,7 +235,7 @@ async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date) 
     }
   }
   await tx.mediaAsset.updateMany({
-    where: { id: mediaId, deletedAt: null },
+    where: { id: mediaId, deletedAt: null, originalStatus: 'pending' },
     data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' },
   })
   await insertTask(tx, {

@@ -12,7 +12,7 @@ import { createStorageObjectKey, StorageError, type PrivateStorage } from '../..
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MediaFailure } from '../domain/errors'
 import { detectDeclaredMedia, parseSingleRange } from '../domain/media-policy'
-import type { MediaRepository, PhotoProcessor, StoredVariant } from './ports'
+import type { MediaProbe, MediaRepository, PhotoProcessor, StoredVariant } from './ports'
 
 export class MediaService {
   constructor(
@@ -21,6 +21,7 @@ export class MediaService {
     private readonly storage: PrivateStorage,
     private readonly config: { familyQuotaBytes: number; maxPendingUploads: number; reservationTtlSeconds: number; uploadUrlTtlSeconds: number },
     private readonly processPhoto: PhotoProcessor,
+    private readonly probeMedia: MediaProbe,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -96,13 +97,23 @@ export class MediaService {
         height = photo.height
         renditionStatus = 'ready'
         for (const [variant, rendered] of [['display', photo.display], ['preview', photo.preview]] as const) {
-          const key = createStorageObjectKey({ namespace: `media-${variant}`, id: upload.assetId, now: this.now() })
-          await this.storage.writeObject({ key, body: new Blob([rendered.bytes.slice().buffer as ArrayBuffer]).stream(),
-            contentLength: rendered.bytes.byteLength, contentType: 'image/webp' })
+          const key = upload.objectKey.replace('media-originals/', `media-${variant}/`)
+          try {
+            await this.storage.writeObject({ key, body: new Blob([rendered.bytes.slice().buffer as ArrayBuffer]).stream(),
+              contentLength: rendered.bytes.byteLength, contentType: 'image/webp' })
+          } catch (error) {
+            if (!(error instanceof StorageError && error.kind === 'already_exists') ||
+              !(await storageObjectMatches(this.storage, key, rendered.bytes.byteLength, rendered.sha256))) throw error
+          }
           variants.push({ variant, objectKey: key, sha256: rendered.sha256,
             byteSize: rendered.bytes.byteLength, mime: 'image/webp', width: rendered.width,
             height: rendered.height, durationMs: null })
         }
+      } else {
+        const probed = await this.probeMedia(originalPath, upload.kind)
+        width = probed.width
+        height = probed.height
+        durationMs = probed.durationMs
       }
       const committed = await this.repository.commitFinalization({ scope, uploadId, verifiedMime,
         sha256, width, height, durationMs, renditionStatus, variants, now: this.now() })
@@ -145,4 +156,12 @@ async function sha256File(path: string) {
 
 function storageFailure(error: unknown) {
   return error instanceof MediaFailure ? error : new MediaFailure('storage_unavailable', 'Хранилище временно недоступно')
+}
+
+async function storageObjectMatches(storage: PrivateStorage, key: string, expectedLength: number, expectedSha256: string) {
+  const stored = await storage.readObject({ key })
+  if (!stored || stored.contentLength !== expectedLength || stored.contentType !== 'image/webp') return false
+  const hash = createHash('sha256')
+  for await (const chunk of Readable.fromWeb(stored.body as never)) hash.update(chunk as Buffer)
+  return hash.digest('hex') === expectedSha256
 }

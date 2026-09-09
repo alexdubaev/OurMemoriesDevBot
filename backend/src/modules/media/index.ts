@@ -7,6 +7,7 @@ import type { FamilyAccess } from '../families'
 import { MediaService } from './application/media-service'
 import { PrismaMediaRepository } from './infrastructure/prisma-media-repository'
 import { processPhoto } from './infrastructure/photo-processor'
+import { probeMedia } from './infrastructure/media-probe'
 import { createMediaRoutes } from './transport/routes'
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
@@ -17,7 +18,7 @@ export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAc
     maxPendingUploads: options.env.MEDIA_MAX_PENDING_UPLOADS,
     reservationTtlSeconds: options.env.MEDIA_RESERVATION_TTL_SECONDS,
     uploadUrlTtlSeconds: options.env.MEDIA_UPLOAD_URL_TTL_SECONDS,
-  }, processPhoto)
+  }, processPhoto, probeMedia)
   return { routes: createMediaRoutes({ requireAuth: options.requireAuth, service }), service }
 }
 

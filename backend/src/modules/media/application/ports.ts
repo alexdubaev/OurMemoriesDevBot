@@ -81,3 +81,8 @@ export type PhotoProcessor = (inputPath: string) => Promise<{
   display: { bytes: Uint8Array; sha256: string; width: number; height: number }
   preview: { bytes: Uint8Array; sha256: string; width: number; height: number }
 }>
+export type MediaProbe = (inputPath: string, kind: 'video' | 'voice') => Promise<{
+  width: number | null
+  height: number | null
+  durationMs: number
+}>
