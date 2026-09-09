@@ -1,8 +1,8 @@
 # Канонический GitHub-репозиторий проекта
 
-**Проект:** `alexdubaev/OurMemoriesDevBot`  
-**HTTPS:** https://github.com/alexdubaev/OurMemoriesDevBot.git  
-**SSH:** `git@github.com:alexdubaev/OurMemoriesDevBot.git`  
+**Проект:** `alexdubaev/OurMemoriesDevBot`<br>
+**HTTPS:** https://github.com/alexdubaev/OurMemoriesDevBot.git<br>
+**SSH:** `git@github.com:alexdubaev/OurMemoriesDevBot.git`<br>
 **Рабочая долгоживущая ветка:** `main`
 
 Этот репозиторий — единственный push-remote продукта. Репозиторий шаблона `di-sukharev/vibe` не является местом публикации нашего кода и никогда не должен оставаться `origin`.
