@@ -19,12 +19,14 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
-import { Prisma } from '../../../generated/prisma/client'
 import { FamilyFailure } from '../domain/errors'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
 type TransactionClient = Parameters<Parameters<DbClient['$transaction']>[0]>[0]
+type JsonPrimitive = string | number | boolean | null
+type JsonValue = JsonPrimitive | JsonValue[] | JsonObject
+type JsonObject = { [key: string]: JsonValue }
 
 export class FamilyService {
   constructor(
@@ -448,10 +450,10 @@ export class FamilyService {
     ): Promise<{
       resourceId: string
       response: Response
-      responseSnapshot: Prisma.InputJsonValue
+      responseSnapshot: JsonObject
     }>
     restore(
-      responseSnapshot: Prisma.JsonValue,
+      responseSnapshot: unknown,
       idempotencyRecordId: string,
     ): Response
   }): Promise<Response> {
@@ -536,7 +538,7 @@ function inviteDto(
   }
 }
 
-function storedFamilyResponse(responseSnapshot: Prisma.JsonValue): FamilyResponse {
+function storedFamilyResponse(responseSnapshot: unknown): FamilyResponse {
   const parsed = familyResponseSchema.safeParse(responseSnapshot)
   if (!parsed.success) unavailableIdempotencyResult()
   return parsed.data
@@ -544,7 +546,7 @@ function storedFamilyResponse(responseSnapshot: Prisma.JsonValue): FamilyRespons
 
 const storedInviteResponseSchema = createInviteResponseSchema.omit({ rawToken: true })
 
-function inviteSnapshot(response: CreateInviteResponse): Prisma.InputJsonObject {
+function inviteSnapshot(response: CreateInviteResponse): JsonObject {
   return {
     id: response.id,
     role: response.role,
@@ -552,7 +554,7 @@ function inviteSnapshot(response: CreateInviteResponse): Prisma.InputJsonObject 
   }
 }
 
-function storedInviteResponse(responseSnapshot: Prisma.JsonValue) {
+function storedInviteResponse(responseSnapshot: unknown) {
   const parsed = storedInviteResponseSchema.safeParse(responseSnapshot)
   if (!parsed.success) unavailableIdempotencyResult()
   return parsed.data
