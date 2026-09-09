@@ -20,11 +20,16 @@ maybeDescribe('Memories API', () => {
     AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
+  // A separate pool makes lifecycle writes observable at PostgreSQL rather than queueing behind
+  // the memory request inside the same adapter connection.
+  const lifecyclePrisma = createPrisma(databaseUrl!)
+  const lifecycleApp = createApp({ env, prisma: lifecyclePrisma })
 
   beforeEach(clearFixtures)
   afterAll(async () => {
     await clearFixtures()
     await prisma.$disconnect()
+    await lifecyclePrisma.$disconnect()
   })
 
   test('full creates a plain-text note, while viewer may read it but cannot create', async () => {
@@ -285,17 +290,18 @@ maybeDescribe('Memories API', () => {
     try {
       const creation = createNote(full.token, family.body.family.id, family.body.child.id, 'Гонка создания')
       await waitForLockedQuery(blocker)
-      const revocation = runDatabaseMutation(
-        `UPDATE family_members
-            SET revoked_at = now()
-          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [family.body.family.id, full.userId],
+      const revocation = requestThrough(
+        lifecycleApp,
+        `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+        owner.token,
+        'DELETE',
+        undefined,
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
 
       expect((await creation).response.status).toBe(201)
-      expect((await revocation).rowCount).toBe(1)
+      expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
     }
@@ -320,17 +326,18 @@ maybeDescribe('Memories API', () => {
         { body: 'После правки', occurredAt: created.body.occurredAt, expectedVersion: 1 },
       )
       await waitForLockedQuery(blocker)
-      const downgrade = runDatabaseMutation(
-        `UPDATE family_members
-            SET role = 'viewer'
-          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [family.body.family.id, full.userId],
+      const downgrade = requestThrough(
+        lifecycleApp,
+        `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+        owner.token,
+        'PATCH',
+        { role: 'viewer' },
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
 
       expect((await update).response.status).toBe(200)
-      expect((await downgrade).rowCount).toBe(1)
+      expect((await downgrade).response.status).toBe(200)
     } finally {
       await rollbackAndClose(blocker)
     }
@@ -357,17 +364,18 @@ maybeDescribe('Memories API', () => {
         { 'If-Match': '1' },
       )
       await waitForLockedQuery(blocker)
-      const revocation = runDatabaseMutation(
-        `UPDATE family_members
-            SET revoked_at = now()
-          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [family.body.family.id, full.userId],
+      const revocation = requestThrough(
+        lifecycleApp,
+        `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+        owner.token,
+        'DELETE',
+        undefined,
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
 
       expect((await deletion).response.status).toBe(204)
-      expect((await revocation).rowCount).toBe(1)
+      expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
     }
@@ -393,17 +401,18 @@ maybeDescribe('Memories API', () => {
         { liked: true },
       )
       await waitForLockedQuery(blocker)
-      const revocation = runDatabaseMutation(
-        `UPDATE family_members
-            SET revoked_at = now()
-          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [family.body.family.id, viewer.userId],
+      const revocation = requestThrough(
+        lifecycleApp,
+        `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+        owner.token,
+        'DELETE',
+        undefined,
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
 
       expect((await like).response.status).toBe(200)
-      expect((await revocation).rowCount).toBe(1)
+      expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
     }
@@ -498,16 +507,6 @@ maybeDescribe('Memories API', () => {
     return client
   }
 
-  async function runDatabaseMutation(sql: string, parameters: unknown[]) {
-    const client = new Client({ connectionString: databaseUrl! })
-    await client.connect()
-    try {
-      return await client.query(sql, parameters)
-    } finally {
-      await client.end()
-    }
-  }
-
   async function waitForLockedQuery(client: Client, queryFragment?: string) {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       // PostgreSQL caches cumulative-statistics snapshots for the duration of a transaction.
@@ -571,7 +570,19 @@ maybeDescribe('Memories API', () => {
     idempotencyKey?: string,
     extraHeaders: Record<string, string> = {},
   ) {
-    const response = await app.request(path, {
+    return requestThrough(app, path, token, method, body, idempotencyKey, extraHeaders)
+  }
+
+  async function requestThrough(
+    targetApp: ReturnType<typeof createApp>,
+    path: string,
+    token: string,
+    method: string,
+    body: unknown,
+    idempotencyKey?: string,
+    extraHeaders: Record<string, string> = {},
+  ) {
+    const response = await targetApp.request(path, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
