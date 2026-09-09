@@ -75,27 +75,30 @@ describe('template checklist validation', () => {
   })
 
   test('rejects malformed install status and invalid or duplicate ledger rows', () => {
-    const malformedStatus = currentChecklist.replace('`not started`', '`almost ready`')
+    const malformedStatus = withInstallStatus(currentChecklist, 'almost ready')
     expect(validateChecklist(malformedStatus, { agents: currentAgents, claude: currentClaude })).toContain(
       'CHECKLIST.md has invalid install status "almost ready".',
     )
 
     const duplicateStatus = currentChecklist.replace(
-      '**Install status:** `not started`',
-      '**Install status:** `not started`\n**Install status:** `completed 2026-08-16`',
+      /^(\*\*Install status:\*\* `[^`]+`)$/m,
+      '$1\n**Install status:** `completed 2026-08-16`',
     )
     expect(validateChecklist(duplicateStatus, { agents: currentAgents, claude: currentClaude })).toContain(
       'CHECKLIST.md must contain exactly one install status declaration.',
     )
 
-    const invalidState = currentChecklist.replace('| Auth (email + password)         | included |', '| Auth (email + password)         | enabled  |')
+    const invalidState = currentChecklist.replace(
+      /^(\| Auth \(email \+ password\)\s+\|)\s*available(\s+\|)/m,
+      '$1 enabled$2',
+    )
     expect(validateChecklist(invalidState, { agents: currentAgents, claude: currentClaude })).toContain(
       'Capability "Auth (email + password)" has invalid state "enabled".',
     )
 
     const duplicateCapability = currentChecklist.replace(
-      '| Admin roles                     | included |',
-      '| Auth (email + password)         | included |',
+      /^(\| )Admin roles(\s+\|)/m,
+      '$1Auth (email + password)$2',
     )
     expect(validateChecklist(duplicateCapability, { agents: currentAgents, claude: currentClaude })).toContain(
       'Capability ledger contains duplicate capability "Auth (email + password)".',
@@ -166,17 +169,18 @@ describe('template checklist validation', () => {
   })
 
   test('keeps a reusable not-started intake pristine', () => {
-    const answered = currentChecklist.replace('| Project name / slug                                             | _unanswered_ |', '| Project name / slug                                             | demo         |')
+    const pristineChecklist = notStartedChecklist()
+    const answered = pristineChecklist.replace('| Project name / slug                                             | _unanswered_ |', '| Project name / slug                                             | demo         |')
     expect(validateChecklist(answered, { agents: currentAgents, claude: currentClaude })).toContain(
       'A reusable template with status "not started" must keep every intake answer `_unanswered_`.',
     )
 
-    const checked = currentChecklist.replace('- [ ] `backend` - API, database, auth', '- [x] `backend` - API, database, auth')
+    const checked = pristineChecklist.replace('- [ ] `backend`', '- [x] `backend`')
     expect(validateChecklist(checked, { agents: currentAgents, claude: currentClaude })).toContain(
       'A reusable template with status "not started" must keep every checklist item unchecked.',
     )
 
-    const malformedIntake = currentChecklist.replace(
+    const malformedIntake = pristineChecklist.replace(
       /^\| Project name \/ slug.*$/m,
       '| Project name / slug | answered | extra |',
     )
@@ -184,7 +188,7 @@ describe('template checklist validation', () => {
       'CHECKLIST.md section "Project identity" intake row "Project name / slug" must contain exactly two columns (found 3).',
     )
 
-    const missingSeparator = currentChecklist.replace(
+    const missingSeparator = pristineChecklist.replace(
       '| --------------------------------------------------------------- | ------------ |',
       '',
     )
@@ -192,7 +196,7 @@ describe('template checklist validation', () => {
       'CHECKLIST.md section "Project identity" must keep a two-column Markdown table separator.',
     )
 
-    const extraIntakeTable = currentChecklist.replace(
+    const extraIntakeTable = pristineChecklist.replace(
       '## 2. Product',
       '| Question | Answer |\n| --- | --- |\n| Shadow answer | answered |\n\n## 2. Product',
     )
@@ -200,7 +204,7 @@ describe('template checklist validation', () => {
       'CHECKLIST.md section "Project identity" must contain exactly one Question/Answer intake table (found 2).',
     )
 
-    const informationalTable = currentChecklist.replace(
+    const informationalTable = pristineChecklist.replace(
       '## 3. Active surfaces',
       '| Example | Meaning |\n| --- | --- |\n| MVP | First useful release |\n\n## 3. Active surfaces',
     )
@@ -208,7 +212,7 @@ describe('template checklist validation', () => {
       validateChecklist(informationalTable, { agents: currentAgents, claude: currentClaude }),
     ).toEqual([])
 
-    const escapedPipe = currentChecklist
+    const escapedPipe = pristineChecklist
       .replace('**Install status:** `not started`', '**Install status:** `in progress`')
       .replace(
         '| Project name / slug                                             | _unanswered_ |',
@@ -218,7 +222,7 @@ describe('template checklist validation', () => {
       validateChecklist(escapedPipe, { agents: currentAgents, claude: currentClaude }),
     ).toEqual([])
 
-    const extraHostingRow = currentChecklist.replace(
+    const extraHostingRow = pristineChecklist.replace(
       /^\| Own server\s+\|.*$/m,
       '$&\n| Shadow host | Never | Nothing |',
     )
@@ -226,8 +230,8 @@ describe('template checklist validation', () => {
       'CHECKLIST.md Deployment hosting comparison must contain exactly five rows (found 6).',
     )
 
-    const duplicateHostingHeader = currentChecklist.replace(
-      /^(\| Hosting\s+\|.*\n\| -.*)$/m,
+    const duplicateHostingHeader = pristineChecklist.replace(
+      /^(\| Hosting[^\r\n]*\r?\n\| -[^\r\n]*)/m,
       '$1\n| Hosting | Chosen when | What the template gives you |',
     )
     expect(validateChecklist(duplicateHostingHeader, { agents: currentAgents, claude: currentClaude })).toContain(
@@ -237,13 +241,13 @@ describe('template checklist validation', () => {
 
   test('requires completed installs to finish the core intake and remove bootstrap instructions', () => {
     const completed = completedChecklist()
-    const cleanAgents = withoutBootstrapBlock(currentAgents)
+    const cleanAgents = currentAgents
     const cleanClaude = currentClaude
 
     expect(validateChecklist(completed, { agents: cleanAgents, claude: cleanClaude })).toEqual([])
 
     const incomplete = completed.replace(
-      /^(\| Project name \/ slug\s+\|) n\/a(\s+\|)$/m,
+      /^(\| Project name \/ slug\s+\|).*?(\s+\|)$/m,
       '$1 _unanswered_$2',
     )
     expect(validateChecklist(incomplete, { agents: cleanAgents, claude: cleanClaude })).toContain(
@@ -251,7 +255,7 @@ describe('template checklist validation', () => {
     )
 
     const emptyAnswer = completed.replace(
-      /^(\| Project name \/ slug\s+\|) n\/a(\s+\|)$/m,
+      /^(\| Project name \/ slug\s+\|).*?(\s+\|)$/m,
       '$1 $2',
     )
     expect(validateChecklist(emptyAnswer, { agents: cleanAgents, claude: cleanClaude })).toContain(
@@ -266,12 +270,16 @@ describe('template checklist validation', () => {
       'CHECKLIST.md section "Product" is missing required question "What product do you want to build first?".',
     )
 
-    const noSurface = completed.replace('- [x] `website` - public pages', '- [ ] `website` - public pages')
+    const noSurface = completed.replace(
+      /^- \[[xX]\] (`(?:backend|webapp|website|mobile)`.*)$/gm,
+      '- [ ] $1',
+    )
     expect(validateChecklist(noSurface, { agents: cleanAgents, claude: cleanClaude })).toContain(
       'A completed install must mark at least one active surface.',
     )
 
-    expect(validateChecklist(completed, { agents: currentAgents, claude: currentClaude })).toContain(
+    const agentsWithBootstrapInstructions = `${currentAgents}\n<!-- BOOTSTRAP_ONLY_START -->\n<!-- BOOTSTRAP_ONLY_END -->\n`
+    expect(validateChecklist(completed, { agents: agentsWithBootstrapInstructions, claude: currentClaude })).toContain(
       'A completed install must remove Bootstrap-Only Instructions from AGENTS.md.',
     )
   })
@@ -424,17 +432,25 @@ describe('tracked Markdown links', () => {
 })
 
 function completedChecklist() {
-  const deploymentStart = currentChecklist.indexOf('## 8. Deployment')
-  const completed = `${currentChecklist.slice(0, deploymentStart).replaceAll('_unanswered_', 'n/a')}${currentChecklist.slice(deploymentStart)}`
-
-  return completed
-    .replace('**Install status:** `not started`', '**Install status:** `completed 2026-08-16`')
-    .replace('- [ ] `website`', '- [x] `website`')
+  return withInstallStatus(currentChecklist, 'completed 2026-08-16')
 }
 
-function withoutBootstrapBlock(source) {
+function notStartedChecklist() {
+  return withInstallStatus(currentChecklist, 'not started')
+    .replace(
+      /^(\| (?!Question\s+\||-)[^|\r\n]+\|)[^|\r\n]+(\|)[ \t]*$/gm,
+      '$1 _unanswered_ $2',
+    )
+    .replace(/^- \[[xX]\]/gm, '- [ ]')
+    .replace(
+      /^- \[ \] External integrations.*$/m,
+      '- [ ] External integrations (which: _unanswered_)',
+    )
+}
+
+function withInstallStatus(source, status) {
   return source.replace(
-    /## Bootstrap-Only Instructions\n\n<!-- BOOTSTRAP_ONLY_START -->[\s\S]*?<!-- BOOTSTRAP_ONLY_END -->\n\n/,
-    '',
+    /^\*\*Install status:\*\* `[^`]+`$/m,
+    `**Install status:** \`${status}\``,
   )
 }
