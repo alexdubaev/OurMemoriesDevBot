@@ -1,6 +1,8 @@
 export type MemoryFailureKind =
   | 'not_found'
+  | 'forbidden'
   | 'conflict'
+  | 'version_conflict'
   | 'idempotency_conflict'
   | 'invalid_input'
   | 'media_unavailable'

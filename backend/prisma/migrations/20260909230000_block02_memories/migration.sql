@@ -15,6 +15,7 @@ CREATE TABLE "memories" (
     "occurred_at" TIMESTAMPTZ(6) NOT NULL,
     "status" "memory_status" NOT NULL DEFAULT 'published',
     "version" INTEGER NOT NULL DEFAULT 1,
+    "created_sequence" BIGSERIAL NOT NULL,
     "deleted_at" TIMESTAMPTZ(6),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
@@ -74,6 +75,9 @@ ALTER TABLE "memories" ADD CONSTRAINT "memories_child_id_family_id_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "memories" ADD CONSTRAINT "memories_author_id_fkey" FOREIGN KEY ("author_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "memories" ADD CONSTRAINT "memories_author_membership_fkey" FOREIGN KEY ("family_id", "author_id") REFERENCES "family_members"("family_id", "user_id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "memory_likes" ADD CONSTRAINT "memory_likes_memory_id_family_id_fkey" FOREIGN KEY ("memory_id", "family_id") REFERENCES "memories"("id", "family_id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -14,7 +14,7 @@ describe('memory cursor policy', () => {
     const cursor = encodeMemoryCursor({
       familyId,
       filters: { childId: null, kind: 'note' },
-      snapshot: { occurredAt: '2026-09-09T10:00:00.000Z', id: '018f01d8-0c2a-7c25-bf83-ae68985c7e91' },
+      snapshotWatermark: '42',
       before: { occurredAt: '2026-09-08T10:00:00.000Z', id: '018f01d8-0c2a-7c25-bf83-ae68985c7e92' },
       expiresAt: '2026-09-09T10:15:00.000Z',
     }, secret)
@@ -23,14 +23,14 @@ describe('memory cursor policy', () => {
 
     expect(claims.familyId).toBe(familyId)
     expect(claims.filters).toEqual({ childId: null, kind: 'note' })
-    expect(claims.snapshot.id).toBe('018f01d8-0c2a-7c25-bf83-ae68985c7e91')
+    expect(claims.snapshotWatermark).toBe('42')
   })
 
   test('fails closed for tampering, expiry, and family or filter mismatches', () => {
     const cursor = encodeMemoryCursor({
       familyId,
       filters: { childId: null, kind: 'note' },
-      snapshot: { occurredAt: '2026-09-09T10:00:00.000Z', id: '018f01d8-0c2a-7c25-bf83-ae68985c7e91' },
+      snapshotWatermark: '42',
       before: { occurredAt: '2026-09-08T10:00:00.000Z', id: '018f01d8-0c2a-7c25-bf83-ae68985c7e92' },
       expiresAt: '2026-09-09T10:15:00.000Z',
     }, secret)

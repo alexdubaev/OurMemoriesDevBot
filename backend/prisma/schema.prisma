@@ -101,6 +101,7 @@ model FamilyMember {
   ownedFamily Family? @relation("FamilyOwnerMembership")
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
   memoryLikes MemoryLike[]
+  authoredMemories Memory[] @relation("MemoryAuthorMembership")
 
   @@id([familyId, userId])
   @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
@@ -169,12 +170,14 @@ model Memory {
   occurredAt DateTime     @map("occurred_at") @db.Timestamptz(6)
   status     MemoryStatus @default(published)
   version    Int          @default(1)
+  createdSequence BigInt   @default(autoincrement()) @map("created_sequence")
   deletedAt  DateTime?    @map("deleted_at") @db.Timestamptz(6)
   createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   family     Family       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "memories_family_id_fkey")
   child      Child        @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "memories_child_id_family_id_fkey")
   author     User         @relation("MemoryAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "memories_author_id_fkey")
+  authorMembership FamilyMember @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
   likes      MemoryLike[]
   media      MemoryMedia[]
 

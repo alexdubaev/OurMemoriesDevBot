@@ -5,10 +5,10 @@ import type { MemoryKind } from '@web-app-demo/contracts'
 export type MemoryCursorFilters = { childId: string | null; kind: MemoryKind | null }
 export type MemoryCursorPosition = { occurredAt: string; id: string }
 export type MemoryCursorClaims = {
-  version: 1
+  version: 2
   familyId: string
   filters: MemoryCursorFilters
-  snapshot: MemoryCursorPosition
+  snapshotWatermark: string
   before: MemoryCursorPosition
   expiresAt: string
 }
@@ -16,7 +16,7 @@ export type MemoryCursorClaims = {
 type CursorInput = Omit<MemoryCursorClaims, 'version'>
 
 export function encodeMemoryCursor(input: CursorInput, secret: string): string {
-  const claims: MemoryCursorClaims = { version: 1, ...input }
+  const claims: MemoryCursorClaims = { version: 2, ...input }
   const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
   return `${payload}.${sign(payload, secret)}`
 }
@@ -57,7 +57,7 @@ export class MemoryCursorError extends Error {
 }
 
 function sign(payload: string, secret: string) {
-  return createHmac('sha256', secret).update(`memory-feed-v1.${payload}`).digest('base64url')
+  return createHmac('sha256', secret).update(`memory-feed-v2.${payload}`).digest('base64url')
 }
 
 function signatureMatches(payload: string, signature: string, secret: string) {
@@ -69,10 +69,10 @@ function signatureMatches(payload: string, signature: string, secret: string) {
 function isClaims(value: unknown): value is MemoryCursorClaims {
   if (!value || typeof value !== 'object') return false
   const claims = value as Partial<MemoryCursorClaims>
-  return claims.version === 1 &&
+  return claims.version === 2 &&
     typeof claims.familyId === 'string' &&
     isFilters(claims.filters) &&
-    isPosition(claims.snapshot) &&
+    typeof claims.snapshotWatermark === 'string' && /^[1-9][0-9]*$/.test(claims.snapshotWatermark) &&
     isPosition(claims.before) &&
     typeof claims.expiresAt === 'string' && !Number.isNaN(new Date(claims.expiresAt).getTime())
 }

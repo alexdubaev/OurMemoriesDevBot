@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 
 import {
   createInviteResponseSchema,
@@ -19,20 +19,19 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
 import { FamilyFailure } from '../domain/errors'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
 type TransactionClient = Parameters<Parameters<DbClient['$transaction']>[0]>[0]
-type JsonPrimitive = string | number | boolean | null
-type JsonValue = JsonPrimitive | JsonValue[] | JsonObject
-type JsonObject = { [key: string]: JsonValue }
 
 export class FamilyService {
   constructor(
     private readonly db: DbClient,
     private readonly access: FamilyAccess,
     private readonly persistenceErrors: PersistenceErrorClassifier,
+    private readonly idempotency: IdempotencyExecutor<TransactionClient>,
     private readonly idempotencySecret: string,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -67,11 +66,12 @@ export class FamilyService {
   ): Promise<FamilyResponse> {
     const payloadHash = hashPayload(input)
     try {
-      return await this.runIdempotent({
-        principal,
+      return (await this.idempotency.run({
+        actorUserId: principal.userId,
         operation: 'family.create',
-        idempotencyKey,
+        key: idempotencyKey,
         payloadHash,
+        now: this.now(),
         execute: async (tx) => {
           const identity = await tx.externalIdentity.findFirst({
             where: { userId: principal.userId, provider: 'telegram' },
@@ -120,7 +120,11 @@ export class FamilyService {
           }
         },
         restore: (responseSnapshot) => storedFamilyResponse(responseSnapshot),
-      })
+        payloadConflict: () => new FamilyFailure(
+          'idempotency_conflict',
+          'Этот Idempotency-Key уже использован с другими данными',
+        ),
+      })).response
     } catch (error) {
       if (this.persistenceErrors.isUniqueConstraint(error)) {
         throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
@@ -202,11 +206,12 @@ export class FamilyService {
     await this.access.requireOwner(scope)
     const payloadHash = hashPayload(input)
     const operation = `family.invite.create:${scope.familyId}`
-    return this.runIdempotent({
-      principal: scope.principal,
+    return (await this.idempotency.run({
+      actorUserId: scope.principal.userId,
       operation,
-      idempotencyKey,
+      key: idempotencyKey,
       payloadHash,
+      now: this.now(),
       execute: async (tx, idempotencyRecordId) => {
         const rawToken = deriveInviteToken(
           this.idempotencySecret,
@@ -251,7 +256,11 @@ export class FamilyService {
           ),
         }
       },
-    })
+      payloadConflict: () => new FamilyFailure(
+        'idempotency_conflict',
+        'Этот Idempotency-Key уже использован с другими данными',
+      ),
+    })).response
   }
 
   async previewInvite(principal: Principal, rawToken: string): Promise<InvitePreviewResponse> {
@@ -432,76 +441,6 @@ export class FamilyService {
     }
   }
 
-  private async runIdempotent<Response>({
-    principal,
-    operation,
-    idempotencyKey,
-    payloadHash,
-    execute,
-    restore,
-  }: {
-    principal: Principal
-    operation: string
-    idempotencyKey: string
-    payloadHash: string
-    execute(
-      tx: TransactionClient,
-      idempotencyRecordId: string,
-    ): Promise<{
-      resourceId: string
-      response: Response
-      responseSnapshot: JsonObject
-    }>
-    restore(
-      responseSnapshot: unknown,
-      idempotencyRecordId: string,
-    ): Response
-  }): Promise<Response> {
-    return this.db.$transaction(async (tx) => {
-      const lockName = `idempotency:${principal.userId}:${operation}:${idempotencyKey}`
-      await tx.$queryRaw<Array<{ acquired: boolean }>>`
-        SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0)) IS NULL AS acquired
-      `
-
-      const now = this.now()
-      const existing = await tx.idempotencyRecord.findUnique({
-        where: {
-          actorUserId_operation_key: {
-            actorUserId: principal.userId,
-            operation,
-            key: idempotencyKey,
-          },
-        },
-      })
-      if (existing && existing.expiresAt > now) {
-        if (existing.payloadHash !== payloadHash) {
-          throw new FamilyFailure(
-            'idempotency_conflict',
-            'Этот Idempotency-Key уже использован с другими данными',
-          )
-        }
-        return restore(existing.responseSnapshot, existing.id)
-      }
-      if (existing) await tx.idempotencyRecord.delete({ where: { id: existing.id } })
-
-      const idempotencyRecordId = randomUUID()
-      const result = await execute(tx, idempotencyRecordId)
-      await tx.idempotencyRecord.create({
-        data: {
-          id: idempotencyRecordId,
-          actorUserId: principal.userId,
-          operation,
-          key: idempotencyKey,
-          payloadHash,
-          resourceId: result.resourceId,
-          responseSnapshot: result.responseSnapshot,
-          createdAt: now,
-          expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-        },
-      })
-      return result.response
-    }, { timeout: 15_000 })
-  }
 }
 
 function hashInviteToken(rawToken: string) {

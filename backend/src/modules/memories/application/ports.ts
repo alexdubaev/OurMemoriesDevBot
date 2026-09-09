@@ -1,4 +1,12 @@
+import type {
+  CreateMemoryRequest,
+  LikeResponse,
+  MemoryDto,
+  UpdateMemoryRequest,
+} from '@web-app-demo/contracts'
+
 import type { FamilyScope } from '../../families'
+import type { MemoryCursorFilters, MemoryCursorPosition } from '../domain/memory-cursor'
 
 /**
  * Block 03 replaces the production rejection with a catalog that verifies family ownership,
@@ -6,4 +14,28 @@ import type { FamilyScope } from '../../families'
  */
 export type MediaMemoryCatalog = {
   assertReadyForPublication(scope: FamilyScope, mediaIds: string[]): Promise<void>
+}
+
+export type MemoryRepository = {
+  create(
+    scope: FamilyScope,
+    input: CreateMemoryRequest,
+    idempotency: { key: string; payloadHash: string; now: Date },
+  ): Promise<{ memory: MemoryDto; replayed: boolean }>
+  listFirst(
+    scope: FamilyScope,
+    filters: MemoryCursorFilters,
+    limit: number,
+  ): Promise<{ items: MemoryDto[]; hasNext: boolean; snapshotWatermark: string }>
+  listAfter(
+    scope: FamilyScope,
+    filters: MemoryCursorFilters,
+    snapshotWatermark: string,
+    before: MemoryCursorPosition,
+    limit: number,
+  ): Promise<{ items: MemoryDto[]; hasNext: boolean }>
+  get(scope: FamilyScope, memoryId: string): Promise<MemoryDto>
+  update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto>
+  delete(scope: FamilyScope, memoryId: string, expectedVersion: number, now: Date): Promise<void>
+  setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse>
 }

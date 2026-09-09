@@ -7,7 +7,9 @@ export function toMemoryAppError(error: unknown) {
   if (error instanceof MemoryFailure) {
     switch (error.kind) {
       case 'not_found': return new AppError(404, 'NOT_FOUND', error.message)
+      case 'forbidden': return new AppError(403, 'ROLE_FORBIDDEN', error.message)
       case 'conflict': return new AppError(409, 'CONFLICT', error.message)
+      case 'version_conflict': return new AppError(409, 'VERSION_CONFLICT', error.message)
       case 'idempotency_conflict': return new AppError(409, 'IDEMPOTENCY_CONFLICT', error.message)
       case 'invalid_input': return new AppError(422, 'INVALID_INPUT', error.message)
       case 'media_unavailable': return new AppError(409, 'CONFLICT', error.message)

@@ -1,29 +1,34 @@
 import type { MiddlewareHandler } from 'hono'
 
 import type { DbClient } from '../../db'
+import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempotency'
 import type { AuthHttpEnv } from '../auth'
 import type { FamilyAccess } from '../families'
 import { MemoryService } from './application/memory-service'
 import type { MediaMemoryCatalog } from './application/ports'
 import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
+import { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 import { createMemoryRoutes } from './transport/routes'
 
 export function createMemoriesModule({
   db,
   familyAccess,
+  idempotencyExecutor,
   idempotencySecret,
   requireAuth,
   mediaCatalog = unavailableMediaMemoryCatalog,
 }: {
   db: DbClient
   familyAccess: FamilyAccess
+  idempotencyExecutor: IdempotencyExecutor<PrismaTransactionClient>
   idempotencySecret: string
   requireAuth: MiddlewareHandler<AuthHttpEnv>
   mediaCatalog?: MediaMemoryCatalog
 }) {
-  const service = new MemoryService(db, familyAccess, mediaCatalog, idempotencySecret)
+  const repository = new PrismaMemoryRepository(db, idempotencyExecutor)
+  const service = new MemoryService(familyAccess, repository, mediaCatalog, idempotencySecret)
   return { routes: createMemoryRoutes({ requireAuth, service }) }
 }
 
-export type { MediaMemoryCatalog } from './application/ports'
+export type { MediaMemoryCatalog, MemoryRepository } from './application/ports'
 export { MemoryService } from './application/memory-service'
