@@ -110,6 +110,20 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     expect(familyRecord.expiresAt.getTime() - familyRecord.createdAt.getTime())
       .toBe(24 * 60 * 60 * 1000)
 
+    const originalFamilyResponse = familyAttempts[0]!.body
+    expect(familyRecord.responseSnapshot).toEqual(originalFamilyResponse)
+    const patchedFamily = await patchFamily(
+      owner.token,
+      originalFamilyResponse.family.id,
+      { name: 'Имя после создания', child: { displayName: 'Ребёнок после создания' } },
+    )
+    expect(patchedFamily.response.status).toBe(200)
+    expect(patchedFamily.body).not.toEqual(originalFamilyResponse)
+
+    const replayAfterPatch = await createFamily(owner, 'Идемпотентная семья', familyKey)
+    expect(replayAfterPatch.response.status).toBe(201)
+    expect(replayAfterPatch.body).toEqual(originalFamilyResponse)
+
     const changedFamily = await createFamily(owner, 'Другое имя', familyKey)
     expect(changedFamily.response.status).toBe(409)
     expect(changedFamily.body.error.code).toBe('IDEMPOTENCY_CONFLICT')
@@ -122,6 +136,23 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     expect(inviteAttempts.map(({ response }) => response.status)).toEqual([201, 201])
     expect(inviteAttempts[0]!.body).toEqual(inviteAttempts[1]!.body)
     expect(await prisma.familyInvite.count()).toBe(1)
+    const inviteRecord = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: {
+        operation: `family.invite.create:${familyAttempts[0]!.body.family.id}`,
+        key: inviteKey,
+      },
+    })
+    expect(inviteRecord.responseSnapshot).toEqual({
+      id: inviteAttempts[0]!.body.id,
+      role: inviteAttempts[0]!.body.role,
+      expiresAt: inviteAttempts[0]!.body.expiresAt,
+    })
+    expect(JSON.stringify(inviteRecord.responseSnapshot))
+      .not.toContain(inviteAttempts[0]!.body.rawToken)
+    const storedInvite = await prisma.familyInvite.findUniqueOrThrow({
+      where: { id: inviteAttempts[0]!.body.id },
+    })
+    expect(storedInvite.tokenHash).not.toBe(inviteAttempts[0]!.body.rawToken)
 
     const changedInvite = await createInvite(
       owner,

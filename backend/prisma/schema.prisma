@@ -144,6 +144,7 @@ model IdempotencyRecord {
   key         String   @db.Uuid
   payloadHash String   @map("payload_hash")
   resourceId  String   @map("resource_id") @db.Uuid
+  responseSnapshot Json @map("response_snapshot")
   expiresAt   DateTime @map("expires_at")
   createdAt   DateTime @default(now()) @map("created_at")
   actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Cascade, map: "idempotency_records_actor_user_id_fkey")

@@ -1,5 +1,9 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 
+import {
+  createInviteResponseSchema,
+  familyResponseSchema,
+} from '@web-app-demo/contracts'
 import type {
   AcceptInviteResponse,
   CreateFamilyRequest,
@@ -15,6 +19,7 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import { Prisma } from '../../../generated/prisma/client'
 import { FamilyFailure } from '../domain/errors'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
@@ -105,12 +110,14 @@ export class FamilyService {
                 : null,
             },
           })
+          const response = { family: familyDto(family), child: childDto(child) }
           return {
             resourceId: family.id,
-            response: { family: familyDto(family), child: childDto(child) },
+            response,
+            responseSnapshot: response,
           }
         },
-        restore: (tx, familyId) => familyResponse(tx, familyId),
+        restore: (responseSnapshot) => storedFamilyResponse(responseSnapshot),
       })
     } catch (error) {
       if (this.persistenceErrors.isUniqueConstraint(error)) {
@@ -222,21 +229,25 @@ export class FamilyService {
             createdBy: scope.principal.userId,
           },
         })
+        const response = inviteDto(invite, rawToken)
         return {
           resourceId: invite.id,
-          response: inviteDto(invite, rawToken),
+          response,
+          responseSnapshot: inviteSnapshot(response),
         }
       },
-      restore: async (tx, inviteId, idempotencyRecordId) => {
-        const invite = await tx.familyInvite.findUnique({ where: { id: inviteId } })
-        if (!invite) throw new FamilyFailure('conflict', 'Результат запроса больше недоступен')
-        return inviteDto(invite, deriveInviteToken(
+      restore: (responseSnapshot, idempotencyRecordId) => {
+        const invite = storedInviteResponse(responseSnapshot)
+        return {
+          ...invite,
+          rawToken: deriveInviteToken(
           this.idempotencySecret,
           scope.principal.userId,
           scope.familyId,
           idempotencyRecordId,
           payloadHash,
-        ))
+          ),
+        }
       },
     })
   }
@@ -434,12 +445,15 @@ export class FamilyService {
     execute(
       tx: TransactionClient,
       idempotencyRecordId: string,
-    ): Promise<{ resourceId: string; response: Response }>
+    ): Promise<{
+      resourceId: string
+      response: Response
+      responseSnapshot: Prisma.InputJsonValue
+    }>
     restore(
-      tx: TransactionClient,
-      resourceId: string,
+      responseSnapshot: Prisma.JsonValue,
       idempotencyRecordId: string,
-    ): Promise<Response>
+    ): Response
   }): Promise<Response> {
     return this.db.$transaction(async (tx) => {
       const lockName = `idempotency:${principal.userId}:${operation}:${idempotencyKey}`
@@ -464,7 +478,7 @@ export class FamilyService {
             'Этот Idempotency-Key уже использован с другими данными',
           )
         }
-        return restore(tx, existing.resourceId, existing.id)
+        return restore(existing.responseSnapshot, existing.id)
       }
       if (existing) await tx.idempotencyRecord.delete({ where: { id: existing.id } })
 
@@ -478,6 +492,7 @@ export class FamilyService {
           key: idempotencyKey,
           payloadHash,
           resourceId: result.resourceId,
+          responseSnapshot: result.responseSnapshot,
           createdAt: now,
           expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
         },
@@ -521,14 +536,30 @@ function inviteDto(
   }
 }
 
-async function familyResponse(tx: TransactionClient, familyId: string): Promise<FamilyResponse> {
-  const family = await tx.family.findUnique({
-    where: { id: familyId },
-    include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
-  })
-  const child = family?.children[0]
-  if (!family || !child) throw new FamilyFailure('conflict', 'Результат запроса больше недоступен')
-  return { family: familyDto(family), child: childDto(child) }
+function storedFamilyResponse(responseSnapshot: Prisma.JsonValue): FamilyResponse {
+  const parsed = familyResponseSchema.safeParse(responseSnapshot)
+  if (!parsed.success) unavailableIdempotencyResult()
+  return parsed.data
+}
+
+const storedInviteResponseSchema = createInviteResponseSchema.omit({ rawToken: true })
+
+function inviteSnapshot(response: CreateInviteResponse): Prisma.InputJsonObject {
+  return {
+    id: response.id,
+    role: response.role,
+    expiresAt: response.expiresAt,
+  }
+}
+
+function storedInviteResponse(responseSnapshot: Prisma.JsonValue) {
+  const parsed = storedInviteResponseSchema.safeParse(responseSnapshot)
+  if (!parsed.success) unavailableIdempotencyResult()
+  return parsed.data
+}
+
+function unavailableIdempotencyResult(): never {
+  throw new FamilyFailure('conflict', 'Результат запроса больше недоступен')
 }
 
 function familyDto(family: { id: string; name: string; timezone: string; ownerUserId: string }): FamilyDto {
