@@ -6,7 +6,8 @@ export const apiErrorCodeSchema = z.enum([
   'FORBIDDEN',
   'NOT_FOUND',
   'CONFLICT',
-  'VALIDATION_ERROR',
+  'IDEMPOTENCY_CONFLICT',
+  'INVALID_INPUT',
   'PAYLOAD_TOO_LARGE',
   'RATE_LIMITED',
   'AUTH_PASSWORD_RESET_INVALID',
@@ -28,9 +29,10 @@ export const apiErrorSchema = z.object({
   error: z.object({
     code: apiErrorCodeSchema,
     message: z.string(),
-    details: z.unknown().optional(),
-  }),
-})
+    requestId: z.uuid(),
+    fieldErrors: z.record(z.string(), z.string()).optional(),
+  }).strict(),
+}).strict()
 
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>
 export type ApiErrorResponse = z.infer<typeof apiErrorSchema>

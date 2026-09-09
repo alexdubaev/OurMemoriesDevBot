@@ -35,7 +35,7 @@ const telegramRoute = createRoute({
       content: { 'application/json': { schema: cookieAuthResponseSchema } },
       description: 'Verified Telegram identity and application session',
     },
-    400: { content: errorResponseContent, description: 'Invalid payload' },
+    422: { content: errorResponseContent, description: 'Invalid payload' },
     401: { content: errorResponseContent, description: 'Invalid, expired, or replayed initData' },
     403: { content: errorResponseContent, description: 'Untrusted browser origin' },
   },
@@ -51,7 +51,7 @@ const refreshRoute = createRoute({
       content: { 'application/json': { schema: cookieRefreshResponseSchema } },
       description: 'Rotated application session',
     },
-    400: { content: errorResponseContent, description: 'Invalid payload' },
+    422: { content: errorResponseContent, description: 'Invalid payload' },
     401: { content: errorResponseContent, description: 'Invalid refresh session' },
     403: { content: errorResponseContent, description: 'Untrusted browser origin' },
   },
@@ -64,7 +64,7 @@ const logoutRoute = createRoute({
   responses: {
     ...authWriteErrorResponses,
     204: { description: 'Application session revoked' },
-    400: { content: errorResponseContent, description: 'Invalid payload' },
+    422: { content: errorResponseContent, description: 'Invalid payload' },
     403: { content: errorResponseContent, description: 'Untrusted browser origin' },
   },
 })
@@ -131,7 +131,7 @@ function assertTrustedCookieOrigin(c: Context, env: AppEnv) {
   if (!env.COOKIE_SECURE) return
   const origin = c.req.header('origin')
   if (!origin || !env.CORS_ORIGINS.includes(origin)) {
-    throw new AppError(403, 'FORBIDDEN', 'Cookie authentication requires a trusted Origin')
+    throw new AppError(403, 'FORBIDDEN', 'Источник запроса не разрешён')
   }
 }
 

@@ -9,9 +9,11 @@ import { createFamilyRoutes } from './transport/routes'
 
 export function createFamiliesModule({
   db,
+  idempotencySecret,
   requireAuth,
 }: {
   db: DbClient
+  idempotencySecret: string
   requireAuth: MiddlewareHandler<AuthHttpEnv>
 }) {
   const access = createPrismaFamilyAccess(db)
@@ -19,7 +21,7 @@ export function createFamiliesModule({
     access,
     routes: createFamilyRoutes({
       requireAuth,
-      service: new FamilyService(db, access, prismaPersistenceErrors),
+      service: new FamilyService(db, access, prismaPersistenceErrors, idempotencySecret),
     }),
   }
 }

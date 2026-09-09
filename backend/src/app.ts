@@ -10,7 +10,13 @@ import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
-import { errorResponse, handleError, validationErrorHook } from './http/errors'
+import {
+  createRequestContext,
+  errorResponse,
+  handleError,
+  requestIdFrom,
+  validationErrorHook,
+} from './http/errors'
 import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
@@ -51,9 +57,13 @@ export function createApp({
   }
   const storage = privateStorage ?? createPrivateStorage(env)
   const auth = createAuthModule({ db: prisma, emailDelivery, env, legacyPasswordAuthForTests })
-  const families = createFamiliesModule({ db: prisma, requireAuth: auth.requireAuth })
+  const families = createFamiliesModule({
+    db: prisma,
+    idempotencySecret: env.JWT_SECRET,
+    requireAuth: auth.requireAuth,
+  })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
-    errorMessage: 'Too many admin user directory requests',
+    errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => c.var.user.id,
     max: env.ADMIN_USERS_READ_RATE_LIMIT_MAX,
     windowSeconds: env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS,
@@ -79,6 +89,7 @@ export function createApp({
     bearerFormat: 'JWT',
   })
 
+  app.use('*', createRequestContext())
   app.use(secureHeaders())
   app.use(
     '*',
@@ -176,7 +187,11 @@ export function createApp({
     },
   })
 
-  app.notFound((c) => c.json(errorResponse('NOT_FOUND', 'Route not found'), 404))
+  app.notFound((c) => c.json(errorResponse(
+    'NOT_FOUND',
+    'Маршрут не найден',
+    requestIdFrom(c),
+  ), 404))
   app.onError(handleError)
 
   return app

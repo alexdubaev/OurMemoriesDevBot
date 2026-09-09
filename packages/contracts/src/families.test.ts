@@ -6,6 +6,8 @@ import {
   createInviteRequestSchema,
   familyMeResponseSchema,
   familyRoleSchema,
+  idempotencyKeyHeadersSchema,
+  updateFamilyRequestSchema,
   updateMemberRoleRequestSchema,
 } from './index'
 
@@ -55,6 +57,32 @@ describe('family contracts', () => {
       acceptInviteRequestSchema.parse({ token: 't'.repeat(32), role: 'full' }),
     ).toThrow()
     expect(updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toEqual({ role: 'viewer' })
+  })
+
+  test('allows only current MVP family and child fields in family updates', () => {
+    expect(updateFamilyRequestSchema.parse({
+      name: ' Новое имя ',
+      timezone: 'Asia/Yekaterinburg',
+      child: { displayName: ' Маша ', birthDate: null },
+    })).toEqual({
+      name: 'Новое имя',
+      timezone: 'Asia/Yekaterinburg',
+      child: { displayName: 'Маша', birthDate: null },
+    })
+    expect(() => updateFamilyRequestSchema.parse({})).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ theme: 'dark' })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: {} })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ timezone: 'not-a-timezone' })).toThrow()
+  })
+
+  test('requires a UUID Idempotency-Key for Block 01 creation requests', () => {
+    expect(idempotencyKeyHeadersSchema.parse({
+      'idempotency-key': '01993b24-7e7d-7000-8000-000000000003',
+    })).toEqual({
+      'idempotency-key': '01993b24-7e7d-7000-8000-000000000003',
+    })
+    expect(() => idempotencyKeyHeadersSchema.parse({})).toThrow()
+    expect(() => idempotencyKeyHeadersSchema.parse({ 'idempotency-key': 'retry-1' })).toThrow()
   })
 
   test('keeps family authorization in the current-session response rather than the JWT', () => {

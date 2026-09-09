@@ -87,8 +87,8 @@ maybeDescribe('users and admin API integration', () => {
         headers: authenticatedJsonHeaders(session.accessToken),
         body: JSON.stringify({ displayName }),
       })
-      expect(invalid.status).toBe(400)
-      expect((await invalid.json()).error.code).toBe('VALIDATION_ERROR')
+      expect(invalid.status).toBe(422)
+      expect((await invalid.json()).error.code).toBe('INVALID_INPUT')
     }
   })
 
@@ -168,16 +168,16 @@ maybeDescribe('users and admin API integration', () => {
     const excessivePage = await app.request('/api/admin/users?page=101', {
       headers: authenticatedHeaders(admin.accessToken),
     })
-    expect(excessivePage.status).toBe(400)
-    expect((await excessivePage.json()).error.code).toBe('VALIDATION_ERROR')
+    expect(excessivePage.status).toBe(422)
+    expect((await excessivePage.json()).error.code).toBe('INVALID_INPUT')
 
     const malformedUserId = await app.request('/api/admin/users/not-a-uuid/role', {
       method: 'PATCH',
       headers: authenticatedJsonHeaders(admin.accessToken),
       body: JSON.stringify({ role: 'admin' }),
     })
-    expect(malformedUserId.status).toBe(400)
-    expect((await malformedUserId.json()).error.code).toBe('VALIDATION_ERROR')
+    expect(malformedUserId.status).toBe(422)
+    expect((await malformedUserId.json()).error.code).toBe('INVALID_INPUT')
 
     const promote = await app.request(`/api/admin/users/${target.user.id}/role`, {
       method: 'PATCH',

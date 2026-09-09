@@ -556,7 +556,7 @@ maybeDescribe('auth API integration', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     })
-    expect(cookieWithBodyToken.status).toBe(400)
+    expect(cookieWithBodyToken.status).toBe(422)
 
     const tokenWithCookieOnly = await app.request('/api/auth/token/refresh', {
       method: 'POST',
@@ -566,7 +566,7 @@ maybeDescribe('auth API integration', () => {
       },
       body: JSON.stringify({}),
     })
-    expect(tokenWithCookieOnly.status).toBe(400)
+    expect(tokenWithCookieOnly.status).toBe(422)
   })
 
   test('production web auth allows an exact same-site custom-domain origin', async () => {
@@ -666,6 +666,7 @@ maybeDescribe('auth API integration', () => {
   test('guards me and returns stable validation errors', async () => {
     const unauthorizedMe = await app.request('/api/auth/me')
     expect(unauthorizedMe.status).toBe(401)
+    expect((await unauthorizedMe.json()).error.message).toBe('Требуется повторная авторизация')
 
     const invalidRegister = await app.request('/api/auth/register', {
       method: 'POST',
@@ -677,10 +678,14 @@ maybeDescribe('auth API integration', () => {
     })
     const body = await invalidRegister.json()
 
-    expect(invalidRegister.status).toBe(400)
-    expect(body.error.code).toBe('VALIDATION_ERROR')
-    expect(body.error.message).toBe('Invalid request payload')
-    expect(Array.isArray(body.error.details)).toBe(true)
+    expect(invalidRegister.status).toBe(422)
+    expect(body.error.code).toBe('INVALID_INPUT')
+    expect(body.error.message).toBe('Проверьте правильность заполнения полей')
+    expect(body.error.requestId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(body.error.fieldErrors).toEqual({
+      email: 'Некорректное значение',
+      password: 'Некорректное значение',
+    })
   })
 
   test('me rejects revoked, expired, and missing sessions', async () => {

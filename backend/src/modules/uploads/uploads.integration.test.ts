@@ -212,13 +212,13 @@ maybeDescribe('avatar upload API integration', () => {
       body: JSON.stringify({ contentType: 'image/svg+xml', byteSize: 1024 }),
     })
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(422)
   })
 
   test('reports a driver limit below the contract limit as a client error, not a server fault', async () => {
     // The contract accepts up to AVATAR_MAX_BYTES, but PRIVATE_STORAGE_UPLOAD_MAX_BYTES can be
     // configured lower. The storage layer then refuses a request the contract let through, and
-    // that must reach the caller as 400 rather than surfacing as an unhandled 500.
+    // that must reach the caller as 422 rather than surfacing as an unhandled 500.
     const tightEnv = { ...env, PRIVATE_STORAGE_UPLOAD_MAX_BYTES: 32 }
     const tightConfig = privateStorageConfigFromEnv({
       ...tightEnv,
@@ -247,8 +247,8 @@ maybeDescribe('avatar upload API integration', () => {
       body: JSON.stringify({ contentType: 'image/png', byteSize: pngFixture.byteLength }),
     })
 
-    expect(response.status).toBe(400)
-    expect((await response.json()).error.code).toBe('VALIDATION_ERROR')
+    expect(response.status).toBe(422)
+    expect((await response.json()).error.code).toBe('INVALID_INPUT')
   })
 
   test('keeps one live avatar per user and deletes the object it replaces', async () => {

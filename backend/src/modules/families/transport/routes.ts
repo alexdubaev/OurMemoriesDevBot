@@ -12,9 +12,11 @@ import {
   familyMeResponseSchema,
   familyParamsSchema,
   familyResponseSchema,
+  idempotencyKeyHeadersSchema,
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
   updateMemberRoleRequestSchema,
+  updateFamilyRequestSchema,
 } from '@web-app-demo/contracts'
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
@@ -28,7 +30,7 @@ import { executeFamily } from './errors'
 const bearerSecurity = [{ BearerAuth: [] }]
 const json = <Schema extends ZodType>(schema: Schema) => ({ 'application/json': { schema } })
 const errors = {
-  400: { content: json(apiErrorSchema), description: 'Invalid payload' },
+  422: { content: json(apiErrorSchema), description: 'Invalid payload' },
   401: { content: json(apiErrorSchema), description: 'Authentication required' },
   403: { content: json(apiErrorSchema), description: 'Family role does not allow this action' },
   404: { content: json(apiErrorSchema), description: 'Family resource not found' },
@@ -38,7 +40,10 @@ const errors = {
 
 const createFamilyRoute = createRoute({
   method: 'post', path: '/families', security: bearerSecurity,
-  request: { body: { content: json(createFamilyRequestSchema) } },
+  request: {
+    headers: idempotencyKeyHeadersSchema,
+    body: { content: json(createFamilyRequestSchema) },
+  },
   responses: { ...errors, 201: { content: json(familyResponseSchema), description: 'Created pilot family' } },
 })
 const meRoute = createRoute({
@@ -50,6 +55,14 @@ const getFamilyRoute = createRoute({
   request: { params: familyParamsSchema },
   responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Family visible to member' } },
 })
+const updateFamilyRoute = createRoute({
+  method: 'patch', path: '/families/{familyId}', security: bearerSecurity,
+  request: {
+    params: familyParamsSchema,
+    body: { content: json(updateFamilyRequestSchema) },
+  },
+  responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Updated family and child profile' } },
+})
 const listMembersRoute = createRoute({
   method: 'get', path: '/families/{familyId}/members', security: bearerSecurity,
   request: { params: familyParamsSchema },
@@ -57,7 +70,11 @@ const listMembersRoute = createRoute({
 })
 const createInviteRoute = createRoute({
   method: 'post', path: '/families/{familyId}/invites', security: bearerSecurity,
-  request: { params: familyParamsSchema, body: { content: json(createInviteRequestSchema) } },
+  request: {
+    params: familyParamsSchema,
+    headers: idempotencyKeyHeadersSchema,
+    body: { content: json(createInviteRequestSchema) },
+  },
   responses: { ...errors, 201: { content: json(createInviteResponseSchema), description: 'Created one-use invitation' } },
 })
 const previewInviteRoute = createRoute({
@@ -107,16 +124,30 @@ export function createFamilyRoutes({
     return service.getMe(user)
   }), 200))
   routes.openapi(createFamilyRoute, async (c) => c.json(await executeFamily(() =>
-    service.createFamily(principal(c.var.user), c.req.valid('json')),
+    service.createFamily(
+      principal(c.var.user),
+      c.req.valid('json'),
+      c.req.valid('header')['idempotency-key'],
+    ),
   ), 201))
   routes.openapi(getFamilyRoute, async (c) => c.json(await executeFamily(() =>
     service.getFamily(scope(c.var.user, c.req.valid('param').familyId)),
+  ), 200))
+  routes.openapi(updateFamilyRoute, async (c) => c.json(await executeFamily(() =>
+    service.updateFamily(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.valid('json'),
+    ),
   ), 200))
   routes.openapi(listMembersRoute, async (c) => c.json(await executeFamily(() =>
     service.listMembers(scope(c.var.user, c.req.valid('param').familyId)),
   ), 200))
   routes.openapi(createInviteRoute, async (c) => c.json(await executeFamily(() =>
-    service.createInvite(scope(c.var.user, c.req.valid('param').familyId), c.req.valid('json')),
+    service.createInvite(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.valid('json'),
+      c.req.valid('header')['idempotency-key'],
+    ),
   ), 201))
   routes.openapi(previewInviteRoute, async (c) => c.json(await executeFamily(() =>
     service.previewInvite(principal(c.var.user), c.req.valid('json').token),

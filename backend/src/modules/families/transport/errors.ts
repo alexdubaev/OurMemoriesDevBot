@@ -18,6 +18,8 @@ export function toFamilyAppError(error: unknown) {
       return new AppError(410, 'INVITE_REVOKED', error.message)
     case 'conflict':
       return new AppError(409, 'CONFLICT', error.message)
+    case 'idempotency_conflict':
+      return new AppError(409, 'IDEMPOTENCY_CONFLICT', error.message)
   }
 }
 

@@ -3,6 +3,9 @@ import { userSchema } from './auth'
 
 export const familyRoleSchema = z.enum(['full', 'viewer'])
 
+export const idempotencyKeyHeadersSchema = z
+  .object({ 'idempotency-key': z.uuid() })
+
 const trimmedName = (minimum: number, maximum: number) =>
   z.string().trim().min(minimum).max(maximum)
 
@@ -37,6 +40,23 @@ export const createFamilyRequestSchema = z
       .strict(),
   })
   .strict()
+
+const updateChildRequestSchema = z
+  .object({
+    displayName: trimmedName(1, 60).optional(),
+    birthDate: birthDateSchema.nullable().optional(),
+  })
+  .strict()
+  .refine((input) => Object.keys(input).length > 0, 'At least one child field is required')
+
+export const updateFamilyRequestSchema = z
+  .object({
+    name: trimmedName(1, 80).optional(),
+    timezone: ianaTimezoneSchema.optional(),
+    child: updateChildRequestSchema.optional(),
+  })
+  .strict()
+  .refine((input) => Object.keys(input).length > 0, 'At least one family field is required')
 
 export const createInviteRequestSchema = z
   .object({
@@ -132,7 +152,9 @@ export const familyMeResponseSchema = z.object({
 }).strict()
 
 export type FamilyRole = z.infer<typeof familyRoleSchema>
+export type IdempotencyKeyHeaders = z.infer<typeof idempotencyKeyHeadersSchema>
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>
+export type UpdateFamilyRequest = z.infer<typeof updateFamilyRequestSchema>
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>
 export type UpdateMemberRoleRequest = z.infer<typeof updateMemberRoleRequestSchema>

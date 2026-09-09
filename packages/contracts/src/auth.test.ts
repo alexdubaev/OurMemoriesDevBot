@@ -184,18 +184,29 @@ describe('auth contracts', () => {
     expect(
       apiErrorSchema.parse({
         error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid request payload',
-          details: [{ path: ['email'], message: 'Invalid email address' }],
+          code: 'INVALID_INPUT',
+          message: 'Проверьте правильность заполнения полей',
+          requestId: '01993b24-7e7d-7000-8000-000000000001',
+          fieldErrors: { email: 'Некорректное значение' },
         },
       }),
     ).toEqual({
       error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Invalid request payload',
-        details: [{ path: ['email'], message: 'Invalid email address' }],
+        code: 'INVALID_INPUT',
+        message: 'Проверьте правильность заполнения полей',
+        requestId: '01993b24-7e7d-7000-8000-000000000001',
+        fieldErrors: { email: 'Некорректное значение' },
       },
     })
+
+    expect(() => apiErrorSchema.parse({
+      error: {
+        code: 'INVALID_INPUT',
+        message: 'Проверьте правильность заполнения полей',
+        requestId: '01993b24-7e7d-7000-8000-000000000001',
+        details: [{ path: ['email'], message: 'internal schema detail' }],
+      },
+    })).toThrow()
 
     expect(() =>
       apiErrorSchema.parse({

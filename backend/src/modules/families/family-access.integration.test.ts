@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
@@ -19,6 +21,7 @@ maybeDescribe('Family access and invitations', () => {
   const app = createApp({ env, prisma })
 
   async function clearFixtures() {
+    await prisma.idempotencyRecord.deleteMany()
     await prisma.familyInvite.deleteMany()
     await prisma.child.deleteMany()
     await prisma.family.deleteMany()
@@ -236,9 +239,16 @@ maybeDescribe('Family access and invitations', () => {
   }
 
   async function jsonRequest(path: string, token: string, method: string, body: unknown) {
+    const needsIdempotencyKey = method === 'POST' && (
+      path === '/api/v1/families' || path.endsWith('/invites')
+    )
     const response = await app.request(path, {
       method,
-      headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+      headers: {
+        ...authHeaders(token),
+        'Content-Type': 'application/json',
+        ...(needsIdempotencyKey ? { 'Idempotency-Key': randomUUID() } : {}),
+      },
       body: JSON.stringify(body),
     })
     return { response, body: await response.json() as any }

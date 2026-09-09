@@ -108,7 +108,7 @@ function assertTrustedOrigin(c: Context, env: AppEnv) {
   if (!env.COOKIE_SECURE) return
   const origin = c.req.header('origin')
   if (!origin || !env.CORS_ORIGINS.includes(origin)) {
-    throw new AppError(403, 'FORBIDDEN', 'Cookie authentication requires a trusted Origin')
+    throw new AppError(403, 'FORBIDDEN', 'Источник запроса не разрешён')
   }
 }
 

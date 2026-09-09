@@ -23,6 +23,7 @@ model User {
   familyMemberships   FamilyMember[]
   createdInvites      FamilyInvite[]   @relation("InviteCreator")
   acceptedInvites     FamilyInvite[]   @relation("InviteAcceptor")
+  idempotencyRecords  IdempotencyRecord[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -134,6 +135,22 @@ model FamilyInvite {
 
   @@index([familyId, expiresAt], map: "family_invites_family_id_expires_at_idx")
   @@map("family_invites")
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  operation   String
+  key         String   @db.Uuid
+  payloadHash String   @map("payload_hash")
+  resourceId  String   @map("resource_id") @db.Uuid
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Cascade, map: "idempotency_records_actor_user_id_fkey")
+
+  @@unique([actorUserId, operation, key], map: "idempotency_records_actor_operation_key_key")
+  @@index([expiresAt], map: "idempotency_records_expires_at_idx")
+  @@map("idempotency_records")
 }
 
 enum ExternalIdentityProvider {

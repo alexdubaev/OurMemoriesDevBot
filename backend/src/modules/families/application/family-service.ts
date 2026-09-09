@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomUUID } from 'node:crypto'
 
 import type {
   AcceptInviteResponse,
@@ -10,6 +10,7 @@ import type {
   FamilyMeResponse,
   FamilyResponse,
   InvitePreviewResponse,
+  UpdateFamilyRequest,
   UpdateMemberRoleRequest,
 } from '@web-app-demo/contracts'
 
@@ -18,12 +19,14 @@ import { FamilyFailure } from '../domain/errors'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
+type TransactionClient = Parameters<Parameters<DbClient['$transaction']>[0]>[0]
 
 export class FamilyService {
   constructor(
     private readonly db: DbClient,
     private readonly access: FamilyAccess,
     private readonly persistenceErrors: PersistenceErrorClassifier,
+    private readonly idempotencySecret: string,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -50,49 +53,64 @@ export class FamilyService {
     }
   }
 
-  async createFamily(principal: Principal, input: CreateFamilyRequest): Promise<FamilyResponse> {
+  async createFamily(
+    principal: Principal,
+    input: CreateFamilyRequest,
+    idempotencyKey: string,
+  ): Promise<FamilyResponse> {
+    const payloadHash = hashPayload(input)
     try {
-      return await this.db.$transaction(async (tx) => {
-        const identity = await tx.externalIdentity.findFirst({
-          where: { userId: principal.userId, provider: 'telegram' },
-          select: { subject: true },
-        })
-        const admitted = identity && await tx.pilotAdmission.findFirst({
-          where: { provider: 'telegram', subject: identity.subject, revokedAt: null },
-          select: { id: true },
-        })
-        if (!admitted) {
-          throw new FamilyFailure('forbidden', 'Создание семьи доступно участникам пилота')
-        }
+      return await this.runIdempotent({
+        principal,
+        operation: 'family.create',
+        idempotencyKey,
+        payloadHash,
+        execute: async (tx) => {
+          const identity = await tx.externalIdentity.findFirst({
+            where: { userId: principal.userId, provider: 'telegram' },
+            select: { subject: true },
+          })
+          const admitted = identity && await tx.pilotAdmission.findFirst({
+            where: { provider: 'telegram', subject: identity.subject, revokedAt: null },
+            select: { id: true },
+          })
+          if (!admitted) {
+            throw new FamilyFailure('forbidden', 'Создание семьи доступно участникам пилота')
+          }
 
-        const existing = await tx.familyMember.findFirst({
-          where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
-          select: { familyId: true },
-        })
-        if (existing) {
-          throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
-        }
+          const existing = await tx.familyMember.findFirst({
+            where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+            select: { familyId: true },
+          })
+          if (existing) {
+            throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+          }
 
-        const family = await tx.family.create({
-          data: {
-            ownerUserId: principal.userId,
-            name: input.name,
-            timezone: input.timezone,
-          },
-        })
-        await tx.familyMember.create({
-          data: { familyId: family.id, userId: principal.userId, role: 'full' },
-        })
-        const child = await tx.child.create({
-          data: {
-            familyId: family.id,
-            displayName: input.child.displayName,
-            birthDate: input.child.birthDate
-              ? new Date(`${input.child.birthDate}T00:00:00.000Z`)
-              : null,
-          },
-        })
-        return { family: familyDto(family), child: childDto(child) }
+          const family = await tx.family.create({
+            data: {
+              ownerUserId: principal.userId,
+              name: input.name,
+              timezone: input.timezone,
+            },
+          })
+          await tx.familyMember.create({
+            data: { familyId: family.id, userId: principal.userId, role: 'full' },
+          })
+          const child = await tx.child.create({
+            data: {
+              familyId: family.id,
+              displayName: input.child.displayName,
+              birthDate: input.child.birthDate
+                ? new Date(`${input.child.birthDate}T00:00:00.000Z`)
+                : null,
+            },
+          })
+          return {
+            resourceId: family.id,
+            response: { family: familyDto(family), child: childDto(child) },
+          }
+        },
+        restore: (tx, familyId) => familyResponse(tx, familyId),
       })
     } catch (error) {
       if (this.persistenceErrors.isUniqueConstraint(error)) {
@@ -100,6 +118,44 @@ export class FamilyService {
       }
       throw error
     }
+  }
+
+  async updateFamily(scope: FamilyScope, input: UpdateFamilyRequest): Promise<FamilyResponse> {
+    await this.access.requireOwner(scope)
+    return this.db.$transaction(async (tx) => {
+      const family = await tx.family.findFirst({
+        where: { id: scope.familyId, status: 'active' },
+        include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+      })
+      const child = family?.children[0]
+      if (!family || !child) throw new FamilyFailure('not_found', 'Семья не найдена')
+
+      const updatedFamily = await tx.family.update({
+        where: { id: family.id },
+        data: {
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+        },
+      })
+      const updatedChild = input.child
+        ? await tx.child.update({
+            where: { id: child.id },
+            data: {
+              ...(input.child.displayName === undefined
+                ? {}
+                : { displayName: input.child.displayName }),
+              ...(input.child.birthDate === undefined
+                ? {}
+                : {
+                    birthDate: input.child.birthDate === null
+                      ? null
+                      : new Date(`${input.child.birthDate}T00:00:00.000Z`),
+                  }),
+            },
+          })
+        : child
+      return { family: familyDto(updatedFamily), child: childDto(updatedChild) }
+    })
   }
 
   async getFamily(scope: FamilyScope): Promise<FamilyResponse> {
@@ -132,26 +188,57 @@ export class FamilyService {
   async createInvite(
     scope: FamilyScope,
     input: CreateInviteRequest,
+    idempotencyKey: string,
   ): Promise<CreateInviteResponse> {
     await this.access.requireOwner(scope)
-    const rawToken = randomBytes(24).toString('base64url')
-    const now = this.now()
-    const invite = await this.db.familyInvite.create({
-      data: {
-        familyId: scope.familyId,
-        role: input.role,
-        tokenHash: hashInviteToken(rawToken),
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000),
-        createdBy: scope.principal.userId,
+    const payloadHash = hashPayload(input)
+    const operation = `family.invite.create:${scope.familyId}`
+    return this.runIdempotent({
+      principal: scope.principal,
+      operation,
+      idempotencyKey,
+      payloadHash,
+      execute: async (tx, idempotencyRecordId) => {
+        const rawToken = deriveInviteToken(
+          this.idempotencySecret,
+          scope.principal.userId,
+          scope.familyId,
+          idempotencyRecordId,
+          payloadHash,
+        )
+        const family = await tx.family.findFirst({
+          where: { id: scope.familyId, status: 'active' },
+          select: { id: true },
+        })
+        if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+        const now = this.now()
+        const invite = await tx.familyInvite.create({
+          data: {
+            familyId: scope.familyId,
+            role: input.role,
+            tokenHash: hashInviteToken(rawToken),
+            createdAt: now,
+            expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000),
+            createdBy: scope.principal.userId,
+          },
+        })
+        return {
+          resourceId: invite.id,
+          response: inviteDto(invite, rawToken),
+        }
+      },
+      restore: async (tx, inviteId, idempotencyRecordId) => {
+        const invite = await tx.familyInvite.findUnique({ where: { id: inviteId } })
+        if (!invite) throw new FamilyFailure('conflict', 'Результат запроса больше недоступен')
+        return inviteDto(invite, deriveInviteToken(
+          this.idempotencySecret,
+          scope.principal.userId,
+          scope.familyId,
+          idempotencyRecordId,
+          payloadHash,
+        ))
       },
     })
-    return {
-      id: invite.id,
-      rawToken,
-      role: invite.role,
-      expiresAt: invite.expiresAt.toISOString(),
-    }
   }
 
   async previewInvite(principal: Principal, rawToken: string): Promise<InvitePreviewResponse> {
@@ -160,6 +247,9 @@ export class FamilyService {
       where: { tokenHash: hashInviteToken(rawToken) },
       include: { family: true },
     })
+    if (invite?.family.status !== 'active') {
+      throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+    }
     assertInviteAvailable(invite, this.now())
     return {
       family: { id: invite.family.id, name: invite.family.name },
@@ -179,19 +269,25 @@ export class FamilyService {
           expiresAt: Date
           acceptedBy: string | null
           revokedAt: Date | null
+          familyStatus: 'active' | 'deleting' | 'deleted'
         }>>`
-          SELECT id,
-                 family_id AS "familyId",
-                 role::text AS role,
-                 expires_at AS "expiresAt",
-                 accepted_by AS "acceptedBy",
-                 revoked_at AS "revokedAt"
-            FROM family_invites
-           WHERE token_hash = ${tokenHash}
+          SELECT i.id,
+                 i.family_id AS "familyId",
+                 i.role::text AS role,
+                 i.expires_at AS "expiresAt",
+                 i.accepted_by AS "acceptedBy",
+                 i.revoked_at AS "revokedAt",
+                 f.status::text AS "familyStatus"
+            FROM family_invites i
+            JOIN families f ON f.id = i.family_id
+           WHERE i.token_hash = ${tokenHash}
            FOR UPDATE
         `
         const invite = rows[0]
         if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+        if (invite.familyStatus !== 'active') {
+          throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+        }
         if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
         if (invite.expiresAt <= this.now()) {
           throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
@@ -322,10 +418,117 @@ export class FamilyService {
       if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Участник не найден')
     }
   }
+
+  private async runIdempotent<Response>({
+    principal,
+    operation,
+    idempotencyKey,
+    payloadHash,
+    execute,
+    restore,
+  }: {
+    principal: Principal
+    operation: string
+    idempotencyKey: string
+    payloadHash: string
+    execute(
+      tx: TransactionClient,
+      idempotencyRecordId: string,
+    ): Promise<{ resourceId: string; response: Response }>
+    restore(
+      tx: TransactionClient,
+      resourceId: string,
+      idempotencyRecordId: string,
+    ): Promise<Response>
+  }): Promise<Response> {
+    return this.db.$transaction(async (tx) => {
+      const lockName = `idempotency:${principal.userId}:${operation}:${idempotencyKey}`
+      await tx.$queryRaw<Array<{ acquired: boolean }>>`
+        SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0)) IS NULL AS acquired
+      `
+
+      const now = this.now()
+      const existing = await tx.idempotencyRecord.findUnique({
+        where: {
+          actorUserId_operation_key: {
+            actorUserId: principal.userId,
+            operation,
+            key: idempotencyKey,
+          },
+        },
+      })
+      if (existing && existing.expiresAt > now) {
+        if (existing.payloadHash !== payloadHash) {
+          throw new FamilyFailure(
+            'idempotency_conflict',
+            'Этот Idempotency-Key уже использован с другими данными',
+          )
+        }
+        return restore(tx, existing.resourceId, existing.id)
+      }
+      if (existing) await tx.idempotencyRecord.delete({ where: { id: existing.id } })
+
+      const idempotencyRecordId = randomUUID()
+      const result = await execute(tx, idempotencyRecordId)
+      await tx.idempotencyRecord.create({
+        data: {
+          id: idempotencyRecordId,
+          actorUserId: principal.userId,
+          operation,
+          key: idempotencyKey,
+          payloadHash,
+          resourceId: result.resourceId,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        },
+      })
+      return result.response
+    }, { timeout: 15_000 })
+  }
 }
 
 function hashInviteToken(rawToken: string) {
   return createHash('sha256').update(rawToken).digest('hex')
+}
+
+function hashPayload(input: unknown) {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex')
+}
+
+function deriveInviteToken(
+  secret: string,
+  actorUserId: string,
+  familyId: string,
+  idempotencyRecordId: string,
+  payloadHash: string,
+) {
+  return createHmac('sha256', secret)
+    .update(['family-invite-v1', actorUserId, familyId, idempotencyRecordId, payloadHash].join('\0'))
+    .digest()
+    .subarray(0, 24)
+    .toString('base64url')
+}
+
+function inviteDto(
+  invite: { id: string; role: 'full' | 'viewer'; expiresAt: Date },
+  rawToken: string,
+): CreateInviteResponse {
+  return {
+    id: invite.id,
+    rawToken,
+    role: invite.role,
+    expiresAt: invite.expiresAt.toISOString(),
+  }
+}
+
+async function familyResponse(tx: TransactionClient, familyId: string): Promise<FamilyResponse> {
+  const family = await tx.family.findUnique({
+    where: { id: familyId },
+    include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+  })
+  const child = family?.children[0]
+  if (!family || !child) throw new FamilyFailure('conflict', 'Результат запроса больше недоступен')
+  return { family: familyDto(family), child: childDto(child) }
 }
 
 function familyDto(family: { id: string; name: string; timezone: string; ownerUserId: string }): FamilyDto {
