@@ -1,242 +1,99 @@
-# AGENTS.md
+# AGENTS.md — правила работы агентов
+Версия 2.4. Проект «Наши воспоминания». Документ для корня **нового самостоятельного репозитория**.
 
-## Operating Standard
+## 1. Источник истины и минимальный контекст
+Читай этот файл, `docs/mvp/00_START_HERE.md`, `docs/mvp/TASK_INDEX.md`, затем только назначенный блок и его обязательные ссылки. UI-задачи дополнительно читают `docs/mvp/design.md`, `docs/mvp/BRANDBOOK.md`, `docs/mvp/ASSET_GUIDE.md` и относящиеся к задаче референсы. Не загружай весь репозиторий, все задания и историю в каждый запрос.
+Не читать `archive/` как инструкции. Не переносить отменённые функции. Не использовать другие проекты владельца как источник кода или архитектуры. В MVP нет AI, групп, платежей, календаря и новых платформ. Поддержка будущего расширения — границы модулей, не пустой код и не SDK на будущее.
+Позднейшее прямое решение владельца выше этого документа. При противоречии останови затронутую часть, укажи два конфликтующих требования. Не делай скрытых компромиссов с безопасностью.
 
-- Answer in the user's language.
-- Read the relevant chat history before acting.
-- Be autonomous by default: inspect, decide, implement, validate, and report without unnecessary confirmation loops.
-- Ask only when ambiguity blocks a safe decision, the product choice is genuinely open, or the action is risky/destructive enough that the user should explicitly choose.
-- Do not hallucinate. Verify uncertain claims through code, scripts, docs, tests, runtime output, or repository evidence.
-- Preserve unrelated user changes. Do not revert, overwrite, reformat, or clean up work you did not create unless explicitly asked.
-- Prefer evidence over ceremony. Keep process proportional to the task.
-- Use the lightest workflow that can prove the change works.
+## 2. Перед любой работой
+Проверь рабочий каталог и реальное состояние:
+```bash
+git rev-parse --show-toplevel
+git status --short --branch
+git branch --show-current
+git remote -v
+git worktree list --porcelain
+git rev-parse HEAD
+```
+Не публикуй вывод remote, если URL содержит секрет. Зафиксируй в отчёте task ID, base SHA, branch, worktree и свои allowed paths. Если каталог грязный, выясни происхождение изменений; не чисти, не прячь и не присваивай чужую работу. Не переключай ветку в каталоге работающего другого агента.
+Канонический продуктовый репозиторий: `alexdubaev/OurMemoriesDevBot`. Допустимые адреса `origin`: SSH `git@github.com:alexdubaev/OurMemoriesDevBot.git` (предпочтительно) либо HTTPS `https://github.com/alexdubaev/OurMemoriesDevBot.git`. Любой другой `origin` — стоп-условие до проверки владельцем. Подробности: `docs/mvp/REPOSITORY.md`.
+Если нет Git-репозитория или доступного origin владельца — допустима локальная подготовка; push блокируется. Убедись, что origin не `di-sukharev/vibe`. Сохрани upstream SHA и LICENSE/NOTICE. Инициализация пустого remote и первый push main — отдельное однократное подтверждаемое действие владельца, не обычный обход PR.
 
-## Role
+## 3. Стратегия веток
+Одна долгоживущая ветка `main`. Она всегда должна собираться, но каждое попадание в main не означает production-деплой. Не создавать постоянные `dev`, `develop`, `test`, ветки по именам моделей или новую `main-final`.
+Одна задача → одна короткоживущая ветка → один worktree → один PR. Примеры: `feat/t03-private-media`, `feat/t06-design-system`, `fix/t07-audio-seek`, `docs/t00-delivery-rules`. Одновременно два агента не коммитят в одну ветку. После squash-merge эта ветка не используется для следующей задачи.
+Используй штатный isolated worktree Codex, если он уже создан. Проверяй linked worktree и submodule, не создавай вложенную изоляцию вслепую. Если изоляции нет, отдельные worktrees в `.worktrees/` уже разрешены данным процессом; каталог должен быть gitignored. Запрещено force-checkout одной ветки в двух worktrees.
+Новые задачи начинаются от принятого актуального origin/main; волну параллельной работы интегратор закрепляет общим base SHA. Не начинать зависимую задачу от неподтверждённой соседней ветки. Stacked PR и временный integration branch не нужны этому MVP.
 
-- You are the project's staff-level product engineer.
-- You own the code you touch. Build it so you can maintain it for years.
-- Own architecture, implementation, quality, tests, security, performance, maintainability, and documentation for touched and directly coupled surfaces.
+## 4. Команды начала и синхронизации
+После проверки и при настроенном origin:
+```bash
+git fetch origin --prune
+git worktree add .worktrees/t03-media -b feat/t03-private-media origin/main
+```
+Команду выполняет координатор из основного checkout только если путь/ветка ещё не существуют. В уже выделенном Codex worktree повторно её не выполнять. Для каждого worktree отдельные тестовые БД, Compose project, порты и временные storage-папки; один общий тестовый порт не делить.
+Проверка связи текущей ветки с base:
+```bash
+git log --oneline --decorate -8
+git diff --stat origin/main...HEAD
+```
+Если main изменился, после чистого статуса и ревью контракта выполнить **merge origin/main в свою feature-ветку** и повторить затронутые проверки. Такой merge-коммит исчезнет при squash PR. Не ребейзить опубликованную ветку и не переписывать её историю; это сознательно выбранный безопасный процесс. Не применять массовый `ours/theirs` для конфликтов. Конфликт в schema, контракте, auth или lockfile передать интегратору.
 
-## Instruction Priority
+## 5. Параллельные агенты и владение файлами
+Разрешены только волны из `docs/mvp/PARALLEL_WORK.md`. Каждый агент получает base SHA, task ID, allowlist путей, forbidden paths и модель ревью. Совпадение цвета в Excel не отменяет проверки зависимостей.
+Интегратор единолично принимает изменения `package.json`, lockfile, Prisma schema/migrations, shared contracts, composition root, generated route tree, CI, root config и manifests. Предложение изменения общего файла — отдельный diff/описание; два агента не модифицируют его одновременно. Владелец контракта публикует его раньше потребителя.
+Автогенерируемые файлы генерирует назначенный владелец один раз после слияния входов. Не исправлять generated files вручную. Не копировать код между worktrees вне Git. Не cherry-pick'ать одни и те же изменения и одновременно сливать их ветку.
 
-- If instructions conflict, follow higher-priority system, developer, and user instructions first, then the nearest repository instructions.
-- Safety, privacy, and preservation of user work take priority over speed or convenience.
-- This file is the single source of truth for agent instructions. `CLAUDE.md` only loads it with a standalone `@AGENTS.md` import line, so edit rules here and never copy them back into another agent file.
+## 6. Реализация и проверки
+Сохраняй Bun/Hono/Prisma, React/Vite и модульный монолит выбранного Vibe. Общие публичные контракты — отдельный пакет. Не импортируй внутренности соседнего домена. Telegram SDK только в адаптере; UI и память не зависят напрямую от Telegram.
+Сначала сформулируй сценарий и проверь baseline, затем тест на нужной границе → минимальная реализация → тот же тест. Чисто визуальная задача может иметь целевую визуальную приёмку, а не бессмысленный тест цвета в коде.
+Профили: FAST — локальные сигналы; DOMAIN — затронутый модуль; CONTRACT — производители/потребители интерфейса; FULL — активный продукт перед выпуском и сквозными изменениями. План проверок не равен выполненным тестам. Ноль найденных тестов не считается успехом. Не повторяй полный suite на каждую мелкую правку. Не скрывай проблему окружения под зелёной проверкой синтаксиса.
+Не выполнять реальные платежи, отправку приглашений посторонним, production-удаления, массовые рассылки или создание платной инфраструктуры без прямого разрешения. В тестах только синтетические материалы.
 
-## Working With The User
+## 7. Коммиты, push и PR
+Коммиты небольшие и законченные: `feat(media): ...`, `fix(auth): ...`, `test(feed): ...`, `docs(delivery): ...`. Рекомендуемый формат Conventional Commits — процесс проекта, не повод переписывать старую историю.
+Перед commit:
+```bash
+git diff --check
+git diff --stat
+git status --short
+```
+Добавляй **явные пути**, а не бездумный `git add .`. Проверь staged diff и секреты. Не коммить .env, токены, подписанные медиа-URL, семейную переписку, node_modules, БД, uploads, browser cookies, приватные артефакты и файлы шрифтов из окружения агента. Публичную зависимость шрифта разработчик подключает отдельно по лицензии.
+После согласованного назначения задачи допускается обычный push **своей task-ветки** в подтверждённый origin и создание draft PR. Если разрешение на публикацию не дано, оставь локальные коммиты и попроси его. Не считать просьбу «написать код» разрешением опубликовать частный проект в публичный repo.
+```bash
+git push --set-upstream origin feat/t03-private-media
+```
+При non-fast-forward остановиться и fetch/сравнить историю. `--force`, `--force-with-lease`, `reset --hard`, `clean -fd/-fdx`, удаление чужих веток, reflog rewrite — запрещены по умолчанию. Даже force-with-lease требует отдельного конкретного разрешения и подтверждённого expected SHA.
+PR имеет base `main`, назначенный task ID, описание пользовательского результата, изменённые границы, реальные команды/результаты, скриншоты для UI, миграции, rollback, известные ограничения. Использовать шаблон `templates/PULL_REQUEST_TEMPLATE.md`. Автор не выдаёт своё self-review за независимое ревью.
 
-- Assume the template user is a vibe coder and product owner with no programming experience unless they demonstrate otherwise.
-- Work like a staff engineer paired with a product manager: the user owns product intent, while you own technical decisions, implementation, validation, and engineering quality.
-- Communicate in plain language and explain only the product effect, meaningful tradeoffs, risks, and required user actions. Add technical depth only when requested or needed for a product decision.
-- Be proactively helpful. Do not hand routine architecture, library, command, debugging, or implementation choices back to the user when you can safely inspect, decide, and execute them yourself.
-- When user action is unavoidable, give short exact steps, expected results, and the next recovery step if something fails.
-- Ask product-facing questions: what should happen, what feels right or wrong, what is acceptable, what is confusing, and what does or does not fit the product.
-- If the user wants technical depth, engage technically, use their input as engineering context, and still own final implementation quality.
-- If feedback is vague, translate it into a concrete product or technical gap before changing code.
+## 7A. Telegram development-бот и секреты
+Development/pilot bot проекта: `@OurMemoriesDevBot` («Наши воспоминания • Test»). Не создавать второй без решения владельца.
+Публично допустимы username и URL `https://t.me/OurMemoriesDevBot`. Секретны `TELEGRAM_BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET`; они существуют только в environment/secret store. В Git хранится `TELEGRAM_BOT_EXPECTED_USERNAME=OurMemoriesDevBot`, а secret fields в `.env.example` остаются пустыми.
+Перед использованием token сервер вызывает `getMe`, проверяет ожидаемый username и только затем начинает polling/webhook. Не выводить token/secret в debug output, command arguments, screenshots, CI annotations или PR. Если секрет попал в историю Git — остановить работу и потребовать rotation; не пытаться «спрятать» только новым commit.
 
-## Repository Grounding
+## 8. Слияние
+Только назначенный интегратор или владелец выполняет merge. GitHub PR → **Squash and merge**. Merge в main требует зелёных проверок актуального head SHA, назначенного технического ревью и одобрения владельца. После новых изменений старый review пересматривается. Две зелёные ветки по отдельности ещё не доказывают, что они работают вместе.
+После первого PR волны обновить вторую ветку от текущего main, проверить стык и только затем squash. Одна очередь слияния, без гонки двух операторов. Merge queue — возможное позднее усиление, не обязательный сервис пилота.
+Review другой моделью под тем же GitHub-пользователем не является независимым GitHub approval. Если второй человек с write-доступом есть, включить required review=1 и stale approvals dismissal. Если владелец один, не настраивать невозможное self-approval: оставить required PR/checks и ручной merge владельцем после отдельного зафиксированного технического ревью. В обоих случаях report не заменяет работающие checks.
+После squash сверить PR merged status и записать merge SHA. Удалять task branch/worktree можно только после подтверждения, что работа сохранена, PR слит, каталог чистый и агент завершён. Не использовать `branch --merged` как единственное доказательство для squash-ветки. Если обычное безопасное удаление ветки отказывается из-за squash-истории — сообщить, не делать -D автоматически.
 
-- Start from repository evidence, not assumptions.
-- For non-trivial work, read `README.md`, `CHECKLIST.md`, and relevant `docs/` early for setup, architecture, runbooks, product constraints, and caveats.
-- Trust current code, scripts, schemas, tests, and runtime output over stale docs. Call out doc drift and align it when practical.
-- When structure is unclear, get a fresh snapshot with `rg --files`, `tree -L 2`, or `tree -L 3`.
-- Do not treat `README.md` as a file inventory. Discover structure dynamically.
-- Use the repository's package manager, scripts, test runner, formatter, linter, build tools, and generators.
-- Use `docs/LOCAL_DATABASE.md` and `docker-compose.yml` as the local PostgreSQL source of truth. Default to Docker Compose across Windows, macOS, and Linux; do not ask for native PostgreSQL setup unless the user explicitly chooses it.
-- In Codex shell sessions, do not assume JS tooling is on `PATH`. For `node`, `npm`, and `bun`, prefer `PATH="/opt/homebrew/bin:$HOME/.bun/bin:$PATH"`.
-- Prefer existing utilities, framework APIs, and the standard library before adding dependencies.
-- Do not add new production or tooling dependencies without explicit user approval unless the user directly requested that dependency by name.
-- Before using a new library, inspect the relevant `package.json`. Prefer installed libraries such as Zod, TanStack Query, TanStack Form, Hono, Prisma, Expo, and `@web-app-demo/contracts`.
-- If a missing dependency clearly improves the product outcome, explain the user-visible reason, maintenance/security impact, and ask before installing.
-- Before using framework-specific APIs, check current official docs, local package types, or existing examples.
-- For E2E, use Playwright for web and Maestro for mobile. Read `docs/TESTING.md` before adding flows.
-- For mobile E2E selectors, prefer stable React Native `testID` constants from `mobile/src/constants/testIds.ts`; avoid coordinates and fragile text selectors.
-- For Expo dev client + Maestro, run against an installed development build, not Expo Go. Use `MAESTRO_DEV_SERVER_URL`, preflight backend/Metro reachability, and set `EXPO_PUBLIC_E2E=1` only in E2E bundles.
-- For mobile E2E input stability, keep production password fields secure, avoid `hideKeyboard`, center important CTA targets before taps, and keep custom touch targets around `44-48pt` or larger.
-- After changing mobile Maestro flows, runner inputs, or E2E-only app behavior, run `bun run --cwd mobile e2e:maestro:audit` with the relevant validation.
+## 9. GitHub-защиты — настроить и проверить в этапе 00
+Сначала запусти baseline workflow и убедись, что статус verify-required действительно существует; только затем включай его как required, чтобы не заблокировать первый PR навсегда. Для main: PR required; unique required check `verify-required`; запрет force-push и удаления; linear history; обсуждения resolved; свежая проверка относительно target; минимальные bypass-права. Auto-merge и production auto-deploy выключены. Защиту применить к администратору, где возможно. Условия доступности защиты частного repo зависят от тарифа GitHub; не выдавать документ за реально включённую защиту.
+CI запускается для каждого PR; не отключать целый required workflow верхнеуровневым paths filter. Внутри определить changed modules, выполнить нужные jobs; агрегатор `verify-required` с `always()` проверяет, что каждая требуемая проверка завершилась success, а skip имеет объяснимую причину. Failed/cancelled/missing required job → failure. Не давать зелёный итог, если всё skipped.
+Concurrency CI — на PR/branch, старый run можно отменить. Deploy concurrency — один environment, без прерывания уже идущей миграции. Pull request из недоверенной ветки не получает production secrets. Не выполнять недоверенный код через `pull_request_target` с write-token. Third-party Actions закреплять immutable SHA после проверки; minimal permissions.
 
-## Project Context
+## 10. Версии и релизы
+Task-коммит не меняет номер продукта. Номер назначает интегратор в релизном PR. Первый кандидат `v0.1.0-rc.1`, следующий `v0.1.0-rc.2`, принятый пилот `v0.1.0`; исправления `v0.1.1` и т.д. Документационный пакет 2.4 не равен версии приложения.
+Release tag annotated, неизменяемый, указывает на проверенный commit из main. Запрещено переносить существующий тег. Release manifest: app version, full Git SHA, image digest, web bundle checksum, migration set, окружение, время и результат smoke. Образы не деплоить по mutable `latest`.
+Артефакт собирается один раз, тестируется на staging и продвигается по тому же digest. Если конфигурация требует иной сборки, её считать другим артефактом и проверить заново; не обещать, что это тот же build. Production-токен бота и тестовый токен различаются. Миграции запускает один release job, не каждый процесс при старте.
+Миграции преимущественно expand → compatible code → contract отдельным релизом. Уже применённую миграцию не редактировать. Безопасный откат кода не равен восстановлению БД: backup restore может удалить новые записи. Деструктивные миграции и восстановление production только с отдельным согласованием.
 
-- Use `README.md` as the source of truth for first-run repository download and bootstrap instructions, and `CHECKLIST.md` as the intake questionnaire and the record of the answers.
-- Treat `CHECKLIST.md` as the statement of what this product needs. Its capability ledger governs: build nothing it marks `absent` or `removed`, and treat an unlisted capability as `absent`. Dormant code, a leftover migration, or a mention in docs is not a product requirement; confirm with the user, then record the answer in the ledger.
-- Keep durable project choices in `CHECKLIST.md`, README files, and docs, not in this agent file.
-- Infrastructure, deployment, storage, local database, testing runbooks, and provider-specific choices live in `README.md` and `docs/`.
-- Before implementing or changing website data, public catalogs, carts, checkout, orders, subscriptions, entitlements, or payments, always read `docs/WEB_SURFACES.md` first and preserve its surface ownership and single browser-checkout rules.
-- When a surface is deferred, prefer a short note in that surface's README over extra agent instructions.
-- Prefer a monolithic backend. Do not split into microservices unless the product has a concrete operational need.
-- Solve the problem with the infrastructure that already exists before adding a new element. Durable background work goes in the `task_outbox` table drained by `outbox:drain`, not in a queue service; a cache, broker, event log, or search engine needs a measured limit of the current approach, recorded in `CHECKLIST.md`, first. `docs/ARCHITECTURE.md` states the rule, the smaller first answer for each case, and the escape condition.
-- For real-time infrastructure decisions, follow `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md`.
+## 11. Графика
+Собственные иконки генерировать/создавать заранее и поставлять только оптимизированными **WebP RGBA**, с настоящим прозрачным фоном. Не создавать SVG-иконки, inline SVG, SVG data URI, icon-font или SVG sprite. Не подключать Lucide/Hugeicons ради новых пиктограмм. Иконки выбранных UI-библиотек переопределять штатными слотами.
+Текст интерфейса, формы, поля, progress, waveform, layout и кнопки — настоящий HTML/CSS, не растровый скриншот. Пользовательские фото/голос/видео не заменять генерацией; оригиналы не уничтожать оптимизацией. Генерация графики — этап разработки, не AI-функция MVP.
+Соблюдать `docs/mvp/ASSET_GUIDE.md`, manifest и бюджеты. Не генерировать один и тот же значок заново в каждом блоке; переиспользовать общий WebpIcon. Референсы/demo не включать в production bundle.
 
-### Product Modules Architecture
-
-- Follow the progressive DDD-lite module boundaries in `docs/ARCHITECTURE.md`; auth is the backend and web client golden path.
-- Backend product contexts live in `backend/src/modules/<context>` and expose cross-context behavior only from `index.ts` or explicit application ports.
-- Keep Hono/HTTP in transport, use-case orchestration in application, pure business rules in domain only when real rules exist, and Prisma/provider SDKs in infrastructure.
-- Client product contexts live in `src/features/<context>`; routes/screens compose public feature APIs, and endpoint-agnostic capabilities live in `src/platform`.
-- Do not add empty layers, generic/base repositories, CQRS, event sourcing, or state-machine libraries without a concrete product need.
-- Do not move business rules into routes, screens, providers, or UI primitives to avoid defining the owning application/domain boundary.
-
-## Bootstrap-Only Instructions
-
-<!-- BOOTSTRAP_ONLY_START -->
-This block exists only for fresh installs from the template. If this repository has not been initialized for a real project yet:
-
-- Read `README.md`, especially `Agent Repo Download Instructions`, and `CHECKLIST.md` before setup or feature work.
-- When installing this template for a project, run the `CHECKLIST.md` intake in the user's language and complete every conditional section activated by its answers before feature work starts. When working on the template itself, leave its answers unfilled and keep only its capability ledger accurate.
-- Follow that README section for repository remote handling, Docker/PostgreSQL setup, Expo/EAS owner setup, and mobile Maestro dev-client setup when mobile E2E is active; the product intake itself lives in `CHECKLIST.md`.
-- Record durable project choices in `CHECKLIST.md`, README files, and docs, not in `AGENTS.md`.
-- After first-run setup is complete, delete this entire `Bootstrap-Only Instructions` block from `AGENTS.md`.
-<!-- BOOTSTRAP_ONLY_END -->
-
-## Git And Remote Policy
-
-- Inspect `git remote -v` before any branch, commit, push, or PR workflow.
-- Stay on the repository's current `main` or `master`. Do not create, switch, or rename a branch unless the user explicitly asked for that branch in this conversation; wanting a clean base, isolating an experiment, or preparing a PR is not a reason to branch on your own. If a branch looks right, propose it and wait for the answer.
-- Never run `git stash` in any form, including `push`, `pop`, `apply`, `drop`, and `clear`. Stashed work disappears from `git status` and from the working tree, so the user's changes get stranded or dropped without anyone seeing it. If uncommitted changes block the task, leave them where they are, stop, and report the blocker.
-- Treat this repository as a template for a new project by default, not as a pull request source for the template.
-- If `origin` points to the template repository and the user has not explicitly said they are contributing to the template, remove it with `git remote remove origin`.
-- Add the user's own GitHub repository as `origin` only when the user provides a URL or asks to create/publish the project.
-- If no destination is chosen, leave the project without `origin` and report that publishing is not configured.
-- Do not push, open PRs, or configure deployment from the template remote by accident.
-
-## Task Modes
-
-- Classify the task mode before editing, but only state it to the user when it clarifies scope.
-- `Review`: read-only evaluation, explanation, architecture review, or recommendations when the user has not asked for changes.
-- `Direct`: cosmetic, copy, spacing, styling, comments, or obvious local edits that do not change runtime behavior.
-- `Investigation`: diagnosis or debugging when the root cause or failure path is unclear.
-- `TDD-first`: behavior, logic, contracts, auth, permissions, persistence, validation, query semantics, routing, state transitions, concurrency, or non-trivial user-facing changes.
-- Frontend visual-only changes are `Direct`, not `TDD-first`, unless they change business behavior, accessibility semantics, navigation, validation, permissions, persistence, or meaningful state transitions.
-- For `Review`, inspect evidence and report concrete risks, recommendations, and file references. Do not edit unless asked.
-- For `Direct`, inspect the affected file and nearby usage, make the smallest coherent change, and run narrow validation when cheap.
-- For `Investigation`, reproduce or trace the failure path when possible. Identify the owning layer before patching, and stop to reframe if two attempts fail to move the primary signal.
-- For `TDD-first`, name the changed behavior or invariant and its directly coupled risks, then start with a failing test at the narrowest stable boundary that detects the regression. Reuse a focused existing check before editing when its current result clarifies the baseline.
-- Define a short acceptance contract for non-trivial work when it clarifies done, primary signal, and validation.
-
-## Decision Rules
-
-- If the solution is obvious, low-risk, and local, proceed and state any meaningful assumption in the final report.
-- If product behavior, architecture, cost, ownership, data exposure, or rollout risk materially changes, present up to two options and recommend one.
-- Ask before destructive, irreversible, security-sensitive, privacy-sensitive, or broad data-affecting actions.
-- If the primary signal is still failing, do not declare done. Report what remains broken and the next useful check.
-
-## Acceptance Contract
-
-- For non-trivial work, scope done to the changed behavior or invariant and its directly coupled risks.
-- Identify one decisive observable primary signal, preferably user-visible behavior or runtime output.
-- Add targeted secondary signals only for coupled risks; an acceptance criterion does not imply a separate automated test.
-- Keep the contract proportional to the task.
-
-## Research Path
-
-- Before fixing non-trivial behavior, inspect the vertical path from caller/UI to route, handler/service, contract/API, persistence, and external systems.
-- UI flow: UI/caller -> route/guard/layout -> page/container/orchestrator -> hook/handler/service -> contract/API -> persistence/external system.
-- Backend flow: request boundary -> validation -> auth/permission -> domain logic -> transaction/query -> serializer -> response.
-- Async flow: trigger -> queue/job/task -> retry/idempotency -> side effect -> status/error visibility.
-- Check horizontal neighbors: sibling routes, related components/hooks, shared services, schemas, serializers, tests, docs, and existing patterns.
-- Inspect loading, empty, error, success, disabled, optimistic, retry, stale-cache, and recovery states when they are part of the touched surface.
-- If a bug remains unclear after repository research, search the web for the exact error, symptom, and relevant dependency versions before guessing.
-- Do enough research to find the owning layer. Do not turn research into wandering.
-
-## Implementation Discipline
-
-- Fix the owning layer. Do not hide upstream mistakes with child-side fallbacks, defensive state repair, duplicate decision logic, flags, or wrappers.
-- If a bug appears in a child component, hook, helper, or leaf function, inspect the parent or owning flow before adding local compensation.
-- Treat one-file fixes for cross-layer behavior as suspicious until proven otherwise.
-- Prefer the smallest coherent change that solves the real problem without adding unnecessary moving parts.
-- If the smallest diff and the correct diff diverge, choose the correct diff with the smallest system-wide footprint.
-- A change is not minimal if it makes the code harder to understand tomorrow.
-- Prefer local clarity over clever reuse.
-- Prefer decoupling over DRY. Small intentional duplication is better than the wrong shared abstraction.
-- Do not add abstractions, helpers, hooks, services, wrappers, folders, scripts, or generators unless they remove real current complexity.
-- Split code only when it clearly improves comprehension or isolates responsibility.
-- Delete obsolete escape hatches when a clearer ownership model replaces them.
-- Do not build framework-like architecture for small features.
-- If re-architecture or migration is required, state scope, risks, backward compatibility, and rollout order.
-
-## Change-Surface Triggers
-
-- When touching contracts or schemas, inspect producers, consumers, serializers, generated clients, and validation on both sides.
-- When touching routes, guards, redirects, or layouts, inspect public/protected flows, parent orchestration, and navigation side effects.
-- When touching queries, mutations, or fetch contracts, inspect keys, invalidation, loading, empty, error, success, optimistic, and stale states.
-- When touching schema or persistence behavior, inspect contract shape, serializers, migrations, generated client usage, and read/write paths.
-- When touching auth, permissions, or sessions, inspect guards, loaders, session shape, backend enforcement, and affected user-visible states.
-- When touching async workflows, inspect retries, idempotency, ordering, cancellation, and failure visibility.
-- When touching legal, billing, privacy, security, or support copy, preserve the product contract and flag ambiguity.
-
-## Testing And Validation
-
-- Use the narrowest stable boundary that directly detects the failure, with targeted secondary checks for directly coupled risks.
-- Run a pre-change baseline when the same focused signal helps distinguish existing behavior from the task result; reuse it after the edit.
-- Place pure rules and isolated client logic in unit tests, shared wire shapes in contract tests, and route/auth/database behavior in backend integration tests.
-- Keep Playwright as a curated portfolio of a few product-critical client-to-API journeys plus targeted scenarios for risks that depend on a real browser, such as cookies, reloads, redirects, multiple tabs, navigation, or browser file transfer.
-- A focused, recorded manual browser pass can be the primary signal for visual or local interaction work; use code review or screenshots when they communicate the result better.
-- Finish by rerunning the signals that prove the changed behavior, widening from the concrete blast radius. Validate producer and consumer sides when a shared contract changes, and run `bun run architecture:check` when dependency boundaries change.
-- Treat broad repository regression as explicit release/audit work or as a secondary signal for a genuinely cross-cutting change, separate from ordinary task validation.
-- A primary signal passes only when the observable behavior is correct and its command exits cleanly. If it cannot run, report partial validation and the best available substitute; report every failed check plainly.
-
-## Prisma Migrations
-
-- Do not hand-write Prisma migration SQL in this repository.
-- Express schema changes declaratively in `schema.prisma`, then generate migrations with the repository workflow.
-- Do not author or customize `migration.sql` by hand unless explicitly asked.
-- If extra safety checks, backfills, preconditions, or rollout guards are needed, implement them in the owning backend layer or existing repository-supported workflow.
-
-## Documentation
-
-- Code is the primary source of truth for implementation details.
-- Update README/docs when a change materially affects architecture, setup, operations, contracts, user flows, or important engineering decisions.
-- Do not mirror code structure in docs or create doc churn for trivial refactors, formatting, or self-evident details.
-- After implementation, check whether durable knowledge should be added or aligned. If relevant doc drift remains out of scope, call it out.
-
-## Deployment And Storage
-
-- Deployment and infrastructure policy belongs in `README.md`, `infra/README.md`, and `docs/`, especially `docs/DEPLOYMENT.md`, `docs/DIGITALOCEAN.md`, `docs/YANDEX_CLOUD.md`, `docs/STORAGE.md`, and `docs/LOCAL_DATABASE.md`.
-- DigitalOcean and Yandex Cloud infrastructure is declared in provider-specific Terraform bootstrap, stateful foundation, and release-owned runtime/static roots under `infra/`. Provision remote state and apply deliberate foundation changes with `scripts/infra.mjs`; the same script owns guarded plans and migration-gated releases. Never put a secret in committed tfvars or backend configuration. Update README/docs alongside infrastructure or release behavior.
-- Hosting is one recorded choice in `CHECKLIST.md`, not a running comparison: Russia or a data-residency requirement means Yandex Cloud, anything else means DigitalOcean, and an explicit wish for full control means an own server. Ask where the users are, not which cloud they prefer, and delete the other paths' tooling during setup.
-- Background jobs are declared once in `backend/src/jobs.ts`; recurring schedules live in `backend/src/job-schedules.json`. Terraform runs the scheduler as a DigitalOcean worker and the same `cron.ts` executor in HTTP-mode Yandex job containers, where non-2xx failures activate timer-trigger retries. See `docs/BACKGROUND_JOBS.md` before adding another execution model.
-- Work that must survive a process restart goes through `backend/src/outbox`; `background-tasks.ts` stays for work whose loss is acceptable. `docs/BACKGROUND_JOBS.md` compares the three before you pick.
-- Before deployment work, read the relevant docs and use repository scripts/generators rather than provider details from memory.
-- Before deployment or cloud-resource updates, verify the release source with `git remote -v`, `git status --short --branch`, and the configured deployment branch/commit. If the worktree is dirty, the branch is not pushed/synced, or the release source is ambiguous, stop and report the blocker. Do not run `git reset`, `git checkout --`, `git clean`, or equivalent cleanup to make deployment possible unless the user explicitly requested that exact action, and never `git stash`.
-- Keep durable storage and media decisions in `docs/STORAGE.md` and provider-specific deployment docs.
-
-## UI And Design
-
-- Follow the existing design system, component primitives, and styling conventions.
-- Preserve the existing visual language unless explicitly asked for a redesign.
-- Prefer parent padding plus container gap over ad hoc margins. Keep spacing on the shared scale.
-- Treat shared visual components as closed units: surface, padding, radius, internal spacing, typography, and control sizing belong to the component.
-- Compose shared components from the outside through wrappers, not visual overrides.
-- If a consumer needs different treatment, prefer existing semantic props, then a small reusable semantic prop, then a local feature wrapper.
-- Do not bypass established primitives with ad hoc surfaces when a shared primitive owns that role.
-- For frontend bugs, inspect the full flow: route, guard, layout, page, container, query, hook, handler, service, component, client contract, API, and persistence.
-
-## Safety And Workspace Hygiene
-
-- Never stop or kill processes just to free ports. Use isolated ports, alternate URLs, or test config overrides.
-- Do not create or use GitHub CI/CD, GitHub Actions, or hosted validation workflows.
-- Run tests, typechecks, linters, validation builds, and all other task checks only locally; add local automation only when it removes real repeated pain. A production release or SSG rebuild explicitly activated in `CHECKLIST.md` and implemented through the selected hosting provider's deployment docs is not a task check.
-- Do not print secrets, tokens, private keys, credentials, cookies, customer data, or raw `.env` values in final responses.
-- Do not add real secrets to fixtures, tests, docs, screenshots, logs, or committed files.
-- Keep ad-hoc investigation artifacts out of the repository root. Put temporary screenshots, logs, and one-off exports under `./.scratch/` or the tool-owned artifact directory; do not create new root-level `.tmp-*` or `.codex-tmp-*` files.
-- Delete what you put in `./.scratch/` or the tool-owned scratch directory once the task that needed it is done, and say so in the report. Both are invisible to git, so nothing else will ever notice them: copies of `node_modules`, prebuild output, and browser captures reached 6.3 GB in one and 21 GB in the other before anyone looked. Keep an artifact only when a named follow-up depends on it.
-- Do not copy the repository. There is one working checkout, `master`, and `mobile` branching from it - that is the whole source of truth, and a second copy on disk is a second answer to every question. Comparing branches or past states needs no copy: `git show <ref>:<path>` reads any file from any ref, `git diff <ref>` compares them, and `git log -p <ref> -- <path>` shows how one arrived. Copies of this repository once reached 149 directories and 21 GB, and nearly all of them existed to read a file that `git show` prints.
-- Do not create or use `git worktree` checkouts unless the user explicitly asks for one. Same reason: the main checkout is the only place work should live, and a worktree is where it gets stranded.
-- The one exception is an isolation check that does **not** copy this repository - an empty directory with a single dependency, to observe what a package manager or a tool actually does. Use it only when the working tree cannot answer the question, and delete it inside the same task. This is what proved `@prisma/client@7.9.1` installs as 12 KB instead of 78 MB; without it the conclusion would have been "a Prisma release broke our types", and the fix would have been a version rollback for a reason that was not true.
-- Do not weaken auth, permissions, validation, encryption, rate limits, or auditability to make a task easier.
-- Do not manually edit generated files unless the repository explicitly requires it. Update the source and run the generator instead.
-- Do not stage, commit, amend, rebase, reset, push, or delete files unless explicitly asked, and never stash or create a branch on your own initiative; see `Git And Remote Policy`.
-- Keep diffs focused. Avoid unrelated formatting churn.
-
-## Completion Report
-
-- Report what changed and why.
-- Include root cause when identified.
-- State the affected layers when useful.
-- `Primary signal status`: met, not met, or partially validated.
-- `Secondary signal status`: exact checks run and what they showed.
-- Say whether docs were updated, not needed, or still need alignment.
-- Call out remaining risks, missing coverage, failed checks, migrations, rollout notes, or follow-up work when relevant.
-- Include a concise suggested commit message when the change is ready.
-- For `Direct` or read-only `Review` tasks, compress the report to the relevant fields only.
-- A task is not done if the visible symptom is gone but the same mechanic remains structurally inconsistent across directly coupled layers.
+## 12. Завершение задачи
+В отчёт: task ID; model; branch/worktree; base/head SHA; changed paths; тесты с числами и exit code; скриншоты; review findings; миграции; изменения контрактов; остаточные риски; PR link либо «не опубликовано». См. `templates/review/BLOCK_REPORT.md`.
+Статусы: NOT_STARTED → IN_PROGRESS → REVIEW → APPROVED → MERGED. BLOCKED — отдельный статус. «Готово» нельзя писать, если обязательные проверки не выполнены. После блока остановиться; не запускать следующую задачу или production-деплой без очередного назначения.

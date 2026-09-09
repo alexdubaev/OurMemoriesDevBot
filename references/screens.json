@@ -1,0 +1,296 @@
+[
+  {
+    "id": "S01",
+    "title": "Лента · полный доступ",
+    "task": "07",
+    "route": "/app",
+    "file": "references/screens/S01.webp"
+  },
+  {
+    "id": "S02",
+    "title": "Лента · просмотр",
+    "task": "07",
+    "route": "/app · viewer",
+    "file": "references/screens/S02.webp"
+  },
+  {
+    "id": "S03",
+    "title": "Пустая лента · полный доступ",
+    "task": "06",
+    "route": "/app · empty",
+    "file": "references/screens/S03.webp"
+  },
+  {
+    "id": "S04",
+    "title": "Пустая лента · просмотр",
+    "task": "06",
+    "route": "/app · empty viewer",
+    "file": "references/screens/S04.webp"
+  },
+  {
+    "id": "S05",
+    "title": "Панель добавления",
+    "task": "06",
+    "route": "/app · AddSheet",
+    "file": "references/screens/S05.webp"
+  },
+  {
+    "id": "S06",
+    "title": "Полноэкранное фото",
+    "task": "07",
+    "route": "PhotoViewer",
+    "file": "references/screens/S06.webp"
+  },
+  {
+    "id": "S07",
+    "title": "Новая заметка",
+    "task": "09",
+    "route": "/app/new?kind=note",
+    "file": "references/screens/S07.webp"
+  },
+  {
+    "id": "S08",
+    "title": "Фотоальбом с подписью",
+    "task": "09",
+    "route": "/app/new?kind=media",
+    "file": "references/screens/S08.webp"
+  },
+  {
+    "id": "S09",
+    "title": "Новое видео",
+    "task": "09",
+    "route": "/app/new?kind=media · video",
+    "file": "references/screens/S09.webp"
+  },
+  {
+    "id": "S10",
+    "title": "Загрузка медиа",
+    "task": "09",
+    "route": "Composer · uploading",
+    "file": "references/screens/S10.webp"
+  },
+  {
+    "id": "S11",
+    "title": "Изменение подписи и даты",
+    "task": "09",
+    "route": "/app/memories/:id/edit",
+    "file": "references/screens/S11.webp"
+  },
+  {
+    "id": "S12",
+    "title": "Удаление записи · подтверждение",
+    "task": "09",
+    "route": "MemoryDetail · delete",
+    "file": "references/screens/S12.webp"
+  },
+  {
+    "id": "S13",
+    "title": "Деталь фотографии",
+    "task": "07",
+    "route": "/app/memories/:id · photo",
+    "file": "references/screens/S13.webp"
+  },
+  {
+    "id": "S14",
+    "title": "Голосовое с подписью",
+    "task": "07",
+    "route": "/app/memories/:id · voice",
+    "file": "references/screens/S14.webp"
+  },
+  {
+    "id": "S15",
+    "title": "Видеозапись · просмотр",
+    "task": "07",
+    "route": "/app/memories/:id · video",
+    "file": "references/screens/S15.webp"
+  },
+  {
+    "id": "S16",
+    "title": "Видео сохранено · готовим просмотр",
+    "task": "07",
+    "route": "/app · rendition pending",
+    "file": "references/screens/S16.webp"
+  },
+  {
+    "id": "S17",
+    "title": "Лента · фильтр «Голос»",
+    "task": "07",
+    "route": "/app?kind=voice",
+    "file": "references/screens/S17.webp"
+  },
+  {
+    "id": "S18",
+    "title": "Как добавить голосовое",
+    "task": "09",
+    "route": "AddSheet · voice help",
+    "file": "references/screens/S18.webp"
+  },
+  {
+    "id": "S19",
+    "title": "Семья · создатель",
+    "task": "08",
+    "route": "/app/family · owner",
+    "file": "references/screens/S19.webp"
+  },
+  {
+    "id": "S20",
+    "title": "Семья · просмотр",
+    "task": "08",
+    "route": "/app/family · viewer",
+    "file": "references/screens/S20.webp"
+  },
+  {
+    "id": "S21",
+    "title": "Пригласить · выбор прав",
+    "task": "08",
+    "route": "Family · invite role",
+    "file": "references/screens/S21.webp"
+  },
+  {
+    "id": "S22",
+    "title": "Готовое приглашение",
+    "task": "08",
+    "route": "Family · invite ready",
+    "file": "references/screens/S22.webp"
+  },
+  {
+    "id": "S23",
+    "title": "Изменить права участника",
+    "task": "08",
+    "route": "Family · role edit",
+    "file": "references/screens/S23.webp"
+  },
+  {
+    "id": "S24",
+    "title": "Выйти из семьи · подтверждение",
+    "task": "08",
+    "route": "Family · leave",
+    "file": "references/screens/S24.webp"
+  },
+  {
+    "id": "S25",
+    "title": "Загрузка приложения",
+    "task": "06",
+    "route": "/ · bootstrap",
+    "file": "references/screens/S25.webp"
+  },
+  {
+    "id": "S26",
+    "title": "Создание семейной ленты",
+    "task": "08",
+    "route": "/onboarding",
+    "file": "references/screens/S26.webp"
+  },
+  {
+    "id": "S27",
+    "title": "Принять приглашение",
+    "task": "08",
+    "route": "/invite · preview",
+    "file": "references/screens/S27.webp"
+  },
+  {
+    "id": "S28",
+    "title": "Приглашение недействительно",
+    "task": "08",
+    "route": "/invite · expired/revoked",
+    "file": "references/screens/S28.webp"
+  },
+  {
+    "id": "S29",
+    "title": "Доступ отозван",
+    "task": "08",
+    "route": "Access revoked",
+    "file": "references/screens/S29.webp"
+  },
+  {
+    "id": "S30",
+    "title": "Помощь и приватность",
+    "task": "08",
+    "route": "Family · help",
+    "file": "references/screens/S30.webp"
+  },
+  {
+    "id": "S31",
+    "title": "Ошибка обновления ленты",
+    "task": "07",
+    "route": "/app · network error",
+    "file": "references/screens/S31.webp"
+  },
+  {
+    "id": "S32",
+    "title": "Лимит тестового архива",
+    "task": "09",
+    "route": "Quota exceeded",
+    "file": "references/screens/S32.webp"
+  },
+  {
+    "id": "S33",
+    "title": "Ошибка подготовки видео",
+    "task": "07",
+    "route": "MemoryDetail · rendition failed",
+    "file": "references/screens/S33.webp"
+  },
+  {
+    "id": "S34",
+    "title": "Конфликт редактирования",
+    "task": "09",
+    "route": "Editor · 409",
+    "file": "references/screens/S34.webp"
+  },
+  {
+    "id": "S35",
+    "title": "Нет допуска к пилоту",
+    "task": "08",
+    "route": "/onboarding · admission denied",
+    "file": "references/screens/S35.webp"
+  },
+  {
+    "id": "S36",
+    "title": "Бот · автопубликация и подпись",
+    "task": "04",
+    "route": "Telegram private chat",
+    "file": "references/screens/S36.webp"
+  },
+  {
+    "id": "S37",
+    "title": "Настройки семьи и ребёнка",
+    "task": "08",
+    "route": "Family · edit owner",
+    "file": "references/screens/S37.webp"
+  },
+  {
+    "id": "S38",
+    "title": "Текстовая заметка · деталь",
+    "task": "07",
+    "route": "/app/memories/:id · note",
+    "file": "references/screens/S38.webp"
+  },
+  {
+    "id": "S39",
+    "title": "Удаление участника",
+    "task": "08",
+    "route": "Family · revoke confirm",
+    "file": "references/screens/S39.webp"
+  },
+  {
+    "id": "S40",
+    "title": "Ошибка загрузки · повтор",
+    "task": "09",
+    "route": "Composer · upload failed",
+    "file": "references/screens/S40.webp"
+  },
+  {
+    "id": "S41",
+    "title": "Открытие вне Telegram",
+    "task": "06",
+    "route": "/ · host unavailable",
+    "file": "references/screens/S41.webp"
+  },
+  {
+    "id": "S42",
+    "title": "Участник уже в другой семье",
+    "task": "08",
+    "route": "/invite · already in family",
+    "file": "references/screens/S42.webp"
+  }
+]

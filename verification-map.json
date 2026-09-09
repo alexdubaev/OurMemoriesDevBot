@@ -1,0 +1,67 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "impact": "docs",
+      "prefixes": ["docs/mvp/"],
+      "commandIds": ["template"]
+    },
+    {
+      "impact": "media",
+      "prefixes": [
+        "backend/src/modules/media/",
+        "backend/src/modules/telegram/",
+        "backend/src/storage/"
+      ],
+      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+    },
+    {
+      "impact": "contracts",
+      "prefixes": ["packages/contracts/"],
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "webapp"]
+    },
+    {
+      "impact": "auth",
+      "prefixes": ["backend/src/modules/auth/"],
+      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+    },
+    {
+      "impact": "schema",
+      "prefixes": ["backend/prisma/"],
+      "commandIds": ["architecture", "typecheck", "backend-integration"]
+    },
+    {
+      "impact": "webapp",
+      "prefixes": ["webapp/"],
+      "commandIds": ["architecture", "typecheck", "webapp", "build-webapp"]
+    },
+    {
+      "impact": "infrastructure",
+      "prefixes": [
+        ".env.example",
+        ".bun-version",
+        "backend/.env.example",
+        "backend/Dockerfile",
+        "backend/src/app.ts",
+        "backend/src/env.ts",
+        "backend/src/runtime.ts",
+        "bun.lock",
+        "bunfig.toml",
+        "docker-compose.yml",
+        "infra/",
+        "package.json",
+        "scripts/"
+      ],
+      "commandIds": [
+        "architecture",
+        "template",
+        "typecheck",
+        "contracts",
+        "backend-unit",
+        "backend-integration",
+        "webapp",
+        "build-webapp"
+      ]
+    }
+  ]
+}

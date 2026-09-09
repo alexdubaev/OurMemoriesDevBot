@@ -1,0 +1,173 @@
+{
+  "packageVersion": "2.3",
+  "tasks": [
+    {
+      "order": 1,
+      "id": "00",
+      "title": "Основа проекта",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [],
+      "wave": null,
+      "path": "docs/mvp/tasks/00_FOUNDATION.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 2,
+      "id": "01",
+      "title": "Telegram-вход и семьи",
+      "model": "Sol",
+      "review": "Sol",
+      "dependencies": [
+        "00"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/01_AUTH_FAMILY.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 3,
+      "id": "02",
+      "title": "Записи, лента и лайки: API",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "01"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/02_MEMORIES.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 4,
+      "id": "03",
+      "title": "Приватное файловое хранилище",
+      "model": "Sol",
+      "review": "Sol",
+      "dependencies": [
+        "02"
+      ],
+      "wave": "A",
+      "path": "docs/mvp/tasks/03_MEDIA_STORAGE.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 5,
+      "id": "06",
+      "title": "Дизайн-система и WebP-иконки",
+      "model": "Luna",
+      "review": "Terra",
+      "dependencies": [
+        "02"
+      ],
+      "wave": "A",
+      "path": "docs/mvp/tasks/06_DESIGN_SYSTEM.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 6,
+      "id": "04",
+      "title": "Личный бот и автопубликация",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "03",
+        "06"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/04_BOT_CAPTURE.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 7,
+      "id": "05",
+      "title": "Голос, видео и подписи",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "04"
+      ],
+      "wave": "B",
+      "path": "docs/mvp/tasks/05_AUDIO_VIDEO_CAPTIONS.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 8,
+      "id": "08",
+      "title": "Семья и приглашения: интерфейс",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "04",
+        "06"
+      ],
+      "wave": "B",
+      "path": "docs/mvp/tasks/08_FAMILY_UI.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 9,
+      "id": "07",
+      "title": "Живая лента и просмотр медиа",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "05",
+        "08"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/07_LIVE_FEED.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 10,
+      "id": "09",
+      "title": "Добавление и редактирование",
+      "model": "Terra",
+      "review": "Sol",
+      "dependencies": [
+        "07",
+        "08"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/09_COMPOSER_EDIT.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 11,
+      "id": "10",
+      "title": "Приватность и надёжность",
+      "model": "Sol",
+      "review": "Sol",
+      "dependencies": [
+        "09"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/10_PRIVACY_RELIABILITY.md",
+      "status": "Не начато"
+    },
+    {
+      "order": 12,
+      "id": "11",
+      "title": "Проверка и закрытый релиз",
+      "model": "Sol",
+      "review": "Sol",
+      "dependencies": [
+        "10"
+      ],
+      "wave": null,
+      "path": "docs/mvp/tasks/11_PILOT_RELEASE.md",
+      "status": "Не начато"
+    }
+  ],
+  "parallelGroups": {
+    "A": [
+      "03",
+      "06"
+    ],
+    "B": [
+      "05",
+      "08"
+    ]
+  }
+}

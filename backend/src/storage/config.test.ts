@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { resolve } from 'node:path'
 
 import { loadEnv } from '../env'
 import { deriveLocalSigningKey, privateStorageConfigFromEnv } from './config'
@@ -14,8 +15,7 @@ describe('privateStorageConfigFromEnv', () => {
 
     expect(config.driver).toBe('filesystem')
     if (config.driver !== 'filesystem') throw new Error('unreachable')
-    expect(config.root.startsWith('/')).toBe(true)
-    expect(config.root.endsWith('/.storage')).toBe(true)
+    expect(config.root).toBe(resolve(process.cwd(), '.storage'))
     expect(config.publicBaseUrl).toBe('http://127.0.0.1:3000')
     expect(config.uploadMaxBytes).toBe(5 * 1024 * 1024)
   })

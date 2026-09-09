@@ -1,16 +1,10 @@
-# Install Checklist
+# «Наши воспоминания» — product checklist
 
-This file is the intake record for this repository. The installing agent fills it in during first-run setup and keeps it current afterwards.
+This is the completed product record for OurMemoriesDevBot. `docs/mvp/00_START_HERE.md` and `docs/mvp/01_PRODUCT.md` define product scope; this checklist records the same decisions in the Vibe intake format for future agents.
 
-**For the agent:** ask the questions below in the user's language, in product terms, and write the answers into this file as you go. Do not start feature work until everything through _First-version capabilities_ and every conditional section activated by those answers is completed. Never ask the user anything under _Decided by the agent_ - make those calls yourself and explain them in product terms.
+**For agents:** treat decisions below as already made. Do not re-open them during Block 00. A field marked `deferred / not required for Block 00` needs a later explicit product decision, not a template default.
 
-**For the product owner:** this is the record of what was decided about your project. If something here is wrong, say so - the agent treats this file as the source of truth for what your product needs.
-
-Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the question cannot apply to this project. Answers are written in the product owner's language, but the section headings and the capability-ledger state words stay in English: other documents refer to them by those exact names. Keep every section heading, even when its rows are all `n/a`.
-
-**When working on the template itself** (not installing it for a project), there is nothing to record: leave every answer cell at `_unanswered_` and every checkbox unchecked - those would otherwise ship to each future install. The capability ledger is the exception: it always describes the current branch, so keep it current when template work adds or removes a capability.
-
-**Install status:** `not started`
+**Install status:** `completed 2026-09-09`
 <!-- Set to: not started | in progress | completed YYYY-MM-DD -->
 
 ---
@@ -19,9 +13,9 @@ Answer cells hold `_unanswered_` until the question is asked, and `n/a` when the
 
 | Question                                                        | Answer       |
 | --------------------------------------------------------------- | ------------ |
-| New project from this template, or work on the template itself? | _unanswered_ |
-| Project name / slug                                             | _unanswered_ |
-| Your own GitHub repository URL, if you have one                 | _unanswered_ |
+| New project from this template, or work on the template itself? | New product from Vibe: «Наши воспоминания» |
+| Project name / slug                                             | OurMemoriesDevBot |
+| Your own GitHub repository URL, if you have one                 | https://github.com/alexdubaev/OurMemoriesDevBot.git |
 
 If no GitHub destination is chosen, the repository is left without `origin` and publishing stays unconfigured. The template remote is detached during setup unless this checkout is explicitly for improving the template.
 
@@ -29,22 +23,22 @@ If no GitHub destination is chosen, the repository is left without `origin` and 
 
 | Question                                                  | Answer       |
 | --------------------------------------------------------- | ------------ |
-| What product do you want to build first?                  | _unanswered_ |
-| What is the first user journey that must work end to end? | _unanswered_ |
+| What product do you want to build first?                  | Private family memories feed through @OurMemoriesDevBot and Telegram Mini App |
+| What is the first user journey that must work end to end? | A full-access family member sends a photo, video, voice, or note and sees it in their private family feed |
 
 ## 3. Active surfaces
 
 Mark what is active now, and set the install status to `in progress` as soon as this section is answered. From then on, everything unmarked is deferred and must be left alone: no features, no setup, no test flows. While the status is still `not started` nothing has been decided yet, so unmarked boxes mean "not asked", not "forbidden".
 
-- [ ] `backend` - API, database, auth
-- [ ] `webapp` - browser screens behind sign-in (no SEO)
+- [x] `backend` - API, PostgreSQL, Telegram adapter boundary
+- [x] `webapp` - Telegram Mini App (no public SEO surface)
 - [ ] `website` - public pages that must rank in search or preview when shared
 - [ ] `mobile` - Expo app (lives on the `mobile` branch; switch branches before setup)
 
 | Question                                                                                                             | Answer       |
 | -------------------------------------------------------------------------------------------------------------------- | ------------ |
-| Why the unmarked surfaces are deferred, if it needs explaining                                                       | _unanswered_ |
-| If `mobile` is active: are Expo/EAS builds, Expo Push, and Maestro E2E needed now, or left unconfigured until later? | _unanswered_ |
+| Why the unmarked surfaces are deferred, if it needs explaining                                                       | MVP starts with Telegram Bot + Mini App. Public website, native iOS/Android, and VK are deferred and not implemented. |
+| If `mobile` is active: are Expo/EAS builds, Expo Push, and Maestro E2E needed now, or left unconfigured until later? | n/a — mobile is deferred / not required for Block 00 |
 
 The split between `webapp` and `website` is the agent's call, not the user's; `README.md` explains how to route a feature between them.
 
@@ -52,31 +46,31 @@ The split between `webapp` and `website` is the agent's call, not the user's; `R
 
 Ask about product needs, not implementations. Mark what the first version actually needs, then fill the row below even when nothing was ticked, so a later session can tell "asked, and the answer was no" from "not asked yet".
 
-- [ ] Accounts / sign-in
-- [ ] Saved data that survives a restart
-- [ ] File, image, or media uploads → also answer _Files, images, and media_
+- [x] Accounts / sign-in
+- [x] Saved data that survives a restart
+- [x] File, image, or media uploads → also answer _Files, images, and media_
 - [ ] Paid subscriptions or one-off payments → also answer _Payments_
-- [ ] Admin tools or roles
-- [ ] External integrations (which: _unanswered_)
+- [x] Admin tools or roles
+- [x] External integrations (which: Telegram Bot API)
 - [ ] Real-time chat, presence, collaboration, or live updates
 
 | Question                                                                                          | Answer       |
 | ------------------------------------------------------------------------------------------------- | ------------ |
-| What the first version explicitly should NOT do (write "nothing ruled out" if that is the answer) | _unanswered_ |
+| What the first version explicitly should NOT do (write "nothing ruled out" if that is the answer) | AI; Telegram group ingestion; payments; calendar; comments; search; public social features; native iOS/Android; VK. |
 
 ## 5. Files, images, and media
 
-This project ships private file storage with user avatars, so answer these for the files your product adds on top; otherwise mark the rows `n/a`. Keep the section either way - `docs/STORAGE.md` sends the agent here when uploads are added later.
+Private family media follows the approved limits and retention policy in `docs/mvp/05_STORAGE_SECURITY.md`.
 
 | Question                                                                                      | Answer       |
 | --------------------------------------------------------------------------------------------- | ------------ |
-| What do users upload?                                                                         | _unanswered_ |
-| Public, private, shared with selected people, or mixed?                                       | _unanswered_ |
-| Who can upload, view, replace, and delete?                                                    | _unanswered_ |
-| Maximum file size and allowed file types                                                      | _unanswered_ |
-| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | _unanswered_ |
-| How long do files live after the owning record is deleted?                                    | _unanswered_ |
-| Should filenames be visible to users, or opaque?                                              | _unanswered_ |
+| What do users upload?                                                                         | Photos, videos, voice messages, and text notes. A photo album contains 1–10 photos; text bodies are at most 8,000 Unicode code points. |
+| Public, private, shared with selected people, or mixed?                                       | Private to one family. There is no public feed, group ingestion, or shared public link. |
+| Who can upload, view, replace, and delete?                                                    | Full-access members create, edit, and delete family memories; viewers read, download visible files, and like. The owner manages members and family settings. |
+| Maximum file size and allowed file types                                                      | Family originals: 2 GiB. Photos ≤20 MB/40 MP; voice ≤20 MB/600 s; bot-cloud video ≤20 MB; direct Mini App video ≤100 MB/180 s/4K. |
+| Do images need thumbnails, resizing, format conversion, compression, cropping, or moderation? | Keep originals unchanged. Later media blocks create display/preview derivatives, remove location metadata from derivatives, and validate decode/MIME; no AI moderation or user crop editor. |
+| How long do files live after the owning record is deleted?                                    | Hide immediately; delete live objects within 24 h when infrastructure is healthy. Backups retain for 30 days and deletion tombstones are re-applied on restore. |
+| Should filenames be visible to users, or opaque?                                              | Storage keys are opaque and server-generated. User-facing filenames are not a product feature. |
 
 ## 6. Website data and freshness
 
@@ -85,9 +79,9 @@ follow the implementation contract in `docs/WEB_SURFACES.md`.
 
 | Question                                                                                    | Answer       |
 | ------------------------------------------------------------------------------------------- | ------------ |
-| Which public product or content data comes from the backend/database at website build time? | _unanswered_ |
-| How soon after that data changes must the public website show the change?                   | _unanswered_ |
-| Which changes require an automatic rebuild/redeploy rather than a manual release?           | _unanswered_ |
+| Which public product or content data comes from the backend/database at website build time? | n/a — public website is deferred / not required for Block 00 |
+| How soon after that data changes must the public website show the change?                   | n/a — public website is deferred / not required for Block 00 |
+| Which changes require an automatic rebuild/redeploy rather than a manual release?           | n/a — public website is deferred / not required for Block 00 |
 
 The default is Astro SSG. Database-backed public data is fetched while building static output. If
 published database changes must appear automatically, implement the documented `website:rebuild`
@@ -100,11 +94,11 @@ Answer these only when payments are active above; otherwise mark the rows `n/a`.
 
 | Question                                                                                                                    | Answer       |
 | --------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| What exactly do users pay for?                                                                                              | _unanswered_ |
-| Recurring subscription, one-off purchase, or both?                                                                          | _unanswered_ |
-| Does the public website need a local cart or offer selection before registration/sign-in?                                   | _unanswered_ |
-| Which active surfaces need payment: browser checkout, App Store / Google Play, native card entry, Apple Pay, or Google Pay? | _unanswered_ |
-| What stops working when someone does not pay?                                                                               | _unanswered_ |
+| What exactly do users pay for?                                                                                              | n/a — payments are out of MVP scope |
+| Recurring subscription, one-off purchase, or both?                                                                          | n/a — payments are out of MVP scope |
+| Does the public website need a local cart or offer selection before registration/sign-in?                                   | n/a — payments and public website are out of MVP scope |
+| Which active surfaces need payment: browser checkout, App Store / Google Play, native card entry, Apple Pay, or Google Pay? | n/a — payments are out of MVP scope |
+| What stops working when someone does not pay?                                                                               | n/a — payments are out of MVP scope |
 
 Whatever this project ends up with, the ledger below is what states it. Read `docs/WEB_SURFACES.md`
 before implementing any payment surface. Browser checkout is built in authenticated `webapp` plus
@@ -118,11 +112,11 @@ recording it as `removed`. Payments are never half-present and are never reintro
 
 | Question                                                                                     | Answer       |
 | -------------------------------------------------------------------------------------------- | ------------ |
-| Is deployment needed now, or local-only for the moment?                                      | _unanswered_ |
-| Where are your users, and must the data stay in Russia?                                      | _unanswered_ |
-| Hosting, picked by the agent from the answer above: DigitalOcean / Yandex Cloud / own server | _unanswered_ |
-| Production domains / URLs for API, webapp, and website; is Yandex CDN needed now?            | _unanswered_ |
-| Which surfaces are released first                                                            | _unanswered_ |
+| Is deployment needed now, or local-only for the moment?                                      | Deferred / not required for Block 00 |
+| Where are your users, and must the data stay in Russia?                                      | Deferred / not required for Block 00 |
+| Hosting, picked by the agent from the answer above: DigitalOcean / Yandex Cloud / own server | Deferred / not required for Block 00 |
+| Production domains / URLs for API, webapp, and website; is Yandex CDN needed now?            | Deferred / not required for Block 00 |
+| Which surfaces are released first                                                            | Deferred / not required for Block 00 |
 
 **Ask the audience question, not the provider question.** A product owner knows where their users
 are and whether data must stay in Russia; they should not be asked to compare clouds. The agent
@@ -172,10 +166,15 @@ A capability with no row is `absent` by default. Add the row instead of assuming
 
 | Capability                      | State    | Note                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auth (email + password)         | included | Template baseline.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Admin roles                     | included | Roles and seeding in `backend`; admin UI in `webapp`.                                                                                                                                                                                                                                                                                                                                                                |
-| Password reset email delivery   | included | Two providers behind one port, Yandex Cloud Postbox and Resend, selected by `EMAIL_DELIVERY`. The schema fallback is `disabled`, so an unset deployment sends and queues nothing; the copied local `backend/.env.example` intentionally selects `console` so reset links print locally. Delivery is durable: a request queues a `task_outbox` row and the shipped scheduler drains it every minute. Production needs an account with a provider and a deployed runner. See `docs/EMAIL.md`. |
-| File/media storage              | included | Private uploads end to end, with user avatars as the worked example. Stores on local disk by default and on any S3-compatible bucket via `PRIVATE_STORAGE_*`, with no code change between them. See `docs/STORAGE.md`.                                                                                                                                                                                               |
+| Telegram identity and sessions  | available | Block 01 adapts the retained Vibe session primitives to verified Telegram initData. No fake Telegram login is implemented in Block 00. |
+| Family roles                    | available | Block 01 introduces family membership and full/viewer access. The MVP has no global product-admin role. |
+| Family memories and likes       | available | Blocks 02 and 07 implement the private feed, four formats, ordering, and likes. |
+| Private family media            | available | Block 03 replaces the retained avatar example with family media, quota, access checks, and deletion policy. |
+| Telegram bot capture            | available | Block 04 implements @OurMemoriesDevBot ingestion. No polling, webhook, token use, or group ingestion exists in Block 00. |
+| Auth (email + password)         | available | Retained Vibe technical foundation only. It is not an MVP user journey and the active webapp does not expose it. Block 01 owns the Telegram replacement boundary. |
+| Admin roles                     | available | Retained Vibe code only; it is not the MVP family-role model and not a supported product UI. |
+| Password reset email delivery   | available | Retained Vibe code only; it is not a supported MVP user journey and must not be enabled as a substitute for Telegram identity. |
+| File/media storage              | available | Retained Vibe storage port and avatar example are technical foundations. Product media follows the Block 03 contract. |
 | Infrastructure as code          | included | Provider-specific Terraform bootstrap, foundation, migration/runtime, and static roots cover DigitalOcean and Yandex Cloud, with remote state, guarded plan/apply, migration-gated immutable releases, media storage, static hosting, and jobs. `scripts/infra.mjs` is the one operations entry point. See `infra/README.md` and `docs/DEPLOYMENT.md`.                                                               |
 | Static asset precompression     | included | `bun run static:precompress` writes `.br` and `.gz` next to the text assets in `webapp/dist` and `website/dist`, using `node:zlib` and no dependency. It is own-server tooling: hosted releases do not upload those sidecars and use their edge/runtime compression when available.                                                                                                                                  |
 | Storybook component catalogs    | included | Separate local React/Vite catalogs cover every `src/components/ui` module in `webapp` and `website`, with official docs/a11y addons and story-only composition examples. They are not deployed; Astro sections remain outside Storybook and the website stays static SSG.                                                                                                                                       |
