@@ -39,6 +39,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
+  TELEGRAM_BOT_TOKEN: optionalStringSchema,
+  TELEGRAM_BOT_EXPECTED_USERNAME: stringWithDefault('OurMemoriesDevBot')
+    .pipe(z.string().regex(/^[A-Za-z0-9_]{5,32}$/)),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173,http://localhost:8081,http://localhost:19006')
@@ -110,6 +113,7 @@ const envSchema = z.object({
   validateTrustedProxy(env, ctx)
   validatePrivateStorageEnv(env, ctx)
   validateEmailEnv(env, ctx)
+  validateTelegramEnv(env, ctx)
 })
 
 export type AppEnv = z.infer<typeof envSchema>
@@ -207,6 +211,16 @@ function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.Refine
       // Reported as configured, so password reset would create tokens and queue tasks whose
       // "delivery" is a log line nobody reads while the user waits for mail.
       message: 'EMAIL_DELIVERY=console prints emails instead of sending them and is refused in production',
+    })
+  }
+}
+
+function validateTelegramEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (env.NODE_ENV === 'production' && !env.TELEGRAM_BOT_TOKEN) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TELEGRAM_BOT_TOKEN'],
+      message: 'TELEGRAM_BOT_TOKEN is required in production',
     })
   }
 }

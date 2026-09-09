@@ -3,7 +3,7 @@ import { getConnInfo } from 'hono/bun'
 import { bodyLimit } from 'hono/body-limit'
 import { isIP } from 'node:net'
 
-import { errorResponse } from './errors'
+import { errorResponse, requestIdFrom } from './errors'
 
 type AuthSecurityOptions = {
   bodyLimitBytes: number
@@ -34,7 +34,11 @@ export function createAuthSecurity(options: AuthSecurityOptions): MiddlewareHand
   return [
     bodyLimit({
       maxSize: options.bodyLimitBytes,
-      onError: (c) => c.json(errorResponse('PAYLOAD_TOO_LARGE', 'Request body is too large'), 413),
+      onError: (c) => c.json(errorResponse(
+        'PAYLOAD_TOO_LARGE',
+        'Размер запроса превышает допустимый',
+        requestIdFrom(c),
+      ), 413),
     }),
     createAuthRateLimit(options),
   ]
@@ -42,7 +46,7 @@ export function createAuthSecurity(options: AuthSecurityOptions): MiddlewareHand
 
 function createAuthRateLimit(options: AuthSecurityOptions): MiddlewareHandler {
   const rateLimit = createFixedWindowRateLimit({
-    errorMessage: 'Too many authentication requests',
+    errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => clientAddress(c, options),
     max: options.rateLimitMax,
     windowSeconds: options.rateLimitWindowSeconds,
@@ -136,7 +140,7 @@ function rateLimited<E extends Env>(
   c.header('RateLimit-Remaining', '0')
   c.header('RateLimit-Reset', String(Math.ceil(resetAt / 1000)))
   c.header('Retry-After', String(Math.max(1, Math.ceil((resetAt - now) / 1000))))
-  return c.json(errorResponse('RATE_LIMITED', options.errorMessage), 429)
+  return c.json(errorResponse('RATE_LIMITED', options.errorMessage, requestIdFrom(c)), 429)
 }
 
 /**

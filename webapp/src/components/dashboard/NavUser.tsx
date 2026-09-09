@@ -40,6 +40,7 @@ export function NavUser({
   settingsPath: WorkspaceRoutePath
   user: UserDto
 }) {
+  const accountLabel = user.displayName ?? user.email ?? 'Telegram user'
   const { isMobile, setOpen } = useSidebar()
   const [logoutError, setLogoutError] = useState(false)
   const [logoutPending, setLogoutPending] = useState(false)
@@ -71,7 +72,7 @@ export function NavUser({
               <SidebarMenuButton
                 aria-label="Open account menu"
                 size="lg"
-                tooltip={user.displayName ?? user.email}
+                tooltip={accountLabel}
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <Avatar className="size-8 rounded-lg">
@@ -81,11 +82,11 @@ export function NavUser({
                 </Avatar>
                 <div className="grid min-w-0 flex-1 gap-0.5 text-left">
                   <Typography variant="control" truncate>
-                    {user.displayName ?? user.email}
+                    {accountLabel}
                   </Typography>
                   <div className="flex min-w-0 items-center gap-1.5">
                     <Typography variant="caption" tone="muted" truncate>
-                      {user.email}
+                      {user.email ?? 'Telegram account'}
                     </Typography>
                     <Badge variant="outline" className="shrink-0 capitalize">
                       {user.role}
@@ -114,10 +115,10 @@ export function NavUser({
                   </Avatar>
                   <div className="grid min-w-0 flex-1 gap-0.5">
                     <Typography variant="bodySmMedium" truncate>
-                      {user.displayName ?? user.email}
+                      {accountLabel}
                     </Typography>
                     <Typography variant="caption" tone="muted" truncate>
-                      {user.email}
+                      {user.email ?? 'Telegram account'}
                     </Typography>
                   </div>
                 </div>
@@ -157,7 +158,7 @@ export function NavUser({
 }
 
 function userInitials(user: UserDto) {
-  return (user.displayName ?? user.email)
+  return (user.displayName ?? user.email ?? 'Telegram user')
     .split(/\s+|@/)
     .filter(Boolean)
     .slice(0, 2)

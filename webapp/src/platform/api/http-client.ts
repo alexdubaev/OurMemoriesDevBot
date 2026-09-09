@@ -20,11 +20,20 @@ export type HttpRequestOptions = {
 export class ApiRequestError extends Error {
   readonly status: number
   readonly code: string
+  readonly requestId: string | null
+  readonly fieldErrors?: Record<string, string>
 
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    options: { requestId?: string; fieldErrors?: Record<string, string> } = {},
+  ) {
     super(message)
     this.status = status
     this.code = code
+    this.requestId = options.requestId ?? null
+    this.fieldErrors = options.fieldErrors
   }
 }
 
@@ -71,7 +80,10 @@ async function toApiError(response: Response, signal?: AbortSignal) {
 
   try {
     const parsed = apiErrorSchema.parse(await response.json())
-    return new ApiRequestError(response.status, parsed.error.code, parsed.error.message)
+    return new ApiRequestError(response.status, parsed.error.code, parsed.error.message, {
+      requestId: parsed.error.requestId,
+      fieldErrors: parsed.error.fieldErrors,
+    })
   } catch {
     // An abort that lands while the error body is still streaming rejects `json()` with the abort
     // reason. Surface that reason instead of a status-coded error a caller could act on, such as

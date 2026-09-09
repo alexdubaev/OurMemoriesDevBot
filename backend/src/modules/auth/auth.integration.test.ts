@@ -21,7 +21,7 @@ maybeDescribe('auth API integration', () => {
   }
   const env = loadEnv(envInput)
   const prisma = createPrisma(databaseUrl!)
-  const app = createApp({ env, prisma })
+  const app = createApp({ env, prisma, legacyPasswordAuthForTests: true })
 
   beforeEach(async () => {
     await prisma.taskOutbox.deleteMany()
@@ -177,7 +177,7 @@ maybeDescribe('auth API integration', () => {
         messages.push(message)
       },
     }
-    const emailApp = createApp({ emailDelivery, env, prisma })
+    const emailApp = createApp({ emailDelivery, env, prisma, legacyPasswordAuthForTests: true })
     // The drain runs outside any request, so it builds its own auth service from the runtime.
     const drainRuntime = { emailDelivery, env, prisma } as unknown as BackendRuntime
     const drain = () => drainTaskOutbox(drainRuntime, { now: new Date() })
@@ -322,7 +322,7 @@ maybeDescribe('auth API integration', () => {
     }
     // A pass makes five loops, so a batch of two is a ceiling of ten.
     const floodEnv = loadEnv({ ...envInput, TASK_OUTBOX_BATCH_LIMIT: '2' })
-    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma })
+    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma, legacyPasswordAuthForTests: true })
     const drainRuntime = { emailDelivery, env: floodEnv, prisma } as unknown as BackendRuntime
     const drain = () =>
       drainTaskOutbox(drainRuntime, { ...drainOptionsFromEnv(floodEnv), now: new Date() })
@@ -556,7 +556,7 @@ maybeDescribe('auth API integration', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     })
-    expect(cookieWithBodyToken.status).toBe(400)
+    expect(cookieWithBodyToken.status).toBe(422)
 
     const tokenWithCookieOnly = await app.request('/api/auth/token/refresh', {
       method: 'POST',
@@ -566,7 +566,7 @@ maybeDescribe('auth API integration', () => {
       },
       body: JSON.stringify({}),
     })
-    expect(tokenWithCookieOnly.status).toBe(400)
+    expect(tokenWithCookieOnly.status).toBe(422)
   })
 
   test('production web auth allows an exact same-site custom-domain origin', async () => {
@@ -577,6 +577,7 @@ maybeDescribe('auth API integration', () => {
         COOKIE_SECURE: true,
       },
       prisma,
+      legacyPasswordAuthForTests: true,
     })
     const register = await productionApp.request('/api/auth/register', {
       method: 'POST',
@@ -610,6 +611,7 @@ maybeDescribe('auth API integration', () => {
         COOKIE_SECURE: true,
       },
       prisma,
+      legacyPasswordAuthForTests: true,
     })
     const register = await productionApp.request('/api/auth/register', {
       method: 'POST',
@@ -664,6 +666,7 @@ maybeDescribe('auth API integration', () => {
   test('guards me and returns stable validation errors', async () => {
     const unauthorizedMe = await app.request('/api/auth/me')
     expect(unauthorizedMe.status).toBe(401)
+    expect((await unauthorizedMe.json()).error.message).toBe('Требуется повторная авторизация')
 
     const invalidRegister = await app.request('/api/auth/register', {
       method: 'POST',
@@ -675,10 +678,14 @@ maybeDescribe('auth API integration', () => {
     })
     const body = await invalidRegister.json()
 
-    expect(invalidRegister.status).toBe(400)
-    expect(body.error.code).toBe('VALIDATION_ERROR')
-    expect(body.error.message).toBe('Invalid request payload')
-    expect(Array.isArray(body.error.details)).toBe(true)
+    expect(invalidRegister.status).toBe(422)
+    expect(body.error.code).toBe('INVALID_INPUT')
+    expect(body.error.message).toBe('Проверьте правильность заполнения полей')
+    expect(body.error.requestId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(body.error.fieldErrors).toEqual({
+      email: 'Некорректное значение',
+      password: 'Некорректное значение',
+    })
   })
 
   test('me rejects revoked, expired, and missing sessions', async () => {

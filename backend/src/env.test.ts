@@ -49,6 +49,7 @@ describe('loadEnv', () => {
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '0123456789abcdef'.repeat(4),
+      TELEGRAM_BOT_TOKEN: '123456:production-secret',
       COOKIE_SECURE: 'true',
       CORS_ORIGINS: 'https://web.example.com',
       // Production ships the avatar feature, so it must have durable object storage; the
@@ -63,6 +64,7 @@ describe('loadEnv', () => {
     }
 
     expect(() => loadEnv(productionBase)).not.toThrow()
+    expect(() => loadEnv({ ...productionBase, TELEGRAM_BOT_TOKEN: '' })).toThrow('TELEGRAM_BOT_TOKEN')
     expect(() => loadEnv({ ...productionBase, JWT_SECRET: 'a-memorable-human-secret-phrase-that-is-long-enough-to-pass' }))
       .toThrow('JWT_SECRET')
     expect(() => loadEnv({ ...productionBase, COOKIE_SECURE: 'false' })).toThrow('COOKIE_SECURE')
@@ -195,6 +197,7 @@ describe('private storage env', () => {
     ...base,
     NODE_ENV: 'production',
     JWT_SECRET: 'a'.repeat(63) + 'b',
+    TELEGRAM_BOT_TOKEN: '123456:production-secret',
     COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://app.example.com',
   }
@@ -395,6 +398,7 @@ describe('email env', () => {
       ...base,
       NODE_ENV: 'production',
       JWT_SECRET: 'a'.repeat(63) + 'b',
+      TELEGRAM_BOT_TOKEN: '123456:production-secret',
       COOKIE_SECURE: 'true',
       CORS_ORIGINS: 'https://app.example.com',
       WEBAPP_ORIGIN: 'https://app.example.com',

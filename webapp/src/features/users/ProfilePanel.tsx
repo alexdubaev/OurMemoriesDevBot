@@ -64,7 +64,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
                 aria-readonly="true"
                 id="profile-email"
                 readOnly
-                value={user.email}
+                value={user.email ?? ''}
               />
               <FieldDescription>Email changes are not enabled in this template.</FieldDescription>
             </Field>

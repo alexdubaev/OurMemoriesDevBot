@@ -19,7 +19,11 @@ export const browserUploadAllowedHeaders = ['Content-Type', 'If-None-Match']
 export const browserUploadExposedHeaders = ['ETag']
 
 /** The API's CORS allow-list: the upload headers plus what an authenticated API call needs. */
-export const apiCorsAllowedHeaders = [...browserUploadAllowedHeaders, 'Authorization']
+export const apiCorsAllowedHeaders = [
+  ...browserUploadAllowedHeaders,
+  'Authorization',
+  'Idempotency-Key',
+]
 
 export type FilesystemStorageConfig = {
   driver: 'filesystem'

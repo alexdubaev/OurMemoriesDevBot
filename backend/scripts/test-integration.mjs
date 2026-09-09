@@ -163,7 +163,9 @@ export async function runBackendIntegration({
     if (!selectedTestRun) {
       throw new Error('No *.integration.test.* files found under backend/src or backend/scripts')
     }
-    run('bun', ['test', ...selectedTestRun.testFiles, ...withTestBudget(selectedTestRun.bunTestArgs)], { env })
+    for (const testFile of selectedTestRun.testFiles) {
+      run('bun', ['test', testFile, ...withIntegrationDefaults(selectedTestRun.bunTestArgs)], { env })
+    }
   } catch (error) {
     primaryFailure = error
   } finally {
@@ -183,9 +185,20 @@ export async function runBackendIntegration({
   if (primaryFailure) throw primaryFailure
 }
 
-function withTestBudget(bunTestArgs) {
-  if (bunTestArgs.some((argument) => argument.startsWith('--timeout='))) return bunTestArgs
-  return [...bunTestArgs, `--timeout=${integrationTestTimeoutMs}`]
+function withIntegrationDefaults(bunTestArgs) {
+  const defaults = [...bunTestArgs]
+
+  // Every integration file shares one disposable PostgreSQL database. Bun otherwise executes
+  // files concurrently, so one file's cleanup can race another file's transaction and hang the
+  // suite. A caller can still opt into a different value for an explicitly isolated run.
+  if (!defaults.some((argument) => argument.startsWith('--max-concurrency='))) {
+    defaults.push('--max-concurrency=1')
+  }
+  if (!defaults.some((argument) => argument.startsWith('--timeout='))) {
+    defaults.push(`--timeout=${integrationTestTimeoutMs}`)
+  }
+
+  return defaults
 }
 
 function errorMessage(error) {

@@ -175,11 +175,14 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
     headers: {
       Origin: 'http://localhost:5173',
       'Access-Control-Request-Method': 'PATCH',
+      'Access-Control-Request-Headers': 'authorization,content-type,idempotency-key',
     },
   })
 
   expect(response.status).toBe(204)
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
+  expect(response.headers.get('access-control-allow-headers')?.toLowerCase())
+    .toContain('idempotency-key')
 })
 test('account mutations reject oversized bodies before authentication', async () => {
   const app = createApp({
@@ -214,6 +217,7 @@ test('account mutations share bounded write-rate protection', async () => {
   )
   expect(limited.status).toBe(429)
   expect(limited.headers.get('retry-after')).toBeTruthy()
+  expect((await limited.json()).error.message).toBe('Слишком много запросов. Попробуйте позже')
 })
 
 test('admin user reads share one bounded budget across filters, sessions, and client addresses', async () => {

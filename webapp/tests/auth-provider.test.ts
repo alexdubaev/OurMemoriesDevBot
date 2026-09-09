@@ -58,7 +58,13 @@ test('the session stays unknown while the restored access token is still being v
 
 test('a browser without a session cookie resolves to signed out without loading /me', async () => {
   const requests = installFakeBackend({
-    refresh: () => json({ error: { code: 'UNAUTHORIZED', message: 'No session' } }, 401),
+    refresh: () => json({
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'No session',
+        requestId: '01993b24-7e7d-7000-8000-000000000204',
+      },
+    }, 401),
     me: () => json({ user }, 200),
   })
   const { session } = await mountAuthProvider()
@@ -70,7 +76,13 @@ test('a browser without a session cookie resolves to signed out without loading 
 
 test('a failed session restore surfaces the error instead of an unknown session', async () => {
   const requests = installFakeBackend({
-    refresh: () => json({ error: { code: 'INTERNAL_ERROR', message: 'Refresh failed' } }, 500),
+    refresh: () => json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Refresh failed',
+        requestId: '01993b24-7e7d-7000-8000-000000000205',
+      },
+    }, 500),
     me: () => json({ user }, 200),
   })
   const { session } = await mountAuthProvider()

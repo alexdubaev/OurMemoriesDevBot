@@ -5,6 +5,7 @@ import {
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import { bootstrapAdmin } from './admin-bootstrap'
+import { hashBootstrapPassword, verifyBootstrapPassword } from './bootstrap-passwords'
 
 export type DevelopmentSeedAccounts = {
   admin: DevelopmentSeedCredentials
@@ -47,7 +48,7 @@ async function bootstrapDevelopmentUser(
         data: {
           displayName: 'Development User',
           email: credentials.email,
-          passwordHash: await Bun.password.hash(credentials.password, { algorithm: 'argon2id' }),
+          passwordHash: await hashBootstrapPassword(credentials.password),
           role: 'user',
         },
         select: { email: true, id: true },
@@ -74,9 +75,7 @@ async function updateExistingDevelopmentUser(
     return { email: credentials.email, id: existing.id }
   }
 
-  const requestedPasswordHash = await Bun.password.hash(credentials.password, {
-    algorithm: 'argon2id',
-  })
+  const requestedPasswordHash = await hashBootstrapPassword(credentials.password)
   return db.$transaction(async (tx) => {
     await acquireUserAuthenticationAuthorityLock(tx, existing.id)
     const current = await tx.user.findUniqueOrThrow({
@@ -117,7 +116,7 @@ function isUniqueConstraintFailure(error: unknown) {
 
 async function matchesPassword(password: string, passwordHash: string) {
   try {
-    return await Bun.password.verify(password, passwordHash)
+    return await verifyBootstrapPassword(password, passwordHash)
   } catch {
     return false
   }

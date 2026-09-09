@@ -2,11 +2,12 @@ import type { UserRole } from '@web-app-demo/contracts'
 import { createMiddleware } from 'hono/factory'
 
 import { AppError } from '../../../http/errors'
+import type { RequestContextEnv } from '../../../http/errors'
 import type { AuthenticatedPrincipal } from '../domain/user'
 import { executeAuth } from './errors'
 
 export type AuthHttpEnv = {
-  Variables: {
+  Variables: RequestContextEnv['Variables'] & {
     user: AuthenticatedPrincipal
   }
 }
@@ -25,7 +26,7 @@ export function createRequireAuth(
 export function createRequireRole(role: UserRole) {
   return createMiddleware<AuthHttpEnv>(async (c, next) => {
     if (c.var.user.role !== role) {
-      throw new AppError(403, 'FORBIDDEN', 'You do not have permission to access this resource')
+      throw new AppError(403, 'FORBIDDEN', 'Недостаточно прав для этого действия')
     }
     await next()
   })

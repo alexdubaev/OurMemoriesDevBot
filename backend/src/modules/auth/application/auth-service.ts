@@ -159,6 +159,7 @@ export class AuthService {
     if (!created) return 'skipped'
 
     try {
+      if (!user.email) return 'skipped'
       await passwordResetNotifier.sendPasswordReset({ email: user.email, token, expiresAt }, signal)
     } catch (error) {
       // Also on a permanent failure, not only on the last attempt: the drain marks such a task
@@ -289,7 +290,6 @@ export class AuthService {
     return {
       accessToken: await this.dependencies.accessTokens.sign({
         sub: session.user.id,
-        email: session.user.email,
         sessionId: session.id,
       }),
       refreshToken,
@@ -370,7 +370,6 @@ export class AuthService {
       user: await this.dependencies.projectUser(user),
       accessToken: await this.dependencies.accessTokens.sign({
         sub: user.id,
-        email: user.email,
         sessionId,
       }),
       refreshToken,

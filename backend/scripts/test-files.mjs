@@ -10,7 +10,9 @@ import { Glob } from 'bun'
  * Docker because it intentionally includes the integration runner.
  */
 export function backendTestFiles(backendRoot) {
-  const all = [...new Glob('{src,scripts}/**/*.test.{ts,mjs}').scanSync(backendRoot)].sort()
+  const all = [...new Glob('{src,scripts}/**/*.test.{ts,mjs}').scanSync(backendRoot)]
+    .map((file) => file.replaceAll('\\', '/'))
+    .sort()
 
   return {
     all,

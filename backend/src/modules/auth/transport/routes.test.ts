@@ -4,160 +4,86 @@ import { createApp } from '../../../app'
 import type { DbClient } from '../../../db'
 import { loadEnv } from '../../../env'
 
-const env = loadEnv({
+const base = {
   DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
-  // COOKIE_SECURE=true makes this a production-like runtime, which requires a generated secret.
   JWT_SECRET: '0123456789abcdef'.repeat(4),
   CORS_ORIGINS: 'https://web.example.com',
   ACCESS_TOKEN_TTL_SECONDS: '60',
   TRUST_PROXY: 'true',
   TRUSTED_PROXY_CLIENT_IP_HEADER: 'do-connecting-ip',
   COOKIE_SECURE: 'true',
-})
+}
+const env = loadEnv(base)
 
-describe('auth routes', () => {
-  test('limits auth request bodies before validation or password work', async () => {
+describe('public Block 01 auth routes', () => {
+  test('limits Telegram exchange bodies before signature work', async () => {
     const app = createApp({ env: { ...env, AUTH_BODY_LIMIT_BYTES: 32 }, prisma: {} as DbClient })
-    const response = await app.request('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'body@example.com', password: 'x'.repeat(64) }),
-    })
-
+    const response = await telegramRequest(app, { initData: 'x'.repeat(64) })
     expect(response.status).toBe(413)
   })
 
-  test('rate limits repeated auth writes from one client before service work', async () => {
+  test('rate limits repeated Telegram exchanges by the configured client address', async () => {
     const app = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma: {} as DbClient })
-    const request = () => app.request('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Forwarded-For': '10.10.0.8',
-        'Do-Connecting-Ip': '203.0.113.10',
-      },
-      body: JSON.stringify({ email: 'invalid', password: 'short' }),
+    const request = () => telegramRequest(app, { initData: 'invalid' }, {
+      'X-Forwarded-For': '10.10.0.8',
+      'Do-Connecting-Ip': '203.0.113.10',
     })
 
-    expect((await request()).status).toBe(400)
+    expect((await request()).status).toBe(401)
     const limited = await request()
     expect(limited.status).toBe(429)
     expect(limited.headers.get('retry-after')).toBeTruthy()
   })
 
-  test('uses the configured trusted proxy header instead of a shared ingress address', async () => {
-    const app = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma: {} as DbClient })
-    const request = (clientIp: string) => app.request('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Forwarded-For': '10.10.0.8',
-        'Do-Connecting-Ip': clientIp,
-      },
-      body: JSON.stringify({ email: 'invalid', password: 'short' }),
-    })
-
-    expect((await request('203.0.113.10')).status).toBe(400)
-    expect((await request('203.0.113.11')).status).toBe(400)
-    expect((await request('203.0.113.10')).status).toBe(429)
-  })
-
-  test('can select the trusted last address from an appended proxy chain', async () => {
-    const app = createApp({
-      env: {
-        ...env,
-        AUTH_RATE_LIMIT_MAX: 1,
-        TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-forwarded-for',
-        TRUSTED_PROXY_CLIENT_IP_POSITION: 'last',
-      },
-      prisma: {} as DbClient,
-    })
-    const request = (clientIp: string) => app.request('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Forwarded-For': `198.51.100.99, ${clientIp}`,
-      },
-      body: JSON.stringify({ email: 'invalid', password: 'short' }),
-    })
-
-    expect((await request('203.0.113.10')).status).toBe(400)
-    expect((await request('203.0.113.11')).status).toBe(400)
-    expect((await request('203.0.113.10')).status).toBe(429)
-  })
-
-  test('rejects all secure cookie auth writes from untrusted origins before auth service work', async () => {
+  test('rejects secure cookie writes from an untrusted origin before auth work', async () => {
     const app = createApp({ env, prisma: {} as DbClient })
-    const refreshCookie = `web_app_demo_refresh=${'r'.repeat(32)}`
-
-    const untrustedLogin = await app.request('/api/auth/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://attacker.example',
-      },
-      body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
+    const response = await telegramRequest(app, { initData: 'invalid' }, {
+      Origin: 'https://attacker.example',
     })
-    const untrustedLoginBody = await untrustedLogin.json()
-
-    expect(untrustedLogin.status).toBe(403)
-    expect(untrustedLoginBody.error.code).toBe('FORBIDDEN')
-
-    const noOriginRefresh = await app.request('/api/auth/refresh', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Cookie: refreshCookie,
-      },
-      body: JSON.stringify({}),
-    })
-    const noOriginRefreshBody = await noOriginRefresh.json()
-
-    expect(noOriginRefresh.status).toBe(403)
-    expect(noOriginRefreshBody.error.code).toBe('FORBIDDEN')
-
-    const untrustedLogout = await app.request('/api/auth/logout', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Cookie: refreshCookie,
-        Origin: 'https://attacker.example',
-      },
-      body: JSON.stringify({}),
-    })
-    const untrustedLogoutBody = await untrustedLogout.json()
-
-    expect(untrustedLogout.status).toBe(403)
-    expect(untrustedLogoutBody.error.code).toBe('FORBIDDEN')
-
-    // Registration is a cookie write like the others: without this guard a third-party page could
-    // make the visitor's browser create an account the attacker controls and hold its session.
-    const untrustedRegister = await app.request('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://attacker.example',
-      },
-      body: JSON.stringify({ email: 'victim@example.com', password: 'password123' }),
-    })
-    const untrustedRegisterBody = await untrustedRegister.json()
-
-    expect(untrustedRegister.status).toBe(403)
-    expect(untrustedRegisterBody.error.code).toBe('FORBIDDEN')
+    expect(response.status).toBe(403)
+    expect((await response.json()).error.code).toBe('FORBIDDEN')
   })
 
-  test('accepts password reset requests generically while email delivery is disabled', async () => {
-    const app = createApp({ env, prisma: {} as DbClient })
-    const response = await app.request('/api/auth/password-reset/request', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://web.example.com',
-      },
-      body: JSON.stringify({ email: 'unknown@example.com' }),
+  test('production physically exposes neither dev login nor legacy password routes', async () => {
+    const production = loadEnv({
+      ...base,
+      NODE_ENV: 'production',
+      TELEGRAM_BOT_TOKEN: '123456:production-secret',
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'ru-central1',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.example.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
     })
+    const app = createApp({ env: production, prisma: {} as DbClient })
 
-    expect(response.status).toBe(202)
-    expect(await response.json()).toEqual({ accepted: true })
+    for (const path of [
+      '/api/v1/auth/dev-login',
+      '/api/v1/auth/register',
+      '/api/v1/auth/login',
+      '/api/v1/auth/password-reset/request',
+      '/api/auth/register',
+      '/api/auth/login',
+    ]) {
+      expect((await app.request(path, { method: 'POST' })).status).toBe(404)
+    }
   })
 })
+
+function telegramRequest(
+  app: ReturnType<typeof createApp>,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
+  return app.request('/api/v1/auth/telegram', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://web.example.com',
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  })
+}

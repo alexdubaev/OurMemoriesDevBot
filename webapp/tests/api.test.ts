@@ -26,7 +26,13 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
     const meCallCount = calls.filter((call) => call.path === '/api/auth/me').length
 
     if (path === '/api/auth/me' && meCallCount === 1) {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
+      return json({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Expired access token',
+          requestId: '01993b24-7e7d-7000-8000-000000000201',
+        },
+      }, 401)
     }
 
     if (path === '/api/auth/refresh') {
@@ -143,7 +149,13 @@ test('AuthApi clears only local session state when refresh is unauthorized', asy
     }
 
     if (path === '/api/auth/refresh') {
-      return json({ error: { code: 'UNAUTHORIZED', message: 'Invalid refresh token' } }, 401)
+      return json({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Invalid refresh token',
+          requestId: '01993b24-7e7d-7000-8000-000000000202',
+        },
+      }, 401)
     }
 
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
@@ -355,6 +367,7 @@ test('AuthApi preserves backend error status, code, and message', async () => {
           error: {
             code: 'CONFLICT',
             message: 'User with this email already exists',
+            requestId: '01993b24-7e7d-7000-8000-000000000203',
           },
         },
         409,
@@ -378,6 +391,7 @@ test('AuthApi preserves backend error status, code, and message', async () => {
     status: 409,
     code: 'CONFLICT',
     message: 'User with this email already exists',
+    requestId: '01993b24-7e7d-7000-8000-000000000203',
   })
 })
 

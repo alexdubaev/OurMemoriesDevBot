@@ -39,7 +39,7 @@ export const adminUserParamsSchema = z
 export const adminUserSummarySchema = z
   .object({
     id: z.string(),
-    email: emailSchema,
+    email: emailSchema.nullable(),
     displayName: z.string().nullable(),
     role: userRoleSchema,
     createdAt: z.string().datetime(),

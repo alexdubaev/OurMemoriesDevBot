@@ -10,10 +10,17 @@ import { createBackgroundTasks, type TaskDeferrer } from './background-tasks'
 import type { DbClient } from './db'
 import { disabledEmailDelivery, type EmailDelivery } from './email'
 import type { AppEnv } from './env'
-import { errorResponse, handleError, validationErrorHook } from './http/errors'
+import {
+  createRequestContext,
+  errorResponse,
+  handleError,
+  requestIdFrom,
+  validationErrorHook,
+} from './http/errors'
 import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
+import { createFamiliesModule } from './modules/families'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
@@ -33,6 +40,8 @@ type CreateAppOptions = {
    * it at a temporary directory instead of the configured root.
    */
   privateStorage?: PrivateStorageRuntime
+  /** Test-only compatibility for legacy auth regression suites; production rejects it. */
+  legacyPasswordAuthForTests?: boolean
 }
 
 export function createApp({
@@ -41,11 +50,20 @@ export function createApp({
   env,
   prisma,
   privateStorage,
+  legacyPasswordAuthForTests = false,
 }: CreateAppOptions) {
+  if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
+    throw new Error('Legacy password auth test routes cannot be mounted in production')
+  }
   const storage = privateStorage ?? createPrivateStorage(env)
-  const auth = createAuthModule({ db: prisma, emailDelivery, env })
+  const auth = createAuthModule({ db: prisma, emailDelivery, env, legacyPasswordAuthForTests })
+  const families = createFamiliesModule({
+    db: prisma,
+    idempotencySecret: env.JWT_SECRET,
+    requireAuth: auth.requireAuth,
+  })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
-    errorMessage: 'Too many admin user directory requests',
+    errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => c.var.user.id,
     max: env.ADMIN_USERS_READ_RATE_LIMIT_MAX,
     windowSeconds: env.ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS,
@@ -71,6 +89,7 @@ export function createApp({
     bearerFormat: 'JWT',
   })
 
+  app.use('*', createRequestContext())
   app.use(secureHeaders())
   app.use(
     '*',
@@ -98,7 +117,8 @@ export function createApp({
     trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
     trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
   })) {
-    app.use('/api/auth/*', middleware)
+    app.use('/api/v1/auth/*', middleware)
+    if (legacyPasswordAuthForTests) app.use('/api/auth/*', middleware)
   }
   for (const middleware of createAuthSecurity({
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
@@ -111,6 +131,8 @@ export function createApp({
     app.use('/api/users/*', middleware)
     app.use('/api/admin/*', middleware)
     app.use('/api/uploads/*', middleware)
+    app.use('/api/v1/families/*', middleware)
+    app.use('/api/v1/invites/*', middleware)
   }
   app.get('/', (c) => {
     return c.json({
@@ -144,7 +166,9 @@ export function createApp({
       : c.json({ status: 'unavailable' }, 503)
   })
 
-  app.route('/api/auth', auth.routes)
+  app.route('/api/v1', auth.routes)
+  if (auth.legacyTestRoutes) app.route('/api/auth', auth.legacyTestRoutes)
+  app.route('/api/v1', families.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
@@ -163,7 +187,11 @@ export function createApp({
     },
   })
 
-  app.notFound((c) => c.json(errorResponse('NOT_FOUND', 'Route not found'), 404))
+  app.notFound((c) => c.json(errorResponse(
+    'NOT_FOUND',
+    'Маршрут не найден',
+    requestIdFrom(c),
+  ), 404))
   app.onError(handleError)
 
   return app
