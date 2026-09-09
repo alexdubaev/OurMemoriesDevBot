@@ -175,12 +175,13 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
     headers: {
       Origin: 'http://localhost:5173',
       'Access-Control-Request-Method': 'PATCH',
-      'Access-Control-Request-Headers': 'authorization,content-type,idempotency-key',
+      'Access-Control-Request-Headers': 'authorization,if-match',
     },
   })
 
   expect(response.status).toBe(204)
   expect(response.headers.get('access-control-allow-methods')).toContain('PATCH')
+  expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('if-match')
   expect(response.headers.get('access-control-allow-headers')?.toLowerCase())
     .toContain('idempotency-key')
 })

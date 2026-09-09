@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createMemoryRequestSchema,
   listMemoriesQuerySchema,
+  mediaDtoSchema,
   memoryDtoSchema,
 } from './memories'
 
@@ -61,5 +62,40 @@ describe('memory contracts', () => {
       likes: { count: 0, likedByMe: false },
       capabilities: { edit: true, delete: true, like: true },
     })).toThrow()
+  })
+
+  test('accepts only backend API paths in media DTOs', () => {
+    const mediaId = '018f01d8-0c2a-7c25-bf83-ae68985c7e94'
+    const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'
+    const contentPath = `/api/v1/families/${familyId}/media/${mediaId}/content`
+    const valid = {
+      id: mediaId,
+      kind: 'photo' as const,
+      width: 1200,
+      height: 800,
+      durationMs: null,
+      renditionStatus: 'ready' as const,
+      previewPath: `${contentPath}?variant=preview`,
+      displayPath: `${contentPath}?variant=display`,
+      playbackPath: null,
+      originalDownloadPath: `${contentPath}?variant=original`,
+      waveform: null,
+    }
+
+    expect(mediaDtoSchema.parse(valid)).toEqual(valid)
+
+    for (const unsafePath of [
+      'https://storage.example/private/object?signature=secret',
+      '//storage.example/private/object',
+      '\\api\\v1\\private\\object',
+      '/api/v1/families/../storage/private-object',
+      '/api/v1/families/%2e%2e/storage/private-object',
+      '/private/family/object-key',
+      `${contentPath}?X-Amz-Credential=secret`,
+      `${contentPath}?token=secret`,
+      `${contentPath}#private-object`,
+    ]) {
+      expect(() => mediaDtoSchema.parse({ ...valid, originalDownloadPath: unsafePath })).toThrow()
+    }
   })
 })

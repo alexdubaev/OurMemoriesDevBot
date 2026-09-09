@@ -23,6 +23,7 @@ export const apiCorsAllowedHeaders = [
   ...browserUploadAllowedHeaders,
   'Authorization',
   'Idempotency-Key',
+  'If-Match',
 ]
 
 export type FilesystemStorageConfig = {

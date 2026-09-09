@@ -54,6 +54,47 @@ export const memoriesFamilyParamsSchema = z.object({ familyId: uuid }).strict()
 export const ifMatchVersionHeadersSchema = z.object({
   'if-match': z.coerce.number().int().positive(),
 })
+
+const backendMediaPathSchema = z.string().superRefine((value, context) => {
+  if (!value.startsWith('/api/v1/') || value.startsWith('//') || value.includes('\\') || value.includes('#')) {
+    context.addIssue({ code: 'custom', message: 'Media path must be a relative backend API path' })
+    return
+  }
+
+  let decoded = value
+  try {
+    for (let pass = 0; pass < 2; pass += 1) decoded = decodeURIComponent(decoded)
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Media path contains invalid encoding' })
+    return
+  }
+  const pathOnly = decoded.split('?', 1)[0] ?? ''
+  if (decoded.includes('\\') || pathOnly.split('/').includes('..')) {
+    context.addIssue({ code: 'custom', message: 'Media path must not contain traversal segments' })
+    return
+  }
+
+  const uuidSegment = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+  const contentPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/${uuidSegment}/content$`)
+  if (!contentPath.test(pathOnly)) {
+    context.addIssue({ code: 'custom', message: 'Media path must target the authenticated media endpoint' })
+    return
+  }
+
+  const query = value.includes('?') ? value.slice(value.indexOf('?') + 1) : ''
+  const parameters = new URLSearchParams(query)
+  if (parameters.size > 1 || parameters.getAll('variant').length > 1) {
+    context.addIssue({ code: 'custom', message: 'Media path contains duplicate query parameters' })
+    return
+  }
+  for (const [name, parameterValue] of parameters) {
+    if (name !== 'variant' || !['preview', 'display', 'playback', 'original'].includes(parameterValue)) {
+      context.addIssue({ code: 'custom', message: 'Media path contains an unsupported query parameter' })
+      return
+    }
+  }
+})
+
 export const mediaDtoSchema = z.object({
   id: uuid,
   kind: z.enum(['photo', 'video', 'voice']),
@@ -61,10 +102,10 @@ export const mediaDtoSchema = z.object({
   height: z.number().int().positive().nullable(),
   durationMs: z.number().int().positive().nullable(),
   renditionStatus: z.enum(['pending', 'ready', 'failed']),
-  previewPath: z.string().nullable(),
-  displayPath: z.string().nullable(),
-  playbackPath: z.string().nullable(),
-  originalDownloadPath: z.string(),
+  previewPath: backendMediaPathSchema.nullable(),
+  displayPath: backendMediaPathSchema.nullable(),
+  playbackPath: backendMediaPathSchema.nullable(),
+  originalDownloadPath: backendMediaPathSchema,
   waveform: z.array(z.number()).nullable(),
 }).strict()
 

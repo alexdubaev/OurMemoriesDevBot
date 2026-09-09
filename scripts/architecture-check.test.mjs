@@ -20,6 +20,17 @@ describe('backend layers', () => {
     ])
   })
 
+  test('rejects the repository database client imported through a local wrapper', () => {
+    const violation = check([
+      file(
+        'backend/src/modules/memories/application/memory-service.ts',
+        "import type { DbClient } from '../../../db'",
+      ),
+    ])[0]
+
+    expect(violation?.rule).toBe('backend-application-dependencies')
+  })
+
   test('rejects Prisma from transport while accepting application ports', () => {
     expect(check([file('backend/src/modules/auth/transport/routes.ts', "import type { AuthService } from '../application/auth-service'")])).toEqual([])
     expect(check([file('backend/src/modules/auth/transport/routes.ts', "import { Prisma } from '../../../generated/prisma/client'")])[0]?.rule).toBe('backend-transport-dependencies')

@@ -89,9 +89,18 @@ function checkBackendLayers(filePath, specifier, report) {
   const forbiddenPackage = applicationForbiddenPackages.find((name) => packageMatches(specifier, name))
   const importsPrisma = specifier.includes('generated/prisma') || packageMatches(specifier, '@prisma/')
   const target = resolveRepositoryImport(filePath, specifier)
+  // Block 02 establishes the repository boundary for memories without retroactively turning the
+  // older Block 01 family service into an unrelated refactor. Extend this allow-list as each
+  // application module is migrated to ports.
+  const importsDatabaseClient =
+    filePath.startsWith('backend/src/modules/memories/application/') &&
+    (target === 'backend/src/db' || target === 'backend/src/db.ts')
   const targetLayer = target?.match(/^backend\/src\/modules\/[^/]+\/(domain|application|transport|infrastructure)(?:\/|$)/)?.[1]
 
-  if ((layer === 'domain' || layer === 'application') && (forbiddenPackage || importsPrisma)) {
+  if (
+    (layer === 'domain' || layer === 'application') &&
+    (forbiddenPackage || importsPrisma || importsDatabaseClient)
+  ) {
     report(
       `backend-${layer}-dependencies`,
       `${layer} must not import framework, persistence, environment, or provider SDK code (${specifier}).`,
