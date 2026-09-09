@@ -51,6 +51,7 @@
     "check": "bun run template:check && bun run architecture:check && bun run audit && bun run typecheck && bun run lint && bun run test && bun run test:build-contracts",
     "template:check": "bun scripts/template-check.mjs",
     "architecture:check": "bun scripts/architecture-check.mjs",
+    "verify:plan": "bun scripts/verify-plan.mjs",
     "audit": "bun scripts/dependency-audit.mjs",
     "static:precompress": "bun scripts/precompress-static.mjs",
     "lint": "bun run --cwd webapp lint",

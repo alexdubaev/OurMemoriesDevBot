@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "commands": {
+    "architecture": "bun run architecture:check",
+    "backend-integration": "bun run test:backend:integration",
+    "backend-unit": "bun run test:backend:unit",
+    "contracts": "bun run test:contracts",
+    "template-check": "bun run template:check",
+    "typecheck": "bun run typecheck",
+    "webapp": "bun run test:webapp"
+  },
+  "rules": [
+    {
+      "impact": "docs",
+      "prefixes": ["docs/mvp/"],
+      "commandIds": ["template-check"]
+    },
+    {
+      "impact": "media",
+      "prefixes": ["backend/src/modules/media/", "backend/src/modules/telegram/"],
+      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+    },
+    {
+      "impact": "contracts",
+      "prefixes": ["packages/contracts/"],
+      "commandIds": ["architecture", "contracts", "backend-unit", "webapp", "typecheck"]
+    },
+    {
+      "impact": "auth",
+      "prefixes": ["backend/src/modules/auth/"],
+      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+    },
+    {
+      "impact": "schema",
+      "prefixes": ["backend/prisma/"],
+      "commandIds": ["architecture", "backend-integration", "typecheck"]
+    },
+    {
+      "impact": "webapp",
+      "prefixes": ["webapp/"],
+      "commandIds": ["architecture", "webapp", "typecheck"]
+    }
+  ]
+}
