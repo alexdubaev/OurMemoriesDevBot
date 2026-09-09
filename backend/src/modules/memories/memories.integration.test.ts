@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { Client } from 'pg'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
@@ -16,6 +17,7 @@ maybeDescribe('Memories API', () => {
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '0123456789abcdef'.repeat(4),
     CORS_ORIGINS: 'http://localhost:5173',
+    AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
 
@@ -122,57 +124,97 @@ maybeDescribe('Memories API', () => {
     const invite = await request(`/api/v1/families/${familyA.body.family.id}/invites`, ownerA.token, 'POST',
       { role: 'viewer' }, randomUUID())
     await request('/api/v1/invites/accept', viewer.token, 'POST', { token: invite.body.rawToken })
-    const created = await createNote(ownerA.token, familyA.body.family.id, familyA.body.child.id, 'Только семьи A')
+    const createdA = await createNote(ownerA.token, familyA.body.family.id, familyA.body.child.id, 'Только семьи A')
+    const createdB = await createNote(ownerB.token, familyB.body.family.id, familyB.body.child.id, 'Только семьи B')
 
-    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${created.body.id}`,
+    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${createdA.body.id}`,
       ownerB.token, 'GET', undefined)).response.status).toBe(404)
-    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${created.body.id}`,
-      ownerB.token, 'PATCH', { body: 'Чужая правка', occurredAt: created.body.occurredAt, expectedVersion: 1 })).response.status).toBe(404)
-    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${created.body.id}`,
-      viewer.token, 'PATCH', { body: 'Нельзя', occurredAt: created.body.occurredAt, expectedVersion: 1 })).response.status).toBe(403)
+    for (const [method, body, headers] of [
+      ['GET', undefined, undefined],
+      ['PATCH', { body: 'Чужая правка', occurredAt: createdB.body.occurredAt, expectedVersion: 1 }, undefined],
+      ['DELETE', undefined, { 'If-Match': '1' }],
+      ['PUT', { liked: true }, undefined],
+    ] as const) {
+      const suffix = method === 'PUT' ? '/like' : ''
+      const attempt = await request(
+        `/api/v1/families/${familyA.body.family.id}/memories/${createdB.body.id}${suffix}`,
+        ownerA.token,
+        method,
+        body,
+        undefined,
+        headers,
+      )
+      expect(attempt.response.status).toBe(404)
+    }
+    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${createdA.body.id}`,
+      viewer.token, 'PATCH', { body: 'Нельзя', occurredAt: createdA.body.occurredAt, expectedVersion: 1 })).response.status).toBe(403)
+    expect((await request(`/api/v1/families/${familyA.body.family.id}/memories/${createdA.body.id}`,
+      viewer.token, 'DELETE', undefined, undefined, { 'If-Match': '1' })).response.status).toBe(403)
     expect((await request(`/api/v1/families/${familyA.body.family.id}/memories`, ownerA.token, 'POST',
       noteInput(familyB.body.child.id, 'Чужой ребёнок'), randomUUID())).response.status).toBe(404)
   })
 
-  test('rejects stale versions rather than overwriting a newer edit', async () => {
+  test('allows only one concurrent update and reports VERSION_CONFLICT for stale update and delete', async () => {
     const owner = await admittedUser('Владелец', '34001')
     const family = await createFamily(owner.token, 'Семья')
     const created = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Версия один')
-    const first = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
-      owner.token, 'PATCH', { body: 'Версия два', occurredAt: created.body.occurredAt, expectedVersion: 1 })
-    expect(first.response.status).toBe(200)
-    expect(first.body.version).toBe(2)
+    const updates = await Promise.all([
+      request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+        owner.token, 'PATCH', { body: 'Конкурент A', occurredAt: created.body.occurredAt, expectedVersion: 1 }),
+      request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+        owner.token, 'PATCH', { body: 'Конкурент B', occurredAt: created.body.occurredAt, expectedVersion: 1 }),
+    ])
+    expect(updates.map(({ response }) => response.status).sort()).toEqual([200, 409])
+    expect(updates.find(({ response }) => response.status === 409)?.body.error.code).toBe('VERSION_CONFLICT')
     const stale = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
       owner.token, 'PATCH', { body: 'Потерянная правка', occurredAt: created.body.occurredAt, expectedVersion: 1 })
     expect(stale.response.status).toBe(409)
+    expect(stale.body.error.code).toBe('VERSION_CONFLICT')
+    const staleDelete = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+      owner.token, 'DELETE', undefined, undefined, { 'If-Match': '1' })
+    expect(staleDelete.response.status).toBe(409)
+    expect(staleDelete.body.error.code).toBe('VERSION_CONFLICT')
     const current = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
       owner.token, 'GET', undefined)
-    expect(current.body.body).toBe('Версия два')
+    expect(['Конкурент A', 'Конкурент B']).toContain(current.body.body)
+    expect(current.body.version).toBe(2)
   })
 
-  test('keeps a keyset page stable when newer memories arrive and rejects cursor context changes', async () => {
+  test('keeps a sequence-bound keyset snapshot across backdated inserts and deletes', async () => {
     const owner = await admittedUser('Владелец', '35001')
     const outsider = await admittedUser('Другая семья', '35002')
     const family = await createFamily(owner.token, 'Семья')
     const otherFamily = await createFamily(outsider.token, 'Другая семья')
     const base = Date.now() - 60_000
     const oldest = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Старое', base)
-    const middle = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Среднее', base + 10_000)
-    const newest = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Новое', base + 20_000)
+    const lowerMiddle = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Среднее 1', base + 10_000)
+    const upperMiddle = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Среднее 2', base + 20_000)
+    const newest = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Новое', base + 30_000)
     const first = await request(`/api/v1/families/${family.body.family.id}/memories?limit=2`, owner.token, 'GET', undefined)
-    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual([newest.body.id, middle.body.id])
-    await createNote(owner.token, family.body.family.id, family.body.child.id, 'Позже', base + 30_000)
+    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual([newest.body.id, upperMiddle.body.id])
+    const insertedAfterSnapshot = await createNote(
+      owner.token,
+      family.body.family.id,
+      family.body.child.id,
+      'Новая, но задним числом',
+      base + 15_000,
+    )
+    await request(`/api/v1/families/${family.body.family.id}/memories/${oldest.body.id}`,
+      owner.token, 'DELETE', undefined, undefined, { 'If-Match': '1' })
     const second = await request(
       `/api/v1/families/${family.body.family.id}/memories?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`,
       owner.token, 'GET', undefined,
     )
-    expect(second.body.items.map((item: { id: string }) => item.id)).toEqual([oldest.body.id])
-    expect(new Set([...first.body.items, ...second.body.items].map((item: { id: string }) => item.id)).size).toBe(3)
+    expect(second.body.items.map((item: { id: string }) => item.id)).toEqual([lowerMiddle.body.id])
+    expect(second.body.items.map((item: { id: string }) => item.id)).not.toContain(insertedAfterSnapshot.body.id)
+    expect(second.body.items.map((item: { id: string }) => item.id)).not.toContain(oldest.body.id)
     expect((await request(`/api/v1/families/${otherFamily.body.family.id}/memories?cursor=${encodeURIComponent(first.body.nextCursor)}`,
       outsider.token, 'GET', undefined)).response.status).toBe(422)
     expect((await request(`/api/v1/families/${family.body.family.id}/memories?kind=note&cursor=${encodeURIComponent(first.body.nextCursor)}`,
       owner.token, 'GET', undefined)).response.status).toBe(422)
     expect((await request(`/api/v1/families/${family.body.family.id}/memories?cursor=${encodeURIComponent(`${first.body.nextCursor}x`)}`,
+      owner.token, 'GET', undefined)).response.status).toBe(422)
+    expect((await request(`/api/v1/families/${family.body.family.id}/memories?cursor=${encodeURIComponent('%%%not-a-cursor')}`,
       owner.token, 'GET', undefined)).response.status).toBe(422)
   })
 
@@ -190,6 +232,9 @@ maybeDescribe('Memories API', () => {
       owner.token, 'GET', undefined)).response.status).toBe(404)
     expect((await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'GET', undefined)).body.items)
       .toEqual([])
+    const likeDeleted = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}/like`,
+      owner.token, 'PUT', { liked: true })
+    expect(likeDeleted.response.status).toBe(404)
     expect(await prisma.memory.findUniqueOrThrow({ where: { id: created.body.id } })).toMatchObject({ status: 'deleted' })
   })
 
@@ -222,6 +267,146 @@ maybeDescribe('Memories API', () => {
     const ownerView = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
       owner.token, 'GET', undefined)
     expect(ownerView.body.likes).toEqual({ count: 0, likedByMe: false })
+    const reinvite = await request(`/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST',
+      { role: 'viewer' }, randomUUID())
+    await request('/api/v1/invites/accept', viewer.token, 'POST', { token: reinvite.body.rawToken })
+    const reactivatedView = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+      owner.token, 'GET', undefined)
+    expect(reactivatedView.body.likes).toEqual({ count: 1, likedByMe: false })
+  })
+
+  test('serializes revoke against an in-flight create authorization', async () => {
+    const owner = await admittedUser('Владелец', '37501')
+    const full = await admittedUser('Полный доступ', '37502')
+    const family = await createFamily(owner.token, 'Семья')
+    await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const blocker = await beginDatabaseBlock('LOCK TABLE memories IN ACCESS EXCLUSIVE MODE')
+
+    try {
+      const creation = createNote(full.token, family.body.family.id, family.body.child.id, 'Гонка создания')
+      await waitForLockedQuery(blocker)
+      const revocation = runDatabaseMutation(
+        `UPDATE family_members
+            SET revoked_at = now()
+          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [family.body.family.id, full.userId],
+      )
+      await waitForLockedQuery(blocker, 'family_members')
+      await blocker.query('COMMIT')
+
+      expect((await creation).response.status).toBe(201)
+      expect((await revocation).rowCount).toBe(1)
+    } finally {
+      await rollbackAndClose(blocker)
+    }
+  })
+
+  test('serializes downgrade against an in-flight update authorization', async () => {
+    const owner = await admittedUser('Владелец', '37601')
+    const full = await admittedUser('Полный доступ', '37602')
+    const family = await createFamily(owner.token, 'Семья')
+    await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const created = await createNote(full.token, family.body.family.id, family.body.child.id, 'До правки')
+    const blocker = await beginDatabaseBlock(
+      'SELECT id FROM memories WHERE id = $1 FOR UPDATE',
+      [created.body.id],
+    )
+
+    try {
+      const update = request(
+        `/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+        full.token,
+        'PATCH',
+        { body: 'После правки', occurredAt: created.body.occurredAt, expectedVersion: 1 },
+      )
+      await waitForLockedQuery(blocker)
+      const downgrade = runDatabaseMutation(
+        `UPDATE family_members
+            SET role = 'viewer'
+          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [family.body.family.id, full.userId],
+      )
+      await waitForLockedQuery(blocker, 'family_members')
+      await blocker.query('COMMIT')
+
+      expect((await update).response.status).toBe(200)
+      expect((await downgrade).rowCount).toBe(1)
+    } finally {
+      await rollbackAndClose(blocker)
+    }
+  })
+
+  test('serializes revoke against an in-flight delete authorization', async () => {
+    const owner = await admittedUser('Владелец', '37701')
+    const full = await admittedUser('Полный доступ', '37702')
+    const family = await createFamily(owner.token, 'Семья')
+    await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const created = await createNote(full.token, family.body.family.id, family.body.child.id, 'Удалить')
+    const blocker = await beginDatabaseBlock(
+      'SELECT id FROM memories WHERE id = $1 FOR UPDATE',
+      [created.body.id],
+    )
+
+    try {
+      const deletion = request(
+        `/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+        full.token,
+        'DELETE',
+        undefined,
+        undefined,
+        { 'If-Match': '1' },
+      )
+      await waitForLockedQuery(blocker)
+      const revocation = runDatabaseMutation(
+        `UPDATE family_members
+            SET revoked_at = now()
+          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [family.body.family.id, full.userId],
+      )
+      await waitForLockedQuery(blocker, 'family_members')
+      await blocker.query('COMMIT')
+
+      expect((await deletion).response.status).toBe(204)
+      expect((await revocation).rowCount).toBe(1)
+    } finally {
+      await rollbackAndClose(blocker)
+    }
+  })
+
+  test('serializes revoke against an in-flight like authorization', async () => {
+    const owner = await admittedUser('Владелец', '37801')
+    const viewer = await admittedUser('Зритель', '37802')
+    const family = await createFamily(owner.token, 'Семья')
+    await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const created = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Лайк')
+    const lockName = `memory-like:${created.body.id}:${viewer.userId}`
+    const blocker = await beginDatabaseBlock(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [lockName],
+    )
+
+    try {
+      const like = request(
+        `/api/v1/families/${family.body.family.id}/memories/${created.body.id}/like`,
+        viewer.token,
+        'PUT',
+        { liked: true },
+      )
+      await waitForLockedQuery(blocker)
+      const revocation = runDatabaseMutation(
+        `UPDATE family_members
+            SET revoked_at = now()
+          WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [family.body.family.id, viewer.userId],
+      )
+      await waitForLockedQuery(blocker, 'family_members')
+      await blocker.query('COMMIT')
+
+      expect((await like).response.status).toBe(200)
+      expect((await revocation).rowCount).toBe(1)
+    } finally {
+      await rollbackAndClose(blocker)
+    }
   })
 
   test('keeps media publication closed and rejects a cross-family typed media reference at the database boundary', async () => {
@@ -237,6 +422,16 @@ maybeDescribe('Memories API', () => {
     expect(mediaAttempt.response.status).toBe(409)
     await expect(Promise.resolve(prisma.memoryMedia.create({
       data: { familyId: familyB.body.family.id, memoryId: created.body.id, mediaId: randomUUID(), position: 0 },
+    }))).rejects.toThrow()
+    await expect(Promise.resolve(prisma.memory.create({
+      data: {
+        familyId: familyA.body.family.id,
+        childId: familyA.body.child.id,
+        authorId: ownerB.userId,
+        kind: 'note',
+        body: 'Неверный автор',
+        occurredAt: new Date(Date.now() - 30_000),
+      },
     }))).rejects.toThrow()
   })
 
@@ -273,6 +468,90 @@ maybeDescribe('Memories API', () => {
     return request('/api/v1/families', token, 'POST', {
       name, timezone: 'Europe/Moscow', child: { displayName: 'Ребёнок' },
     }, randomUUID())
+  }
+
+  async function inviteMember(
+    ownerToken: string,
+    memberToken: string,
+    familyId: string,
+    role: 'full' | 'viewer',
+  ) {
+    const invite = await request(
+      `/api/v1/families/${familyId}/invites`,
+      ownerToken,
+      'POST',
+      { role },
+      randomUUID(),
+    )
+    expect(invite.response.status).toBe(201)
+    const accepted = await request('/api/v1/invites/accept', memberToken, 'POST', {
+      token: invite.body.rawToken,
+    })
+    expect(accepted.response.status).toBe(200)
+  }
+
+  async function beginDatabaseBlock(sql: string, parameters: unknown[] = []) {
+    const client = new Client({ connectionString: databaseUrl! })
+    await client.connect()
+    await client.query('BEGIN')
+    await client.query(sql, parameters)
+    return client
+  }
+
+  async function runDatabaseMutation(sql: string, parameters: unknown[]) {
+    const client = new Client({ connectionString: databaseUrl! })
+    await client.connect()
+    try {
+      return await client.query(sql, parameters)
+    } finally {
+      await client.end()
+    }
+  }
+
+  async function waitForLockedQuery(client: Client, queryFragment?: string) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      // PostgreSQL caches cumulative-statistics snapshots for the duration of a transaction.
+      // The blocker deliberately stays in one transaction, so refresh before observing a second
+      // connection that may have begun waiting after the previous poll.
+      await client.query('SELECT pg_stat_clear_snapshot()')
+      const result = await client.query<{ waiting: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
+              AND ($1::text IS NULL OR query ILIKE $1)
+         ) AS waiting`,
+        [queryFragment ? `%${queryFragment}%` : null],
+      )
+      if (result.rows[0]?.waiting) return
+      await Bun.sleep(50)
+    }
+    await client.query('SELECT pg_stat_clear_snapshot()')
+    const activity = await client.query<{
+      state: string
+      wait_event_type: string | null
+      wait_event: string | null
+      query: string
+    }>(`
+      SELECT state, wait_event_type, wait_event, query
+        FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND pid <> pg_backend_pid()
+       ORDER BY pid
+    `)
+    throw new Error(
+      `Timed out waiting for a blocked PostgreSQL query${queryFragment ? ` containing ${queryFragment}` : ''}: ${JSON.stringify(activity.rows)}`,
+    )
+  }
+
+  async function rollbackAndClose(client: Client) {
+    try {
+      await client.query('ROLLBACK')
+    } finally {
+      await client.end()
+    }
   }
 
   function createNote(token: string, familyId: string, childId: string, body: string, occurredAt = Date.now() - 30_000) {
