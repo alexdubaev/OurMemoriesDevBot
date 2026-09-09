@@ -1,2 +1,7 @@
-export { createTelegramHostBridge } from './host-bridge'
-export type { TelegramHostMetadata, TelegramInsets } from './host-bridge'
+export { createBrowserDevHostBridge, createTelegramHostBridge } from './host-bridge'
+export type {
+  BrowserDevHostOptions,
+  HostBridge,
+  TelegramHostMetadata,
+  TelegramInsets,
+} from './host-bridge'
