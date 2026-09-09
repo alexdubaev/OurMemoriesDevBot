@@ -1,29 +1,24 @@
 {
-  "version": 1,
-  "commands": {
-    "architecture": "bun run architecture:check",
-    "backend-integration": "bun run test:backend:integration",
-    "backend-unit": "bun run test:backend:unit",
-    "contracts": "bun run test:contracts",
-    "template-check": "bun run template:check",
-    "typecheck": "bun run typecheck",
-    "webapp": "bun run test:webapp"
-  },
+  "version": 2,
   "rules": [
     {
       "impact": "docs",
       "prefixes": ["docs/mvp/"],
-      "commandIds": ["template-check"]
+      "commandIds": ["template"]
     },
     {
       "impact": "media",
-      "prefixes": ["backend/src/modules/media/", "backend/src/modules/telegram/"],
+      "prefixes": [
+        "backend/src/modules/media/",
+        "backend/src/modules/telegram/",
+        "backend/src/storage/"
+      ],
       "commandIds": ["architecture", "backend-unit", "backend-integration"]
     },
     {
       "impact": "contracts",
       "prefixes": ["packages/contracts/"],
-      "commandIds": ["architecture", "contracts", "backend-unit", "webapp", "typecheck"]
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "webapp"]
     },
     {
       "impact": "auth",
@@ -33,12 +28,40 @@
     {
       "impact": "schema",
       "prefixes": ["backend/prisma/"],
-      "commandIds": ["architecture", "backend-integration", "typecheck"]
+      "commandIds": ["architecture", "typecheck", "backend-integration"]
     },
     {
       "impact": "webapp",
       "prefixes": ["webapp/"],
-      "commandIds": ["architecture", "webapp", "typecheck"]
+      "commandIds": ["architecture", "typecheck", "webapp", "build-webapp"]
+    },
+    {
+      "impact": "infrastructure",
+      "prefixes": [
+        ".env.example",
+        ".bun-version",
+        "backend/.env.example",
+        "backend/Dockerfile",
+        "backend/src/app.ts",
+        "backend/src/env.ts",
+        "backend/src/runtime.ts",
+        "bun.lock",
+        "bunfig.toml",
+        "docker-compose.yml",
+        "infra/",
+        "package.json",
+        "scripts/"
+      ],
+      "commandIds": [
+        "architecture",
+        "template",
+        "typecheck",
+        "contracts",
+        "backend-unit",
+        "backend-integration",
+        "webapp",
+        "build-webapp"
+      ]
     }
   ]
 }

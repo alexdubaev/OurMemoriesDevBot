@@ -1,48 +1,88 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { appendFileSync, readFileSync } from 'node:fs'
 
 const mapUrl = new URL('../verification-map.json', import.meta.url)
 
+/**
+ * This is an execution boundary: verification-map.json can select only these IDs.
+ * GitHub Actions maps them to static commands, never to command strings from the map.
+ */
+export const verificationCommandIds = [
+  'architecture',
+  'template',
+  'typecheck',
+  'contracts',
+  'backend-unit',
+  'backend-integration',
+  'webapp',
+  'build-webapp',
+]
+
+export const fullVerificationCommandIds = [...verificationCommandIds]
+
+const knownCommandIds = new Set(verificationCommandIds)
+const verificationControlPaths = [
+  '.github/workflows/',
+  'verification-map.json',
+  'scripts/verify-plan.mjs',
+]
+
 export function planVerification(paths, map = readVerificationMap()) {
+  validateVerificationMap(map)
+
   const impacts = []
   const commandIds = new Set()
   const unknownPaths = []
 
   for (const suppliedPath of paths) {
     const normalizedPath = normalizePath(suppliedPath)
-    const rule = normalizedPath && map.rules.find(({ prefixes }) =>
-      prefixes.some((prefix) => normalizedPath.startsWith(prefix)),
-    )
 
-    if (!rule) {
+    if (!normalizedPath) {
       unknownPaths.push(suppliedPath)
       continue
     }
 
-    if (!impacts.includes(rule.impact)) impacts.push(rule.impact)
-    for (const commandId of rule.commandIds) commandIds.add(commandId)
-  }
+    if (isVerificationControlPath(normalizedPath)) return fullVerificationPlan()
 
-  if (unknownPaths.length > 0 || paths.length === 0) {
-    return {
-      status: 'needs-expansion',
-      impacts: [],
-      commands: [],
-      ...(unknownPaths.length > 0 ? { unknownPaths } : { unknownPaths: [] }),
+    const rules = map.rules.filter(({ prefixes }) =>
+      prefixes.some((prefix) => normalizedPath.startsWith(prefix)),
+    )
+
+    if (rules.length === 0) {
+      unknownPaths.push(suppliedPath)
+      continue
+    }
+
+    for (const rule of rules) {
+      if (!impacts.includes(rule.impact)) impacts.push(rule.impact)
+      for (const commandId of rule.commandIds) commandIds.add(commandId)
     }
   }
+
+  if (unknownPaths.length > 0 || paths.length === 0) return fullVerificationPlan(unknownPaths)
 
   return {
     status: 'ready',
     impacts,
-    commands: [...commandIds].map((commandId) => map.commands[commandId]),
+    commandIds: commandIdsInStableOrder(commandIds),
+  }
+}
+
+function fullVerificationPlan(unknownPaths) {
+  return {
+    status: 'ready',
+    impacts: ['full'],
+    commandIds: fullVerificationCommandIds,
+    ...(unknownPaths?.length ? { unknownPaths } : {}),
   }
 }
 
 function readVerificationMap() {
-  const map = JSON.parse(readFileSync(mapUrl, 'utf8'))
-  if (map.version !== 1 || !map.commands || !Array.isArray(map.rules)) {
-    throw new Error('verification-map.json must use version 1 with commands and rules')
+  return JSON.parse(readFileSync(mapUrl, 'utf8'))
+}
+
+function validateVerificationMap(map) {
+  if (map.version !== 2 || !Array.isArray(map.rules)) {
+    throw new Error('verification-map.json must use version 2 with rules')
   }
 
   for (const rule of map.rules) {
@@ -50,13 +90,21 @@ function readVerificationMap() {
       throw new Error('verification-map.json contains an invalid rule')
     }
     for (const commandId of rule.commandIds) {
-      if (typeof map.commands[commandId] !== 'string') {
-        throw new Error(`verification-map.json references unknown command "${commandId}"`)
+      if (!knownCommandIds.has(commandId)) {
+        throw new Error(`verification-map.json references unknown verification command id "${commandId}"`)
       }
     }
   }
+}
 
-  return map
+function commandIdsInStableOrder(commandIds) {
+  return verificationCommandIds.filter((commandId) => commandIds.has(commandId))
+}
+
+function isVerificationControlPath(path) {
+  return verificationControlPaths.some((controlPath) =>
+    controlPath.endsWith('/') ? path.startsWith(controlPath) : path === controlPath,
+  )
 }
 
 function normalizePath(suppliedPath) {
@@ -66,10 +114,18 @@ function normalizePath(suppliedPath) {
   return suppliedPath.replace(/^\.\//, '')
 }
 
-if (import.meta.main) {
-  const plan = planVerification(process.argv.slice(2))
-  process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
-  if (plan.status !== 'ready') process.exitCode = 2
+function cliPaths(args) {
+  if (args.length === 1 && args[0] === '--stdin0') {
+    return readFileSync(0, 'utf8').split('\0').filter(Boolean)
+  }
+  return args
 }
 
-export const verificationMapPath = fileURLToPath(mapUrl)
+if (import.meta.main) {
+  const plan = planVerification(cliPaths(process.argv.slice(2)))
+  process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
+
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `command_ids=${plan.commandIds.join(',')}\n`)
+  }
+}

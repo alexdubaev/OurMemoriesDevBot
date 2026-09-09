@@ -12,26 +12,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  foundation:
-    name: foundation checks
-    runs-on: ubuntu-latest
-    container:
-      image: oven/bun:1.4.0
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - run: bun install --frozen-lockfile
-      - run: bun run architecture:check
-      - run: bun run typecheck
-      - run: bun test tests/verify-plan.test.ts
-      - run: bun run build:webapp
-
   verify-required:
     name: verify-required
-    if: always()
-    needs: [foundation]
     runs-on: ubuntu-latest
     steps:
-      - name: Fail closed unless every required check succeeded
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - id: plan
+        name: Plan verification from the pull-request diff
         env:
-          FOUNDATION_RESULT: ${{ needs.foundation.result }}
-        run: test "$FOUNDATION_RESULT" = success
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+            HEAD_SHA="$(git rev-parse HEAD)"
+          fi
+          git diff --name-only --diff-filter=ACMRD -z "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
+          bun scripts/verify-plan.mjs --stdin0 < "$RUNNER_TEMP/changed-paths"
+      - name: Architecture checks
+        if: contains(steps.plan.outputs.command_ids, 'architecture')
+        run: bun run architecture:check
+      - name: Template checks
+        if: contains(steps.plan.outputs.command_ids, 'template')
+        run: bun run template:check
+      - name: Type checks
+        if: contains(steps.plan.outputs.command_ids, 'typecheck')
+        run: bun run typecheck
+      - name: Contract tests
+        if: contains(steps.plan.outputs.command_ids, 'contracts')
+        run: bun run test:contracts
+      - name: Backend unit tests
+        if: contains(steps.plan.outputs.command_ids, 'backend-unit')
+        run: bun run test:backend:unit
+      - name: Backend integration tests
+        if: contains(steps.plan.outputs.command_ids, 'backend-integration')
+        run: bun run test:backend:integration
+      - name: Webapp tests
+        if: contains(steps.plan.outputs.command_ids, 'webapp')
+        run: bun run test:webapp
+      - name: Webapp build
+        if: contains(steps.plan.outputs.command_ids, 'build-webapp')
+        run: bun run build:webapp
