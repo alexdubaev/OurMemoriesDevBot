@@ -72,7 +72,7 @@ function parseUniqueFields(rawInitData: string) {
 
 function telegramHash(fields: Map<string, string>, botToken: string) {
   const dataCheckString = [...fields]
-    .filter(([key]) => key !== 'hash' && key !== 'signature')
+    .filter(([key]) => key !== 'hash')
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, value]) => `${key}=${value}`)
     .join('\n')
