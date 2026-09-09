@@ -62,7 +62,7 @@ test('the mobile publication gate requires its three available capabilities', ()
   }
 
   const fencedCapabilities = validMobileChecklist.replace(
-    /^(\| Payments \/ subscriptions.*\n\| Push notifications.*\n\| Social sign-in.*)$/m,
+    /^(\| Payments \/ subscriptions[^\r\n]*\r?\n\| Push notifications[^\r\n]*\r?\n\| Social sign-in[^\r\n]*)/m,
     '```md\n$1\n```',
   )
   expect(validateMobileCapabilityContract(fencedCapabilities)).toEqual([
@@ -90,6 +90,10 @@ test('the mobile publication gate requires its three available capabilities', ()
 
 function mobileChecklist() {
   return currentChecklist
+    .replace(
+      /^(\| (?!Capability\s+\||-)[^|\r\n]+\|)\s*available(\s*\|.*)$/gm,
+      '$1 absent$2',
+    )
     .replace(
       /^(\| Browser checkout \/ payments\s+\| absent\s+\|.*)$/m,
       '$1\n| Payments / subscriptions        | available | Mobile store subscriptions are available. |',
