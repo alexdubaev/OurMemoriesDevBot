@@ -9,7 +9,7 @@ datasource db {
 
 model User {
   id           String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  email        String        @unique
+  email        String?       @unique
   passwordHash String?       @map("password_hash")
   displayName  String?       @map("display_name")
   role         UserRole      @default(user)
@@ -18,9 +18,143 @@ model User {
   sessions            AuthSession[]
   passwordResetTokens PasswordResetToken[]
   avatars             UserAvatar[]
+  externalIdentities  ExternalIdentity[]
+  ownedFamilies       Family[]         @relation("FamilyOwner")
+  familyMemberships   FamilyMember[]
+  createdInvites      FamilyInvite[]   @relation("InviteCreator")
+  acceptedInvites     FamilyInvite[]   @relation("InviteAcceptor")
 
   @@index([role], map: "users_role_idx")
   @@map("users")
+}
+
+model ExternalIdentity {
+  id        String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String                   @map("user_id") @db.Uuid
+  provider  ExternalIdentityProvider
+  subject   String
+  createdAt DateTime                 @default(now()) @map("created_at")
+  updatedAt DateTime                 @updatedAt @map("updated_at")
+  user      User                     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "external_identities_user_id_fkey")
+
+  @@unique([provider, subject], map: "external_identities_provider_subject_key")
+  @@index([userId], map: "external_identities_user_id_idx")
+  @@map("external_identities")
+}
+
+model TelegramAuthReplay {
+  fingerprintHash String      @id @map("fingerprint_hash")
+  sessionId       String?     @map("session_id") @db.Uuid
+  expiresAt       DateTime    @map("expires_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  session         AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "telegram_auth_replays_session_id_fkey")
+
+  @@index([expiresAt], map: "telegram_auth_replays_expires_at_idx")
+  @@map("telegram_auth_replays")
+}
+
+model PilotAdmission {
+  id         String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  provider   ExternalIdentityProvider
+  subject    String
+  admittedAt DateTime                 @default(now()) @map("admitted_at")
+  revokedAt  DateTime?                @map("revoked_at")
+  createdAt  DateTime                 @default(now()) @map("created_at")
+  updatedAt  DateTime                 @updatedAt @map("updated_at")
+
+  @@unique([provider, subject], map: "pilot_admissions_provider_subject_key")
+  @@index([revokedAt], map: "pilot_admissions_revoked_at_idx")
+  @@map("pilot_admissions")
+}
+
+model Family {
+  id                   String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ownerUserId          String       @map("owner_user_id") @db.Uuid
+  name                 String
+  timezone             String
+  status               FamilyStatus @default(active)
+  storageUsedBytes     BigInt       @default(0) @map("storage_used_bytes")
+  storageReservedBytes BigInt       @default(0) @map("storage_reserved_bytes")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  owner                User         @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")
+  members              FamilyMember[] @relation("FamilyMembers")
+  ownerMembership      FamilyMember   @relation("FamilyOwnerMembership", fields: [id, ownerUserId], references: [familyId, userId], onDelete: Restrict, map: "families_owner_membership_fkey")
+  children             Child[]
+  invites              FamilyInvite[]
+
+  @@index([ownerUserId], map: "families_owner_user_id_idx")
+  @@unique([id, ownerUserId], map: "families_owner_pair_key")
+  @@map("families")
+}
+
+model FamilyMember {
+  familyId String     @map("family_id") @db.Uuid
+  userId   String     @map("user_id") @db.Uuid
+  role     FamilyRole
+  joinedAt DateTime   @default(now()) @map("joined_at")
+  revokedAt DateTime? @map("revoked_at")
+  family   Family     @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: Cascade, map: "family_members_family_id_fkey")
+  ownedFamily Family? @relation("FamilyOwnerMembership")
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
+
+  @@id([familyId, userId])
+  @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
+  @@map("family_members")
+}
+
+model Child {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId    String    @map("family_id") @db.Uuid
+  displayName String    @map("display_name")
+  birthDate   DateTime? @map("birth_date") @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  family      Family    @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
+
+  @@index([familyId], map: "children_family_id_idx")
+  @@map("children")
+}
+
+model FamilyInvite {
+  id         String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId   String     @map("family_id") @db.Uuid
+  role       FamilyRole
+  tokenHash  String     @unique(map: "family_invites_token_hash_key") @map("token_hash")
+  expiresAt  DateTime   @map("expires_at")
+  createdBy  String     @map("created_by") @db.Uuid
+  acceptedBy String?    @map("accepted_by") @db.Uuid
+  acceptedAt DateTime?  @map("accepted_at")
+  revokedAt  DateTime?  @map("revoked_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  family     Family     @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "family_invites_family_id_fkey")
+  creator    User       @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Restrict, map: "family_invites_created_by_fkey")
+  acceptor   User?      @relation("InviteAcceptor", fields: [acceptedBy], references: [id], onDelete: Restrict, map: "family_invites_accepted_by_fkey")
+
+  @@index([familyId, expiresAt], map: "family_invites_family_id_expires_at_idx")
+  @@map("family_invites")
+}
+
+enum ExternalIdentityProvider {
+  telegram
+
+  @@map("external_identity_provider")
+}
+
+enum FamilyRole {
+  full
+  viewer
+
+  @@map("family_role")
+}
+
+enum FamilyStatus {
+  active
+  deleting
+  deleted
+
+  @@map("family_status")
 }
 
 /// One row per avatar upload attempt. The object itself lives in private storage; this table
@@ -145,6 +279,7 @@ model AuthSession {
   createdAt                DateTime  @default(now()) @map("created_at")
   updatedAt                DateTime  @updatedAt @map("updated_at")
   user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
+  telegramAuthReplays      TelegramAuthReplay[]
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")

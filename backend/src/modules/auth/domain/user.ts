@@ -2,7 +2,7 @@ import type { UserDto, UserRole } from '@web-app-demo/contracts'
 
 export type AuthUserRecord = {
   id: string
-  email: string
+  email: string | null
   passwordHash: string | null
   displayName: string | null
   role: UserRole

@@ -64,6 +64,7 @@ describe('user and admin contracts', () => {
       createdAt: user.createdAt,
     }
     expect(adminUserSummarySchema.parse(summary)).toEqual(summary)
+    expect(adminUserSummarySchema.parse({ ...summary, email: null }).email).toBeNull()
     expect(() =>
       adminUserSummarySchema.parse({ ...summary, passwordHash: 'must-not-leak' }),
     ).toThrow()

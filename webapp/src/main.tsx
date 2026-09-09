@@ -2,7 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import App from './App'
+import { createTelegramHostBridge } from './platform/telegram'
 import './production.css'
+
+createTelegramHostBridge(window).ready()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

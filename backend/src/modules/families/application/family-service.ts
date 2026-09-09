@@ -1,0 +1,392 @@
+import { createHash, randomBytes } from 'node:crypto'
+
+import type {
+  AcceptInviteResponse,
+  CreateFamilyRequest,
+  CreateInviteRequest,
+  CreateInviteResponse,
+  FamilyDto,
+  FamilyMemberDto,
+  FamilyMeResponse,
+  FamilyResponse,
+  InvitePreviewResponse,
+  UpdateMemberRoleRequest,
+} from '@web-app-demo/contracts'
+
+import type { DbClient } from '../../../db'
+import { FamilyFailure } from '../domain/errors'
+import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
+
+type Principal = FamilyScope['principal']
+
+export class FamilyService {
+  constructor(
+    private readonly db: DbClient,
+    private readonly access: FamilyAccess,
+    private readonly persistenceErrors: PersistenceErrorClassifier,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async getMe(user: {
+    id: string
+    email: string | null
+    displayName: string | null
+    role: 'user' | 'admin'
+    createdAt: string
+  }): Promise<FamilyMeResponse> {
+    const membership = await this.db.familyMember.findFirst({
+      where: { userId: user.id, revokedAt: null, family: { status: 'active' } },
+      include: { family: true },
+    })
+    return {
+      user,
+      activeFamily: membership ? {
+        id: membership.family.id,
+        name: membership.family.name,
+        role: membership.role,
+        isOwner: membership.family.ownerUserId === user.id,
+      } : null,
+      limits: { activeFamiliesMaximum: 1 },
+    }
+  }
+
+  async createFamily(principal: Principal, input: CreateFamilyRequest): Promise<FamilyResponse> {
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const identity = await tx.externalIdentity.findFirst({
+          where: { userId: principal.userId, provider: 'telegram' },
+          select: { subject: true },
+        })
+        const admitted = identity && await tx.pilotAdmission.findFirst({
+          where: { provider: 'telegram', subject: identity.subject, revokedAt: null },
+          select: { id: true },
+        })
+        if (!admitted) {
+          throw new FamilyFailure('forbidden', 'Создание семьи доступно участникам пилота')
+        }
+
+        const existing = await tx.familyMember.findFirst({
+          where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+          select: { familyId: true },
+        })
+        if (existing) {
+          throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        }
+
+        const family = await tx.family.create({
+          data: {
+            ownerUserId: principal.userId,
+            name: input.name,
+            timezone: input.timezone,
+          },
+        })
+        await tx.familyMember.create({
+          data: { familyId: family.id, userId: principal.userId, role: 'full' },
+        })
+        const child = await tx.child.create({
+          data: {
+            familyId: family.id,
+            displayName: input.child.displayName,
+            birthDate: input.child.birthDate
+              ? new Date(`${input.child.birthDate}T00:00:00.000Z`)
+              : null,
+          },
+        })
+        return { family: familyDto(family), child: childDto(child) }
+      })
+    } catch (error) {
+      if (this.persistenceErrors.isUniqueConstraint(error)) {
+        throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+      }
+      throw error
+    }
+  }
+
+  async getFamily(scope: FamilyScope): Promise<FamilyResponse> {
+    await this.access.requireMember(scope)
+    const family = await this.db.family.findFirst({
+      where: { id: scope.familyId, status: 'active' },
+      include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+    })
+    if (!family || !family.children[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
+    return { family: familyDto(family), child: childDto(family.children[0]) }
+  }
+
+  async listMembers(scope: FamilyScope): Promise<{ items: FamilyMemberDto[] }> {
+    await this.access.requireMember(scope)
+    const family = await this.db.family.findUnique({
+      where: { id: scope.familyId },
+      select: { ownerUserId: true },
+    })
+    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+    const members = await this.db.familyMember.findMany({
+      where: { familyId: scope.familyId, revokedAt: null },
+      include: { user: { select: { displayName: true } } },
+      orderBy: { joinedAt: 'asc' },
+    })
+    return {
+      items: members.map((member) => memberDto(member, family.ownerUserId)),
+    }
+  }
+
+  async createInvite(
+    scope: FamilyScope,
+    input: CreateInviteRequest,
+  ): Promise<CreateInviteResponse> {
+    await this.access.requireOwner(scope)
+    const rawToken = randomBytes(24).toString('base64url')
+    const now = this.now()
+    const invite = await this.db.familyInvite.create({
+      data: {
+        familyId: scope.familyId,
+        role: input.role,
+        tokenHash: hashInviteToken(rawToken),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000),
+        createdBy: scope.principal.userId,
+      },
+    })
+    return {
+      id: invite.id,
+      rawToken,
+      role: invite.role,
+      expiresAt: invite.expiresAt.toISOString(),
+    }
+  }
+
+  async previewInvite(principal: Principal, rawToken: string): Promise<InvitePreviewResponse> {
+    void principal
+    const invite = await this.db.familyInvite.findUnique({
+      where: { tokenHash: hashInviteToken(rawToken) },
+      include: { family: true },
+    })
+    assertInviteAvailable(invite, this.now())
+    return {
+      family: { id: invite.family.id, name: invite.family.name },
+      role: invite.role,
+      expiresAt: invite.expiresAt.toISOString(),
+    }
+  }
+
+  async acceptInvite(principal: Principal, rawToken: string): Promise<AcceptInviteResponse> {
+    const tokenHash = hashInviteToken(rawToken)
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{
+          id: string
+          familyId: string
+          role: 'full' | 'viewer'
+          expiresAt: Date
+          acceptedBy: string | null
+          revokedAt: Date | null
+        }>>`
+          SELECT id,
+                 family_id AS "familyId",
+                 role::text AS role,
+                 expires_at AS "expiresAt",
+                 accepted_by AS "acceptedBy",
+                 revoked_at AS "revokedAt"
+            FROM family_invites
+           WHERE token_hash = ${tokenHash}
+           FOR UPDATE
+        `
+        const invite = rows[0]
+        if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+        if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+        if (invite.expiresAt <= this.now()) {
+          throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
+        }
+
+        if (invite.acceptedBy) {
+          if (invite.acceptedBy !== principal.userId) {
+            throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
+          }
+          return inviteResponse(tx, invite.familyId, principal.userId)
+        }
+
+        const activeMembership = await tx.familyMember.findFirst({
+          where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+          select: { familyId: true },
+        })
+        if (activeMembership && activeMembership.familyId !== invite.familyId) {
+          throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        }
+
+        if (!activeMembership) {
+          await tx.familyMember.upsert({
+            where: { familyId_userId: { familyId: invite.familyId, userId: principal.userId } },
+            update: { role: invite.role, revokedAt: null, joinedAt: this.now() },
+            create: { familyId: invite.familyId, userId: principal.userId, role: invite.role },
+          })
+        }
+        await tx.familyInvite.update({
+          where: { id: invite.id },
+          data: { acceptedBy: principal.userId, acceptedAt: this.now() },
+        })
+        return inviteResponse(tx, invite.familyId, principal.userId)
+      })
+    } catch (error) {
+      if (this.persistenceErrors.isUniqueConstraint(error)) {
+        throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+      }
+      throw error
+    }
+  }
+
+  async revokeInvite(scope: FamilyScope, inviteId: string) {
+    await this.access.requireOwner(scope)
+    const invite = await this.db.familyInvite.findFirst({
+      where: { id: inviteId, familyId: scope.familyId },
+      select: { acceptedAt: true, revokedAt: true },
+    })
+    if (!invite || invite.acceptedAt) {
+      throw new FamilyFailure('not_found', 'Приглашение не найдено')
+    }
+    if (invite.revokedAt) return
+
+    const result = await this.db.familyInvite.updateMany({
+      where: { id: inviteId, familyId: scope.familyId, revokedAt: null, acceptedAt: null },
+      data: { revokedAt: this.now() },
+    })
+    if (result.count === 0) {
+      const concurrentlyRevoked = await this.db.familyInvite.findFirst({
+        where: { id: inviteId, familyId: scope.familyId, revokedAt: { not: null } },
+        select: { id: true },
+      })
+      if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+    }
+  }
+
+  async updateMemberRole(scope: FamilyScope, userId: string, input: UpdateMemberRoleRequest) {
+    await this.access.requireOwner(scope)
+    const family = await this.db.family.findUnique({
+      where: { id: scope.familyId },
+      select: { ownerUserId: true },
+    })
+    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+    if (family.ownerUserId === userId) {
+      throw new FamilyFailure('conflict', 'Создателя семьи нельзя понизить')
+    }
+    const updated = await this.db.familyMember.updateMany({
+      where: { familyId: scope.familyId, userId, revokedAt: null },
+      data: { role: input.role },
+    })
+    if (updated.count === 0) throw new FamilyFailure('not_found', 'Участник не найден')
+    const member = await this.db.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: scope.familyId, userId } },
+      include: { user: { select: { displayName: true } } },
+    })
+    return { membership: memberDto(member, family.ownerUserId) }
+  }
+
+  async removeMember(scope: FamilyScope, userId: string) {
+    const removingSelf = scope.principal.userId === userId
+    if (removingSelf) {
+      const ownMembership = await this.db.familyMember.findUnique({
+        where: { familyId_userId: { familyId: scope.familyId, userId } },
+        select: { revokedAt: true, family: { select: { status: true } } },
+      })
+      if (!ownMembership || ownMembership.family.status !== 'active') {
+        throw new FamilyFailure('not_found', 'Семья не найдена')
+      }
+      if (ownMembership.revokedAt) return
+      await this.access.requireMember(scope)
+    } else {
+      await this.access.requireOwner(scope)
+    }
+
+    const family = await this.db.family.findUnique({
+      where: { id: scope.familyId },
+      select: { ownerUserId: true },
+    })
+    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+    if (family.ownerUserId === userId) {
+      throw new FamilyFailure('conflict', 'Создателя семьи нельзя удалить')
+    }
+    const member = await this.db.familyMember.findUnique({
+      where: { familyId_userId: { familyId: scope.familyId, userId } },
+      select: { revokedAt: true },
+    })
+    if (!member) throw new FamilyFailure('not_found', 'Участник не найден')
+    if (member.revokedAt) return
+
+    const revoked = await this.db.familyMember.updateMany({
+      where: { familyId: scope.familyId, userId, revokedAt: null },
+      data: { revokedAt: this.now() },
+    })
+    if (revoked.count === 0) {
+      const concurrentlyRevoked = await this.db.familyMember.findFirst({
+        where: { familyId: scope.familyId, userId, revokedAt: { not: null } },
+        select: { userId: true },
+      })
+      if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Участник не найден')
+    }
+  }
+}
+
+function hashInviteToken(rawToken: string) {
+  return createHash('sha256').update(rawToken).digest('hex')
+}
+
+function familyDto(family: { id: string; name: string; timezone: string; ownerUserId: string }): FamilyDto {
+  return {
+    id: family.id,
+    name: family.name,
+    timezone: family.timezone,
+    ownerUserId: family.ownerUserId,
+  }
+}
+
+function childDto(child: { id: string; displayName: string; birthDate: Date | null }) {
+  return {
+    id: child.id,
+    displayName: child.displayName,
+    birthDate: child.birthDate?.toISOString().slice(0, 10) ?? null,
+  }
+}
+
+function memberDto(
+  member: {
+    userId: string
+    role: 'full' | 'viewer'
+    joinedAt: Date
+    user: { displayName: string | null }
+  },
+  ownerUserId: string,
+): FamilyMemberDto {
+  return {
+    userId: member.userId,
+    displayName: member.user.displayName,
+    role: member.role,
+    isOwner: member.userId === ownerUserId,
+    joinedAt: member.joinedAt.toISOString(),
+  }
+}
+
+function assertInviteAvailable<T extends {
+  acceptedAt: Date | null
+  expiresAt: Date
+  revokedAt: Date | null
+}>(invite: T | null, now: Date): asserts invite is T {
+  if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+  if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+  if (invite.expiresAt <= now) throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
+  if (invite.acceptedAt) throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
+}
+
+async function inviteResponse(
+  tx: Parameters<Parameters<DbClient['$transaction']>[0]>[0],
+  familyId: string,
+  userId: string,
+): Promise<AcceptInviteResponse> {
+  const family = await tx.family.findUniqueOrThrow({ where: { id: familyId } })
+  const member = await tx.familyMember.findFirst({
+    where: { familyId, userId, revokedAt: null },
+    include: { user: { select: { displayName: true } } },
+  })
+  if (!member) throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
+  return {
+    family: familyDto(family),
+    membership: memberDto(member, family.ownerUserId),
+  }
+}

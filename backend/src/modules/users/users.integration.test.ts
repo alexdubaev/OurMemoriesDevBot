@@ -39,7 +39,7 @@ maybeDescribe('users and admin API integration', () => {
     ACCESS_TOKEN_TTL_SECONDS: '60',
   })
   const prisma = createPrisma(databaseUrl!)
-  const app = createApp({ env, prisma })
+  const app = createApp({ env, prisma, legacyPasswordAuthForTests: true })
 
   beforeEach(async () => {
     await prisma.authSession.deleteMany()
@@ -259,11 +259,11 @@ maybeDescribe('users and admin API integration', () => {
     const thirdTarget = await register('queue-third@example.com')
 
     const firstUpdateGate = gateNextUserUpdate(firstTarget.user.id)
-    const firstRoleApp = createApp({ env, prisma: firstUpdateGate.db })
+    const firstRoleApp = createApp({ env, prisma: firstUpdateGate.db, legacyPasswordAuthForTests: true })
     // Resolves once both later role changes have asked for the global role lock the first one is
     // holding: from then on they are queued behind it, whatever the machine's pace.
     const roleLockQueue = observeAdvisoryLockRequests(userRoleMutationLockKey, 2)
-    const queuedRoleApp = createApp({ env, prisma: roleLockQueue.db })
+    const queuedRoleApp = createApp({ env, prisma: roleLockQueue.db, legacyPasswordAuthForTests: true })
     const promote = (targetId: string, requestApp: typeof app) =>
       requestApp.request(`/api/admin/users/${targetId}/role`, {
         method: 'PATCH',
@@ -328,7 +328,7 @@ maybeDescribe('users and admin API integration', () => {
       userAuthenticationAuthorityLockKey(existing.user.id),
     )
     const loginTransactions = recordTransactionOptions(authorityLock.db)
-    const loginApp = createApp({ env, prisma: loginTransactions.db })
+    const loginApp = createApp({ env, prisma: loginTransactions.db, legacyPasswordAuthForTests: true })
     let loginSettled = false
     const oldPasswordLogin = Promise.resolve(loginApp.request('/api/auth/token/login', {
       method: 'POST',
@@ -358,7 +358,7 @@ maybeDescribe('users and admin API integration', () => {
   test('revokes a password login that wins session issuance before bootstrap reset', async () => {
     const existing = await register('login-before-bootstrap-reset@example.com')
     const sessionCreateGate = gateNextSessionCreate()
-    const loginApp = createApp({ env, prisma: sessionCreateGate.db })
+    const loginApp = createApp({ env, prisma: sessionCreateGate.db, legacyPasswordAuthForTests: true })
     const login = loginApp.request('/api/auth/token/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -403,7 +403,7 @@ maybeDescribe('users and admin API integration', () => {
     })
     const target = await register('role-first-target@example.com')
     const userUpdateGate = gateNextUserUpdate(target.user.id)
-    const roleApp = createApp({ env, prisma: userUpdateGate.db })
+    const roleApp = createApp({ env, prisma: userUpdateGate.db, legacyPasswordAuthForTests: true })
     const roleChange = roleApp.request(`/api/admin/users/${target.user.id}/role`, {
       method: 'PATCH',
       headers: authenticatedJsonHeaders(admin.accessToken),
@@ -414,7 +414,7 @@ maybeDescribe('users and admin API integration', () => {
     const authorityLock = observeAdvisoryLockRequests(
       userAuthenticationAuthorityLockKey(target.user.id),
     )
-    const loginApp = createApp({ env, prisma: authorityLock.db })
+    const loginApp = createApp({ env, prisma: authorityLock.db, legacyPasswordAuthForTests: true })
     let loginSettled = false
     const targetLogin = Promise.resolve(loginApp.request('/api/auth/token/login', {
       method: 'POST',

@@ -135,7 +135,7 @@ export function createPrismaUsersRepository(db: DbClient): UsersRepository {
 
 function toAdminUserSummary(user: {
   id: string
-  email: string
+  email: string | null
   displayName: string | null
   role: UserRole
   createdAt: Date

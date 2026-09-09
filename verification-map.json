@@ -26,6 +26,11 @@
       "commandIds": ["architecture", "backend-unit", "backend-integration"]
     },
     {
+      "impact": "families",
+      "prefixes": ["backend/src/modules/families/"],
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration"]
+    },
+    {
       "impact": "schema",
       "prefixes": ["backend/prisma/"],
       "commandIds": ["architecture", "typecheck", "backend-integration"]

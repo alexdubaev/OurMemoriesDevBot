@@ -10,7 +10,6 @@ import type { AuthUserRecord } from '../domain/user'
 export type AccessTokenPayload = {
   sub: string
   sessionId: string
-  email: string
 }
 
 export type AuthRepository = {
@@ -86,6 +85,36 @@ export type AuthRepository = {
      */
     queueNotice(email: string, enqueue: (task: QueuedTask) => Promise<void>): Promise<void>
   }): Promise<{ email: string } | null>
+}
+
+export type TelegramIdentity = {
+  provider: 'telegram'
+  subject: string
+  displayName: string
+}
+
+export type VerifiedTelegramInitData = {
+  identity: TelegramIdentity
+  replayFingerprintHash: string
+}
+
+export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {
+  exchangeTelegramIdentity(input: {
+    identity: TelegramIdentity
+    fingerprintHash: string
+    replayExpiresAt: Date
+    existingSessionId?: string
+    now: Date
+    session: {
+      refreshTokenHash: string
+      refreshTokenFamilyHash: string
+      expiresAt: Date
+      metadata: SessionMetadata
+    }
+  }): Promise<
+    | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
+    | { state: 'replayed' }
+  >
 }
 
 export type AccessTokens = {

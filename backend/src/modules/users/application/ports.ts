@@ -8,7 +8,7 @@ import type {
 
 export type UserRecord = {
   id: string
-  email: string
+  email: string | null
   displayName: string | null
   role: UserRole
   createdAt: Date

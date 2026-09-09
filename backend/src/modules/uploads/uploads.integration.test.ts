@@ -49,6 +49,7 @@ maybeDescribe('avatar upload API integration', () => {
     app = createApp({
       env,
       prisma,
+      legacyPasswordAuthForTests: true,
       privateStorage: { storage, httpRoutes: createFilesystemStorageRoutes(config) },
     })
   })
@@ -226,6 +227,7 @@ maybeDescribe('avatar upload API integration', () => {
     const tightApp = createApp({
       env: tightEnv,
       prisma,
+      legacyPasswordAuthForTests: true,
       privateStorage: {
         storage: new FilesystemPrivateStorage(tightConfig),
         httpRoutes: createFilesystemStorageRoutes(tightConfig),

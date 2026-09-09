@@ -9,7 +9,7 @@ export function AccountSummary({ user }: { user: UserDto }) {
     <SectionCards
       items={[
         {
-          description: user.email,
+          description: user.email ?? 'Telegram account',
           icon: UserCircle02Icon,
           label: 'Account',
           value: user.displayName ?? 'No display name',

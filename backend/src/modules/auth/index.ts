@@ -4,9 +4,13 @@ import type { AppEnv } from '../../env'
 import { drainPassCapacity } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
+import { TelegramAuthService } from './application/telegram-auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
 import { toBaseUserDto } from './domain/user'
-import { createPrismaAuthRepository } from './infrastructure/auth-repository'
+import {
+  createPrismaAuthRepository,
+  createPrismaTelegramAuthRepository,
+} from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
 import { createPasswordResetNotifier } from './infrastructure/password-reset-notifier'
@@ -21,7 +25,10 @@ import {
   hashRefreshToken,
   hashRefreshTokenFamily,
 } from './infrastructure/refresh-tokens'
+import { verifyTelegramInitData } from './infrastructure/telegram-init-data'
+import { verifyTelegramBotIdentity } from './infrastructure/telegram-bot-identity'
 import { createRequireAuth, createRequireRole, type AuthHttpEnv } from './transport/middleware'
+import { createLegacyAuthTestRoutes } from './transport/legacy-test-routes'
 import { createAuthRoutes } from './transport/routes'
 
 type CreateAuthModuleOptions = {
@@ -31,6 +38,7 @@ type CreateAuthModuleOptions = {
   env: AppEnv
   logoutCleanup?: LogoutCleanup
   projectUser?: ProjectUser
+  legacyPasswordAuthForTests?: boolean
 }
 
 const systemClock: Clock = {
@@ -46,8 +54,10 @@ export function createAuthModule({
   env,
   logoutCleanup = noLogoutCleanup,
   projectUser = toBaseUserDto,
+  legacyPasswordAuthForTests = false,
 }: CreateAuthModuleOptions) {
   const service = buildAuthService({ clock, db, emailDelivery, env, logoutCleanup, projectUser })
+  const telegramService = buildTelegramAuthService({ clock, db, env, projectUser })
   const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
 
   return {
@@ -55,8 +65,47 @@ export function createAuthModule({
       service.authenticateAccessToken(accessToken),
     requireAuth,
     requireAdmin: createRequireRole('admin'),
-    routes: createAuthRoutes({ env, requireAuth, service }),
+    legacyTestRoutes: legacyPasswordAuthForTests
+      ? createLegacyAuthTestRoutes({ env, requireAuth, service })
+      : undefined,
+    routes: createAuthRoutes({ env, service, telegramService }),
   }
+}
+
+type BuildAuthServiceOptions = Required<Omit<CreateAuthModuleOptions, 'legacyPasswordAuthForTests'>>
+
+function buildTelegramAuthService({
+  clock,
+  db,
+  env,
+  projectUser,
+}: Pick<Required<CreateAuthModuleOptions>, 'clock' | 'db' | 'env' | 'projectUser'>) {
+  const sessions = createPrismaAuthRepository(db)
+  return new TelegramAuthService({
+    accessTokens: {
+      sign: (payload) => signAccessToken(payload, env),
+      verify: (token) => verifyAccessToken(token, env),
+    },
+    clock,
+    projectUser,
+    refreshReuseGraceSeconds: env.REFRESH_REUSE_GRACE_SECONDS,
+    refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
+    refreshTokens: {
+      create: () => createRefreshToken(env.JWT_SECRET),
+      hash: hashRefreshToken,
+      familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
+      rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
+    },
+    repository: createPrismaTelegramAuthRepository(db, sessions),
+    verifyInitData: (rawInitData) => {
+      if (!env.TELEGRAM_BOT_TOKEN) throw new Error('Telegram authentication is not configured')
+      return verifyTelegramInitData(rawInitData, {
+        botToken: env.TELEGRAM_BOT_TOKEN,
+        now: clock.now(),
+      })
+    },
+  })
 }
 
 /**
@@ -88,7 +137,7 @@ function buildAuthService({
   env,
   logoutCleanup,
   projectUser,
-}: Required<CreateAuthModuleOptions>) {
+}: BuildAuthServiceOptions) {
   return new AuthService({
     accessTokens: {
       sign: (payload) => signAccessToken(payload, env),
@@ -128,3 +177,4 @@ function buildAuthService({
 export type { AuthHttpEnv }
 export type { LogoutCleanup, ProjectUser } from './application/ports'
 export type { AuthenticatedPrincipal } from './domain/user'
+export { signAccessToken, verifyTelegramBotIdentity }

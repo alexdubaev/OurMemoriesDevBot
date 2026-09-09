@@ -5,6 +5,7 @@ import {
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import type { AdminSeedConfig } from '../domain/admin-seed-config'
+import { hashBootstrapPassword, verifyBootstrapPassword } from './bootstrap-passwords'
 
 export { parseAdminSeedConfig } from '../domain/admin-seed-config'
 
@@ -15,7 +16,7 @@ export async function bootstrapAdmin(
   const requestedPasswordHash =
     config.password === null
       ? undefined
-      : await Bun.password.hash(config.password, { algorithm: 'argon2id' })
+      : await hashBootstrapPassword(config.password)
 
   const admin = await upsertAdmin(db, config, requestedPasswordHash)
 
@@ -105,7 +106,7 @@ function isUniqueConstraintFailure(error: unknown) {
 
 async function matchesPassword(password: string, passwordHash: string) {
   try {
-    return await Bun.password.verify(password, passwordHash)
+    return await verifyBootstrapPassword(password, passwordHash)
   } catch {
     return false
   }

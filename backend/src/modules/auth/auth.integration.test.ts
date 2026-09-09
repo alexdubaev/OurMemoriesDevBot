@@ -21,7 +21,7 @@ maybeDescribe('auth API integration', () => {
   }
   const env = loadEnv(envInput)
   const prisma = createPrisma(databaseUrl!)
-  const app = createApp({ env, prisma })
+  const app = createApp({ env, prisma, legacyPasswordAuthForTests: true })
 
   beforeEach(async () => {
     await prisma.taskOutbox.deleteMany()
@@ -177,7 +177,7 @@ maybeDescribe('auth API integration', () => {
         messages.push(message)
       },
     }
-    const emailApp = createApp({ emailDelivery, env, prisma })
+    const emailApp = createApp({ emailDelivery, env, prisma, legacyPasswordAuthForTests: true })
     // The drain runs outside any request, so it builds its own auth service from the runtime.
     const drainRuntime = { emailDelivery, env, prisma } as unknown as BackendRuntime
     const drain = () => drainTaskOutbox(drainRuntime, { now: new Date() })
@@ -322,7 +322,7 @@ maybeDescribe('auth API integration', () => {
     }
     // A pass makes five loops, so a batch of two is a ceiling of ten.
     const floodEnv = loadEnv({ ...envInput, TASK_OUTBOX_BATCH_LIMIT: '2' })
-    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma })
+    const floodApp = createApp({ emailDelivery, env: floodEnv, prisma, legacyPasswordAuthForTests: true })
     const drainRuntime = { emailDelivery, env: floodEnv, prisma } as unknown as BackendRuntime
     const drain = () =>
       drainTaskOutbox(drainRuntime, { ...drainOptionsFromEnv(floodEnv), now: new Date() })
@@ -577,6 +577,7 @@ maybeDescribe('auth API integration', () => {
         COOKIE_SECURE: true,
       },
       prisma,
+      legacyPasswordAuthForTests: true,
     })
     const register = await productionApp.request('/api/auth/register', {
       method: 'POST',
@@ -610,6 +611,7 @@ maybeDescribe('auth API integration', () => {
         COOKIE_SECURE: true,
       },
       prisma,
+      legacyPasswordAuthForTests: true,
     })
     const register = await productionApp.request('/api/auth/register', {
       method: 'POST',

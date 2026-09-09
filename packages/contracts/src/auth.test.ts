@@ -17,17 +17,30 @@ import {
   tokenLogoutRequestSchema,
   tokenRefreshRequestSchema,
   tokenRefreshResponseSchema,
+  telegramAuthRequestSchema,
+  userSchema,
 } from './index'
 
 const validUser = {
   id: 'user_1',
-  email: 'user@example.com',
+  email: null,
   displayName: null,
   role: 'user',
   createdAt: '2026-05-11T00:00:00.000Z',
 } satisfies UserDto
 
 describe('auth contracts', () => {
+  test('accepts only raw Telegram initData for the public authentication exchange', () => {
+    expect(telegramAuthRequestSchema.parse({ initData: 'query_id=q&auth_date=1&hash=h' })).toEqual({
+      initData: 'query_id=q&auth_date=1&hash=h',
+    })
+    expect(() => telegramAuthRequestSchema.parse({ initData: '' })).toThrow()
+    expect(() => telegramAuthRequestSchema.parse({ initData: 'valid', userId: '123' })).toThrow()
+  })
+
+  test('represents Telegram users without inventing an email address', () => {
+    expect(userSchema.parse(validUser)).toEqual(validUser)
+  })
   test('normalizes registration and login input', () => {
     expect(
       registerRequestSchema.parse({

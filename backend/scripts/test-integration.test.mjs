@@ -54,7 +54,9 @@ describe('backend integration Docker lifecycle', () => {
         integrationTestFiles: [integrationFile],
         spawn,
       }),
-    ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
+    ).rejects.toThrow(
+      `bun test ${integrationFile} --max-concurrency=1 --timeout=${integrationTestTimeoutMs} failed with exit code 7`,
+    )
 
     const projectName = integrationProjectName(calls)
     expect(commandArgs(calls)).toContainEqual([
@@ -146,7 +148,9 @@ describe('backend integration Docker lifecycle', () => {
         spawn,
         writeError: (message) => messages.push(message),
       }),
-    ).rejects.toThrow(`bun test ${integrationFile} --timeout=${integrationTestTimeoutMs} failed with exit code 7`)
+    ).rejects.toThrow(
+      `bun test ${integrationFile} --max-concurrency=1 --timeout=${integrationTestTimeoutMs} failed with exit code 7`,
+    )
 
     expect(messages).toHaveLength(1)
     expect(messages[0]).toContain('Docker cleanup also failed')
@@ -243,6 +247,7 @@ describe('backend integration Docker lifecycle', () => {
       integrationFile,
       '-t',
       'focused behavior',
+      '--max-concurrency=1',
       `--timeout=${integrationTestTimeoutMs}`,
     ])
     expect(calls.some(({ command }) => command === 'docker')).toBe(false)
@@ -271,7 +276,12 @@ describe('backend integration Docker lifecycle', () => {
     // Longer than the longest request-path transaction timeout, so a lock held too long is still
     // reported through the request that held it rather than by the harness as a bare timeout.
     expect(integrationTestTimeoutMs).toBeGreaterThan(userAuthenticationSessionTransactionOptions.timeout)
-    expect(bunTestArgs(calls)).toEqual(['test', integrationFile, `--timeout=${integrationTestTimeoutMs}`])
+    expect(bunTestArgs(calls)).toEqual([
+      'test',
+      integrationFile,
+      '--max-concurrency=1',
+      `--timeout=${integrationTestTimeoutMs}`,
+    ])
 
     const overridden = []
     await runBackendIntegration({
@@ -281,7 +291,38 @@ describe('backend integration Docker lifecycle', () => {
       spawn: successfulSpawn(overridden),
     })
 
-    expect(bunTestArgs(overridden)).toEqual(['test', integrationFile, '--timeout=1000'])
+    expect(bunTestArgs(overridden)).toEqual([
+      'test',
+      integrationFile,
+      '--timeout=1000',
+      '--max-concurrency=1',
+    ])
+  })
+
+  test('isolates shared-database integration files in serial Bun processes', async () => {
+    const calls = []
+
+    await runBackendIntegration({
+      environment: { TEST_DATABASE_URL: testDatabaseUrl, TEST_SKIP_DOCKER: '1' },
+      integrationTestFiles: [integrationFile, 'src/other.integration.test.ts'],
+      testArgs: ['--max-concurrency=2'],
+      spawn: successfulSpawn(calls),
+    })
+
+    expect(allBunTestArgs(calls)).toEqual([
+      [
+        'test',
+        integrationFile,
+        '--max-concurrency=2',
+        `--timeout=${integrationTestTimeoutMs}`,
+      ],
+      [
+        'test',
+        'src/other.integration.test.ts',
+        '--max-concurrency=2',
+        `--timeout=${integrationTestTimeoutMs}`,
+      ],
+    ])
   })
 
   test('TEST_SKIP_DOCKER requires an explicit external test database URL', async () => {
@@ -330,6 +371,12 @@ function successfulSpawn(calls, shouldFail = () => false) {
 
 function bunTestArgs(calls) {
   return calls.find(({ command, args }) => command === 'bun' && args[0] === 'test')?.args
+}
+
+function allBunTestArgs(calls) {
+  return calls
+    .filter(({ command, args }) => command === 'bun' && args[0] === 'test')
+    .map(({ args }) => args)
 }
 
 function commandArgs(calls) {

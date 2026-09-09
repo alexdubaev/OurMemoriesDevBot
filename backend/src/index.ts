@@ -1,8 +1,20 @@
 import { createApp } from './app'
+import { verifyTelegramBotIdentity } from './modules/auth'
 import { createBackendRuntime } from './runtime'
 import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
+if (runtime.env.TELEGRAM_BOT_TOKEN) {
+  try {
+    await verifyTelegramBotIdentity({
+      token: runtime.env.TELEGRAM_BOT_TOKEN,
+      expectedUsername: runtime.env.TELEGRAM_BOT_EXPECTED_USERNAME,
+    })
+  } catch (error) {
+    await runtime.close()
+    throw error
+  }
+}
 const app = createApp({
   backgroundTasks: runtime.backgroundTasks,
   emailDelivery: runtime.emailDelivery,

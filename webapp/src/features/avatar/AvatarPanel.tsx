@@ -148,7 +148,7 @@ function uploadErrorMessage(error: unknown) {
 }
 
 function initials(user: UserDto) {
-  const source = user.displayName?.trim() || user.email
+  const source = user.displayName?.trim() || user.email || 'Telegram user'
 
   return source
     .split(/[\s@._-]+/)

@@ -14,7 +14,6 @@ describe('access tokens', () => {
       {
         sub: 'user_1',
         sessionId: 'session_1',
-        email: 'user@example.com',
       },
       env,
     )
@@ -22,15 +21,14 @@ describe('access tokens', () => {
     await expect(verifyAccessToken(token, env)).resolves.toEqual({
       sub: 'user_1',
       sessionId: 'session_1',
-      email: 'user@example.com',
     })
     expect(decodeJwt(token)).not.toHaveProperty('role')
+    expect(decodeJwt(token)).not.toHaveProperty('email')
   })
 
   test('rejects JWTs signed with any algorithm except HS256', async () => {
     const token = await new SignJWT({
       sessionId: 'session_1',
-      email: 'user@example.com',
     })
       .setProtectedHeader({ alg: 'HS384' })
       .setSubject('user_1')
