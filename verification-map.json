@@ -31,6 +31,11 @@
       "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration"]
     },
     {
+      "impact": "memories",
+      "prefixes": ["backend/src/modules/memories/"],
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration"]
+    },
+    {
       "impact": "schema",
       "prefixes": ["backend/prisma/"],
       "commandIds": ["architecture", "typecheck", "backend-integration"]
