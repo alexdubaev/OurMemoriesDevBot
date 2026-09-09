@@ -101,9 +101,13 @@ const envSchema = z.object({
   PRIVATE_STORAGE_SECRET_ACCESS_KEY: optionalStringSchema,
   PRIVATE_STORAGE_FORCE_PATH_STYLE: booleanStringSchema,
   PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: booleanStringSchema,
-  PRIVATE_STORAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+  PRIVATE_STORAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(100_000_000),
   PRIVATE_STORAGE_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(15 * 60),
   PRIVATE_STORAGE_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(7 * 24 * 60 * 60).default(5 * 60),
+  MEDIA_FAMILY_QUOTA_BYTES: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(2_147_483_648),
+  MEDIA_MAX_PENDING_UPLOADS: z.coerce.number().int().positive().max(100).default(5),
+  MEDIA_RESERVATION_TTL_SECONDS: z.coerce.number().int().positive().max(24 * 60 * 60).default(15 * 60),
+  MEDIA_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(15 * 60).default(5 * 60),
 }).superRefine((env, ctx) => {
   validateJwtSecret(env, ctx)
   validateProductionRuntime(env, ctx)

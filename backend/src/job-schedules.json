@@ -22,5 +22,21 @@
     "yandexExpression": "0 3 ? * * *",
     "lockTimeoutMs": 240000,
     "yandexExecutionTimeoutSeconds": 180
+  },
+  {
+    "key": "media-pending",
+    "job": "media:pending:cleanup",
+    "expression": "37 * * * *",
+    "yandexExpression": "37 * ? * * *",
+    "lockTimeoutMs": 900000,
+    "yandexExecutionTimeoutSeconds": 840
+  },
+  {
+    "key": "media-orphans",
+    "job": "media:orphans:reconcile",
+    "expression": "25 4 * * *",
+    "yandexExpression": "25 4 ? * * *",
+    "lockTimeoutMs": 900000,
+    "yandexExecutionTimeoutSeconds": 840
   }
 ]

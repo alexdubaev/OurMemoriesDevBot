@@ -42,6 +42,11 @@ export type {
   PresignedDownload,
   PresignedUpload,
   PrivateStorage,
+  ListedStorageObject,
+  ReadObjectInput,
+  ReadRangeInput,
   StorageDriverName,
   StorageObjectHead,
+  StorageObjectRead,
+  WriteObjectInput,
 } from './port'

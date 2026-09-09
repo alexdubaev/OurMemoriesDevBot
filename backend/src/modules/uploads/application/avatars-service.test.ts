@@ -42,6 +42,19 @@ function createFakeStorage() {
         expiresAt: new Date(clockMs + 300_000).toISOString(),
       }
     },
+    async writeObject(input) {
+      const bytes = new Uint8Array(await new Response(input.body).arrayBuffer())
+      if (objects.has(input.key)) throw new Error('already exists')
+      objects.set(input.key, { bytes, contentType: input.contentType })
+      return { key: input.key, contentLength: bytes.byteLength, contentType: input.contentType }
+    },
+    async readObject(input) {
+      const stored = objects.get(input.key)
+      if (!stored) return null
+      const bytes = input.range ? stored.bytes.subarray(input.range.start, input.range.end + 1) : stored.bytes
+      return { key: input.key, body: new Blob([bytes.slice().buffer as ArrayBuffer]).stream(),
+        contentLength: bytes.byteLength, contentType: stored.contentType }
+    },
     async headObject(key) {
       const stored = objects.get(key)
       return stored
@@ -58,6 +71,9 @@ function createFakeStorage() {
     },
     async deleteObject(key) {
       objects.delete(key)
+    },
+    async listObjects(prefix) {
+      return [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key, lastModified: new Date(clockMs) }))
     },
   }
 

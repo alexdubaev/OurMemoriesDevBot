@@ -11,6 +11,8 @@ export type StorageErrorKind =
   | 'invalid_key'
   /** A caller asked for something the driver refuses to sign: bad size, bad type, bad TTL. */
   | 'invalid_request'
+  /** An immutable key already exists and must not be overwritten. */
+  | 'already_exists'
   /** The driver is not usable with the current configuration. */
   | 'misconfigured'
 

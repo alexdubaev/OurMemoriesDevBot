@@ -7,6 +7,7 @@ import type { FamilyAccess } from '../families'
 import { MemoryService } from './application/memory-service'
 import type { MediaMemoryCatalog } from './application/ports'
 import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
+export { createMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
 import { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 import { createMemoryRoutes } from './transport/routes'
 

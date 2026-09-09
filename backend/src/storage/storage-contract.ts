@@ -206,6 +206,64 @@ export function describeStorageContract(
       })
     })
 
+    test('writes and reads an object as streams without buffering the whole payload', async () => {
+      await withSetup(async (setup) => {
+        const key = createStorageObjectKey({ namespace: 'contract' })
+        const chunks = [pngFixture.subarray(0, 11), pngFixture.subarray(11)]
+        let pull = 0
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            const chunk = chunks[pull]
+            pull += 1
+            if (chunk) controller.enqueue(chunk)
+            else controller.close()
+          },
+        })
+
+        await setup.storage.writeObject({
+          key,
+          body,
+          contentLength: pngFixture.byteLength,
+          contentType: 'image/png',
+        })
+        const stored = await setup.storage.readObject({ key, range: { start: 8, end: 19 } })
+
+        expect(stored?.contentLength).toBe(12)
+        expect(stored?.contentRange).toEqual({ start: 8, end: 19, total: pngFixture.byteLength })
+        expect(Buffer.from(await new Response(stored?.body).arrayBuffer())).toEqual(
+          pngFixture.subarray(8, 20),
+        )
+      })
+    })
+
+    test('stream writes stay write-once and reject a body shorter than its declared length', async () => {
+      await withSetup(async (setup) => {
+        const key = createStorageObjectKey({ namespace: 'contract' })
+        const stream = () => new Blob([pngFixture]).stream()
+
+        await setup.storage.writeObject({
+          key,
+          body: stream(),
+          contentLength: pngFixture.byteLength,
+          contentType: 'image/png',
+        })
+
+        await expect(setup.storage.writeObject({
+          key,
+          body: stream(),
+          contentLength: pngFixture.byteLength,
+          contentType: 'image/png',
+        })).rejects.toMatchObject({ kind: 'already_exists' })
+
+        await expect(setup.storage.writeObject({
+          key: createStorageObjectKey({ namespace: 'contract' }),
+          body: new Blob([pngFixture.subarray(0, 8)]).stream(),
+          contentLength: pngFixture.byteLength,
+          contentType: 'image/png',
+        })).rejects.toMatchObject({ kind: 'invalid_request' })
+      })
+    })
+
     test('serves the stored bytes through a presigned GET', async () => {
       await withSetup(async (setup) => {
         const key = createStorageObjectKey({ namespace: 'contract' })

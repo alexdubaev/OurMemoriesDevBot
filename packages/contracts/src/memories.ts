@@ -55,7 +55,7 @@ export const ifMatchVersionHeadersSchema = z.object({
   'if-match': z.coerce.number().int().positive(),
 })
 
-const backendMediaPathSchema = z.string().superRefine((value, context) => {
+export const backendMediaPathSchema = z.string().superRefine((value, context) => {
   if (!value.startsWith('/api/v1/') || value.startsWith('//') || value.includes('\\') || value.includes('#')) {
     context.addIssue({ code: 'custom', message: 'Media path must be a relative backend API path' })
     return

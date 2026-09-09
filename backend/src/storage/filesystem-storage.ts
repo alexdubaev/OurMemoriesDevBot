@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { link, mkdir, open, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { link, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 import type { FilesystemStorageConfig } from './config'
 import { StorageError } from './errors'
@@ -12,8 +15,11 @@ import type {
   PresignedDownload,
   PresignedUpload,
   PrivateStorage,
+  ReadObjectInput,
   ReadRangeInput,
   StorageObjectHead,
+  StorageObjectRead,
+  WriteObjectInput,
 } from './port'
 import {
   assertByteSize,
@@ -98,6 +104,79 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     }
   }
 
+  async writeObject(input: WriteObjectInput): Promise<StorageObjectHead> {
+    const safeKey = assertSafeObjectKey(input.key)
+    const contentType = assertContentType(input.contentType)
+    const contentLength = assertByteSize(input.contentLength, this.config.uploadMaxBytes)
+    const objectPath = this.objectPath(safeKey)
+    await mkdir(dirname(objectPath), { recursive: true })
+    const temporaryPath = `${objectPath}.${randomUUID()}.part`
+    const hash = createHash('md5')
+    let written = 0
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        written += chunk.byteLength
+        if (written > contentLength) {
+          callback(new StorageError('invalid_request', 'Stream exceeds its declared length'))
+          return
+        }
+        hash.update(chunk)
+        callback(null, chunk)
+      },
+    })
+
+    try {
+      await pipeline(
+        Readable.fromWeb(input.body as never),
+        meter,
+        createWriteStream(temporaryPath, { flags: 'wx' }),
+      )
+      if (written !== contentLength) {
+        throw new StorageError('invalid_request', 'Stream does not match its declared length')
+      }
+      try {
+        await link(temporaryPath, objectPath)
+      } catch (error) {
+        if (isExistingFile(error)) {
+          throw new StorageError('already_exists', 'Storage object key already exists')
+        }
+        throw error
+      }
+      const etag = `"${hash.digest('hex')}"`
+      const metadataPath = this.metadataPath(safeKey)
+      await mkdir(dirname(metadataPath), { recursive: true })
+      await writeFile(
+        metadataPath,
+        JSON.stringify({ contentType, contentLength, etag } satisfies StoredObjectMetadata),
+      )
+      return { key: safeKey, contentLength, contentType, etag }
+    } finally {
+      await unlinkIfPresent(temporaryPath)
+    }
+  }
+
+  async readObject(input: ReadObjectInput): Promise<StorageObjectRead | null> {
+    const safeKey = assertSafeObjectKey(input.key)
+    const metadata = await this.readMetadata(safeKey)
+    if (!metadata) return null
+    const range = input.range ? assertReadRange(input.range) : undefined
+    if (range && (range.start >= metadata.contentLength || range.end >= metadata.contentLength)) {
+      throw new StorageError('invalid_request', 'Read range exceeds the stored object')
+    }
+    const nodeBody = createReadStream(this.objectPath(safeKey), range)
+    const body = Readable.toWeb(nodeBody) as unknown as ReadableStream<Uint8Array>
+    return {
+      key: safeKey,
+      body,
+      contentLength: range ? range.end - range.start + 1 : metadata.contentLength,
+      contentType: metadata.contentType,
+      etag: metadata.etag,
+      ...(range
+        ? { contentRange: { start: range.start, end: range.end, total: metadata.contentLength } }
+        : {}),
+    }
+  }
+
   async readRange(key: string, range: ReadRangeInput): Promise<Uint8Array | null> {
     const safeKey = assertSafeObjectKey(key)
     const { start, end } = assertReadRange(range)
@@ -140,34 +219,43 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     body: Uint8Array,
     contentType: string,
   ): Promise<{ stored: true; etag: string } | { stored: false; reason: 'already_exists' }> {
-    const safeKey = assertSafeObjectKey(key)
-    const objectPath = this.objectPath(safeKey)
-
-    if (await pathExists(objectPath)) return { stored: false, reason: 'already_exists' }
-
-    await mkdir(dirname(objectPath), { recursive: true })
-    const temporaryPath = `${objectPath}.${randomUUID()}.part`
-    await writeFile(temporaryPath, body, { flag: 'wx' })
-
     try {
-      await link(temporaryPath, objectPath)
+      const stored = await this.writeObject({
+        key,
+        body: new Blob([body.slice().buffer as ArrayBuffer]).stream(),
+        contentLength: body.byteLength,
+        contentType,
+      })
+      return { stored: true, etag: stored.etag ?? '' }
     } catch (error) {
-      await unlinkIfPresent(temporaryPath)
-      if (isExistingFile(error)) return { stored: false, reason: 'already_exists' }
+      if (error instanceof StorageError && error.kind === 'already_exists') {
+        return { stored: false, reason: 'already_exists' }
+      }
       throw error
     }
+  }
 
-    await unlinkIfPresent(temporaryPath)
-
-    const etag = `"${createHash('md5').update(body).digest('hex')}"`
-    const metadataPath = this.metadataPath(safeKey)
-    await mkdir(dirname(metadataPath), { recursive: true })
-    await writeFile(
-      metadataPath,
-      JSON.stringify({ contentType, contentLength: body.byteLength, etag } satisfies StoredObjectMetadata),
-    )
-
-    return { stored: true, etag }
+  async listObjects(prefix: string) {
+    const safePrefix = assertSafeObjectKey(prefix)
+    const root = join(this.config.root, 'objects')
+    const found: Array<{ key: string; lastModified: Date }> = []
+    const walk = async (directory: string) => {
+      let entries
+      try { entries = await readdir(directory, { withFileTypes: true }) } catch (error) {
+        if (isMissingFile(error)) return
+        throw error
+      }
+      for (const entry of entries) {
+        const path = join(directory, entry.name)
+        if (entry.isDirectory()) await walk(path)
+        else if (!entry.name.endsWith('.part')) {
+          const key = path.slice(root.length + 1).split(sep).join('/')
+          if (key.startsWith(safePrefix)) found.push({ key, lastModified: (await stat(path)).mtime })
+        }
+      }
+    }
+    await walk(join(root, ...safePrefix.split('/')))
+    return found
   }
 
   async readMetadata(key: string): Promise<StoredObjectMetadata | null> {
@@ -206,16 +294,6 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     const path = claims.key.split('/').map(encodeURIComponent).join('/')
 
     return `${this.config.publicBaseUrl}${filesystemStorageRoutePrefix}/${path}?${params.toString()}`
-  }
-}
-
-async function pathExists(path: string) {
-  try {
-    await stat(path)
-    return true
-  } catch (error) {
-    if (isMissingFile(error)) return false
-    throw error
   }
 }
 
