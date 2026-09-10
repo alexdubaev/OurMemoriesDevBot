@@ -465,7 +465,7 @@ function commandText(command: string, cancelled = false) {
 function commandButtons(env: AppEnv, command: string, argument: string) {
   if (!env.TELEGRAM_MINI_APP_URL || !['start', 'app'].includes(command)) return undefined
   const url = command === 'start' && argument
-    ? `${env.TELEGRAM_MINI_APP_URL}/#invite=${encodeURIComponent(argument)}`
+    ? `https://t.me/OurMemoriesDevBot?startapp=invite_${encodeURIComponent(argument)}`
     : env.TELEGRAM_MINI_APP_URL
   return { buttons: [{ text: command === 'start' && argument ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
 }

@@ -63,6 +63,7 @@ export const completeChildProfileRequestSchema = z.object({
   sex: childSexSchema,
   avatarMediaId: z.uuid(),
   avatarCrop: childAvatarCropSchema,
+  expectedVersion: z.int().positive().nullable().default(null),
 }).strict()
 
 const updateChildRequestSchema = z
@@ -103,6 +104,7 @@ export const updateMemberRoleRequestSchema = z
   .object({
     role: familyRoleSchema.optional(),
     familyDisplayName: familyDisplayNameSchema.nullable().optional(),
+    expectedVersion: z.int().positive().optional(),
   })
   .strict()
   .refine((input) => input.role !== undefined || input.familyDisplayName !== undefined,
@@ -116,6 +118,7 @@ export const familyMemberSchema = z
     role: familyRoleSchema,
     isOwner: z.boolean(),
     joinedAt: z.string().datetime(),
+    version: z.int().positive(),
   })
   .strict()
 
@@ -139,8 +142,11 @@ export const childSchema = z.object({
   sex: childSexSchema.nullable(),
   avatarMediaId: z.uuid().nullable(),
   avatarCrop: childAvatarCropSchema.nullable(),
+  version: z.int().positive(),
   isComplete: z.boolean(),
 }).strict()
+
+export const familyUsageSchema = z.object({ usedBytes: z.number().int().nonnegative(), quotaBytes: z.number().int().positive().nullable() }).strict()
 
 export const familyResponseSchema = z.object({
   family: familySchema,
@@ -213,3 +219,4 @@ export type FamilyInviteDto = z.infer<typeof familyInviteSchema>
 export type InvitePreviewResponse = z.infer<typeof invitePreviewResponseSchema>
 export type AcceptInviteResponse = z.infer<typeof acceptInviteResponseSchema>
 export type FamilyMeResponse = z.infer<typeof familyMeResponseSchema>
+export type FamilyUsage = z.infer<typeof familyUsageSchema>

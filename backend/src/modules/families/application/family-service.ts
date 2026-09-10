@@ -14,6 +14,7 @@ import type {
   FamilyInviteDto,
   FamilyMemberDto,
   FamilyMeResponse,
+  FamilyUsage,
   FamilyResponse,
   InvitePreviewResponse,
   UpdateFamilyRequest,
@@ -36,6 +37,7 @@ export class FamilyService {
     private readonly persistenceErrors: PersistenceErrorClassifier,
     private readonly idempotency: IdempotencyExecutor<TransactionClient>,
     private readonly idempotencySecret: string,
+    private readonly familyQuotaBytes: number,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -189,12 +191,15 @@ export class FamilyService {
             renditionStatus: 'ready',
             deletedAt: null,
           },
-          select: { id: true },
+          select: { id: true, width: true, height: true },
         }),
         tx.child.findFirst({ where: { familyId: scope.familyId }, orderBy: { createdAt: 'asc' } }),
       ])
       if (!avatar) {
         throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
+      }
+      if (!isSquarePixelCrop(input.avatarCrop, avatar.width, avatar.height)) {
+        throw new FamilyFailure('conflict', 'Кадрирование аватара должно быть квадратным')
       }
       const data = {
         displayName: input.name,
@@ -203,8 +208,11 @@ export class FamilyService {
         avatarMediaId: input.avatarMediaId,
         avatarCrop: input.avatarCrop,
       }
+      if (currentChild && input.expectedVersion !== null && input.expectedVersion !== currentChild.version) {
+        throw new FamilyFailure('conflict', 'Профиль ребёнка изменён другим участником')
+      }
       const child = currentChild
-        ? await tx.child.update({ where: { id: currentChild.id }, data })
+        ? await tx.child.update({ where: { id: currentChild.id }, data: { ...data, version: { increment: 1 } } })
         : await tx.child.create({ data: { familyId: scope.familyId, ...data } })
 
       if (currentChild?.avatarMediaId && currentChild.avatarMediaId !== input.avatarMediaId) {
@@ -293,10 +301,10 @@ export class FamilyService {
         )
         const family = await tx.family.findFirst({
           where: { id: scope.familyId, status: 'active' },
-          select: { id: true, children: { select: { id: true }, take: 1 } },
+          select: { id: true, children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 } },
         })
         if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
-        if (!family.children[0]) {
+        if (!family.children[0] || !isCompletedChild(family.children[0])) {
           throw new FamilyFailure('conflict', 'Сначала завершите профиль ребёнка')
         }
         const now = this.now()
@@ -336,6 +344,13 @@ export class FamilyService {
         'Этот Idempotency-Key уже использован с другими данными',
       ),
     })).response
+  }
+
+  async getUsage(scope: FamilyScope): Promise<FamilyUsage> {
+    await this.access.requireMember(scope)
+    const family = await this.db.family.findFirst({ where: { id: scope.familyId, status: 'active' }, select: { storageUsedBytes: true } })
+    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+    return { usedBytes: Number(family.storageUsedBytes), quotaBytes: this.familyQuotaBytes }
   }
 
   async listInvites(scope: FamilyScope): Promise<{ items: FamilyInviteDto[] }> {
@@ -506,15 +521,20 @@ export class FamilyService {
         throw new FamilyFailure('forbidden', 'Создателя семьи нельзя изменять через этот экран')
       }
       const updated = await tx.familyMember.updateMany({
-        where: { familyId: scope.familyId, userId, revokedAt: null },
+        where: { familyId: scope.familyId, userId, revokedAt: null, ...(input.expectedVersion === undefined ? {} : { version: input.expectedVersion }) },
         data: {
           ...(input.role === undefined ? {} : { role: input.role }),
           ...(input.familyDisplayName === undefined
             ? {}
-            : { familyDisplayName: input.familyDisplayName }),
+          : { familyDisplayName: input.familyDisplayName }),
+          version: { increment: 1 },
         },
       })
-      if (updated.count === 0) throw new FamilyFailure('not_found', 'Участник не найден')
+      if (updated.count === 0) {
+        const exists = await tx.familyMember.count({ where: { familyId: scope.familyId, userId, revokedAt: null } })
+        if (exists) throw new FamilyFailure('conflict', 'Данные участника изменены другим пользователем')
+        throw new FamilyFailure('not_found', 'Участник не найден')
+      }
       if (input.role === 'viewer') {
         await tx.familyInvite.updateMany({
           where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
@@ -665,6 +685,7 @@ function childDto(child: {
   sex: string | null
   avatarMediaId: string | null
   avatarCrop: unknown
+  version: number
 }) {
   const sex: 'boy' | 'girl' | null = child.sex === 'boy' || child.sex === 'girl' ? child.sex : null
   const avatarCrop = validAvatarCrop(child.avatarCrop) ? child.avatarCrop : null
@@ -675,8 +696,19 @@ function childDto(child: {
     sex,
     avatarMediaId: child.avatarMediaId,
     avatarCrop,
-    isComplete: child.birthDate !== null && sex !== null && child.avatarMediaId !== null && avatarCrop !== null,
+    version: child.version,
+    isComplete: child.displayName.trim().length > 0 && child.birthDate !== null && sex !== null && child.avatarMediaId !== null && avatarCrop !== null,
   }
+}
+
+function isCompletedChild(child: { displayName: string; birthDate: Date | null; sex: string | null; avatarMediaId: string | null; avatarCrop: unknown }) {
+  return child.displayName.trim().length > 0 && child.birthDate !== null &&
+    (child.sex === 'boy' || child.sex === 'girl') && child.avatarMediaId !== null && validAvatarCrop(child.avatarCrop)
+}
+
+function isSquarePixelCrop(crop: { x: number; y: number; width: number; height: number }, width: number | null, height: number | null) {
+  if (!width || !height) return false
+  return Math.abs(crop.width * width - crop.height * height) < 0.01
 }
 
 function pendingInviteDto(invite: {
@@ -712,6 +744,7 @@ function memberDto(
     role: 'full' | 'viewer'
     familyDisplayName: string | null
     joinedAt: Date
+    version: number
     user: { displayName: string | null }
   },
   ownerUserId: string,
@@ -723,6 +756,7 @@ function memberDto(
     role: member.role,
     isOwner: member.userId === ownerUserId,
     joinedAt: member.joinedAt.toISOString(),
+    version: member.version,
   }
 }
 

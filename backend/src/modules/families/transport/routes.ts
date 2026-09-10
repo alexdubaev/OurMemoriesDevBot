@@ -14,6 +14,7 @@ import {
   familyMeResponseSchema,
   familyParamsSchema,
   familyResponseSchema,
+  familyUsageSchema,
   idempotencyKeyHeadersSchema,
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
@@ -86,6 +87,11 @@ const createInviteRoute = createRoute({
     body: { content: json(createInviteRequestSchema) },
   },
   responses: { ...errors, 201: { content: json(createInviteResponseSchema), description: 'Created one-use invitation' } },
+})
+const usageRoute = createRoute({
+  method: 'get', path: '/families/{familyId}/usage', security: bearerSecurity,
+  request: { params: familyParamsSchema },
+  responses: { ...errors, 200: { content: json(familyUsageSchema), description: 'Private family archive usage' } },
 })
 const listInvitesRoute = createRoute({
   method: 'get', path: '/families/{familyId}/invites', security: bearerSecurity,
@@ -162,6 +168,9 @@ export function createFamilyRoutes({
   ), 200))
   routes.openapi(listMembersRoute, async (c) => c.json(await executeFamily(() =>
     service.listMembers(scope(c.var.user, c.req.valid('param').familyId)),
+  ), 200))
+  routes.openapi(usageRoute, async (c) => c.json(await executeFamily(() =>
+    service.getUsage(scope(c.var.user, c.req.valid('param').familyId)),
   ), 200))
   routes.openapi(createInviteRoute, async (c) => c.json(await executeFamily(() =>
     service.createInvite(

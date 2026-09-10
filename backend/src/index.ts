@@ -6,7 +6,7 @@ import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
 let telegram: ReturnType<typeof createTelegramModule> | null = null
-if (runtime.env.TELEGRAM_BOT_TOKEN) {
+if (runtime.env.TELEGRAM_BOT_TOKEN && runtime.env.NODE_ENV !== 'test') {
   try {
     const identity = await verifyTelegramBotIdentity({
       token: runtime.env.TELEGRAM_BOT_TOKEN,

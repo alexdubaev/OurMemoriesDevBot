@@ -287,8 +287,17 @@ maybeDescribe('Private media API', () => {
       name, timezone: 'Europe/Moscow',
     }, randomUUID())
     if (created.response.status === 201) {
+      const avatar = await prisma.mediaAsset.create({
+        data: {
+          familyId: created.body.family.id, uploaderId: created.body.family.ownerUserId,
+          sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+          originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', verifiedMime: 'image/png',
+          sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: 1n, width: 1, height: 1,
+          originalStatus: 'stored', renditionStatus: 'ready',
+        },
+      })
       const child = await prisma.child.create({
-        data: { familyId: created.body.family.id, displayName: 'Legacy child' },
+        data: { familyId: created.body.family.id, displayName: 'Test child', birthDate: new Date('2024-01-01T00:00:00.000Z'), sex: 'girl', avatarMediaId: avatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 } },
       })
       created.body.child = { id: child.id }
     }

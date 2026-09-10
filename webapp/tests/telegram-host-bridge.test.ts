@@ -51,7 +51,7 @@ describe('Telegram HostBridge', () => {
     expect(backCalls).toBe(1)
     expect(openedLinks).toEqual([
       'https://t.me/OurMemoriesDevBot',
-      'https://t.me/OurMemoriesDevBot?start=invite_opaque-token_1',
+      'https://t.me/OurMemoriesDevBot?startapp=invite_opaque-token_1',
     ])
   })
 

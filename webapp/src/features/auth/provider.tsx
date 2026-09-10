@@ -18,6 +18,7 @@ import { AuthApi } from './api'
 import {
   clearAuthenticatedSession,
   confirmPasswordResetAndClearSession,
+  authQueryKeys,
   useCurrentUserQuery,
   useLoginMutation,
   useLogoutMutation,
@@ -137,7 +138,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const authenticateTelegram = useCallback(async (initData: string) => {
     const result = await api.authenticateTelegram(initData)
     setAccessToken(result.data.accessToken)
-  }, [api, setAccessToken])
+    queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
+  }, [api, queryClient, setAccessToken])
 
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {

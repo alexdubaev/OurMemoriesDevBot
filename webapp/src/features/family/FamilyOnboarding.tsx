@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
@@ -28,6 +28,9 @@ export function FamilyOnboarding({
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [position, setPosition] = useState({ x: initialChild?.avatarCrop?.x ?? 0, y: initialChild?.avatarCrop?.y ?? 0 })
+  const [aspect, setAspect] = useState(1)
+  const finalizedAvatar = useRef<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [requestError, setRequestError] = useState<Error | null>(null)
@@ -38,9 +41,10 @@ export function FamilyOnboarding({
 
   const crop = useMemo<Crop>(() => {
     if (!file && initialChild?.avatarCrop) return initialChild.avatarCrop
-    const size = 1 / zoom
-    return { x: (1 - size) / 2, y: (1 - size) / 2, width: size, height: size }
-  }, [file, initialChild?.avatarCrop, zoom])
+    const width = Math.min(1, 1 / aspect) / zoom
+    const height = Math.min(1, aspect) / zoom
+    return { x: Math.min(Math.max(0, position.x), 1 - width), y: Math.min(Math.max(0, position.y), 1 - height), width, height }
+  }, [aspect, file, initialChild?.avatarCrop, position, zoom])
   const age = ageFromBirthDate(birthDate)
 
   function chooseFile(next: File | null) {
@@ -56,6 +60,7 @@ export function FamilyOnboarding({
       return
     }
     setFile(next)
+    finalizedAvatar.current = null
     setPreviewUrl(URL.createObjectURL(next))
     setFormErrors((errors) => ({ ...errors, avatar: '' }))
   }
@@ -74,11 +79,14 @@ export function FamilyOnboarding({
     try {
       const contentType = file ? resolveAvatarContentType(file) : null
       if (file && !contentType) return
-      const avatarMediaId = file && contentType
-        ? await uploadChildAvatar(transport, familyId, file, contentType)
-        : initialChild!.avatarMediaId!
+      let avatarMediaId = initialChild?.avatarMediaId ?? null
+      if (file && contentType) {
+        avatarMediaId = finalizedAvatar.current ?? await uploadChildAvatar(transport, familyId, file, contentType)
+        finalizedAvatar.current = avatarMediaId
+      }
+      if (!avatarMediaId) throw new Error('Не удалось подготовить фотографию ребёнка.')
       await completeChildProfile(transport, familyId, {
-        name: name.trim(), birthDate, sex, avatarMediaId, avatarCrop: crop,
+        name: name.trim(), birthDate, sex, avatarMediaId, avatarCrop: crop, expectedVersion: initialChild?.version ?? null,
       })
       await onCompleted()
     } catch (error) {
@@ -104,7 +112,8 @@ export function FamilyOnboarding({
                 alt="Предпросмотр аватара ребёнка"
                 className="size-full object-cover"
                 src={previewUrl}
-                style={{ transform: `scale(${zoom})` }}
+                onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)}
+                style={{ objectFit: 'cover', objectPosition: `${(crop.x + crop.width / 2) * 100}% ${(crop.y + crop.height / 2) * 100}%`, transform: `scale(${zoom})` }}
               />
             ) : (
               <Typography variant="memoryChild">Фото</Typography>
@@ -123,6 +132,7 @@ export function FamilyOnboarding({
           <label className="mt-3 flex flex-col gap-1" htmlFor="avatar-crop">
             <Typography tone="muted" variant="memoryMeta">Кадрирование</Typography>
             <input id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
+            <div className="grid grid-cols-2 gap-2"><Button onClick={() => setPosition({ x: Math.max(0, crop.x - 0.05), y: crop.y })} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть влево</Typography></Button><Button onClick={() => setPosition({ x: Math.min(1 - crop.width, crop.x + 0.05), y: crop.y })} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вправо</Typography></Button></div>
           </label>
         ) : null}
         <FieldError message={formErrors.avatar} />

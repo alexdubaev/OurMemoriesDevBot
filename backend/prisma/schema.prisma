@@ -197,6 +197,7 @@ model FamilyMember {
   familyDisplayName String?             @map("family_display_name")
   joinedAt          DateTime            @default(now()) @map("joined_at")
   revokedAt         DateTime?           @map("revoked_at")
+  version           Int                 @default(1)
   family            Family              @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: Cascade, map: "family_members_family_id_fkey")
   ownedFamily       Family?             @relation("FamilyOwnerMembership")
   user              User                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
@@ -219,6 +220,7 @@ model Child {
   sex           String?     @map("sex")
   avatarMediaId String?     @unique(map: "children_avatar_media_id_key") @map("avatar_media_id") @db.Uuid
   avatarCrop    Json?       @map("avatar_crop")
+  version       Int         @default(1)
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")

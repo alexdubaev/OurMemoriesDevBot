@@ -16,6 +16,9 @@ import {
   createInviteResponseSchema,
   createFamilyRequestSchema,
   familyMemberResponseSchema,
+  familyUsageSchema,
+  invitePreviewRequestSchema,
+  invitePreviewResponseSchema,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -42,6 +45,12 @@ export function acceptInvite(transport: AuthenticatedTransport, token: string) {
   })
 }
 
+export function previewInvite(transport: AuthenticatedTransport, token: string) {
+  return transport.request('/api/v1/invites/preview', invitePreviewResponseSchema, {
+    method: 'POST', body: invitePreviewRequestSchema.parse({ token }),
+  })
+}
+
 export function loadFamily(transport: AuthenticatedTransport, familyId: string) {
   return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema)
 }
@@ -56,6 +65,10 @@ export function loadFamilyInvites(transport: AuthenticatedTransport, familyId: s
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/invites`, familyInvitesResponseSchema,
   )
+}
+
+export function loadFamilyUsage(transport: AuthenticatedTransport, familyId: string) {
+  return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}/usage`, familyUsageSchema)
 }
 
 export function completeChildProfile(

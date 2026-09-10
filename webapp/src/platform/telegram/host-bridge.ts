@@ -79,7 +79,7 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     },
     openInvite: (rawToken) => {
       if (typeof webApp?.openTelegramLink === 'function') {
-        webApp.openTelegramLink(`${botUrl}?start=invite_${encodeURIComponent(rawToken)}`)
+        webApp.openTelegramLink(`${botUrl}?startapp=invite_${encodeURIComponent(rawToken)}`)
       }
     },
     getInsets: () => normalizedInsets(webApp),

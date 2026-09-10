@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { InlineError } from '@/features/feed'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { createInvite, leaveFamily, revokeInvite, updateFamilyMember } from './api'
-import { ageFromBirthDate, familyMemberName, roleLabel } from './model'
+import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
+import { formatChildAge, familyMemberName, roleLabel } from './model'
 
 export function FamilyScreen({
   familyResponse,
@@ -16,7 +16,6 @@ export function FamilyScreen({
   members,
   transport,
   currentUserId,
-  onInviteCreated,
   onEditChild,
   onFeed,
   onRefresh,
@@ -26,7 +25,6 @@ export function FamilyScreen({
   members: FamilyMemberDto[]
   transport: AuthenticatedTransport
   currentUserId: string
-  onInviteCreated: (rawToken: string) => void
   onEditChild: () => void
   onFeed: () => void
   onRefresh: () => Promise<void>
@@ -35,11 +33,20 @@ export function FamilyScreen({
   const [inviteAlias, setInviteAlias] = useState('')
   const [error, setError] = useState<Error | null>(null)
   const [busy, setBusy] = useState(false)
+  const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [usage, setUsage] = useState<{ usedBytes: number; quotaBytes: number | null } | null>(null)
+  const [usageFailed, setUsageFailed] = useState(false)
   const current = members.find((member) => member.userId === currentUserId)
   const isOwner = current?.isOwner === true
-  const canInvite = isOwner || current?.role === 'full'
   const child = familyResponse.child
+  const canInvite = (isOwner || current?.role === 'full') && child?.isComplete === true
   const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
+
+  const refreshUsage = () => void loadFamilyUsage(transport, familyResponse.family.id).then((next) => {
+    setUsage(next); setUsageFailed(false)
+  }).catch(() => setUsageFailed(true))
+  useEffect(refreshUsage, [familyResponse.family.id, transport])
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true)
@@ -60,20 +67,25 @@ export function FamilyScreen({
         <Typography variant="memoryScreen">Семья</Typography>
         {child ? <ChildCard avatarUrl={avatarUrl} child={child} onEdit={isOwner ? onEditChild : undefined} /> : null}
         {error ? <div className="mt-5"><InlineError onRetry={() => void onRefresh()} /></div> : null}
+        <section className="mt-5 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-labelledby="usage-title">
+          <Typography id="usage-title" variant="memoryDialog">Архив семьи</Typography>
+          {usage ? <><Typography className="mt-2" tone="muted" variant="memoryBody">Использовано {formatBytes(usage.usedBytes)}{usage.quotaBytes ? ` из ${formatBytes(usage.quotaBytes)}` : ''}</Typography>{usage.quotaBytes ? <div aria-label="Использование архива" className="mt-3 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.min(100, usage.usedBytes / usage.quotaBytes * 100)}%` }} /></div> : null}</> : null}
+          {usageFailed ? <Button className="mt-2" onClick={refreshUsage} type="button" variant="ghost"><Typography variant="memoryMeta">Повторить загрузку объёма</Typography></Button> : null}
+        </section>
 
         <section className="mt-6" aria-labelledby="members-title">
           <Typography id="members-title" variant="memoryDialog">Участники</Typography>
           <div className="mt-3 flex flex-col gap-2">
             {members.map((member) => (
               <MemberCard
-                canEditAlias={isOwner || (current?.role === 'full' && !member.isOwner)}
+                canEditAlias={!member.isOwner && (isOwner || current?.role === 'full')}
                 canManageRole={isOwner && !member.isOwner}
                 canRemove={isOwner && !member.isOwner}
                 key={member.userId}
                 member={member}
                 onRemove={() => run(() => leaveFamily(transport, familyResponse.family.id, member.userId))}
                 onSave={(input) => run(() => updateFamilyMember(
-                  transport, familyResponse.family.id, member.userId, input,
+                  transport, familyResponse.family.id, member.userId, { ...input, expectedVersion: member.version },
                 ))}
               />
             ))}
@@ -104,7 +116,7 @@ export function FamilyScreen({
                   role: inviteRole,
                   inviteeDisplayName: inviteAlias || undefined,
                 })
-                onInviteCreated(invitation.rawToken)
+                setInviteReady({ url: `https://t.me/OurMemoriesDevBot?startapp=invite_${invitation.rawToken}`, expiresAt: invitation.expiresAt })
                 setInviteAlias('')
                 setInviteRole('viewer')
               })} type="button">
@@ -113,6 +125,19 @@ export function FamilyScreen({
             </div>
           </section>
         ) : null}
+
+        {inviteReady ? <section className="mt-7 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-labelledby="invite-ready-title">
+          <Typography id="invite-ready-title" variant="memoryDialog">Приглашение готово</Typography>
+          <Typography className="mt-2" tone="muted" variant="memoryBody">Одноразовая ссылка действует до {new Date(inviteReady.expiresAt).toLocaleString('ru-RU')}.</Typography>
+          <input aria-label="Ссылка приглашения" className="mt-4 min-h-11 w-full rounded-[var(--radius-field)] border bg-background px-3" readOnly value={inviteReady.url} />
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button onClick={() => void (async () => { try { await navigator.clipboard.writeText(inviteReady.url); setCopyState('copied') } catch { setCopyState('failed') } })()} type="button"><Typography variant="memoryButton">Скопировать</Typography></Button>
+            <Button onClick={() => void (async () => { if (!navigator.share) return; try { await navigator.share({ url: inviteReady.url }); } catch { /* sharing was cancelled or unavailable */ } })()} type="button" variant="outline"><Typography variant="memoryButton">Поделиться</Typography></Button>
+          </div>
+          {copyState === 'copied' ? <Typography className="mt-2" role="status" tone="muted" variant="memoryMeta">Ссылка скопирована.</Typography> : null}
+          {copyState === 'failed' ? <Typography className="mt-2" role="alert" tone="muted" variant="memoryMeta">Скопируйте ссылку вручную из поля выше.</Typography> : null}
+          <Button className="mt-4 w-full" onClick={() => { setInviteReady(null); setCopyState('idle') }} type="button" variant="ghost"><Typography variant="memoryButton">Готово</Typography></Button>
+        </section> : null}
 
         {canInvite ? (
           <section className="mt-7" aria-labelledby="pending-title">
@@ -154,14 +179,19 @@ export function FamilyScreen({
   )
 }
 
+function formatBytes(value: number) {
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`
+  return `${(value / 1024 / 1024).toFixed(1)} МБ`
+}
+
 function ChildCard({ avatarUrl, child, onEdit }: { avatarUrl: string | null; child: NonNullable<FamilyResponse['child']>; onEdit?: () => void }) {
-  const age = child.birthDate ? ageFromBirthDate(child.birthDate) : null
+  const age = child.birthDate ? formatChildAge(child.birthDate, 'UTC') : null
   return (
     <section className="mt-5 flex items-center gap-3 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-label="Профиль ребёнка">
-      {avatarUrl ? <img alt={`Аватар ${child.name}`} className="size-11 rounded-full object-cover" src={avatarUrl} /> : <AvatarLetter name={child.name} />}
+      {avatarUrl ? <img alt={`Аватар ${child.name}`} className="size-11 rounded-full object-cover" src={avatarUrl} style={child.avatarCrop ? { objectPosition: `${(child.avatarCrop.x + child.avatarCrop.width / 2) * 100}% ${(child.avatarCrop.y + child.avatarCrop.height / 2) * 100}%`, transform: `scale(${1 / Math.min(child.avatarCrop.width, child.avatarCrop.height)})` } : undefined} /> : <AvatarLetter name={child.name} />}
       <div className="min-w-0">
         <Typography className="truncate" variant="memoryChild">{child.name}</Typography>
-        <Typography tone="muted" variant="memoryMeta">{age === null ? 'Профиль ребёнка' : `${age} ${ageWord(age)}`}</Typography>
+        <Typography tone="muted" variant="memoryMeta">{age ?? 'Профиль ребёнка'}{child.birthDate ? ` · ${child.birthDate}` : ''}</Typography>
       </div>
       {onEdit ? <Button className="ml-auto" onClick={onEdit} type="button" variant="ghost"><Typography variant="memoryMeta">Изменить</Typography></Button> : null}
     </section>
@@ -236,10 +266,4 @@ function MemberCard({
 
 function RoleChoice({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return <button aria-pressed={active} className={active ? 'min-h-10 rounded-[var(--radius-field)] bg-accent text-accent-foreground' : 'min-h-10 rounded-[var(--radius-field)] bg-background text-muted-foreground'} onClick={onClick} type="button"><Typography variant="memoryMeta">{label}</Typography></button>
-}
-
-function ageWord(age: number) {
-  if (age % 10 === 1 && age % 100 !== 11) return 'год'
-  if (age % 10 >= 2 && age % 10 <= 4 && (age % 100 < 12 || age % 100 > 14)) return 'года'
-  return 'лет'
 }

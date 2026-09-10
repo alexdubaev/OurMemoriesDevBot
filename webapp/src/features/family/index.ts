@@ -3,6 +3,7 @@ export { FamilyScreen } from './FamilyScreen'
 export { ageFromBirthDate, familyMemberName, roleLabel } from './model'
 export {
   acceptInvite,
+  previewInvite,
   createFamilyBootstrap,
   loadFamily,
   loadFamilyInvites,
