@@ -40,7 +40,7 @@ async function ffprobeJson(path: string, runner: FfmpegRunner): Promise<ProbeRep
   let result
   try {
     result = await runner.run(runner.ffprobePath, ['-v', 'error', '-show_entries',
-      'format=duration,format_name:stream=codec_type,codec_name,duration,width,height', '-of', 'json', path])
+      'format=duration,format_name:stream=codec_type,codec_name,duration,width,height', '-of', 'json', '-protocol_whitelist', 'file,pipe', path], { timeoutMs: 30_000, maxOutputBytes: 1_000_000 })
   } catch {
     throw new MediaFailure('storage_unavailable', 'Media probe недоступен')
   }

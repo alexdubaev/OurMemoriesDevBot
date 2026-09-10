@@ -45,13 +45,13 @@ export const taskHandlers = {
   'media:prepare': {
     maxAttempts: 5,
     deadlineMs: 10 * 60_000,
-    run: async ({ payload }, runtime) => {
+    run: async ({ payload, signal }, runtime) => {
       const mediaId = (payload as { mediaId?: unknown })?.mediaId
       if (typeof mediaId !== 'string' || !/^[0-9a-f-]{36}$/i.test(mediaId)) {
         throw new TerminalTaskError('Task payload is missing a usable media id')
       }
       const { createMediaTasks } = await import('../modules/media')
-      await createMediaTasks(runtime).prepareAsset({ mediaId })
+      await createMediaTasks(runtime).prepareAsset({ mediaId, signal })
     },
   },
   /**

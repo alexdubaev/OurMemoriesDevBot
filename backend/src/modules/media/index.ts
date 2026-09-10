@@ -59,7 +59,7 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
         }
       })
     },
-    async prepareAsset({ mediaId }: { mediaId: string }) {
+    async prepareAsset({ mediaId, signal }: { mediaId: string; signal?: AbortSignal }) {
       const asset = await runtime.prisma.mediaAsset.findUnique({ where: { id: mediaId } })
       if (!asset || asset.deletedAt || asset.originalStatus !== 'stored' || asset.renditionStatus === 'ready' ||
           (asset.mediaKind !== 'voice' && asset.mediaKind !== 'video')) return
@@ -73,13 +73,20 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
         const original = await runtime.privateStorage.storage.readObject({ key: asset.originalKey })
         if (!original) throw new Error('media original is missing')
         await pipeline(Readable.fromWeb(original.body as never), createWriteStream(inputPath))
-        const prepared = await prepareMedia({ inputPath, outputPath, kind: asset.mediaKind }, runner)
+        const prepared = await prepareMedia({ inputPath, outputPath, kind: asset.mediaKind, signal }, runner)
         const bytes = await Bun.file(outputPath).arrayBuffer()
         const sha256 = createHash('sha256').update(Buffer.from(bytes)).digest('hex')
         const existing = await runtime.privateStorage.storage.headObject(objectKey)
         if (!existing) {
           await runtime.privateStorage.storage.writeObject({ key: objectKey, body: Bun.file(outputPath).stream(),
             contentLength: bytes.byteLength, contentType: prepared.mime })
+        } else if (existing.contentLength !== bytes.byteLength || existing.contentType !== prepared.mime) {
+          throw new Error('existing playback rendition metadata does not match the prepared output')
+        } else {
+          const stored = await runtime.privateStorage.storage.readObject({ key: objectKey })
+          if (!stored) throw new Error('existing playback rendition disappeared')
+          const storedHash = createHash('sha256').update(Buffer.from(await new Response(stored.body).arrayBuffer())).digest('hex')
+          if (storedHash !== sha256) throw new Error('existing playback rendition hash does not match the prepared output')
         }
         await runtime.prisma.$transaction(async (tx) => {
           const active = await tx.mediaAsset.findFirst({ where: { id: mediaId, deletedAt: null, originalStatus: 'stored' } })

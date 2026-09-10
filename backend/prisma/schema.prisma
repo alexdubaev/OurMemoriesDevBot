@@ -142,6 +142,9 @@ model CaptionRequest {
   consumedAt      DateTime? @map("consumed_at") @db.Timestamptz(6)
   cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(6)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  family          Family    @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "caption_requests_family_id_fkey")
+  memory          Memory    @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "caption_requests_memory_id_family_id_fkey")
+  member          FamilyMember @relation(fields: [familyId, userId], references: [familyId, userId], onDelete: Restrict, map: "caption_requests_family_id_user_id_fkey")
 
   @@unique([chatId, promptMessageId], map: "caption_requests_chat_prompt_key")
   @@index([familyId, userId, expiresAt], map: "caption_requests_scope_expiry_idx")
@@ -180,6 +183,7 @@ model Family {
   memories             Memory[]
   mediaAssets          MediaAsset[]
   mediaReservations    UploadReservation[]
+  captionRequests      CaptionRequest[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -199,6 +203,7 @@ model FamilyMember {
   authoredMemories  Memory[]            @relation("MemoryAuthorMembership")
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
+  captionRequests  CaptionRequest[]
 
   @@id([familyId, userId])
   @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
@@ -279,6 +284,7 @@ model Memory {
   authorMembership FamilyMember  @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
   likes            MemoryLike[]
   media            MemoryMedia[]
+  captionRequests  CaptionRequest[]
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")

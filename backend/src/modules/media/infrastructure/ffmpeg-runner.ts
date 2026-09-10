@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
 
 export type ProcessResult = { stdout: string; stderr: string; exitCode: number }
-export type ProcessRunner = (file: string, args: string[]) => Promise<ProcessResult>
+export type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; maxOutputBytes?: number }
+export type ProcessRunner = (file: string, args: string[], options?: ProcessOptions) => Promise<ProcessResult>
 
 export type FfmpegRunner = {
   ffmpegPath: string
@@ -36,13 +37,13 @@ export async function assertFfmpegCapabilities(runner: FfmpegRunner): Promise<vo
   requireCapability(encoders.stdout, /\blibx264\b/i, 'H.264 encoder (libx264)')
   requireCapability(filters.stdout, /\bastats\b/i, 'astats waveform filter')
   requireCapability(filters.stdout, /\bametadata\b/i, 'ametadata waveform filter')
-  requireCapability(formats.stdout, /\bmp4\b/i, 'MP4/M4A muxer')
+  requireCapability(formats.stdout, /^\s*[D .]*E\s+.*\bmp4\b/im, 'MP4/M4A muxer')
 }
 
 async function ensureSuccess(runner: FfmpegRunner, file: string, args: string[], label: string) {
   let result: ProcessResult
   try {
-    result = await runner.run(file, args)
+    result = await runner.run(file, args, { timeoutMs: 15_000, maxOutputBytes: 2 * 1024 * 1024 })
   } catch {
     throw new Error(`${label} executable is unavailable`)
   }
@@ -54,18 +55,39 @@ function requireCapability(output: string, pattern: RegExp, capability: string) 
   if (!pattern.test(output)) throw new Error(`FFmpeg lacks required ${capability}`)
 }
 
-function runProcess(file: string, args: string[]): Promise<ProcessResult> {
+function runProcess(file: string, args: string[], options: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    const timeoutMs = options.timeoutMs ?? 5 * 60_000
+    const maxOutputBytes = options.maxOutputBytes ?? 2 * 1024 * 1024
     const child = spawn(file, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
-    child.on('error', reject)
-    child.on('close', (exitCode) => resolve({
+    let outputBytes = 0
+    let failure: Error | null = null
+    const terminate = (error: Error) => {
+      failure ??= error
+      child.kill('SIGKILL')
+    }
+    const timeout = setTimeout(() => terminate(new Error(`Media process exceeded ${timeoutMs}ms`)), timeoutMs)
+    const abort = () => terminate(new Error('Media process aborted'))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    const collect = (target: Buffer[]) => (chunk: Buffer) => {
+      outputBytes += chunk.byteLength
+      if (outputBytes > maxOutputBytes) return terminate(new Error('Media process exceeded output limit'))
+      target.push(chunk)
+    }
+    child.stdout.on('data', collect(stdout))
+    child.stderr.on('data', collect(stderr))
+    child.on('error', (error) => { failure ??= error })
+    child.on('close', (exitCode) => {
+      clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', abort)
+      if (failure) return reject(failure)
+      resolve({
       stdout: Buffer.concat(stdout).toString('utf8'),
       stderr: Buffer.concat(stderr).toString('utf8'),
       exitCode: exitCode ?? -1,
-    }))
+      })
+    })
   })
 }

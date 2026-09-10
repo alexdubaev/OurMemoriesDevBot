@@ -17,15 +17,15 @@ export type PreparedMedia = {
  * is a distinct argv item; user-controlled names are never interpreted by a shell.
  */
 export async function prepareMedia(
-  input: { inputPath: string; outputPath: string; kind: 'voice' | 'video' },
+  input: { inputPath: string; outputPath: string; kind: 'voice' | 'video'; signal?: AbortSignal },
   runner: FfmpegRunner,
 ): Promise<PreparedMedia> {
   const args = input.kind === 'voice'
-    ? ['-nostdin', '-v', 'error', '-i', input.inputPath, '-map', '0:a:0', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-y', input.outputPath]
-    : ['-nostdin', '-v', 'error', '-i', input.inputPath, '-map', '0:v:0', '-map', '0:a?', '-vf',
+    ? ['-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-i', input.inputPath, '-map', '0:a:0', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-fs', '104857600', '-y', input.outputPath]
+    : ['-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-i', input.inputPath, '-map', '0:v:0', '-map', '0:a?', '-vf',
         "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease,format=yuv420p",
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', '-y', input.outputPath]
-  const encoded = await runner.run(runner.ffmpegPath, args)
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', '-fs', '104857600', '-y', input.outputPath]
+  const encoded = await runner.run(runner.ffmpegPath, args, { signal: input.signal, timeoutMs: 4 * 60_000 })
   if (encoded.exitCode !== 0) throw new MediaFailure('unsupported_media', 'Не удалось подготовить воспроизводимую копию')
   const probed = await probeMediaWithRunner(input.outputPath, input.kind, runner)
   return {
@@ -33,16 +33,16 @@ export async function prepareMedia(
     durationMs: probed.durationMs,
     width: probed.width,
     height: probed.height,
-    waveform: input.kind === 'voice' ? await waveform(input.inputPath, runner) : null,
+    waveform: input.kind === 'voice' ? await waveform(input.inputPath, runner, input.signal) : null,
   }
 }
 
-async function waveform(inputPath: string, runner: FfmpegRunner): Promise<number[]> {
+async function waveform(inputPath: string, runner: FfmpegRunner, signal?: AbortSignal): Promise<number[]> {
   const rawPath = `${inputPath}.waveform.pcm`
   try {
     const decoded = await runner.run(runner.ffmpegPath, [
-      '-nostdin', '-v', 'error', '-i', inputPath, '-map', '0:a:0', '-ac', '1', '-ar', '8000', '-f', 's16le', '-y', rawPath,
-    ])
+      '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-i', inputPath, '-map', '0:a:0', '-ac', '1', '-ar', '8000', '-fs', '10485760', '-f', 's16le', '-y', rawPath,
+    ], { signal, timeoutMs: 2 * 60_000 })
     if (decoded.exitCode !== 0) throw new MediaFailure('unsupported_media', 'Не удалось измерить waveform')
     return bucketPeaks(await readFile(rawPath), 48)
   } finally {

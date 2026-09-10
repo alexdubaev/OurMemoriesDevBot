@@ -52,18 +52,41 @@ async function processInbox(
     const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
     await api.sendMessage(event.chatId, commandText(event.command, cancelled), commandButtons(env, event.command, event.argument))
   } else if (event.kind === 'caption_reply') {
-    await consumeCaptionReply(db, event)
+    await consumeCaptionReply(db, api, event)
   } else {
     throw new TerminalTaskError('Telegram inbox task references unexpected content')
   }
   await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
 }
 
-async function consumeCaptionReply(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>) {
+async function consumeCaptionReply(db: DbClient, api: TelegramApiPort, event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>) {
   const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
   if (!admission || admission.role !== 'full') return
-  await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: admission.familyId, userId: admission.userId,
+  const result = await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: admission.familyId, userId: admission.userId,
     chatId: event.chatId, replyToMessageId: event.replyToMessageId, text: event.text })
+  if (result.kind === 'expired') {
+    await api.sendMessage(event.chatId, 'Срок добавления подписи истёк. Откройте запись в семейной ленте, чтобы изменить её.')
+  } else if (result.kind === 'stale') {
+    await renewCaptionRequest(db, api, admission, event)
+  }
+}
+
+async function renewCaptionRequest(
+  db: DbClient,
+  api: TelegramApiPort,
+  admission: { familyId: string; userId: string },
+  event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>,
+) {
+  const prior = await db.captionRequest.findFirst({ where: { familyId: admission.familyId, userId: admission.userId,
+    chatId: BigInt(event.chatId), promptMessageId: BigInt(event.replyToMessageId) } })
+  if (!prior) return
+  const memory = await db.memory.findFirst({ where: { id: prior.memoryId, familyId: admission.familyId, deletedAt: null }, select: { version: true } })
+  if (!memory) return
+  const sent = await api.sendMessage(event.chatId, 'Подпись уже изменилась. Ответьте на это сообщение в течение 10 минут, чтобы повторить изменение.', { forceReply: true })
+  if (!sent || !('messageId' in sent)) return
+  await db.captionRequest.upsert({ where: { chatId_promptMessageId: { chatId: BigInt(event.chatId), promptMessageId: BigInt(sent.messageId) } },
+    create: { familyId: admission.familyId, userId: admission.userId, memoryId: prior.memoryId, chatId: BigInt(event.chatId),
+      promptMessageId: BigInt(sent.messageId), expectedVersion: memory.version, expiresAt: new Date(Date.now() + 10 * 60_000) }, update: {} })
 }
 
 async function cancelCaption(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'command' }>) {

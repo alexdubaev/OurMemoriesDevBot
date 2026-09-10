@@ -24,8 +24,12 @@ export class PrismaCaptionRepository implements CaptionRepository {
   }
 
   async cancel(input: { familyId: string; userId: string; chatId: string }) {
-    const result = await this.db.captionRequest.updateMany({ where: { familyId: input.familyId, userId: input.userId,
-      chatId: BigInt(input.chatId), consumedAt: null, cancelledAt: null, expiresAt: { gt: new Date() } }, data: { cancelledAt: new Date() } })
-    return result.count > 0
+    const current = await this.db.captionRequest.findFirst({ where: { familyId: input.familyId, userId: input.userId,
+      chatId: BigInt(input.chatId), consumedAt: null, cancelledAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' }, select: { id: true } })
+    if (!current) return false
+    const result = await this.db.captionRequest.updateMany({ where: { id: current.id, consumedAt: null, cancelledAt: null,
+      expiresAt: { gt: new Date() } }, data: { cancelledAt: new Date() } })
+    return result.count === 1
   }
 }
