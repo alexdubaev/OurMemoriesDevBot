@@ -2,8 +2,8 @@
 
 Task ID / дата / исполнитель / модель: T04 / 2026-09-10 / Codex / GPT-5 (роль Terra по task-файлу)
 Статус: APPROVED
-Worktree / branch / base SHA / head SHA: `D:\codex\TG_OurMemoriesDevBot\worktrees\t04` / `feat/t04-bot-capture` / `cf7dcbc83bffbe0015584461849bf8346eca370c` / `550c29e`
-PR / merge SHA: не опубликовано / не слито
+Worktree / branch / base SHA / implementation head SHA: `D:\codex\TG_OurMemoriesDevBot\worktrees\t04` / `feat/t04-bot-capture` / `cf7dcbc83bffbe0015584461849bf8346eca370c` / `550c29e`
+PR / merge SHA: [#8](https://github.com/alexdubaev/OurMemoriesDevBot/pull/8) / не слито
 
 ## Выполнено
 
