@@ -74,12 +74,12 @@ describe('memory contracts', () => {
       width: 1200,
       height: 800,
       durationMs: null,
+      waveform: null,
       renditionStatus: 'ready' as const,
       previewPath: `${contentPath}?variant=preview`,
       displayPath: `${contentPath}?variant=display`,
       playbackPath: null,
       originalDownloadPath: `${contentPath}?variant=original`,
-      waveform: null,
     }
 
     expect(mediaDtoSchema.parse(valid)).toEqual(valid)

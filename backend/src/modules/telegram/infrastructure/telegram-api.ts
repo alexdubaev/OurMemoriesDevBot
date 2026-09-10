@@ -46,10 +46,12 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
     },
     async sendMessage(chatId, text, options) {
       try {
-        await api.sendMessage(chatId, text, {
+        const result = await api.sendMessage(chatId, text, {
           ...(options?.replyToMessageId ? { reply_parameters: { message_id: Number(options.replyToMessageId) } } : {}),
+          ...(options?.forceReply ? { reply_markup: { force_reply: true, input_field_placeholder: 'Добавьте подпись' } } : {}),
           ...(options?.buttons?.length ? { reply_markup: telegramInlineKeyboard(options.buttons) } : {}),
         })
+        return { messageId: String(result.message_id) }
       } catch (error) {
         throw telegramProviderFailure(error)
       }

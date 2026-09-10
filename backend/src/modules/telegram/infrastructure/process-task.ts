@@ -9,6 +9,9 @@ import { TerminalTaskError } from '../../../outbox'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
 import { createSourceMemoryPublisher } from '../../memories'
+import { CaptionService } from '../application/captions'
+import { PrismaCaptionRepository } from './prisma-caption-repository'
+import { PrismaTelegramRepository } from './prisma-telegram-repository'
 import type { TelegramApiPort } from '../application/ports'
 import type { TelegramInboundEvent } from '../domain/inbound-event'
 
@@ -46,11 +49,50 @@ async function processInbox(
   if (event.kind === 'denied_content') {
     await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
   } else if (event.kind === 'command') {
-    await api.sendMessage(event.chatId, commandText(event.command), commandButtons(env, event.command, event.argument))
+    const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
+    await api.sendMessage(event.chatId, commandText(event.command, cancelled), commandButtons(env, event.command, event.argument))
+  } else if (event.kind === 'caption_reply') {
+    await consumeCaptionReply(db, api, event)
   } else {
     throw new TerminalTaskError('Telegram inbox task references unexpected content')
   }
   await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
+}
+
+async function consumeCaptionReply(db: DbClient, api: TelegramApiPort, event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>) {
+  const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
+  if (!admission || admission.role !== 'full') return
+  const result = await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: admission.familyId, userId: admission.userId,
+    chatId: event.chatId, replyToMessageId: event.replyToMessageId, text: event.text })
+  if (result.kind === 'expired') {
+    await api.sendMessage(event.chatId, 'Срок добавления подписи истёк. Откройте запись в семейной ленте, чтобы изменить её.')
+  } else if (result.kind === 'stale') {
+    await renewCaptionRequest(db, api, admission, event)
+  }
+}
+
+async function renewCaptionRequest(
+  db: DbClient,
+  api: TelegramApiPort,
+  admission: { familyId: string; userId: string },
+  event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>,
+) {
+  const prior = await db.captionRequest.findFirst({ where: { familyId: admission.familyId, userId: admission.userId,
+    chatId: BigInt(event.chatId), promptMessageId: BigInt(event.replyToMessageId) } })
+  if (!prior) return
+  const memory = await db.memory.findFirst({ where: { id: prior.memoryId, familyId: admission.familyId, deletedAt: null }, select: { version: true } })
+  if (!memory) return
+  const sent = await api.sendMessage(event.chatId, 'Подпись уже изменилась. Ответьте на это сообщение в течение 10 минут, чтобы повторить изменение.', { forceReply: true })
+  if (!sent || !('messageId' in sent)) return
+  await db.captionRequest.upsert({ where: { chatId_promptMessageId: { chatId: BigInt(event.chatId), promptMessageId: BigInt(sent.messageId) } },
+    create: { familyId: admission.familyId, userId: admission.userId, memoryId: prior.memoryId, chatId: BigInt(event.chatId),
+      promptMessageId: BigInt(sent.messageId), expectedVersion: memory.version, expiresAt: new Date(Date.now() + 10 * 60_000) }, update: {} })
+}
+
+async function cancelCaption(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'command' }>) {
+  const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
+  if (!admission || admission.role !== 'full') return false
+  return new CaptionService(new PrismaCaptionRepository(db)).cancel({ familyId: admission.familyId, userId: admission.userId, chatId: event.chatId })
 }
 
 async function processSource(
@@ -355,10 +397,12 @@ function mediaContentType(event: Extract<TelegramInboundEvent, { kind: 'media' }
 }
 
 async function receipt(api: TelegramApiPort, env: AppEnv, chatId: string, memoryId: string, pending: boolean) {
-  await api.sendMessage(
+  return api.sendMessage(
     chatId,
-    pending ? 'Оригинал сохранён. Готовим воспроизведение.' : 'Сохранено в семейную ленту.',
-    openButton(env, memoryId),
+    pending
+      ? 'Оригинал сохранён. Готовим воспроизведение. Ответьте на это сообщение в течение 10 минут, чтобы добавить подпись; /cancel отменит запрос.'
+      : 'Сохранено в семейную ленту.',
+    pending ? { forceReply: true } : openButton(env, memoryId),
   )
 }
 
@@ -366,11 +410,21 @@ async function sendSourceReceipt(
   db: DbClient,
   api: TelegramApiPort,
   env: AppEnv,
-  source: { id: string; chatId: bigint; kind: string; memoryId: string | null; receiptSentAt: Date | null },
+  source: { id: string; chatId: bigint; kind: string; familyId: string; userId: string; memoryId: string | null; receiptSentAt: Date | null },
 ) {
   if (source.receiptSentAt) return 'skipped' as const
   if (!source.memoryId) throw new Error('Published Telegram source lost its memory link')
-  await receipt(api, env, source.chatId.toString(), source.memoryId, source.kind === 'video' || source.kind === 'voice')
+  const needsCaption = source.kind === 'video' || source.kind === 'voice'
+  const sent = await receipt(api, env, source.chatId.toString(), source.memoryId, needsCaption)
+  if (needsCaption && sent && 'messageId' in sent) {
+    const memory = await db.memory.findFirstOrThrow({ where: { id: source.memoryId, familyId: source.familyId, deletedAt: null }, select: { version: true } })
+    await db.captionRequest.upsert({
+      where: { chatId_promptMessageId: { chatId: source.chatId, promptMessageId: BigInt(sent.messageId) } },
+      create: { familyId: source.familyId, userId: source.userId, memoryId: source.memoryId, chatId: source.chatId,
+        promptMessageId: BigInt(sent.messageId), expectedVersion: memory.version, expiresAt: new Date(Date.now() + 10 * 60_000) },
+      update: {},
+    })
+  }
   await db.telegramSource.updateMany({
     where: { id: source.id, receiptSentAt: null },
     data: { receiptSentAt: new Date() },
@@ -399,11 +453,11 @@ async function sendAlbumReceipt(
   await db.telegramSource.updateMany({ where, data: { receiptSentAt: new Date() } })
 }
 
-function commandText(command: string) {
+function commandText(command: string, cancelled = false) {
   if (command === 'start') return 'Отправьте сюда заметку, фото, видео или голосовое — материал автоматически сохранится в семейную ленту. Данные ребёнка заполняются в Mini App.'
   if (command === 'help') return 'Поддерживаются заметки, фото, видео и голосовые до 20 МБ. Подпись можно добавить в Mini App; удалить запись тоже можно там.'
   if (command === 'privacy') return 'Бот принимает материалы только в личном чате. Групповые сообщения не сохраняются и не анализируются.'
-  if (command === 'cancel') return 'Активного запроса подписи нет.'
+  if (command === 'cancel') return cancelled ? 'Добавление подписи отменено.' : 'Активного запроса подписи нет.'
   if (command === 'app') return 'Откройте семейную ленту в Mini App.'
   return 'Неизвестная команда. Используйте /help.'
 }

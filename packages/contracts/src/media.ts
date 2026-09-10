@@ -58,6 +58,7 @@ export const mediaAssetDtoSchema = z.object({
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
   durationMs: z.number().int().positive().nullable(),
+  waveform: z.array(z.number().min(0).max(1)).length(48).nullable(),
   previewPath: backendMediaPathSchema.nullable(),
   displayPath: backendMediaPathSchema.nullable(),
   playbackPath: backendMediaPathSchema.nullable(),

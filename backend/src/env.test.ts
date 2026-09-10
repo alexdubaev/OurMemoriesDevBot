@@ -95,6 +95,16 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...base, EMAIL_DELIVERY: 'smtp' })).toThrow('EMAIL_DELIVERY')
   })
 
+  test('keeps FFmpeg paths optional so deployments can use PATH while allowing explicit binaries', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+    expect(loadEnv(base).FFMPEG_PATH).toBeUndefined()
+    expect(loadEnv({ ...base, FFMPEG_PATH: 'C:/tools/ffmpeg.exe', FFPROBE_PATH: 'C:/tools/ffprobe.exe' }))
+      .toMatchObject({ FFMPEG_PATH: 'C:/tools/ffmpeg.exe', FFPROBE_PATH: 'C:/tools/ffprobe.exe' })
+  })
+
   test('requires complete Telegram adapter secrets without exposing their values', () => {
     const base = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',

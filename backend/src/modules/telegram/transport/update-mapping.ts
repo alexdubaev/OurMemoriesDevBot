@@ -27,7 +27,9 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
   if (typeof message.text === 'string') {
     const command = parseCommand(message.text)
     if (command) return { kind: 'command', ...identity, ...command }
-    if (isRecord(message.reply_to_message)) return { kind: 'ignored', updateId }
+    if (isRecord(message.reply_to_message) && isSafeInteger(message.reply_to_message.message_id)) {
+      return { kind: 'caption_reply', ...identity, text: message.text, replyToMessageId: String(message.reply_to_message.message_id) }
+    }
     return { kind: 'note', ...identity, text: message.text }
   }
 

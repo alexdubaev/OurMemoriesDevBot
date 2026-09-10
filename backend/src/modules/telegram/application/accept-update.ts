@@ -13,7 +13,7 @@ export function createAcceptTelegramUpdate(options: {
     if (event.kind === 'ignored' || event.kind === 'ignored_group') return { inboxId: null, duplicate: false }
     let acceptedEvent = event
     let admission = null
-    if (event.kind === 'note' || event.kind === 'media') {
+    if (event.kind === 'note' || event.kind === 'media' || event.kind === 'caption_reply') {
       admission = await options.repository.findAdmission(event.senderId)
       if (!admission || admission.role !== 'full') {
         acceptedEvent = {

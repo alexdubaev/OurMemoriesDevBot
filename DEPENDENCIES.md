@@ -11,7 +11,7 @@
 | Zod | Vibe lockfile | Shared public contracts | Existing template dependency |
 | Sharp 0.35.4 | npm, pinned workspace override | Decode ordinary images and create metadata-free WebP derivatives | Apache-2.0; native libvips build |
 | heic-decode 2.1.0 | npm | Decode real HEVC/HEIC input when the bundled libvips build cannot render HEIC | ISC; libheif-js/WASM fallback |
-| @ffprobe-installer/ffprobe 2.1.2 | npm | Bounded codec, duration, and dimensions probe before video/voice publication | LGPL/GPL FFmpeg build; exact platform binary selected by lockfile |
+| FFmpeg / ffprobe | Runtime/container environment | Bounded probe and private audio/video rendition worker | System-provisioned external runtime; configured by `FFMPEG_PATH` / `FFPROBE_PATH` or discovered in `PATH` |
 
 ## Deliberately not added
 

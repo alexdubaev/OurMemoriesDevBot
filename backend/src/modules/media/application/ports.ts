@@ -31,6 +31,7 @@ export type StoredVariant = {
   width: number | null
   height: number | null
   durationMs: number | null
+  codec?: string | null
 }
 
 export type ContentObject = {
@@ -67,6 +68,7 @@ export type MediaRepository = {
     width: number | null
     height: number | null
     durationMs: number | null
+    waveform?: number[] | null
     renditionStatus: 'pending' | 'ready'
     variants: StoredVariant[]
     now: Date

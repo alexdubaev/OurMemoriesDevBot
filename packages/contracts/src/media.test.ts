@@ -67,6 +67,7 @@ describe('private media contracts', () => {
         width: 1,
         height: 1,
         durationMs: null,
+        waveform: null,
         previewPath: `/api/v1/families/${uuid}/media/${uuid}/content?variant=preview`,
         displayPath: `/api/v1/families/${uuid}/media/${uuid}/content?variant=display`,
         playbackPath: null,
