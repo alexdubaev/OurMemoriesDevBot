@@ -17,6 +17,9 @@ maybeDescribe('Family access and invitations', () => {
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '0123456789abcdef'.repeat(4),
     CORS_ORIGINS: 'http://localhost:5173',
+    // This suite intentionally exercises many state transitions through one in-memory app.
+    // Its fixture reset cannot reset that app's process-local rate-limit counter.
+    AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
 
