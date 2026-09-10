@@ -11,11 +11,13 @@ export type TelegramHostMetadata = {
 export type HostBridge = {
   readonly isAvailable: boolean
   initData(): string | null
+  inviteToken(): string | null
   metadata(): TelegramHostMetadata | null
   ready(): void
   close(): void
   back(): void
   openBot(): void
+  openInvite(rawToken: string): void
   getInsets(): TelegramInsets
 }
 
@@ -52,6 +54,7 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
       ? webApp.initData
       : null,
+    inviteToken: () => inviteTokenFromInitData(webApp?.initData),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -74,6 +77,11 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     openBot: () => {
       if (typeof webApp?.openTelegramLink === 'function') webApp.openTelegramLink(botUrl)
     },
+    openInvite: (rawToken) => {
+      if (typeof webApp?.openTelegramLink === 'function') {
+        webApp.openTelegramLink(`${botUrl}?start=invite_${encodeURIComponent(rawToken)}`)
+      }
+    },
     getInsets: () => normalizedInsets(webApp),
   }
 }
@@ -92,11 +100,13 @@ export function createBrowserDevHostBridge(
   return {
     isAvailable: false,
     initData: () => null,
+    inviteToken: () => null,
     metadata: () => metadata,
     ready: () => undefined,
     close: () => undefined,
     back: () => undefined,
     openBot: () => undefined,
+    openInvite: () => undefined,
     getInsets: () => safeInsets,
   }
 }
@@ -134,6 +144,14 @@ function normalizedInsets(webApp: TelegramWebApp | null): TelegramInsets {
 
 function finiteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function inviteTokenFromInitData(initData: unknown) {
+  if (typeof initData !== 'string' || initData.length === 0) return null
+  const startParam = new URLSearchParams(initData).get('start_param')
+  if (!startParam?.startsWith('invite_')) return null
+  const token = startParam.slice('invite_'.length)
+  return /^[A-Za-z0-9_-]{32,128}$/.test(token) ? token : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
