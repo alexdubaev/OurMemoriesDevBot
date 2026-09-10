@@ -176,6 +176,7 @@ async function runClaimedTask({
     await recordFailure({
       attempt,
       candidate,
+      entry,
       error,
       finalAttempt: finalAttempt || classifyFailure(error) === 'terminal',
       metrics,
@@ -211,6 +212,7 @@ async function runClaimedTask({
 async function recordFailure({
   attempt,
   candidate,
+  entry,
   error,
   finalAttempt,
   metrics,
@@ -221,6 +223,7 @@ async function recordFailure({
 }: {
   attempt: number
   candidate: { id: string; type: string }
+  entry: TaskHandlerRegistry[string]
   error: unknown
   finalAttempt: boolean
   metrics: DrainMetrics
@@ -237,7 +240,9 @@ async function recordFailure({
           attempts: attempt,
           kind: 'retry',
           lastError,
-          scheduledFor: nextAttemptAt(attempt, now, options.random),
+          scheduledFor: entry.retryDelayMs
+            ? new Date(now.getTime() + entry.retryDelayMs(error, attempt))
+            : nextAttemptAt(attempt, now, options.random),
         },
     id: candidate.id,
     now,

@@ -8,7 +8,7 @@ export async function verifyTelegramBotIdentity({
   token,
   expectedUsername,
   request = fetch,
-}: TelegramBotIdentityOptions): Promise<void> {
+}: TelegramBotIdentityOptions): Promise<{ id: bigint; username: string }> {
   let response: Response
   try {
     response = await request(`https://api.telegram.org/bot${token}/getMe`, {
@@ -29,8 +29,14 @@ export async function verifyTelegramBotIdentity({
     throw new Error('Telegram getMe rejected the configured bot token')
   }
   const username = payload.result.username
-  if (username !== expectedUsername) {
+  const id = payload.result.id
+  if (username !== expectedUsername || (typeof id !== 'number' && typeof id !== 'string')) {
     throw new Error(`Configured token belongs to a different bot; expected Telegram bot @${expectedUsername}`)
+  }
+  try {
+    return { id: BigInt(id), username }
+  } catch {
+    throw new Error('Telegram getMe returned an invalid numeric bot id')
   }
 }
 

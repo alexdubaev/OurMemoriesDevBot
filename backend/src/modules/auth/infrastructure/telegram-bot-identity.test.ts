@@ -13,7 +13,7 @@ describe('Telegram bot startup identity', () => {
       token: 'secret-token',
       expectedUsername: 'OurMemoriesDevBot',
       request,
-    })).resolves.toBeUndefined()
+    })).resolves.toEqual({ id: 123456n, username: 'OurMemoriesDevBot' })
     await expect(verifyTelegramBotIdentity({
       token: 'secret-token',
       expectedUsername: 'DifferentBot',

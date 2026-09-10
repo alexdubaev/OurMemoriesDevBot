@@ -15,6 +15,7 @@ maybeDescribe('Telegram authentication exchange', () => {
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '0123456789abcdef'.repeat(4),
     TELEGRAM_BOT_TOKEN: botToken,
+    TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
     TELEGRAM_BOT_EXPECTED_USERNAME: 'OurMemoriesDevBot',
     CORS_ORIGINS: 'http://localhost:5173',
   })

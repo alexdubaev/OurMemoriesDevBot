@@ -1,15 +1,19 @@
 import { createApp } from './app'
 import { verifyTelegramBotIdentity } from './modules/auth'
+import { createTelegramApi, createTelegramModule, startTelegramPolling } from './modules/telegram'
 import { createBackendRuntime } from './runtime'
 import { shutdownBackend } from './shutdown'
 
 const runtime = createBackendRuntime()
+let telegram: ReturnType<typeof createTelegramModule> | null = null
 if (runtime.env.TELEGRAM_BOT_TOKEN) {
   try {
-    await verifyTelegramBotIdentity({
+    const identity = await verifyTelegramBotIdentity({
       token: runtime.env.TELEGRAM_BOT_TOKEN,
       expectedUsername: runtime.env.TELEGRAM_BOT_EXPECTED_USERNAME,
     })
+    const api = createTelegramApi(runtime.env.TELEGRAM_BOT_TOKEN, runtime.env.TELEGRAM_FILE_MAX_BYTES)
+    telegram = createTelegramModule({ runtime, botId: identity.id, api })
   } catch (error) {
     await runtime.close()
     throw error
@@ -21,6 +25,7 @@ const app = createApp({
   env: runtime.env,
   prisma: runtime.prisma,
   privateStorage: runtime.privateStorage,
+  telegramRoutes: telegram?.routes,
 })
 
 const server = Bun.serve({
@@ -30,6 +35,10 @@ const server = Bun.serve({
 
 console.log(`Backend listening on ${server.url}`)
 
+const polling = telegram && runtime.env.TELEGRAM_BOT_MODE === 'polling'
+  ? startTelegramPolling({ api: telegram.api, acceptUpdate: telegram.acceptUpdate })
+  : null
+
 let shuttingDown = false
 
 async function shutdown(signal: string) {
@@ -37,6 +46,8 @@ async function shutdown(signal: string) {
   shuttingDown = true
 
   console.log(`Backend received ${signal}; shutting down`)
+  polling?.stop()
+  if (polling) await polling.stopped
   await shutdownBackend(
     server,
     runtime,

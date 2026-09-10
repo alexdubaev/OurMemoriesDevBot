@@ -3,7 +3,7 @@
   "rules": [
     {
       "impact": "docs",
-      "prefixes": ["docs/mvp/"],
+      "prefixes": ["docs/", "templates/", "REPO_MAP.md"],
       "commandIds": ["template"]
     },
     {
@@ -51,10 +51,14 @@
         ".env.example",
         ".bun-version",
         "backend/.env.example",
+        "backend/package.json",
         "backend/Dockerfile",
         "backend/src/app.ts",
         "backend/src/env.ts",
+        "backend/src/index.ts",
+        "backend/src/outbox/",
         "backend/src/runtime.ts",
+        "backend/src/worker.ts",
         "bun.lock",
         "bunfig.toml",
         "docker-compose.yml",

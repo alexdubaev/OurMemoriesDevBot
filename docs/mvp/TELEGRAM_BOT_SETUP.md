@@ -30,12 +30,14 @@ TELEGRAM_MINI_APP_URL=
 # secrets — values NEVER commit
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_INBOX_ENCRYPTION_KEY=
 ```
 
 ### Правила
 - `TELEGRAM_BOT_EXPECTED_USERNAME` хранится в Git: это публичная конфигурация.
 - `TELEGRAM_BOT_TOKEN` — секрет BotFather. Только server-side.
 - `TELEGRAM_WEBHOOK_SECRET` — отдельная случайная строка минимум 32 байта энтропии; не равна bot token.
+- `TELEGRAM_INBOX_ENCRYPTION_KEY` — отдельный base64url-ключ из 32 случайных байт для AES-256-GCM durable inbox; не равен другим секретам.
 - `TELEGRAM_WEBHOOK_URL` появляется после получения HTTPS-домена backend.
 - `TELEGRAM_MINI_APP_URL` появляется после HTTPS-деплоя webapp.
 - Локально допускается `TELEGRAM_BOT_MODE=polling`; в staging/production использовать `webhook`.

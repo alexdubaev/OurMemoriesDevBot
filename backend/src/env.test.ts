@@ -50,6 +50,10 @@ describe('loadEnv', () => {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
       JWT_SECRET: '0123456789abcdef'.repeat(4),
       TELEGRAM_BOT_TOKEN: '123456:production-secret',
+      TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+      TELEGRAM_BOT_MODE: 'webhook',
+      TELEGRAM_WEBHOOK_URL: 'https://api.example.com/webhooks/telegram',
+      TELEGRAM_WEBHOOK_SECRET: 'W'.repeat(43),
       COOKIE_SECURE: 'true',
       CORS_ORIGINS: 'https://web.example.com',
       // Production ships the avatar feature, so it must have durable object storage; the
@@ -64,6 +68,7 @@ describe('loadEnv', () => {
     }
 
     expect(() => loadEnv(productionBase)).not.toThrow()
+    expect(() => loadEnv({ ...productionBase, TELEGRAM_BOT_MODE: 'polling' })).toThrow('TELEGRAM_BOT_MODE')
     expect(() => loadEnv({ ...productionBase, TELEGRAM_BOT_TOKEN: '' })).toThrow('TELEGRAM_BOT_TOKEN')
     expect(() => loadEnv({ ...productionBase, JWT_SECRET: 'a-memorable-human-secret-phrase-that-is-long-enough-to-pass' }))
       .toThrow('JWT_SECRET')
@@ -88,6 +93,40 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...base, TASK_OUTBOX_BATCH_LIMIT: '0' })).toThrow('TASK_OUTBOX_BATCH_LIMIT')
     expect(() => loadEnv({ ...base, TASK_OUTBOX_RETENTION_DAYS: '-1' })).toThrow('TASK_OUTBOX_RETENTION_DAYS')
     expect(() => loadEnv({ ...base, EMAIL_DELIVERY: 'smtp' })).toThrow('EMAIL_DELIVERY')
+  })
+
+  test('requires complete Telegram adapter secrets without exposing their values', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      TELEGRAM_BOT_TOKEN: '123456:adapter-secret',
+      TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+    }
+
+    expect(loadEnv(base).TELEGRAM_BOT_MODE).toBe('polling')
+    expect(() => loadEnv({ ...base, TELEGRAM_INBOX_ENCRYPTION_KEY: '' }))
+      .toThrow('TELEGRAM_INBOX_ENCRYPTION_KEY')
+    expect(() => loadEnv({ ...base, TELEGRAM_INBOX_ENCRYPTION_KEY: 'too-short' }))
+      .toThrow('TELEGRAM_INBOX_ENCRYPTION_KEY')
+    expect(() => loadEnv({
+      ...base,
+      TELEGRAM_BOT_MODE: 'webhook',
+      TELEGRAM_WEBHOOK_URL: 'https://api.example.com/api/v1/telegram/webhook',
+      TELEGRAM_WEBHOOK_SECRET: '',
+    })).toThrow('TELEGRAM_WEBHOOK_SECRET')
+    expect(() => loadEnv({
+      ...base,
+      TELEGRAM_BOT_MODE: 'webhook',
+      TELEGRAM_WEBHOOK_URL: 'http://api.example.com/api/v1/telegram/webhook',
+      TELEGRAM_WEBHOOK_SECRET: 'w'.repeat(43),
+    })).toThrow('TELEGRAM_WEBHOOK_URL')
+    expect(() => loadEnv({
+      ...base,
+      TELEGRAM_BOT_MODE: 'webhook',
+      TELEGRAM_WEBHOOK_URL: 'https://api.example.com/api/v1/telegram/webhook',
+      TELEGRAM_WEBHOOK_SECRET: 'w'.repeat(43),
+      TELEGRAM_MINI_APP_URL: 'http://app.example.com',
+    })).toThrow('TELEGRAM_MINI_APP_URL')
   })
 
   test('rejects unsafe production CORS origins', () => {
@@ -198,6 +237,10 @@ describe('private storage env', () => {
     NODE_ENV: 'production',
     JWT_SECRET: 'a'.repeat(63) + 'b',
     TELEGRAM_BOT_TOKEN: '123456:production-secret',
+    TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+    TELEGRAM_BOT_MODE: 'webhook',
+    TELEGRAM_WEBHOOK_URL: 'https://api.example.com/webhooks/telegram',
+    TELEGRAM_WEBHOOK_SECRET: 'W'.repeat(43),
     COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://app.example.com',
   }
@@ -399,6 +442,10 @@ describe('email env', () => {
       NODE_ENV: 'production',
       JWT_SECRET: 'a'.repeat(63) + 'b',
       TELEGRAM_BOT_TOKEN: '123456:production-secret',
+      TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+      TELEGRAM_BOT_MODE: 'webhook',
+      TELEGRAM_WEBHOOK_URL: 'https://api.example.com/webhooks/telegram',
+      TELEGRAM_WEBHOOK_SECRET: 'W'.repeat(43),
       COOKIE_SECURE: 'true',
       CORS_ORIGINS: 'https://app.example.com',
       WEBAPP_ORIGIN: 'https://app.example.com',

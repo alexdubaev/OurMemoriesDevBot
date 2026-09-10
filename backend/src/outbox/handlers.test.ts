@@ -7,6 +7,15 @@ import type { TaskHandlerRegistry } from './handlers'
 const registry = { 'test:work': { run: async () => undefined } } satisfies TaskHandlerRegistry
 
 describe('the task type registry', () => {
+  test('uses Telegram retry_after and the 5/30/120/600 second fallback schedule', () => {
+    const retry = taskHandlers['telegram:process'].retryDelayMs!
+    expect(retry({}, 1)).toBe(5_000)
+    expect(retry({}, 2)).toBe(30_000)
+    expect(retry({}, 3)).toBe(120_000)
+    expect(retry({}, 4)).toBe(600_000)
+    expect(retry({ retryAfterSeconds: 17 }, 1)).toBe(17_000)
+  })
+
   test('rejects Object.prototype keys instead of queueing a row nothing can run', () => {
     // `'constructor' in registry` is true. Enqueueing it would write a row that every drain
     // skips forever while the caller believes the work was accepted.

@@ -38,7 +38,7 @@ export class PrismaMediaRepository implements MediaRepository {
           id: input.assetId,
           familyId: input.familyId,
           uploaderId: input.userId,
-          sourceKind: 'upload',
+          sourceKind: input.sourceKind ?? 'upload',
           purpose: input.purpose,
           mediaKind: input.kind,
           originalKey: input.objectKey,
@@ -61,6 +61,27 @@ export class PrismaMediaRepository implements MediaRepository {
         data: { storageReservedBytes: { increment: BigInt(input.byteSize) } },
       })
     })
+  }
+
+  async findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null> {
+    const asset = await this.db.mediaAsset.findFirst({
+      where: {
+        id: assetId,
+        familyId: scope.familyId,
+        uploaderId: scope.principal.userId,
+        sourceKind: 'telegram',
+        purpose: 'memory',
+      },
+      include: { variants: true, reservation: true },
+    })
+    if (!asset) return null
+    if (asset.originalStatus === 'stored' && !asset.deletedAt) {
+      return { kind: 'ready', asset: assetDto(asset) }
+    }
+    if (asset.originalStatus !== 'pending' || asset.deletedAt || !asset.reservation || asset.reservation.releasedAt) {
+      return { kind: 'expired' }
+    }
+    return { kind: 'pending', upload: pendingDto({ ...asset.reservation, asset }) }
   }
 
   async prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation> {

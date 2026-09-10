@@ -13,6 +13,7 @@ export type PendingMediaUpload = {
   assetId: string
   familyId: string
   userId: string
+  sourceKind?: 'upload' | 'telegram'
   purpose: MediaPurpose
   kind: PrivateMediaKind
   objectKey: string
@@ -55,6 +56,7 @@ export type MediaRepository = {
     maxPendingUploads: number
     now: Date
   }): Promise<void>
+  findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null>
   prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation>
   rejectUpload(scope: FamilyScope, uploadId: string, now: Date): Promise<void>
   commitFinalization(input: {
