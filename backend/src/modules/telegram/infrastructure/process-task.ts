@@ -9,6 +9,9 @@ import { TerminalTaskError } from '../../../outbox'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
 import { createSourceMemoryPublisher } from '../../memories'
+import { CaptionService } from '../application/captions'
+import { PrismaCaptionRepository } from './prisma-caption-repository'
+import { PrismaTelegramRepository } from './prisma-telegram-repository'
 import type { TelegramApiPort } from '../application/ports'
 import type { TelegramInboundEvent } from '../domain/inbound-event'
 
@@ -46,11 +49,36 @@ async function processInbox(
   if (event.kind === 'denied_content') {
     await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
   } else if (event.kind === 'command') {
+    if (event.command === 'cancel') await cancelCaption(db, event)
     await api.sendMessage(event.chatId, commandText(event.command), commandButtons(env, event.command, event.argument))
+  } else if (event.kind === 'caption_reply') {
+    await consumeCaptionReply(db, event)
   } else {
     throw new TerminalTaskError('Telegram inbox task references unexpected content')
   }
   await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
+}
+
+async function consumeCaptionReply(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>) {
+  const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
+  if (!admission || admission.role !== 'full') return
+  const source = await db.telegramSource.findFirst({ where: { chatId: BigInt(event.chatId), messageId: BigInt(event.replyToMessageId),
+    userId: admission.userId, familyId: admission.familyId, status: 'published', memoryId: { not: null } } })
+  if (!source?.memoryId) return
+  const memory = await db.memory.findFirst({ where: { id: source.memoryId, familyId: admission.familyId, deletedAt: null }, select: { version: true } })
+  if (!memory) return
+  await db.captionRequest.upsert({ where: { chatId_promptMessageId: { chatId: BigInt(event.chatId), promptMessageId: BigInt(event.replyToMessageId) } },
+    create: { familyId: admission.familyId, userId: admission.userId, memoryId: source.memoryId, chatId: BigInt(event.chatId),
+      promptMessageId: BigInt(event.replyToMessageId), expectedVersion: memory.version, expiresAt: new Date(Date.now() + 10 * 60_000) },
+    update: {} })
+  await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: admission.familyId, userId: admission.userId,
+    chatId: event.chatId, replyToMessageId: event.replyToMessageId, text: event.text })
+}
+
+async function cancelCaption(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'command' }>) {
+  const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
+  if (!admission || admission.role !== 'full') return
+  await new CaptionService(new PrismaCaptionRepository(db)).cancel({ familyId: admission.familyId, userId: admission.userId, chatId: event.chatId })
 }
 
 async function processSource(

@@ -126,7 +126,7 @@ describe('Telegram update mapping', () => {
       .toEqual({ kind: 'ignored', updateId: '108' })
   })
 
-  test('does not turn a reply into a new note', () => {
+  test('maps a reply as an explicit caption candidate, never as a new note', () => {
     expect(normalizeTelegramUpdate({
       update_id: 109,
       message: {
@@ -137,6 +137,6 @@ describe('Telegram update mapping', () => {
         reply_to_message: { message_id: 18, text: 'Исходное сообщение' },
         text: 'Это будущая подпись, а не новая заметка',
       },
-    })).toEqual({ kind: 'ignored', updateId: '109' })
+    })).toMatchObject({ kind: 'caption_reply', updateId: '109', replyToMessageId: '18', text: 'Это будущая подпись, а не новая заметка' })
   })
 })

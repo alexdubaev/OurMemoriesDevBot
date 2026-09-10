@@ -70,7 +70,7 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
         return { inboxId: existing?.id ?? null, duplicate: true }
       }
 
-      if (event.kind === 'command' || event.kind === 'denied_content') {
+      if (event.kind === 'command' || event.kind === 'denied_content' || event.kind === 'caption_reply') {
         await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
         return { inboxId, duplicate: false }
       }
@@ -128,8 +128,8 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
   }
 }
 
-function isContent(event: TelegramInboundEvent): event is Extract<TelegramInboundEvent, { kind: 'note' | 'media' }> {
-  return event.kind === 'note' || event.kind === 'media'
+function isContent(event: TelegramInboundEvent): event is Extract<TelegramInboundEvent, { kind: 'note' | 'media' | 'caption_reply' }> {
+  return event.kind === 'note' || event.kind === 'media' || event.kind === 'caption_reply'
 }
 
 async function queue(

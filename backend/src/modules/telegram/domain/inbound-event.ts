@@ -13,6 +13,7 @@ type TelegramMessageIdentity = {
 export type TelegramInboundEvent =
   | ({ kind: 'command'; command: TelegramCommand; argument: string } & TelegramMessageIdentity)
   | ({ kind: 'note'; text: string } & TelegramMessageIdentity)
+  | ({ kind: 'caption_reply'; text: string; replyToMessageId: string } & TelegramMessageIdentity)
   | ({
       kind: 'media'
       mediaKind: 'photo' | 'video' | 'voice'
