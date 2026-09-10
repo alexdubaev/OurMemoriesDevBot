@@ -37,14 +37,21 @@ maybeDescribe('Telegram durable capture', () => {
   })
   const privateStorage = createPrivateStorage(env)
   const app = createApp({ env, prisma, privateStorage })
-  const sent: Array<{ chatId: string; text: string }> = []
+  const sent: Array<{ chatId: string; text: string; options: Parameters<TelegramApiPort['sendMessage']>[2] }> = []
+  let finalReceiptFailuresRemaining = 0
   const api: TelegramApiPort = {
     download: async () => ({
       body: new Blob([photoFixture.slice().buffer as ArrayBuffer]).stream(),
       byteSize: photoFixture.byteLength,
       contentType: 'image/jpeg',
     }),
-    sendMessage: async (chatId, text) => { sent.push({ chatId, text }) },
+    sendMessage: async (chatId, text, options) => {
+      if (text.startsWith('Сохранено') && finalReceiptFailuresRemaining > 0) {
+        finalReceiptFailuresRemaining -= 1
+        throw new Error('synthetic Telegram 429')
+      }
+      sent.push({ chatId, text, options })
+    },
     getUpdates: async () => [],
     setCommands: async () => undefined,
     setMenuButton: async () => undefined,
@@ -62,6 +69,7 @@ maybeDescribe('Telegram durable capture', () => {
   beforeEach(async () => {
     await clearFixtures()
     sent.length = 0
+    finalReceiptFailuresRemaining = 0
     await rm(storageRoot, { recursive: true, force: true })
     await mkdir(storageRoot, { recursive: true })
   })
@@ -108,6 +116,44 @@ maybeDescribe('Telegram durable capture', () => {
     expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту.')
   })
 
+  test('retries a transient original write without poisoning the accepted Telegram media id', async () => {
+    const owner = await familyOwner('52501')
+    await accept(photo(251, 25, owner.subject, 'Повтор после сбоя'))
+    const task = await prisma.taskOutbox.findFirstOrThrow()
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    const writeObject = privateStorage.storage.writeObject.bind(privateStorage.storage)
+    let failOnce = true
+    privateStorage.storage.writeObject = async (input) => {
+      if (failOnce && input.key.startsWith('media-originals/')) {
+        failOnce = false
+        throw new Error('synthetic storage outage')
+      }
+      return writeObject(input)
+    }
+    try {
+      await expect(process(task.payload)).rejects.toThrow('synthetic storage outage')
+      expect((await prisma.uploadReservation.findFirstOrThrow()).releasedAt).toBeNull()
+    } finally {
+      privateStorage.storage.writeObject = writeObject
+    }
+    await process(task.payload)
+    expect(await prisma.memory.count()).toBe(1)
+    expect((await prisma.telegramSource.findFirstOrThrow()).status).toBe('published')
+  })
+
+  test('retries a final receipt after publication without creating a second memory', async () => {
+    const owner = await familyOwner('52601')
+    await accept(note(261, 26, owner.subject, 'Квитанция после 429'))
+    const task = await prisma.taskOutbox.findFirstOrThrow()
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    finalReceiptFailuresRemaining = 1
+    await expect(process(task.payload)).rejects.toThrow('synthetic Telegram 429')
+    expect(await prisma.memory.count()).toBe(1)
+    await process(task.payload)
+    expect(await prisma.memory.count()).toBe(1)
+    expect(sent.filter(({ text }) => text === 'Сохранено в семейную ленту.')).toHaveLength(1)
+  })
+
   test('persists album timing across processor restart, preserves order, and appends a late photo', async () => {
     const owner = await familyOwner('53001')
     for (const [updateId, messageId] of [[301, 31], [303, 33], [302, 32]] as const) {
@@ -128,6 +174,34 @@ maybeDescribe('Telegram durable capture', () => {
     await createTelegramTaskProcessor({ runtime, api, crypto })(lateTask.payload)
     expect(await prisma.memory.count()).toBe(1)
     expect(await prisma.memoryMedia.count({ where: { memoryId: firstMemory.id } })).toBe(4)
+  })
+
+  test('reconciles a late album photo after a crash between memory commit and Telegram bookkeeping', async () => {
+    const owner = await familyOwner('53501')
+    for (const [updateId, messageId] of [[351, 51], [352, 52], [353, 53]] as const) {
+      await accept(photo(updateId, messageId, owner.subject, messageId === 51 ? 'До сбоя' : '', 'album-crash'))
+    }
+    const initial = await prisma.telegramSource.findMany({ orderBy: { messageId: 'asc' } })
+    for (const source of initial) await createStoredPhoto(source)
+    await prisma.memory.create({ data: {
+      id: initial[0]!.plannedMemoryId, familyId: owner.familyId, childId: owner.childId,
+      authorId: owner.userId, kind: 'photo', body: 'До сбоя', occurredAt: new Date('2026-08-28T00:00:00Z'),
+    } })
+    await prisma.memoryMedia.createMany({ data: initial.map((source, position) => ({
+      familyId: owner.familyId, memoryId: initial[0]!.plannedMemoryId, mediaId: source.plannedMediaId!, position,
+    })) })
+
+    await accept(photo(354, 54, owner.subject, '', 'album-crash'))
+    const late = await prisma.telegramSource.findFirstOrThrow({ where: { messageId: 54n } })
+    await createStoredPhoto(late)
+    const album = await prisma.telegramAlbum.findFirstOrThrow()
+    await prisma.telegramAlbum.update({ where: { id: album.id }, data: { readyAt: new Date(0) } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { contains: ':354' } } })
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.memoryMedia.count({ where: { memoryId: initial[0]!.plannedMemoryId } })).toBe(4)
+    expect(await prisma.telegramSource.count({ where: { status: 'published', memoryId: initial[0]!.plannedMemoryId } })).toBe(4)
   })
 
   test('publishes mixed album items separately and blocks viewers and revoked members', async () => {
@@ -222,6 +296,16 @@ maybeDescribe('Telegram durable capture', () => {
     expect(response.status).toBe(201)
     const body = await response.json() as any
     return { ...owner, familyId: body.family.id, childId: body.child.id }
+  }
+
+  async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string; userId: string }) {
+    await prisma.mediaAsset.create({ data: {
+      id: source.plannedMediaId!, familyId: source.familyId, uploaderId: source.userId,
+      sourceKind: 'telegram', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `media-originals/test/${source.plannedMediaId}`, declaredMime: 'image/jpeg',
+      verifiedMime: 'image/jpeg', sha256: '0'.repeat(64), byteSize: 1n,
+      originalStatus: 'stored', renditionStatus: 'ready',
+    } })
   }
 })
 

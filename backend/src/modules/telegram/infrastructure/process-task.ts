@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { MemoryKind } from '../../../generated/prisma/enums'
 import { Client } from 'pg'
 import type { DbClient } from '../../../db'
@@ -62,7 +64,8 @@ async function processSource(
   signal?: AbortSignal,
 ) {
   const source = await loadSource(db, sourceId)
-  if (!source || source.status === 'published' || source.status === 'rejected') return 'skipped' as const
+  if (!source || source.status === 'rejected') return 'skipped' as const
+  if (source.status === 'published') return sendSourceReceipt(db, api, env, source)
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const event = decryptEvent(crypto, source.inbox)
   const mediaId = event.kind === 'media'
@@ -71,7 +74,7 @@ async function processSource(
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const published = await publishSingle(db, memories, source.id, event, mediaId)
   if (!published) return rejectSource(db, api, env, source, 'access_revoked')
-  await receipt(api, env, source.chatId.toString(), published.memoryId, event.kind === 'media' && event.mediaKind !== 'photo')
+  await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
 }
 
 async function processAlbum(
@@ -106,7 +109,6 @@ async function processAlbumLocked(
     orderBy: { messageId: 'asc' },
   })
   const pending = sources.filter((source) => source.status === 'accepted' || source.status === 'processing')
-  if (pending.length === 0) return 'skipped' as const
 
   if (album.status === 'published') {
     for (const source of pending) {
@@ -121,10 +123,33 @@ async function processAlbumLocked(
       }
       const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
       const appended = await appendLatePhoto(db, memories, album.id, source.id, mediaId)
-      if (appended) await receipt(api, env, source.chatId.toString(), appended, false)
+      if (!appended) throw new Error('Published Telegram album lost its memory link')
+    }
+    if (album.memoryId) await sendAlbumReceipt(db, api, env, album.id, album.chatId.toString(), album.memoryId)
+    return
+  }
+
+  if (album.status === 'mixed') {
+    for (const source of sources) {
+      if (source.status === 'published') {
+        await sendSourceReceipt(db, api, env, source)
+        continue
+      }
+      if (source.status === 'rejected') continue
+      const event = decryptEvent(crypto, source.inbox)
+      if (event.kind !== 'media') throw new TerminalTaskError('Telegram album contains a non-media source')
+      if (!(await hasFullAccess(db, source))) {
+        await rejectSource(db, api, env, source, 'access_revoked')
+        continue
+      }
+      const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
+      const published = await publishSingle(db, memories, source.id, event, mediaId)
+      if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
     }
     return
   }
+
+  if (pending.length === 0) return 'skipped' as const
 
   const events = sources.map((source) => ({ source, event: decryptEvent(crypto, source.inbox) }))
   const mediaEvents = events.filter((entry): entry is typeof entry & { event: Extract<TelegramInboundEvent, { kind: 'media' }> } => entry.event.kind === 'media')
@@ -139,20 +164,19 @@ async function processAlbumLocked(
     }
     if (!(await hasFullAccess(db, sources[0]!))) return rejectAlbum(db, api, env, sources, album.id, 'access_revoked')
     const memoryId = await publishPhotoAlbum(db, memories, album.id, sources.map(({ id }) => id), mediaEvents.map(({ event }) => event), mediaIds)
-    if (memoryId) await receipt(api, env, album.chatId.toString(), memoryId, false)
+    if (memoryId) await sendAlbumReceipt(db, api, env, album.id, album.chatId.toString(), memoryId)
     return
   }
 
   await db.telegramAlbum.update({ where: { id: album.id }, data: { status: 'mixed' } })
   for (const { source, event } of mediaEvents) {
-    if (source.status === 'published') continue
     if (!(await hasFullAccess(db, source))) {
       await rejectSource(db, api, env, source, 'access_revoked')
       continue
     }
     const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
     const published = await publishSingle(db, memories, source.id, event, mediaId)
-    if (published) await receipt(api, env, source.chatId.toString(), published.memoryId, event.mediaKind !== 'photo')
+    if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
   }
 }
 
@@ -166,11 +190,20 @@ async function ingestSourceMedia(
   signal?: AbortSignal,
 ) {
   if (!source) throw new TerminalTaskError('Telegram source disappeared')
-  const existing = source.plannedMediaId
-    ? await db.mediaAsset.findFirst({ where: { id: source.plannedMediaId, originalStatus: 'stored', deletedAt: null } })
+  let plannedMediaId = source.plannedMediaId
+  const planned = plannedMediaId ? await db.mediaAsset.findUnique({ where: { id: plannedMediaId } }) : null
+  if (planned && (planned.originalStatus === 'failed' || planned.deletedAt)) {
+    plannedMediaId = randomUUID()
+    await db.telegramSource.update({ where: { id: source.id }, data: { plannedMediaId, mediaId: null, status: 'accepted' } })
+  }
+  const existing = plannedMediaId
+    ? await db.mediaAsset.findFirst({ where: { id: plannedMediaId, originalStatus: 'stored', deletedAt: null } })
     : null
-  if (existing) return existing.id
-  if (!source.plannedMediaId) throw new TerminalTaskError('Telegram media source has no planned media id')
+  if (existing) {
+    await db.telegramSource.update({ where: { id: source.id }, data: { mediaId: existing.id, status: 'processing' } })
+    return existing.id
+  }
+  if (!plannedMediaId) throw new TerminalTaskError('Telegram media source has no planned media id')
   if (event.fileSize !== null && event.fileSize > env.TELEGRAM_FILE_MAX_BYTES) {
     await db.telegramSource.update({ where: { id: source.id }, data: { status: 'rejected', rejectionCode: 'file_too_large' } })
     await api.sendMessage(source.chatId.toString(), 'Файл больше 20 МБ. Загрузите его через Mini App.', openButton(env))
@@ -181,7 +214,7 @@ async function ingestSourceMedia(
   const scope = scopeFor(source)
   try {
     const result = await media.ingestTelegram(scope, {
-      assetId: source.plannedMediaId,
+      assetId: plannedMediaId,
       kind: event.mediaKind,
       contentType: mediaContentType(event),
       byteSize: download.byteSize,
@@ -215,9 +248,11 @@ async function publishSingle(
     body: event.kind === 'note' ? event.text : event.kind === 'media' ? event.caption : '',
     occurredAt: new Date('occurredAt' in event ? event.occurredAt : source.createdAt),
     mediaIds: mediaId ? [mediaId] : [],
-  })
-  await db.$transaction(async (tx) => {
-    await tx.telegramSource.update({ where: { id: source.id }, data: { status: 'published', memoryId, mediaId } })
+  }, async (tx, committedMemoryId) => {
+    await tx.telegramSource.update({
+      where: { id: source.id },
+      data: { status: 'published', memoryId: committedMemoryId, mediaId },
+    })
     await tx.telegramInbox.update({ where: { id: source.inboxId }, data: processedInboxData() })
   })
   return { memoryId }
@@ -243,11 +278,16 @@ async function publishPhotoAlbum(
     body: events.find(({ caption }) => caption.length > 0)?.caption ?? '',
     occurredAt: new Date(events[0]!.occurredAt),
     mediaIds,
-  })
-  await db.$transaction(async (tx) => {
-    await tx.telegramSource.updateMany({ where: { id: { in: sourceIds } }, data: { status: 'published', memoryId } })
+  }, async (tx, committedMemoryId) => {
+    await tx.telegramSource.updateMany({
+      where: { id: { in: sourceIds } },
+      data: { status: 'published', memoryId: committedMemoryId },
+    })
     await tx.telegramInbox.updateMany({ where: { source: { id: { in: sourceIds } } }, data: processedInboxData() })
-    await tx.telegramAlbum.update({ where: { id: albumId }, data: { status: 'published', memoryId } })
+    await tx.telegramAlbum.update({
+      where: { id: albumId },
+      data: { status: 'published', memoryId: committedMemoryId },
+    })
   })
   return memoryId
 }
@@ -261,11 +301,15 @@ async function appendLatePhoto(db: DbClient, memories: ReturnType<typeof createS
       orderBy: { messageId: 'asc' }, select: { id: true, mediaId: true },
     })
   if (ordered.length > 10) return null
-  await memories.replaceOrderedMedia(scopeFor(source), album.memoryId, ordered.map(({ mediaId: id }) => id!))
-  await db.$transaction(async (tx) => {
+  await memories.replaceOrderedMedia(
+    scopeFor(source),
+    album.memoryId,
+    ordered.map(({ mediaId: id }) => id!),
+    async (tx) => {
     await tx.telegramSource.update({ where: { id: sourceId }, data: { status: 'published', memoryId: album.memoryId, mediaId } })
     await tx.telegramInbox.update({ where: { id: source.inboxId }, data: processedInboxData() })
-  })
+    },
+  )
   return album.memoryId
 }
 
@@ -318,6 +362,43 @@ async function receipt(api: TelegramApiPort, env: AppEnv, chatId: string, memory
   )
 }
 
+async function sendSourceReceipt(
+  db: DbClient,
+  api: TelegramApiPort,
+  env: AppEnv,
+  source: { id: string; chatId: bigint; kind: string; memoryId: string | null; receiptSentAt: Date | null },
+) {
+  if (source.receiptSentAt) return 'skipped' as const
+  if (!source.memoryId) throw new Error('Published Telegram source lost its memory link')
+  await receipt(api, env, source.chatId.toString(), source.memoryId, source.kind === 'video' || source.kind === 'voice')
+  await db.telegramSource.updateMany({
+    where: { id: source.id, receiptSentAt: null },
+    data: { receiptSentAt: new Date() },
+  })
+}
+
+async function sendAlbumReceipt(
+  db: DbClient,
+  api: TelegramApiPort,
+  env: AppEnv,
+  albumId: string,
+  chatId: string,
+  memoryId: string,
+) {
+  const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
+  if (!album) return 'skipped' as const
+  const where = {
+    botId: album.botId,
+    chatId: album.chatId,
+    mediaGroupId: album.mediaGroupId,
+    status: 'published' as const,
+    receiptSentAt: null,
+  }
+  if ((await db.telegramSource.count({ where })) === 0) return 'skipped' as const
+  await receipt(api, env, chatId, memoryId, false)
+  await db.telegramSource.updateMany({ where, data: { receiptSentAt: new Date() } })
+}
+
 function commandText(command: string) {
   if (command === 'start') return 'Отправьте сюда заметку, фото, видео или голосовое — материал автоматически сохранится в семейную ленту. Данные ребёнка заполняются в Mini App.'
   if (command === 'help') return 'Поддерживаются заметки, фото, видео и голосовые до 20 МБ. Подпись можно добавить в Mini App; удалить запись тоже можно там.'
@@ -332,7 +413,7 @@ function commandButtons(env: AppEnv, command: string, argument: string) {
   const url = command === 'start' && argument
     ? `${env.TELEGRAM_MINI_APP_URL}/#invite=${encodeURIComponent(argument)}`
     : env.TELEGRAM_MINI_APP_URL
-  return { buttons: [{ text: command === 'start' && argument ? 'Открыть приглашение' : 'Открыть ленту', url }] }
+  return { buttons: [{ text: command === 'start' && argument ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
 }
 
 function openButton(env: AppEnv, memoryId?: string) {
@@ -341,7 +422,7 @@ function openButton(env: AppEnv, memoryId?: string) {
 }
 
 function openButtonFromUrl(baseUrl: string, memoryId?: string) {
-  return { buttons: [{ text: 'Открыть', url: memoryId ? `${baseUrl}/memories/${memoryId}` : baseUrl }] }
+  return { buttons: [{ text: 'Открыть', webAppUrl: memoryId ? `${baseUrl}/memories/${memoryId}` : baseUrl }] }
 }
 
 function taskPayload(value: unknown) {

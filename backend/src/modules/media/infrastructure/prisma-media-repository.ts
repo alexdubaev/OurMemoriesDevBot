@@ -63,6 +63,27 @@ export class PrismaMediaRepository implements MediaRepository {
     })
   }
 
+  async findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null> {
+    const asset = await this.db.mediaAsset.findFirst({
+      where: {
+        id: assetId,
+        familyId: scope.familyId,
+        uploaderId: scope.principal.userId,
+        sourceKind: 'telegram',
+        purpose: 'memory',
+      },
+      include: { variants: true, reservation: true },
+    })
+    if (!asset) return null
+    if (asset.originalStatus === 'stored' && !asset.deletedAt) {
+      return { kind: 'ready', asset: assetDto(asset) }
+    }
+    if (asset.originalStatus !== 'pending' || asset.deletedAt || !asset.reservation || asset.reservation.releasedAt) {
+      return { kind: 'expired' }
+    }
+    return { kind: 'pending', upload: pendingDto({ ...asset.reservation, asset }) }
+  }
+
   async prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation> {
     return this.db.$transaction(async (tx) => {
       const reservation = await reservationFor(tx, scope, uploadId)

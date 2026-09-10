@@ -18,8 +18,8 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
       if (expectedSize !== null && expectedSize > fileMaxBytes) throw new TelegramProviderError('Telegram file is too large')
       try {
         const file = await api.getFile(fileId, signal)
-        const byteSize = file.file_size ?? expectedSize
-        if (!file.file_path || byteSize === null || byteSize > fileMaxBytes) {
+        const declaredSize = file.file_size ?? expectedSize
+        if (!file.file_path || (declaredSize !== null && declaredSize > fileMaxBytes)) {
           throw new TelegramProviderError('Telegram file is unavailable or too large')
         }
         const response = await fetch(new URL(file.file_path, fileBase), { signal })
@@ -29,6 +29,11 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
           await response.body.cancel()
           throw new TelegramProviderError('Telegram file is too large')
         }
+        const byteSize = Number.isSafeInteger(headerLength) && headerLength > 0 ? headerLength : declaredSize
+        if (byteSize === null) {
+          await response.body.cancel()
+          throw new TelegramProviderError('Telegram file size is unavailable')
+        }
         return {
           body: limitStream(response.body, fileMaxBytes),
           byteSize,
@@ -36,39 +41,43 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
         } satisfies TelegramDownload
       } catch (error) {
         if (error instanceof TelegramProviderError) throw error
-        throw providerFailure(error)
+        throw telegramProviderFailure(error)
       }
     },
     async sendMessage(chatId, text, options) {
       try {
         await api.sendMessage(chatId, text, {
           ...(options?.replyToMessageId ? { reply_parameters: { message_id: Number(options.replyToMessageId) } } : {}),
-          ...(options?.buttons?.length ? {
-            reply_markup: { inline_keyboard: [options.buttons.map((button) => ({ text: button.text, url: button.url }))] },
-          } : {}),
+          ...(options?.buttons?.length ? { reply_markup: telegramInlineKeyboard(options.buttons) } : {}),
         })
       } catch (error) {
-        throw providerFailure(error)
+        throw telegramProviderFailure(error)
       }
     },
     async getUpdates(offset, signal) {
       try {
         return await api.getUpdates({ offset, timeout: 25, allowed_updates: ['message'] }, signal)
       } catch (error) {
-        throw providerFailure(error)
+        throw telegramProviderFailure(error)
       }
     },
     async setCommands(commands) {
-      try { await api.setMyCommands(commands) } catch (error) { throw providerFailure(error) }
+      try { await api.setMyCommands(commands) } catch (error) { throw telegramProviderFailure(error) }
     },
     async setMenuButton(url) {
       try { await api.setChatMenuButton({ menu_button: { type: 'web_app', text: 'Открыть ленту', web_app: { url } } }) }
-      catch (error) { throw providerFailure(error) }
+      catch (error) { throw telegramProviderFailure(error) }
     },
   }
 }
 
-function providerFailure(error: unknown) {
+export function telegramInlineKeyboard(buttons: Array<{ text: string; webAppUrl: string }>) {
+  return {
+    inline_keyboard: [buttons.map((button) => ({ text: button.text, web_app: { url: button.webAppUrl } }))],
+  }
+}
+
+export function telegramProviderFailure(error: unknown) {
   const retryAfter = readRetryAfter(error)
   return new TelegramProviderError('Telegram Bot API request failed', retryAfter)
 }

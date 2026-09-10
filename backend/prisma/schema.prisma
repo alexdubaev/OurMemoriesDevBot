@@ -96,6 +96,7 @@ model TelegramSource {
   memoryId        String?              @map("memory_id") @db.Uuid
   mediaId         String?              @map("media_id") @db.Uuid
   rejectionCode   String?              @map("rejection_code")
+  receiptSentAt   DateTime?            @map("receipt_sent_at") @db.Timestamptz(6)
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
   inbox           TelegramInbox        @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "telegram_sources_inbox_id_fkey")

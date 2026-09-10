@@ -13,17 +13,27 @@ export type SourceMemoryInput = {
   mediaIds: string[]
 }
 
+type AfterMemoryWrite = (tx: PrismaTransactionClient, memoryId: string) => Promise<void>
+
 /** Trusted adapter boundary: fixed ids make a crash between publication and source bookkeeping
  * replay-safe, while the same family/media invariants as the HTTP service stay enforced. */
 export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) {
   return {
-    async publish(scope: FamilyScope, input: SourceMemoryInput) {
+    async publish(scope: FamilyScope, input: SourceMemoryInput, afterWrite?: AfterMemoryWrite) {
       await access.requireFull(scope)
       return db.$transaction(async (tx) => {
         await lockFullMember(tx, scope)
-        const existing = await tx.memory.findUnique({ where: { id: input.id }, select: { id: true, familyId: true } })
+        const existing = await tx.memory.findUnique({
+          where: { id: input.id },
+          select: { id: true, familyId: true, childId: true, kind: true, media: { orderBy: { position: 'asc' }, select: { mediaId: true } } },
+        })
         if (existing) {
           if (existing.familyId !== scope.familyId) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
+          if (existing.childId !== input.childId || existing.kind !== input.kind) {
+            throw new MemoryFailure('invalid_input', 'Источник не соответствует сохранённому воспоминанию')
+          }
+          await reconcileOrderedMedia(tx, scope.familyId, existing.id, existing.media.map(({ mediaId }) => mediaId), input.mediaIds)
+          await afterWrite?.(tx, existing.id)
           return existing.id
         }
         const child = await tx.child.findFirst({ where: { id: input.childId, familyId: scope.familyId }, select: { id: true } })
@@ -39,26 +49,43 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         if (input.mediaIds.length > 0) await tx.memoryMedia.createMany({ data: input.mediaIds.map((mediaId, position) => ({
           familyId: scope.familyId, memoryId: input.id, mediaId, position,
         })) })
+        await afterWrite?.(tx, input.id)
         return input.id
       })
     },
 
-    async replaceOrderedMedia(scope: FamilyScope, memoryId: string, mediaIds: string[]) {
+    async replaceOrderedMedia(scope: FamilyScope, memoryId: string, mediaIds: string[], afterWrite?: AfterMemoryWrite) {
       await access.requireFull(scope)
       return db.$transaction(async (tx) => {
         await lockFullMember(tx, scope)
         const memory = await tx.memory.findFirst({ where: { id: memoryId, familyId: scope.familyId, deletedAt: null }, select: { id: true } })
         if (!memory) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
-        const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } })
-        const newlyAttached = mediaIds.filter((id) => !linked.some(({ mediaId }) => mediaId === id))
-        if (!(await readyMediaCount(tx, scope.familyId, newlyAttached))) throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
-        await tx.memoryMedia.deleteMany({ where: { memoryId, familyId: scope.familyId } })
-        await tx.memoryMedia.createMany({ data: mediaIds.map((mediaId, position) => ({ familyId: scope.familyId, memoryId, mediaId, position })) })
-        await tx.memory.update({ where: { id: memoryId }, data: { version: { increment: 1 } } })
+        const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, orderBy: { position: 'asc' }, select: { mediaId: true } })
+        await reconcileOrderedMedia(tx, scope.familyId, memoryId, linked.map(({ mediaId }) => mediaId), mediaIds)
+        await afterWrite?.(tx, memoryId)
         return memoryId
       })
     },
   }
+}
+
+async function reconcileOrderedMedia(
+  tx: PrismaTransactionClient,
+  familyId: string,
+  memoryId: string,
+  linkedIds: string[],
+  mediaIds: string[],
+) {
+  const newlyAttached = mediaIds.filter((id) => !linkedIds.includes(id))
+  if (!(await readyMediaCount(tx, familyId, newlyAttached))) {
+    throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
+  }
+  if (linkedIds.length === mediaIds.length && linkedIds.every((id, index) => id === mediaIds[index])) return
+  await tx.memoryMedia.deleteMany({ where: { memoryId, familyId } })
+  if (mediaIds.length > 0) await tx.memoryMedia.createMany({
+    data: mediaIds.map((mediaId, position) => ({ familyId, memoryId, mediaId, position })),
+  })
+  await tx.memory.update({ where: { id: memoryId }, data: { version: { increment: 1 } } })
 }
 
 async function readyMediaCount(

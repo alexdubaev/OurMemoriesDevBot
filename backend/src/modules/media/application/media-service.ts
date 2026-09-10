@@ -66,35 +66,60 @@ export class MediaService {
   }) {
     await this.access.requireFull(scope)
     const now = this.now()
-    const uploadId = randomUUID()
-    const objectKey = createStorageObjectKey({ namespace: 'media-originals', id: input.assetId, now })
-    const expiresAt = new Date(now.getTime() + this.config.reservationTtlSeconds * 1_000)
-    await this.repository.reserve({
-      uploadId,
-      assetId: input.assetId,
-      familyId: scope.familyId,
-      userId: scope.principal.userId,
-      sourceKind: 'telegram',
-      purpose: 'memory',
-      kind: input.kind,
-      objectKey,
-      declaredMime: input.contentType,
-      byteSize: input.byteSize,
-      expiresAt,
-      quotaBytes: this.config.familyQuotaBytes,
-      maxPendingUploads: this.config.maxPendingUploads,
-      now,
-    })
-    try {
-      await this.storage.writeObject({
-        key: objectKey,
-        body: input.body,
-        contentLength: input.byteSize,
-        contentType: input.contentType,
+    let preparation = await this.repository.findTelegramIngestion(scope, input.assetId)
+    if (preparation?.kind === 'ready') return { asset: preparation.asset }
+    if (preparation?.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
+    if (preparation?.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+    if (!preparation) {
+      const uploadId = randomUUID()
+      const objectKey = createStorageObjectKey({ namespace: 'media-originals', id: input.assetId, now })
+      const expiresAt = new Date(now.getTime() + this.config.reservationTtlSeconds * 1_000)
+      await this.repository.reserve({
+        uploadId,
+        assetId: input.assetId,
+        familyId: scope.familyId,
+        userId: scope.principal.userId,
+        sourceKind: 'telegram',
+        purpose: 'memory',
+        kind: input.kind,
+        objectKey,
+        declaredMime: input.contentType,
+        byteSize: input.byteSize,
+        expiresAt,
+        quotaBytes: this.config.familyQuotaBytes,
+        maxPendingUploads: this.config.maxPendingUploads,
+        now,
       })
-      return await this.finalize(scope, uploadId)
+      preparation = { kind: 'pending', upload: {
+        uploadId, assetId: input.assetId, familyId: scope.familyId, userId: scope.principal.userId,
+        sourceKind: 'telegram', purpose: 'memory', kind: input.kind, objectKey,
+        declaredMime: input.contentType, byteSize: input.byteSize, expiresAt,
+      } }
+    }
+    const upload = preparation.upload
+    if (upload.kind !== input.kind || upload.declaredMime !== input.contentType || upload.byteSize !== input.byteSize) {
+      await input.body.cancel().catch(() => undefined)
+      await this.repository.rejectUpload(scope, upload.uploadId, this.now())
+      throw new MediaFailure('invalid_file', 'Telegram изменил метаданные файла между попытками')
+    }
+    try {
+      const stored = await this.storage.headObject(upload.objectKey)
+      if (stored) {
+        await input.body.cancel().catch(() => undefined)
+        if (stored.contentLength !== upload.byteSize || stored.contentType !== upload.declaredMime) {
+          await this.repository.rejectUpload(scope, upload.uploadId, this.now())
+          throw new MediaFailure('invalid_file', 'Сохранённый оригинал не соответствует Telegram-файлу')
+        }
+      } else {
+        await this.storage.writeObject({
+          key: upload.objectKey,
+          body: input.body,
+          contentLength: upload.byteSize,
+          contentType: upload.declaredMime,
+        })
+      }
+      return await this.finalize(scope, upload.uploadId)
     } catch (error) {
-      await this.repository.rejectUpload(scope, uploadId, this.now()).catch(() => undefined)
       if (error instanceof StorageError) throw storageFailure(error)
       throw error
     }

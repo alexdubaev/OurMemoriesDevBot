@@ -56,6 +56,7 @@ export type MediaRepository = {
     maxPendingUploads: number
     now: Date
   }): Promise<void>
+  findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null>
   prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation>
   rejectUpload(scope: FamilyScope, uploadId: string, now: Date): Promise<void>
   commitFinalization(input: {

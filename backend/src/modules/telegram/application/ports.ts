@@ -27,7 +27,7 @@ export type TelegramDownload = {
 export type TelegramApiPort = {
   download(fileId: string, expectedSize: number | null, signal?: AbortSignal): Promise<TelegramDownload>
   sendMessage(chatId: string, text: string, options?: {
-    buttons?: Array<{ text: string; url: string }>
+    buttons?: Array<{ text: string; webAppUrl: string }>
     replyToMessageId?: string
   }): Promise<void>
   getUpdates(offset: number, signal: AbortSignal): Promise<unknown[]>

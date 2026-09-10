@@ -12,14 +12,17 @@ export function createTelegramWebhook(options: {
   acceptUpdate: (event: TelegramInboundEvent) => Promise<unknown>
 }) {
   const routes = new Hono()
+  routes.use('/webhooks/telegram', async (c, next) => {
+    if (!sameSecret(c.req.header('X-Telegram-Bot-Api-Secret-Token'), options.secret)) {
+      return c.json({ ok: false }, 401)
+    }
+    await next()
+  })
   routes.use('/webhooks/telegram', bodyLimit({
     maxSize: options.bodyLimitBytes,
     onError: (c) => c.json({ ok: false }, 413),
   }))
   routes.post('/webhooks/telegram', async (c) => {
-    if (!sameSecret(c.req.header('X-Telegram-Bot-Api-Secret-Token'), options.secret)) {
-      return c.json({ ok: false }, 401)
-    }
     const declaredLength = Number(c.req.header('content-length'))
     if (Number.isFinite(declaredLength) && declaredLength > options.bodyLimitBytes) {
       return c.json({ ok: false }, 413)
