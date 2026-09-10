@@ -7,3 +7,8 @@ Original repository: https://github.com/di-sukharev/vibe
 
 Backend test fixture `heic-exif-orientation.heic` derives from gen2brain/heic
 (https://github.com/gen2brain/heic), MIT License.
+
+The web application loads the Inter typeface from its official distribution
+(https://rsms.me/inter/). Copyright (c) 2016 The Inter Project Authors.
+Inter is licensed under the SIL Open Font License, Version 1.1:
+https://github.com/rsms/inter/blob/master/LICENSE.txt
