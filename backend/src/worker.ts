@@ -144,6 +144,8 @@ export async function main() {
   const runtime = createBackendRuntime()
 
   try {
+    const { assertMediaProcessorRuntime } = await import('./modules/media')
+    await assertMediaProcessorRuntime(runtime.env)
     if (runtime.env.TELEGRAM_BOT_TOKEN) {
       const { verifyTelegramBotIdentity } = await import('./modules/auth')
       await verifyTelegramBotIdentity({

@@ -115,6 +115,10 @@ const envSchema = z.object({
   MEDIA_MAX_PENDING_UPLOADS: z.coerce.number().int().positive().max(100).default(5),
   MEDIA_RESERVATION_TTL_SECONDS: z.coerce.number().int().positive().max(24 * 60 * 60).default(15 * 60),
   MEDIA_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().max(15 * 60).default(5 * 60),
+  // System-provisioned executable names or explicit paths. Absence means PATH lookup, while the
+  // worker's capability check proves the binary works before it accepts a media preparation job.
+  FFMPEG_PATH: optionalStringSchema,
+  FFPROBE_PATH: optionalStringSchema,
 }).superRefine((env, ctx) => {
   validateJwtSecret(env, ctx)
   validateProductionRuntime(env, ctx)

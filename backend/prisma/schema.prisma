@@ -128,6 +128,26 @@ model TelegramAlbum {
   @@map("telegram_albums")
 }
 
+/// A reply-bound caption edit intent. It carries all ownership and optimistic-concurrency data so
+/// a restart or a later unrelated message can never guess which memory to mutate.
+model CaptionRequest {
+  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId        String    @map("family_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  memoryId        String    @map("memory_id") @db.Uuid
+  chatId          BigInt    @map("chat_id")
+  promptMessageId BigInt    @map("prompt_message_id")
+  expectedVersion Int       @map("expected_version")
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt      DateTime? @map("consumed_at") @db.Timestamptz(6)
+  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([chatId, promptMessageId], map: "caption_requests_chat_prompt_key")
+  @@index([familyId, userId, expiresAt], map: "caption_requests_scope_expiry_idx")
+  @@map("caption_requests")
+}
+
 model PilotAdmission {
   id         String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   provider   ExternalIdentityProvider
@@ -308,6 +328,8 @@ model MediaAsset {
   width              Int?
   height             Int?
   durationMs         Int?                 @map("duration_ms")
+  waveform           Json?                @map("waveform")
+  processingErrorCode String?             @map("processing_error_code")
   originalStatus     MediaOriginalStatus  @default(pending) @map("original_status")
   renditionStatus    MediaRenditionStatus @default(pending) @map("rendition_status")
   deletedAt          DateTime?            @map("deleted_at") @db.Timestamptz(6)
@@ -339,6 +361,7 @@ model MediaVariant {
   width      Int?
   height     Int?
   durationMs Int?             @map("duration_ms")
+  codec      String?          @map("codec")
   createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   asset      MediaAsset       @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Cascade, map: "media_variants_media_id_family_id_fkey")
 

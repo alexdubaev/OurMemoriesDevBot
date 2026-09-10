@@ -117,6 +117,7 @@ export class PrismaMediaRepository implements MediaRepository {
     width: number | null
     height: number | null
     durationMs: number | null
+    waveform?: number[] | null
     renditionStatus: 'pending' | 'ready'
     variants: StoredVariant[]
     now: Date
@@ -158,6 +159,7 @@ export class PrismaMediaRepository implements MediaRepository {
           width: input.width,
           height: input.height,
           durationMs: input.durationMs,
+          waveform: input.waveform ?? undefined,
           originalStatus: 'stored',
           renditionStatus: input.renditionStatus,
         },
@@ -173,6 +175,12 @@ export class PrismaMediaRepository implements MediaRepository {
           storageUsedBytes: { increment: reservation.bytes },
         },
       })
+      if (reservation.asset.mediaKind === 'voice' || reservation.asset.mediaKind === 'video') {
+        await insertTask(tx, {
+          type: 'media:prepare', dedupeKey: `media-prepare:${reservation.mediaId}`,
+          payload: { mediaId: reservation.mediaId }, scheduledFor: input.now,
+        })
+      }
       const ready = await tx.mediaAsset.findUniqueOrThrow({
         where: { id: reservation.mediaId }, include: { variants: true },
       })
@@ -290,6 +298,7 @@ function assetDto(asset: {
   width: number | null
   height: number | null
   durationMs: number | null
+  waveform: unknown
   variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
 }): MediaAssetDto {
   const path = (variant: MediaVariant) =>
@@ -304,6 +313,8 @@ function assetDto(asset: {
     width: asset.width,
     height: asset.height,
     durationMs: asset.durationMs,
+    waveform: Array.isArray(asset.waveform) && asset.waveform.length === 48 && asset.waveform.every((peak) => typeof peak === 'number')
+      ? asset.waveform as number[] : null,
     previewPath: variants.has('preview') ? path('preview') : null,
     displayPath: variants.has('display') ? path('display') : null,
     playbackPath: variants.has('playback') ? path('playback') : null,
