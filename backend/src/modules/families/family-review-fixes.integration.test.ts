@@ -46,7 +46,7 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     expect(ownerUpdate.response.status).toBe(200)
     expect(ownerUpdate.body).toMatchObject({
       family: { name: 'Обновлённая семья', timezone: 'Asia/Yekaterinburg' },
-      child: { displayName: 'Маша', birthDate: null },
+      child: { name: 'Маша', birthDate: null },
     })
 
     expect((await patchFamily(full.token, family.body.family.id, { name: 'Нет' })).response.status)
@@ -88,7 +88,6 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     const missingKey = await jsonRequest('/api/v1/families', owner.token, 'POST', {
       name: 'Без ключа',
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Ребёнок' },
     })
     expect(missingKey.response.status).toBe(422)
     expect(missingKey.body.error).toMatchObject({
@@ -145,6 +144,7 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     expect(inviteRecord.responseSnapshot).toEqual({
       id: inviteAttempts[0]!.body.id,
       role: inviteAttempts[0]!.body.role,
+      inviteeDisplayName: null,
       expiresAt: inviteAttempts[0]!.body.expiresAt,
     })
     expect(JSON.stringify(inviteRecord.responseSnapshot))
@@ -314,16 +314,22 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     }
   }
 
-  function createFamily(
+  async function createFamily(
     user: { token: string },
     name: string,
     idempotencyKey = randomUUID(),
   ) {
-    return jsonRequest('/api/v1/families', user.token, 'POST', {
+    const created = await jsonRequest('/api/v1/families', user.token, 'POST', {
       name,
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Ребёнок' },
     }, idempotencyKey)
+    if (created.response.status === 201) {
+      const child = await prisma.child.findFirst({ where: { familyId: created.body.family.id } })
+      if (!child) await prisma.child.create({
+        data: { familyId: created.body.family.id, displayName: 'Legacy child' },
+      })
+    }
+    return created
   }
 
   function createInvite(

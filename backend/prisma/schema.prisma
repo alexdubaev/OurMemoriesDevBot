@@ -216,7 +216,9 @@ model Child {
   familyId      String      @map("family_id") @db.Uuid
   displayName   String      @map("display_name")
   birthDate     DateTime?   @map("birth_date") @db.Date
+  sex           String?     @map("sex")
   avatarMediaId String?     @unique(map: "children_avatar_media_id_key") @map("avatar_media_id") @db.Uuid
+  avatarCrop    Json?       @map("avatar_crop")
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")

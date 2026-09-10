@@ -19,32 +19,49 @@ describe('family contracts', () => {
     expect(() => familyRoleSchema.parse('admin')).toThrow()
   })
 
-  test('normalizes family creation and rejects invalid child or timezone input', () => {
+  test('creates an idempotent family bootstrap without allowing an incomplete child profile', () => {
     expect(
       createFamilyRequestSchema.parse({
         name: ' Наша семья ',
         timezone: 'Europe/Moscow',
-        child: { displayName: ' Миша ', birthDate: '2024-02-29' },
       }),
     ).toEqual({
       name: 'Наша семья',
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Миша', birthDate: '2024-02-29' },
     })
     expect(() =>
       createFamilyRequestSchema.parse({
         name: 'Family',
         timezone: 'not-a-timezone',
-        child: { displayName: '' },
       }),
     ).toThrow()
     expect(() =>
       createFamilyRequestSchema.parse({
         name: 'Family',
         timezone: 'Europe/Moscow',
-        child: { displayName: 'Миша', birthDate: '2024-02-30' },
+        child: { displayName: 'Миша' },
       }),
     ).toThrow()
+  })
+
+  test('requires every child profile field and a bounded avatar crop during onboarding', async () => {
+    const { completeChildProfileRequestSchema } = await import('./index')
+    expect(completeChildProfileRequestSchema.parse({
+      name: ' Миша ',
+      birthDate: '2024-02-29',
+      sex: 'boy',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    })).toMatchObject({ name: 'Миша', sex: 'boy' })
+    expect(() => completeChildProfileRequestSchema.parse({
+      name: 'Миша', birthDate: '2024-02-29', sex: 'boy',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+    })).toThrow()
+    expect(() => completeChildProfileRequestSchema.parse({
+      name: 'Миша', birthDate: '2024-02-29', sex: 'girl',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+      avatarCrop: { x: 0.5, y: 0, width: 0.6, height: 1 },
+    })).toThrow()
   })
 
   test('defaults invitations to viewer and never accepts a role during consumption', () => {

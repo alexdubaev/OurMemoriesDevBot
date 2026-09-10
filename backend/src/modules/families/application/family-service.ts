@@ -6,10 +6,12 @@ import {
 } from '@web-app-demo/contracts'
 import type {
   AcceptInviteResponse,
+  CompleteChildProfileRequest,
   CreateFamilyRequest,
   CreateInviteRequest,
   CreateInviteResponse,
   FamilyDto,
+  FamilyInviteDto,
   FamilyMemberDto,
   FamilyMeResponse,
   FamilyResponse,
@@ -20,6 +22,7 @@ import type {
 
 import type { DbClient } from '../../../db'
 import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
+import { insertTask } from '../../../outbox/store'
 import { FamilyFailure } from '../domain/errors'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
@@ -103,16 +106,7 @@ export class FamilyService {
           await tx.familyMember.create({
             data: { familyId: family.id, userId: principal.userId, role: 'full' },
           })
-          const child = await tx.child.create({
-            data: {
-              familyId: family.id,
-              displayName: input.child.displayName,
-              birthDate: input.child.birthDate
-                ? new Date(`${input.child.birthDate}T00:00:00.000Z`)
-                : null,
-            },
-          })
-          const response = { family: familyDto(family), child: childDto(child) }
+          const response = { family: familyDto(family), child: null }
           return {
             resourceId: family.id,
             response,
@@ -141,7 +135,7 @@ export class FamilyService {
         include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
       })
       const child = family?.children[0]
-      if (!family || !child) throw new FamilyFailure('not_found', 'Семья не найдена')
+      if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
 
       const updatedFamily = await tx.family.update({
         where: { id: family.id },
@@ -150,7 +144,7 @@ export class FamilyService {
           ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
         },
       })
-      const updatedChild = input.child
+      const updatedChild = input.child && child
         ? await tx.child.update({
             where: { id: child.id },
             data: {
@@ -167,7 +161,72 @@ export class FamilyService {
             },
           })
         : child
-      return { family: familyDto(updatedFamily), child: childDto(updatedChild) }
+      return { family: familyDto(updatedFamily), child: updatedChild ? childDto(updatedChild) : null }
+    })
+  }
+
+  async completeChildProfile(
+    scope: FamilyScope,
+    input: CompleteChildProfileRequest,
+  ): Promise<FamilyResponse> {
+    await this.access.requireOwner(scope)
+    return this.db.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM families
+         WHERE id = ${scope.familyId}::uuid AND status = 'active'
+         FOR UPDATE
+      `
+      if (!locked[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
+      const [family, avatar, currentChild] = await Promise.all([
+        tx.family.findUniqueOrThrow({ where: { id: scope.familyId } }),
+        tx.mediaAsset.findFirst({
+          where: {
+            id: input.avatarMediaId,
+            familyId: scope.familyId,
+            purpose: 'child_avatar',
+            mediaKind: 'photo',
+            originalStatus: 'stored',
+            renditionStatus: 'ready',
+            deletedAt: null,
+          },
+          select: { id: true },
+        }),
+        tx.child.findFirst({ where: { familyId: scope.familyId }, orderBy: { createdAt: 'asc' } }),
+      ])
+      if (!avatar) {
+        throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
+      }
+      const data = {
+        displayName: input.name,
+        birthDate: new Date(`${input.birthDate}T00:00:00.000Z`),
+        sex: input.sex,
+        avatarMediaId: input.avatarMediaId,
+        avatarCrop: input.avatarCrop,
+      }
+      const child = currentChild
+        ? await tx.child.update({ where: { id: currentChild.id }, data })
+        : await tx.child.create({ data: { familyId: scope.familyId, ...data } })
+
+      if (currentChild?.avatarMediaId && currentChild.avatarMediaId !== input.avatarMediaId) {
+        const retired = await tx.mediaAsset.updateMany({
+          where: {
+            id: currentChild.avatarMediaId,
+            familyId: scope.familyId,
+            purpose: 'child_avatar',
+            deletedAt: null,
+          },
+          data: { deletedAt: this.now() },
+        })
+        if (retired.count === 1) {
+          await insertTask(tx, {
+            type: 'media:delete',
+            dedupeKey: `media-delete:${currentChild.avatarMediaId}`,
+            payload: { mediaId: currentChild.avatarMediaId },
+            scheduledFor: this.now(),
+          })
+        }
+      }
+      return { family: familyDto(family), child: childDto(child) }
     })
   }
 
@@ -177,8 +236,8 @@ export class FamilyService {
       where: { id: scope.familyId, status: 'active' },
       include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
     })
-    if (!family || !family.children[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
-    return { family: familyDto(family), child: childDto(family.children[0]) }
+    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+    return { family: familyDto(family), child: family.children[0] ? childDto(family.children[0]) : null }
   }
 
   async listMembers(scope: FamilyScope): Promise<{ items: FamilyMemberDto[] }> {
@@ -213,6 +272,18 @@ export class FamilyService {
       payloadHash,
       now: this.now(),
       execute: async (tx, idempotencyRecordId) => {
+        const issuer = await tx.$queryRaw<Array<{ role: 'full' | 'viewer' }>>`
+          SELECT role::text AS role
+            FROM family_members
+           WHERE family_id = ${scope.familyId}::uuid
+             AND user_id = ${scope.principal.userId}::uuid
+             AND revoked_at IS NULL
+           FOR UPDATE
+        `
+        if (!issuer[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
+        if (issuer[0].role !== 'full') {
+          throw new FamilyFailure('forbidden', 'Для этого действия нужен полный доступ')
+        }
         const rawToken = deriveInviteToken(
           this.idempotencySecret,
           scope.principal.userId,
@@ -222,9 +293,12 @@ export class FamilyService {
         )
         const family = await tx.family.findFirst({
           where: { id: scope.familyId, status: 'active' },
-          select: { id: true },
+          select: { id: true, children: { select: { id: true }, take: 1 } },
         })
         if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+        if (!family.children[0]) {
+          throw new FamilyFailure('conflict', 'Сначала завершите профиль ребёнка')
+        }
         const now = this.now()
         const invite = await tx.familyInvite.create({
           data: {
@@ -262,6 +336,23 @@ export class FamilyService {
         'Этот Idempotency-Key уже использован с другими данными',
       ),
     })).response
+  }
+
+  async listInvites(scope: FamilyScope): Promise<{ items: FamilyInviteDto[] }> {
+    const actor = await this.access.requireMember(scope)
+    if (!actor.isOwner && actor.role !== 'full') {
+      throw new FamilyFailure('forbidden', 'Для просмотра приглашений нужен полный доступ')
+    }
+    const invites = await this.db.familyInvite.findMany({
+      where: {
+        familyId: scope.familyId,
+        acceptedAt: null,
+        revokedAt: null,
+        ...(actor.isOwner ? {} : { createdBy: scope.principal.userId }),
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    return { items: invites.map(pendingInviteDto) }
   }
 
   async previewInvite(principal: Principal, rawToken: string): Promise<InvitePreviewResponse> {
@@ -400,35 +491,42 @@ export class FamilyService {
 
   async updateMemberRole(scope: FamilyScope, userId: string, input: UpdateMemberRoleRequest) {
     const actor = await this.access.requireMember(scope)
-    const family = await this.db.family.findUnique({
-      where: { id: scope.familyId },
-      select: { ownerUserId: true },
-    })
-    if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
-    if (family.ownerUserId === userId) {
-      throw new FamilyFailure('forbidden', 'Создателя семьи нельзя изменять через этот экран')
-    }
     if (input.role !== undefined && !actor.isOwner) {
       throw new FamilyFailure('forbidden', 'Уровень доступа меняет только создатель семьи')
     }
     if (input.role === undefined && !actor.isOwner && actor.role !== 'full') {
       throw new FamilyFailure('forbidden', 'Для этого действия нужен полный доступ')
     }
-    const updated = await this.db.familyMember.updateMany({
-      where: { familyId: scope.familyId, userId, revokedAt: null },
-      data: {
-        ...(input.role === undefined ? {} : { role: input.role }),
-        ...(input.familyDisplayName === undefined
-          ? {}
-          : { familyDisplayName: input.familyDisplayName }),
-      },
+    return this.db.$transaction(async (tx) => {
+      const family = await tx.family.findUnique({
+        where: { id: scope.familyId }, select: { ownerUserId: true },
+      })
+      if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+      if (family.ownerUserId === userId) {
+        throw new FamilyFailure('forbidden', 'Создателя семьи нельзя изменять через этот экран')
+      }
+      const updated = await tx.familyMember.updateMany({
+        where: { familyId: scope.familyId, userId, revokedAt: null },
+        data: {
+          ...(input.role === undefined ? {} : { role: input.role }),
+          ...(input.familyDisplayName === undefined
+            ? {}
+            : { familyDisplayName: input.familyDisplayName }),
+        },
+      })
+      if (updated.count === 0) throw new FamilyFailure('not_found', 'Участник не найден')
+      if (input.role === 'viewer') {
+        await tx.familyInvite.updateMany({
+          where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
+          data: { revokedAt: this.now() },
+        })
+      }
+      const member = await tx.familyMember.findUniqueOrThrow({
+        where: { familyId_userId: { familyId: scope.familyId, userId } },
+        include: { user: { select: { displayName: true } } },
+      })
+      return { membership: memberDto(member, family.ownerUserId) }
     })
-    if (updated.count === 0) throw new FamilyFailure('not_found', 'Участник не найден')
-    const member = await this.db.familyMember.findUniqueOrThrow({
-      where: { familyId_userId: { familyId: scope.familyId, userId } },
-      include: { user: { select: { displayName: true } } },
-    })
-    return { membership: memberDto(member, family.ownerUserId) }
   }
 
   async removeMember(scope: FamilyScope, userId: string) {
@@ -462,17 +560,24 @@ export class FamilyService {
     if (!member) throw new FamilyFailure('not_found', 'Участник не найден')
     if (member.revokedAt) return
 
-    const revoked = await this.db.familyMember.updateMany({
-      where: { familyId: scope.familyId, userId, revokedAt: null },
-      data: { revokedAt: this.now() },
-    })
-    if (revoked.count === 0) {
-      const concurrentlyRevoked = await this.db.familyMember.findFirst({
-        where: { familyId: scope.familyId, userId, revokedAt: { not: null } },
-        select: { userId: true },
+    await this.db.$transaction(async (tx) => {
+      const revoked = await tx.familyMember.updateMany({
+        where: { familyId: scope.familyId, userId, revokedAt: null },
+        data: { revokedAt: this.now() },
       })
-      if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Участник не найден')
-    }
+      if (revoked.count === 0) {
+        const concurrentlyRevoked = await tx.familyMember.findFirst({
+          where: { familyId: scope.familyId, userId, revokedAt: { not: null } },
+          select: { userId: true },
+        })
+        if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Участник не найден')
+        return
+      }
+      await tx.familyInvite.updateMany({
+        where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: this.now() },
+      })
+    })
   }
 
 }
@@ -553,12 +658,52 @@ function familyDto(family: { id: string; name: string; timezone: string; ownerUs
   }
 }
 
-function childDto(child: { id: string; displayName: string; birthDate: Date | null }) {
+function childDto(child: {
+  id: string
+  displayName: string
+  birthDate: Date | null
+  sex: string | null
+  avatarMediaId: string | null
+  avatarCrop: unknown
+}) {
+  const sex: 'boy' | 'girl' | null = child.sex === 'boy' || child.sex === 'girl' ? child.sex : null
+  const avatarCrop = validAvatarCrop(child.avatarCrop) ? child.avatarCrop : null
   return {
     id: child.id,
-    displayName: child.displayName,
+    name: child.displayName,
     birthDate: child.birthDate?.toISOString().slice(0, 10) ?? null,
+    sex,
+    avatarMediaId: child.avatarMediaId,
+    avatarCrop,
+    isComplete: child.birthDate !== null && sex !== null && child.avatarMediaId !== null && avatarCrop !== null,
   }
+}
+
+function pendingInviteDto(invite: {
+  id: string
+  role: 'full' | 'viewer'
+  inviteeDisplayName: string | null
+  expiresAt: Date
+  createdAt: Date
+}): FamilyInviteDto {
+  return {
+    id: invite.id,
+    role: invite.role,
+    inviteeDisplayName: invite.inviteeDisplayName,
+    expiresAt: invite.expiresAt.toISOString(),
+    createdAt: invite.createdAt.toISOString(),
+  }
+}
+
+function validAvatarCrop(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const crop = value as Record<string, unknown>
+  const [x, y, width, height] = [crop.x, crop.y, crop.width, crop.height]
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof width !== 'number' || typeof height !== 'number' ||
+    !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return false
+  }
+  return x >= 0 && y >= 0 && width > 0 && height > 0 && x + width <= 1 && y + height <= 1
 }
 
 function memberDto(

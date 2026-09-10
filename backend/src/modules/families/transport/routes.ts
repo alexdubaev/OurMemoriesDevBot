@@ -3,9 +3,11 @@ import {
   acceptInviteResponseSchema,
   apiErrorSchema,
   createFamilyRequestSchema,
+  completeChildProfileRequestSchema,
   createInviteRequestSchema,
   createInviteResponseSchema,
   familyInviteParamsSchema,
+  familyInvitesResponseSchema,
   familyMemberParamsSchema,
   familyMemberResponseSchema,
   familyMembersResponseSchema,
@@ -63,6 +65,14 @@ const updateFamilyRoute = createRoute({
   },
   responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Updated family and child profile' } },
 })
+const completeChildProfileRoute = createRoute({
+  method: 'put', path: '/families/{familyId}/child', security: bearerSecurity,
+  request: {
+    params: familyParamsSchema,
+    body: { content: json(completeChildProfileRequestSchema) },
+  },
+  responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Completed child profile' } },
+})
 const listMembersRoute = createRoute({
   method: 'get', path: '/families/{familyId}/members', security: bearerSecurity,
   request: { params: familyParamsSchema },
@@ -76,6 +86,11 @@ const createInviteRoute = createRoute({
     body: { content: json(createInviteRequestSchema) },
   },
   responses: { ...errors, 201: { content: json(createInviteResponseSchema), description: 'Created one-use invitation' } },
+})
+const listInvitesRoute = createRoute({
+  method: 'get', path: '/families/{familyId}/invites', security: bearerSecurity,
+  request: { params: familyParamsSchema },
+  responses: { ...errors, 200: { content: json(familyInvitesResponseSchema), description: 'Visible pending invitations' } },
 })
 const previewInviteRoute = createRoute({
   method: 'post', path: '/invites/preview', security: bearerSecurity,
@@ -139,6 +154,12 @@ export function createFamilyRoutes({
       c.req.valid('json'),
     ),
   ), 200))
+  routes.openapi(completeChildProfileRoute, async (c) => c.json(await executeFamily(() =>
+    service.completeChildProfile(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.valid('json'),
+    ),
+  ), 200))
   routes.openapi(listMembersRoute, async (c) => c.json(await executeFamily(() =>
     service.listMembers(scope(c.var.user, c.req.valid('param').familyId)),
   ), 200))
@@ -149,6 +170,9 @@ export function createFamilyRoutes({
       c.req.valid('header')['idempotency-key'],
     ),
   ), 201))
+  routes.openapi(listInvitesRoute, async (c) => c.json(await executeFamily(() =>
+    service.listInvites(scope(c.var.user, c.req.valid('param').familyId)),
+  ), 200))
   routes.openapi(previewInviteRoute, async (c) => c.json(await executeFamily(() =>
     service.previewInvite(principal(c.var.user), c.req.valid('json').token),
   ), 200))

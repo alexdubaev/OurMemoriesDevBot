@@ -345,10 +345,13 @@ maybeDescribe('Telegram durable capture', () => {
     const owner = await admittedUser(subject)
     const response = await app.request('/api/v1/families', { method: 'POST', headers: {
       Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID(),
-    }, body: JSON.stringify({ name: 'Семья', timezone: 'Europe/Moscow', child: { displayName: 'Ребёнок' } }) })
+    }, body: JSON.stringify({ name: 'Семья', timezone: 'Europe/Moscow' }) })
     expect(response.status).toBe(201)
     const body = await response.json() as any
-    return { ...owner, familyId: body.family.id, childId: body.child.id }
+    const child = await prisma.child.create({
+      data: { familyId: body.family.id, displayName: 'Legacy child' },
+    })
+    return { ...owner, familyId: body.family.id, childId: child.id }
   }
 
   async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string; userId: string }) {

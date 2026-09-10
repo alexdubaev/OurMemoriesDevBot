@@ -26,7 +26,8 @@ export class MediaService {
   ) {}
 
   async reserve(scope: FamilyScope, input: ReserveMediaUploadRequest) {
-    await this.access.requireFull(scope)
+    if (input.purpose === 'child_avatar') await this.access.requireOwner(scope)
+    else await this.access.requireFull(scope)
     const now = this.now()
     const uploadId = randomUUID()
     const assetId = randomUUID()

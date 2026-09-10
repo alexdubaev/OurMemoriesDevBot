@@ -21,9 +21,13 @@ maybeDescribe('Family access and invitations', () => {
   const app = createApp({ env, prisma })
 
   async function clearFixtures() {
+    await prisma.taskOutbox.deleteMany()
     await prisma.idempotencyRecord.deleteMany()
     await prisma.familyInvite.deleteMany()
     await prisma.child.deleteMany()
+    await prisma.mediaVariant.deleteMany()
+    await prisma.uploadReservation.deleteMany()
+    await prisma.mediaAsset.deleteMany()
     await prisma.family.deleteMany()
     await prisma.authSession.deleteMany()
     await prisma.externalIdentity.deleteMany()
@@ -129,6 +133,84 @@ maybeDescribe('Family access and invitations', () => {
     expect(await prisma.familyMember.count({ where: { familyId: family.body.family.id } })).toBe(2)
   })
 
+  test('creates one bootstrap family and lets only its owner complete a child with a ready private avatar', async () => {
+    const owner = await admittedUser('Owner', '10001')
+    const full = await admittedUser('Full', '10002')
+    const created = await jsonRequest('/api/v1/families', owner.token, 'POST', {
+      name: 'Наша семья', timezone: 'Europe/Moscow',
+    })
+    expect(created.response.status).toBe(201)
+    expect(created.body.child).toBeNull()
+    expect((await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/invites`, owner.token, 'POST', {},
+    )).response.status).toBe(409)
+
+    await prisma.familyMember.create({
+      data: { familyId: created.body.family.id, userId: full.userId, role: 'full' },
+    })
+    const avatar = await prisma.mediaAsset.create({
+      data: {
+        familyId: created.body.family.id,
+        uploaderId: owner.userId,
+        sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png', verifiedMime: 'image/png', sha256: 'a'.repeat(64),
+        byteSize: 12n, width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready',
+      },
+    })
+    const profile = {
+      name: ' Маша ', birthDate: '2024-02-29', sex: 'girl', avatarMediaId: avatar.id,
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    }
+    const completed = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`, owner.token, 'PUT', profile,
+    )
+    expect(completed.response.status).toBe(200)
+    expect(completed.body.child).toMatchObject({
+      name: 'Маша', birthDate: '2024-02-29', sex: 'girl', avatarMediaId: avatar.id, isComplete: true,
+    })
+    expect(await prisma.child.count({ where: { familyId: created.body.family.id } })).toBe(1)
+    expect((await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`, full.token, 'PUT', profile,
+    )).response.status).toBe(403)
+
+    const memoryAsset = await prisma.mediaAsset.create({
+      data: {
+        familyId: created.body.family.id, uploaderId: owner.userId,
+        sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png', verifiedMime: 'image/png', sha256: 'b'.repeat(64),
+        byteSize: 12n, width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready',
+      },
+    })
+    const rejectedReplacement = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`, owner.token, 'PUT', {
+        ...profile, avatarMediaId: memoryAsset.id,
+      },
+    )
+    expect(rejectedReplacement.response.status).toBe(409)
+    expect((await getFamily(created.body.family.id, owner.token)).status).toBe(200)
+
+    const replacement = await prisma.mediaAsset.create({
+      data: {
+        familyId: created.body.family.id, uploaderId: owner.userId,
+        sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png', verifiedMime: 'image/png', sha256: 'c'.repeat(64),
+        byteSize: 12n, width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready',
+      },
+    })
+    const replaced = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`, owner.token, 'PUT', {
+        ...profile, avatarMediaId: replacement.id,
+      },
+    )
+    expect(replaced.response.status).toBe(200)
+    expect(replaced.body.child.avatarMediaId).toBe(replacement.id)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: avatar.id } })).deletedAt).not.toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+  })
+
   test('lets full issue an aliased invite without granting owner-only member management', async () => {
     const owner = await admittedUser('Owner', '12101')
     const full = await admittedUser('Full', '12102')
@@ -223,6 +305,18 @@ maybeDescribe('Family access and invitations', () => {
       `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
     )
 
+    const fullVisible = await app.request(
+      `/api/v1/families/${family.body.family.id}/invites`, { headers: authHeaders(full.token) },
+    )
+    expect(fullVisible.status).toBe(200)
+    expect((await fullVisible.json() as any).items.map((invite: { id: string }) => invite.id))
+      .toEqual([fullPending.body.id])
+    const ownerVisible = await app.request(
+      `/api/v1/families/${family.body.family.id}/invites`, { headers: authHeaders(owner.token) },
+    )
+    expect((await ownerVisible.json() as any).items.map((invite: { id: string }) => invite.id).sort())
+      .toEqual([fullPending.body.id, ownerPending.body.id].sort())
+
     expect((await app.request(
       `/api/v1/families/${family.body.family.id}/invites/${fullPending.body.id}`,
       { method: 'DELETE', headers: authHeaders(full.token) },
@@ -231,6 +325,42 @@ maybeDescribe('Family access and invitations', () => {
       `/api/v1/families/${family.body.family.id}/invites/${ownerPending.body.id}`,
       { method: 'DELETE', headers: authHeaders(full.token) },
     )).status).toBe(404)
+  })
+
+  test('invalidates a full member’s pending invitations on downgrade and removal', async () => {
+    const owner = await admittedUser('Owner', '12401')
+    const full = await admittedUser('Full', '12402')
+    const family = await createFamily(owner.token, 'Семья')
+    const membershipInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'full' },
+    )
+    await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: membershipInvite.body.rawToken })
+
+    const downgradedInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, full.token, 'POST', {},
+    )
+    expect((await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+      owner.token, 'PATCH', { role: 'viewer' },
+    )).response.status).toBe(200)
+    expect((await jsonRequest('/api/v1/invites/preview', owner.token, 'POST', {
+      token: downgradedInvite.body.rawToken,
+    })).response.status).toBe(410)
+
+    await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+      owner.token, 'PATCH', { role: 'full' },
+    )
+    const removedInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, full.token, 'POST', {},
+    )
+    expect((await app.request(
+      `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
+      { method: 'DELETE', headers: authHeaders(owner.token) },
+    )).status).toBe(204)
+    expect((await jsonRequest('/api/v1/invites/preview', owner.token, 'POST', {
+      token: removedInvite.body.rawToken,
+    })).response.status).toBe(410)
   })
 
   test('keeps one active family when one user accepts two invitations concurrently', async () => {
@@ -331,11 +461,16 @@ maybeDescribe('Family access and invitations', () => {
   }
 
   async function createFamily(token: string, name: string) {
-    return jsonRequest('/api/v1/families', token, 'POST', {
+    const created = await jsonRequest('/api/v1/families', token, 'POST', {
       name,
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Ребёнок' },
     })
+    if (created.response.status === 201) {
+      await prisma.child.create({
+        data: { familyId: created.body.family.id, displayName: 'Legacy child' },
+      })
+    }
+    return created
   }
 
   function getFamily(familyId: string, token: string) {

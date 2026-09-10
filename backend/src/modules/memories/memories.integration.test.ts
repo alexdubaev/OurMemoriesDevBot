@@ -473,10 +473,17 @@ maybeDescribe('Memories API', () => {
     return { userId: user.id, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }
   }
 
-  function createFamily(token: string, name: string) {
-    return request('/api/v1/families', token, 'POST', {
-      name, timezone: 'Europe/Moscow', child: { displayName: 'Ребёнок' },
+  async function createFamily(token: string, name: string) {
+    const created = await request('/api/v1/families', token, 'POST', {
+      name, timezone: 'Europe/Moscow',
     }, randomUUID())
+    if (created.response.status === 201) {
+      const child = await prisma.child.create({
+        data: { familyId: created.body.family.id, displayName: 'Legacy child' },
+      })
+      created.body.child = { id: child.id }
+    }
+    return created
   }
 
   async function inviteMember(
