@@ -6,9 +6,17 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { EmptyState, FeedShell, FeedSkeleton, InlineError, type FeedFilter } from '@/features/feed'
-import { AuthContext } from '@/features/auth/context'
-import { FamilyOnboarding, FamilyScreen } from '@/features/family'
-import { acceptInvite, createFamilyBootstrap, loadFamily, loadFamilyInvites, loadFamilyMe, loadFamilyMembers } from '@/features/family/api'
+import { AuthContext } from '@/features/auth'
+import {
+  acceptInvite,
+  createFamilyBootstrap,
+  FamilyOnboarding,
+  FamilyScreen,
+  loadFamily,
+  loadFamilyInvites,
+  loadFamilyMe,
+  loadFamilyMembers,
+} from '@/features/family'
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
