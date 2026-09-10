@@ -1,8 +1,8 @@
 # Отчёт блока 04
 
 Task ID / дата / исполнитель / модель: T04 / 2026-09-10 / Codex / GPT-5 (роль Terra по task-файлу)
-Статус: REVIEW
-Worktree / branch / base SHA / head SHA: `D:\codex\TG_OurMemoriesDevBot\worktrees\t04` / `feat/t04-bot-capture` / `cf7dcbc83bffbe0015584461849bf8346eca370c` / `e819f20`
+Статус: APPROVED
+Worktree / branch / base SHA / head SHA: `D:\codex\TG_OurMemoriesDevBot\worktrees\t04` / `feat/t04-bot-capture` / `cf7dcbc83bffbe0015584461849bf8346eca370c` / `550c29e`
 PR / merge SHA: не опубликовано / не слито
 
 ## Выполнено
@@ -15,15 +15,16 @@ PR / merge SHA: не опубликовано / не слито
 - Фотоальбомы используют PostgreSQL-состояние, тишину 1,5 секунды, hard deadline 8 секунд, advisory single-flight, порядок `message_id`, late append и отдельные записи для mixed album.
 - `full` проверяется при приёме, перед import и внутри публикации. Viewer, inactive family и revoked member не публикуют.
 - Команды `/start`, `/app`, `/help`, `/privacy`, `/cancel`; child questionnaire в Telegram отсутствует. `/start` с payload открывает приглашение через fragment Mini App URL, если HTTPS URL настроен.
-- Receipt отправляется только в исходный личный чат: «Получено» после durable commit и «Сохранено» только после stored original + Memory. Родственникам рассылка не выполняется.
+- Receipt отправляется только в исходный личный чат: «Получено» после durable commit и «Сохранено» только после stored original + Memory. Незавершённый receipt имеет отдельный durable marker и повторяется после transient/429 без второго Memory. Родственникам рассылка не выполняется.
 - Добавлен безопасный config dry-run. `--apply` идемпотентно настраивает команды/menu button, но намеренно не вызывает `setWebhook`.
 
 ## Проверено
 
 - `bun run test:backend:unit -- src/modules/telegram/update-mapping.test.ts`: 7 pass, 0 fail, exit 0.
-- `bun run test:backend:integration -- src/modules/telegram/capture.integration.test.ts`: 5 pass, 0 fail, 31 assertions, exit 0; миграции применились на чистой PostgreSQL 18.
-- `bun run test:backend:unit`: 337 pass, 0 fail, 969 assertions, exit 0.
-- `bun run architecture:check`: 574 source files, exit 0.
+- `bun run test:backend:unit -- src/modules/telegram/telegram-api.test.ts`: 2 pass, 0 fail, 4 assertions, exit 0.
+- `bun run test:backend:integration -- src/modules/telegram/capture.integration.test.ts`: 8 pass, 0 fail, 45 assertions, exit 0; все 10 миграций применились на чистой PostgreSQL 18.
+- `bun run test:backend:unit`: 339 pass, 0 fail, 974 assertions, exit 0.
+- `bun run architecture:check`: 575 source files, exit 0.
 - `bun run typecheck`: backend/contracts/webapp/website без errors, exit 0; один существующий Astro hint о deprecated `verticalAlign`.
 - `bun run test:contracts`: 34 pass, 0 fail, exit 0.
 - `bun run test:webapp`: 84 pass, 0 fail, exit 0.
@@ -38,15 +39,15 @@ PR / merge SHA: не опубликовано / не слито
 
 ## Независимое ревью
 
-Назначен один Sol-review committed diff `cf7dcbc..e819f20`; verdict и fixes будут добавлены перед публикацией.
+Выполнен ровно один независимый review моделью GPT-5.6 Sol (`cf7dcbc..e819f20`). Первичный verdict `CHANGES_REQUIRED`: четыре P1 — retry после transient media failure, атомарность album/source bookkeeping, retry финального receipt и Telegram `web_app` button. Все четыре исправлены коммитом `550c29e`, покрыты красными-зелёными тестами и тем же reviewer подтверждены как `FIXED`; остаточных blocker findings нет.
 
 ## Не выполнено / риски
 
 - Реальный `TELEGRAM_BOT_TOKEN` в среде отсутствует, поэтому live-вызов development-бота не выполнялся. Секрет не запрашивался и не создавался.
 - `TELEGRAM_MINI_APP_URL` и staging webhook URL пока не настроены. Bot config и webhook не применялись к Telegram; это отдельная операция владельца после готового HTTPS окружения.
 - Полноценный UI ребёнка, family UI, feed/composer/player, caption ForceReply workflow, AI/группы/платежи не добавлялись.
-- Миграция additive: `telegram_inbox`, `telegram_sources`, `telegram_albums` и четыре enum. Для rollback кода таблицы безопасно оставить неиспользуемыми; destructive down-migration после появления capture data не выполнять.
+- Миграции additive: `telegram_inbox`, `telegram_sources`, `telegram_albums`, четыре enum и nullable `receipt_sent_at`. Для rollback кода таблицы/поле безопасно оставить неиспользуемыми; destructive down-migration после появления capture data не выполнять.
 
 ## Следующий шаг
 
-Завершить один Sol-review, исправить только доказанные blockers, повторить затронутые проверки, затем push → PR → Linux `verify-required` → squash merge. Следующий блок не запускать без отдельного назначения.
+Push → PR → Linux `verify-required` → squash merge. Следующий блок не запускать без отдельного назначения.
