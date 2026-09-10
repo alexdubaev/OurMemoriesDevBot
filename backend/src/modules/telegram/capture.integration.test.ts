@@ -51,6 +51,7 @@ maybeDescribe('Telegram durable capture', () => {
         throw new Error('synthetic Telegram 429')
       }
       sent.push({ chatId, text, options })
+      return { messageId: String(9_000 + sent.length) }
     },
     getUpdates: async () => [],
     setCommands: async () => undefined,
@@ -255,10 +256,62 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await prisma.telegramSource.count()).toBe(0)
   })
 
+  test('changes a caption only through its live ForceReply request, and cancellation is durable', async () => {
+    const owner = await familyOwner('55001')
+    const memory = await prisma.memory.create({ data: {
+      familyId: owner.familyId, childId: owner.childId, authorId: owner.userId, kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(),
+    } })
+    const expiresAt = new Date(Date.now() + 10 * 60_000)
+    await prisma.captionRequest.create({ data: {
+      familyId: owner.familyId, userId: owner.userId, memoryId: memory.id, chatId: 55001n,
+      promptMessageId: 9901n, expectedVersion: memory.version, expiresAt,
+    } })
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+
+    await accept(reply(601, 61, owner.subject, 9901, 'Подпись из точного ответа'))
+    const replyTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })
+    await process(replyTask.payload)
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } })).toMatchObject({ body: 'Подпись из точного ответа', version: 2 })
+    expect(await prisma.captionRequest.findUniqueOrThrow({ where: { chatId_promptMessageId: { chatId: 55001n, promptMessageId: 9901n } } })).toMatchObject({ consumedAt: expect.any(Date) })
+
+    await accept(note(602, 62, owner.subject, 'Обычная следующая заметка'))
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } })).toMatchObject({ body: 'Подпись из точного ответа' })
+
+    await prisma.captionRequest.create({ data: {
+      familyId: owner.familyId, userId: owner.userId, memoryId: memory.id, chatId: 55001n,
+      promptMessageId: 9902n, expectedVersion: 2, expiresAt,
+    } })
+    await accept(command(603, 63, owner.subject, '/cancel'))
+    const cancelInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 603n } })
+    const cancelTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${cancelInbox.id}` } })
+    await process(cancelTask.payload)
+    expect(await prisma.captionRequest.findUniqueOrThrow({ where: { chatId_promptMessageId: { chatId: 55001n, promptMessageId: 9902n } } })).toMatchObject({ cancelledAt: expect.any(Date) })
+    expect(sent.at(-1)?.text).toBe('Добавление подписи отменено.')
+
+    await accept(reply(604, 64, owner.subject, 9902, 'Не должно сохраниться'))
+    const cancelledReplyInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 604n } })
+    const cancelledReplyTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${cancelledReplyInbox.id}` } })
+    await process(cancelledReplyTask.payload)
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } })).toMatchObject({ body: 'Подпись из точного ответа' })
+
+    const viewer = await admittedUser('55002')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    await prisma.captionRequest.create({ data: {
+      familyId: owner.familyId, userId: owner.userId, memoryId: memory.id, chatId: 55001n,
+      promptMessageId: 9903n, expectedVersion: 2, expiresAt,
+    } })
+    await accept(reply(605, 65, viewer.subject, 9903, 'Просмотр не должен менять подпись'))
+    const viewerInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 605n } })
+    const viewerTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${viewerInbox.id}` } })
+    await process(viewerTask.payload)
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } })).toMatchObject({ body: 'Подпись из точного ответа' })
+  })
+
   async function clearFixtures() {
     await prisma.telegramSource.deleteMany()
     await prisma.telegramAlbum.deleteMany()
     await prisma.telegramInbox.deleteMany()
+    await prisma.captionRequest.deleteMany()
     await prisma.idempotencyRecord.deleteMany()
     await prisma.memoryLike.deleteMany()
     await prisma.memoryMedia.deleteMany()
@@ -325,5 +378,13 @@ function photo(updateId: number, messageId: number, subject: string, caption: st
     message_id: messageId, date: 1_788_000_000, ...(mediaGroupId ? { media_group_id: mediaGroupId } : {}),
     chat: { id: Number(subject), type: 'private' }, from: { id: Number(subject), is_bot: false, first_name: 'Тест' },
     caption, photo: [{ file_id: `file-${messageId}`, file_unique_id: `unique-${messageId}`, width: 32, height: 32, file_size: photoFixture.byteLength }],
+  } })
+}
+
+function reply(updateId: number, messageId: number, subject: string, replyToMessageId: number, text: string) {
+  return normalizeTelegramUpdate({ update_id: updateId, message: {
+    message_id: messageId, date: 1_788_000_000, chat: { id: Number(subject), type: 'private' },
+    from: { id: Number(subject), is_bot: false, first_name: 'Тест' }, text,
+    reply_to_message: { message_id: replyToMessageId },
   } })
 }
