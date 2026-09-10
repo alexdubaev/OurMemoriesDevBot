@@ -71,7 +71,7 @@ maybeDescribe('Block 01 independent review boundaries', () => {
       { method: 'DELETE', headers: authHeaders(adminOutsider.token) },
     )).status).toBe(404)
 
-    expect((await createInvite(full, family.body.family.id, 'viewer')).response.status).toBe(403)
+    expect((await createInvite(full, family.body.family.id, 'viewer')).response.status).toBe(201)
     expect((await createInvite(viewer, family.body.family.id, 'viewer')).response.status).toBe(403)
     expect((await createInvite(adminOutsider, family.body.family.id, 'viewer')).response.status)
       .toBe(404)

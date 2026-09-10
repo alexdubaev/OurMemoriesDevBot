@@ -9,6 +9,18 @@ export const idempotencyKeyHeadersSchema = z
 const trimmedName = (minimum: number, maximum: number) =>
   z.string().trim().min(minimum).max(maximum)
 
+const familyDisplayNameSchema = z
+  .string()
+  .transform((value) => value.normalize('NFC').trim())
+  .transform((value) => value === '' ? null : value)
+  .pipe(z.string().refine(
+    (value) => Array.from(value).length <= 64,
+    'Family display name must be at most 64 Unicode code points',
+  ).refine(
+    (value) => !/[\p{Cc}\p{Cf}]/u.test(value),
+    'Family display name cannot contain control characters',
+  ).nullable())
+
 const ianaTimezoneSchema = z.string().refine((value) => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format()
@@ -61,6 +73,7 @@ export const updateFamilyRequestSchema = z
 export const createInviteRequestSchema = z
   .object({
     role: familyRoleSchema.default('viewer'),
+    inviteeDisplayName: familyDisplayNameSchema.optional(),
   })
   .strict()
 
@@ -76,14 +89,18 @@ export const invitePreviewRequestSchema = acceptInviteRequestSchema
 
 export const updateMemberRoleRequestSchema = z
   .object({
-    role: familyRoleSchema,
+    role: familyRoleSchema.optional(),
+    familyDisplayName: familyDisplayNameSchema.nullable().optional(),
   })
   .strict()
+  .refine((input) => input.role !== undefined || input.familyDisplayName !== undefined,
+    'At least one member field is required')
 
 export const familyMemberSchema = z
   .object({
     userId: z.uuid(),
     displayName: z.string().nullable(),
+    familyDisplayName: z.string().nullable(),
     role: familyRoleSchema,
     isOwner: z.boolean(),
     joinedAt: z.string().datetime(),
@@ -126,6 +143,7 @@ export const createInviteResponseSchema = z.object({
   id: z.uuid(),
   rawToken: inviteTokenSchema,
   role: familyRoleSchema,
+  inviteeDisplayName: z.string().nullable(),
   expiresAt: z.string().datetime(),
 }).strict()
 

@@ -203,7 +203,7 @@ export class FamilyService {
     input: CreateInviteRequest,
     idempotencyKey: string,
   ): Promise<CreateInviteResponse> {
-    await this.access.requireOwner(scope)
+    await this.access.requireFull(scope)
     const payloadHash = hashPayload(input)
     const operation = `family.invite.create:${scope.familyId}`
     return (await this.idempotency.run({
@@ -230,6 +230,7 @@ export class FamilyService {
           data: {
             familyId: scope.familyId,
             role: input.role,
+            inviteeDisplayName: input.inviteeDisplayName ?? null,
             tokenHash: hashInviteToken(rawToken),
             createdAt: now,
             expiresAt: new Date(now.getTime() + 72 * 60 * 60 * 1000),
@@ -288,6 +289,7 @@ export class FamilyService {
           id: string
           familyId: string
           role: 'full' | 'viewer'
+          inviteeDisplayName: string | null
           expiresAt: Date
           acceptedBy: string | null
           revokedAt: Date | null
@@ -296,6 +298,7 @@ export class FamilyService {
           SELECT i.id,
                  i.family_id AS "familyId",
                  i.role::text AS role,
+                 i.invitee_display_name AS "inviteeDisplayName",
                  i.expires_at AS "expiresAt",
                  i.accepted_by AS "acceptedBy",
                  i.revoked_at AS "revokedAt",
@@ -333,8 +336,18 @@ export class FamilyService {
         if (!activeMembership) {
           await tx.familyMember.upsert({
             where: { familyId_userId: { familyId: invite.familyId, userId: principal.userId } },
-            update: { role: invite.role, revokedAt: null, joinedAt: this.now() },
-            create: { familyId: invite.familyId, userId: principal.userId, role: invite.role },
+            update: {
+              role: invite.role,
+              familyDisplayName: invite.inviteeDisplayName,
+              revokedAt: null,
+              joinedAt: this.now(),
+            },
+            create: {
+              familyId: invite.familyId,
+              userId: principal.userId,
+              role: invite.role,
+              familyDisplayName: invite.inviteeDisplayName,
+            },
           })
         }
         await tx.familyInvite.update({
@@ -352,9 +365,13 @@ export class FamilyService {
   }
 
   async revokeInvite(scope: FamilyScope, inviteId: string) {
-    await this.access.requireOwner(scope)
+    const actor = await this.access.requireMember(scope)
+    if (!actor.isOwner && actor.role !== 'full') {
+      throw new FamilyFailure('forbidden', 'Для этого действия нужен полный доступ')
+    }
+    const issuerScope = actor.isOwner ? {} : { createdBy: scope.principal.userId }
     const invite = await this.db.familyInvite.findFirst({
-      where: { id: inviteId, familyId: scope.familyId },
+      where: { id: inviteId, familyId: scope.familyId, ...issuerScope },
       select: { acceptedAt: true, revokedAt: true },
     })
     if (!invite || invite.acceptedAt) {
@@ -363,12 +380,18 @@ export class FamilyService {
     if (invite.revokedAt) return
 
     const result = await this.db.familyInvite.updateMany({
-      where: { id: inviteId, familyId: scope.familyId, revokedAt: null, acceptedAt: null },
+      where: {
+        id: inviteId,
+        familyId: scope.familyId,
+        ...issuerScope,
+        revokedAt: null,
+        acceptedAt: null,
+      },
       data: { revokedAt: this.now() },
     })
     if (result.count === 0) {
       const concurrentlyRevoked = await this.db.familyInvite.findFirst({
-        where: { id: inviteId, familyId: scope.familyId, revokedAt: { not: null } },
+        where: { id: inviteId, familyId: scope.familyId, ...issuerScope, revokedAt: { not: null } },
         select: { id: true },
       })
       if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Приглашение не найдено')
@@ -376,18 +399,29 @@ export class FamilyService {
   }
 
   async updateMemberRole(scope: FamilyScope, userId: string, input: UpdateMemberRoleRequest) {
-    await this.access.requireOwner(scope)
+    const actor = await this.access.requireMember(scope)
     const family = await this.db.family.findUnique({
       where: { id: scope.familyId },
       select: { ownerUserId: true },
     })
     if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
     if (family.ownerUserId === userId) {
-      throw new FamilyFailure('conflict', 'Создателя семьи нельзя понизить')
+      throw new FamilyFailure('forbidden', 'Создателя семьи нельзя изменять через этот экран')
+    }
+    if (input.role !== undefined && !actor.isOwner) {
+      throw new FamilyFailure('forbidden', 'Уровень доступа меняет только создатель семьи')
+    }
+    if (input.role === undefined && !actor.isOwner && actor.role !== 'full') {
+      throw new FamilyFailure('forbidden', 'Для этого действия нужен полный доступ')
     }
     const updated = await this.db.familyMember.updateMany({
       where: { familyId: scope.familyId, userId, revokedAt: null },
-      data: { role: input.role },
+      data: {
+        ...(input.role === undefined ? {} : { role: input.role }),
+        ...(input.familyDisplayName === undefined
+          ? {}
+          : { familyDisplayName: input.familyDisplayName }),
+      },
     })
     if (updated.count === 0) throw new FamilyFailure('not_found', 'Участник не найден')
     const member = await this.db.familyMember.findUniqueOrThrow({
@@ -466,13 +500,19 @@ function deriveInviteToken(
 }
 
 function inviteDto(
-  invite: { id: string; role: 'full' | 'viewer'; expiresAt: Date },
+  invite: {
+    id: string
+    role: 'full' | 'viewer'
+    inviteeDisplayName: string | null
+    expiresAt: Date
+  },
   rawToken: string,
 ): CreateInviteResponse {
   return {
     id: invite.id,
     rawToken,
     role: invite.role,
+    inviteeDisplayName: invite.inviteeDisplayName,
     expiresAt: invite.expiresAt.toISOString(),
   }
 }
@@ -489,6 +529,7 @@ function inviteSnapshot(response: CreateInviteResponse): JsonObject {
   return {
     id: response.id,
     role: response.role,
+    inviteeDisplayName: response.inviteeDisplayName,
     expiresAt: response.expiresAt,
   }
 }
@@ -524,6 +565,7 @@ function memberDto(
   member: {
     userId: string
     role: 'full' | 'viewer'
+    familyDisplayName: string | null
     joinedAt: Date
     user: { displayName: string | null }
   },
@@ -532,6 +574,7 @@ function memberDto(
   return {
     userId: member.userId,
     displayName: member.user.displayName,
+    familyDisplayName: member.familyDisplayName,
     role: member.role,
     isOwner: member.userId === ownerUserId,
     joinedAt: member.joinedAt.toISOString(),

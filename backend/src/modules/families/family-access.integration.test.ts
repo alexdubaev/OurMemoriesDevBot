@@ -88,7 +88,7 @@ maybeDescribe('Family access and invitations', () => {
       'PATCH',
       { role: 'viewer' },
     )
-    expect(ownerDemotion.response.status).toBe(409)
+    expect(ownerDemotion.response.status).toBe(403)
 
     const revokeViewer = await app.request(
       `/api/v1/families/${familyA.body.family.id}/members/${viewer.userId}`,
@@ -127,6 +127,110 @@ maybeDescribe('Family access and invitations', () => {
     })
     expect(repeated.response.status).toBe(200)
     expect(await prisma.familyMember.count({ where: { familyId: family.body.family.id } })).toBe(2)
+  })
+
+  test('lets full issue an aliased invite without granting owner-only member management', async () => {
+    const owner = await admittedUser('Owner', '12101')
+    const full = await admittedUser('Full', '12102')
+    const viewer = await admittedUser('Viewer', '12103')
+    const family = await createFamily(owner.token, 'Семья')
+    const fullInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`,
+      owner.token,
+      'POST',
+      { role: 'full' },
+    )
+    await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: fullInvite.body.rawToken })
+
+    const invite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`,
+      full.token,
+      'POST',
+      { role: 'viewer', inviteeDisplayName: 'Бабушка Оля' },
+    )
+    expect(invite.response.status).toBe(201)
+
+    const accepted = await jsonRequest('/api/v1/invites/accept', viewer.token, 'POST', {
+      token: invite.body.rawToken,
+    })
+    expect(accepted.response.status).toBe(200)
+    expect(accepted.body.membership).toMatchObject({
+      role: 'viewer',
+      familyDisplayName: 'Бабушка Оля',
+    })
+
+    const roleChange = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      full.token,
+      'PATCH',
+      { role: 'full' },
+    )
+    expect(roleChange.response.status).toBe(403)
+  })
+
+  test('lets full change only a non-owner family alias', async () => {
+    const owner = await admittedUser('Owner', '12201')
+    const full = await admittedUser('Full', '12202')
+    const viewer = await admittedUser('Viewer', '12203')
+    const family = await createFamily(owner.token, 'Семья')
+    const fullInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'full' },
+    )
+    const viewerInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
+    )
+    await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: fullInvite.body.rawToken })
+    await jsonRequest('/api/v1/invites/accept', viewer.token, 'POST', { token: viewerInvite.body.rawToken })
+
+    const renamed = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      full.token,
+      'PATCH',
+      { familyDisplayName: 'Бабушка Оля' },
+    )
+    expect(renamed.response.status).toBe(200)
+    expect(renamed.body.membership).toMatchObject({
+      userId: viewer.userId,
+      familyDisplayName: 'Бабушка Оля',
+      role: 'viewer',
+    })
+    expect((await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      full.token,
+      'PATCH',
+      { role: 'full' },
+    )).response.status).toBe(403)
+    expect((await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${owner.userId}`,
+      full.token,
+      'PATCH',
+      { familyDisplayName: 'Нельзя' },
+    )).response.status).toBe(403)
+  })
+
+  test('lets full revoke only its own pending invitation', async () => {
+    const owner = await admittedUser('Owner', '12301')
+    const full = await admittedUser('Full', '12302')
+    const family = await createFamily(owner.token, 'Семья')
+    const fullInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'full' },
+    )
+    await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: fullInvite.body.rawToken })
+    const fullPending = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, full.token, 'POST', { role: 'viewer' },
+    )
+    const ownerPending = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
+    )
+
+    expect((await app.request(
+      `/api/v1/families/${family.body.family.id}/invites/${fullPending.body.id}`,
+      { method: 'DELETE', headers: authHeaders(full.token) },
+    )).status).toBe(204)
+    expect((await app.request(
+      `/api/v1/families/${family.body.family.id}/invites/${ownerPending.body.id}`,
+      { method: 'DELETE', headers: authHeaders(full.token) },
+    )).status).toBe(404)
   })
 
   test('keeps one active family when one user accepts two invitations concurrently', async () => {

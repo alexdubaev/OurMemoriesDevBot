@@ -59,6 +59,34 @@ describe('family contracts', () => {
     expect(updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toEqual({ role: 'viewer' })
   })
 
+  test('keeps a family-local invitation alias separate from the access role', () => {
+    expect(createInviteRequestSchema.parse({
+      role: 'viewer',
+      inviteeDisplayName: '  Бабушка Оля  ',
+    })).toEqual({
+      role: 'viewer',
+      inviteeDisplayName: 'Бабушка Оля',
+    })
+    expect(createInviteRequestSchema.parse({ inviteeDisplayName: '   ' })).toEqual({
+      role: 'viewer',
+      inviteeDisplayName: null,
+    })
+    expect(() => createInviteRequestSchema.parse({
+      role: 'full',
+      inviteeDisplayName: 'x'.repeat(65),
+    })).toThrow()
+  })
+
+  test('allows a membership alias update without accepting authority fields by default', () => {
+    expect(updateMemberRoleRequestSchema.parse({
+      familyDisplayName: ' Тётя Лена ',
+    })).toEqual({ familyDisplayName: 'Тётя Лена' })
+    expect(updateMemberRoleRequestSchema.parse({ familyDisplayName: null })).toEqual({
+      familyDisplayName: null,
+    })
+    expect(() => updateMemberRoleRequestSchema.parse({})).toThrow()
+  })
+
   test('allows only current MVP family and child fields in family updates', () => {
     expect(updateFamilyRequestSchema.parse({
       name: ' Новое имя ',
