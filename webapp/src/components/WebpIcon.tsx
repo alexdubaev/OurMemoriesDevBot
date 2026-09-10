@@ -1,9 +1,9 @@
 import type { CSSProperties, ImgHTMLAttributes } from 'react'
 
-import type { WebpIconName } from './webp-icon-types'
+import { resolveWebpIconSource } from './webp-icon-manifest'
+import type { WebpIconName, WebpIconState } from './webp-icon-types'
 
-export type { WebpIconName } from './webp-icon-types'
-export type WebpIconState = 'active' | 'default'
+export type { WebpIconName, WebpIconState } from './webp-icon-types'
 
 type IconAccessibility =
   | { decorative: true; label?: never }
@@ -27,7 +27,8 @@ export function WebpIcon({
   style,
   ...props
 }: WebpIconProps) {
-  const path = `/assets/icons/${name}-${state}`
+  const source2x = resolveWebpIconSource(name, state, 2)
+  const source3x = resolveWebpIconSource(name, state, 3)
   const iconStyle = { '--webp-icon-size': `${size}px`, ...style } as CSSProperties
 
   return (
@@ -39,8 +40,8 @@ export function WebpIcon({
       decoding="async"
       draggable={false}
       height={size}
-      src={`${path}@2x.webp`}
-      srcSet={`${path}@2x.webp 2x, ${path}@3x.webp 3x`}
+      src={source2x.src}
+      srcSet={`${source2x.src} 2x, ${source3x.src} 3x`}
       style={iconStyle}
       width={size}
     />

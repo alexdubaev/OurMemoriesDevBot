@@ -15,3 +15,4 @@ export const webpIconNames = [
 ] as const
 
 export type WebpIconName = (typeof webpIconNames)[number]
+export type WebpIconState = 'active' | 'default'
