@@ -30,6 +30,8 @@ export type TaskHandlerEntry = {
   maxAttempts?: number
   /** How long one attempt may take. Must stay well below the lease - see `resolveLeaseStaleMs`. */
   deadlineMs?: number
+  /** Optional provider-aware retry schedule. The generic outbox policy remains the default. */
+  retryDelayMs?: (error: unknown, attempt: number) => number
 }
 
 export type EnqueueTaskInput = {

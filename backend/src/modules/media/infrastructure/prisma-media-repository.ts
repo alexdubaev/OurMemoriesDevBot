@@ -38,7 +38,7 @@ export class PrismaMediaRepository implements MediaRepository {
           id: input.assetId,
           familyId: input.familyId,
           uploaderId: input.userId,
-          sourceKind: 'upload',
+          sourceKind: input.sourceKind ?? 'upload',
           purpose: input.purpose,
           mediaKind: input.kind,
           originalKey: input.objectKey,

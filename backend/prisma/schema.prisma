@@ -57,6 +57,76 @@ model TelegramAuthReplay {
   @@map("telegram_auth_replays")
 }
 
+/// Encrypted, durable Telegram ingress. The raw Bot API update never enters logs or a public DTO;
+/// only the normalized minimum needed by the worker is encrypted here.
+model TelegramInbox {
+  id                String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  botId             BigInt              @map("bot_id")
+  updateId          BigInt              @map("update_id")
+  eventKind         TelegramInboxKind   @map("event_kind")
+  encryptedPayload  Bytes               @map("encrypted_payload")
+  encryptionIv      Bytes               @map("encryption_iv")
+  encryptionAuthTag Bytes               @map("encryption_auth_tag")
+  receivedAt        DateTime            @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt       DateTime?           @map("processed_at") @db.Timestamptz(6)
+  source            TelegramSource?
+
+  @@unique([botId, updateId], map: "telegram_inbox_bot_update_key")
+  @@index([processedAt, receivedAt], map: "telegram_inbox_processing_idx")
+  @@map("telegram_inbox")
+}
+
+/// Permanent source identity. Unlike HTTP idempotency records this row never expires, so a Bot
+/// API redelivery can never create a second family post after the normal idempotency TTL.
+model TelegramSource {
+  id              String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  inboxId         String               @unique(map: "telegram_sources_inbox_id_key") @map("inbox_id") @db.Uuid
+  botId           BigInt               @map("bot_id")
+  chatId          BigInt               @map("chat_id")
+  messageId       BigInt               @map("message_id")
+  senderSubject   String               @map("sender_subject")
+  userId          String               @map("user_id") @db.Uuid
+  familyId        String               @map("family_id") @db.Uuid
+  childId         String               @map("child_id") @db.Uuid
+  kind            TelegramSourceKind
+  mediaGroupId    String?              @map("media_group_id")
+  status          TelegramSourceStatus @default(accepted)
+  plannedMemoryId String               @map("planned_memory_id") @db.Uuid
+  plannedMediaId  String?              @map("planned_media_id") @db.Uuid
+  memoryId        String?              @map("memory_id") @db.Uuid
+  mediaId         String?              @map("media_id") @db.Uuid
+  rejectionCode   String?              @map("rejection_code")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  inbox           TelegramInbox        @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "telegram_sources_inbox_id_fkey")
+
+  @@unique([botId, chatId, messageId], map: "telegram_sources_bot_chat_message_key")
+  @@index([botId, chatId, mediaGroupId, messageId], map: "telegram_sources_album_order_idx")
+  @@index([status, updatedAt], map: "telegram_sources_status_idx")
+  @@map("telegram_sources")
+}
+
+/// Durable album clock and publication result. Times are persisted so a restart cannot reset the
+/// silence window or the hard deadline.
+model TelegramAlbum {
+  id           String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  botId        BigInt              @map("bot_id")
+  chatId       BigInt              @map("chat_id")
+  mediaGroupId String              @map("media_group_id")
+  status       TelegramAlbumStatus @default(collecting)
+  firstSeenAt  DateTime            @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime            @map("last_seen_at") @db.Timestamptz(6)
+  readyAt      DateTime            @map("ready_at") @db.Timestamptz(6)
+  hardDeadline DateTime            @map("hard_deadline") @db.Timestamptz(6)
+  memoryId     String?             @map("memory_id") @db.Uuid
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([botId, chatId, mediaGroupId], map: "telegram_albums_bot_chat_group_key")
+  @@index([status, readyAt], map: "telegram_albums_ready_idx")
+  @@map("telegram_albums")
+}
+
 model PilotAdmission {
   id         String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   provider   ExternalIdentityProvider
@@ -487,6 +557,41 @@ enum TaskOutboxStatus {
   failed
 
   @@map("task_outbox_status")
+}
+
+enum TelegramInboxKind {
+  command
+  content
+  denied
+
+  @@map("telegram_inbox_kind")
+}
+
+enum TelegramSourceKind {
+  note
+  photo
+  video
+  voice
+
+  @@map("telegram_source_kind")
+}
+
+enum TelegramSourceStatus {
+  accepted
+  processing
+  published
+  rejected
+
+  @@map("telegram_source_status")
+}
+
+enum TelegramAlbumStatus {
+  collecting
+  published
+  mixed
+  rejected
+
+  @@map("telegram_album_status")
 }
 
 model AuthSession {

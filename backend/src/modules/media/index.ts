@@ -5,6 +5,7 @@ import type { PrivateStorage } from '../../storage'
 import type { AuthHttpEnv } from '../auth'
 import type { FamilyAccess } from '../families'
 import { MediaService } from './application/media-service'
+export { MediaFailure } from './domain/errors'
 import { PrismaMediaRepository } from './infrastructure/prisma-media-repository'
 import { processPhoto } from './infrastructure/photo-processor'
 import { probeMedia } from './infrastructure/media-probe'
@@ -12,14 +13,19 @@ import { createMediaRoutes } from './transport/routes'
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
   requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage }) {
+  const service = createMediaService(options)
+  return { routes: createMediaRoutes({ requireAuth: options.requireAuth, service }), service }
+}
+
+export function createMediaService(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
+  storage: PrivateStorage }) {
   const repository = new PrismaMediaRepository(options.db)
-  const service = new MediaService(options.familyAccess, repository, options.storage, {
+  return new MediaService(options.familyAccess, repository, options.storage, {
     familyQuotaBytes: options.env.MEDIA_FAMILY_QUOTA_BYTES,
     maxPendingUploads: options.env.MEDIA_MAX_PENDING_UPLOADS,
     reservationTtlSeconds: options.env.MEDIA_RESERVATION_TTL_SECONDS,
     uploadUrlTtlSeconds: options.env.MEDIA_UPLOAD_URL_TTL_SECONDS,
   }, processPhoto, probeMedia)
-  return { routes: createMediaRoutes({ requireAuth: options.requireAuth, service }), service }
 }
 
 export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { storage: PrivateStorage } }) {

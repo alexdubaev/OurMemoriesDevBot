@@ -31,7 +31,7 @@ export type WorkerLoop = {
  * See docs/BACKGROUND_JOBS.md before switching this on.
  */
 export const workerLoops: WorkerLoop[] = [
-  // { job: 'db:ping', intervalMs: 10_000 },
+  { job: 'outbox:drain', intervalMs: 1_000 },
 ]
 
 export type WorkerHandle = {
@@ -144,6 +144,13 @@ export async function main() {
   const runtime = createBackendRuntime()
 
   try {
+    if (runtime.env.TELEGRAM_BOT_TOKEN) {
+      const { verifyTelegramBotIdentity } = await import('./modules/auth')
+      await verifyTelegramBotIdentity({
+        token: runtime.env.TELEGRAM_BOT_TOKEN,
+        expectedUsername: runtime.env.TELEGRAM_BOT_EXPECTED_USERNAME,
+      })
+    }
     await runWorker(runtime)
   } finally {
     await runtime.close()

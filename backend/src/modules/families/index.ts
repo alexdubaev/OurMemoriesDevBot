@@ -5,6 +5,7 @@ import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempot
 import type { AuthHttpEnv } from '../auth'
 import { FamilyService } from './application/family-service'
 import { createPrismaFamilyAccess } from './infrastructure/family-access'
+export { createPrismaFamilyAccess } from './infrastructure/family-access'
 import { prismaPersistenceErrors } from './infrastructure/persistence-errors'
 import { createFamilyRoutes } from './transport/routes'
 

@@ -42,6 +42,13 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: optionalStringSchema,
   TELEGRAM_BOT_EXPECTED_USERNAME: stringWithDefault('OurMemoriesDevBot')
     .pipe(z.string().regex(/^[A-Za-z0-9_]{5,32}$/)),
+  TELEGRAM_BOT_MODE: z.enum(['polling', 'webhook']).default('polling'),
+  TELEGRAM_WEBHOOK_URL: optionalUrlSchema,
+  TELEGRAM_MINI_APP_URL: optionalUrlSchema,
+  TELEGRAM_WEBHOOK_SECRET: optionalStringSchema,
+  TELEGRAM_INBOX_ENCRYPTION_KEY: optionalStringSchema,
+  TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(512 * 1024),
+  TELEGRAM_FILE_MAX_BYTES: z.coerce.number().int().positive().max(20_000_000).default(20_000_000),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173,http://localhost:8081,http://localhost:19006')
@@ -226,6 +233,50 @@ function validateTelegramEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
       path: ['TELEGRAM_BOT_TOKEN'],
       message: 'TELEGRAM_BOT_TOKEN is required in production',
     })
+  }
+
+  if (env.TELEGRAM_BOT_TOKEN && !isInboxEncryptionKey(env.TELEGRAM_INBOX_ENCRYPTION_KEY)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TELEGRAM_INBOX_ENCRYPTION_KEY'],
+      message: 'TELEGRAM_INBOX_ENCRYPTION_KEY must be a base64url-encoded 32-byte key when Telegram is configured',
+    })
+  }
+
+  if (env.TELEGRAM_BOT_TOKEN && isProductionLikeRuntime(env) && env.TELEGRAM_BOT_MODE !== 'webhook') {
+    ctx.addIssue({ code: 'custom', path: ['TELEGRAM_BOT_MODE'], message: 'TELEGRAM_BOT_MODE must be webhook in production-like runtimes' })
+  }
+
+  if (env.TELEGRAM_BOT_MODE === 'webhook') {
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      ctx.addIssue({ code: 'custom', path: ['TELEGRAM_BOT_TOKEN'], message: 'TELEGRAM_BOT_TOKEN is required in webhook mode' })
+    }
+    if (!env.TELEGRAM_WEBHOOK_URL || new URL(env.TELEGRAM_WEBHOOK_URL).protocol !== 'https:') {
+      ctx.addIssue({ code: 'custom', path: ['TELEGRAM_WEBHOOK_URL'], message: 'TELEGRAM_WEBHOOK_URL must be an HTTPS URL in webhook mode' })
+    }
+    if (!env.TELEGRAM_WEBHOOK_SECRET || !/^[A-Za-z0-9_-]{43,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TELEGRAM_WEBHOOK_SECRET'],
+        message: 'TELEGRAM_WEBHOOK_SECRET must carry at least 32 bytes of random base64url-safe data',
+      })
+    }
+    if (env.TELEGRAM_WEBHOOK_SECRET === env.TELEGRAM_BOT_TOKEN) {
+      ctx.addIssue({ code: 'custom', path: ['TELEGRAM_WEBHOOK_SECRET'], message: 'TELEGRAM_WEBHOOK_SECRET must differ from TELEGRAM_BOT_TOKEN' })
+    }
+  }
+
+  if (env.TELEGRAM_MINI_APP_URL && new URL(env.TELEGRAM_MINI_APP_URL).protocol !== 'https:') {
+    ctx.addIssue({ code: 'custom', path: ['TELEGRAM_MINI_APP_URL'], message: 'TELEGRAM_MINI_APP_URL must use HTTPS' })
+  }
+}
+
+function isInboxEncryptionKey(value: string | undefined) {
+  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return false
+  try {
+    return Buffer.from(value, 'base64url').byteLength === 32
+  } catch {
+    return false
   }
 }
 

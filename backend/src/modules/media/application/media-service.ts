@@ -55,6 +55,51 @@ export class MediaService {
     }
   }
 
+  /** Server-side ingestion for trusted adapters. It deliberately follows the same reservation,
+   * validation, quota and finalization lifecycle as browser uploads. */
+  async ingestTelegram(scope: FamilyScope, input: {
+    assetId: string
+    kind: 'photo' | 'video' | 'voice'
+    contentType: ReserveMediaUploadRequest['contentType']
+    byteSize: number
+    body: ReadableStream<Uint8Array>
+  }) {
+    await this.access.requireFull(scope)
+    const now = this.now()
+    const uploadId = randomUUID()
+    const objectKey = createStorageObjectKey({ namespace: 'media-originals', id: input.assetId, now })
+    const expiresAt = new Date(now.getTime() + this.config.reservationTtlSeconds * 1_000)
+    await this.repository.reserve({
+      uploadId,
+      assetId: input.assetId,
+      familyId: scope.familyId,
+      userId: scope.principal.userId,
+      sourceKind: 'telegram',
+      purpose: 'memory',
+      kind: input.kind,
+      objectKey,
+      declaredMime: input.contentType,
+      byteSize: input.byteSize,
+      expiresAt,
+      quotaBytes: this.config.familyQuotaBytes,
+      maxPendingUploads: this.config.maxPendingUploads,
+      now,
+    })
+    try {
+      await this.storage.writeObject({
+        key: objectKey,
+        body: input.body,
+        contentLength: input.byteSize,
+        contentType: input.contentType,
+      })
+      return await this.finalize(scope, uploadId)
+    } catch (error) {
+      await this.repository.rejectUpload(scope, uploadId, this.now()).catch(() => undefined)
+      if (error instanceof StorageError) throw storageFailure(error)
+      throw error
+    }
+  }
+
   async finalize(scope: FamilyScope, uploadId: string) {
     const preparation = await this.repository.prepareFinalize(scope, uploadId, this.now())
     if (preparation.kind === 'ready') return { asset: preparation.asset }

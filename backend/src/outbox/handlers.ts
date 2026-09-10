@@ -16,6 +16,21 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
  */
 export const taskHandlers = {
+  'telegram:process': {
+    maxAttempts: 5,
+    deadlineMs: 90_000,
+    retryDelayMs: (error, attempt) => {
+      const retryAfter = typeof error === 'object' && error !== null && 'retryAfterSeconds' in error
+        ? (error as { retryAfterSeconds?: unknown }).retryAfterSeconds
+        : undefined
+      if (typeof retryAfter === 'number' && retryAfter > 0) return retryAfter * 1_000
+      return [5_000, 30_000, 120_000, 600_000][Math.min(attempt - 1, 3)]!
+    },
+    run: async ({ payload, signal }, runtime) => {
+      const { createTelegramTasks } = await import('../modules/telegram')
+      await createTelegramTasks(runtime).process(payload, signal)
+    },
+  },
   'media:delete': {
     maxAttempts: 5,
     run: async ({ payload }, runtime) => {

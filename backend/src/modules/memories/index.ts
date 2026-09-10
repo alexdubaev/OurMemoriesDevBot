@@ -9,6 +9,7 @@ import type { MediaMemoryCatalog } from './application/ports'
 import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
 export { createMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
 import { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
+export { createSourceMemoryPublisher } from './infrastructure/source-memory-publisher'
 import { createMemoryRoutes } from './transport/routes'
 
 export function createMemoriesModule({

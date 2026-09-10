@@ -45,6 +45,7 @@ type CreateAppOptions = {
   privateStorage?: PrivateStorageRuntime
   /** Test-only compatibility for legacy auth regression suites; production rejects it. */
   legacyPasswordAuthForTests?: boolean
+  telegramRoutes?: import('hono').Hono | null
 }
 
 export function createApp({
@@ -54,6 +55,7 @@ export function createApp({
   prisma,
   privateStorage,
   legacyPasswordAuthForTests = false,
+  telegramRoutes = null,
 }: CreateAppOptions) {
   if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
     throw new Error('Legacy password auth test routes cannot be mounted in production')
@@ -189,6 +191,7 @@ export function createApp({
   app.route('/api/users', users.userRoutes)
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
+  if (telegramRoutes) app.route('/', telegramRoutes)
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.

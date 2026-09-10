@@ -13,6 +13,7 @@ export type PendingMediaUpload = {
   assetId: string
   familyId: string
   userId: string
+  sourceKind?: 'upload' | 'telegram'
   purpose: MediaPurpose
   kind: PrivateMediaKind
   objectKey: string
