@@ -11,6 +11,7 @@ import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
 import { EmptyState, FeedShell, FeedSkeleton, InlineError, MemoryCardFrame, type FeedFilter } from './components'
 import { feedQueryKeys, useFeedQuery, useMemoryLike } from './queries'
+import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 
@@ -36,6 +37,7 @@ export function FeedPage({
   const queryClient = useQueryClient()
   const feed = useFeedQuery(transport, familyId, filter)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
+  const { refetch } = feed
   const like = useMemoryLike(transport, familyId, filter)
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
@@ -65,11 +67,16 @@ export function FeedPage({
   useEffect(() => {
     let checking = false
     const checkForNew = async () => {
-      if (checking || document.hidden || !knownFirstId.current) return
+      if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
         const latest = await loadFeed(transport, familyId, filter, null)
-        if (latest.items[0]?.id && latest.items[0].id !== knownFirstId.current) setNewAvailable(true)
+        const latestFirstId = latest.items[0]?.id ?? null
+        if (shouldRefreshInitialEmptyFeed({ knownFirstId: knownFirstId.current, latestFirstId })) {
+          await refreshFromTop(refetch, knownFirstId, setNewAvailable)
+        } else if (latestFirstId && latestFirstId !== knownFirstId.current) {
+          setNewAvailable(true)
+        }
       } catch (error) {
         if (error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLost()
       } finally {
@@ -80,7 +87,7 @@ export function FeedPage({
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [familyId, filter, onAccessLost, transport])
+  }, [familyId, filter, onAccessLost, refetch, transport])
 
   useEffect(() => {
     const target = sentinel.current
