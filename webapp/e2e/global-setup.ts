@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createPrisma } from '../../backend/src/db'
 import {
   assertE2eDatabaseUrl,
   composeEnv,
@@ -71,4 +72,17 @@ export default async function globalSetup() {
     DEV_SEED_USER_EMAIL: 'user@example.com',
     DEV_SEED_USER_PASSWORD: e2eAdminPassword,
   })
+
+  // Browser E2E uses synthetic, signed Telegram initData. Only fixture identities receive pilot
+  // admission; regular unadmitted identities remain covered by the family integration suite.
+  const prisma = createPrisma(databaseUrl)
+  try {
+    await prisma.pilotAdmission.createMany({
+      data: [81000011, 81000012, 81000013, 81000014, 81000021, 81000022, 81000023, 81000024]
+        .map((id) => ({ provider: 'telegram', subject: String(id) })),
+      skipDuplicates: true,
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
 }

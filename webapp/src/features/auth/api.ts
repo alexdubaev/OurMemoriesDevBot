@@ -9,6 +9,7 @@ import {
   passwordResetRequestResponseSchema,
   passwordResetRequestSchema,
   registerRequestSchema,
+  telegramAuthRequestSchema,
   type CookieAuthResponse,
   type CookieRefreshResponse,
   type LoginRequest,
@@ -80,6 +81,18 @@ export class AuthApi {
         method: 'POST',
         body: payload,
       })
+      const sessionEvent = publishBrowserSessionState('authenticated')
+      return { data, sessionEpoch: sessionEvent.epoch }
+    })
+  }
+
+  authenticateTelegram(initData: string): Promise<BrowserSessionTransition<CookieAuthResponse>> {
+    const payload = telegramAuthRequestSchema.parse({ initData })
+    return this.authCoordinator(async () => {
+      const data = await this.http.request('/api/v1/auth/telegram', cookieAuthResponseSchema, {
+        method: 'POST', body: payload,
+      })
+      this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
     })
@@ -175,6 +188,39 @@ export class AuthApi {
     options: HttpRequestOptions = {},
   ): Promise<z.infer<TSchema>> {
     return this.performAuthenticatedRequest(path, schema, options)
+  }
+
+  async rawAuthenticated(path: string, options: HttpRequestOptions = {}) {
+    const requestEpoch = this.sessionEpoch
+    const accessToken = this.options.getAccessToken()
+    const headers = new Headers(options.headers)
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+
+    try {
+      return await this.http.raw(path, { ...options, headers })
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.status !== 401 || !accessToken) throw error
+      if (!this.isSessionEpochCurrent(requestEpoch)) throw error
+
+      let refreshed: CookieRefreshResponse
+      try {
+        refreshed = await this.refresh(requestEpoch)
+      } catch (refreshError) {
+        if (refreshError instanceof BrowserSessionEpochChangedError) throw error
+        throw refreshError
+      }
+      if (!this.isSessionEpochCurrent(requestEpoch)) throw error
+      if (!hasSamePrincipal(accessToken, refreshed.accessToken)) {
+        this.options.setAccessToken(null)
+        await this.options.onAuthExpired?.()
+        throw error
+      }
+
+      this.options.setAccessToken(refreshed.accessToken)
+      const retryHeaders = new Headers(options.headers)
+      retryHeaders.set('Authorization', `Bearer ${refreshed.accessToken}`)
+      return this.http.raw(path, { ...options, headers: retryHeaders })
+    }
   }
 
   private async performAuthenticatedRequest<TSchema extends z.ZodType>(

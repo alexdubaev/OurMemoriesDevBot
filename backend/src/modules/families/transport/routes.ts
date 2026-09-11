@@ -3,18 +3,22 @@ import {
   acceptInviteResponseSchema,
   apiErrorSchema,
   createFamilyRequestSchema,
+  completeChildProfileRequestSchema,
   createInviteRequestSchema,
   createInviteResponseSchema,
   familyInviteParamsSchema,
+  familyInvitesResponseSchema,
   familyMemberParamsSchema,
   familyMemberResponseSchema,
   familyMembersResponseSchema,
   familyMeResponseSchema,
   familyParamsSchema,
   familyResponseSchema,
+  familyUsageSchema,
   idempotencyKeyHeadersSchema,
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
+  removeMemberRequestSchema,
   updateMemberRoleRequestSchema,
   updateFamilyRequestSchema,
 } from '@web-app-demo/contracts'
@@ -63,6 +67,14 @@ const updateFamilyRoute = createRoute({
   },
   responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Updated family and child profile' } },
 })
+const completeChildProfileRoute = createRoute({
+  method: 'put', path: '/families/{familyId}/child', security: bearerSecurity,
+  request: {
+    params: familyParamsSchema,
+    body: { content: json(completeChildProfileRequestSchema) },
+  },
+  responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Completed child profile' } },
+})
 const listMembersRoute = createRoute({
   method: 'get', path: '/families/{familyId}/members', security: bearerSecurity,
   request: { params: familyParamsSchema },
@@ -76,6 +88,16 @@ const createInviteRoute = createRoute({
     body: { content: json(createInviteRequestSchema) },
   },
   responses: { ...errors, 201: { content: json(createInviteResponseSchema), description: 'Created one-use invitation' } },
+})
+const usageRoute = createRoute({
+  method: 'get', path: '/families/{familyId}/usage', security: bearerSecurity,
+  request: { params: familyParamsSchema },
+  responses: { ...errors, 200: { content: json(familyUsageSchema), description: 'Private family archive usage' } },
+})
+const listInvitesRoute = createRoute({
+  method: 'get', path: '/families/{familyId}/invites', security: bearerSecurity,
+  request: { params: familyParamsSchema },
+  responses: { ...errors, 200: { content: json(familyInvitesResponseSchema), description: 'Visible pending invitations' } },
 })
 const previewInviteRoute = createRoute({
   method: 'post', path: '/invites/preview', security: bearerSecurity,
@@ -102,7 +124,10 @@ const updateMemberRoute = createRoute({
 })
 const removeMemberRoute = createRoute({
   method: 'delete', path: '/families/{familyId}/members/{userId}', security: bearerSecurity,
-  request: { params: familyMemberParamsSchema },
+  request: {
+    params: familyMemberParamsSchema,
+    body: { content: json(removeMemberRequestSchema) },
+  },
   responses: { ...errors, 204: { description: 'Revoked family membership' } },
 })
 
@@ -139,8 +164,17 @@ export function createFamilyRoutes({
       c.req.valid('json'),
     ),
   ), 200))
+  routes.openapi(completeChildProfileRoute, async (c) => c.json(await executeFamily(() =>
+    service.completeChildProfile(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.valid('json'),
+    ),
+  ), 200))
   routes.openapi(listMembersRoute, async (c) => c.json(await executeFamily(() =>
     service.listMembers(scope(c.var.user, c.req.valid('param').familyId)),
+  ), 200))
+  routes.openapi(usageRoute, async (c) => c.json(await executeFamily(() =>
+    service.getUsage(scope(c.var.user, c.req.valid('param').familyId)),
   ), 200))
   routes.openapi(createInviteRoute, async (c) => c.json(await executeFamily(() =>
     service.createInvite(
@@ -149,6 +183,9 @@ export function createFamilyRoutes({
       c.req.valid('header')['idempotency-key'],
     ),
   ), 201))
+  routes.openapi(listInvitesRoute, async (c) => c.json(await executeFamily(() =>
+    service.listInvites(scope(c.var.user, c.req.valid('param').familyId)),
+  ), 200))
   routes.openapi(previewInviteRoute, async (c) => c.json(await executeFamily(() =>
     service.previewInvite(principal(c.var.user), c.req.valid('json').token),
   ), 200))
@@ -168,7 +205,9 @@ export function createFamilyRoutes({
   })
   routes.openapi(removeMemberRoute, async (c) => {
     const params = c.req.valid('param')
-    await executeFamily(() => service.removeMember(scope(c.var.user, params.familyId), params.userId))
+    await executeFamily(() => service.removeMember(
+      scope(c.var.user, params.familyId), params.userId, c.req.valid('json').expectedVersion,
+    ))
     return c.body(null, 204)
   })
   return routes

@@ -2,6 +2,7 @@ export type FamilyFailureKind =
   | 'not_found'
   | 'forbidden'
   | 'conflict'
+  | 'version_conflict'
   | 'idempotency_conflict'
   | 'already_in_family'
   | 'invite_used'

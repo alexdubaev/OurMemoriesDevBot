@@ -1,5 +1,21 @@
 # Блок 08 — Онбординг, приглашения и права в интерфейсе
 
+> **Утверждённая поправка владельца · 10.09.2026.** Для T08 актуальна
+> спецификация `OurMemories_T08_Package/docs/mvp/tasks/08_FAMILY_UI.md`.
+> В затронутых ею областях она заменяет более ранние положения этого файла,
+> `01_PRODUCT.md`, `design.md` и Wave B: новый завершённый профиль ребёнка
+> требует `avatar`, `name`, `birthDate`, `sex`; `full` может создавать
+> приглашения, но не получает owner-only полномочий; family-local alias не
+> влияет на авторизацию и переносится из invitation при accept. Разрешены
+> только необходимые изменения families/children/invites backend, Prisma,
+> migration и shared contracts. T08 не зависит от T07.
+>
+> Для этого блока владелец также разрешил ровно два последовательных
+> independent review: Codex 5.3 Spark — implementation/UI/integration, затем
+> Sol — security/data/invariants. После Sol третий review не запускается;
+> blocker означает только SECURITY, DATA, обязательную FUNCTION, REGRESSION
+> или required CI. Это исключение действует только для T08.
+
 **Исполнитель:** Terra. **Ревью:** Sol — выдача/отзыв доступа и защита owner.
 **Зависимости:** 04, 06 приняты и слиты в main. Разрешённая параллельная волна B; читать ../PARALLEL_WORK.md.
 **Цель:** Организатор приглашает близких и управляет двумя уровнями доступа через понятный интерфейс.

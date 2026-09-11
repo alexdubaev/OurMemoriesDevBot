@@ -7,6 +7,7 @@ import {
   familyMeResponseSchema,
   familyRoleSchema,
   idempotencyKeyHeadersSchema,
+  removeMemberRequestSchema,
   updateFamilyRequestSchema,
   updateMemberRoleRequestSchema,
 } from './index'
@@ -19,32 +20,49 @@ describe('family contracts', () => {
     expect(() => familyRoleSchema.parse('admin')).toThrow()
   })
 
-  test('normalizes family creation and rejects invalid child or timezone input', () => {
+  test('creates an idempotent family bootstrap without allowing an incomplete child profile', () => {
     expect(
       createFamilyRequestSchema.parse({
         name: ' Наша семья ',
         timezone: 'Europe/Moscow',
-        child: { displayName: ' Миша ', birthDate: '2024-02-29' },
       }),
     ).toEqual({
       name: 'Наша семья',
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Миша', birthDate: '2024-02-29' },
     })
     expect(() =>
       createFamilyRequestSchema.parse({
         name: 'Family',
         timezone: 'not-a-timezone',
-        child: { displayName: '' },
       }),
     ).toThrow()
     expect(() =>
       createFamilyRequestSchema.parse({
         name: 'Family',
         timezone: 'Europe/Moscow',
-        child: { displayName: 'Миша', birthDate: '2024-02-30' },
+        child: { displayName: 'Миша' },
       }),
     ).toThrow()
+  })
+
+  test('requires every child profile field and a bounded avatar crop during onboarding', async () => {
+    const { completeChildProfileRequestSchema } = await import('./index')
+    expect(completeChildProfileRequestSchema.parse({
+      name: ' Миша ',
+      birthDate: '2024-02-29',
+      sex: 'boy',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    })).toMatchObject({ name: 'Миша', sex: 'boy' })
+    expect(() => completeChildProfileRequestSchema.parse({
+      name: 'Миша', birthDate: '2024-02-29', sex: 'boy',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+    })).toThrow()
+    expect(() => completeChildProfileRequestSchema.parse({
+      name: 'Миша', birthDate: '2024-02-29', sex: 'girl',
+      avatarMediaId: '019c0000-0000-7000-8000-000000000001',
+      avatarCrop: { x: 0.5, y: 0, width: 0.6, height: 1 },
+    })).toThrow()
   })
 
   test('defaults invitations to viewer and never accepts a role during consumption', () => {
@@ -56,22 +74,60 @@ describe('family contracts', () => {
     expect(() =>
       acceptInviteRequestSchema.parse({ token: 't'.repeat(32), role: 'full' }),
     ).toThrow()
-    expect(updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toEqual({ role: 'viewer' })
+    expect(updateMemberRoleRequestSchema.parse({ role: 'viewer', expectedVersion: 3 })).toEqual({
+      role: 'viewer',
+      expectedVersion: 3,
+    })
+    expect(() => updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toThrow()
+  })
+
+  test('keeps a family-local invitation alias separate from the access role', () => {
+    expect(createInviteRequestSchema.parse({
+      role: 'viewer',
+      inviteeDisplayName: '  Бабушка Оля  ',
+    })).toEqual({
+      role: 'viewer',
+      inviteeDisplayName: 'Бабушка Оля',
+    })
+    expect(createInviteRequestSchema.parse({ inviteeDisplayName: '   ' })).toEqual({
+      role: 'viewer',
+      inviteeDisplayName: null,
+    })
+    expect(() => createInviteRequestSchema.parse({
+      role: 'full',
+      inviteeDisplayName: 'x'.repeat(65),
+    })).toThrow()
+  })
+
+  test('requires version authority for membership updates and removals', () => {
+    expect(updateMemberRoleRequestSchema.parse({
+      familyDisplayName: ' Тётя Лена ',
+      expectedVersion: 2,
+    })).toEqual({ familyDisplayName: 'Тётя Лена', expectedVersion: 2 })
+    expect(updateMemberRoleRequestSchema.parse({ familyDisplayName: null, expectedVersion: 2 })).toEqual({
+      familyDisplayName: null,
+      expectedVersion: 2,
+    })
+    expect(() => updateMemberRoleRequestSchema.parse({})).toThrow()
+    expect(removeMemberRequestSchema.parse({ expectedVersion: 4 })).toEqual({ expectedVersion: 4 })
+    expect(() => removeMemberRequestSchema.parse({})).toThrow()
   })
 
   test('allows only current MVP family and child fields in family updates', () => {
     expect(updateFamilyRequestSchema.parse({
       name: ' Новое имя ',
       timezone: 'Asia/Yekaterinburg',
-      child: { displayName: ' Маша ', birthDate: null },
+      child: { displayName: ' Маша ', birthDate: null, expectedVersion: 5 },
     })).toEqual({
       name: 'Новое имя',
       timezone: 'Asia/Yekaterinburg',
-      child: { displayName: 'Маша', birthDate: null },
+      child: { displayName: 'Маша', birthDate: null, expectedVersion: 5 },
     })
     expect(() => updateFamilyRequestSchema.parse({})).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ theme: 'dark' })).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ child: {} })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: { expectedVersion: 5 } })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: { displayName: 'Маша' } })).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ timezone: 'not-a-timezone' })).toThrow()
   })
 

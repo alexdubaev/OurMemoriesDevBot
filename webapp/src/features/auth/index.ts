@@ -11,6 +11,7 @@ export {
   readPasswordResetToken,
 } from './password-reset-location'
 export { AuthProvider } from './provider'
+export { AuthContext } from './context'
 export { authQueryKeys, sessionQueryKeys } from './queries'
 export { useAuth } from './use-auth'
 export type { ValidationErrors } from './components/form-model'

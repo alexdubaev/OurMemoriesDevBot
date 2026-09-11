@@ -9,6 +9,18 @@ export const idempotencyKeyHeadersSchema = z
 const trimmedName = (minimum: number, maximum: number) =>
   z.string().trim().min(minimum).max(maximum)
 
+const familyDisplayNameSchema = z
+  .string()
+  .transform((value) => value.normalize('NFC').trim())
+  .transform((value) => value === '' ? null : value)
+  .pipe(z.string().refine(
+    (value) => Array.from(value).length <= 64,
+    'Family display name must be at most 64 Unicode code points',
+  ).refine(
+    (value) => !/[\p{Cc}\p{Cf}]/u.test(value),
+    'Family display name cannot contain control characters',
+  ).nullable())
+
 const ianaTimezoneSchema = z.string().refine((value) => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format()
@@ -24,30 +36,44 @@ const birthDateSchema = z
   .refine((value) => {
     const date = new Date(`${value}T00:00:00.000Z`)
     return !Number.isNaN(date.getTime()) &&
-      date.toISOString().slice(0, 10) === value &&
-      date <= new Date()
-  }, 'Birth date must be a real date and cannot be in the future')
+      date.toISOString().slice(0, 10) === value
+  }, 'Birth date must be a real calendar date')
+
+export const childSexSchema = z.enum(['boy', 'girl'])
+
+export const childAvatarCropSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  width: z.number().gt(0).max(1),
+  height: z.number().gt(0).max(1),
+}).strict().refine((crop) => crop.x + crop.width <= 1 && crop.y + crop.height <= 1,
+  'Avatar crop must stay within the image bounds')
 
 export const createFamilyRequestSchema = z
   .object({
     name: trimmedName(1, 80).default('Наша семья'),
     timezone: ianaTimezoneSchema,
-    child: z
-      .object({
-        displayName: trimmedName(1, 60),
-        birthDate: birthDateSchema.optional(),
-      })
-      .strict(),
   })
   .strict()
+
+export const completeChildProfileRequestSchema = z.object({
+  name: trimmedName(1, 60),
+  birthDate: birthDateSchema,
+  sex: childSexSchema,
+  avatarMediaId: z.uuid(),
+  avatarCrop: childAvatarCropSchema,
+  expectedVersion: z.int().positive().nullable().default(null),
+}).strict()
 
 const updateChildRequestSchema = z
   .object({
     displayName: trimmedName(1, 60).optional(),
     birthDate: birthDateSchema.nullable().optional(),
+    expectedVersion: z.int().positive(),
   })
   .strict()
-  .refine((input) => Object.keys(input).length > 0, 'At least one child field is required')
+  .refine((input) => input.displayName !== undefined || input.birthDate !== undefined,
+    'At least one child field is required')
 
 export const updateFamilyRequestSchema = z
   .object({
@@ -61,6 +87,7 @@ export const updateFamilyRequestSchema = z
 export const createInviteRequestSchema = z
   .object({
     role: familyRoleSchema.default('viewer'),
+    inviteeDisplayName: familyDisplayNameSchema.optional(),
   })
   .strict()
 
@@ -76,17 +103,27 @@ export const invitePreviewRequestSchema = acceptInviteRequestSchema
 
 export const updateMemberRoleRequestSchema = z
   .object({
-    role: familyRoleSchema,
+    role: familyRoleSchema.optional(),
+    familyDisplayName: familyDisplayNameSchema.nullable().optional(),
+    expectedVersion: z.int().positive(),
   })
   .strict()
+  .refine((input) => input.role !== undefined || input.familyDisplayName !== undefined,
+    'At least one member field is required')
+
+export const removeMemberRequestSchema = z.object({
+  expectedVersion: z.int().positive(),
+}).strict()
 
 export const familyMemberSchema = z
   .object({
     userId: z.uuid(),
     displayName: z.string().nullable(),
+    familyDisplayName: z.string().nullable(),
     role: familyRoleSchema,
     isOwner: z.boolean(),
     joinedAt: z.string().datetime(),
+    version: z.int().positive(),
   })
   .strict()
 
@@ -105,13 +142,20 @@ export const familyInviteParamsSchema = familyParamsSchema.extend({ inviteId: z.
 
 export const childSchema = z.object({
   id: z.uuid(),
-  displayName: z.string(),
+  name: z.string(),
   birthDate: z.string().nullable(),
+  sex: childSexSchema.nullable(),
+  avatarMediaId: z.uuid().nullable(),
+  avatarCrop: childAvatarCropSchema.nullable(),
+  version: z.int().positive(),
+  isComplete: z.boolean(),
 }).strict()
+
+export const familyUsageSchema = z.object({ usedBytes: z.number().int().nonnegative(), quotaBytes: z.number().int().positive().nullable() }).strict()
 
 export const familyResponseSchema = z.object({
   family: familySchema,
-  child: childSchema,
+  child: childSchema.nullable(),
 }).strict()
 
 export const familyMembersResponseSchema = z.object({
@@ -126,7 +170,20 @@ export const createInviteResponseSchema = z.object({
   id: z.uuid(),
   rawToken: inviteTokenSchema,
   role: familyRoleSchema,
+  inviteeDisplayName: z.string().nullable(),
   expiresAt: z.string().datetime(),
+}).strict()
+
+export const familyInviteSchema = z.object({
+  id: z.uuid(),
+  role: familyRoleSchema,
+  inviteeDisplayName: z.string().nullable(),
+  expiresAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+}).strict()
+
+export const familyInvitesResponseSchema = z.object({
+  items: z.array(familyInviteSchema),
 }).strict()
 
 export const invitePreviewResponseSchema = z.object({
@@ -154,14 +211,18 @@ export const familyMeResponseSchema = z.object({
 export type FamilyRole = z.infer<typeof familyRoleSchema>
 export type IdempotencyKeyHeaders = z.infer<typeof idempotencyKeyHeadersSchema>
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>
+export type CompleteChildProfileRequest = z.infer<typeof completeChildProfileRequestSchema>
 export type UpdateFamilyRequest = z.infer<typeof updateFamilyRequestSchema>
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>
 export type UpdateMemberRoleRequest = z.infer<typeof updateMemberRoleRequestSchema>
+export type RemoveMemberRequest = z.infer<typeof removeMemberRequestSchema>
 export type FamilyMemberDto = z.infer<typeof familyMemberSchema>
 export type FamilyDto = z.infer<typeof familySchema>
 export type FamilyResponse = z.infer<typeof familyResponseSchema>
 export type CreateInviteResponse = z.infer<typeof createInviteResponseSchema>
+export type FamilyInviteDto = z.infer<typeof familyInviteSchema>
 export type InvitePreviewResponse = z.infer<typeof invitePreviewResponseSchema>
 export type AcceptInviteResponse = z.infer<typeof acceptInviteResponseSchema>
 export type FamilyMeResponse = z.infer<typeof familyMeResponseSchema>
+export type FamilyUsage = z.infer<typeof familyUsageSchema>

@@ -31,6 +31,7 @@ describe('Telegram HostBridge', () => {
     })
 
     expect(bridge.initData()).toBe('query_id=signed')
+    expect(bridge.inviteToken()).toBeNull()
     expect(bridge.metadata()).toEqual({
       version: '8.0',
       platform: 'ios',
@@ -44,10 +45,21 @@ describe('Telegram HostBridge', () => {
     bridge.close()
     bridge.back()
     bridge.openBot()
+    bridge.openInvite('opaque-token_1')
     expect(readyCalls).toBe(1)
     expect(closeCalls).toBe(1)
     expect(backCalls).toBe(1)
-    expect(openedLinks).toEqual(['https://t.me/OurMemoriesDevBot'])
+    expect(openedLinks).toEqual([
+      'https://t.me/OurMemoriesDevBot',
+      'https://t.me/OurMemoriesDevBot?startapp=invite_opaque-token_1',
+    ])
+  })
+
+  test('reads only an opaque invite token from signed initData for server-side acceptance', () => {
+    const bridge = createTelegramHostBridge({
+      Telegram: { WebApp: { initData: 'query_id=signed&start_param=invite_abcdefghijklmnopqrstuvwxyzABCDEF' } },
+    })
+    expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
   })
 
   test('provides a safe browser-dev adapter without inventing Telegram authentication', () => {
@@ -69,5 +81,6 @@ describe('Telegram HostBridge', () => {
     expect(() => bridge.close()).not.toThrow()
     expect(() => bridge.back()).not.toThrow()
     expect(() => bridge.openBot()).not.toThrow()
+    expect(() => bridge.openInvite('opaque-token')).not.toThrow()
   })
 })

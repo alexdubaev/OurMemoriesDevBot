@@ -18,6 +18,7 @@ import { AuthApi } from './api'
 import {
   clearAuthenticatedSession,
   confirmPasswordResetAndClearSession,
+  authQueryKeys,
   useCurrentUserQuery,
   useLoginMutation,
   useLogoutMutation,
@@ -134,6 +135,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
+  const authenticateTelegram = useCallback(async (initData: string) => {
+    const result = await api.authenticateTelegram(initData)
+    setAccessToken(result.data.accessToken)
+    queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
+  }, [api, queryClient, setAccessToken])
+
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {
       await api.requestPasswordReset(input)
@@ -172,6 +179,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const transport = useMemo(
     () => ({
       request: api.requestAuthenticated.bind(api),
+      raw: api.rawAuthenticated.bind(api),
     }),
     [api],
   )
@@ -184,13 +192,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       sessionError,
       retrySession,
       transport,
+      authenticateTelegram,
       register,
       login,
       logout,
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
+    [authenticateTelegram, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

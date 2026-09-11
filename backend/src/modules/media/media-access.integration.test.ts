@@ -133,10 +133,16 @@ maybeDescribe('Private media API', () => {
     const member = await admittedUser('Участник', '43202')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, member.token, family.body.family.id, 'full')
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
     const upload = await reserveAndPut(member.token, family.body.family.id, 'memory', pngFixture)
 
     const revoked = await jsonRequest(
-      `/api/v1/families/${family.body.family.id}/members/${member.userId}`, owner.token, 'DELETE', undefined,
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: membership.version },
     )
     expect(revoked.response.status).toBe(204)
     const finalized = await jsonRequest(
@@ -154,8 +160,16 @@ maybeDescribe('Private media API', () => {
     const member = await admittedUser('Участник', '43212')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, member.token, family.body.family.id, 'full')
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
     const uploaded = await uploadPhoto(member.token, family.body.family.id, 'memory', pngFixture)
-    await jsonRequest(`/api/v1/families/${family.body.family.id}/members/${member.userId}`, owner.token, 'DELETE')
+    await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: membership.version },
+    )
     const repeated = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/uploads/${uploaded.reserved.body.upload.uploadId}/finalize`, member.token, 'POST', {},
     )
@@ -194,8 +208,13 @@ maybeDescribe('Private media API', () => {
   test('child avatar assets share the lifecycle but cannot be published as MemoryMedia', async () => {
     const owner = await admittedUser('Владелец', '43401')
     const viewer = await admittedUser('Зритель', '43402')
+    const full = await admittedUser('Полный доступ', '43403')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    expect((await jsonRequest(`/api/v1/families/${family.body.family.id}/uploads`, full.token, 'POST', {
+      purpose: 'child_avatar', kind: 'photo', contentType: 'image/png', byteSize: pngFixture.byteLength,
+    })).response.status).toBe(403)
     const uploaded = await uploadPhoto(owner.token, family.body.family.id, 'child_avatar', pngFixture)
     expect(uploaded.finalized.response.status).toBe(200)
 
@@ -208,9 +227,17 @@ maybeDescribe('Private media API', () => {
     )
     expect(memory.response.status).toBe(409)
 
-    await prisma.child.update({
-      where: { id: family.body.child.id }, data: { avatarMediaId: uploaded.reserved.body.assetId },
-    })
+    const completed = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/child`, owner.token, 'PUT', {
+        name: 'Ребёнок', birthDate: '2024-02-29', sex: 'girl',
+        avatarMediaId: uploaded.reserved.body.assetId,
+        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: (await prisma.child.findUniqueOrThrow({
+          where: { id: family.body.child.id },
+        })).version,
+      },
+    )
+    expect(completed.response.status).toBe(200)
     const avatar = await app.request(
       `/api/v1/families/${family.body.family.id}/media/${uploaded.reserved.body.assetId}/content?variant=display`,
       { headers: { Authorization: `Bearer ${viewer.token}` } },
@@ -272,10 +299,26 @@ maybeDescribe('Private media API', () => {
     return { userId: user.id, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }
   }
 
-  function createFamily(token: string, name: string) {
-    return jsonRequest('/api/v1/families', token, 'POST', {
-      name, timezone: 'Europe/Moscow', child: { displayName: 'Ребёнок' },
+  async function createFamily(token: string, name: string) {
+    const created = await jsonRequest('/api/v1/families', token, 'POST', {
+      name, timezone: 'Europe/Moscow',
     }, randomUUID())
+    if (created.response.status === 201) {
+      const avatar = await prisma.mediaAsset.create({
+        data: {
+          familyId: created.body.family.id, uploaderId: created.body.family.ownerUserId,
+          sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+          originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', verifiedMime: 'image/png',
+          sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: 1n, width: 1, height: 1,
+          originalStatus: 'stored', renditionStatus: 'ready',
+        },
+      })
+      const child = await prisma.child.create({
+        data: { familyId: created.body.family.id, displayName: 'Test child', birthDate: new Date('2024-01-01T00:00:00.000Z'), sex: 'girl', avatarMediaId: avatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 } },
+      })
+      created.body.child = { id: child.id }
+    }
+    return created
   }
 
   async function inviteMember(ownerToken: string, memberToken: string, familyId: string, role: 'full' | 'viewer') {

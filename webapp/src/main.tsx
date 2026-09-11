@@ -1,7 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from './App'
+import { AuthProvider } from './features/auth'
 import { createTelegramHostBridge } from './platform/telegram'
 import './production.css'
 
@@ -9,6 +11,7 @@ const hostBridge = createTelegramHostBridge(window)
 hostBridge.ready()
 
 const root = createRoot(document.getElementById('root')!)
+const queryClient = new QueryClient()
 
 async function renderApplication() {
   if (import.meta.env.DEV && window.location.pathname === '/__fixtures/design-system') {
@@ -23,7 +26,11 @@ async function renderApplication() {
 
   root.render(
     <StrictMode>
-      <App hostBridge={hostBridge} />
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <App hostBridge={hostBridge} />
+        </AuthProvider>
+      </QueryClientProvider>
     </StrictMode>,
   )
 }

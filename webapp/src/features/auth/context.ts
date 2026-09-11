@@ -20,6 +20,7 @@ export type AuthContextValue = {
   sessionError: Error | null
   retrySession: () => Promise<void>
   transport: AuthenticatedTransport
+  authenticateTelegram: (initData: string) => Promise<void>
   register: (input: RegisterRequest) => Promise<void>
   login: (input: LoginRequest) => Promise<void>
   logout: () => Promise<void>

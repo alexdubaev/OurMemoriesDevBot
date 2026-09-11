@@ -73,6 +73,54 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
   expect(meCalls[1]?.authorization).toBe(`Bearer ${freshAccessToken}`)
 })
 
+test('AuthApi refreshes a private raw request before retrying it', async () => {
+  const expiredAccessToken = accessTokenFor('user_1', 'expired')
+  const freshAccessToken = accessTokenFor('user_1', 'fresh')
+  let accessToken: string | null = expiredAccessToken
+  const calls: Array<{ path: string; authorization: string | null }> = []
+
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname
+    const authorization = new Headers(init?.headers).get('Authorization')
+    calls.push({ path, authorization })
+    if (path === '/api/auth/refresh') return json({ accessToken: freshAccessToken }, 200)
+    if (authorization === `Bearer ${freshAccessToken}`) return new Response('avatar', { status: 200 })
+    return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
+  }
+
+  const client = new AuthApi({
+    getAccessToken: () => accessToken,
+    setAccessToken: (nextAccessToken) => { accessToken = nextAccessToken },
+  })
+
+  await expect(client.rawAuthenticated('/api/v1/families/family/media/avatar/content')).resolves.toMatchObject({ status: 200 })
+  expect(calls).toEqual([
+    { path: '/api/v1/families/family/media/avatar/content', authorization: `Bearer ${expiredAccessToken}` },
+    { path: '/api/auth/refresh', authorization: null },
+    { path: '/api/v1/families/family/media/avatar/content', authorization: `Bearer ${freshAccessToken}` },
+  ])
+})
+
+test('AuthApi exchanges only Telegram initData and keeps the issued access token in memory', async () => {
+  let accessToken: string | null = null
+  globalThis.fetch = async (input, init) => {
+    expect(new URL(String(input)).pathname).toBe('/api/v1/auth/telegram')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBe(JSON.stringify({ initData: 'query_id=signed' }))
+    return json({
+      accessToken: accessTokenFor('telegram_user', 'fresh'),
+      user: {
+        id: 'telegram_user', email: null, displayName: 'Telegram User', role: 'user',
+        createdAt: '2026-09-10T00:00:00.000Z',
+      },
+    }, 200)
+  }
+  const api = new AuthApi({ getAccessToken: () => accessToken, setAccessToken: (next) => { accessToken = next } })
+  const response = await api.authenticateTelegram('query_id=signed')
+  expect(response.data.user.id).toBe('telegram_user')
+  expect(accessToken).toBe(response.data.accessToken)
+})
+
 test('AuthApi shares one refresh across concurrent unauthorized requests', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')

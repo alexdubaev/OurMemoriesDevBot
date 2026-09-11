@@ -5,6 +5,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
+import { Prisma } from '../../generated/prisma/client'
 import { signAccessToken } from '../auth'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -36,17 +37,20 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     const fullInvite = await createInvite(owner, family.body.family.id, 'full')
     const viewerInvite = await createInvite(owner, family.body.family.id, 'viewer')
     await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: fullInvite.body.rawToken })
-    await jsonRequest('/api/v1/invites/accept', viewer.token, 'POST', { token: viewerInvite.body.rawToken })
+    const viewerAccepted = await jsonRequest(
+      '/api/v1/invites/accept', viewer.token, 'POST', { token: viewerInvite.body.rawToken },
+    )
+    const child = await prisma.child.findFirstOrThrow({ where: { familyId: family.body.family.id } })
 
     const ownerUpdate = await patchFamily(owner.token, family.body.family.id, {
       name: 'Обновлённая семья',
       timezone: 'Asia/Yekaterinburg',
-      child: { displayName: 'Маша', birthDate: null },
+      child: { displayName: 'Маша', birthDate: '2024-01-01', expectedVersion: child.version },
     })
     expect(ownerUpdate.response.status).toBe(200)
     expect(ownerUpdate.body).toMatchObject({
       family: { name: 'Обновлённая семья', timezone: 'Asia/Yekaterinburg' },
-      child: { displayName: 'Маша', birthDate: null },
+      child: { name: 'Маша', birthDate: '2024-01-01' },
     })
 
     expect((await patchFamily(full.token, family.body.family.id, { name: 'Нет' })).response.status)
@@ -64,14 +68,14 @@ maybeDescribe('Block 01 independent review boundaries', () => {
       `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
       adminOutsider.token,
       'PATCH',
-      { role: 'full' },
+      { role: 'full', expectedVersion: viewerAccepted.body.membership.version },
     )).response.status).toBe(404)
     expect((await app.request(
       `/api/v1/families/${family.body.family.id}/invites/${viewerInvite.body.id}`,
       { method: 'DELETE', headers: authHeaders(adminOutsider.token) },
     )).status).toBe(404)
 
-    expect((await createInvite(full, family.body.family.id, 'viewer')).response.status).toBe(403)
+    expect((await createInvite(full, family.body.family.id, 'viewer')).response.status).toBe(201)
     expect((await createInvite(viewer, family.body.family.id, 'viewer')).response.status).toBe(403)
     expect((await createInvite(adminOutsider, family.body.family.id, 'viewer')).response.status)
       .toBe(404)
@@ -79,7 +83,7 @@ maybeDescribe('Block 01 independent review boundaries', () => {
       `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
       owner.token,
       'PATCH',
-      { role: 'full' },
+      { role: 'full', expectedVersion: viewerAccepted.body.membership.version },
     )).response.status).toBe(200)
   })
 
@@ -88,7 +92,6 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     const missingKey = await jsonRequest('/api/v1/families', owner.token, 'POST', {
       name: 'Без ключа',
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Ребёнок' },
     })
     expect(missingKey.response.status).toBe(422)
     expect(missingKey.body.error).toMatchObject({
@@ -112,10 +115,16 @@ maybeDescribe('Block 01 independent review boundaries', () => {
 
     const originalFamilyResponse = familyAttempts[0]!.body
     expect(familyRecord.responseSnapshot).toEqual(originalFamilyResponse)
+    const child = await prisma.child.findFirstOrThrow({
+      where: { familyId: originalFamilyResponse.family.id },
+    })
     const patchedFamily = await patchFamily(
       owner.token,
       originalFamilyResponse.family.id,
-      { name: 'Имя после создания', child: { displayName: 'Ребёнок после создания' } },
+      {
+        name: 'Имя после создания',
+        child: { displayName: 'Ребёнок после создания', expectedVersion: child.version },
+      },
     )
     expect(patchedFamily.response.status).toBe(200)
     expect(patchedFamily.body).not.toEqual(originalFamilyResponse)
@@ -145,6 +154,7 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     expect(inviteRecord.responseSnapshot).toEqual({
       id: inviteAttempts[0]!.body.id,
       role: inviteAttempts[0]!.body.role,
+      inviteeDisplayName: null,
       expiresAt: inviteAttempts[0]!.body.expiresAt,
     })
     expect(JSON.stringify(inviteRecord.responseSnapshot))
@@ -211,6 +221,54 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     const otherUser = await acceptInvite(second.token, used.body.rawToken)
     expect(otherUser.response.status).toBe(409)
     expect(otherUser.body.error.code).toBe('INVITE_USED')
+  })
+
+  test('keeps a legacy nullable child readable and lets its owner complete the same record', async () => {
+    const owner = await admittedUser('Owner', '23501')
+    const family = await createFamily(owner, 'Legacy family')
+    const existing = await prisma.child.findFirstOrThrow({ where: { familyId: family.body.family.id } })
+    const avatarMediaId = existing.avatarMediaId!
+    const legacy = await prisma.child.update({
+      where: { id: existing.id },
+      data: {
+        displayName: 'Legacy child',
+        birthDate: null,
+        sex: null,
+        avatarMediaId: null,
+        avatarCrop: Prisma.DbNull,
+      },
+    })
+
+    const readable = await app.request(`/api/v1/families/${family.body.family.id}`, {
+      headers: authHeaders(owner.token),
+    })
+    expect(readable.status).toBe(200)
+    expect(await readable.json()).toMatchObject({
+      child: {
+        id: existing.id,
+        name: 'Legacy child',
+        birthDate: null,
+        sex: null,
+        avatarMediaId: null,
+        isComplete: false,
+      },
+    })
+
+    const completed = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/child`,
+      owner.token,
+      'PUT',
+      {
+        name: 'Лиза',
+        birthDate: '2024-02-29',
+        sex: 'girl',
+        avatarMediaId,
+        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: legacy.version,
+      },
+    )
+    expect(completed.response.status).toBe(200)
+    expect(completed.body.child).toMatchObject({ id: existing.id, isComplete: true })
   })
 
   test('keeps the owner as an active full member under direct database writes', async () => {
@@ -314,16 +372,49 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     }
   }
 
-  function createFamily(
+  async function createFamily(
     user: { token: string },
     name: string,
     idempotencyKey = randomUUID(),
   ) {
-    return jsonRequest('/api/v1/families', user.token, 'POST', {
+    const created = await jsonRequest('/api/v1/families', user.token, 'POST', {
       name,
       timezone: 'Europe/Moscow',
-      child: { displayName: 'Ребёнок' },
     }, idempotencyKey)
+    if (created.response.status === 201) {
+      const child = await prisma.child.findFirst({ where: { familyId: created.body.family.id } })
+      if (!child) {
+        const avatar = await prisma.mediaAsset.create({
+          data: {
+            familyId: created.body.family.id,
+            uploaderId: created.body.family.ownerUserId,
+            sourceKind: 'upload',
+            purpose: 'child_avatar',
+            mediaKind: 'photo',
+            originalKey: `media-originals/${randomUUID()}`,
+            declaredMime: 'image/png',
+            verifiedMime: 'image/png',
+            sha256: randomUUID().replaceAll('-', '').repeat(2),
+            byteSize: 1n,
+            width: 1,
+            height: 1,
+            originalStatus: 'stored',
+            renditionStatus: 'ready',
+          },
+        })
+        await prisma.child.create({
+          data: {
+            familyId: created.body.family.id,
+            displayName: 'Legacy child',
+            birthDate: new Date('2024-01-01T00:00:00.000Z'),
+            sex: 'girl',
+            avatarMediaId: avatar.id,
+            avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+          },
+        })
+      }
+    }
+    return created
   }
 
   function createInvite(
