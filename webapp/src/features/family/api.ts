@@ -19,6 +19,7 @@ import {
   familyUsageSchema,
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
+  removeMemberRequestSchema,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -144,9 +145,14 @@ export function updateFamilyMember(
   )
 }
 
-export function leaveFamily(transport: AuthenticatedTransport, familyId: string, userId: string) {
+export function leaveFamily(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  userId: string,
+  expectedVersion: number,
+) {
   return transport.raw(
     `/api/v1/families/${encodeURIComponent(familyId)}/members/${encodeURIComponent(userId)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', body: removeMemberRequestSchema.parse({ expectedVersion }) },
   )
 }

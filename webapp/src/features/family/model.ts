@@ -1,5 +1,34 @@
 type CalendarDate = { year: number; month: number; day: number }
 
+export function familyCalendarDate(timezone: string, now = new Date()) {
+  const today = dateParts(now, timezone)
+  return [today.year, pad(today.month), pad(today.day)].join('-')
+}
+
+export function isBirthDateOnOrBeforeFamilyToday(birthDate: string, timezone: string, now = new Date()) {
+  return parseDateOnly(birthDate) !== null && birthDate <= familyCalendarDate(timezone, now)
+}
+
+export function inviteIssueMessage(code: string) {
+  const copy: Record<string, string> = {
+    OTHER_FAMILY: 'У вас уже есть другая активная семья. Сначала завершите работу с ней; текущее приглашение не использовано.',
+    ALREADY_IN_FAMILY: 'Вы уже состоите в другой семье.',
+    INVITE_EXPIRED: 'Срок действия приглашения истёк.',
+    INVITE_REVOKED: 'Это приглашение отозвано.',
+    INVITE_USED: 'Это приглашение уже использовано.',
+    NOT_FOUND: 'Приглашение не найдено.',
+    NETWORK: 'Не удалось проверить приглашение. Проверьте соединение.',
+  }
+  return copy[code] ?? 'Не удалось обработать приглашение. Попробуйте ещё раз.'
+}
+
+export function inviteIssueCode(error: unknown) {
+  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    return (error as { code: string }).code
+  }
+  return error instanceof TypeError ? 'NETWORK' : 'UNKNOWN'
+}
+
 export function ageFromBirthDate(birthDate: string, now = new Date()) {
   const birth = parseDateOnly(birthDate)
   if (!birth) return null
@@ -49,6 +78,10 @@ function plural(value: number, one: string, few: string, many: string) {
   if (value % 10 === 1) return one
   if (value % 10 >= 2 && value % 10 <= 4) return few
   return many
+}
+
+function pad(value: number) {
+  return String(value).padStart(2, '0')
 }
 
 export function roleLabel(role: 'full' | 'viewer', isOwner: boolean) {

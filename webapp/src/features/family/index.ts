@@ -1,6 +1,14 @@
 export { FamilyOnboarding } from './FamilyOnboarding'
 export { FamilyScreen } from './FamilyScreen'
-export { ageFromBirthDate, familyMemberName, roleLabel } from './model'
+export {
+  familyCalendarDate,
+  familyMemberName,
+  formatChildAge,
+  inviteIssueCode,
+  inviteIssueMessage,
+  isBirthDateOnOrBeforeFamilyToday,
+  roleLabel,
+} from './model'
 export {
   acceptInvite,
   previewInvite,

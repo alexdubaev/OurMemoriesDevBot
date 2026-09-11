@@ -84,28 +84,34 @@ maybeDescribe('Family access and invitations', () => {
       familyId: familyA.body.family.id,
     })).rejects.toMatchObject({ kind: 'forbidden' })
 
-    const ownerRemoval = await app.request(
+    const ownerRemoval = await jsonRequest(
       `/api/v1/families/${familyA.body.family.id}/members/${ownerA.userId}`,
-      { method: 'DELETE', headers: authHeaders(ownerA.token) },
+      ownerA.token,
+      'DELETE',
+      { expectedVersion: 1 },
     )
-    expect(ownerRemoval.status).toBe(409)
+    expect(ownerRemoval.response.status).toBe(409)
     const ownerDemotion = await jsonRequest(
       `/api/v1/families/${familyA.body.family.id}/members/${ownerA.userId}`,
       ownerA.token,
       'PATCH',
-      { role: 'viewer' },
+      { role: 'viewer', expectedVersion: 1 },
     )
     expect(ownerDemotion.response.status).toBe(403)
 
-    const revokeViewer = await app.request(
+    const revokeViewer = await jsonRequest(
       `/api/v1/families/${familyA.body.family.id}/members/${viewer.userId}`,
-      { method: 'DELETE', headers: authHeaders(ownerA.token) },
+      ownerA.token,
+      'DELETE',
+      { expectedVersion: accepted.body.membership.version },
     )
-    expect(revokeViewer.status).toBe(204)
-    expect((await app.request(
+    expect(revokeViewer.response.status).toBe(204)
+    expect((await jsonRequest(
       `/api/v1/families/${familyA.body.family.id}/members/${viewer.userId}`,
-      { method: 'DELETE', headers: authHeaders(ownerA.token) },
-    )).status).toBe(204)
+      ownerA.token,
+      'DELETE',
+      { expectedVersion: accepted.body.membership.version },
+    )).response.status).toBe(204)
     expect((await getFamily(familyA.body.family.id, viewer.token)).status).toBe(404)
   })
 
@@ -129,11 +135,51 @@ maybeDescribe('Family access and invitations', () => {
 
     const winner = attempts.find(({ response }) => response.status === 200)!
     const winnerToken = winner === attempts[0] ? first.token : second.token
+    const loserToken = winner === attempts[0] ? second.token : first.token
     const repeated = await jsonRequest('/api/v1/invites/accept', winnerToken, 'POST', {
       token: invite.body.rawToken,
     })
     expect(repeated.response.status).toBe(200)
+    expect((await jsonRequest('/api/v1/invites/preview', winnerToken, 'POST', {
+      token: invite.body.rawToken,
+    })).response.status).toBe(200)
+    const usedByAnotherUser = await jsonRequest('/api/v1/invites/preview', loserToken, 'POST', {
+      token: invite.body.rawToken,
+    })
+    expect(usedByAnotherUser.response.status).toBe(409)
+    expect(usedByAnotherUser.body.error.code).toBe('INVITE_USED')
     expect(await prisma.familyMember.count({ where: { familyId: family.body.family.id } })).toBe(2)
+  })
+
+  test('does not consume an unused invite when an active member opens the same family', async () => {
+    const owner = await admittedUser('Owner', '12011')
+    const member = await admittedUser('Member', '12012')
+    const family = await createFamily(owner.token, 'Семья')
+    const membershipInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', {
+        role: 'viewer', inviteeDisplayName: 'Первое имя',
+      },
+    )
+    const accepted = await jsonRequest('/api/v1/invites/accept', member.token, 'POST', {
+      token: membershipInvite.body.rawToken,
+    })
+    expect(accepted.response.status).toBe(200)
+
+    const unused = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', {
+        role: 'full', inviteeDisplayName: 'Новое имя',
+      },
+    )
+    const alreadyMember = await jsonRequest('/api/v1/invites/accept', member.token, 'POST', {
+      token: unused.body.rawToken,
+    })
+    expect(alreadyMember.response.status).toBe(200)
+    expect(alreadyMember.body.membership).toMatchObject({
+      role: 'viewer',
+      familyDisplayName: 'Первое имя',
+    })
+    expect(await prisma.familyInvite.findUniqueOrThrow({ where: { id: unused.body.id } }))
+      .toMatchObject({ acceptedAt: null, acceptedBy: null })
   })
 
   test('creates one bootstrap family and lets only its owner complete a child with a ready private avatar', async () => {
@@ -188,7 +234,7 @@ maybeDescribe('Family access and invitations', () => {
     })
     const rejectedReplacement = await jsonRequest(
       `/api/v1/families/${created.body.family.id}/child`, owner.token, 'PUT', {
-        ...profile, avatarMediaId: memoryAsset.id,
+        ...profile, avatarMediaId: memoryAsset.id, expectedVersion: completed.body.child.version,
       },
     )
     expect(rejectedReplacement.response.status).toBe(409)
@@ -205,13 +251,162 @@ maybeDescribe('Family access and invitations', () => {
     })
     const replaced = await jsonRequest(
       `/api/v1/families/${created.body.family.id}/child`, owner.token, 'PUT', {
-        ...profile, avatarMediaId: replacement.id,
+        ...profile, avatarMediaId: replacement.id, expectedVersion: completed.body.child.version,
       },
     )
     expect(replaced.response.status).toBe(200)
     expect(replaced.body.child.avatarMediaId).toBe(replacement.id)
     expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: avatar.id } })).deletedAt).not.toBeNull()
     expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+  })
+
+  test('rejects a future child birth date using the family calendar day', async () => {
+    const owner = await admittedUser('Timezone owner', '12101')
+    const timezone = 'Pacific/Kiritimati'
+    const created = await jsonRequest('/api/v1/families', owner.token, 'POST', {
+      name: 'Timezone family', timezone,
+    })
+    expect(created.response.status).toBe(201)
+    const avatar = await prisma.mediaAsset.create({
+      data: {
+        familyId: created.body.family.id,
+        uploaderId: owner.userId,
+        sourceKind: 'upload',
+        purpose: 'child_avatar',
+        mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png',
+        verifiedMime: 'image/png',
+        sha256: randomUUID().replaceAll('-', '').repeat(2),
+        byteSize: 1n,
+        width: 1,
+        height: 1,
+        originalStatus: 'stored',
+        renditionStatus: 'ready',
+      },
+    })
+
+    const response = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`,
+      owner.token,
+      'PUT',
+      {
+        name: 'Завтра',
+        birthDate: calendarDateOffset(timezone, 1),
+        sex: 'girl',
+        avatarMediaId: avatar.id,
+        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: null,
+      },
+    )
+    expect(response.response.status).toBe(409)
+    expect(response.body.error.code).toBe('CONFLICT')
+  })
+
+  test('rejects a timezone change that would make the existing child birth date future', async () => {
+    const owner = await admittedUser('Timezone change owner', '12102')
+    const sourceTimezone = 'Pacific/Kiritimati'
+    const created = await jsonRequest('/api/v1/families', owner.token, 'POST', {
+      name: 'Timezone change family', timezone: sourceTimezone,
+    })
+    const avatar = await prisma.mediaAsset.create({
+      data: {
+        familyId: created.body.family.id,
+        uploaderId: owner.userId,
+        sourceKind: 'upload',
+        purpose: 'child_avatar',
+        mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png',
+        verifiedMime: 'image/png',
+        sha256: randomUUID().replaceAll('-', '').repeat(2),
+        byteSize: 1n,
+        width: 1,
+        height: 1,
+        originalStatus: 'stored',
+        renditionStatus: 'ready',
+      },
+    })
+    const completed = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}/child`,
+      owner.token,
+      'PUT',
+      {
+        name: 'Сегодня',
+        birthDate: calendarDateOffset(sourceTimezone, 0),
+        sex: 'girl',
+        avatarMediaId: avatar.id,
+        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: null,
+      },
+    )
+    expect(completed.response.status).toBe(200)
+
+    const changed = await jsonRequest(
+      `/api/v1/families/${created.body.family.id}`,
+      owner.token,
+      'PATCH',
+      { timezone: 'Pacific/Honolulu' },
+    )
+    expect(changed.response.status).toBe(409)
+    expect(changed.body.error.code).toBe('CONFLICT')
+    expect((await getFamilyJson(created.body.family.id, owner.token)).body.family.timezone)
+      .toBe(sourceTimezone)
+  })
+
+  test('rejects stale child writes through both child mutation paths', async () => {
+    const owner = await admittedUser('Owner', '10011')
+    const family = await createFamily(owner.token, 'Семья')
+    const current = await getFamilyJson(family.body.family.id, owner.token)
+    const child = current.body.child
+    expect(child).not.toBeNull()
+
+    const avatar = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: child.avatarMediaId } })
+    const profile = {
+      name: 'Лиза',
+      birthDate: '2024-02-29',
+      sex: 'girl',
+      avatarMediaId: avatar.id,
+      avatarCrop: child.avatarCrop,
+      expectedVersion: child.version,
+    }
+    const first = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/child`, owner.token, 'PUT', profile,
+    )
+    expect(first.response.status).toBe(200)
+
+    const stale = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/child`, owner.token, 'PUT', {
+        ...profile,
+        name: 'Старое имя',
+      },
+    )
+    expect(stale.response.status).toBe(409)
+    expect(stale.body.error.code).toBe('VERSION_CONFLICT')
+
+    const missingVersion = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/child`, owner.token, 'PUT', {
+        ...profile,
+        name: 'Без версии',
+        expectedVersion: null,
+      },
+    )
+    expect(missingVersion.response.status).toBe(409)
+    expect(missingVersion.body.error.code).toBe('VERSION_CONFLICT')
+
+    const legacyFirst = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}`, owner.token, 'PATCH', {
+        child: { displayName: 'Лиза legacy', expectedVersion: first.body.child.version },
+      },
+    )
+    expect(legacyFirst.response.status).toBe(200)
+    const legacyStale = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}`, owner.token, 'PATCH', {
+        child: { displayName: 'Старый legacy', expectedVersion: first.body.child.version },
+      },
+    )
+    expect(legacyStale.response.status).toBe(409)
+    expect(legacyStale.body.error.code).toBe('VERSION_CONFLICT')
   })
 
   test('lets full issue an aliased invite without granting owner-only member management', async () => {
@@ -248,7 +443,7 @@ maybeDescribe('Family access and invitations', () => {
       `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
       full.token,
       'PATCH',
-      { role: 'full' },
+      { role: 'full', expectedVersion: accepted.body.membership.version },
     )
     expect(roleChange.response.status).toBe(403)
   })
@@ -265,13 +460,15 @@ maybeDescribe('Family access and invitations', () => {
       `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
     )
     await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: fullInvite.body.rawToken })
-    await jsonRequest('/api/v1/invites/accept', viewer.token, 'POST', { token: viewerInvite.body.rawToken })
+    const viewerAccepted = await jsonRequest(
+      '/api/v1/invites/accept', viewer.token, 'POST', { token: viewerInvite.body.rawToken },
+    )
 
     const renamed = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
       full.token,
       'PATCH',
-      { familyDisplayName: 'Бабушка Оля' },
+      { familyDisplayName: 'Бабушка Оля', expectedVersion: viewerAccepted.body.membership.version },
     )
     expect(renamed.response.status).toBe(200)
     expect(renamed.body.membership).toMatchObject({
@@ -283,14 +480,104 @@ maybeDescribe('Family access and invitations', () => {
       `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
       full.token,
       'PATCH',
-      { role: 'full' },
+      { role: 'full', expectedVersion: renamed.body.membership.version },
     )).response.status).toBe(403)
     expect((await jsonRequest(
       `/api/v1/families/${family.body.family.id}/members/${owner.userId}`,
       full.token,
       'PATCH',
-      { familyDisplayName: 'Нельзя' },
+      { familyDisplayName: 'Нельзя', expectedVersion: 1 },
     )).response.status).toBe(403)
+  })
+
+  test('rejects stale member alias, role, removal, and pre-reactivation versions', async () => {
+    const owner = await admittedUser('Owner', '12211')
+    const member = await admittedUser('Member', '12212')
+    const family = await createFamily(owner.token, 'Семья')
+    const membershipInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
+    )
+    const accepted = await jsonRequest('/api/v1/invites/accept', member.token, 'POST', {
+      token: membershipInvite.body.rawToken,
+    })
+    const originalVersion = accepted.body.membership.version
+
+    const missingVersion = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { familyDisplayName: 'Без версии' },
+    )
+    expect(missingVersion.response.status).toBe(422)
+
+    const aliased = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { familyDisplayName: 'Бабушка Оля', expectedVersion: originalVersion },
+    )
+    expect(aliased.response.status).toBe(200)
+    const staleAlias = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { familyDisplayName: 'Старое имя', expectedVersion: originalVersion },
+    )
+    expect(staleAlias.response.status).toBe(409)
+    expect(staleAlias.body.error.code).toBe('VERSION_CONFLICT')
+
+    const aliasVersion = aliased.body.membership.version
+    const promoted = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { role: 'full', expectedVersion: aliasVersion },
+    )
+    expect(promoted.response.status).toBe(200)
+    const staleRole = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { role: 'viewer', expectedVersion: aliasVersion },
+    )
+    expect(staleRole.response.status).toBe(409)
+    expect(staleRole.body.error.code).toBe('VERSION_CONFLICT')
+
+    const removalVersion = promoted.body.membership.version
+    const removed = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: removalVersion },
+    )
+    expect(removed.response.status).toBe(204)
+
+    const reactivationInvite = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
+    )
+    const reactivated = await jsonRequest('/api/v1/invites/accept', member.token, 'POST', {
+      token: reactivationInvite.body.rawToken,
+    })
+    expect(reactivated.response.status).toBe(200)
+    expect(reactivated.body.membership.version).toBeGreaterThan(removalVersion)
+
+    const staleRemoval = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: removalVersion },
+    )
+    expect(staleRemoval.response.status).toBe(409)
+    expect(staleRemoval.body.error.code).toBe('VERSION_CONFLICT')
+
+    const preRemovalStale = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'PATCH',
+      { familyDisplayName: 'До удаления', expectedVersion: removalVersion },
+    )
+    expect(preRemovalStale.response.status).toBe(409)
+    expect(preRemovalStale.body.error.code).toBe('VERSION_CONFLICT')
   })
 
   test('lets full revoke only its own pending invitation', async () => {
@@ -337,30 +624,35 @@ maybeDescribe('Family access and invitations', () => {
     const membershipInvite = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'full' },
     )
-    await jsonRequest('/api/v1/invites/accept', full.token, 'POST', { token: membershipInvite.body.rawToken })
+    const accepted = await jsonRequest(
+      '/api/v1/invites/accept', full.token, 'POST', { token: membershipInvite.body.rawToken },
+    )
 
     const downgradedInvite = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/invites`, full.token, 'POST', {},
     )
-    expect((await jsonRequest(
+    const downgraded = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
-      owner.token, 'PATCH', { role: 'viewer' },
-    )).response.status).toBe(200)
+      owner.token, 'PATCH', { role: 'viewer', expectedVersion: accepted.body.membership.version },
+    )
+    expect(downgraded.response.status).toBe(200)
     expect((await jsonRequest('/api/v1/invites/preview', owner.token, 'POST', {
       token: downgradedInvite.body.rawToken,
     })).response.status).toBe(410)
 
-    await jsonRequest(
+    const promoted = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
-      owner.token, 'PATCH', { role: 'full' },
+      owner.token, 'PATCH', { role: 'full', expectedVersion: downgraded.body.membership.version },
     )
     const removedInvite = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/invites`, full.token, 'POST', {},
     )
-    expect((await app.request(
+    expect((await jsonRequest(
       `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
-      { method: 'DELETE', headers: authHeaders(owner.token) },
-    )).status).toBe(204)
+      owner.token,
+      'DELETE',
+      { expectedVersion: promoted.body.membership.version },
+    )).response.status).toBe(204)
     expect((await jsonRequest('/api/v1/invites/preview', owner.token, 'POST', {
       token: removedInvite.body.rawToken,
     })).response.status).toBe(410)
@@ -398,6 +690,11 @@ maybeDescribe('Family access and invitations', () => {
 
   test('enforces pilot admission and distinguishes revoked from expired invitations', async () => {
     const outsider = await admittedUser('Not admitted', '13001', 'user', false)
+    const missingPreview = await jsonRequest('/api/v1/invites/preview', outsider.token, 'POST', {
+      token: 'missing-invitation-token'.padEnd(32, 'x'),
+    })
+    expect(missingPreview.response.status).toBe(404)
+    expect(missingPreview.body.error.code).toBe('NOT_FOUND')
     const denied = await createFamily(outsider.token, 'Недоступная семья')
     expect(denied.response.status).toBe(403)
     expect(denied.body.error.code).toBe('ROLE_FORBIDDEN')
@@ -489,6 +786,11 @@ maybeDescribe('Family access and invitations', () => {
     return app.request(`/api/v1/families/${familyId}`, { headers: authHeaders(token) })
   }
 
+  async function getFamilyJson(familyId: string, token: string) {
+    const response = await getFamily(familyId, token)
+    return { response, body: await response.json() as any }
+  }
+
   async function jsonRequest(path: string, token: string, method: string, body: unknown) {
     const needsIdempotencyKey = method === 'POST' && (
       path === '/api/v1/families' || path.endsWith('/invites')
@@ -502,10 +804,22 @@ maybeDescribe('Family access and invitations', () => {
       },
       body: JSON.stringify(body),
     })
-    return { response, body: await response.json() as any }
+    return { response, body: response.status === 204 ? null : await response.json() as any }
   }
 
   function authHeaders(token: string) {
     return { Authorization: `Bearer ${token}` }
   }
 })
+
+function calendarDateOffset(timezone: string, days: number) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value)
+  const shifted = new Date(Date.UTC(value('year'), value('month') - 1, value('day') + days))
+  return shifted.toISOString().slice(0, 10)
+}

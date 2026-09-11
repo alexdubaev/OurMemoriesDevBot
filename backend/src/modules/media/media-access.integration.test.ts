@@ -133,10 +133,16 @@ maybeDescribe('Private media API', () => {
     const member = await admittedUser('Участник', '43202')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, member.token, family.body.family.id, 'full')
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
     const upload = await reserveAndPut(member.token, family.body.family.id, 'memory', pngFixture)
 
     const revoked = await jsonRequest(
-      `/api/v1/families/${family.body.family.id}/members/${member.userId}`, owner.token, 'DELETE', undefined,
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: membership.version },
     )
     expect(revoked.response.status).toBe(204)
     const finalized = await jsonRequest(
@@ -154,8 +160,16 @@ maybeDescribe('Private media API', () => {
     const member = await admittedUser('Участник', '43212')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, member.token, family.body.family.id, 'full')
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
     const uploaded = await uploadPhoto(member.token, family.body.family.id, 'memory', pngFixture)
-    await jsonRequest(`/api/v1/families/${family.body.family.id}/members/${member.userId}`, owner.token, 'DELETE')
+    await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: membership.version },
+    )
     const repeated = await jsonRequest(
       `/api/v1/families/${family.body.family.id}/uploads/${uploaded.reserved.body.upload.uploadId}/finalize`, member.token, 'POST', {},
     )
@@ -218,6 +232,9 @@ maybeDescribe('Private media API', () => {
         name: 'Ребёнок', birthDate: '2024-02-29', sex: 'girl',
         avatarMediaId: uploaded.reserved.body.assetId,
         avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: (await prisma.child.findUniqueOrThrow({
+          where: { id: family.body.child.id },
+        })).version,
       },
     )
     expect(completed.response.status).toBe(200)

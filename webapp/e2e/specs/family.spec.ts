@@ -70,12 +70,26 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByText('Выберите вариант.')).toBeVisible()
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
+  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
+  await page.getByRole('button', { name: 'Отмена' }).click()
+  await page.getByRole('button', { name: 'Создать семейную ленту' }).click()
+  await expect(page.getByText('Добавьте фотографию ребёнка.')).toBeVisible()
+  await page.locator('#child-avatar').setInputFiles(pngImage)
+  await page.locator('#avatar-crop').fill('1.2')
+  await page.getByRole('button', { name: 'Сдвинуть вниз' }).click()
+  await page.getByRole('button', { name: 'Использовать фото' }).click()
   await page.locator('#child-name').fill('Лиза')
   await page.locator('#child-birth-date').fill('2024-02-29')
   await page.getByRole('button', { name: 'Девочка' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).dblclick()
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await page.getByRole('button', { name: 'Семья' }).click()
+  await expect(page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Изменить' }).click()
+  await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
+  await page.getByRole('button', { name: 'Отмена' }).click()
   await expect(page.getByRole('heading', { name: 'Семья' })).toBeVisible()
 
   // The buttons become busy synchronously; the network proves retry/double-click cannot mint
@@ -99,9 +113,27 @@ async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) 
   return startParam!
 }
 
-async function inviteePage(browser: Browser, subject: number, startParam: string, label: string) {
+type RequestLog = { accepts: string[]; familyCreations: string[]; privateFamilyRequests: string[] }
+
+async function inviteePage(
+  browser: Browser,
+  subject: number,
+  startParam: string,
+  label: string,
+  requests?: RequestLog,
+) {
   const context = await browser.newContext()
   const page = await context.newPage()
+  if (requests) page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'POST' && path === '/api/v1/families') {
+      requests.familyCreations.push(path)
+    }
+    if (request.method() === 'POST' && path === '/api/v1/invites/accept') {
+      requests.accepts.push(path)
+    }
+    if (path.startsWith('/api/v1/families/')) requests.privateFamilyRequests.push(path)
+  })
   await installTelegramHost(page, signedInitData(subject, label, startParam))
   await page.goto('/')
   return { context, page }
@@ -111,29 +143,20 @@ test('onboards a child and accepts a viewer invite only after explicit startapp 
   const owner = await createCompletedOwner(page, 81000011)
   const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира')
 
-  const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E')
-  const privateFamilyRequests: string[] = []
-  guest.page.on('request', (request) => {
-    if (new URL(request.url()).pathname.startsWith('/api/v1/families/')) {
-      privateFamilyRequests.push(request.url())
-    }
-  })
+  const requests: RequestLog = { accepts: [], familyCreations: [], privateFamilyRequests: [] }
+  const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E', requests)
 
   await expect(guest.page.getByRole('heading', { name: 'Приглашение в семью' })).toBeVisible()
   await expect(guest.page.getByText('Наша семья')).toBeVisible()
   await expect(guest.page.getByText('Лиза', { exact: true })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
-  await expect.poll(() => privateFamilyRequests).toEqual([])
+  await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
   // Reloading a preview is a real startapp round trip, not an implicit accept.
   await guest.page.reload()
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
-  await expect.poll(() => privateFamilyRequests).toEqual([])
+  await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
-  const accepts: string[] = []
-  guest.page.on('request', (request) => {
-    if (new URL(request.url()).pathname === '/api/v1/invites/accept') accepts.push(request.url())
-  })
   await guest.page.getByRole('button', { name: 'Присоединиться' }).dblclick()
   await expect(guest.page.getByRole('button', { name: 'Семья' })).toBeVisible()
   await guest.page.getByRole('button', { name: 'Семья' }).click()
@@ -141,7 +164,31 @@ test('onboards a child and accepts a viewer invite only after explicit startapp 
   await expect(guest.page.getByRole('button', { name: 'Создать приглашение' })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(0)
   await expect(guest.page.getByRole('img', { name: 'Режим просмотра' })).toBeVisible()
-  await expect.poll(() => accepts.length).toBe(1)
+  await expect.poll(() => requests.accepts.length).toBe(1)
+
+  await guest.page.reload()
+  await expect(guest.page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
+  await expect(guest.page.getByText('Это приглашение уже использовано.')).toHaveCount(0)
+  await expect.poll(() => requests.accepts.length).toBe(1)
+
+  await owner.page.getByRole('button', { name: 'Готово' }).click()
+  const alreadyMemberStartParam = await createInvite(owner.page, 'full', 'Не менять существующее имя')
+  const alreadyMemberRequests: RequestLog = {
+    accepts: [], familyCreations: [], privateFamilyRequests: [],
+  }
+  const alreadyMember = await inviteePage(
+    browser,
+    81000012,
+    alreadyMemberStartParam,
+    'Приглашённая E2E',
+    alreadyMemberRequests,
+  )
+  await expect(alreadyMember.page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await expect(alreadyMember.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
+  await expect(alreadyMember.page.getByText('Это приглашение уже использовано.')).toHaveCount(0)
+  await expect.poll(() => alreadyMemberRequests.accepts.length).toBe(0)
+  await alreadyMember.context.close()
 
   guest.page.once('dialog', (dialog) => dialog.accept())
   await guest.page.getByRole('button', { name: 'Выйти из семьи' }).click()
@@ -149,7 +196,7 @@ test('onboards a child and accepts a viewer invite only after explicit startapp 
   await expect(guest.page.getByText('Создайте семейную ленту, чтобы добавить профиль ребёнка.')).toBeVisible()
 
   // Leaving clears the active context.  It must not quietly bootstrap another family.
-  await expect.poll(() => privateFamilyRequests.filter((url) => new URL(url).pathname === '/api/v1/families').length).toBe(0)
+  await expect.poll(() => requests.familyCreations.length).toBe(0)
   await guest.context.close()
   await owner.context.close()
 })

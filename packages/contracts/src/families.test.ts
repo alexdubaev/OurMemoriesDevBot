@@ -7,6 +7,7 @@ import {
   familyMeResponseSchema,
   familyRoleSchema,
   idempotencyKeyHeadersSchema,
+  removeMemberRequestSchema,
   updateFamilyRequestSchema,
   updateMemberRoleRequestSchema,
 } from './index'
@@ -73,7 +74,11 @@ describe('family contracts', () => {
     expect(() =>
       acceptInviteRequestSchema.parse({ token: 't'.repeat(32), role: 'full' }),
     ).toThrow()
-    expect(updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toEqual({ role: 'viewer' })
+    expect(updateMemberRoleRequestSchema.parse({ role: 'viewer', expectedVersion: 3 })).toEqual({
+      role: 'viewer',
+      expectedVersion: 3,
+    })
+    expect(() => updateMemberRoleRequestSchema.parse({ role: 'viewer' })).toThrow()
   })
 
   test('keeps a family-local invitation alias separate from the access role', () => {
@@ -94,29 +99,35 @@ describe('family contracts', () => {
     })).toThrow()
   })
 
-  test('allows a membership alias update without accepting authority fields by default', () => {
+  test('requires version authority for membership updates and removals', () => {
     expect(updateMemberRoleRequestSchema.parse({
       familyDisplayName: ' Тётя Лена ',
-    })).toEqual({ familyDisplayName: 'Тётя Лена' })
-    expect(updateMemberRoleRequestSchema.parse({ familyDisplayName: null })).toEqual({
+      expectedVersion: 2,
+    })).toEqual({ familyDisplayName: 'Тётя Лена', expectedVersion: 2 })
+    expect(updateMemberRoleRequestSchema.parse({ familyDisplayName: null, expectedVersion: 2 })).toEqual({
       familyDisplayName: null,
+      expectedVersion: 2,
     })
     expect(() => updateMemberRoleRequestSchema.parse({})).toThrow()
+    expect(removeMemberRequestSchema.parse({ expectedVersion: 4 })).toEqual({ expectedVersion: 4 })
+    expect(() => removeMemberRequestSchema.parse({})).toThrow()
   })
 
   test('allows only current MVP family and child fields in family updates', () => {
     expect(updateFamilyRequestSchema.parse({
       name: ' Новое имя ',
       timezone: 'Asia/Yekaterinburg',
-      child: { displayName: ' Маша ', birthDate: null },
+      child: { displayName: ' Маша ', birthDate: null, expectedVersion: 5 },
     })).toEqual({
       name: 'Новое имя',
       timezone: 'Asia/Yekaterinburg',
-      child: { displayName: 'Маша', birthDate: null },
+      child: { displayName: 'Маша', birthDate: null, expectedVersion: 5 },
     })
     expect(() => updateFamilyRequestSchema.parse({})).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ theme: 'dark' })).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ child: {} })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: { expectedVersion: 5 } })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: { displayName: 'Маша' } })).toThrow()
     expect(() => updateFamilyRequestSchema.parse({ timezone: 'not-a-timezone' })).toThrow()
   })
 

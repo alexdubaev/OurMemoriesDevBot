@@ -16,6 +16,8 @@ import {
   loadFamilyInvites,
   loadFamilyMe,
   loadFamilyMembers,
+  inviteIssueCode,
+  inviteIssueMessage,
   previewInvite,
 } from '@/features/family'
 import type { HostBridge } from '@/platform/telegram'
@@ -96,8 +98,9 @@ function FamilyController({ currentUserId, insets, insetsStyle, inviteToken, tra
             setFamilyResponse(null)
             return
           }
+          setInviteHandled(true)
         } catch (reason) {
-          setInviteIssue(inviteErrorCode(reason))
+          setInviteIssue(inviteIssueCode(reason))
           setFamilyResponse(null)
           return
         }
@@ -131,16 +134,21 @@ function FamilyController({ currentUserId, insets, insetsStyle, inviteToken, tra
   if (error) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><InlineError onRetry={() => void refresh()} /></main>
   if (inviteIssue) return <InviteIssue code={inviteIssue} onRetry={refresh} style={insetsStyle} />
   if (invitePreview && inviteToken && !inviteHandled) return <InvitePreview preview={invitePreview} style={insetsStyle} onAccept={async () => {
-    await acceptInvite(transport, inviteToken)
-    setInviteHandled(true)
-    setInvitePreview(null)
+    try {
+      await acceptInvite(transport, inviteToken)
+      setInviteHandled(true)
+      setInvitePreview(null)
+    } catch (reason) {
+      setInviteIssue(inviteIssueCode(reason))
+      setInvitePreview(null)
+    }
   }} />
   if (noFamily) return <NoFamily style={insetsStyle} onCreate={async () => {
     await createFamilyBootstrap(transport, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
     await refresh()
   }} />
   if (!familyResponse) return <Loading style={insetsStyle} />
-  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} initialChild={familyResponse.child ?? undefined} onCompleted={async () => { setEditingChild(false); setScreen('feed'); await refresh() }} transport={transport} /></div>
+  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { setEditingChild(false); setScreen('feed'); await refresh() }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
     return <div style={insetsStyle}><FeedShell activeFilter={filter} childName={familyResponse.child.name} childSubtitle={familyResponse.child.birthDate ?? 'Профиль ребёнка'} insets={insets} onFamily={() => setScreen('family')} onFeed={() => undefined} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'}><EmptyState mode={current?.role === 'viewer' ? 'viewer' : 'full'} /></FeedShell></div>
@@ -163,18 +171,14 @@ function InvitePreview({ preview, style, onAccept }: { preview: InvitePreviewRes
 }
 
 function InviteIssue({ code, onRetry, style }: { code: string; onRetry: () => Promise<void>; style: CSSProperties }) {
-  const copy: Record<string, string> = { OTHER_FAMILY: 'У вас уже есть другая активная семья. Сначала завершите работу с ней; текущее приглашение не использовано.', INVITE_EXPIRED: 'Срок действия приглашения истёк.', INVITE_REVOKED: 'Это приглашение отозвано.', INVITE_USED: 'Это приглашение уже использовано.', NOT_FOUND: 'Приглашение не найдено.', NETWORK: 'Не удалось проверить приглашение. Проверьте соединение.' }
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Приглашение</Typography><Typography className="mt-8" variant="memoryBody">{copy[code] ?? copy.NOT_FOUND}</Typography>{code === 'NETWORK' ? <Button className="mt-6" onClick={() => void onRetry()} type="button"><Typography variant="memoryButton">Повторить</Typography></Button> : null}</main>
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Приглашение</Typography><Typography className="mt-8" variant="memoryBody">{inviteIssueMessage(code)}</Typography>{!terminalInviteIssueCodes.has(code) ? <Button className="mt-6" onClick={() => void onRetry()} type="button"><Typography variant="memoryButton">Повторить</Typography></Button> : null}</main>
 }
+
+const terminalInviteIssueCodes = new Set(['OTHER_FAMILY', 'ALREADY_IN_FAMILY', 'INVITE_EXPIRED', 'INVITE_REVOKED', 'INVITE_USED', 'NOT_FOUND'])
 
 function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
   return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Наши воспоминания</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); try { await onCreate() } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button></main>
-}
-
-function inviteErrorCode(error: unknown) {
-  if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') return (error as { code: string }).code
-  return 'NETWORK'
 }
 
 function Loading({ style }: { style?: CSSProperties }) {

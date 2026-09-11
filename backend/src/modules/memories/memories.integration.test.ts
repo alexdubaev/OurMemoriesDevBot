@@ -266,9 +266,15 @@ maybeDescribe('Memories API', () => {
       { count: 0, likedByMe: false }, { count: 0, likedByMe: false },
     ])
     await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}/like`, viewer.token, 'PUT', { liked: true })
-    await app.request(`/api/v1/families/${family.body.family.id}/members/${viewer.userId}`, {
-      method: 'DELETE', headers: { Authorization: `Bearer ${owner.token}` },
+    const viewerMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
     })
+    await request(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: viewerMembership.version },
+    )
     const ownerView = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
       owner.token, 'GET', undefined)
     expect(ownerView.body.likes).toEqual({ count: 0, likedByMe: false })
@@ -285,6 +291,9 @@ maybeDescribe('Memories API', () => {
     const full = await admittedUser('Полный доступ', '37502')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const fullMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: full.userId } },
+    })
     const blocker = await beginDatabaseBlock('LOCK TABLE memories IN ACCESS EXCLUSIVE MODE')
 
     try {
@@ -295,7 +304,7 @@ maybeDescribe('Memories API', () => {
         `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
         owner.token,
         'DELETE',
-        undefined,
+        { expectedVersion: fullMembership.version },
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
@@ -312,6 +321,9 @@ maybeDescribe('Memories API', () => {
     const full = await admittedUser('Полный доступ', '37602')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const fullMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: full.userId } },
+    })
     const created = await createNote(full.token, family.body.family.id, family.body.child.id, 'До правки')
     const blocker = await beginDatabaseBlock(
       'SELECT id FROM memories WHERE id = $1 FOR UPDATE',
@@ -331,7 +343,7 @@ maybeDescribe('Memories API', () => {
         `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
         owner.token,
         'PATCH',
-        { role: 'viewer' },
+        { role: 'viewer', expectedVersion: fullMembership.version },
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
@@ -348,6 +360,9 @@ maybeDescribe('Memories API', () => {
     const full = await admittedUser('Полный доступ', '37702')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, full.token, family.body.family.id, 'full')
+    const fullMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: full.userId } },
+    })
     const created = await createNote(full.token, family.body.family.id, family.body.child.id, 'Удалить')
     const blocker = await beginDatabaseBlock(
       'SELECT id FROM memories WHERE id = $1 FOR UPDATE',
@@ -369,7 +384,7 @@ maybeDescribe('Memories API', () => {
         `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
         owner.token,
         'DELETE',
-        undefined,
+        { expectedVersion: fullMembership.version },
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
@@ -386,6 +401,9 @@ maybeDescribe('Memories API', () => {
     const viewer = await admittedUser('Зритель', '37802')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const viewerMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
+    })
     const created = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Лайк')
     const lockName = `memory-like:${created.body.id}:${viewer.userId}`
     const blocker = await beginDatabaseBlock(
@@ -406,7 +424,7 @@ maybeDescribe('Memories API', () => {
         `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
         owner.token,
         'DELETE',
-        undefined,
+        { expectedVersion: viewerMembership.version },
       )
       await waitForLockedQuery(blocker, 'family_members')
       await blocker.query('COMMIT')
@@ -478,8 +496,33 @@ maybeDescribe('Memories API', () => {
       name, timezone: 'Europe/Moscow',
     }, randomUUID())
     if (created.response.status === 201) {
+      const avatar = await prisma.mediaAsset.create({
+        data: {
+          familyId: created.body.family.id,
+          uploaderId: created.body.family.ownerUserId,
+          sourceKind: 'upload',
+          purpose: 'child_avatar',
+          mediaKind: 'photo',
+          originalKey: `media-originals/${randomUUID()}`,
+          declaredMime: 'image/png',
+          verifiedMime: 'image/png',
+          sha256: randomUUID().replaceAll('-', '').repeat(2),
+          byteSize: 1n,
+          width: 1,
+          height: 1,
+          originalStatus: 'stored',
+          renditionStatus: 'ready',
+        },
+      })
       const child = await prisma.child.create({
-        data: { familyId: created.body.family.id, displayName: 'Legacy child' },
+        data: {
+          familyId: created.body.family.id,
+          displayName: 'Test child',
+          birthDate: new Date('2024-01-01T00:00:00.000Z'),
+          sex: 'girl',
+          avatarMediaId: avatar.id,
+          avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        },
       })
       created.body.child = { id: child.id }
     }

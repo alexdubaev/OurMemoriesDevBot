@@ -36,9 +36,8 @@ const birthDateSchema = z
   .refine((value) => {
     const date = new Date(`${value}T00:00:00.000Z`)
     return !Number.isNaN(date.getTime()) &&
-      date.toISOString().slice(0, 10) === value &&
-      date <= new Date()
-  }, 'Birth date must be a real date and cannot be in the future')
+      date.toISOString().slice(0, 10) === value
+  }, 'Birth date must be a real calendar date')
 
 export const childSexSchema = z.enum(['boy', 'girl'])
 
@@ -70,9 +69,11 @@ const updateChildRequestSchema = z
   .object({
     displayName: trimmedName(1, 60).optional(),
     birthDate: birthDateSchema.nullable().optional(),
+    expectedVersion: z.int().positive(),
   })
   .strict()
-  .refine((input) => Object.keys(input).length > 0, 'At least one child field is required')
+  .refine((input) => input.displayName !== undefined || input.birthDate !== undefined,
+    'At least one child field is required')
 
 export const updateFamilyRequestSchema = z
   .object({
@@ -104,11 +105,15 @@ export const updateMemberRoleRequestSchema = z
   .object({
     role: familyRoleSchema.optional(),
     familyDisplayName: familyDisplayNameSchema.nullable().optional(),
-    expectedVersion: z.int().positive().optional(),
+    expectedVersion: z.int().positive(),
   })
   .strict()
   .refine((input) => input.role !== undefined || input.familyDisplayName !== undefined,
     'At least one member field is required')
+
+export const removeMemberRequestSchema = z.object({
+  expectedVersion: z.int().positive(),
+}).strict()
 
 export const familyMemberSchema = z
   .object({
@@ -211,6 +216,7 @@ export type UpdateFamilyRequest = z.infer<typeof updateFamilyRequestSchema>
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>
 export type UpdateMemberRoleRequest = z.infer<typeof updateMemberRoleRequestSchema>
+export type RemoveMemberRequest = z.infer<typeof removeMemberRequestSchema>
 export type FamilyMemberDto = z.infer<typeof familyMemberSchema>
 export type FamilyDto = z.infer<typeof familySchema>
 export type FamilyResponse = z.infer<typeof familyResponseSchema>

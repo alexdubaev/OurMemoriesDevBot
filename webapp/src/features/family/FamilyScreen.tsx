@@ -65,7 +65,7 @@ export function FamilyScreen({
     <div className="min-h-screen min-h-dvh bg-background">
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-bottom-nav)+var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]">
         <Typography variant="memoryScreen">Семья</Typography>
-        {child ? <ChildCard avatarUrl={avatarUrl} child={child} onEdit={isOwner ? onEditChild : undefined} /> : null}
+        {child ? <ChildCard avatarUrl={avatarUrl} child={child} onEdit={isOwner ? onEditChild : undefined} timezone={familyResponse.family.timezone} /> : null}
         {error ? <div className="mt-5"><InlineError onRetry={() => void onRefresh()} /></div> : null}
         <section className="mt-5 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-labelledby="usage-title">
           <Typography id="usage-title" variant="memoryDialog">Архив семьи</Typography>
@@ -83,7 +83,9 @@ export function FamilyScreen({
                 canRemove={isOwner && !member.isOwner}
                 key={member.userId}
                 member={member}
-                onRemove={() => run(() => leaveFamily(transport, familyResponse.family.id, member.userId))}
+                onRemove={() => run(() => leaveFamily(
+                  transport, familyResponse.family.id, member.userId, member.version,
+                ))}
                 onSave={(input) => run(() => updateFamilyMember(
                   transport, familyResponse.family.id, member.userId, { ...input, expectedVersion: member.version },
                 ))}
@@ -164,10 +166,12 @@ export function FamilyScreen({
           <Typography id="privacy-title" variant="memoryDialog">Помощь и приватность</Typography>
           <Typography className="mt-2" tone="muted" variant="memoryBody">Воспоминания и фотографии семьи доступны только участникам этой семьи.</Typography>
         </section>
-        {!isOwner ? (
+        {current && !isOwner ? (
           <Button className="mt-6 min-h-11 w-full" disabled={busy} onClick={() => {
             if (window.confirm('Выйти из семьи? Доступ к приватным материалам будет закрыт.')) {
-              void run(() => leaveFamily(transport, familyResponse.family.id, currentUserId))
+              void run(() => leaveFamily(
+                transport, familyResponse.family.id, currentUserId, current.version,
+              ))
             }
           }} type="button" variant="outline">
             <Typography variant="memoryButton">Выйти из семьи</Typography>
@@ -184,8 +188,8 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} МБ`
 }
 
-function ChildCard({ avatarUrl, child, onEdit }: { avatarUrl: string | null; child: NonNullable<FamilyResponse['child']>; onEdit?: () => void }) {
-  const age = child.birthDate ? formatChildAge(child.birthDate, 'UTC') : null
+function ChildCard({ avatarUrl, child, onEdit, timezone }: { avatarUrl: string | null; child: NonNullable<FamilyResponse['child']>; onEdit?: () => void; timezone: string }) {
+  const age = child.birthDate ? formatChildAge(child.birthDate, timezone) : null
   return (
     <section className="mt-5 flex items-center gap-3 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-label="Профиль ребёнка">
       {avatarUrl ? <img alt={`Аватар ${child.name}`} className="size-11 rounded-full object-cover" src={avatarUrl} style={child.avatarCrop ? { objectPosition: `${(child.avatarCrop.x + child.avatarCrop.width / 2) * 100}% ${(child.avatarCrop.y + child.avatarCrop.height / 2) * 100}%`, transform: `scale(${1 / Math.min(child.avatarCrop.width, child.avatarCrop.height)})` } : undefined} /> : <AvatarLetter name={child.name} />}

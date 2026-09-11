@@ -6,20 +6,28 @@ import { InlineError } from '@/features/feed'
 import { resolveAvatarContentType } from '@/features/avatar'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { completeChildProfile, uploadChildAvatar } from './api'
-import { ageFromBirthDate } from './model'
+import {
+  familyCalendarDate,
+  formatChildAge,
+  isBirthDateOnOrBeforeFamilyToday,
+} from './model'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
 type Crop = { x: number; y: number; width: number; height: number }
 
 export function FamilyOnboarding({
   familyId,
+  familyTimezone,
   initialChild,
   transport,
+  onCancel,
   onCompleted,
 }: {
   familyId: string
+  familyTimezone: string
   initialChild?: NonNullable<FamilyResponse['child']>
   transport: AuthenticatedTransport
+  onCancel?: () => void
   onCompleted: () => Promise<void>
 }) {
   const [name, setName] = useState(initialChild?.name ?? '')
@@ -27,9 +35,15 @@ export function FamilyOnboarding({
   const [sex, setSex] = useState<'boy' | 'girl' | null>(initialChild?.sex ?? null)
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
+  const [cropFile, setCropFile] = useState<File | null>(null)
+  const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
-  const [position, setPosition] = useState({ x: initialChild?.avatarCrop?.x ?? 0, y: initialChild?.avatarCrop?.y ?? 0 })
+  const [position, setPosition] = useState({ x: 0, y: 0 })
   const [aspect, setAspect] = useState(1)
+  const [confirmedCrop, setConfirmedCrop] = useState<Crop>(
+    initialChild?.avatarCrop ?? { x: 0, y: 0, width: 1, height: 1 },
+  )
   const finalizedAvatar = useRef<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -39,19 +53,42 @@ export function FamilyOnboarding({
     if (previewUrl) URL.revokeObjectURL(previewUrl)
   }, [previewUrl])
 
+  useEffect(() => () => {
+    if (cropPreviewUrl) URL.revokeObjectURL(cropPreviewUrl)
+  }, [cropPreviewUrl])
+
+  useEffect(() => {
+    if (!initialChild?.avatarMediaId) return
+    let cancelled = false
+    let objectUrl: string | null = null
+    void transport.raw(
+      `/api/v1/families/${encodeURIComponent(familyId)}/media/${encodeURIComponent(initialChild.avatarMediaId)}/content?variant=display`,
+    ).then(async (response) => {
+      if (!response.ok) return
+      objectUrl = URL.createObjectURL(await response.blob())
+      if (!cancelled) setCurrentAvatarUrl(objectUrl)
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [familyId, initialChild?.avatarMediaId, transport])
+
   const crop = useMemo<Crop>(() => {
-    if (!file && initialChild?.avatarCrop) return initialChild.avatarCrop
+    if (!cropFile) return confirmedCrop
     const width = Math.min(1, 1 / aspect) / zoom
     const height = Math.min(1, aspect) / zoom
     return { x: Math.min(Math.max(0, position.x), 1 - width), y: Math.min(Math.max(0, position.y), 1 - height), width, height }
-  }, [aspect, file, initialChild?.avatarCrop, position, zoom])
-  const age = ageFromBirthDate(birthDate)
+  }, [aspect, confirmedCrop, cropFile, position, zoom])
+  const age = formatChildAge(birthDate, familyTimezone)
+  const maximumBirthDate = familyCalendarDate(familyTimezone)
+  const displayAvatarUrl = previewUrl ?? currentAvatarUrl
 
   function chooseFile(next: File | null) {
     setRequestError(null)
     if (!next) {
-      setFile(null)
-      setPreviewUrl(null)
+      setCropFile(null)
+      setCropPreviewUrl(null)
       return
     }
     const contentType = resolveAvatarContentType(next)
@@ -59,17 +96,44 @@ export function FamilyOnboarding({
       setFormErrors((errors) => ({ ...errors, avatar: 'Выберите фотографию до 20 МБ в формате JPEG, PNG, WebP или HEIC.' }))
       return
     }
-    setFile(next)
-    finalizedAvatar.current = null
-    setPreviewUrl(URL.createObjectURL(next))
+    setCropFile(next)
+    setCropPreviewUrl(URL.createObjectURL(next))
+    setZoom(1)
+    setPosition({ x: 0, y: 0 })
+    setAspect(1)
     setFormErrors((errors) => ({ ...errors, avatar: '' }))
+  }
+
+  function cancelCrop() {
+    setCropFile(null)
+    setCropPreviewUrl(null)
+    setZoom(1)
+    setPosition({ x: 0, y: 0 })
+  }
+
+  function useCrop() {
+    if (!cropFile) return
+    setFile(cropFile)
+    setPreviewUrl(URL.createObjectURL(cropFile))
+    setConfirmedCrop(crop)
+    finalizedAvatar.current = null
+    cancelCrop()
+  }
+
+  function moveCrop(deltaX: number, deltaY: number) {
+    setPosition((current) => ({
+      x: Math.min(Math.max(0, current.x + deltaX), 1 - crop.width),
+      y: Math.min(Math.max(0, current.y + deltaY), 1 - crop.height),
+    }))
   }
 
   async function submit() {
     const errors: Record<string, string> = {}
     if (!file && !initialChild?.avatarMediaId) errors.avatar = 'Добавьте фотографию ребёнка.'
     if (!name.trim()) errors.name = 'Укажите имя ребёнка.'
-    if (!birthDate || age === null) errors.birthDate = 'Укажите корректную дату рождения.'
+    if (!birthDate || age === null || !isBirthDateOnOrBeforeFamilyToday(birthDate, familyTimezone)) {
+      errors.birthDate = 'Укажите корректную дату рождения.'
+    }
     if (!sex) errors.sex = 'Выберите вариант.'
     setFormErrors(errors)
     setRequestError(null)
@@ -86,7 +150,7 @@ export function FamilyOnboarding({
       }
       if (!avatarMediaId) throw new Error('Не удалось подготовить фотографию ребёнка.')
       await completeChildProfile(transport, familyId, {
-        name: name.trim(), birthDate, sex, avatarMediaId, avatarCrop: crop, expectedVersion: initialChild?.version ?? null,
+        name: name.trim(), birthDate, sex, avatarMediaId, avatarCrop: confirmedCrop, expectedVersion: initialChild?.version ?? null,
       })
       await onCompleted()
     } catch (error) {
@@ -107,13 +171,12 @@ export function FamilyOnboarding({
 
         <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
           <span className="relative grid size-36 place-items-center overflow-hidden rounded-full bg-accent">
-            {previewUrl ? (
+            {displayAvatarUrl ? (
               <img
-                alt="Предпросмотр аватара ребёнка"
+                alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
                 className="size-full object-cover"
-                src={previewUrl}
-                onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)}
-                style={{ objectFit: 'cover', objectPosition: `${(crop.x + crop.width / 2) * 100}% ${(crop.y + crop.height / 2) * 100}%`, transform: `scale(${zoom})` }}
+                src={displayAvatarUrl}
+                style={cropStyle(confirmedCrop)}
               />
             ) : (
               <Typography variant="memoryChild">Фото</Typography>
@@ -128,12 +191,33 @@ export function FamilyOnboarding({
             type="file"
           />
         </label>
-        {previewUrl ? (
-          <label className="mt-3 flex flex-col gap-1" htmlFor="avatar-crop">
-            <Typography tone="muted" variant="memoryMeta">Кадрирование</Typography>
-            <input id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
-            <div className="grid grid-cols-2 gap-2"><Button onClick={() => setPosition({ x: Math.max(0, crop.x - 0.05), y: crop.y })} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть влево</Typography></Button><Button onClick={() => setPosition({ x: Math.min(1 - crop.width, crop.x + 0.05), y: crop.y })} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вправо</Typography></Button></div>
-          </label>
+        {cropPreviewUrl ? (
+          <section aria-label="Кадрирование фотографии" className="mt-4 rounded-[var(--radius-card)] bg-card p-4 shadow-[var(--shadow-card)]">
+            <Typography variant="memoryDialog">Кадрирование</Typography>
+            <div className="mx-auto mt-3 size-36 overflow-hidden rounded-full bg-accent">
+              <img
+                alt="Предпросмотр кадрирования"
+                className="size-full object-cover"
+                onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)}
+                src={cropPreviewUrl}
+                style={cropStyle(crop)}
+              />
+            </div>
+            <label className="mt-4 flex flex-col gap-1" htmlFor="avatar-crop">
+              <Typography tone="muted" variant="memoryMeta">Масштаб</Typography>
+              <input id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button onClick={() => moveCrop(-0.05, 0)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть влево</Typography></Button>
+              <Button onClick={() => moveCrop(0.05, 0)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вправо</Typography></Button>
+              <Button onClick={() => moveCrop(0, -0.05)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вверх</Typography></Button>
+              <Button onClick={() => moveCrop(0, 0.05)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вниз</Typography></Button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать фото</Typography></Button>
+              <Button onClick={cancelCrop} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button>
+            </div>
+          </section>
         ) : null}
         <FieldError message={formErrors.avatar} />
 
@@ -155,12 +239,12 @@ export function FamilyOnboarding({
           <input
             className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
             id="child-birth-date"
-            max={new Date().toISOString().slice(0, 10)}
+            max={maximumBirthDate}
             onChange={(event) => setBirthDate(event.target.value)}
             type="date"
             value={birthDate}
           />
-          {age !== null ? <Typography tone="muted" variant="memoryMeta">Сейчас {age} {ageWord(age)}</Typography> : null}
+          {age !== null ? <Typography tone="muted" variant="memoryMeta">Сейчас {age}</Typography> : null}
         </label>
         <FieldError message={formErrors.birthDate} />
 
@@ -177,6 +261,7 @@ export function FamilyOnboarding({
         <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>
+        {onCancel ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
       </section>
     </main>
   )
@@ -196,8 +281,10 @@ function FieldError({ message }: { message?: string }) {
   return message ? <Typography className="mt-1 text-destructive" role="alert" variant="memoryMeta">{message}</Typography> : null
 }
 
-function ageWord(age: number) {
-  if (age % 10 === 1 && age % 100 !== 11) return 'год'
-  if (age % 10 >= 2 && age % 10 <= 4 && (age % 100 < 12 || age % 100 > 14)) return 'года'
-  return 'лет'
+function cropStyle(crop: Crop) {
+  return {
+    objectFit: 'cover' as const,
+    objectPosition: `${(crop.x + crop.width / 2) * 100}% ${(crop.y + crop.height / 2) * 100}%`,
+    transform: `scale(${1 / Math.min(crop.width, crop.height)})`,
+  }
 }

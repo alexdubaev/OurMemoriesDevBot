@@ -18,6 +18,7 @@ import {
   idempotencyKeyHeadersSchema,
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
+  removeMemberRequestSchema,
   updateMemberRoleRequestSchema,
   updateFamilyRequestSchema,
 } from '@web-app-demo/contracts'
@@ -123,7 +124,10 @@ const updateMemberRoute = createRoute({
 })
 const removeMemberRoute = createRoute({
   method: 'delete', path: '/families/{familyId}/members/{userId}', security: bearerSecurity,
-  request: { params: familyMemberParamsSchema },
+  request: {
+    params: familyMemberParamsSchema,
+    body: { content: json(removeMemberRequestSchema) },
+  },
   responses: { ...errors, 204: { description: 'Revoked family membership' } },
 })
 
@@ -201,7 +205,9 @@ export function createFamilyRoutes({
   })
   routes.openapi(removeMemberRoute, async (c) => {
     const params = c.req.valid('param')
-    await executeFamily(() => service.removeMember(scope(c.var.user, params.familyId), params.userId))
+    await executeFamily(() => service.removeMember(
+      scope(c.var.user, params.familyId), params.userId, c.req.valid('json').expectedVersion,
+    ))
     return c.body(null, 204)
   })
   return routes

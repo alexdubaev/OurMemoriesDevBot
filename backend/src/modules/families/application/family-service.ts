@@ -25,6 +25,7 @@ import type { DbClient } from '../../../db'
 import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import { FamilyFailure } from '../domain/errors'
+import { isBirthDateOnOrBeforeFamilyToday } from '../domain/family-date'
 import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
@@ -138,6 +139,17 @@ export class FamilyService {
       })
       const child = family?.children[0]
       if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
+      if (input.child && !child) throw new FamilyFailure('not_found', 'Профиль ребёнка не найден')
+      const resultingBirthDate = input.child?.birthDate === undefined
+        ? child?.birthDate?.toISOString().slice(0, 10)
+        : input.child.birthDate
+      if (resultingBirthDate && !isBirthDateOnOrBeforeFamilyToday(
+        resultingBirthDate,
+        input.timezone ?? family.timezone,
+        this.now(),
+      )) {
+        throw new FamilyFailure('conflict', 'Дата рождения не может быть в будущем')
+      }
 
       const updatedFamily = await tx.family.update({
         where: { id: family.id },
@@ -146,23 +158,29 @@ export class FamilyService {
           ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
         },
       })
-      const updatedChild = input.child && child
-        ? await tx.child.update({
-            where: { id: child.id },
-            data: {
-              ...(input.child.displayName === undefined
-                ? {}
-                : { displayName: input.child.displayName }),
-              ...(input.child.birthDate === undefined
-                ? {}
-                : {
-                    birthDate: input.child.birthDate === null
-                      ? null
-                      : new Date(`${input.child.birthDate}T00:00:00.000Z`),
-                  }),
-            },
-          })
-        : child
+      let updatedChild = child
+      if (input.child && child) {
+        const updated = await tx.child.updateMany({
+          where: { id: child.id, version: input.child.expectedVersion },
+          data: {
+            ...(input.child.displayName === undefined
+              ? {}
+              : { displayName: input.child.displayName }),
+            ...(input.child.birthDate === undefined
+              ? {}
+              : {
+                  birthDate: input.child.birthDate === null
+                    ? null
+                    : new Date(`${input.child.birthDate}T00:00:00.000Z`),
+                }),
+            version: { increment: 1 },
+          },
+        })
+        if (updated.count === 0) {
+          throw new FamilyFailure('version_conflict', 'Профиль ребёнка изменён другим участником')
+        }
+        updatedChild = await tx.child.findUniqueOrThrow({ where: { id: child.id } })
+      }
       return { family: familyDto(updatedFamily), child: updatedChild ? childDto(updatedChild) : null }
     })
   }
@@ -198,6 +216,9 @@ export class FamilyService {
       if (!avatar) {
         throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
       }
+      if (!isBirthDateOnOrBeforeFamilyToday(input.birthDate, family.timezone, this.now())) {
+        throw new FamilyFailure('conflict', 'Дата рождения не может быть в будущем')
+      }
       if (!isSquarePixelCrop(input.avatarCrop, avatar.width, avatar.height)) {
         throw new FamilyFailure('conflict', 'Кадрирование аватара должно быть квадратным')
       }
@@ -208,12 +229,25 @@ export class FamilyService {
         avatarMediaId: input.avatarMediaId,
         avatarCrop: input.avatarCrop,
       }
-      if (currentChild && input.expectedVersion !== null && input.expectedVersion !== currentChild.version) {
-        throw new FamilyFailure('conflict', 'Профиль ребёнка изменён другим участником')
+      let child
+      if (currentChild) {
+        if (input.expectedVersion === null) {
+          throw new FamilyFailure('version_conflict', 'Для изменения профиля нужна его текущая версия')
+        }
+        const updated = await tx.child.updateMany({
+          where: { id: currentChild.id, version: input.expectedVersion },
+          data: { ...data, version: { increment: 1 } },
+        })
+        if (updated.count === 0) {
+          throw new FamilyFailure('version_conflict', 'Профиль ребёнка изменён другим участником')
+        }
+        child = await tx.child.findUniqueOrThrow({ where: { id: currentChild.id } })
+      } else {
+        if (input.expectedVersion !== null) {
+          throw new FamilyFailure('version_conflict', 'Профиль ребёнка ещё не создан')
+        }
+        child = await tx.child.create({ data: { familyId: scope.familyId, ...data } })
       }
-      const child = currentChild
-        ? await tx.child.update({ where: { id: currentChild.id }, data: { ...data, version: { increment: 1 } } })
-        : await tx.child.create({ data: { familyId: scope.familyId, ...data } })
 
       if (currentChild?.avatarMediaId && currentChild.avatarMediaId !== input.avatarMediaId) {
         const retired = await tx.mediaAsset.updateMany({
@@ -371,15 +405,29 @@ export class FamilyService {
   }
 
   async previewInvite(principal: Principal, rawToken: string): Promise<InvitePreviewResponse> {
-    void principal
     const invite = await this.db.familyInvite.findUnique({
       where: { tokenHash: hashInviteToken(rawToken) },
       include: { family: true },
     })
-    if (invite?.family.status !== 'active') {
-      throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+    if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+    if (invite.family.status !== 'active') throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+    if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+    if (invite.acceptedAt) {
+      const acceptedByCurrentMember = invite.acceptedBy === principal.userId && await this.db.familyMember.findFirst({
+        where: {
+          familyId: invite.familyId,
+          userId: principal.userId,
+          revokedAt: null,
+          family: { status: 'active' },
+        },
+        select: { userId: true },
+      })
+      if (!acceptedByCurrentMember) {
+        throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
+      }
+    } else if (invite.expiresAt <= this.now()) {
+      throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
     }
-    assertInviteAvailable(invite, this.now())
     return {
       family: { id: invite.family.id, name: invite.family.name },
       role: invite.role,
@@ -420,15 +468,14 @@ export class FamilyService {
           throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
         }
         if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
-        if (invite.expiresAt <= this.now()) {
-          throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
-        }
-
         if (invite.acceptedBy) {
           if (invite.acceptedBy !== principal.userId) {
             throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
           }
           return inviteResponse(tx, invite.familyId, principal.userId)
+        }
+        if (invite.expiresAt <= this.now()) {
+          throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
         }
 
         const activeMembership = await tx.familyMember.findFirst({
@@ -437,6 +484,9 @@ export class FamilyService {
         })
         if (activeMembership && activeMembership.familyId !== invite.familyId) {
           throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        }
+        if (activeMembership?.familyId === invite.familyId) {
+          return inviteResponse(tx, invite.familyId, principal.userId)
         }
 
         if (!activeMembership) {
@@ -447,6 +497,7 @@ export class FamilyService {
               familyDisplayName: invite.inviteeDisplayName,
               revokedAt: null,
               joinedAt: this.now(),
+              version: { increment: 1 },
             },
             create: {
               familyId: invite.familyId,
@@ -521,7 +572,7 @@ export class FamilyService {
         throw new FamilyFailure('forbidden', 'Создателя семьи нельзя изменять через этот экран')
       }
       const updated = await tx.familyMember.updateMany({
-        where: { familyId: scope.familyId, userId, revokedAt: null, ...(input.expectedVersion === undefined ? {} : { version: input.expectedVersion }) },
+        where: { familyId: scope.familyId, userId, revokedAt: null, version: input.expectedVersion },
         data: {
           ...(input.role === undefined ? {} : { role: input.role }),
           ...(input.familyDisplayName === undefined
@@ -532,7 +583,7 @@ export class FamilyService {
       })
       if (updated.count === 0) {
         const exists = await tx.familyMember.count({ where: { familyId: scope.familyId, userId, revokedAt: null } })
-        if (exists) throw new FamilyFailure('conflict', 'Данные участника изменены другим пользователем')
+        if (exists) throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
         throw new FamilyFailure('not_found', 'Участник не найден')
       }
       if (input.role === 'viewer') {
@@ -549,17 +600,20 @@ export class FamilyService {
     })
   }
 
-  async removeMember(scope: FamilyScope, userId: string) {
+  async removeMember(scope: FamilyScope, userId: string, expectedVersion: number) {
     const removingSelf = scope.principal.userId === userId
     if (removingSelf) {
       const ownMembership = await this.db.familyMember.findUnique({
         where: { familyId_userId: { familyId: scope.familyId, userId } },
-        select: { revokedAt: true, family: { select: { status: true } } },
+        select: { revokedAt: true, version: true, family: { select: { status: true } } },
       })
       if (!ownMembership || ownMembership.family.status !== 'active') {
         throw new FamilyFailure('not_found', 'Семья не найдена')
       }
-      if (ownMembership.revokedAt) return
+      if (ownMembership.revokedAt) {
+        if (ownMembership.version === expectedVersion + 1) return
+        throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
+      }
       await this.access.requireMember(scope)
     } else {
       await this.access.requireOwner(scope)
@@ -575,23 +629,27 @@ export class FamilyService {
     }
     const member = await this.db.familyMember.findUnique({
       where: { familyId_userId: { familyId: scope.familyId, userId } },
-      select: { revokedAt: true },
+      select: { revokedAt: true, version: true },
     })
     if (!member) throw new FamilyFailure('not_found', 'Участник не найден')
-    if (member.revokedAt) return
+    if (member.revokedAt) {
+      if (member.version === expectedVersion + 1) return
+      throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
+    }
 
     await this.db.$transaction(async (tx) => {
       const revoked = await tx.familyMember.updateMany({
-        where: { familyId: scope.familyId, userId, revokedAt: null },
-        data: { revokedAt: this.now() },
+        where: { familyId: scope.familyId, userId, revokedAt: null, version: expectedVersion },
+        data: { revokedAt: this.now(), version: { increment: 1 } },
       })
       if (revoked.count === 0) {
-        const concurrentlyRevoked = await tx.familyMember.findFirst({
-          where: { familyId: scope.familyId, userId, revokedAt: { not: null } },
-          select: { userId: true },
+        const currentMember = await tx.familyMember.findUnique({
+          where: { familyId_userId: { familyId: scope.familyId, userId } },
+          select: { revokedAt: true, version: true },
         })
-        if (!concurrentlyRevoked) throw new FamilyFailure('not_found', 'Участник не найден')
-        return
+        if (!currentMember) throw new FamilyFailure('not_found', 'Участник не найден')
+        if (currentMember.revokedAt && currentMember.version === expectedVersion + 1) return
+        throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
       }
       await tx.familyInvite.updateMany({
         where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
@@ -758,17 +816,6 @@ function memberDto(
     joinedAt: member.joinedAt.toISOString(),
     version: member.version,
   }
-}
-
-function assertInviteAvailable<T extends {
-  acceptedAt: Date | null
-  expiresAt: Date
-  revokedAt: Date | null
-}>(invite: T | null, now: Date): asserts invite is T {
-  if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
-  if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
-  if (invite.expiresAt <= now) throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
-  if (invite.acceptedAt) throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
 }
 
 async function inviteResponse(
