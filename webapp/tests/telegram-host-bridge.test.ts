@@ -7,6 +7,45 @@ import {
 } from '../src/platform/telegram/host-bridge'
 
 describe('Telegram HostBridge', () => {
+  test('subscribes to Telegram BackButton without leaking stale callbacks', () => {
+    const handlers = new Set<() => void>()
+    let showCalls = 0
+    let hideCalls = 0
+    const bridge = createTelegramHostBridge({
+      Telegram: {
+        WebApp: {
+          BackButton: {
+            show: () => { showCalls += 1 },
+            hide: () => { hideCalls += 1 },
+            onClick: (handler: () => void) => { handlers.add(handler) },
+            offClick: (handler: () => void) => { handlers.delete(handler) },
+          },
+        },
+      },
+    })
+    let backCalls = 0
+
+    const unsubscribeFirst = bridge.onBack(() => { backCalls += 1 })
+    expect(showCalls).toBe(1)
+    expect(handlers.size).toBe(1)
+    handlers.forEach((handler) => handler())
+    expect(backCalls).toBe(1)
+
+    unsubscribeFirst()
+    unsubscribeFirst()
+    expect(hideCalls).toBe(1)
+    expect(handlers.size).toBe(0)
+    handlers.forEach((handler) => handler())
+    expect(backCalls).toBe(1)
+
+    const unsubscribeSecond = bridge.onBack(() => { backCalls += 1 })
+    expect(showCalls).toBe(2)
+    expect(handlers.size).toBe(1)
+    unsubscribeSecond()
+    expect(hideCalls).toBe(2)
+    expect(handlers.size).toBe(0)
+  })
+
   test('exposes verified-exchange input and only safe host metadata', () => {
     let readyCalls = 0
     let closeCalls = 0

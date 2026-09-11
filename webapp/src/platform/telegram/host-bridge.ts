@@ -16,6 +16,7 @@ export type HostBridge = {
   ready(): void
   close(): void
   back(): void
+  onBack(handler: () => void): () => void
   openBot(): void
   openTelegramVideo(deepLink: string): void
   openInvite(rawToken: string): void
@@ -36,6 +37,7 @@ type TelegramWebApp = {
   contentSafeAreaInset?: unknown
   ready?: unknown
   close?: unknown
+  BackButton?: unknown
   openTelegramLink?: unknown
 }
 
@@ -50,6 +52,12 @@ const zeroInsets: TelegramInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 export function createTelegramHostBridge(host: unknown): HostBridge {
   const webApp = readWebApp(host)
   const browserHost = isRecord(host) ? host as BrowserHost : null
+  const backButton = isRecord(webApp?.BackButton) ? webApp.BackButton : null
+  const subscribeBack = backButton?.onClick
+  const unsubscribeBack = backButton?.offClick
+  const showBack = backButton?.show
+  const hideBack = backButton?.hide
+  const backHandlers = new Set<() => void>()
   return {
     isAvailable: webApp !== null,
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
@@ -74,6 +82,22 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     },
     back: () => {
       if (typeof browserHost?.history?.back === 'function') browserHost.history.back()
+    },
+    onBack: (handler) => {
+      if (!backButton || typeof subscribeBack !== 'function' || typeof unsubscribeBack !== 'function') {
+        return () => undefined
+      }
+      let subscribed = true
+      subscribeBack.call(backButton, handler)
+      backHandlers.add(handler)
+      if (backHandlers.size === 1 && typeof showBack === 'function') showBack.call(backButton)
+      return () => {
+        if (!subscribed) return
+        subscribed = false
+        unsubscribeBack.call(backButton, handler)
+        backHandlers.delete(handler)
+        if (backHandlers.size === 0 && typeof hideBack === 'function') hideBack.call(backButton)
+      }
     },
     openBot: () => {
       if (typeof webApp?.openTelegramLink === 'function') webApp.openTelegramLink(botUrl)
@@ -113,6 +137,7 @@ export function createBrowserDevHostBridge(
     ready: () => undefined,
     close: () => undefined,
     back: () => undefined,
+    onBack: () => () => undefined,
     openBot: () => undefined,
     openTelegramVideo: () => undefined,
     openInvite: () => undefined,

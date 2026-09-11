@@ -118,6 +118,7 @@ const hostBridge: HostBridge = {
   ready: () => undefined,
   close: () => undefined,
   back: () => undefined,
+  onBack: () => () => undefined,
   openBot: () => undefined,
   openTelegramVideo: () => undefined,
   openInvite: () => undefined,

@@ -166,7 +166,7 @@ function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoInde
   transport: AuthenticatedTransport
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
-  if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} transport={transport} />
+  if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} hostBridge={hostBridge} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer path={attachment.playbackPath} waveform={attachment.waveform} />
   return <PrivateVideo path={attachment.playbackPath} />
 }
@@ -186,16 +186,25 @@ function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }
   </div>
 }
 
-function PrivateImage({ attachment, photoAlbum, photoIndex, transport }: {
+function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transport }: {
   attachment: Extract<MemoryAttachment, { source: 'private_storage' }>
+  hostBridge: HostBridge
   photoAlbum: Array<Extract<MemoryAttachment, { source: 'private_storage' }>>
   photoIndex: number
   transport: AuthenticatedTransport
 }) {
   const path = attachment.displayPath ?? attachment.previewPath
   const url = usePrivateObjectUrl(path, transport)
+  const viewerSession = useRef<AbortController | null>(null)
+  useEffect(() => () => { viewerSession.current?.abort() }, [])
   if (!url) return <div aria-label="Загрузка фотографии" className="aspect-[4/3] bg-muted" />
-  return <button aria-label="Открыть фото" className="block w-full" onClick={(event) => void showPrivatePhotoAlbum(photoAlbum, photoIndex, transport, event.currentTarget)} type="button"><img alt="Воспоминание" className="aspect-[4/3] w-full object-cover" height={attachment.height ?? undefined} src={url} width={attachment.width ?? undefined} /></button>
+  return <button aria-label="Открыть фото" className="block w-full" onClick={(event) => {
+    viewerSession.current?.abort()
+    const session = new AbortController()
+    viewerSession.current = session
+    void showPrivatePhotoAlbum(photoAlbum, photoIndex, transport, event.currentTarget, hostBridge, session.signal)
+      .finally(() => { if (viewerSession.current === session) viewerSession.current = null })
+  }} type="button"><img alt="Воспоминание" className="aspect-[4/3] w-full object-cover" height={attachment.height ?? undefined} src={url} width={attachment.width ?? undefined} /></button>
 }
 
 function AudioPlayer({ path, waveform }: { path: string | null; waveform: number[] | null }) {
@@ -269,40 +278,73 @@ async function showPrivatePhotoAlbum(
   index: number,
   transport: AuthenticatedTransport,
   trigger: HTMLButtonElement,
+  hostBridge: HostBridge,
+  signal: AbortSignal,
 ) {
-  const slides = await Promise.all(attachments.map(async (attachment) => {
-    const path = attachment.displayPath ?? attachment.originalDownloadPath
-    const response = await transport.raw(path)
-    return {
-      src: URL.createObjectURL(await response.blob()),
-      width: attachment.width ?? undefined,
-      height: attachment.height ?? undefined,
-    }
-  }))
   const scrollY = window.scrollY
-  await showPhoto(slides, index, () => {
+  const slides: Array<{ src: string; width?: number; height?: number }> = []
+  try {
+    for (const attachment of attachments) {
+      const path = attachment.displayPath ?? attachment.originalDownloadPath
+      const response = await transport.raw(path)
+      const src = URL.createObjectURL(await response.blob())
+      slides.push({
+        src,
+        width: attachment.width ?? undefined,
+        height: attachment.height ?? undefined,
+      })
+      if (signal.aborted) return
+    }
+    await showPhoto(slides, index, hostBridge, signal)
+  } finally {
     slides.forEach(({ src }) => URL.revokeObjectURL(src))
     window.scrollTo({ top: scrollY })
-    trigger.focus({ preventScroll: true })
-  })
+    if (trigger.isConnected) trigger.focus({ preventScroll: true })
+  }
 }
 
-async function showPhoto(slides: Array<{ src: string; width?: number; height?: number }>, index: number, onClosed: () => void) {
+async function showPhoto(
+  slides: Array<{ src: string; width?: number; height?: number }>,
+  index: number,
+  hostBridge: HostBridge,
+  signal: AbortSignal,
+) {
   const { default: PhotoSwipe } = await import('photoswipe')
+  if (signal.aborted) return
   const gallery = new PhotoSwipe({ dataSource: slides, index, showHideAnimationType: 'none' })
   let closingFromHistory = false
-  const closeFromHistory = () => {
-    closingFromHistory = true
-    gallery.close()
-  }
-  window.history.pushState({ privatePhotoViewer: true }, '')
-  window.addEventListener('popstate', closeFromHistory, { once: true })
-  gallery.on('destroy', () => {
-    window.removeEventListener('popstate', closeFromHistory)
-    if (!closingFromHistory && window.history.state?.privatePhotoViewer) window.history.back()
-    onClosed()
+  await new Promise<void>((resolve) => {
+    let initialized = false
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      window.removeEventListener('popstate', closeFromHistory)
+      signal.removeEventListener('abort', closeFromUnmount)
+      unsubscribeBack()
+      if (!closingFromHistory && window.history.state?.privatePhotoViewer) window.history.back()
+      resolve()
+    }
+    const closeFromHistory = () => {
+      closingFromHistory = true
+      gallery.close()
+    }
+    const closeFromUnmount = () => {
+      if (initialized) gallery.destroy()
+      else finish()
+    }
+    const unsubscribeBack = hostBridge.onBack(() => gallery.close())
+    window.history.pushState({ privatePhotoViewer: true }, '')
+    window.addEventListener('popstate', closeFromHistory, { once: true })
+    signal.addEventListener('abort', closeFromUnmount, { once: true })
+    gallery.on('destroy', finish)
+    if (signal.aborted) {
+      closeFromUnmount()
+      return
+    }
+    gallery.init()
+    initialized = true
   })
-  gallery.init()
 }
 
 function dayLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone }).format(new Date(value)) }

@@ -32,24 +32,140 @@ test('hiding the Mini App pauses registered media and visibility never autoplays
   browser.restore()
 })
 
-test('unmounting an authenticated feed pauses its active media before unregistering it', async () => {
+test('unmounting an authenticated feed pauses every mounted local player before unregistering it', async () => {
   const browser = installBrowser()
-  const media = mediaElement()
+  const card = mediaElement()
+  const detail = mediaElement()
   const root = createRoot(detachedContainer(browser.window))
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, null,
-      createElement(PlayerProbe, { id: 'voice', media }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail }),
     ))
   })
 
   await act(async () => root.unmount())
-  expect(media.pauseCalls).toBe(1)
+  expect(card.pauseCalls).toBe(1)
+  expect(detail.pauseCalls).toBe(1)
   browser.restore()
 })
 
-function PlayerProbe({ id, media }: { id: string; media: ReturnType<typeof mediaElement> }) {
+test('card and detail players for the same media pause each other as separate mounted instances', async () => {
+  const browser = installBrowser()
+  const card = mediaElement()
+  const detail = mediaElement()
+  const root = createRoot(detachedContainer(browser.window))
+  let activateCard = () => undefined
+  let activateDetail = () => undefined
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card, onActivate: (activate) => { activateCard = activate } }),
+    ))
+  })
+  activateCard()
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card, onActivate: (activate) => { activateCard = activate } }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail, onActivate: (activate) => { activateDetail = activate } }),
+    ))
+  })
+
+  activateDetail()
+  expect(card.pauseCalls).toBe(1)
+  activateCard()
+  expect(detail.pauseCalls).toBe(1)
+
+  await act(async () => root.unmount())
+  browser.restore()
+})
+
+test('unmounting detail keeps the same-media card registered for hidden pause', async () => {
+  const browser = installBrowser()
+  const card = mediaElement()
+  const detail = mediaElement()
+  const root = createRoot(detachedContainer(browser.window))
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail }),
+    ))
+  })
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+    ))
+  })
+
+  browser.setHidden(true)
+  browser.dispatch('visibilitychange')
+  expect(detail.pauseCalls).toBe(1)
+  expect(card.pauseCalls).toBe(1)
+
+  await act(async () => root.unmount())
+  browser.restore()
+})
+
+test('closing detail and becoming visible never autoplays the remaining card', async () => {
+  const browser = installBrowser()
+  const card = mediaElement()
+  const detail = mediaElement()
+  const root = createRoot(detachedContainer(browser.window))
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail }),
+    ))
+  })
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+    ))
+  })
+
+  browser.setHidden(false)
+  browser.dispatch('visibilitychange')
+  expect(card.playCalls).toBe(0)
+  expect(detail.playCalls).toBe(0)
+
+  await act(async () => root.unmount())
+  browser.restore()
+})
+
+test('different media instances retain ordinary one-local-media-at-a-time behavior', async () => {
+  const browser = installBrowser()
+  const first = mediaElement()
+  const second = mediaElement()
+  const root = createRoot(detachedContainer(browser.window))
+  let activateFirst = () => undefined
+  let activateSecond = () => undefined
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, null,
+      createElement(PlayerProbe, { id: 'first-media', media: first, onActivate: (activate) => { activateFirst = activate } }),
+      createElement(PlayerProbe, { id: 'second-media', media: second, onActivate: (activate) => { activateSecond = activate } }),
+    ))
+  })
+
+  activateFirst()
+  expect(second.pauseCalls).toBe(1)
+  activateSecond()
+  expect(first.pauseCalls).toBe(1)
+
+  await act(async () => root.unmount())
+  browser.restore()
+})
+
+function PlayerProbe({ id, media, onActivate }: {
+  id: string
+  media: ReturnType<typeof mediaElement>
+  onActivate?: (activate: () => void) => void
+}) {
   const ref = useRef(media as unknown as HTMLMediaElement)
-  usePlaybackRegistration(id, ref)
+  const activate = usePlaybackRegistration(id, ref)
+  onActivate?.(activate)
   return null
 }
 

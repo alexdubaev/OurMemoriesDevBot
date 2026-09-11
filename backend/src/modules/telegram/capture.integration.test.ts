@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { Client } from 'pg'
 import sharp from 'sharp'
 
 import { createApp } from '../../app'
@@ -233,6 +234,68 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await result).toBe('denied')
     expect(sentVideos).toHaveLength(0)
     expect(await prisma.telegramVideoDelivery.findFirstOrThrow()).toMatchObject({ deniedAt: expect.any(Date) })
+  })
+
+  test('serializes a concurrent membership revoke behind the protected Telegram send section', async () => {
+    const owner = await familyOwner('52323')
+    const viewer = await admittedUser('52324')
+    const membership = await prisma.familyMember.create({
+      data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' },
+    })
+    const pointer = await prepareVideoPointer(owner, 236, 29, viewer)
+    let releaseSend!: () => void
+    let reportSendStarted!: () => void
+    const sendStarted = new Promise<void>((resolve) => { reportSendStarted = resolve })
+    const sendRelease = new Promise<void>((resolve) => { releaseSend = resolve })
+    const protectedApi: TelegramApiPort = {
+      ...api,
+      sendVideo: async (chatId, fileId) => {
+        sentVideos.push({ chatId, fileId })
+        reportSendStarted()
+        await sendRelease
+      },
+    }
+    const delivery = new TelegramVideoDeliveryService(
+      prisma,
+      createPrismaFamilyAccess(prisma),
+      env.TELEGRAM_BOT_EXPECTED_USERNAME,
+    )
+    const observer = new Client({ connectionString: databaseUrl! })
+    await observer.connect()
+    let deliveryResult: ReturnType<typeof delivery.deliverFromStart> | undefined
+    let revokeRequest: Promise<Response> | undefined
+
+    try {
+      const pendingDelivery = delivery.deliverFromStart(viewer.subject, viewer.subject, pointer, protectedApi, crypto)
+      deliveryResult = pendingDelivery
+      await sendStarted
+
+      let revokeSettled = false
+      const pendingRevoke = Promise.resolve(app.request(`/api/v1/families/${owner.familyId}/members/${viewer.userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersion: membership.version }),
+      })).then((response) => {
+        revokeSettled = true
+        return response
+      })
+      revokeRequest = pendingRevoke
+
+      await waitForLockedQuery(observer, 'family_members')
+      expect(revokeSettled).toBe(false)
+
+      releaseSend()
+      expect(await pendingDelivery).toBe('delivered')
+      expect((await pendingRevoke).status).toBe(204)
+      expect(await prisma.familyMember.findUniqueOrThrow({
+        where: { familyId_userId: { familyId: owner.familyId, userId: viewer.userId } },
+      })).toMatchObject({ revokedAt: expect.any(Date), version: membership.version + 1 })
+      expect(sentVideos).toEqual([{ chatId: viewer.subject, fileId: 'video-file-29' }])
+    } finally {
+      releaseSend()
+      await Promise.allSettled([deliveryResult, revokeRequest].filter((value) => value !== undefined))
+      await observer.end()
+    }
   })
 
   test('parks an ambiguous Bot API result and never retries the video', async () => {
@@ -564,6 +627,40 @@ maybeDescribe('Telegram durable capture', () => {
     expect(opened.status).toBe(200)
     const body = await opened.json() as { telegramDeepLink: string }
     return body.telegramDeepLink.split('start=')[1]!
+  }
+
+  async function waitForLockedQuery(client: Client, queryFragment: string) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await client.query('SELECT pg_stat_clear_snapshot()')
+      const result = await client.query<{ waiting: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
+              AND query ILIKE $1
+         ) AS waiting`,
+        [`%${queryFragment}%`],
+      )
+      if (result.rows[0]?.waiting) return
+      await Bun.sleep(50)
+    }
+
+    await client.query('SELECT pg_stat_clear_snapshot()')
+    const activity = await client.query<{
+      state: string
+      wait_event_type: string | null
+      wait_event: string | null
+      query: string
+    }>(`
+      SELECT state, wait_event_type, wait_event, query
+        FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND pid <> pg_backend_pid()
+       ORDER BY pid
+    `)
+    throw new Error(`Timed out waiting for a blocked PostgreSQL query containing ${queryFragment}: ${JSON.stringify(activity.rows)}`)
   }
 
   async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string; userId: string }) {

@@ -139,13 +139,20 @@ test.describe.serial('T07 live feed', () => {
     await openFeed(page)
     const singleOpener = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).getByRole('button', { name: 'Открыть фото' })
     await singleOpener.scrollIntoViewIfNeeded()
+    await installObjectUrlTracker(page)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
     const singleScroll = await page.evaluate(() => window.scrollY)
     await singleOpener.click()
     await expect(page.locator('.pswp__counter')).toContainText('1 / 1')
     await expect(page.locator('.pswp__zoom-wrap > img')).toBeVisible()
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(1)
+    await expect.poll(async () => (await objectUrlSnapshot(page)).created.length).toBe(1)
     await page.locator('.pswp__button--close').click()
+    await expect(page.locator('.pswp')).toHaveCount(0)
     await expect(singleOpener).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(singleScroll)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
+    await expectObjectUrlsClean(page, 1)
 
     const opener = page.getByRole('button', { name: 'Открыть фото' }).first()
     await opener.scrollIntoViewIfNeeded()
@@ -153,20 +160,42 @@ test.describe.serial('T07 live feed', () => {
     await opener.click()
     await expect(page.locator('.pswp')).toBeVisible()
     await expect(page.locator('.pswp__counter')).toContainText('1 / 2')
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(1)
+    await expect.poll(async () => (await objectUrlSnapshot(page)).created.length).toBe(3)
     await page.locator('.pswp__button--arrow--next').click()
     await expect(page.locator('.pswp__counter')).toContainText('2 / 2')
     await page.screenshot({ path: resolve('e2e/.artifacts/t07-photoswipe.png') })
-    await page.locator('.pswp__button--close').click()
+    await triggerTelegramBack(page)
     await expect(page.locator('.pswp')).toHaveCount(0)
     await expect(opener).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(beforeScroll)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
+    await expectObjectUrlsClean(page, 3)
+
+    await triggerTelegramBack(page)
+    await expect(page.locator('.pswp')).toHaveCount(0)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
+    await expect.poll(() => page.evaluate(() => Boolean(window.history.state?.privatePhotoViewer))).toBe(false)
 
     await opener.click()
     await expect(page.locator('.pswp')).toBeVisible()
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(1)
+    await expect.poll(async () => (await objectUrlSnapshot(page)).created.length).toBe(5)
     await page.goBack()
     await expect(page.locator('.pswp')).toHaveCount(0)
     await expect(opener).toBeFocused()
     expect(await page.evaluate(() => window.scrollY)).toBe(beforeScroll)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
+    await expectObjectUrlsClean(page, 5)
+
+    await opener.click()
+    await expect(page.locator('.pswp')).toBeVisible()
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(1)
+    await expect.poll(async () => (await objectUrlSnapshot(page)).created.length).toBe(7)
+    await page.getByRole('button', { name: 'Семья', exact: true }).evaluate((button) => (button as HTMLButtonElement).click())
+    await expect(page.locator('.pswp')).toHaveCount(0)
+    await expect.poll(() => telegramBackHandlerCount(page)).toBe(0)
+    await expectObjectUrlsClean(page, 7)
   })
 
   test('streams voice and legacy video only after play, seeks with Range/206, and pauses on hide', async ({ page }) => {
@@ -375,16 +404,85 @@ function signedInitData(id: number, name: string) {
 
 async function installTelegramHost(page: Page, initData: string) {
   await page.addInitScript((value) => {
+    const backHandlers = new Set<() => void>()
+    const testWindow = window as typeof window & {
+      __openedTelegramLink?: string
+      __telegramBackHandlerCount?: () => number
+      __triggerTelegramBack?: () => void
+    }
+    testWindow.__telegramBackHandlerCount = () => backHandlers.size
+    testWindow.__triggerTelegramBack = () => { backHandlers.forEach((handler) => handler()) }
     Object.defineProperty(window, 'Telegram', { configurable: true, value: { WebApp: {
       initData: value,
       version: '8.0',
       platform: 'tdesktop',
       safeAreaInset: {},
       contentSafeAreaInset: {},
+      BackButton: {
+        show() {},
+        hide() {},
+        onClick(handler: () => void) { backHandlers.add(handler) },
+        offClick(handler: () => void) { backHandlers.delete(handler) },
+      },
       ready() {},
-      openTelegramLink(url: string) { (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink = url },
+      openTelegramLink(url: string) { testWindow.__openedTelegramLink = url },
     } } })
   }, initData)
+}
+
+async function installObjectUrlTracker(page: Page) {
+  await page.evaluate(() => {
+    const tracked = { created: [] as string[], revoked: [] as string[] }
+    const createObjectUrl = URL.createObjectURL.bind(URL)
+    const revokeObjectUrl = URL.revokeObjectURL.bind(URL)
+    const testWindow = window as typeof window & { __photoObjectUrls?: typeof tracked }
+    testWindow.__photoObjectUrls = tracked
+    URL.createObjectURL = (blob) => {
+      const url = createObjectUrl(blob)
+      tracked.created.push(url)
+      return url
+    }
+    URL.revokeObjectURL = (url) => {
+      if (tracked.created.includes(url)) tracked.revoked.push(url)
+      revokeObjectUrl(url)
+    }
+  })
+}
+
+function objectUrlSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const tracked = (window as typeof window & {
+      __photoObjectUrls?: { created: string[]; revoked: string[] }
+    }).__photoObjectUrls
+    if (!tracked) throw new Error('Object URL tracker is not installed')
+    return { created: [...tracked.created], revoked: [...tracked.revoked] }
+  })
+}
+
+async function expectObjectUrlsClean(page: Page, expectedCount: number) {
+  await expect.poll(async () => (await objectUrlSnapshot(page)).revoked.length).toBe(expectedCount)
+  const snapshot = await objectUrlSnapshot(page)
+  expect(snapshot.created).toHaveLength(expectedCount)
+  expect(snapshot.revoked).toHaveLength(expectedCount)
+  expect(new Set(snapshot.created).size).toBe(expectedCount)
+  expect(new Set(snapshot.revoked).size).toBe(expectedCount)
+  expect([...snapshot.revoked].sort()).toEqual([...snapshot.created].sort())
+}
+
+function telegramBackHandlerCount(page: Page) {
+  return page.evaluate(() => {
+    const count = (window as typeof window & { __telegramBackHandlerCount?: () => number }).__telegramBackHandlerCount
+    if (!count) throw new Error('Telegram BackButton harness is not installed')
+    return count()
+  })
+}
+
+function triggerTelegramBack(page: Page) {
+  return page.evaluate(() => {
+    const trigger = (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack
+    if (!trigger) throw new Error('Telegram BackButton harness is not installed')
+    trigger()
+  })
 }
 
 async function openFeed(page: Page) {
