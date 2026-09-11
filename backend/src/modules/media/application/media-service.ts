@@ -23,6 +23,8 @@ export class MediaService {
     private readonly processPhoto: PhotoProcessor,
     private readonly probeMedia: MediaProbe,
     private readonly now: () => Date = () => new Date(),
+    private readonly cleanupTemporaryDirectory: (directory: string) => Promise<void> = removeTemporaryDirectory,
+    private readonly warnCleanupFailure: (errorName: string) => void = warnTemporaryCleanupFailure,
   ) {}
 
   async reserve(scope: FamilyScope, input: ReserveMediaUploadRequest) {
@@ -149,6 +151,8 @@ export class MediaService {
 
     const directory = await mkdtemp(join(tmpdir(), 'our-memories-media-'))
     const originalPath = join(directory, 'original')
+    let finalizationCommitted = false
+    let operationError: unknown = undefined
     try {
       const original = await this.storage.readObject({ key: upload.objectKey })
       if (!original) throw new MediaFailure('upload_incomplete', 'Файл не найден в хранилище')
@@ -186,19 +190,29 @@ export class MediaService {
         height = probed.height
         durationMs = probed.durationMs
       }
-      const committed = await this.repository.commitFinalization({ scope, uploadId, verifiedMime,
+      const finalization = await this.repository.commitFinalization({ scope, uploadId, verifiedMime,
         sha256, width, height, durationMs, renditionStatus, variants, now: this.now() })
-      if (committed.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
-      if (committed.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
-      return { asset: committed.asset }
+      if (finalization.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
+      if (finalization.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+      finalizationCommitted = true
+      return { asset: finalization.asset }
     } catch (error) {
+      operationError = error
       if (error instanceof MediaFailure && ['invalid_file', 'unsupported_media'].includes(error.kind)) {
         await this.repository.rejectUpload(scope, uploadId, this.now())
       }
       if (error instanceof StorageError) throw storageFailure(error)
       throw error
     } finally {
-      await rm(directory, { recursive: true, force: true })
+      try {
+        await this.cleanupTemporaryDirectory(directory)
+      } catch (error) {
+        if (finalizationCommitted || operationError !== undefined) {
+          this.warnCleanupFailure(error instanceof Error ? error.name : 'UnknownError')
+        } else {
+          throw error
+        }
+      }
     }
   }
 
@@ -217,6 +231,14 @@ export class MediaService {
       throw new MediaFailure('not_found', 'Медиа недоступно для публикации')
     }
   }
+}
+
+function removeTemporaryDirectory(directory: string) {
+  return rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+}
+
+function warnTemporaryCleanupFailure(errorName: string) {
+  console.warn('Temporary media cleanup failed', { errorName })
 }
 
 async function sha256File(path: string) {
