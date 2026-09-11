@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import {
   createBrowserDevHostBridge,
@@ -7,6 +9,16 @@ import {
 } from '../src/platform/telegram/host-bridge'
 
 describe('Telegram HostBridge', () => {
+  test('loads Telegram WebApp API before the React production bootstrap', () => {
+    const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
+    const html = readFileSync(indexPath, 'utf8')
+    const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
+    const reactBootstrap = '/src/main.tsx'
+
+    expect(html).toContain(`src="${telegramSdk}"`)
+    expect(html.indexOf(telegramSdk)).toBeLessThan(html.indexOf(reactBootstrap))
+  })
+
   test('subscribes to Telegram BackButton without leaking stale callbacks', () => {
     const handlers = new Set<() => void>()
     let showCalls = 0
