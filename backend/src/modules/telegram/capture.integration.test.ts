@@ -39,12 +39,17 @@ maybeDescribe('Telegram durable capture', () => {
   const app = createApp({ env, prisma, privateStorage })
   const sent: Array<{ chatId: string; text: string; options: Parameters<TelegramApiPort['sendMessage']>[2] }> = []
   let finalReceiptFailuresRemaining = 0
+  let downloadCalls = 0
+  const sentVideos: Array<{ chatId: string; fileId: string }> = []
   const api: TelegramApiPort = {
-    download: async () => ({
+    download: async () => {
+      downloadCalls += 1
+      return {
       body: new Blob([photoFixture.slice().buffer as ArrayBuffer]).stream(),
       byteSize: photoFixture.byteLength,
       contentType: 'image/jpeg',
-    }),
+      }
+    },
     sendMessage: async (chatId, text, options) => {
       if (text.startsWith('Сохранено') && finalReceiptFailuresRemaining > 0) {
         finalReceiptFailuresRemaining -= 1
@@ -53,6 +58,7 @@ maybeDescribe('Telegram durable capture', () => {
       sent.push({ chatId, text, options })
       return { messageId: String(9_000 + sent.length) }
     },
+    sendVideo: async (chatId, fileId) => { sentVideos.push({ chatId, fileId }) },
     getUpdates: async () => [],
     setCommands: async () => undefined,
     setMenuButton: async () => undefined,
@@ -71,6 +77,8 @@ maybeDescribe('Telegram durable capture', () => {
     await clearFixtures()
     sent.length = 0
     finalReceiptFailuresRemaining = 0
+    downloadCalls = 0
+    sentVideos.length = 0
     await rm(storageRoot, { recursive: true, force: true })
     await mkdir(storageRoot, { recursive: true })
   })
@@ -115,6 +123,65 @@ maybeDescribe('Telegram durable capture', () => {
     expect(memory).toMatchObject({ kind: 'photo', body: 'На прогулке' })
     expect(memory.media[0]?.asset).toMatchObject({ sourceKind: 'telegram', originalStatus: 'stored', purpose: 'memory' })
     expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту.')
+  })
+
+  test('publishes a Telegram video without downloading it or creating private storage media', async () => {
+    const owner = await familyOwner('52101')
+    await accept(video(211, 22, owner.subject, 'Первый ролик'))
+    const task = await prisma.taskOutbox.findFirstOrThrow()
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    const memory = await prisma.memory.findFirstOrThrow({ include: { media: true } })
+    const reference = await prisma.telegramVideoReference.findFirstOrThrow({ where: { memoryId: memory.id } })
+    expect(downloadCalls).toBe(0)
+    expect(memory).toMatchObject({ kind: 'video', body: 'Первый ролик' })
+    expect(memory.media).toHaveLength(0)
+    expect(reference.fileIdCiphertext.byteLength).toBeGreaterThan(0)
+  })
+
+  test('opens a Telegram-only video through a requester-bound pointer and rechecks membership in the bot chat', async () => {
+    const owner = await familyOwner('52201')
+    await accept(video(221, 23, owner.subject, 'Только в Telegram'))
+    const sourceTask = await prisma.taskOutbox.findFirstOrThrow()
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await process(sourceTask.payload)
+    const memory = await prisma.memory.findFirstOrThrow()
+
+    const opened = await app.request(`/api/v1/families/${owner.familyId}/memories/${memory.id}/telegram-video`, {
+      method: 'POST', headers: { Authorization: `Bearer ${owner.token}` },
+    })
+    expect(opened.status).toBe(200)
+    const { telegramDeepLink } = await opened.json() as { telegramDeepLink: string }
+    expect(telegramDeepLink).toMatch(/^https:\/\/t\.me\/OurMemoriesDevBot\?start=watch_[A-Za-z0-9_-]{32}$/)
+    expect(telegramDeepLink).not.toContain('video-file-23')
+
+    const pointer = telegramDeepLink.split('start=')[1]!
+    await accept(command(222, 24, owner.subject, `/start ${pointer}`))
+    const deliveryTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })
+    await process(deliveryTask.payload)
+    await process(deliveryTask.payload)
+    expect(sentVideos).toEqual([{ chatId: owner.subject, fileId: 'video-file-23' }])
+  })
+
+  test('does not deliver a Telegram video when membership was revoked after the Mini App check', async () => {
+    const owner = await familyOwner('52301')
+    const viewer = await admittedUser('52302')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    await accept(video(231, 24, owner.subject, 'Проверка отзыва'))
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await process((await prisma.taskOutbox.findFirstOrThrow()).payload)
+    const memory = await prisma.memory.findFirstOrThrow()
+    const opened = await app.request(`/api/v1/families/${owner.familyId}/memories/${memory.id}/telegram-video`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    const { telegramDeepLink } = await opened.json() as { telegramDeepLink: string }
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: owner.familyId, userId: viewer.userId } }, data: { revokedAt: new Date() },
+    })
+    await accept(command(232, 25, viewer.subject, `/start ${telegramDeepLink.split('start=')[1]!}`))
+    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
+    expect(sentVideos).toHaveLength(0)
   })
 
   test('retries a transient original write without poisoning the accepted Telegram media id', async () => {
@@ -216,12 +283,13 @@ maybeDescribe('Telegram durable capture', () => {
     const album = await prisma.telegramAlbum.findFirstOrThrow()
     const sources = await prisma.telegramSource.findMany({ orderBy: { messageId: 'asc' } })
     for (const source of sources) {
+      if (source.kind === 'video') continue
       await prisma.mediaAsset.create({ data: {
         id: source.plannedMediaId!, familyId: source.familyId, uploaderId: source.userId,
-        sourceKind: 'telegram', purpose: 'memory', mediaKind: source.kind === 'video' ? 'video' : 'photo',
-        originalKey: `media-originals/test/${source.plannedMediaId}`, declaredMime: source.kind === 'video' ? 'video/mp4' : 'image/jpeg',
-        verifiedMime: source.kind === 'video' ? 'video/mp4' : 'image/jpeg', sha256: '0'.repeat(64), byteSize: 1n,
-        originalStatus: 'stored', renditionStatus: source.kind === 'photo' ? 'ready' : 'pending',
+        sourceKind: 'telegram', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `media-originals/test/${source.plannedMediaId}`, declaredMime: 'image/jpeg',
+        verifiedMime: 'image/jpeg', sha256: '0'.repeat(64), byteSize: 1n,
+        originalStatus: 'stored', renditionStatus: 'ready',
       } })
     }
     await prisma.telegramAlbum.update({ where: { id: album.id }, data: { readyAt: new Date(0) } })
@@ -308,6 +376,8 @@ maybeDescribe('Telegram durable capture', () => {
   })
 
   async function clearFixtures() {
+    await prisma.telegramVideoDelivery.deleteMany()
+    await prisma.telegramVideoReference.deleteMany()
     await prisma.telegramSource.deleteMany()
     await prisma.telegramAlbum.deleteMany()
     await prisma.telegramInbox.deleteMany()
@@ -381,6 +451,14 @@ function photo(updateId: number, messageId: number, subject: string, caption: st
     message_id: messageId, date: 1_788_000_000, ...(mediaGroupId ? { media_group_id: mediaGroupId } : {}),
     chat: { id: Number(subject), type: 'private' }, from: { id: Number(subject), is_bot: false, first_name: 'Тест' },
     caption, photo: [{ file_id: `file-${messageId}`, file_unique_id: `unique-${messageId}`, width: 32, height: 32, file_size: photoFixture.byteLength }],
+  } })
+}
+
+function video(updateId: number, messageId: number, subject: string, caption: string) {
+  return normalizeTelegramUpdate({ update_id: updateId, message: {
+    message_id: messageId, date: 1_788_000_000, chat: { id: Number(subject), type: 'private' },
+    from: { id: Number(subject), is_bot: false, first_name: 'Тест' }, caption,
+    video: { file_id: `video-file-${messageId}`, file_unique_id: `video-unique-${messageId}`, width: 640, height: 360, duration: 24, file_size: 2_000_000, mime_type: 'video/mp4' },
   } })
 }
 

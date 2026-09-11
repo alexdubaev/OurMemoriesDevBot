@@ -344,6 +344,9 @@ function memoryInclude() {
       orderBy: { position: 'asc' as const },
       include: { asset: { include: { variants: true } } },
     },
+    telegramVideoReference: {
+      select: { id: true, width: true, height: true, durationMs: true },
+    },
   } as const
 }
 
@@ -370,6 +373,7 @@ function dto(
       renditionStatus: 'pending' | 'ready' | 'failed'
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
+    telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null } | null
   },
   principalUserId: string,
   role: MemberRole,
@@ -385,11 +389,13 @@ function dto(
     createdAt: memory.createdAt.toISOString(),
     version: memory.version,
     status: memory.status,
-    attachments: memory.media.map(({ asset }) => {
+    attachments: [
+      ...memory.media.map(({ asset }) => {
       const path = (variant: string) => `/api/v1/families/${memory.familyId}/media/${asset.id}/content?variant=${variant}`
       const variants = new Set(asset.variants.map(({ variant }) => variant))
       return {
         id: asset.id,
+        source: 'private_storage' as const,
         kind: asset.mediaKind,
         width: asset.width,
         height: asset.height,
@@ -401,7 +407,18 @@ function dto(
         originalDownloadPath: path('original'),
         waveform: null,
       }
-    }),
+      }),
+      ...(memory.telegramVideoReference ? [{
+        id: memory.telegramVideoReference.id,
+        source: 'telegram' as const,
+        kind: 'video' as const,
+        width: memory.telegramVideoReference.width,
+        height: memory.telegramVideoReference.height,
+        durationMs: memory.telegramVideoReference.durationMs,
+        thumbnailPath: null,
+        openInTelegramPath: `/api/v1/families/${memory.familyId}/memories/${memory.id}/telegram-video`,
+      }] : []),
+    ],
     likes: {
       count: memory.likes.length,
       likedByMe: memory.likes.some((like) => like.userId === principalUserId),

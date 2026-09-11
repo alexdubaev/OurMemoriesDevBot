@@ -56,6 +56,13 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
         throw telegramProviderFailure(error)
       }
     },
+    async sendVideo(chatId, fileId) {
+      try {
+        await api.sendVideo(chatId, fileId)
+      } catch (error) {
+        throw telegramProviderFailure(error)
+      }
+    },
     async getUpdates(offset, signal) {
       try {
         return await api.getUpdates({ offset, timeout: 25, allowed_updates: ['message'] }, signal)

@@ -17,6 +17,7 @@ export type HostBridge = {
   close(): void
   back(): void
   openBot(): void
+  openTelegramVideo(deepLink: string): void
   openInvite(rawToken: string): void
   getInsets(): TelegramInsets
 }
@@ -77,6 +78,13 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     openBot: () => {
       if (typeof webApp?.openTelegramLink === 'function') webApp.openTelegramLink(botUrl)
     },
+    openTelegramVideo: (deepLink) => {
+      // The API creates this link after the Family + Memory guard. Do not compose bot links or
+      // accept any other host: the payload is an opaque server-side navigation pointer.
+      if (typeof webApp?.openTelegramLink === 'function' && isTelegramBotLink(deepLink)) {
+        webApp.openTelegramLink(deepLink)
+      }
+    },
     openInvite: (rawToken) => {
       if (typeof webApp?.openTelegramLink === 'function') {
         webApp.openTelegramLink(`${botUrl}?startapp=invite_${encodeURIComponent(rawToken)}`)
@@ -106,6 +114,7 @@ export function createBrowserDevHostBridge(
     close: () => undefined,
     back: () => undefined,
     openBot: () => undefined,
+    openTelegramVideo: () => undefined,
     openInvite: () => undefined,
     getInsets: () => safeInsets,
   }
@@ -156,4 +165,14 @@ function inviteTokenFromInitData(initData: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isTelegramBotLink(value: string) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 't.me' &&
+      url.pathname === '/OurMemoriesDevBot' && /^watch_[A-Za-z0-9_-]{32}$/.test(url.searchParams.get('start') ?? '')
+  } catch {
+    return false
+  }
 }

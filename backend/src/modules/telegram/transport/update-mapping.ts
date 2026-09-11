@@ -47,6 +47,9 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
         fileUniqueId: photo.file_unique_id as string,
         fileSize: isSafeInteger(photo.file_size) ? photo.file_size : null,
         contentType: 'image/jpeg',
+        width: isSafeInteger(photo.width) ? photo.width : null,
+        height: isSafeInteger(photo.height) ? photo.height : null,
+        durationMs: null,
         caption: typeof message.caption === 'string' ? message.caption : '',
         mediaGroupId: typeof message.media_group_id === 'string' ? message.media_group_id : null,
       }
@@ -68,6 +71,9 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
       fileUniqueId: media.file_unique_id,
       fileSize: isSafeInteger(media.file_size) ? media.file_size : null,
       contentType: typeof media.mime_type === 'string' ? media.mime_type : fallbackContentType,
+      width: isSafeInteger(media.width) ? media.width : null,
+      height: isSafeInteger(media.height) ? media.height : null,
+      durationMs: isSafeInteger(media.duration) ? media.duration * 1_000 : null,
       caption: typeof message.caption === 'string' ? message.caption : '',
       mediaGroupId: typeof message.media_group_id === 'string' ? message.media_group_id : null,
     }

@@ -100,8 +100,10 @@ model TelegramSource {
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
   inbox           TelegramInbox        @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "telegram_sources_inbox_id_fkey")
+  videoReference  TelegramVideoReference?
 
   @@unique([botId, chatId, messageId], map: "telegram_sources_bot_chat_message_key")
+  @@unique([id, familyId], map: "telegram_sources_id_family_id_key")
   @@index([botId, chatId, mediaGroupId, messageId], map: "telegram_sources_album_order_idx")
   @@index([status, updatedAt], map: "telegram_sources_status_idx")
   @@map("telegram_sources")
@@ -291,6 +293,7 @@ model Memory {
   likes            MemoryLike[]
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
+  telegramVideoReference TelegramVideoReference?
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
@@ -359,6 +362,50 @@ model MediaAsset {
   @@unique([id, familyId], map: "media_assets_id_family_id_key")
   @@index([familyId, originalStatus, deletedAt], map: "media_assets_family_status_idx")
   @@map("media_assets")
+}
+
+/// Adapter-owned reference for a video which remains on Telegram. Keeping its file id encrypted
+/// here lets the bot re-send the same file to an authorized member without treating it as private
+/// object storage or exposing it through a Memory DTO.
+model TelegramVideoReference {
+  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceId           String         @unique(map: "telegram_video_references_source_id_key") @map("source_id") @db.Uuid
+  memoryId           String         @unique(map: "telegram_video_references_memory_id_key") @map("memory_id") @db.Uuid
+  familyId           String         @map("family_id") @db.Uuid
+  fileIdCiphertext   Bytes          @map("file_id_ciphertext")
+  encryptionIv       Bytes          @map("encryption_iv")
+  encryptionAuthTag  Bytes          @map("encryption_auth_tag")
+  fileUniqueId       String         @map("file_unique_id")
+  width              Int?
+  height             Int?
+  durationMs         Int?           @map("duration_ms")
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  source             TelegramSource @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "telegram_video_references_source_id_family_id_fkey")
+  memory             Memory         @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "telegram_video_references_memory_id_family_id_fkey")
+  deliveries         TelegramVideoDelivery[]
+
+  @@index([familyId], map: "telegram_video_references_family_id_idx")
+  @@unique([sourceId, familyId], map: "telegram_video_references_source_id_family_id_key")
+  @@unique([memoryId, familyId], map: "telegram_video_references_memory_id_family_id_key")
+
+  @@map("telegram_video_references")
+}
+
+/// Short-lived, requester-bound navigation pointers for Telegram-only videos. The pointer does
+/// not grant access: the bot verifies the same user, an active membership and a live memory.
+model TelegramVideoDelivery {
+  id          String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  tokenHash   String                 @unique(map: "telegram_video_deliveries_token_hash_key") @map("token_hash")
+  referenceId String                 @map("reference_id") @db.Uuid
+  familyId    String                 @map("family_id") @db.Uuid
+  userId      String                 @map("user_id") @db.Uuid
+  expiresAt   DateTime               @map("expires_at") @db.Timestamptz(6)
+  deliveredAt DateTime?              @map("delivered_at") @db.Timestamptz(6)
+  createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  reference   TelegramVideoReference @relation(fields: [referenceId], references: [id], onDelete: Cascade, map: "telegram_video_deliveries_reference_id_fkey")
+
+  @@index([familyId, userId, expiresAt], map: "telegram_video_deliveries_member_expiry_idx")
+  @@map("telegram_video_deliveries")
 }
 
 model MediaVariant {

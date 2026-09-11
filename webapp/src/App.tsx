@@ -5,7 +5,7 @@ import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewRes
 import { WebpIcon } from '@/components/WebpIcon'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
-import { EmptyState, FeedShell, FeedSkeleton, InlineError, type FeedFilter } from '@/features/feed'
+import { FeedPage, FeedSkeleton, InlineError, type FeedFilter } from '@/features/feed'
 import { AuthContext } from '@/features/auth'
 import {
   acceptInvite,
@@ -63,10 +63,10 @@ export default function App({ hostBridge }: AppProps) {
       </main>
     )
   }
-  return <FamilyController currentUserId={auth.user.id} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} transport={auth.transport} />
+  return <FamilyController currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} transport={auth.transport} />
 }
 
-function FamilyController({ currentUserId, insets, insetsStyle, inviteToken, transport }: { currentUserId: string; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; transport: AuthenticatedTransport }) {
+function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; transport: AuthenticatedTransport }) {
   const [familyResponse, setFamilyResponse] = useState<FamilyResponse | null>(null)
   const [members, setMembers] = useState<FamilyMemberDto[]>([])
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
@@ -151,7 +151,7 @@ function FamilyController({ currentUserId, insets, insetsStyle, inviteToken, tra
   if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { setEditingChild(false); setScreen('feed'); await refresh() }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
-    return <div style={insetsStyle}><FeedShell activeFilter={filter} childName={familyResponse.child.name} childSubtitle={familyResponse.child.birthDate ?? 'Профиль ребёнка'} insets={insets} onFamily={() => setScreen('family')} onFeed={() => undefined} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'}><EmptyState mode={current?.role === 'viewer' ? 'viewer' : 'full'} /></FeedShell></div>
+    return <div style={insetsStyle}><FeedPage childName={familyResponse.child.name} childSubtitle={familyResponse.child.birthDate ?? 'Профиль ребёнка'} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
   }
   return <div style={insetsStyle}><FamilyScreen currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }

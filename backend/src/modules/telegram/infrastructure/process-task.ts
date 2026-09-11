@@ -4,18 +4,23 @@ import type { MemoryKind } from '../../../generated/prisma/enums'
 import { Client } from 'pg'
 import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
+import type { PrismaTransactionClient } from '../../../idempotency'
 import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
 import { createSourceMemoryPublisher } from '../../memories'
 import { CaptionService } from '../application/captions'
+import { TelegramVideoDeliveryService } from '../application/video-delivery'
 import { PrismaCaptionRepository } from './prisma-caption-repository'
 import { PrismaTelegramRepository } from './prisma-telegram-repository'
 import type { TelegramApiPort } from '../application/ports'
-import type { TelegramInboundEvent } from '../domain/inbound-event'
+import type { TelegramInboundEvent, TelegramMediaEvent } from '../domain/inbound-event'
 
-type PayloadCrypto = { decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T }
+type PayloadCrypto = {
+  decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
+  encrypt(value: unknown): { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }
+}
 
 export function createTelegramTaskProcessor(options: {
   runtime: BackendRuntime
@@ -26,10 +31,11 @@ export function createTelegramTaskProcessor(options: {
   const access = createPrismaFamilyAccess(prisma)
   const media = createMediaService({ db: prisma, env, familyAccess: access, storage: options.runtime.privateStorage.storage })
   const memories = createSourceMemoryPublisher(prisma, access)
+  const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
 
   return async (payload: unknown, signal?: AbortSignal) => {
     const ids = taskPayload(payload)
-    if (ids.inboxId) return processInbox(prisma, options.api, options.crypto, env, ids.inboxId)
+    if (ids.inboxId) return processInbox(prisma, options.api, options.crypto, env, videoDelivery, ids.inboxId)
     if (ids.sourceId) return processSource(prisma, options.api, options.crypto, env, media, memories, ids.sourceId, signal)
     if (ids.albumId) return processAlbum(prisma, options.api, options.crypto, env, media, memories, ids.albumId, signal)
     throw new TerminalTaskError('Telegram task payload has no supported id')
@@ -41,6 +47,7 @@ async function processInbox(
   api: TelegramApiPort,
   crypto: PayloadCrypto,
   env: AppEnv,
+  videoDelivery: TelegramVideoDeliveryService,
   inboxId: string,
 ) {
   const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
@@ -49,6 +56,13 @@ async function processInbox(
   if (event.kind === 'denied_content') {
     await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
   } else if (event.kind === 'command') {
+    if (event.command === 'start') {
+      const delivery = await videoDelivery.deliverFromStart(event.senderId, event.chatId, event.argument, api, crypto)
+      if (delivery === 'delivered' || delivery === 'denied') {
+        await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
+        return
+      }
+    }
     const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
     await api.sendMessage(event.chatId, commandText(event.command, cancelled), commandButtons(env, event.command, event.argument))
   } else if (event.kind === 'caption_reply') {
@@ -110,11 +124,14 @@ async function processSource(
   if (source.status === 'published') return sendSourceReceipt(db, api, env, source)
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const event = decryptEvent(crypto, source.inbox)
-  const mediaId = event.kind === 'media'
+  const mediaId = event.kind === 'media' && event.mediaKind !== 'video'
     ? await ingestSourceMedia(db, api, env, media, source, event, signal)
     : null
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
-  const published = await publishSingle(db, memories, source.id, event, mediaId)
+  const published = await publishSingle(db, memories, source.id, event, mediaId,
+    event.kind === 'media' && event.mediaKind === 'video'
+      ? telegramVideoReferenceWrite(crypto, source.id, event)
+      : undefined)
   if (!published) return rejectSource(db, api, env, source, 'access_revoked')
   await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
 }
@@ -184,8 +201,9 @@ async function processAlbumLocked(
         await rejectSource(db, api, env, source, 'access_revoked')
         continue
       }
-      const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
-      const published = await publishSingle(db, memories, source.id, event, mediaId)
+      const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+      const published = await publishSingle(db, memories, source.id, event, mediaId,
+        event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event) : undefined)
       if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
     }
     return
@@ -194,7 +212,7 @@ async function processAlbumLocked(
   if (pending.length === 0) return 'skipped' as const
 
   const events = sources.map((source) => ({ source, event: decryptEvent(crypto, source.inbox) }))
-  const mediaEvents = events.filter((entry): entry is typeof entry & { event: Extract<TelegramInboundEvent, { kind: 'media' }> } => entry.event.kind === 'media')
+  const mediaEvents = events.filter((entry): entry is typeof entry & { event: TelegramMediaEvent } => entry.event.kind === 'media')
   if (mediaEvents.length !== events.length) throw new TerminalTaskError('Telegram album contains a non-media source')
   const photoOnly = mediaEvents.every(({ event }) => event.mediaKind === 'photo')
 
@@ -216,8 +234,9 @@ async function processAlbumLocked(
       await rejectSource(db, api, env, source, 'access_revoked')
       continue
     }
-    const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
-    const published = await publishSingle(db, memories, source.id, event, mediaId)
+    const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+    const published = await publishSingle(db, memories, source.id, event, mediaId,
+      event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event) : undefined)
     if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
   }
 }
@@ -228,7 +247,7 @@ async function ingestSourceMedia(
   env: AppEnv,
   media: ReturnType<typeof createMediaService>,
   source: Awaited<ReturnType<typeof loadSource>> & {},
-  event: Extract<TelegramInboundEvent, { kind: 'media' }>,
+  event: TelegramMediaEvent,
   signal?: AbortSignal,
 ) {
   if (!source) throw new TerminalTaskError('Telegram source disappeared')
@@ -279,6 +298,7 @@ async function publishSingle(
   sourceId: string,
   event: TelegramInboundEvent,
   mediaId: string | null,
+  afterWrite?: (tx: PrismaTransactionClient, memoryId: string) => Promise<void>,
 ) {
   const source = await db.telegramSource.findUnique({ where: { id: sourceId } })
   if (!source) return null
@@ -291,6 +311,7 @@ async function publishSingle(
     occurredAt: new Date('occurredAt' in event ? event.occurredAt : source.createdAt),
     mediaIds: mediaId ? [mediaId] : [],
   }, async (tx, committedMemoryId) => {
+    await afterWrite?.(tx, committedMemoryId)
     await tx.telegramSource.update({
       where: { id: source.id },
       data: { status: 'published', memoryId: committedMemoryId, mediaId },
@@ -300,12 +321,41 @@ async function publishSingle(
   return { memoryId }
 }
 
+function telegramVideoReferenceWrite(
+  crypto: PayloadCrypto,
+  sourceId: string,
+  event: TelegramMediaEvent,
+) {
+  if (event.mediaKind !== 'video') throw new TerminalTaskError('Telegram video reference requires a video event')
+  return async (tx: PrismaTransactionClient, memoryId: string) => {
+    const encrypted = crypto.encrypt(event.fileId)
+    const source = await tx.telegramSource.findUnique({ where: { id: sourceId }, select: { familyId: true } })
+    if (!source) throw new TerminalTaskError('Telegram source disappeared before video reference write')
+    await tx.telegramVideoReference.upsert({
+      where: { sourceId },
+      create: {
+        sourceId,
+        memoryId,
+        familyId: source.familyId,
+        fileIdCiphertext: Buffer.from(encrypted.ciphertext),
+        encryptionIv: Buffer.from(encrypted.iv),
+        encryptionAuthTag: Buffer.from(encrypted.authTag),
+        fileUniqueId: event.fileUniqueId,
+        width: event.width,
+        height: event.height,
+        durationMs: event.durationMs,
+      },
+      update: {},
+    })
+  }
+}
+
 async function publishPhotoAlbum(
   db: DbClient,
   memories: ReturnType<typeof createSourceMemoryPublisher>,
   albumId: string,
   sourceIds: string[],
-  events: Array<Extract<TelegramInboundEvent, { kind: 'media' }>>,
+  events: TelegramMediaEvent[],
   mediaIds: string[],
 ) {
   const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
@@ -390,7 +440,7 @@ function memoryKind(event: TelegramInboundEvent): MemoryKind {
   throw new TerminalTaskError('Telegram source event cannot become a memory')
 }
 
-function mediaContentType(event: Extract<TelegramInboundEvent, { kind: 'media' }>) {
+function mediaContentType(event: TelegramMediaEvent) {
   if (event.mediaKind === 'photo') return 'image/jpeg' as const
   if (event.mediaKind === 'video') return 'video/mp4' as const
   return 'audio/ogg' as const

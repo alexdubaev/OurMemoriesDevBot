@@ -46,12 +46,15 @@ describe('Telegram HostBridge', () => {
     bridge.back()
     bridge.openBot()
     bridge.openInvite('opaque-token_1')
+    bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')
+    bridge.openTelegramVideo('https://evil.example/?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')
     expect(readyCalls).toBe(1)
     expect(closeCalls).toBe(1)
     expect(backCalls).toBe(1)
     expect(openedLinks).toEqual([
       'https://t.me/OurMemoriesDevBot',
       'https://t.me/OurMemoriesDevBot?startapp=invite_opaque-token_1',
+      'https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF',
     ])
   })
 
@@ -82,5 +85,6 @@ describe('Telegram HostBridge', () => {
     expect(() => bridge.back()).not.toThrow()
     expect(() => bridge.openBot()).not.toThrow()
     expect(() => bridge.openInvite('opaque-token')).not.toThrow()
+    expect(() => bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).not.toThrow()
   })
 })

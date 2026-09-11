@@ -5,6 +5,7 @@ import {
   listMemoriesQuerySchema,
   mediaDtoSchema,
   memoryDtoSchema,
+  telegramVideoAttachmentSchema,
 } from './memories'
 
 const childId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
@@ -70,6 +71,7 @@ describe('memory contracts', () => {
     const contentPath = `/api/v1/families/${familyId}/media/${mediaId}/content`
     const valid = {
       id: mediaId,
+      source: 'private_storage' as const,
       kind: 'photo' as const,
       width: 1200,
       height: 800,
@@ -97,5 +99,22 @@ describe('memory contracts', () => {
     ]) {
       expect(() => mediaDtoSchema.parse({ ...valid, originalDownloadPath: unsafePath })).toThrow()
     }
+  })
+
+  test('represents a Telegram-only video without a storage path or a Telegram file identifier', () => {
+    const attachment = {
+      id: '018f01d8-0c2a-7c25-bf83-ae68985c7e95',
+      source: 'telegram',
+      kind: 'video',
+      width: 640,
+      height: 360,
+      durationMs: 24_000,
+      thumbnailPath: null,
+      openInTelegramPath: `/api/v1/families/018f01d8-0c2a-7c25-bf83-ae68985c7e91/memories/018f01d8-0c2a-7c25-bf83-ae68985c7e90/telegram-video`,
+    } as const
+
+    expect(telegramVideoAttachmentSchema.parse(attachment)).toEqual(attachment)
+    expect(() => telegramVideoAttachmentSchema.parse({ ...attachment, fileId: 'private-file-id' })).toThrow()
+    expect(() => telegramVideoAttachmentSchema.parse({ ...attachment, playbackPath: '/api/v1/families/018f01d8-0c2a-7c25-bf83-ae68985c7e91/media/018f01d8-0c2a-7c25-bf83-ae68985c7e95/content?variant=playback' })).toThrow()
   })
 })

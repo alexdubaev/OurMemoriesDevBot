@@ -79,6 +79,7 @@ export function createApp({
     idempotencySecret: env.JWT_SECRET,
     requireAuth: auth.requireAuth,
     mediaCatalog: createMediaMemoryCatalog((scope, ids) => media.service.assertReadyForMemory(scope, ids)),
+    telegramBotUsername: env.TELEGRAM_BOT_EXPECTED_USERNAME,
   })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Слишком много запросов. Попробуйте позже',

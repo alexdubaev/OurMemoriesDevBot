@@ -31,6 +31,8 @@ export type TelegramApiPort = {
     forceReply?: boolean
     replyToMessageId?: string
   }): Promise<void | { messageId: string }>
+  /** Re-send an existing Telegram file id; never accepts arbitrary client media bytes. */
+  sendVideo(chatId: string, fileId: string): Promise<void>
   getUpdates(offset: number, signal: AbortSignal): Promise<unknown[]>
   setCommands(commands: Array<{ command: string; description: string }>): Promise<void>
   setMenuButton(url: string): Promise<void>
