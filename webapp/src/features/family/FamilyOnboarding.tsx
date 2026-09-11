@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
-import { InlineError } from '@/features/feed'
 import { resolveAvatarContentType } from '@/features/avatar'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { completeChildProfile, uploadChildAvatar } from './api'
@@ -10,6 +9,7 @@ import {
   familyCalendarDate,
   formatChildAge,
   isBirthDateOnOrBeforeFamilyToday,
+  onboardingSaveErrorMessage,
 } from './model'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
@@ -262,7 +262,10 @@ export function FamilyOnboarding({
         </fieldset>
         <FieldError message={formErrors.sex} />
 
-        {requestError ? <div className="mt-5"><InlineError onRetry={() => void submit()} /></div> : null}
+        {requestError ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
+          <Typography variant="memoryBody">{onboardingSaveErrorMessage}</Typography>
+          <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button>
+        </section> : null}
         <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>

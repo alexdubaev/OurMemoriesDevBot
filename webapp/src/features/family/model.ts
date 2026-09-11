@@ -1,5 +1,7 @@
 type CalendarDate = { year: number; month: number; day: number }
 
+export const onboardingSaveErrorMessage = 'Не удалось сохранить данные. Попробуйте ещё раз.'
+
 export function familyCalendarDate(timezone: string, now = new Date()) {
   const today = dateParts(now, timezone)
   return [today.year, pad(today.month), pad(today.day)].join('-')
