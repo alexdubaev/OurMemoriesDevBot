@@ -1,7 +1,10 @@
 import { apiErrorSchema } from '@web-app-demo/contracts'
 import type { z } from 'zod'
 
-const defaultApiBaseUrl = (import.meta.env?.VITE_API_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+// Browser requests stay on the Mini App's origin unless deployment explicitly supplies a
+// separate API origin. This lets Funnel forward `/api` without making a phone's `localhost`
+// part of the request path.
+const defaultApiBaseUrl = (import.meta.env?.VITE_API_URL ?? '').replace(/\/$/, '')
 
 export type HttpRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
