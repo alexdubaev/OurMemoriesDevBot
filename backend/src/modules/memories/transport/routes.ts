@@ -20,7 +20,7 @@ import type { ZodType } from 'zod'
 import { validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
 import type { MemoryService } from '../application/memory-service'
-import type { TelegramVideoDeliveryService } from '../../telegram/application/video-delivery'
+import type { TelegramVideoDeliveryService } from '../../telegram'
 import { executeMemory } from './errors'
 
 const bearerSecurity = [{ BearerAuth: [] }]

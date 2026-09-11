@@ -1,10 +1,10 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import type { TelegramVideoOpenResponse } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
 import type { FamilyAccess, FamilyScope } from '../../families'
-import { MemoryFailure } from '../../memories/domain/errors'
+import { MemoryFailure } from '../../memories'
 import type { TelegramApiPort } from './ports'
 
 const pointerLifetimeMs = 5 * 60 * 1_000
@@ -12,6 +12,11 @@ const pointerPrefix = 'watch_'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
+}
+
+type DeliveryOptions = {
+  now?: () => Date
+  beforeFinalAuthorization?: () => Promise<void>
 }
 
 /**
@@ -23,7 +28,7 @@ export class TelegramVideoDeliveryService {
     private readonly db: DbClient,
     private readonly familyAccess: FamilyAccess,
     private readonly botUsername: string,
-    private readonly now: () => Date = () => new Date(),
+    private readonly options: DeliveryOptions = {},
   ) {}
 
   async request(scope: FamilyScope, memoryId: string): Promise<TelegramVideoOpenResponse> {
@@ -58,43 +63,102 @@ export class TelegramVideoDeliveryService {
     pointer: string,
     api: TelegramApiPort,
     crypto: PayloadCrypto,
-  ): Promise<'delivered' | 'denied' | 'not_video_pointer'> {
-    if (!isPointer(pointer)) return 'not_video_pointer'
+  ): Promise<'delivered' | 'ambiguous' | 'denied' | 'not_video_pointer'> {
+    if (!isPointer(pointer)) return pointer.startsWith(pointerPrefix) ? 'denied' : 'not_video_pointer'
     const delivery = await this.db.telegramVideoDelivery.findUnique({
       where: { tokenHash: hash(pointer) },
-      include: {
-        reference: {
-          include: { memory: { select: { familyId: true, status: true, deletedAt: true } } },
-        },
-      },
+      select: { id: true, userId: true },
     })
     const now = this.now()
-    if (!delivery || delivery.expiresAt <= now || delivery.deliveredAt) return 'denied'
-    if (delivery.reference.familyId !== delivery.familyId ||
-        delivery.reference.memory.familyId !== delivery.familyId ||
-        delivery.reference.memory.status !== 'published' || delivery.reference.memory.deletedAt) return 'denied'
+    if (!delivery) return 'denied'
 
     const identity = await this.db.externalIdentity.findUnique({
       where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
       select: { userId: true },
     })
     if (identity?.userId !== delivery.userId) return 'denied'
-    const membership = await this.db.familyMember.findUnique({
-      where: { familyId_userId: { familyId: delivery.familyId, userId: delivery.userId } },
-      select: { revokedAt: true, family: { select: { status: true } } },
-    })
-    if (!membership || membership.revokedAt || membership.family.status !== 'active') return 'denied'
 
-    const fileId = crypto.decrypt<string>({
-      ciphertext: delivery.reference.fileIdCiphertext,
-      iv: delivery.reference.encryptionIv,
-      authTag: delivery.reference.encryptionAuthTag,
+    const claimToken = randomUUID()
+    const claimed = await this.db.telegramVideoDelivery.updateMany({
+      where: {
+        id: delivery.id,
+        expiresAt: { gt: now },
+        claimToken: null,
+        deliveredAt: null,
+        ambiguousAt: null,
+        deniedAt: null,
+      },
+      data: { claimToken, claimedAt: now },
     })
-    await api.sendVideo(chatId, fileId)
+    if (claimed.count === 0) return 'denied'
+
+    await this.options.beforeFinalAuthorization?.()
+
+    let sendStarted = false
+    try {
+      const delivered = await this.db.$transaction(async (tx) => {
+        const authorized = await tx.$queryRaw<Array<{ referenceId: string }>>`
+          SELECT d."reference_id" AS "referenceId"
+          FROM "telegram_video_deliveries" d
+          JOIN "telegram_video_references" r ON r."id" = d."reference_id"
+          JOIN "memories" m ON m."id" = r."memory_id" AND m."family_id" = d."family_id"
+          JOIN "family_members" fm ON fm."family_id" = d."family_id" AND fm."user_id" = d."user_id"
+          JOIN "families" f ON f."id" = d."family_id"
+          JOIN "external_identities" ei ON ei."user_id" = d."user_id"
+          WHERE d."id" = ${delivery.id}::uuid
+            AND d."claim_token" = ${claimToken}::uuid
+            AND d."expires_at" > ${this.now()}
+            AND d."delivered_at" IS NULL
+            AND d."ambiguous_at" IS NULL
+            AND d."denied_at" IS NULL
+            AND r."family_id" = d."family_id"
+            AND m."status" = 'published'::"memory_status"
+            AND m."deleted_at" IS NULL
+            AND fm."revoked_at" IS NULL
+            AND f."status" = 'active'::"family_status"
+            AND ei."provider" = 'telegram'::"external_identity_provider"
+            AND ei."subject" = ${senderSubject}
+          FOR SHARE OF d, r, m, fm, f, ei
+        `
+        if (!authorized[0]) return false
+
+        const reference = await tx.telegramVideoReference.findUniqueOrThrow({
+          where: { id: authorized[0].referenceId },
+          select: { fileIdCiphertext: true, encryptionIv: true, encryptionAuthTag: true },
+        })
+        const fileId = crypto.decrypt<string>({
+          ciphertext: reference.fileIdCiphertext,
+          iv: reference.encryptionIv,
+          authTag: reference.encryptionAuthTag,
+        })
+        sendStarted = true
+        await api.sendVideo(chatId, fileId)
+        await tx.telegramVideoDelivery.update({ where: { id: delivery.id }, data: { deliveredAt: this.now() } })
+        return true
+      }, { timeout: 15_000 })
+
+      if (delivered) return 'delivered'
+      await this.markDenied(delivery.id, claimToken)
+      return 'denied'
+    } catch (error) {
+      if (!sendStarted) throw error
+      await this.db.telegramVideoDelivery.updateMany({
+        where: { id: delivery.id, claimToken, deliveredAt: null, deniedAt: null },
+        data: { ambiguousAt: this.now() },
+      })
+      return 'ambiguous'
+    }
+  }
+
+  private now() {
+    return this.options.now?.() ?? new Date()
+  }
+
+  private async markDenied(id: string, claimToken: string) {
     await this.db.telegramVideoDelivery.updateMany({
-      where: { id: delivery.id, deliveredAt: null }, data: { deliveredAt: now },
+      where: { id, claimToken, deliveredAt: null, ambiguousAt: null },
+      data: { deniedAt: this.now() },
     })
-    return 'delivered'
   }
 }
 

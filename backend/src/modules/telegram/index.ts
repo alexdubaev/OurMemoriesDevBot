@@ -59,3 +59,4 @@ export function telegramConfigSummary(env: Pick<AppEnv, 'TELEGRAM_BOT_EXPECTED_U
 
 export { startTelegramPolling } from './transport/polling'
 export { createTelegramApi } from './infrastructure/telegram-api'
+export { TelegramVideoDeliveryService } from './application/video-delivery'

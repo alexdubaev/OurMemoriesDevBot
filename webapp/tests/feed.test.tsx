@@ -1,0 +1,125 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { MemoryDto } from '@web-app-demo/contracts'
+import { expect, test } from 'bun:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+import { FeedPage } from '../src/features/feed/FeedPage'
+import { feedQueryKeys } from '../src/features/feed/queries'
+import type { AuthenticatedTransport } from '../src/platform/api'
+import type { HostBridge } from '../src/platform/telegram'
+
+const familyId = '11111111-1111-4111-8111-111111111111'
+const memoryId = '22222222-2222-4222-8222-222222222222'
+const childId = '33333333-3333-4333-8333-333333333333'
+const authorId = '44444444-4444-4444-8444-444444444444'
+const mediaId = '55555555-5555-4555-8555-555555555555'
+const waveform = Array.from({ length: 48 }, (_, index) => (index + 1) / 48)
+
+const memory: MemoryDto = {
+  id: memoryId,
+  familyId,
+  childId,
+  author: { id: authorId, name: 'Мама' },
+  kind: 'voice',
+  body: 'Первое слово',
+  occurredAt: '2026-09-11T10:00:00.000Z',
+  createdAt: '2026-09-11T10:00:00.000Z',
+  version: 1,
+  status: 'published',
+  attachments: [{
+    id: mediaId,
+    source: 'private_storage',
+    kind: 'voice',
+    width: null,
+    height: null,
+    durationMs: 12_000,
+    renditionStatus: 'ready',
+    previewPath: null,
+    displayPath: null,
+    playbackPath: `/api/v1/families/${familyId}/media/${mediaId}/content?variant=playback`,
+    originalDownloadPath: `/api/v1/families/${familyId}/media/${mediaId}/content?variant=original`,
+    waveform,
+  }],
+  likes: { count: 0, likedByMe: false },
+  capabilities: { edit: true, delete: true, like: true },
+}
+
+test('a next-page error keeps already displayed memories on screen', () => {
+  const queryClient = feedClient()
+  const query = queryClient.getQueryCache().find({ queryKey: feedQueryKeys.list(familyId, 'all') })
+  if (!query) throw new Error('feed query was not created')
+  query.setState({
+    ...query.state,
+    error: new Error('page two unavailable'),
+    errorUpdateCount: 1,
+    errorUpdatedAt: Date.now(),
+    fetchFailureCount: 1,
+    fetchFailureReason: new Error('page two unavailable'),
+    status: 'error',
+  })
+
+  expect(renderFeed(queryClient)).toContain('Первое слово')
+})
+
+test('a prepared voice renders every measured waveform peak', () => {
+  const markup = renderFeed(feedClient())
+  expect(markup.match(/data-waveform-peak=/g)).toHaveLength(48)
+})
+
+test('overlapping keyset pages render one card per memory id', () => {
+  const queryClient = feedClient()
+  queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
+    pages: [
+      { items: [memory], nextCursor: 'page-2' },
+      { items: [memory], nextCursor: null },
+    ],
+    pageParams: [null, 'page-2'],
+  })
+  const markup = renderFeed(queryClient)
+  expect(markup.match(/aria-label="Открыть воспоминание Первое слово"/g)).toHaveLength(1)
+})
+
+function feedClient() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
+    pages: [{ items: [memory], nextCursor: 'page-2' }],
+    pageParams: [null],
+  })
+  return queryClient
+}
+
+function renderFeed(queryClient: QueryClient) {
+  return renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(FeedPage, {
+    childName: 'Лиза',
+    childSubtitle: '2 года',
+    familyId,
+    familyTimezone: 'Europe/Moscow',
+    filter: 'all',
+    hostBridge,
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    onFamily: () => undefined,
+    onFilterChange: () => undefined,
+    role: 'full',
+    transport,
+  })))
+}
+
+const transport: AuthenticatedTransport = {
+  request: async () => { throw new Error('unexpected feed request during static render') },
+  raw: async () => { throw new Error('unexpected media request during static render') },
+}
+
+const hostBridge: HostBridge = {
+  isAvailable: true,
+  initData: () => null,
+  inviteToken: () => null,
+  metadata: () => null,
+  ready: () => undefined,
+  close: () => undefined,
+  back: () => undefined,
+  openBot: () => undefined,
+  openTelegramVideo: () => undefined,
+  openInvite: () => undefined,
+  getInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}

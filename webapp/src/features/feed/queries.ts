@@ -2,11 +2,12 @@ import type { MemoryDto, MemoryPage } from '@web-app-demo/contracts'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import type { AuthenticatedTransport } from '@/platform/api'
+import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './components'
 import { loadFeed, setMemoryLike } from './api'
 
 export const feedQueryKeys = {
-  all: ['feed'] as const,
+  all: [...sessionQueryKeys.all, 'feed'] as const,
   list: (familyId: string, filter: FeedFilter) => [...feedQueryKeys.all, familyId, filter] as const,
 }
 

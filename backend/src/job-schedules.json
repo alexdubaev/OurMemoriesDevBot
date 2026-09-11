@@ -38,5 +38,13 @@
     "yandexExpression": "25 4 ? * * *",
     "lockTimeoutMs": 900000,
     "yandexExecutionTimeoutSeconds": 840
+  },
+  {
+    "key": "telegram-deliveries",
+    "job": "telegram:deliveries:cleanup",
+    "expression": "42 * * * *",
+    "yandexExpression": "42 * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
   }
 ]

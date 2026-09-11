@@ -400,11 +400,16 @@ model TelegramVideoDelivery {
   familyId    String                 @map("family_id") @db.Uuid
   userId      String                 @map("user_id") @db.Uuid
   expiresAt   DateTime               @map("expires_at") @db.Timestamptz(6)
+  claimToken  String?                @unique(map: "telegram_video_deliveries_claim_token_key") @map("claim_token") @db.Uuid
+  claimedAt   DateTime?              @map("claimed_at") @db.Timestamptz(6)
   deliveredAt DateTime?              @map("delivered_at") @db.Timestamptz(6)
+  ambiguousAt DateTime?              @map("ambiguous_at") @db.Timestamptz(6)
+  deniedAt    DateTime?              @map("denied_at") @db.Timestamptz(6)
   createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   reference   TelegramVideoReference @relation(fields: [referenceId], references: [id], onDelete: Cascade, map: "telegram_video_deliveries_reference_id_fkey")
 
   @@index([familyId, userId, expiresAt], map: "telegram_video_deliveries_member_expiry_idx")
+  @@index([expiresAt], map: "telegram_video_deliveries_expires_at_idx")
   @@map("telegram_video_deliveries")
 }
 

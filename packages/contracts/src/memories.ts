@@ -107,7 +107,7 @@ export const mediaDtoSchema = z.object({
   displayPath: backendMediaPathSchema.nullable(),
   playbackPath: backendMediaPathSchema.nullable(),
   originalDownloadPath: backendMediaPathSchema,
-  waveform: z.array(z.number()).nullable(),
+  waveform: z.array(z.number().min(0).max(1)).length(48).nullable(),
 }).strict()
 
 const telegramVideoOpenPathSchema = z.string().superRefine((value, context) => {

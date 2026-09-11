@@ -150,6 +150,13 @@ export const backgroundJobs = {
     }
     console.log('Job media:orphans:reconcile completed.')
   },
+  'telegram:deliveries:cleanup': async ({ prisma }, now) => {
+    const retentionCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
+    const deliveries = await prisma.telegramVideoDelivery.deleteMany({
+      where: { expiresAt: { lt: retentionCutoff } },
+    })
+    console.log(`Job telegram:deliveries:cleanup removed ${deliveries.count} expired pointers.`)
+  },
   'outbox:drain': async (runtime, now) => {
     const { drainOptionsFromEnv, drainTaskOutbox } = await import('./outbox')
     const metrics = await drainTaskOutbox(runtime, {

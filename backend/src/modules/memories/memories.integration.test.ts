@@ -462,6 +462,61 @@ maybeDescribe('Memories API', () => {
     }))).rejects.toThrow()
   })
 
+  test('returns the measured 48-peak voice waveform through the Memory contract', async () => {
+    const owner = await admittedUser('Владелец', '38101')
+    const family = await createFamily(owner.token, 'Семья')
+    const waveform = Array.from({ length: 48 }, (_, index) => (index + 1) / 48)
+    const asset = await prisma.mediaAsset.create({
+      data: {
+        familyId: family.body.family.id,
+        uploaderId: owner.userId,
+        sourceKind: 'upload',
+        purpose: 'memory',
+        mediaKind: 'voice',
+        originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'audio/ogg',
+        verifiedMime: 'audio/ogg',
+        sha256: randomUUID().replaceAll('-', '').repeat(2),
+        byteSize: 1_024n,
+        durationMs: 12_000,
+        waveform,
+        originalStatus: 'stored',
+        renditionStatus: 'ready',
+        variants: {
+          create: {
+            variant: 'playback',
+            objectKey: `media-playback/${randomUUID()}.m4a`,
+            sha256: randomUUID().replaceAll('-', '').repeat(2),
+            byteSize: 512n,
+            mime: 'audio/mp4',
+            durationMs: 12_000,
+          },
+        },
+      },
+    })
+
+    const memory = await prisma.memory.create({
+      data: {
+        familyId: family.body.family.id,
+        childId: family.body.child.id,
+        authorId: owner.userId,
+        kind: 'voice',
+        body: 'Первое слово',
+        occurredAt: new Date('2026-09-11T10:00:00.000Z'),
+        media: { create: { mediaId: asset.id, position: 0 } },
+      },
+    })
+    const listed = await request(
+      `/api/v1/families/${family.body.family.id}/memories/${memory.id}`,
+      owner.token,
+      'GET',
+      undefined,
+    )
+
+    expect(listed.response.status).toBe(200)
+    expect(listed.body.attachments[0].waveform).toEqual(waveform)
+  })
+
   async function clearFixtures() {
     await prisma.idempotencyRecord.deleteMany()
     await prisma.memoryLike.deleteMany()

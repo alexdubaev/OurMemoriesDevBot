@@ -78,6 +78,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [inviteHandled, setInviteHandled] = useState(false)
   const [noFamily, setNoFamily] = useState(false)
+  const [accessLost, setAccessLost] = useState(false)
 
   const refresh = useCallback(async () => {
     setError(null)
@@ -147,11 +148,12 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     await createFamilyBootstrap(transport, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
     await refresh()
   }} />
+  if (accessLost) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><Typography variant="memoryScreen">Доступ закрыт</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Доступ к семейной ленте закрыт.</Typography></main>
   if (!familyResponse) return <Loading style={insetsStyle} />
   if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { setEditingChild(false); setScreen('feed'); await refresh() }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
-    return <div style={insetsStyle}><FeedPage childName={familyResponse.child.name} childSubtitle={familyResponse.child.birthDate ?? 'Профиль ребёнка'} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
+    return <div style={insetsStyle}><FeedPage childName={familyResponse.child.name} childSubtitle={familyResponse.child.birthDate ?? 'Профиль ребёнка'} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
   }
   return <div style={insetsStyle}><FamilyScreen currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }

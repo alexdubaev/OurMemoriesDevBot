@@ -4,7 +4,7 @@ import type { DbClient } from '../../db'
 import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempotency'
 import type { AuthHttpEnv } from '../auth'
 import type { FamilyAccess } from '../families'
-import { TelegramVideoDeliveryService } from '../telegram/application/video-delivery'
+import { TelegramVideoDeliveryService } from '../telegram'
 import { MemoryService } from './application/memory-service'
 import type { MediaMemoryCatalog } from './application/ports'
 import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
@@ -38,3 +38,4 @@ export function createMemoriesModule({
 
 export type { MediaMemoryCatalog, MemoryRepository } from './application/ports'
 export { MemoryService } from './application/memory-service'
+export { MemoryFailure } from './domain/errors'

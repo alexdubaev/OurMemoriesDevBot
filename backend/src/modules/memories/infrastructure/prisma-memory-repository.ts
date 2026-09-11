@@ -370,6 +370,7 @@ function dto(
       width: number | null
       height: number | null
       durationMs: number | null
+      waveform: unknown
       renditionStatus: 'pending' | 'ready' | 'failed'
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
@@ -405,7 +406,7 @@ function dto(
         displayPath: variants.has('display') ? path('display') : null,
         playbackPath: variants.has('playback') ? path('playback') : null,
         originalDownloadPath: path('original'),
-        waveform: null,
+        waveform: measuredWaveform(asset.waveform),
       }
       }),
       ...(memory.telegramVideoReference ? [{
@@ -425,6 +426,13 @@ function dto(
     },
     capabilities: { edit: role === 'full', delete: role === 'full', like: true },
   }
+}
+
+function measuredWaveform(value: unknown) {
+  return Array.isArray(value) && value.length === 48 && value.every((peak) =>
+    typeof peak === 'number' && Number.isFinite(peak) && peak >= 0 && peak <= 1)
+    ? value as number[]
+    : null
 }
 
 function memorySnapshot(snapshot: unknown): MemoryDto {

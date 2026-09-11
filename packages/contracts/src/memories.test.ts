@@ -101,6 +101,30 @@ describe('memory contracts', () => {
     }
   })
 
+  test('accepts only a normalized 48-peak measured waveform', () => {
+    const mediaId = '018f01d8-0c2a-7c25-bf83-ae68985c7e94'
+    const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'
+    const contentPath = `/api/v1/families/${familyId}/media/${mediaId}/content`
+    const voice = {
+      id: mediaId,
+      source: 'private_storage' as const,
+      kind: 'voice' as const,
+      width: null,
+      height: null,
+      durationMs: 12_000,
+      waveform: Array.from({ length: 48 }, (_, index) => (index + 1) / 48),
+      renditionStatus: 'ready' as const,
+      previewPath: null,
+      displayPath: null,
+      playbackPath: `${contentPath}?variant=playback`,
+      originalDownloadPath: `${contentPath}?variant=original`,
+    }
+
+    expect(mediaDtoSchema.parse(voice)).toEqual(voice)
+    expect(() => mediaDtoSchema.parse({ ...voice, waveform: voice.waveform.slice(1) })).toThrow()
+    expect(() => mediaDtoSchema.parse({ ...voice, waveform: [...voice.waveform.slice(0, 47), 1.1] })).toThrow()
+  })
+
   test('represents a Telegram-only video without a storage path or a Telegram file identifier', () => {
     const attachment = {
       id: '018f01d8-0c2a-7c25-bf83-ae68985c7e95',

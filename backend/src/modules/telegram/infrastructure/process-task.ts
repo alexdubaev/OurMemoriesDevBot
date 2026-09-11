@@ -58,7 +58,12 @@ async function processInbox(
   } else if (event.kind === 'command') {
     if (event.command === 'start') {
       const delivery = await videoDelivery.deliverFromStart(event.senderId, event.chatId, event.argument, api, crypto)
-      if (delivery === 'delivered' || delivery === 'denied') {
+      if (delivery === 'denied') {
+        await api.sendMessage(event.chatId, 'Видео недоступно или у вас нет доступа.')
+      } else if (delivery === 'ambiguous') {
+        await api.sendMessage(event.chatId, 'Не удалось подтвердить доставку видео. Откройте его заново в Mini App.')
+      }
+      if (delivery !== 'not_video_pointer') {
         await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
         return
       }
