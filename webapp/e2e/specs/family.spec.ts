@@ -71,6 +71,9 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeDisabled()
+  await expect(page.locator('img[alt="Предпросмотр кадрирования"]')).toHaveJSProperty('complete', true)
+  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).click()

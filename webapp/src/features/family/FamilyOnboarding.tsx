@@ -41,6 +41,7 @@ export function FamilyOnboarding({
   const [zoom, setZoom] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [aspect, setAspect] = useState(1)
+  const [cropImageLoaded, setCropImageLoaded] = useState(false)
   const [confirmedCrop, setConfirmedCrop] = useState<Crop>(
     initialChild?.avatarCrop ?? { x: 0, y: 0, width: 1, height: 1 },
   )
@@ -98,6 +99,7 @@ export function FamilyOnboarding({
     }
     setCropFile(next)
     setCropPreviewUrl(URL.createObjectURL(next))
+    setCropImageLoaded(false)
     setZoom(1)
     setPosition({ x: 0, y: 0 })
     setAspect(1)
@@ -198,7 +200,10 @@ export function FamilyOnboarding({
               <img
                 alt="Предпросмотр кадрирования"
                 className="size-full object-cover"
-                onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)}
+                onLoad={(event) => {
+                  setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)
+                  setCropImageLoaded(true)
+                }}
                 src={cropPreviewUrl}
                 style={cropStyle(crop)}
               />
@@ -214,7 +219,7 @@ export function FamilyOnboarding({
               <Button onClick={() => moveCrop(0, 0.05)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вниз</Typography></Button>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать фото</Typography></Button>
+              <Button disabled={!cropImageLoaded} onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать фото</Typography></Button>
               <Button onClick={cancelCrop} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button>
             </div>
           </section>
