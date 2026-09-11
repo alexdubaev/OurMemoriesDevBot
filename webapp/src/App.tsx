@@ -23,6 +23,7 @@ import {
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
+import { createFamilyErrorMessage } from '@/features/family/bootstrap'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -180,7 +181,8 @@ const terminalInviteIssueCodes = new Set(['OTHER_FAMILY', 'ALREADY_IN_FAMILY', '
 
 function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Наши воспоминания</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); try { await onCreate() } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button></main>
+  const [createError, setCreateError] = useState<string | null>(null)
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Наши воспоминания</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); setCreateError(null); try { await onCreate() } catch (error) { setCreateError(createFamilyErrorMessage(error)) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button>{createError ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">{createError}</Typography> : null}</main>
 }
 
 function Loading({ style }: { style?: CSSProperties }) {

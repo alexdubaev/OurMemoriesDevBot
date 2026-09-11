@@ -59,7 +59,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await page.goto('/')
   expect((await telegramExchange).status()).toBe(200)
   await expect(page.getByRole('button', { name: 'Создать семью' })).toBeVisible()
-  await page.getByRole('button', { name: 'Создать семью' }).dblclick()
+  await page.getByRole('button', { name: 'Создать семью' }).click()
   await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
 
   // A completed profile is intentionally stricter than the old optional-child bootstrap.
