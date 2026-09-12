@@ -54,6 +54,10 @@ export function formatChildAge(birthDate: string, timezone: string, now = new Da
   return rest === 0 ? `${years} ${plural(years, 'год', 'года', 'лет')}` : `${years} ${plural(years, 'год', 'года', 'лет')} ${rest} ${plural(rest, 'месяц', 'месяца', 'месяцев')}`
 }
 
+export function feedChildSubtitle(birthDate: string | null | undefined, timezone: string, now = new Date()) {
+  return birthDate ? formatChildAge(birthDate, timezone, now) ?? 'Профиль ребёнка' : 'Профиль ребёнка'
+}
+
 function parseDateOnly(value: string): CalendarDate | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return null

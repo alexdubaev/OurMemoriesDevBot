@@ -5,6 +5,7 @@ export { useChildAvatar } from './useChildAvatar'
 export {
   familyCalendarDate,
   familyMemberName,
+  feedChildSubtitle,
   formatChildAge,
   inviteIssueCode,
   inviteIssueMessage,
