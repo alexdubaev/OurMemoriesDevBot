@@ -5,6 +5,7 @@ import 'photoswipe/style.css'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { toggleMediaPlayback } from '@/platform/media/playback'
@@ -180,38 +181,38 @@ function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoInde
   return <PrivateVideo path={attachment.playbackPath} />
 }
 
-function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
+export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const posterUrl = usePrivateObjectUrl(attachment.thumbnailPath, transport)
+  const openHandoff = () => void (async () => {
+    setBusy(true); setFailed(false)
+    try {
+      const { telegramDeepLink } = await openTelegramVideo(transport, familyId, memoryId)
+      if (!hostBridge.openTelegramVideo(telegramDeepLink)) throw new Error('Telegram host bridge is unavailable')
+    }
+    catch { setFailed(true) } finally { setBusy(false) }
+  })()
   return <div className="bg-muted">
-    <TelegramVideoPoster durationMs={attachment.durationMs} height={attachment.height} posterUrl={posterUrl} width={attachment.width} />
-    <div className="flex flex-col items-center p-5 text-center">
-    <Button className="mt-4" disabled={busy} onClick={() => void (async () => {
-      setBusy(true); setFailed(false)
-      try {
-        const { telegramDeepLink } = await openTelegramVideo(transport, familyId, memoryId)
-        if (!hostBridge.openTelegramVideo(telegramDeepLink)) throw new Error('Telegram host bridge is unavailable')
-      }
-      catch { setFailed(true) } finally { setBusy(false) }
-    })()} type="button">Смотреть в Telegram</Button>
-    {failed ? <Typography className="mt-2" role="alert" variant="memoryMeta">Не удалось открыть видео в Telegram. Попробуйте ещё раз.</Typography> : null}
-    </div>
+    <TelegramVideoPoster disabled={busy} durationMs={attachment.durationMs} height={attachment.height} onOpen={openHandoff} posterUrl={posterUrl} width={attachment.width} />
+    {failed ? <Typography className="px-5 py-3 text-center" role="alert" variant="memoryMeta">Не удалось открыть видео в Telegram. Попробуйте ещё раз.</Typography> : null}
   </div>
 }
 
-export function TelegramVideoPoster({ durationMs, posterUrl, width, height }: {
+export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOpen = () => undefined, disabled = false }: {
   durationMs: number | null; posterUrl: string | null; width: number | null; height: number | null
+  onOpen?: () => void; disabled?: boolean
 }) {
   const aspectRatio = videoPosterAspectRatio(width, height)
-  if (!posterUrl) return <div className="flex flex-col items-center justify-center p-5 text-center" style={{ aspectRatio }}>
-    <Typography variant="memoryBody">Видео хранится в Telegram</Typography>
-    <Typography className="mt-1" tone="muted" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
-  </div>
-  return <div className="relative overflow-hidden" style={{ aspectRatio }}>
-    <img alt="Кадр видео" className="size-full object-cover" src={posterUrl} />
-    <Typography className="absolute bottom-3 right-3 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
-  </div>
+  return <button aria-label="Смотреть видео в Telegram" className="relative block w-full overflow-hidden bg-muted text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-60" disabled={disabled} onClick={onOpen} style={{ aspectRatio }} type="button">
+    {posterUrl
+      ? <img alt="Кадр видео" className="size-full object-cover" src={posterUrl} />
+      : <span className="absolute inset-0 flex items-center justify-center"><Typography as="span" tone="muted" variant="memoryBody">Видео</Typography></span>}
+    <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" data-slot="telegram-video-play-control">
+      <span className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
+    </span>
+    <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+  </button>
 }
 
 function videoPosterAspectRatio(width: number | null, height: number | null) {

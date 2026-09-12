@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeedPage, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { feedQueryKeys } from '../src/features/feed/queries'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
@@ -87,6 +87,32 @@ test('a Telegram video poster renders a protected image and its duration', () =>
   expect(markup).toContain('src="blob:private-telegram-video-poster"')
   expect(markup).toContain('0:24')
   expect(markup).toContain('aspect-ratio:1920 / 1080')
+  expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
+  expect(markup).toContain('data-slot="telegram-video-play-control"')
+  expect(markup).not.toMatch(/<(?:video|audio)\b/)
+})
+
+test('a Telegram video has no text CTA and keeps one handoff action for the full poster and center play control', () => {
+  const onOpen = () => undefined
+  const poster = TelegramVideoPoster({
+    durationMs: 24_000,
+    posterUrl: 'blob:private-telegram-video-poster',
+    width: 1_920,
+    height: 1_080,
+    onOpen,
+  })
+  const markup = renderToStaticMarkup(createElement(TelegramVideo, {
+    attachment: telegramAttachment,
+    familyId,
+    hostBridge,
+    memoryId,
+    transport,
+  }))
+
+  expect(poster.type).toBe('button')
+  expect(poster.props.onClick).toBe(onOpen)
+  expect(markup).not.toContain('Смотреть в Telegram')
+  expect(markup).not.toMatch(/<(?:video|audio)\b/)
 })
 
 test('a Telegram portrait poster preserves the source orientation', () => {
@@ -115,9 +141,12 @@ test('a Telegram poster falls back to 16:9 when dimensions are missing or invali
 
 test('a Telegram video without a poster preserves the safe fallback', () => {
   const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, { durationMs: null, posterUrl: null, width: null, height: null }))
-  expect(markup).toContain('Видео хранится в Telegram')
+  expect(markup).toContain('Видео')
   expect(markup).not.toContain('blob:')
   expect(markup).toContain('aspect-ratio:16 / 9')
+  expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
+  expect(markup).toContain('data-slot="telegram-video-play-control"')
+  expect(markup).toContain('Длительность уточняется')
 })
 
 test('overlapping keyset pages render one card per memory id', () => {
@@ -161,6 +190,16 @@ function renderFeed(queryClient: QueryClient) {
 const transport: AuthenticatedTransport = {
   request: async () => { throw new Error('unexpected feed request during static render') },
   raw: async () => { throw new Error('unexpected media request during static render') },
+}
+
+const telegramAttachment: Extract<MemoryDto['attachments'][number], { source: 'telegram' }> = {
+  id: mediaId,
+  source: 'telegram',
+  kind: 'video',
+  width: 1_920,
+  height: 1_080,
+  durationMs: 24_000,
+  thumbnailPath: `/api/v1/families/${familyId}/media/${mediaId}/content?variant=thumbnail`,
 }
 
 const hostBridge: HostBridge = {

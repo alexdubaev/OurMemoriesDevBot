@@ -17,6 +17,7 @@ const requiredNames = [
   'more',
   'note',
   'photo',
+  'play',
   'plus',
   'retry',
   'voice',
@@ -29,7 +30,7 @@ test('the runtime icon directory contains complete optimized WebP RGBA pairs', a
   const files = (await readdir(publicIcons)).toSorted()
   const expected = requiredNames
     .flatMap((name) =>
-      ['active', 'default'].flatMap((state) =>
+      (name === 'play' ? ['active', 'default', 'white'] : ['active', 'default']).flatMap((state) =>
         [2, 3].map((density) => `${name}-${state}@${density}x.webp`),
       ),
     )
@@ -67,5 +68,10 @@ test('runtime icon URLs resolve through the canonical asset manifest', () => {
     height: 72,
     src: '/assets/icons/voice-default@3x.webp',
     width: 72,
+  })
+  expect(resolveWebpIconSource('play', 'white', 2)).toEqual({
+    height: 48,
+    src: '/assets/icons/play-white@2x.webp',
+    width: 48,
   })
 })
