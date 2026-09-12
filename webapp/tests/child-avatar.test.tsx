@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ChildAvatar } from '../src/features/family/ChildAvatar'
 import { shouldShowChildAvatarImage } from '../src/features/family/child-avatar-state'
+import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { childSchema } from '../../packages/contracts/src/families'
 
 const child = {
@@ -51,4 +52,22 @@ test('uses the initial-letter fallback after an avatar image fails', () => {
 test('the child DTO rejects a raw storage key while retaining only the opaque media id', () => {
   expect(childSchema.safeParse({ ...child, storageKey: 'families/private/avatar.webp' }).success).toBe(false)
   expect(childSchema.parse(child).avatarMediaId).toBe(child.avatarMediaId)
+})
+
+test('keeps the 60px avatar and readable long child name apart in the feed header', () => {
+  const markup = renderToStaticMarkup(createElement(FeedShell, {
+    activeFilter: 'all',
+    childAvatarCrop: child.avatarCrop,
+    childAvatarUrl: 'blob:protected-child-avatar',
+    childName: 'Лилия Александровна с очень длинным именем',
+    childSubtitle: '12 июня 2025',
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    onFilterChange: () => undefined,
+    role: 'full',
+  }, null))
+
+  expect(markup).toContain('items-center gap-3.5')
+  expect(markup).toContain('size-[60px]')
+  expect(markup).toContain('flex-1 self-center')
+  expect(markup).toContain('line-clamp-2 break-words')
 })

@@ -77,9 +77,9 @@ export function FeedShell({
               <WebpIcon decorative name="more" size={24} />
             </button>
           </div>
-          <div className="mt-3 flex min-w-0 items-center gap-2.5" data-slot="child-profile">
+          <div className="mt-3 flex min-w-0 items-center gap-3.5" data-slot="child-profile">
             <ChildAvatar avatarCrop={childAvatarCrop} avatarUrl={childAvatarUrl} name={childName} size="feed-header" />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 self-center">
               <Typography
                 className="line-clamp-2 break-words"
                 data-slot="child-name"
