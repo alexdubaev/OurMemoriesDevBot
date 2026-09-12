@@ -28,6 +28,7 @@ import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
+import { shouldRenderInitialFeedError } from '@/features/app/startup-routing'
 
 type Props = {
   childName: string
@@ -37,6 +38,7 @@ type Props = {
   filter: FeedFilter
   hostBridge: HostBridge
   insets: TelegramInsets
+  isAppBootstrapped?: boolean
   onFamily: () => void
   onFilterChange: (filter: FeedFilter) => void
   onAccessLost: () => void
@@ -46,7 +48,7 @@ type Props = {
 
 export function FeedPage({
   childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
-  onAccessLost, onFilterChange, role, transport,
+  isAppBootstrapped = true, onAccessLost, onFilterChange, role, transport,
 }: Props) {
   const queryClient = useQueryClient()
   const feed = useFeedQuery(transport, familyId, filter)
@@ -120,11 +122,11 @@ export function FeedPage({
     <FeedShell activeFilter={filter} childName={childName} childSubtitle={childSubtitle} insets={insets}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
       {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
-      {feed.isPending ? <FeedSkeleton /> : null}
-      {feed.isError && items.length === 0 ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {!feed.isPending && !feed.isError && items.length === 0 ? <EmptyState mode={role} /> : null}
+      {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
+      {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
+      {isAppBootstrapped && !feed.isPending && !feed.isError && items.length === 0 ? <EmptyState mode={role} /> : null}
       {deleteError ? <Typography role="alert" variant="memoryMeta">Не удалось удалить воспоминание. Попробуйте ещё раз.</Typography> : null}
-      {!feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} hostBridge={hostBridge}
+      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} hostBridge={hostBridge}
         items={items} onLike={(memory) => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
         onDelete={(memory) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: memory.id, version: memory.version }) }}
         onOpen={setDetail} transport={transport} /> : null}
