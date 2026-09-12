@@ -15,6 +15,7 @@ import { feedQueryKeys, useFeedQuery, useMemoryLike } from './queries'
 import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
+import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 
 type Props = {
   childName: string
@@ -223,16 +224,21 @@ function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(() => durationMs ? durationMs / 1_000 : 0)
   const updateDuration = (element: HTMLAudioElement) => { if (Number.isFinite(element.duration) && element.duration >= 0) setDuration(element.duration) }
-  return <div className="p-4"><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} preload="none" ref={audio} src={url ?? undefined} />
+  const syncCurrent = (element: HTMLAudioElement) => setCurrent(element.currentTime)
+  return <div className="p-4"><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={(e) => { activate(); syncCurrent(e.currentTarget) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
     <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => void (async () => { const element = audio.current; if (!element) return; setPlaying(await toggleMediaPlayback(element)) })()} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div>
-    <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position }} waveform={waveform} />
+    <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position; setCurrent(position) }} waveform={waveform} />
   </div>
 }
 
 function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; duration: number; onSeek: (position: number) => void; waveform: number[] | null }) {
   if (!waveform || waveform.length !== 48) return <div className="mt-3"><input aria-label="Позиция голосового сообщения" className="w-full" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.target.value))} step="0.1" type="range" value={current} /></div>
+  const progress = voiceWaveformProgress(current, duration)
   return <div className="relative mt-3 flex h-10 items-center gap-px" data-slot="voice-waveform">
-    {waveform.map((peak, index) => <span aria-hidden="true" className="min-h-1 flex-1 rounded-full bg-primary/70" data-waveform-peak="" key={index} style={{ height: `${Math.max(10, Math.min(100, peak * 100))}%` }} />)}
+    {waveform.map((peak, index) => {
+      const played = isVoiceWaveformPeakPlayed(index, waveform.length, progress)
+      return <span aria-hidden="true" className="min-h-1 flex-1 rounded-full" data-waveform-peak="" data-waveform-played={played} key={index} style={{ backgroundColor: played ? 'var(--memory-accent-strong)' : 'var(--memory-line)', height: `${Math.max(10, Math.min(100, peak * 100))}%` }} />
+    })}
     <div className="absolute inset-0 flex items-center opacity-0 focus-within:opacity-100"><input aria-label="Позиция голосового сообщения" className="w-full" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.target.value))} step="0.1" type="range" value={current} /></div>
   </div>
 }

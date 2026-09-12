@@ -67,6 +67,12 @@ test('a prepared voice renders every measured waveform peak', () => {
   expect(markup.match(/data-waveform-peak=/g)).toHaveLength(48)
 })
 
+test('a prepared voice starts with an unplayed waveform', () => {
+  const markup = renderFeed(feedClient())
+  expect(markup.match(/data-waveform-played="false"/g)).toHaveLength(48)
+  expect(markup).toContain('background-color:var(--memory-line)')
+})
+
 test('a prepared voice displays its DTO duration before audio metadata loads', () => {
   expect(renderFeed(feedClient())).toContain('0:00 / 0:06')
 })
