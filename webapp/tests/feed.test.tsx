@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeedPage } from '../src/features/feed/FeedPage'
+import { FeedPage, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { feedQueryKeys } from '../src/features/feed/queries'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
@@ -77,6 +77,49 @@ test('a prepared voice displays its DTO duration before audio metadata loads', (
   expect(renderFeed(feedClient())).toContain('0:00 / 0:06')
 })
 
+test('a Telegram video poster renders a protected image and its duration', () => {
+  const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+    durationMs: 24_000,
+    posterUrl: 'blob:private-telegram-video-poster',
+    width: 1_920,
+    height: 1_080,
+  }))
+  expect(markup).toContain('src="blob:private-telegram-video-poster"')
+  expect(markup).toContain('0:24')
+  expect(markup).toContain('aspect-ratio:1920 / 1080')
+})
+
+test('a Telegram portrait poster preserves the source orientation', () => {
+  const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+    durationMs: 24_000, posterUrl: 'blob:private-telegram-video-poster', width: 1_080, height: 1_920,
+  }))
+  expect(markup).toContain('aspect-ratio:1080 / 1920')
+  expect(markup).not.toContain('aspect-ratio:1920 / 1080')
+})
+
+test('a Telegram square poster preserves its source ratio', () => {
+  const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+    durationMs: 24_000, posterUrl: 'blob:private-telegram-video-poster', width: 1_080, height: 1_080,
+  }))
+  expect(markup).toContain('aspect-ratio:1080 / 1080')
+})
+
+test('a Telegram poster falls back to 16:9 when dimensions are missing or invalid', () => {
+  for (const [width, height] of [[null, null], [0, 1_080], [1_080, 0], [-1, 1_080]] as const) {
+    const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+      durationMs: 24_000, posterUrl: 'blob:private-telegram-video-poster', width, height,
+    }))
+    expect(markup).toContain('aspect-ratio:16 / 9')
+  }
+})
+
+test('a Telegram video without a poster preserves the safe fallback', () => {
+  const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, { durationMs: null, posterUrl: null, width: null, height: null }))
+  expect(markup).toContain('Видео хранится в Telegram')
+  expect(markup).not.toContain('blob:')
+  expect(markup).toContain('aspect-ratio:16 / 9')
+})
+
 test('overlapping keyset pages render one card per memory id', () => {
   const queryClient = feedClient()
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
@@ -130,7 +173,7 @@ const hostBridge: HostBridge = {
   back: () => undefined,
   onBack: () => () => undefined,
   openBot: () => undefined,
-  openTelegramVideo: () => undefined,
+  openTelegramVideo: () => false,
   openInvite: () => undefined,
   getInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }

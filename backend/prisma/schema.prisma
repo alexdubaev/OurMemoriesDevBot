@@ -357,6 +357,7 @@ model MediaAsset {
   variants           MediaVariant[]
   reservation        UploadReservation?
   memories           MemoryMedia[]
+  telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   avatarForChildren  Child[]              @relation("ChildAvatar")
 
   @@unique([id, familyId], map: "media_assets_id_family_id_key")
@@ -379,14 +380,17 @@ model TelegramVideoReference {
   width              Int?
   height             Int?
   durationMs         Int?           @map("duration_ms")
+  thumbnailMediaId   String?        @map("thumbnail_media_id") @db.Uuid
   createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   source             TelegramSource @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "telegram_video_references_source_id_family_id_fkey")
   memory             Memory         @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "telegram_video_references_memory_id_family_id_fkey")
+  thumbnailMedia     MediaAsset?    @relation("TelegramVideoThumbnail", fields: [thumbnailMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "telegram_video_references_thumbnail_media_id_family_id_fkey")
   deliveries         TelegramVideoDelivery[]
 
   @@index([familyId], map: "telegram_video_references_family_id_idx")
   @@unique([sourceId, familyId], map: "telegram_video_references_source_id_family_id_key")
   @@unique([memoryId, familyId], map: "telegram_video_references_memory_id_family_id_key")
+  @@unique([thumbnailMediaId, familyId], map: "telegram_video_references_thumbnail_media_id_family_id_key")
 
   @@map("telegram_video_references")
 }

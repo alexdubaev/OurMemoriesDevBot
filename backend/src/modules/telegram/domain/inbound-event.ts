@@ -10,6 +10,15 @@ type TelegramMessageIdentity = {
   occurredAt: string
 }
 
+export type TelegramVideoThumbnail = {
+  fileId: string
+  fileUniqueId: string
+  byteSize: number | null
+  contentType: 'image/jpeg'
+  width: number | null
+  height: number | null
+}
+
 export type TelegramMediaEvent = {
   kind: 'media'
   mediaKind: 'photo' | 'video' | 'voice'
@@ -20,6 +29,7 @@ export type TelegramMediaEvent = {
   width: number | null
   height: number | null
   durationMs: number | null
+  thumbnail?: TelegramVideoThumbnail
   caption: string
   mediaGroupId: string | null
 } & TelegramMessageIdentity

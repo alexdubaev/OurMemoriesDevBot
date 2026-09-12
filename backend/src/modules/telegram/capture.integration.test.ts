@@ -129,7 +129,7 @@ maybeDescribe('Telegram durable capture', () => {
     expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту.')
   })
 
-  test('publishes a Telegram video without downloading it or creating private storage media', async () => {
+  test('keeps a Telegram video remote while storing only its supplied poster as private media', async () => {
     const owner = await familyOwner('52101')
     await accept(video(211, 22, owner.subject, 'Первый ролик'))
     const task = await prisma.taskOutbox.findFirstOrThrow()
@@ -138,10 +138,34 @@ maybeDescribe('Telegram durable capture', () => {
 
     const memory = await prisma.memory.findFirstOrThrow({ include: { media: true } })
     const reference = await prisma.telegramVideoReference.findFirstOrThrow({ where: { memoryId: memory.id } })
-    expect(downloadCalls).toBe(0)
+    expect(downloadCalls).toBe(1)
     expect(memory).toMatchObject({ kind: 'video', body: 'Первый ролик' })
     expect(memory.media).toHaveLength(0)
     expect(reference.fileIdCiphertext.byteLength).toBeGreaterThan(0)
+
+    const feed = await app.request(`/api/v1/families/${owner.familyId}/memories`, {
+      headers: { Authorization: `Bearer ${owner.token}` },
+    })
+    expect(feed.status).toBe(200)
+    const dto = (await feed.json() as { items: Array<{ attachments: Array<Record<string, unknown>> }> }).items[0]!.attachments[0]!
+    expect(dto.thumbnailPath).toMatch(new RegExp(`^/api/v1/families/${owner.familyId}/media/[0-9a-f-]+/content\\?variant=display$`))
+    expect(JSON.stringify(dto)).not.toContain('video-file-22')
+  })
+
+  test('does not retire a Telegram video poster as unattached media', async () => {
+    const owner = await familyOwner('52151')
+    await accept(video(212, 23, owner.subject, 'Постер остаётся доступен'))
+    const task = await prisma.taskOutbox.findFirstOrThrow()
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    const reference = await prisma.telegramVideoReference.findFirstOrThrow()
+    expect(reference.thumbnailMediaId).toEqual(expect.any(String))
+
+    await runBackgroundJob('media:pending:cleanup', runtime, new Date(Date.now() + 25 * 60 * 60 * 1_000))
+
+    const poster = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: reference.thumbnailMediaId! } })
+    expect(poster.deletedAt).toBeNull()
   })
 
   test('opens a Telegram-only video through a requester-bound pointer and rechecks membership in the bot chat', async () => {
@@ -697,7 +721,8 @@ function video(updateId: number, messageId: number, subject: string, caption: st
   return normalizeTelegramUpdate({ update_id: updateId, message: {
     message_id: messageId, date: 1_788_000_000, chat: { id: Number(subject), type: 'private' },
     from: { id: Number(subject), is_bot: false, first_name: 'Тест' }, caption,
-    video: { file_id: `video-file-${messageId}`, file_unique_id: `video-unique-${messageId}`, width: 640, height: 360, duration: 24, file_size: 2_000_000, mime_type: 'video/mp4' },
+    video: { file_id: `video-file-${messageId}`, file_unique_id: `video-unique-${messageId}`, width: 640, height: 360, duration: 24, file_size: 2_000_000, mime_type: 'video/mp4',
+      thumbnail: { file_id: `video-thumbnail-${messageId}`, file_unique_id: `video-thumbnail-unique-${messageId}`, width: 320, height: 180, file_size: photoFixture.byteLength } },
   } })
 }
 

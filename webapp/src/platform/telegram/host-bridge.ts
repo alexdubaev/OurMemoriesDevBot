@@ -18,7 +18,7 @@ export type HostBridge = {
   back(): void
   onBack(handler: () => void): () => void
   openBot(): void
-  openTelegramVideo(deepLink: string): void
+  openTelegramVideo(deepLink: string): boolean
   openInvite(rawToken: string): void
   getInsets(): TelegramInsets
 }
@@ -107,7 +107,9 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
       // accept any other host: the payload is an opaque server-side navigation pointer.
       if (typeof webApp?.openTelegramLink === 'function' && isTelegramBotLink(deepLink)) {
         webApp.openTelegramLink(deepLink)
+        return true
       }
+      return false
     },
     openInvite: (rawToken) => {
       if (typeof webApp?.openTelegramLink === 'function') {
@@ -139,7 +141,7 @@ export function createBrowserDevHostBridge(
     back: () => undefined,
     onBack: () => () => undefined,
     openBot: () => undefined,
-    openTelegramVideo: () => undefined,
+    openTelegramVideo: () => false,
     openInvite: () => undefined,
     getInsets: () => safeInsets,
   }

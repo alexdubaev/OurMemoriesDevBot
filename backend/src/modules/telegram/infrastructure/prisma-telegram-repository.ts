@@ -93,9 +93,9 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
           kind: event.kind === 'note' ? 'note' : event.mediaKind,
           mediaGroupId: event.kind === 'media' ? event.mediaGroupId : null,
           plannedMemoryId: randomUUID(),
-          // Telegram-origin videos are deliberately represented by a source reference, not a
-          // MediaAsset: no private object, rendition job, quota reservation, or fake metadata.
-          plannedMediaId: event.kind === 'media' && event.mediaKind !== 'video' ? randomUUID() : null,
+          // The video itself remains a Telegram-only reference. A supplied Telegram thumbnail is
+          // the sole derived object we keep, using this stable id to make retries idempotent.
+          plannedMediaId: event.kind === 'media' && (event.mediaKind !== 'video' || event.thumbnail) ? randomUUID() : null,
           createdAt: now,
         }],
         skipDuplicates: true,

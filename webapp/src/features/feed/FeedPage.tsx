@@ -183,16 +183,41 @@ function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoInde
 function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
-  return <div className="flex aspect-video flex-col items-center justify-center bg-muted p-5 text-center">
-    <Typography variant="memoryBody">Видео хранится в Telegram</Typography>
-    <Typography className="mt-1" tone="muted" variant="memoryMeta">{formatDuration(attachment.durationMs)}</Typography>
+  const posterUrl = usePrivateObjectUrl(attachment.thumbnailPath, transport)
+  return <div className="bg-muted">
+    <TelegramVideoPoster durationMs={attachment.durationMs} height={attachment.height} posterUrl={posterUrl} width={attachment.width} />
+    <div className="flex flex-col items-center p-5 text-center">
     <Button className="mt-4" disabled={busy} onClick={() => void (async () => {
       setBusy(true); setFailed(false)
-      try { hostBridge.openTelegramVideo((await openTelegramVideo(transport, familyId, memoryId)).telegramDeepLink) }
+      try {
+        const { telegramDeepLink } = await openTelegramVideo(transport, familyId, memoryId)
+        if (!hostBridge.openTelegramVideo(telegramDeepLink)) throw new Error('Telegram host bridge is unavailable')
+      }
       catch { setFailed(true) } finally { setBusy(false) }
     })()} type="button">Смотреть в Telegram</Button>
-    {failed ? <Typography className="mt-2" role="alert" variant="memoryMeta">Не удалось открыть видео. Повторите попытку.</Typography> : null}
+    {failed ? <Typography className="mt-2" role="alert" variant="memoryMeta">Не удалось открыть видео в Telegram. Попробуйте ещё раз.</Typography> : null}
+    </div>
   </div>
+}
+
+export function TelegramVideoPoster({ durationMs, posterUrl, width, height }: {
+  durationMs: number | null; posterUrl: string | null; width: number | null; height: number | null
+}) {
+  const aspectRatio = videoPosterAspectRatio(width, height)
+  if (!posterUrl) return <div className="flex flex-col items-center justify-center p-5 text-center" style={{ aspectRatio }}>
+    <Typography variant="memoryBody">Видео хранится в Telegram</Typography>
+    <Typography className="mt-1" tone="muted" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+  </div>
+  return <div className="relative overflow-hidden" style={{ aspectRatio }}>
+    <img alt="Кадр видео" className="size-full object-cover" src={posterUrl} />
+    <Typography className="absolute bottom-3 right-3 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+  </div>
+}
+
+function videoPosterAspectRatio(width: number | null, height: number | null) {
+  return Number.isFinite(width) && Number.isFinite(height) && width! > 0 && height! > 0
+    ? `${width} / ${height}`
+    : '16 / 9'
 }
 
 function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transport }: {

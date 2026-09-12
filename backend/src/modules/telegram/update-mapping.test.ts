@@ -92,9 +92,12 @@ describe('Telegram update mapping', () => {
         video: {
           file_id: 'video-id', file_unique_id: 'video-u', width: 640, height: 480,
           duration: 8, file_size: 1_000_000, mime_type: 'video/mp4',
+          thumbnail: { file_id: 'video-thumbnail-id', file_unique_id: 'video-thumbnail-u', width: 320, height: 180, file_size: 12_000 },
         },
       },
-    })).toMatchObject({ kind: 'media', mediaKind: 'video', contentType: 'video/mp4' })
+    })).toMatchObject({ kind: 'media', mediaKind: 'video', contentType: 'video/mp4', thumbnail: {
+      fileId: 'video-thumbnail-id', contentType: 'image/jpeg', byteSize: 12_000, width: 320, height: 180,
+    } })
     expect(normalizeTelegramUpdate({
       update_id: 106,
       message: {

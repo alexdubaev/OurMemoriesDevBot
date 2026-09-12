@@ -132,13 +132,43 @@ async function processSource(
   const mediaId = event.kind === 'media' && event.mediaKind !== 'video'
     ? await ingestSourceMedia(db, api, env, media, source, event, signal)
     : null
+  const thumbnailMediaId = event.kind === 'media' && event.mediaKind === 'video'
+    ? await ingestVideoThumbnail(db, api, env, media, source, event, signal)
+    : null
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const published = await publishSingle(db, memories, source.id, event, mediaId,
     event.kind === 'media' && event.mediaKind === 'video'
-      ? telegramVideoReferenceWrite(crypto, source.id, event)
+      ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId)
       : undefined)
   if (!published) return rejectSource(db, api, env, source, 'access_revoked')
   await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
+}
+
+async function ingestVideoThumbnail(
+  db: DbClient,
+  api: TelegramApiPort,
+  env: AppEnv,
+  media: ReturnType<typeof createMediaService>,
+  source: Awaited<ReturnType<typeof loadSource>> & {},
+  event: TelegramMediaEvent,
+  signal?: AbortSignal,
+) {
+  const thumbnail = event.thumbnail
+  if (!thumbnail || !source.plannedMediaId) return null
+  const existing = await db.mediaAsset.findFirst({
+    where: { id: source.plannedMediaId, familyId: source.familyId, originalStatus: 'stored', deletedAt: null },
+  })
+  if (existing) return existing.id
+  const download = await api.download(thumbnail.fileId, thumbnail.byteSize, signal)
+  if (download.byteSize > env.TELEGRAM_FILE_MAX_BYTES) throw new TerminalTaskError('Telegram video thumbnail exceeds the MVP Bot API limit')
+  const result = await media.ingestTelegram(scopeFor(source), {
+    assetId: source.plannedMediaId,
+    kind: 'photo',
+    contentType: thumbnail.contentType,
+    byteSize: download.byteSize,
+    body: download.body,
+  })
+  return result.asset.id
 }
 
 async function processAlbum(
@@ -207,8 +237,9 @@ async function processAlbumLocked(
         continue
       }
       const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+      const thumbnailMediaId = event.mediaKind === 'video' ? await ingestVideoThumbnail(db, api, env, media, source, event, signal) : null
       const published = await publishSingle(db, memories, source.id, event, mediaId,
-        event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event) : undefined)
+        event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId) : undefined)
       if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
     }
     return
@@ -240,8 +271,9 @@ async function processAlbumLocked(
       continue
     }
     const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+    const thumbnailMediaId = event.mediaKind === 'video' ? await ingestVideoThumbnail(db, api, env, media, source, event, signal) : null
     const published = await publishSingle(db, memories, source.id, event, mediaId,
-      event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event) : undefined)
+      event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId) : undefined)
     if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
   }
 }
@@ -330,6 +362,7 @@ function telegramVideoReferenceWrite(
   crypto: PayloadCrypto,
   sourceId: string,
   event: TelegramMediaEvent,
+  thumbnailMediaId: string | null,
 ) {
   if (event.mediaKind !== 'video') throw new TerminalTaskError('Telegram video reference requires a video event')
   return async (tx: PrismaTransactionClient, memoryId: string) => {
@@ -349,6 +382,7 @@ function telegramVideoReferenceWrite(
         width: event.width,
         height: event.height,
         durationMs: event.durationMs,
+        thumbnailMediaId,
       },
       update: {},
     })

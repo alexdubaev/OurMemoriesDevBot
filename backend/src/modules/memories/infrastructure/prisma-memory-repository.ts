@@ -173,8 +173,16 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (!concurrent) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         throw versionConflict()
       }
-      const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } })
-      for (const { mediaId } of linked) {
+      const [linked, telegramVideo] = await Promise.all([
+        tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } }),
+        tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
+          SELECT "thumbnail_media_id" AS "thumbnailMediaId"
+            FROM "telegram_video_references"
+           WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
+        `,
+      ])
+      const mediaIds = [...linked.map(({ mediaId }) => mediaId), ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : [])]
+      for (const mediaId of mediaIds) {
         await tx.mediaAsset.updateMany({ where: { id: mediaId, familyId: scope.familyId, deletedAt: null }, data: { deletedAt: now } })
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${mediaId}`,
           payload: { mediaId }, scheduledFor: now })
@@ -345,7 +353,7 @@ function memoryInclude() {
       include: { asset: { include: { variants: true } } },
     },
     telegramVideoReference: {
-      select: { id: true, width: true, height: true, durationMs: true },
+      select: { id: true, width: true, height: true, durationMs: true, thumbnailMedia: { select: { id: true, variants: { select: { variant: true } } } } },
     },
   } as const
 }
@@ -374,7 +382,7 @@ function dto(
       renditionStatus: 'pending' | 'ready' | 'failed'
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
-    telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null } | null
+    telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
   },
   principalUserId: string,
   role: MemberRole,
@@ -416,7 +424,9 @@ function dto(
         width: memory.telegramVideoReference.width,
         height: memory.telegramVideoReference.height,
         durationMs: memory.telegramVideoReference.durationMs,
-        thumbnailPath: null,
+        thumbnailPath: memory.telegramVideoReference.thumbnailMedia?.variants.some(({ variant }) => variant === 'display')
+          ? `/api/v1/families/${memory.familyId}/media/${memory.telegramVideoReference.thumbnailMedia.id}/content?variant=display`
+          : null,
         openInTelegramPath: `/api/v1/families/${memory.familyId}/memories/${memory.id}/telegram-video`,
       }] : []),
     ],
