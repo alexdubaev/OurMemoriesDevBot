@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
 import { resolveAvatarContentType } from '@/features/avatar'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -164,7 +165,7 @@ export function FamilyOnboarding({
 
   return (
     <main className="mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]">
-      <Typography variant="memoryScreen">Наши воспоминания</Typography>
+      <BrandLogo className="w-[148px]" />
       <section aria-labelledby="child-onboarding-title" className="mx-auto mt-6 w-full max-w-md pb-10">
         <Typography id="child-onboarding-title" variant="memoryHero">{initialChild ? 'Профиль ребёнка' : 'Расскажите о ребёнке'}</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">

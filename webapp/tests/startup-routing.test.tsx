@@ -25,13 +25,16 @@ test('routes a returning user with a completed family profile directly to the fe
   expect(decideStartupRoute({ status: 'ready', hasActiveFamily: true, hasChildProfile: true })).toBe('feed')
 })
 
-test('renders a branded, accessible app preloader instead of feed content', () => {
+test('renders the local memoLy logo in the preloader instead of the former text brand', () => {
   const markup = renderToStaticMarkup(createElement(BootPreloader, {
     style: { '--host-inset-top': '12px', '--host-inset-bottom': '18px' },
   }))
 
   expect(markup).toContain('data-slot="app-loading"')
-  expect(markup).toContain('Наши воспоминания')
+  expect(markup).toContain('data-slot="app-brand"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('alt="memoLy"')
+  expect(markup).not.toContain('Наши воспоминания')
   expect(markup).toContain('aria-busy="true"')
   expect(markup).toContain('--host-inset-top:12px')
   expect(markup).toContain('--host-inset-bottom:18px')

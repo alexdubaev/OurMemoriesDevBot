@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode, Ref } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
+import { BrandLogo } from '@/components/BrandLogo'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import { ChildAvatar } from '@/features/family'
@@ -64,10 +65,8 @@ export function FeedShell({
         data-slot="feed-scroll"
       >
         <header>
-          <div className="flex min-h-11 min-w-0 items-start justify-between gap-2">
-            <Typography className="min-w-0 flex-1 py-2" variant="memoryScreen">
-              Наши воспоминания
-            </Typography>
+          <div className="flex min-h-11 min-w-0 items-center justify-between gap-2">
+            <BrandLogo className="min-w-0 w-[148px]" />
             <button
               aria-label="Помощь и конфиденциальность"
               className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground"

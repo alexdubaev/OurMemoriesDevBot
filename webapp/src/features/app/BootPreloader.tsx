@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 
-import { Typography } from '@/components/typography'
+import { BrandLogo } from '@/components/BrandLogo'
 
 export function BootPreloader({ style }: { style?: CSSProperties }) {
   return (
@@ -9,7 +9,7 @@ export function BootPreloader({ style }: { style?: CSSProperties }) {
         <span aria-hidden="true" className="flex size-16 items-center justify-center rounded-full bg-accent/20">
           <span className="size-5 animate-pulse rounded-full bg-accent" />
         </span>
-        <Typography className="mt-6" variant="memoryHero">Наши воспоминания</Typography>
+        <BrandLogo className="mt-6 w-[210px]" />
         <div aria-busy="true" aria-label="Подготавливаем приложение" className="mt-4 flex items-center gap-1.5" role="status">
           <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground [animation-delay:-160ms]" />
           <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground [animation-delay:-80ms]" />

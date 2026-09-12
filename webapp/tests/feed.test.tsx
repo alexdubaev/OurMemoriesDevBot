@@ -5,6 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
@@ -286,6 +287,23 @@ const transport: AuthenticatedTransport = {
   request: async () => { throw new Error('unexpected feed request during static render') },
   raw: async () => { throw new Error('unexpected media request during static render') },
 }
+
+test('the feed header renders the memoLy logo above the child profile instead of the former text brand', () => {
+  const markup = renderToStaticMarkup(createElement(FeedShell, {
+    activeFilter: 'all',
+    childName: 'Лиза',
+    childSubtitle: '2 года',
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    onFilterChange: () => undefined,
+    role: 'full',
+  }, createElement('p', null, 'Лента')))
+
+  expect(markup).toContain('data-slot="app-brand"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('alt="memoLy"')
+  expect(markup).not.toContain('Наши воспоминания')
+  expect(markup.indexOf('data-slot="app-brand"')).toBeLessThan(markup.indexOf('data-slot="child-profile"'))
+})
 
 const telegramAttachment: Extract<MemoryDto['attachments'][number], { source: 'telegram' }> = {
   id: mediaId,

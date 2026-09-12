@@ -5,12 +5,14 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import App from '../src/App'
 import { createBrowserDevHostBridge } from '../src/platform/telegram'
 
-test('shows the approved outside-Telegram screen without pretending that a family is loaded', () => {
+test('shows the memoLy brand outside Telegram without pretending that a family is loaded', () => {
   const markup = renderToStaticMarkup(
     createElement(App, { hostBridge: createBrowserDevHostBridge() }),
   )
 
-  expect(markup).toContain('Наши воспоминания')
+  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('alt="memoLy"')
+  expect(markup).not.toContain('Наши воспоминания')
   expect(markup).toContain('Откройте приложение в Telegram')
   expect(markup).toContain('В этой тестовой версии вход работает через нашего бота.')
   expect(markup).toContain('Открыть бота')

@@ -3,6 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
+import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
@@ -74,7 +75,7 @@ export default function App({ hostBridge }: AppProps) {
   if (!auth.user) {
     return (
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
-        <Typography variant="memoryScreen">Наши воспоминания</Typography>
+        <BrandLogo className="w-[148px]" />
         <div className="mt-8"><InlineError onRetry={() => {
           telegramAttempted.current = false
           setTelegramError(null)
@@ -215,13 +216,13 @@ const terminalInviteIssueCodes = new Set(['OTHER_FAMILY', 'ALREADY_IN_FAMILY', '
 function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Наши воспоминания</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); setCreateError(null); try { await onCreate() } catch (error) { setCreateError(createFamilyErrorMessage(error)) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button>{createError ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">{createError}</Typography> : null}</main>
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><BrandLogo className="w-[148px]" /><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); setCreateError(null); try { await onCreate() } catch (error) { setCreateError(createFamilyErrorMessage(error)) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button>{createError ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">{createError}</Typography> : null}</main>
 }
 
 function OpenInTelegram() {
   return (
     <main className="mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-7 py-10">
-      <Typography variant="memoryHero">Наши воспоминания</Typography>
+      <BrandLogo className="w-[180px]" />
       <div className="flex flex-1 flex-col items-center justify-center pb-20 text-center">
         <span className="flex size-18 items-center justify-center rounded-full bg-accent"><WebpIcon decorative name="info" size={32} state="active" /></span>
         <Typography className="mt-7 max-w-80" variant="memoryDialog">Откройте приложение в Telegram</Typography>
