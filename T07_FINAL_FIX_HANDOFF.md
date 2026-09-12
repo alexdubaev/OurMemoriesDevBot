@@ -1,5 +1,12 @@
 # T07 FINAL FIX HANDOFF
 
+## Post-acceptance runtime incident (2026-09-12)
+
+- **Symptom:** the Mini App shell loaded through Funnel while feed requests failed.
+- **Root cause:** `backend start:api` ran `prisma generate` through the local Prisma shebang under Node 20.18.1; Prisma 7.9.0 then failed before binding port 3000 with `ERR_REQUIRE_ESM` from `@prisma/dev` → `zeptomatch`. Funnel therefore returned 502 for `/api/*` while Vite still returned the HTML shell.
+- **Detection gap:** prior unit, typecheck and browser checks did not exercise the actual local API startup command behind Funnel. The DEV database also had one unapplied existing migration.
+- **Prevention:** Prisma generation and migration deployment now use `bunx --bun`; `bun run acceptance:check` fails closed on API/Vite/Funnel/auth-boundary/DB migration/process failures before device acceptance. It also requires a configured polling bot rather than treating its absence as a warning.
+
 ## Audited state
 
 - Task ID: T07 — Final Fix Round P1-4 + H1/H2.

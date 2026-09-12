@@ -22,7 +22,7 @@
     "prisma:generate": "bun scripts/prisma-generate.mjs",
     "prisma:generate:raw": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
+    "prisma:deploy": "bunx --bun prisma migrate deploy",
     "prisma:seed": "prisma db seed",
     "db:deploy": "bun scripts/deploy-database.ts",
     "db:adopt-owner": "bun scripts/adopt-database-owner.ts",

@@ -38,7 +38,7 @@ try {
     rmSync(generatedPath, { recursive: true, force: true })
   }
 
-  const result = spawnSync('bun', ['run', 'prisma:generate:raw'], {
+  const result = spawnSync('bunx', ['--bun', 'prisma', 'generate'], {
     cwd: backendRoot,
     env: {
       ...process.env,

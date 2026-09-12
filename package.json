@@ -39,6 +39,7 @@
     "dev:webapp": "bun run --cwd webapp dev",
     "dev:website": "bun run --cwd website dev",
     "dev:backend": "bun run --cwd backend dev",
+    "acceptance:check": "bun scripts/dev-acceptance-check.mjs",
     "storybook:webapp": "bun run --cwd webapp storybook",
     "storybook:website": "bun run --cwd website storybook",
     "storybook:build": "bun run storybook:build:webapp && bun run storybook:build:website",
