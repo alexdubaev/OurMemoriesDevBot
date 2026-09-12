@@ -5,8 +5,9 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
-import { feedQueryKeys } from '../src/features/feed/queries'
+import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
 
@@ -212,6 +213,48 @@ test('overlapping keyset pages render one card per memory id', () => {
   })
   const markup = renderFeed(queryClient)
   expect(markup.match(/aria-label="Открыть воспоминание Первое слово"/g)).toHaveLength(1)
+})
+
+test('delete request uses the family-scoped endpoint and current memory version', async () => {
+  let path = ''
+  let options: unknown
+  const deletingTransport: AuthenticatedTransport = {
+    ...transport,
+    raw: async (receivedPath, receivedOptions) => {
+      path = receivedPath
+      options = receivedOptions
+      return new Response(null, { status: 204 })
+    },
+  }
+
+  await deleteMemory(deletingTransport, familyId, memoryId, memory.version)
+
+  expect(path).toBe(`/api/v1/families/${familyId}/memories/${memoryId}`)
+  expect(options).toEqual({ method: 'DELETE', headers: { 'If-Match': '1' } })
+})
+
+test('optimistic deletion removes a memory from every cached family filter', () => {
+  const queryClient = feedClient()
+  queryClient.setQueryData(feedQueryKeys.list(familyId, 'voice'), {
+    pages: [{ items: [memory], nextCursor: null }], pageParams: [null],
+  })
+
+  const snapshot = removeMemoryFromCachedFeeds(queryClient, familyId, memoryId)
+
+  expect(queryClient.getQueryData<{ pages: Array<{ items: MemoryDto[] }> }>(feedQueryKeys.list(familyId, 'all'))?.pages[0]?.items).toEqual([])
+  expect(queryClient.getQueryData<{ pages: Array<{ items: MemoryDto[] }> }>(feedQueryKeys.list(familyId, 'voice'))?.pages[0]?.items).toEqual([])
+  expect(snapshot).toHaveLength(2)
+})
+
+test('delete action is available only when the memory capability permits it', () => {
+  const fullMarkup = renderFeed(feedClient())
+  expect(fullMarkup).toContain('aria-label="Действия с воспоминанием"')
+
+  const viewerClient = feedClient()
+  viewerClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
+    pages: [{ items: [{ ...memory, capabilities: { ...memory.capabilities, delete: false } }], nextCursor: null }], pageParams: [null],
+  })
+  expect(renderFeed(viewerClient)).not.toContain('aria-label="Действия с воспоминанием"')
 })
 
 function feedClient() {

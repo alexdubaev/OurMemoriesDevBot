@@ -547,6 +547,30 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await delivery.deliverFromStart(owner.subject, owner.subject, deletedPointer, api, crypto)).toBe('denied')
   })
 
+  test('deleting a Telegram video blocks new and already-issued handoffs without revoking existing Telegram copies', async () => {
+    const owner = await familyOwner('52344')
+    const viewer = await admittedUser('52345')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    const firstPointer = await prepareVideoPointer(owner, 243, 34, viewer)
+    const delivery = new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+    expect(await delivery.deliverFromStart(viewer.subject, viewer.subject, firstPointer, api, crypto)).toBe('delivered')
+    expect(sentVideos).toEqual([{ chatId: viewer.subject, fileId: 'video-file-34' }])
+
+    const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: owner.familyId } })
+    const preDeletePointer = await requestVideoPointer(owner, memory.id, viewer)
+    const deleted = await app.request(`/api/v1/families/${owner.familyId}/memories/${memory.id}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${owner.token}`, 'If-Match': String(memory.version) },
+    })
+    expect(deleted.status).toBe(204)
+    expect((await app.request(`/api/v1/families/${owner.familyId}/memories/${memory.id}/telegram-video`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })).status).toBe(404)
+    expect(await delivery.deliverFromStart(viewer.subject, viewer.subject, preDeletePointer, api, crypto)).toBe('denied')
+    expect(sentVideos).toEqual([{ chatId: viewer.subject, fileId: 'video-file-34' }])
+    expect(deletedMessages).toEqual([])
+    expect(await prisma.telegramVideoDeliveryTarget.count({ where: { userId: viewer.userId } })).toBe(1)
+  })
+
   test('cleans only delivery pointers beyond the retention window', async () => {
     const owner = await familyOwner('52351')
     await prepareVideoPointer(owner, 241, 34)

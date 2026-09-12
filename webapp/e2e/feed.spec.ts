@@ -248,6 +248,46 @@ test.describe.serial('T07 live feed', () => {
     expect(deepLink).not.toContain('synthetic-file-id')
   })
 
+  test('confirms deletion, removes the card optimistically, and restores it when deletion fails', async ({ page }) => {
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'full' },
+    })
+    await page.reload()
+    await openFeed(page)
+    const card = page.locator('[data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
+    await expect(page.getByRole('alertdialog')).toContainText('Удалить воспоминание?')
+    await page.getByRole('button', { name: 'Отмена' }).click()
+    await expect(card).toBeVisible()
+
+    await page.route('**/api/v1/families/*/memories/*', (route) => {
+      if (route.request().method() !== 'DELETE') return route.continue()
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic delete failure' } }),
+      })
+    })
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
+    await page.getByRole('button', { name: 'Удалить' }).click()
+    await expect(card).toBeVisible()
+    await expect(page.getByRole('alert')).toContainText('Не удалось удалить воспоминание. Попробуйте ещё раз.')
+    await page.unroute('**/api/v1/families/*/memories/*')
+
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
+    await page.getByRole('button', { name: 'Удалить' }).click()
+    await expect(card).toHaveCount(0)
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'viewer' },
+    })
+  })
+
   test('closes access and pauses playback after membership revoke', async ({ page }) => {
     await openFeed(page)
     const voiceCard = page.locator('[data-memory-id]').filter({ hasText: 'Голос E2E' })

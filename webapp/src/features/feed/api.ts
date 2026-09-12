@@ -38,6 +38,18 @@ export function setMemoryLike(
   )
 }
 
+export async function deleteMemory(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  memoryId: string,
+  version: number,
+) {
+  await transport.raw(
+    `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}`,
+    { method: 'DELETE', headers: { 'If-Match': String(version) } },
+  )
+}
+
 export function openTelegramVideo(transport: AuthenticatedTransport, familyId: string, memoryId: string) {
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}/telegram-video`,
