@@ -44,6 +44,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   server: {
+    allowedHosts: ['desktop-7sch55t.tail879033.ts.net'],
     proxy: {
       '/api': { target: backendProxyTarget, changeOrigin: true },
       '/storage': { target: backendProxyTarget, changeOrigin: true },
