@@ -33,7 +33,7 @@ const memory: MemoryDto = {
     kind: 'voice',
     width: null,
     height: null,
-    durationMs: 12_000,
+    durationMs: 5_773,
     renditionStatus: 'ready',
     previewPath: null,
     displayPath: null,
@@ -68,7 +68,7 @@ test('a prepared voice renders every measured waveform peak', () => {
 })
 
 test('a prepared voice displays its DTO duration before audio metadata loads', () => {
-  expect(renderFeed(feedClient())).toContain('0:00 / 0:12')
+  expect(renderFeed(feedClient())).toContain('0:00 / 0:06')
 })
 
 test('overlapping keyset pages render one card per memory id', () => {
