@@ -383,9 +383,12 @@ function telegramVideoReferenceWrite(
   if (event.mediaKind !== 'video') throw new TerminalTaskError('Telegram video reference requires a video event')
   return async (tx: PrismaTransactionClient, memoryId: string) => {
     const encrypted = crypto.encrypt(event.fileId)
-    const source = await tx.telegramSource.findUnique({ where: { id: sourceId }, select: { familyId: true } })
+    const source = await tx.telegramSource.findUnique({
+      where: { id: sourceId },
+      select: { familyId: true, userId: true, chatId: true, messageId: true },
+    })
     if (!source) throw new TerminalTaskError('Telegram source disappeared before video reference write')
-    await tx.telegramVideoReference.upsert({
+    const reference = await tx.telegramVideoReference.upsert({
       where: { sourceId },
       create: {
         sourceId,
@@ -399,6 +402,17 @@ function telegramVideoReferenceWrite(
         height: event.height,
         durationMs: event.durationMs,
         thumbnailMediaId,
+      },
+      update: {},
+    })
+    await tx.telegramVideoDeliveryTarget.upsert({
+      where: { referenceId_userId: { referenceId: reference.id, userId: source.userId } },
+      create: {
+        referenceId: reference.id,
+        userId: source.userId,
+        chatId: source.chatId,
+        messageId: source.messageId,
+        source: 'original',
       },
       update: {},
     })

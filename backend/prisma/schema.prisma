@@ -27,6 +27,7 @@ model User {
   authoredMemories    Memory[]             @relation("MemoryAuthor")
   uploadedMedia       MediaAsset[]         @relation("MediaUploader")
   mediaReservations   UploadReservation[]
+  telegramVideoDeliveryTargets TelegramVideoDeliveryTarget[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -386,6 +387,7 @@ model TelegramVideoReference {
   memory             Memory         @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "telegram_video_references_memory_id_family_id_fkey")
   thumbnailMedia     MediaAsset?    @relation("TelegramVideoThumbnail", fields: [thumbnailMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "telegram_video_references_thumbnail_media_id_family_id_fkey")
   deliveries         TelegramVideoDelivery[]
+  deliveryTargets    TelegramVideoDeliveryTarget[]
 
   @@index([familyId], map: "telegram_video_references_family_id_idx")
   @@unique([sourceId, familyId], map: "telegram_video_references_source_id_family_id_key")
@@ -434,6 +436,26 @@ model TelegramVideoNavigationReply {
   @@index([cleanupAt, deletedAt], map: "telegram_video_navigation_replies_cleanup_idx")
   @@unique([chatId, messageId], map: "telegram_video_navigation_replies_chat_message_key")
   @@map("telegram_video_navigation_replies")
+}
+
+/// One reusable, server-only Telegram navigation target per viewer and Telegram-origin video.
+/// A target is either the uploader's original private-chat message or one bot-delivered copy.
+model TelegramVideoDeliveryTarget {
+  id          String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  referenceId String                    @map("reference_id") @db.Uuid
+  userId      String                    @map("user_id") @db.Uuid
+  chatId      BigInt                    @map("chat_id")
+  messageId   BigInt                    @map("message_id")
+  source      TelegramVideoTargetSource
+  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reference   TelegramVideoReference    @relation(fields: [referenceId], references: [id], onDelete: Cascade, map: "telegram_video_delivery_targets_reference_id_fkey")
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "telegram_video_delivery_targets_user_id_fkey")
+
+  @@unique([referenceId, userId], map: "telegram_video_delivery_targets_reference_user_key")
+  @@index([userId], map: "telegram_video_delivery_targets_user_id_idx")
+  @@unique([chatId, messageId], map: "telegram_video_delivery_targets_chat_message_key")
+  @@map("telegram_video_delivery_targets")
 }
 
 model MediaVariant {
@@ -694,6 +716,13 @@ enum TelegramSourceStatus {
   rejected
 
   @@map("telegram_source_status")
+}
+
+enum TelegramVideoTargetSource {
+  original
+  delivered_copy
+
+  @@map("telegram_video_target_source")
 }
 
 enum TelegramAlbumStatus {

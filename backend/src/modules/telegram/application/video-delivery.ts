@@ -6,7 +6,7 @@ import type { DbClient } from '../../../db'
 import { insertTask } from '../../../outbox/store'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../../memories'
-import { isTelegramMessageAlreadyAbsent, type TelegramApiPort } from './ports'
+import { isTelegramMessageAlreadyAbsent, TelegramReplyTargetMissingError, type TelegramApiPort } from './ports'
 
 const pointerLifetimeMs = 5 * 60 * 1_000
 const pointerPrefix = 'watch_'
@@ -25,8 +25,8 @@ type DeliveryOptions = {
 /**
  * Separates the Mini App navigation hand-off from delivery authorization. The returned deep link
  * contains a random pointer only; Telegram source and media identifiers remain in the adapter
- * store. When the original video is in this requester's private bot chat, delivery creates a
- * temporary reply that Telegram can use to navigate back to that original message.
+ * store. Each user has one reusable private-chat target per video: the uploader's original
+ * message or a single bot-delivered copy. Later visits quote that target temporarily.
  */
 export class TelegramVideoDeliveryService {
   constructor(
@@ -107,11 +107,13 @@ export class TelegramVideoDeliveryService {
           sourceChatId: string
           sourceMessageId: string
           sourceSenderSubject: string
+          sourceUserId: string
         }>>`
           SELECT d."reference_id" AS "referenceId",
                  s."chat_id"::text AS "sourceChatId",
                  s."message_id"::text AS "sourceMessageId",
-                 s."sender_subject" AS "sourceSenderSubject"
+                 s."sender_subject" AS "sourceSenderSubject",
+                 s."user_id" AS "sourceUserId"
           FROM "telegram_video_deliveries" d
           JOIN "telegram_video_references" r ON r."id" = d."reference_id"
           JOIN "telegram_sources" s ON s."id" = r."source_id" AND s."family_id" = r."family_id"
@@ -137,31 +139,60 @@ export class TelegramVideoDeliveryService {
         if (!authorized[0]) return false
 
         const original = authorized[0]
-        sendStarted = true
-        if (original.sourceChatId === chatId && original.sourceSenderSubject === senderSubject) {
-          const sent = await api.sendMessage(chatId, navigationReplyText, {
-            replyToMessageId: original.sourceMessageId,
-          })
-          if (!sent || !('messageId' in sent) || !isTelegramMessageId(sent.messageId)) {
-            throw new Error('Telegram navigation reply did not return a usable message id')
-          }
-          const cleanupAt = new Date(this.now().getTime() + navigationReplyLifetimeMs)
-          const navigation = await tx.telegramVideoNavigationReply.create({
+        // This transaction holds the per-viewer/per-video lock through the Bot API call. It is
+        // deliberately narrow: two different pointers cannot each provision a private copy.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${original.referenceId}:${delivery.userId}`}, 0))`
+        let target = await tx.telegramVideoDeliveryTarget.findUnique({
+          where: { referenceId_userId: { referenceId: original.referenceId, userId: delivery.userId } },
+          select: { id: true, chatId: true, messageId: true },
+        })
+
+        // Legacy uploader videos predate the target table. Recover their original target lazily
+        // only when the user is demonstrably in the original private bot chat.
+        if (!target && original.sourceUserId === delivery.userId
+          && original.sourceChatId === chatId && original.sourceSenderSubject === senderSubject) {
+          target = await tx.telegramVideoDeliveryTarget.create({
             data: {
-              deliveryId: delivery.id,
+              referenceId: original.referenceId,
+              userId: delivery.userId,
               chatId: BigInt(chatId),
-              messageId: BigInt(sent.messageId),
-              cleanupAt,
+              messageId: BigInt(original.sourceMessageId),
+              source: 'original',
             },
-            select: { id: true },
+            select: { id: true, chatId: true, messageId: true },
           })
-          await insertTask(tx, {
-            type: 'telegram:navigation-reply:cleanup',
-            dedupeKey: `telegram-navigation-reply-cleanup:${navigation.id}`,
-            payload: { navigationReplyId: navigation.id },
-            scheduledFor: cleanupAt,
-          })
-        } else {
+        }
+
+        sendStarted = true
+        if (target) {
+          if (target.chatId !== BigInt(chatId)) return false
+          try {
+            const sent = await api.sendMessage(chatId, navigationReplyText, {
+              replyToMessageId: target.messageId.toString(),
+            })
+            if (!sent || !('messageId' in sent) || !isTelegramMessageId(sent.messageId)) {
+              throw new Error('Telegram navigation reply did not return a usable message id')
+            }
+            const cleanupAt = new Date(this.now().getTime() + navigationReplyLifetimeMs)
+            const navigation = await tx.telegramVideoNavigationReply.create({
+              data: { deliveryId: delivery.id, chatId: BigInt(chatId), messageId: BigInt(sent.messageId), cleanupAt },
+              select: { id: true },
+            })
+            await insertTask(tx, {
+              type: 'telegram:navigation-reply:cleanup',
+              dedupeKey: `telegram-navigation-reply-cleanup:${navigation.id}`,
+              payload: { navigationReplyId: navigation.id },
+              scheduledFor: cleanupAt,
+            })
+          } catch (error) {
+            if (!(error instanceof TelegramReplyTargetMissingError)) throw error
+            // Only a provider-confirmed missing reply target permits re-delivery. Other errors
+            // remain ambiguous/fail-safe and never duplicate a user's private video.
+            await tx.telegramVideoDeliveryTarget.delete({ where: { id: target.id } })
+            target = null
+          }
+        }
+        if (!target) {
           const reference = await tx.telegramVideoReference.findUniqueOrThrow({
             where: { id: original.referenceId },
             select: { fileIdCiphertext: true, encryptionIv: true, encryptionAuthTag: true },
@@ -171,7 +202,17 @@ export class TelegramVideoDeliveryService {
             iv: reference.encryptionIv,
             authTag: reference.encryptionAuthTag,
           })
-          await api.sendVideo(chatId, fileId)
+          const sent = await api.sendVideo(chatId, fileId)
+          if (!isTelegramMessageId(sent.messageId)) throw new Error('Telegram video did not return a usable message id')
+          await tx.telegramVideoDeliveryTarget.create({
+            data: {
+              referenceId: original.referenceId,
+              userId: delivery.userId,
+              chatId: BigInt(chatId),
+              messageId: BigInt(sent.messageId),
+              source: 'delivered_copy',
+            },
+          })
         }
         await tx.telegramVideoDelivery.update({ where: { id: delivery.id }, data: { deliveredAt: this.now() } })
         return true

@@ -32,7 +32,7 @@ export type TelegramApiPort = {
     replyToMessageId?: string
   }): Promise<void | { messageId: string }>
   /** Re-send an existing Telegram file id; never accepts arbitrary client media bytes. */
-  sendVideo(chatId: string, fileId: string): Promise<void>
+  sendVideo(chatId: string, fileId: string): Promise<{ messageId: string }>
   /** Deletes one bot-created navigation message; callers must retain the exact server-side id. */
   deleteMessage(chatId: string, messageId: string): Promise<void>
   getUpdates(offset: number, signal: AbortSignal): Promise<unknown[]>
@@ -42,6 +42,9 @@ export type TelegramApiPort = {
 
 /** A missing prior navigation reply is the desired terminal state for cleanup. */
 export class TelegramMessageAlreadyAbsentError extends Error {}
+
+/** Telegram confirms that a reply's target was deleted or otherwise cannot be found. */
+export class TelegramReplyTargetMissingError extends Error {}
 
 export function isTelegramMessageAlreadyAbsent(error: unknown) {
   return error instanceof TelegramMessageAlreadyAbsentError

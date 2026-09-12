@@ -1,6 +1,6 @@
 import { Api } from 'grammy'
 
-import { TelegramMessageAlreadyAbsentError, type TelegramApiPort, type TelegramDownload } from '../application/ports'
+import { TelegramMessageAlreadyAbsentError, TelegramReplyTargetMissingError, type TelegramApiPort, type TelegramDownload } from '../application/ports'
 
 export class TelegramProviderError extends Error {
   constructor(message: string, readonly retryAfterSeconds?: number) {
@@ -53,12 +53,14 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
         })
         return { messageId: String(result.message_id) }
       } catch (error) {
+        if (options?.replyToMessageId && isMissingReplyTarget(error)) throw new TelegramReplyTargetMissingError()
         throw telegramProviderFailure(error)
       }
     },
     async sendVideo(chatId, fileId) {
       try {
-        await api.sendVideo(chatId, fileId)
+        const result = await api.sendVideo(chatId, fileId)
+        return { messageId: String(result.message_id) }
       } catch (error) {
         throw telegramProviderFailure(error)
       }
@@ -111,6 +113,12 @@ function isAbsentTelegramMessage(error: unknown) {
   if (typeof error !== 'object' || error === null) return false
   const description = 'description' in error ? (error as { description?: unknown }).description : undefined
   return typeof description === 'string' && /message to delete not found|message can't be deleted/i.test(description)
+}
+
+function isMissingReplyTarget(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+  const description = 'description' in error ? (error as { description?: unknown }).description : undefined
+  return typeof description === 'string' && /replied message not found|reply message not found|message to be replied not found/i.test(description)
 }
 
 function limitStream(body: ReadableStream<Uint8Array>, limit: number) {

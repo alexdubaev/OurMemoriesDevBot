@@ -17,7 +17,7 @@ import { createPrismaFamilyAccess } from '../families'
 import { createAcceptTelegramUpdate } from './application/accept-update'
 import type { TelegramApiPort } from './application/ports'
 import { cleanupTelegramVideoNavigationReply, TelegramVideoDeliveryService } from './application/video-delivery'
-import { TelegramMessageAlreadyAbsentError } from './application/ports'
+import { TelegramMessageAlreadyAbsentError, TelegramReplyTargetMissingError } from './application/ports'
 import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
 import { createTelegramImmediateVideoStartProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
@@ -64,7 +64,10 @@ maybeDescribe('Telegram durable capture', () => {
       sent.push({ chatId, text, options })
       return { messageId: String(9_000 + sent.length) }
     },
-    sendVideo: async (chatId, fileId) => { sentVideos.push({ chatId, fileId }) },
+    sendVideo: async (chatId, fileId) => {
+      sentVideos.push({ chatId, fileId })
+      return { messageId: String(8_000 + sentVideos.length) }
+    },
     deleteMessage: async (chatId, messageId) => { deletedMessages.push({ chatId, messageId }) },
     getUpdates: async () => [],
     setCommands: async () => undefined,
@@ -152,6 +155,12 @@ maybeDescribe('Telegram durable capture', () => {
     expect(memory).toMatchObject({ kind: 'video', body: 'Первый ролик' })
     expect(memory.media).toHaveLength(0)
     expect(reference.fileIdCiphertext.byteLength).toBeGreaterThan(0)
+    expect(await prisma.telegramVideoDeliveryTarget.findFirstOrThrow()).toMatchObject({
+      userId: owner.userId,
+      chatId: BigInt(owner.subject),
+      messageId: 22n,
+      source: 'original',
+    })
 
     const feed = await app.request(`/api/v1/families/${owner.familyId}/memories`, {
       headers: { Authorization: `Bearer ${owner.token}` },
@@ -276,7 +285,7 @@ maybeDescribe('Telegram durable capture', () => {
     expect((await prisma.telegramVideoNavigationReply.findUniqueOrThrow({ where: { id: navigation.id } })).deletedAt).toEqual(expect.any(Date))
   })
 
-  test('falls back to the existing resend only when the original video is in another private chat', async () => {
+  test('delivers one private copy to an invited member, then quotes that exact cached target', async () => {
     const owner = await familyOwner('52307')
     const viewer = await admittedUser('52308')
     await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
@@ -286,6 +295,86 @@ maybeDescribe('Telegram durable capture', () => {
       .deliverFromStart(viewer.subject, viewer.subject, pointer, api, crypto)).toBe('delivered')
     expect(sentVideos).toEqual([{ chatId: viewer.subject, fileId: 'video-file-29' }])
     expect(await prisma.telegramVideoNavigationReply.count()).toBe(0)
+    const target = await prisma.telegramVideoDeliveryTarget.findFirstOrThrow({ where: { userId: viewer.userId } })
+    expect(target).toMatchObject({ chatId: BigInt(viewer.subject), messageId: 8001n, source: 'delivered_copy' })
+
+    const memory = await prisma.memory.findFirstOrThrow()
+    const laterPointer = await requestVideoPointer(owner, memory.id, viewer)
+    expect(await new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+      .deliverFromStart(viewer.subject, viewer.subject, laterPointer, api, crypto)).toBe('delivered')
+    expect(sentVideos).toHaveLength(1)
+    expect(sent.at(-1)).toMatchObject({
+      chatId: viewer.subject,
+      text: 'Видео из воспоминания ↑',
+      options: { replyToMessageId: target.messageId.toString() },
+    })
+    expect(await prisma.telegramVideoNavigationReply.count()).toBe(1)
+  })
+
+  test('keeps delivery targets isolated between invited family members', async () => {
+    const owner = await familyOwner('523081')
+    const viewerA = await admittedUser('523082')
+    const viewerB = await admittedUser('523083')
+    await prisma.familyMember.createMany({ data: [
+      { familyId: owner.familyId, userId: viewerA.userId, role: 'viewer' },
+      { familyId: owner.familyId, userId: viewerB.userId, role: 'viewer' },
+    ] })
+    await prepareVideoPointer(owner, 238, 31)
+    const memory = await prisma.memory.findFirstOrThrow()
+    const pointerA = await requestVideoPointer(owner, memory.id, viewerA)
+    const pointerB = await requestVideoPointer(owner, memory.id, viewerB)
+    const delivery = new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+    await expect(delivery.deliverFromStart(viewerA.subject, viewerA.subject, pointerA, api, crypto)).resolves.toBe('delivered')
+    await expect(delivery.deliverFromStart(viewerB.subject, viewerB.subject, pointerB, api, crypto)).resolves.toBe('delivered')
+    const targets = await prisma.telegramVideoDeliveryTarget.findMany({
+      where: { userId: { in: [viewerA.userId, viewerB.userId] } }, orderBy: { userId: 'asc' },
+    })
+    expect(targets).toHaveLength(2)
+    expect(targets.map(({ chatId }) => chatId.toString()).sort()).toEqual([viewerA.subject, viewerB.subject].sort())
+  })
+
+  test('serializes concurrent first views from separate pointers into one private copy', async () => {
+    const owner = await familyOwner('523091')
+    const viewer = await admittedUser('523092')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    await prepareVideoPointer(owner, 240, 33)
+    const memory = await prisma.memory.findFirstOrThrow()
+    const [first, second] = await Promise.all([
+      requestVideoPointer(owner, memory.id, viewer),
+      requestVideoPointer(owner, memory.id, viewer),
+    ])
+    const delivery = new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+    await expect(Promise.all([
+      delivery.deliverFromStart(viewer.subject, viewer.subject, first, api, crypto),
+      delivery.deliverFromStart(viewer.subject, viewer.subject, second, api, crypto),
+    ])).resolves.toEqual(['delivered', 'delivered'])
+    expect(sentVideos).toHaveLength(1)
+    expect(await prisma.telegramVideoDeliveryTarget.count({ where: { userId: viewer.userId } })).toBe(1)
+  })
+
+  test('replaces a provider-confirmed stale target with one newly delivered private copy', async () => {
+    const owner = await familyOwner('523101')
+    const viewer = await admittedUser('523102')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    const first = await prepareVideoPointer(owner, 242, 35, viewer)
+    const delivery = new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+    await delivery.deliverFromStart(viewer.subject, viewer.subject, first, api, crypto)
+    const stale = await prisma.telegramVideoDeliveryTarget.findFirstOrThrow({ where: { userId: viewer.userId } })
+    const reference = await prisma.telegramVideoReference.findUniqueOrThrow({ where: { id: stale.referenceId } })
+    const retry = await requestVideoPointer(owner, reference.memoryId, viewer)
+    const staleApi: TelegramApiPort = {
+      ...api,
+      sendMessage: async (_chatId, text, _options) => {
+        if (text === 'Видео из воспоминания ↑') throw new TelegramReplyTargetMissingError()
+        return { messageId: '9999' }
+      },
+    }
+    await expect(delivery.deliverFromStart(viewer.subject, viewer.subject, retry, staleApi, crypto)).resolves.toBe('delivered')
+    expect(sentVideos).toHaveLength(2)
+    const replacement = await prisma.telegramVideoDeliveryTarget.findFirstOrThrow({ where: { userId: viewer.userId } })
+    expect(replacement.id).not.toBe(stale.id)
+    expect(replacement.source).toBe('delivered_copy')
+    expect(await prisma.telegramVideoDeliveryTarget.count({ where: { userId: viewer.userId } })).toBe(1)
   })
 
   test('atomically claims a pointer so concurrent deliveries send one video', async () => {
@@ -353,6 +442,7 @@ maybeDescribe('Telegram durable capture', () => {
         sentVideos.push({ chatId, fileId })
         reportSendStarted()
         await sendRelease
+        return { messageId: String(8_000 + sentVideos.length) }
       },
     }
     const delivery = new TelegramVideoDeliveryService(
@@ -724,6 +814,19 @@ maybeDescribe('Telegram durable capture', () => {
     await createTelegramTaskProcessor({ runtime, api, crypto })(sourceTask.payload)
     const memory = await prisma.memory.findFirstOrThrow({ orderBy: { createdAt: 'desc' } })
     const opened = await app.request(`/api/v1/families/${owner.familyId}/memories/${memory.id}/telegram-video`, {
+      method: 'POST', headers: { Authorization: `Bearer ${requester.token}` },
+    })
+    expect(opened.status).toBe(200)
+    const body = await opened.json() as { telegramDeepLink: string }
+    return body.telegramDeepLink.split('start=')[1]!
+  }
+
+  async function requestVideoPointer(
+    owner: Awaited<ReturnType<typeof familyOwner>>,
+    memoryId: string,
+    requester: Awaited<ReturnType<typeof admittedUser>> = owner,
+  ) {
+    const opened = await app.request(`/api/v1/families/${owner.familyId}/memories/${memoryId}/telegram-video`, {
       method: 'POST', headers: { Authorization: `Bearer ${requester.token}` },
     })
     expect(opened.status).toBe(200)
