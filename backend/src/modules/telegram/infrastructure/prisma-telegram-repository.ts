@@ -47,7 +47,7 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
     return { userId: identity.user.id, familyId: membership.familyId, childId: child.id, role: membership.role }
   }
 
-  async accept({ botId, event, encrypted, admission, now }: Parameters<TelegramAcceptRepository['accept']>[0]): Promise<AcceptedTelegramUpdate> {
+  async accept({ botId, event, encrypted, admission, now, queueInboxTask = true }: Parameters<TelegramAcceptRepository['accept']>[0]): Promise<AcceptedTelegramUpdate> {
     return this.db.$transaction(async (tx) => {
       const inboxId = randomUUID()
       const insertedInbox = await tx.telegramInbox.createMany({
@@ -71,7 +71,7 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
       }
 
       if (event.kind === 'command' || event.kind === 'denied_content' || event.kind === 'caption_reply') {
-        await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
+        if (queueInboxTask) await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
         return { inboxId, duplicate: false }
       }
       if (!isContent(event) || !admission || admission.role !== 'full') {

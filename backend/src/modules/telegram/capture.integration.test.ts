@@ -20,7 +20,7 @@ import { cleanupTelegramVideoNavigationReply, TelegramVideoDeliveryService } fro
 import { TelegramMessageAlreadyAbsentError } from './application/ports'
 import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
-import { createTelegramTaskProcessor } from './infrastructure/process-task'
+import { createTelegramImmediateVideoStartProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
 import { normalizeTelegramUpdate } from './transport/update-mapping'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -78,7 +78,13 @@ maybeDescribe('Telegram durable capture', () => {
   } satisfies BackendRuntime
   const crypto = createTelegramPayloadCrypto(key)
   const repository = new PrismaTelegramRepository(prisma)
-  const accept = createAcceptTelegramUpdate({ botId: 777n, repository, api, encrypt: crypto.encrypt })
+  const accept = createAcceptTelegramUpdate({
+    botId: 777n,
+    repository,
+    api,
+    encrypt: crypto.encrypt,
+    onVideoNavigation: createTelegramImmediateVideoStartProcessor({ runtime, api, crypto }),
+  })
 
   beforeEach(async () => {
     await clearFixtures()
@@ -193,9 +199,7 @@ maybeDescribe('Telegram durable capture', () => {
 
     const pointer = telegramDeepLink.split('start=')[1]!
     await accept(command(222, 24, owner.subject, `/start ${pointer}`))
-    const deliveryTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })
-    await process(deliveryTask.payload)
-    await process(deliveryTask.payload)
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).toBe(0)
     expect(sentVideos).toEqual([])
     expect(sent.at(-1)).toMatchObject({
       chatId: owner.subject,
@@ -220,7 +224,6 @@ maybeDescribe('Telegram durable capture', () => {
       where: { familyId_userId: { familyId: owner.familyId, userId: viewer.userId } }, data: { revokedAt: new Date() },
     })
     await accept(command(232, 25, viewer.subject, `/start ${telegramDeepLink.split('start=')[1]!}`))
-    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
     expect(sentVideos).toHaveLength(0)
     expect(sent.at(-1)?.text).toBe('Видео недоступно или у вас нет доступа.')
   })
@@ -229,8 +232,7 @@ maybeDescribe('Telegram durable capture', () => {
     const owner = await familyOwner('52305')
     const pointer = await prepareVideoPointer(owner, 232, 25)
     await accept(command(233, 26, owner.subject, `/start ${pointer}`))
-    const process = createTelegramTaskProcessor({ runtime, api, crypto })
-    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).toBe(0)
 
     const navigation = await prisma.telegramVideoNavigationReply.findFirstOrThrow()
     const navigationMessageId = String(9_000 + sent.length)
@@ -259,8 +261,6 @@ maybeDescribe('Telegram durable capture', () => {
     const owner = await familyOwner('52306')
     const pointer = await prepareVideoPointer(owner, 234, 27)
     await accept(command(235, 28, owner.subject, `/start ${pointer}`))
-    const process = createTelegramTaskProcessor({ runtime, api, crypto })
-    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
     const navigation = await prisma.telegramVideoNavigationReply.findFirstOrThrow()
 
     await expect(cleanupTelegramVideoNavigationReply(prisma, {

@@ -5,6 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys } from '../src/features/feed/queries'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
@@ -90,6 +91,57 @@ test('a Telegram video poster renders a protected image and its duration', () =>
   expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
   expect(markup).toContain('data-slot="telegram-video-play-control"')
   expect(markup).not.toMatch(/<(?:video|audio)\b/)
+})
+
+test('a Telegram video handoff opens the verified link before closing the Mini App', async () => {
+  const calls: string[] = []
+  const bridge = { ...hostBridge,
+    openTelegramVideo: (link: string) => { calls.push(`open:${link}`); return true },
+    close: () => { calls.push('close') },
+  }
+
+  await navigateToTelegramVideo(bridge, async () => ({ telegramDeepLink: 'https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF' }))
+
+  expect(calls).toEqual([
+    'open:https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF',
+    'close',
+  ])
+})
+
+test('a Telegram video handoff does not close when the bridge cannot open its link', async () => {
+  let closed = false
+  const bridge = { ...hostBridge, openTelegramVideo: () => false, close: () => { closed = true } }
+
+  await expect(navigateToTelegramVideo(bridge, async () => ({ telegramDeepLink: 'https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF' }))).rejects.toThrow('unavailable')
+  expect(closed).toBe(false)
+})
+
+test('a Telegram video handoff blocks duplicate taps until a failed request settles', async () => {
+  let attempts = 0
+  let rejectRequest: ((error: Error) => void) | undefined
+  const action = createSingleFlightTelegramVideoHandoff(async () => {
+    attempts += 1
+    if (attempts > 1) throw new Error('handoff failed')
+    await new Promise<never>((_, reject) => { rejectRequest = reject })
+  })
+
+  const first = action()
+  const second = action()
+  expect(await second).toBe(false)
+  expect(attempts).toBe(1)
+  rejectRequest!(new Error('handoff failed'))
+  await expect(first).rejects.toThrow('handoff failed')
+  await expect(action()).rejects.toThrow('handoff failed')
+  expect(attempts).toBe(2)
+})
+
+test('a Telegram video poster exposes a transient opening state without changing its aspect ratio', () => {
+  const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+    busy: true, disabled: true, durationMs: 24_000, posterUrl: 'blob:private-telegram-video-poster', width: 1_920, height: 1_080,
+  }))
+  expect(markup).toContain('Открываем видео…')
+  expect(markup).toContain('aspect-ratio:1920 / 1080')
+  expect(markup).toContain('disabled=""')
 })
 
 test('a Telegram video has no text CTA and keeps one handoff action for the full poster and center play control', () => {

@@ -55,5 +55,7 @@ export type TelegramAcceptRepository = {
     encrypted: EncryptedTelegramPayload
     admission: TelegramAdmission
     now: Date
+    /** A valid video-navigation start is delivered immediately after this durable write. */
+    queueInboxTask?: boolean
   }): Promise<AcceptedTelegramUpdate>
 }

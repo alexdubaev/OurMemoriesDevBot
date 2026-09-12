@@ -11,6 +11,7 @@ import { privateMediaSource } from '@/platform/media/private-media-access'
 import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
+import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
 import { EmptyState, FeedShell, FeedSkeleton, InlineError, MemoryCardFrame, type FeedFilter } from './components'
 import { feedQueryKeys, useFeedQuery, useMemoryLike } from './queries'
 import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
@@ -185,23 +186,25 @@ export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, tran
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const posterUrl = usePrivateObjectUrl(attachment.thumbnailPath, transport)
-  const openHandoff = () => void (async () => {
+  const handoff = useSingleFlightTelegramVideoHandoff(async () => {
     setBusy(true); setFailed(false)
     try {
-      const { telegramDeepLink } = await openTelegramVideo(transport, familyId, memoryId)
-      if (!hostBridge.openTelegramVideo(telegramDeepLink)) throw new Error('Telegram host bridge is unavailable')
+      await navigateToTelegramVideo(hostBridge, () => openTelegramVideo(transport, familyId, memoryId))
+    } catch (error) {
+      setFailed(true); setBusy(false)
+      throw error
     }
-    catch { setFailed(true) } finally { setBusy(false) }
-  })()
+  })
+  const openHandoff = () => { void handoff().catch(() => undefined) }
   return <div className="bg-muted">
-    <TelegramVideoPoster disabled={busy} durationMs={attachment.durationMs} height={attachment.height} onOpen={openHandoff} posterUrl={posterUrl} width={attachment.width} />
+    <TelegramVideoPoster busy={busy} disabled={busy} durationMs={attachment.durationMs} height={attachment.height} onOpen={openHandoff} posterUrl={posterUrl} width={attachment.width} />
     {failed ? <Typography className="px-5 py-3 text-center" role="alert" variant="memoryMeta">Не удалось открыть видео в Telegram. Попробуйте ещё раз.</Typography> : null}
   </div>
 }
 
-export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOpen = () => undefined, disabled = false }: {
+export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOpen = () => undefined, disabled = false, busy = false }: {
   durationMs: number | null; posterUrl: string | null; width: number | null; height: number | null
-  onOpen?: () => void; disabled?: boolean
+  onOpen?: () => void; disabled?: boolean; busy?: boolean
 }) {
   const aspectRatio = videoPosterAspectRatio(width, height)
   return <button aria-label="Смотреть видео в Telegram" className="relative block w-full overflow-hidden bg-muted text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-60" disabled={disabled} onClick={onOpen} style={{ aspectRatio }} type="button">
@@ -209,7 +212,9 @@ export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOp
       ? <img alt="Кадр видео" className="size-full object-cover" src={posterUrl} />
       : <span className="absolute inset-0 flex items-center justify-center"><Typography as="span" tone="muted" variant="memoryBody">Видео</Typography></span>}
     <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" data-slot="telegram-video-play-control">
-      <span className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
+      {busy
+        ? <Typography as="span" className="rounded-full bg-black/65 px-4 py-2 text-white shadow-sm backdrop-blur-[1px]" variant="memoryMeta">Открываем видео…</Typography>
+        : <span className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>}
     </span>
     <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
   </button>

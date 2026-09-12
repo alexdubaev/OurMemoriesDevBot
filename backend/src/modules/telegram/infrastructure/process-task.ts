@@ -144,6 +144,22 @@ async function processSource(
   await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
 }
 
+/**
+ * Handles a syntactically valid `/start watch_…` immediately after its inbox record commits.
+ * The delivery service still owns every authorization and single-use check; this function merely
+ * bypasses the outbox drain that would otherwise add queue latency to a user-initiated action.
+ */
+export function createTelegramImmediateVideoStartProcessor(options: {
+  runtime: BackendRuntime
+  api: TelegramApiPort
+  crypto: PayloadCrypto
+}) {
+  const { prisma, env } = options.runtime
+  const access = createPrismaFamilyAccess(prisma)
+  const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
+  return (inboxId: string) => processInbox(prisma, options.api, options.crypto, env, videoDelivery, inboxId)
+}
+
 async function ingestVideoThumbnail(
   db: DbClient,
   api: TelegramApiPort,
