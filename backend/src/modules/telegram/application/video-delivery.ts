@@ -3,12 +3,15 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { TelegramVideoOpenResponse } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import { insertTask } from '../../../outbox/store'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../../memories'
-import type { TelegramApiPort } from './ports'
+import { isTelegramMessageAlreadyAbsent, type TelegramApiPort } from './ports'
 
 const pointerLifetimeMs = 5 * 60 * 1_000
 const pointerPrefix = 'watch_'
+const navigationReplyLifetimeMs = 2 * 60 * 1_000
+const navigationReplyText = 'Видео из воспоминания ↑'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
@@ -21,7 +24,9 @@ type DeliveryOptions = {
 
 /**
  * Separates the Mini App navigation hand-off from delivery authorization. The returned deep link
- * contains a random pointer only; the Bot API file id remains encrypted in the adapter store.
+ * contains a random pointer only; Telegram source and media identifiers remain in the adapter
+ * store. When the original video is in this requester's private bot chat, delivery creates a
+ * temporary reply that Telegram can use to navigate back to that original message.
  */
 export class TelegramVideoDeliveryService {
   constructor(
@@ -97,10 +102,19 @@ export class TelegramVideoDeliveryService {
     let sendStarted = false
     try {
       const delivered = await this.db.$transaction(async (tx) => {
-        const authorized = await tx.$queryRaw<Array<{ referenceId: string }>>`
-          SELECT d."reference_id" AS "referenceId"
+        const authorized = await tx.$queryRaw<Array<{
+          referenceId: string
+          sourceChatId: string
+          sourceMessageId: string
+          sourceSenderSubject: string
+        }>>`
+          SELECT d."reference_id" AS "referenceId",
+                 s."chat_id"::text AS "sourceChatId",
+                 s."message_id"::text AS "sourceMessageId",
+                 s."sender_subject" AS "sourceSenderSubject"
           FROM "telegram_video_deliveries" d
           JOIN "telegram_video_references" r ON r."id" = d."reference_id"
+          JOIN "telegram_sources" s ON s."id" = r."source_id" AND s."family_id" = r."family_id"
           JOIN "memories" m ON m."id" = r."memory_id" AND m."family_id" = d."family_id"
           JOIN "family_members" fm ON fm."family_id" = d."family_id" AND fm."user_id" = d."user_id"
           JOIN "families" f ON f."id" = d."family_id"
@@ -122,17 +136,43 @@ export class TelegramVideoDeliveryService {
         `
         if (!authorized[0]) return false
 
-        const reference = await tx.telegramVideoReference.findUniqueOrThrow({
-          where: { id: authorized[0].referenceId },
-          select: { fileIdCiphertext: true, encryptionIv: true, encryptionAuthTag: true },
-        })
-        const fileId = crypto.decrypt<string>({
-          ciphertext: reference.fileIdCiphertext,
-          iv: reference.encryptionIv,
-          authTag: reference.encryptionAuthTag,
-        })
+        const original = authorized[0]
         sendStarted = true
-        await api.sendVideo(chatId, fileId)
+        if (original.sourceChatId === chatId && original.sourceSenderSubject === senderSubject) {
+          const sent = await api.sendMessage(chatId, navigationReplyText, {
+            replyToMessageId: original.sourceMessageId,
+          })
+          if (!sent || !('messageId' in sent) || !isTelegramMessageId(sent.messageId)) {
+            throw new Error('Telegram navigation reply did not return a usable message id')
+          }
+          const cleanupAt = new Date(this.now().getTime() + navigationReplyLifetimeMs)
+          const navigation = await tx.telegramVideoNavigationReply.create({
+            data: {
+              deliveryId: delivery.id,
+              chatId: BigInt(chatId),
+              messageId: BigInt(sent.messageId),
+              cleanupAt,
+            },
+            select: { id: true },
+          })
+          await insertTask(tx, {
+            type: 'telegram:navigation-reply:cleanup',
+            dedupeKey: `telegram-navigation-reply-cleanup:${navigation.id}`,
+            payload: { navigationReplyId: navigation.id },
+            scheduledFor: cleanupAt,
+          })
+        } else {
+          const reference = await tx.telegramVideoReference.findUniqueOrThrow({
+            where: { id: original.referenceId },
+            select: { fileIdCiphertext: true, encryptionIv: true, encryptionAuthTag: true },
+          })
+          const fileId = crypto.decrypt<string>({
+            ciphertext: reference.fileIdCiphertext,
+            iv: reference.encryptionIv,
+            authTag: reference.encryptionAuthTag,
+          })
+          await api.sendVideo(chatId, fileId)
+        }
         await tx.telegramVideoDelivery.update({ where: { id: delivery.id }, data: { deliveredAt: this.now() } })
         return true
       }, { timeout: 15_000 })
@@ -162,10 +202,49 @@ export class TelegramVideoDeliveryService {
   }
 }
 
+/**
+ * Best-effort cleanup for exactly one bot-created navigation reply. A missing message is already
+ * clean; other provider failures are intentionally contained so video navigation remains a
+ * successful primary action and the shared outbox never retries this secondary work forever.
+ */
+export async function cleanupTelegramVideoNavigationReply(
+  db: DbClient,
+  api: TelegramApiPort,
+  navigationReplyId: string,
+  now = new Date(),
+): Promise<'done' | 'skipped'> {
+  const navigation = await db.telegramVideoNavigationReply.findUnique({
+    where: { id: navigationReplyId },
+    select: { chatId: true, messageId: true, deletedAt: true },
+  })
+  if (!navigation || navigation.deletedAt) return 'skipped'
+
+  try {
+    await api.deleteMessage(navigation.chatId.toString(), navigation.messageId.toString())
+  } catch (error) {
+    if (!isTelegramMessageAlreadyAbsent(error)) {
+      console.warn('Telegram navigation reply cleanup failed', {
+        errorType: error instanceof Error ? error.name : typeof error,
+      })
+      return 'skipped'
+    }
+  }
+
+  await db.telegramVideoNavigationReply.updateMany({
+    where: { id: navigationReplyId, deletedAt: null },
+    data: { deletedAt: now },
+  })
+  return 'done'
+}
+
 function hash(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
 function isPointer(value: string) {
   return new RegExp(`^${pointerPrefix}[A-Za-z0-9_-]{32}$`).test(value)
+}
+
+function isTelegramMessageId(value: string) {
+  return /^\d+$/.test(value)
 }

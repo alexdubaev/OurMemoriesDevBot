@@ -16,7 +16,8 @@ import { signAccessToken } from '../auth'
 import { createPrismaFamilyAccess } from '../families'
 import { createAcceptTelegramUpdate } from './application/accept-update'
 import type { TelegramApiPort } from './application/ports'
-import { TelegramVideoDeliveryService } from './application/video-delivery'
+import { cleanupTelegramVideoNavigationReply, TelegramVideoDeliveryService } from './application/video-delivery'
+import { TelegramMessageAlreadyAbsentError } from './application/ports'
 import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
 import { createTelegramTaskProcessor } from './infrastructure/process-task'
@@ -45,6 +46,7 @@ maybeDescribe('Telegram durable capture', () => {
   let finalReceiptFailuresRemaining = 0
   let downloadCalls = 0
   const sentVideos: Array<{ chatId: string; fileId: string }> = []
+  const deletedMessages: Array<{ chatId: string; messageId: string }> = []
   const api: TelegramApiPort = {
     download: async () => {
       downloadCalls += 1
@@ -63,6 +65,7 @@ maybeDescribe('Telegram durable capture', () => {
       return { messageId: String(9_000 + sent.length) }
     },
     sendVideo: async (chatId, fileId) => { sentVideos.push({ chatId, fileId }) },
+    deleteMessage: async (chatId, messageId) => { deletedMessages.push({ chatId, messageId }) },
     getUpdates: async () => [],
     setCommands: async () => undefined,
     setMenuButton: async () => undefined,
@@ -83,6 +86,7 @@ maybeDescribe('Telegram durable capture', () => {
     finalReceiptFailuresRemaining = 0
     downloadCalls = 0
     sentVideos.length = 0
+    deletedMessages.length = 0
     await rm(storageRoot, { recursive: true, force: true })
     await mkdir(storageRoot, { recursive: true })
   })
@@ -150,6 +154,9 @@ maybeDescribe('Telegram durable capture', () => {
     const dto = (await feed.json() as { items: Array<{ attachments: Array<Record<string, unknown>> }> }).items[0]!.attachments[0]!
     expect(dto.thumbnailPath).toMatch(new RegExp(`^/api/v1/families/${owner.familyId}/media/[0-9a-f-]+/content\\?variant=display$`))
     expect(JSON.stringify(dto)).not.toContain('video-file-22')
+    expect(dto).not.toHaveProperty('messageId')
+    expect(dto).not.toHaveProperty('chatId')
+    expect(dto).not.toHaveProperty('fileId')
   })
 
   test('does not retire a Telegram video poster as unattached media', async () => {
@@ -168,7 +175,7 @@ maybeDescribe('Telegram durable capture', () => {
     expect(poster.deletedAt).toBeNull()
   })
 
-  test('opens a Telegram-only video through a requester-bound pointer and rechecks membership in the bot chat', async () => {
+  test('navigates to an original private-chat Telegram video through a temporary reply without resending media', async () => {
     const owner = await familyOwner('52201')
     await accept(video(221, 23, owner.subject, 'Только в Telegram'))
     const sourceTask = await prisma.taskOutbox.findFirstOrThrow()
@@ -189,7 +196,12 @@ maybeDescribe('Telegram durable capture', () => {
     const deliveryTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })
     await process(deliveryTask.payload)
     await process(deliveryTask.payload)
-    expect(sentVideos).toEqual([{ chatId: owner.subject, fileId: 'video-file-23' }])
+    expect(sentVideos).toEqual([])
+    expect(sent.at(-1)).toMatchObject({
+      chatId: owner.subject,
+      text: 'Видео из воспоминания ↑',
+      options: { replyToMessageId: '23' },
+    })
   })
 
   test('does not deliver a Telegram video when membership was revoked after the Mini App check', async () => {
@@ -213,6 +225,69 @@ maybeDescribe('Telegram durable capture', () => {
     expect(sent.at(-1)?.text).toBe('Видео недоступно или у вас нет доступа.')
   })
 
+  test('schedules cleanup for exactly the navigation reply and deletes it after two minutes', async () => {
+    const owner = await familyOwner('52305')
+    const pointer = await prepareVideoPointer(owner, 232, 25)
+    await accept(command(233, 26, owner.subject, `/start ${pointer}`))
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
+
+    const navigation = await prisma.telegramVideoNavigationReply.findFirstOrThrow()
+    const navigationMessageId = String(9_000 + sent.length)
+    const cleanup = await prisma.taskOutbox.findFirstOrThrow({
+      where: { type: 'telegram:navigation-reply:cleanup' },
+    })
+    expect(navigation).toMatchObject({ chatId: BigInt(owner.subject), messageId: BigInt(navigationMessageId), deletedAt: null })
+    expect(navigation.cleanupAt.getTime() - navigation.createdAt.getTime()).toBeGreaterThanOrEqual(119_000)
+    expect(navigation.cleanupAt.getTime() - navigation.createdAt.getTime()).toBeLessThanOrEqual(121_000)
+    expect(cleanup.payload).toEqual({ navigationReplyId: navigation.id })
+    expect(JSON.stringify(cleanup.payload)).not.toContain(owner.subject)
+
+    await expect(cleanupTelegramVideoNavigationReply(
+      prisma,
+      api,
+      navigation.id,
+      new Date(navigation.cleanupAt.getTime() + 1),
+    )).resolves.toBe('done')
+
+    expect(deletedMessages).toEqual([{ chatId: owner.subject, messageId: navigationMessageId }])
+    expect((await prisma.telegramVideoNavigationReply.findUniqueOrThrow({ where: { id: navigation.id } })).deletedAt).toEqual(expect.any(Date))
+    expect(deletedMessages.map(({ messageId }) => messageId)).not.toContain('25')
+  })
+
+  test('treats an already-deleted navigation reply as cleanup completion and leaves provider failures non-blocking', async () => {
+    const owner = await familyOwner('52306')
+    const pointer = await prepareVideoPointer(owner, 234, 27)
+    await accept(command(235, 28, owner.subject, `/start ${pointer}`))
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await process((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: { startsWith: 'telegram-inbox:' } } })).payload)
+    const navigation = await prisma.telegramVideoNavigationReply.findFirstOrThrow()
+
+    await expect(cleanupTelegramVideoNavigationReply(prisma, {
+      ...api,
+      deleteMessage: async () => { throw new Error('synthetic provider outage') },
+    }, navigation.id)).resolves.toBe('skipped')
+    expect((await prisma.telegramVideoNavigationReply.findUniqueOrThrow({ where: { id: navigation.id } })).deletedAt).toBeNull()
+
+    await expect(cleanupTelegramVideoNavigationReply(prisma, {
+      ...api,
+      deleteMessage: async () => { throw new TelegramMessageAlreadyAbsentError() },
+    }, navigation.id)).resolves.toBe('done')
+    expect((await prisma.telegramVideoNavigationReply.findUniqueOrThrow({ where: { id: navigation.id } })).deletedAt).toEqual(expect.any(Date))
+  })
+
+  test('falls back to the existing resend only when the original video is in another private chat', async () => {
+    const owner = await familyOwner('52307')
+    const viewer = await admittedUser('52308')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    const pointer = await prepareVideoPointer(owner, 236, 29, viewer)
+
+    expect(await new TelegramVideoDeliveryService(prisma, createPrismaFamilyAccess(prisma), env.TELEGRAM_BOT_EXPECTED_USERNAME)
+      .deliverFromStart(viewer.subject, viewer.subject, pointer, api, crypto)).toBe('delivered')
+    expect(sentVideos).toEqual([{ chatId: viewer.subject, fileId: 'video-file-29' }])
+    expect(await prisma.telegramVideoNavigationReply.count()).toBe(0)
+  })
+
   test('atomically claims a pointer so concurrent deliveries send one video', async () => {
     const owner = await familyOwner('52311')
     const pointer = await prepareVideoPointer(owner, 233, 26)
@@ -228,7 +303,8 @@ maybeDescribe('Telegram durable capture', () => {
     ])
 
     expect(results.sort()).toEqual(['delivered', 'denied'])
-    expect(sentVideos).toHaveLength(1)
+    expect(sentVideos).toHaveLength(0)
+    expect(sent.filter(({ text, options }) => text === 'Видео из воспоминания ↑' && options?.replyToMessageId === '26')).toHaveLength(1)
   })
 
   test('denies delivery when revoke commits at the controlled final-authorization boundary', async () => {
@@ -327,8 +403,9 @@ maybeDescribe('Telegram durable capture', () => {
     const pointer = await prepareVideoPointer(owner, 235, 28)
     const uncertainApi: TelegramApiPort = {
       ...api,
-      sendVideo: async (chatId, fileId) => {
-        sentVideos.push({ chatId, fileId })
+      sendMessage: async (chatId, text, options) => {
+        if (text !== 'Видео из воспоминания ↑') return api.sendMessage(chatId, text, options)
+        sent.push({ chatId, text, options })
         throw new Error('synthetic response lost after Telegram accepted the video')
       },
     }
@@ -340,7 +417,8 @@ maybeDescribe('Telegram durable capture', () => {
 
     expect(await delivery.deliverFromStart(owner.subject, owner.subject, pointer, uncertainApi, crypto)).toBe('ambiguous')
     expect(await delivery.deliverFromStart(owner.subject, owner.subject, pointer, uncertainApi, crypto)).toBe('denied')
-    expect(sentVideos).toHaveLength(1)
+    expect(sentVideos).toHaveLength(0)
+    expect(sent.filter(({ text }) => text === 'Видео из воспоминания ↑')).toHaveLength(1)
     expect(await prisma.telegramVideoDelivery.findFirstOrThrow()).toMatchObject({ ambiguousAt: expect.any(Date) })
   })
 

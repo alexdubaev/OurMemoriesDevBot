@@ -365,9 +365,9 @@ model MediaAsset {
   @@map("media_assets")
 }
 
-/// Adapter-owned reference for a video which remains on Telegram. Keeping its file id encrypted
-/// here lets the bot re-send the same file to an authorized member without treating it as private
-/// object storage or exposing it through a Memory DTO.
+/// Adapter-owned reference for a video which remains on Telegram. Its source relation retains
+/// the original private-chat message identity server-side; the encrypted file id is a legacy and
+/// unsupported-context fallback, never a public DTO field.
 model TelegramVideoReference {
   id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sourceId           String         @unique(map: "telegram_video_references_source_id_key") @map("source_id") @db.Uuid
@@ -411,10 +411,29 @@ model TelegramVideoDelivery {
   deniedAt    DateTime?              @map("denied_at") @db.Timestamptz(6)
   createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   reference   TelegramVideoReference @relation(fields: [referenceId], references: [id], onDelete: Cascade, map: "telegram_video_deliveries_reference_id_fkey")
+  navigationReply TelegramVideoNavigationReply?
 
   @@index([familyId, userId, expiresAt], map: "telegram_video_deliveries_member_expiry_idx")
   @@index([expiresAt], map: "telegram_video_deliveries_expires_at_idx")
   @@map("telegram_video_deliveries")
+}
+
+/// A short-lived bot message that quotes the original private-chat video. Keeping its exact
+/// target here makes cleanup durable and prevents an outbox retry from deleting any other chat
+/// message. Neither Telegram identifier is exposed through application DTOs.
+model TelegramVideoNavigationReply {
+  id          String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  deliveryId  String                 @unique(map: "telegram_video_navigation_replies_delivery_id_key") @map("delivery_id") @db.Uuid
+  chatId      BigInt                 @map("chat_id")
+  messageId   BigInt                 @map("message_id")
+  cleanupAt   DateTime               @map("cleanup_at") @db.Timestamptz(6)
+  deletedAt   DateTime?              @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  delivery    TelegramVideoDelivery  @relation(fields: [deliveryId], references: [id], onDelete: Cascade, map: "telegram_video_navigation_replies_delivery_id_fkey")
+
+  @@index([cleanupAt, deletedAt], map: "telegram_video_navigation_replies_cleanup_idx")
+  @@unique([chatId, messageId], map: "telegram_video_navigation_replies_chat_message_key")
+  @@map("telegram_video_navigation_replies")
 }
 
 model MediaVariant {
