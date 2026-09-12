@@ -30,6 +30,7 @@ import { validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
 import type { FamilyService } from '../application/family-service'
 import { executeFamily } from './errors'
+import { bypassesFamilyBearerAuth } from './private-media-content-request'
 
 const bearerSecurity = [{ BearerAuth: [] }]
 const json = <Schema extends ZodType>(schema: Schema) => ({ 'application/json': { schema } })
@@ -141,7 +142,9 @@ export function createFamilyRoutes({
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   routes.use('/me', requireAuth)
   routes.use('/families', requireAuth)
-  routes.use('/families/*', requireAuth)
+  routes.use('/families/*', (c, next) => (
+    bypassesFamilyBearerAuth(c.req.method, c.req.path) ? next() : requireAuth(c, next)
+  ))
   routes.use('/invites/*', requireAuth)
 
   routes.openapi(meRoute, async (c) => c.json(await executeFamily(() => {
