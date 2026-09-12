@@ -50,6 +50,9 @@ maybeDescribe('Private media API', () => {
     const outsider = await admittedUser('Чужой', '43003')
     const family = await createFamily(owner.token, 'Семья')
     await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const viewerMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
+    })
 
     const uploaded = await uploadPhoto(owner.token, family.body.family.id, 'memory', pngFixture)
     expect(uploaded.finalized.response.status).toBe(200)
@@ -87,9 +90,26 @@ maybeDescribe('Private media API', () => {
     expect(partial.headers.get('content-range')).toBe(`bytes 8-19/${pngFixture.byteLength}`)
     expect(Buffer.from(await partial.arrayBuffer())).toEqual(pngFixture.subarray(8, 20))
 
+    const mediaSession = await app.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    expect(mediaSession.status).toBe(204)
+    const mediaCookie = mediaSession.headers.get('set-cookie')?.split(';')[0]
+    expect(mediaCookie).toMatch(/^our_memories_media_access=/)
+    const cookieRange = await app.request(contentPath, {
+      headers: { Cookie: mediaCookie!, Range: 'bytes=8-19' },
+    })
+    expect(cookieRange.status).toBe(206)
+    expect(cookieRange.headers.get('accept-ranges')).toBe('bytes')
+    expect(cookieRange.headers.get('content-range')).toBe(`bytes 8-19/${pngFixture.byteLength}`)
+    expect(cookieRange.headers.get('content-length')).toBe('12')
+    expect(cookieRange.headers.get('content-type')).toBe('image/png')
+    expect((await app.request(contentPath, { headers: { Range: 'bytes=0-3' } })).status).toBe(401)
+
     expect((await app.request(contentPath, {
       headers: { Authorization: `Bearer ${outsider.token}` },
     })).status).toBe(404)
+    expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
     for (const request of [
       app.request(contentPath.replace('variant=original', 'variant=preview'), { method: 'HEAD', headers: { Authorization: `Bearer ${outsider.token}` } }),
       app.request(contentPath, { headers: { Authorization: `Bearer ${outsider.token}`, Range: 'bytes=0-3' } }),
@@ -100,11 +120,21 @@ maybeDescribe('Private media API', () => {
     expect(unsatisfiable.status).toBe(416)
     expect(unsatisfiable.headers.get('content-range')).toBe(`bytes */${pngFixture.byteLength}`)
 
+    const revoked = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: viewerMembership.version },
+    )
+    expect(revoked.response.status).toBe(204)
+    expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
+
     const deleted = await app.request(`/api/v1/families/${family.body.family.id}/memories/${memory.body.id}`, {
       method: 'DELETE', headers: { Authorization: `Bearer ${owner.token}`, 'If-Match': String(memory.body.version) },
     })
     expect(deleted.status).toBe(204)
     expect(await prisma.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.reserved.body.assetId}` } })).toBe(1)
+    expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
   })
 
   test('serializes quota reservations and viewers cannot reserve uploads', async () => {

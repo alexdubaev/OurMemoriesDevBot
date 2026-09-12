@@ -8,16 +8,21 @@ export function syncPrivateMediaAccessToken(accessToken: string | null) {
 
 export async function privateMediaSource(path: string) {
   const registration = await ensurePrivateMediaAccess()
-  return registration && currentAccessToken ? path : null
+  if (registration && currentAccessToken) return path
+  return currentAccessToken && await bootstrapMediaSession(path) ? path : null
 }
 
 async function ensurePrivateMediaAccess() {
   if (!('serviceWorker' in navigator)) return null
-  registrationPromise ??= registerPrivateMediaWorker()
-  const registration = await registrationPromise
-  if (!registration) return null
-  await sendToken(registration, currentAccessToken)
-  return registration
+  try {
+    registrationPromise ??= registerPrivateMediaWorker()
+    const registration = await registrationPromise
+    if (!registration) return null
+    await sendToken(registration, currentAccessToken)
+    return registration
+  } catch {
+    return null
+  }
 }
 
 async function registerPrivateMediaWorker() {
@@ -44,4 +49,19 @@ async function sendToken(registration: ServiceWorkerRegistration, token: string 
     }
     worker.postMessage({ type: 'private-media-token', token }, [channel.port2])
   })))
+}
+
+async function bootstrapMediaSession(path: string) {
+  const familyId = /^\/api\/v1\/families\/([0-9a-f-]{36})\/media\//i.exec(path)?.[1]
+  if (!familyId || !currentAccessToken) return false
+  try {
+    const response = await fetch(`/api/v1/families/${familyId}/media/playback-session`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${currentAccessToken}` },
+      credentials: 'include',
+    })
+    return response.ok
+  } catch {
+    return false
+  }
 }

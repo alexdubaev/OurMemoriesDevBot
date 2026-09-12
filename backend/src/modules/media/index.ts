@@ -9,7 +9,7 @@ import { pipeline } from 'node:stream/promises'
 import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
 import type { PrivateStorage } from '../../storage'
-import type { AuthHttpEnv } from '../auth'
+import type { AuthenticatedPrincipal, AuthHttpEnv } from '../auth'
 import type { FamilyAccess } from '../families'
 import { MediaService } from './application/media-service'
 export { MediaFailure } from './domain/errors'
@@ -21,9 +21,10 @@ import { prepareMedia } from './infrastructure/media-processor'
 import { createMediaRoutes } from './transport/routes'
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
+  authenticateMediaAccess: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>
   requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage }) {
   const service = createMediaService(options)
-  return { routes: createMediaRoutes({ requireAuth: options.requireAuth, service }), service }
+  return { routes: createMediaRoutes({ authenticateMediaAccess: options.authenticateMediaAccess, cookieSecure: options.env.COOKIE_SECURE, requireAuth: options.requireAuth, service }), service }
 }
 
 export function createMediaService(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;

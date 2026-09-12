@@ -71,7 +71,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
   })
   const media = createMediaModule({ db: prisma, env, familyAccess: families.access,
-    requireAuth: auth.requireAuth, storage: storage.storage })
+    authenticateMediaAccess: auth.authenticateMediaAccess, requireAuth: auth.requireAuth, storage: storage.storage })
   const memories = createMemoriesModule({
     db: prisma,
     idempotencyExecutor,

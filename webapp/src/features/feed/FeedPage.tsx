@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { privateMediaSource } from '@/platform/media/private-media-access'
+import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
 import { EmptyState, FeedShell, FeedSkeleton, InlineError, MemoryCardFrame, type FeedFilter } from './components'
@@ -174,7 +175,7 @@ function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoInde
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} hostBridge={hostBridge} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} transport={transport} />
-  if (attachment.kind === 'voice') return <AudioPlayer path={attachment.playbackPath} waveform={attachment.waveform} />
+  if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
   return <PrivateVideo path={attachment.playbackPath} />
 }
 
@@ -214,15 +215,16 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   }} type="button"><img alt="Воспоминание" className="aspect-[4/3] w-full object-cover" height={attachment.height ?? undefined} src={url} width={attachment.width ?? undefined} /></button>
 }
 
-function AudioPlayer({ path, waveform }: { path: string | null; waveform: number[] | null }) {
+function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
   const url = usePrivateMediaSource(path)
   const audio = useRef<HTMLAudioElement | null>(null)
   const activate = usePlaybackRegistration(`audio:${path ?? 'missing'}`, audio)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
-  const [duration, setDuration] = useState(0)
-  return <div className="p-4"><audio onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} preload="none" ref={audio} src={url ?? undefined} />
-    <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => void (async () => { const element = audio.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography></div>
+  const [duration, setDuration] = useState(() => durationMs ? durationMs / 1_000 : 0)
+  const updateDuration = (element: HTMLAudioElement) => { if (Number.isFinite(element.duration) && element.duration >= 0) setDuration(element.duration) }
+  return <div className="p-4"><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} preload="none" ref={audio} src={url ?? undefined} />
+    <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => void (async () => { const element = audio.current; if (!element) return; setPlaying(await toggleMediaPlayback(element)) })()} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography></div>
     <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position }} waveform={waveform} />
   </div>
 }

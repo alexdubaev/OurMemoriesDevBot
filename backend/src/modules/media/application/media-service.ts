@@ -226,6 +226,10 @@ export class MediaService {
     return { ...object, body: stored.body, range }
   }
 
+  async authorizePlaybackSession(scope: FamilyScope) {
+    await this.access.requireMember(scope)
+  }
+
   async assertReadyForMemory(scope: FamilyScope, mediaIds: string[]) {
     if (!(await this.repository.readyForMemory(scope, mediaIds))) {
       throw new MediaFailure('not_found', 'Медиа недоступно для публикации')

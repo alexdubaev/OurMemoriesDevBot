@@ -67,6 +67,10 @@ test('a prepared voice renders every measured waveform peak', () => {
   expect(markup.match(/data-waveform-peak=/g)).toHaveLength(48)
 })
 
+test('a prepared voice displays its DTO duration before audio metadata loads', () => {
+  expect(renderFeed(feedClient())).toContain('0:00 / 0:12')
+})
+
 test('overlapping keyset pages render one card per memory id', () => {
   const queryClient = feedClient()
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
