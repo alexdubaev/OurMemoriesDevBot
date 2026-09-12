@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -9,6 +9,7 @@ import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
 import { AuthContext } from '@/features/auth'
 import { BootPreloader } from '@/features/app/BootPreloader'
 import { decideStartupRoute } from '@/features/app/startup-routing'
+import { shouldKeepTelegramAuthPreloader, shouldStartTelegramAuth } from '@/features/app/telegram-auth-handoff'
 import {
   acceptInvite,
   createFamilyBootstrap,
@@ -33,15 +34,31 @@ export default function App({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
   const telegramAttempted = useRef(false)
   const [telegramError, setTelegramError] = useState<Error | null>(null)
+  const [hasStartedTelegramAuth, setHasStartedTelegramAuth] = useState(false)
+  const [isTelegramAuthPending, setIsTelegramAuthPending] = useState(false)
+  const initData = hostBridge.initData()
+  const telegramAuthState = useMemo(() => auth ? {
+    hasStartedTelegramAuth,
+    hasInitData: Boolean(initData),
+    isAuthenticated: auth.isAuthenticated,
+    isAuthBootstrapping: auth.isBootstrapping,
+    isTelegramAuthPending,
+    isTelegramAvailable: hostBridge.isAvailable,
+  } : null, [auth, hasStartedTelegramAuth, initData, isTelegramAuthPending, hostBridge.isAvailable])
 
   useEffect(() => {
-    const initData = hostBridge.initData()
-    if (!auth || !hostBridge.isAvailable || auth.isBootstrapping || auth.isAuthenticated || !initData || telegramAttempted.current) return
+    if (!auth || !initData || !shouldStartTelegramAuth(telegramAuthState!)) return
     telegramAttempted.current = true
-    void auth.authenticateTelegram(initData).catch((error: unknown) => {
-      setTelegramError(error instanceof Error ? error : new Error('Не удалось войти через Telegram.'))
+    queueMicrotask(() => {
+      setHasStartedTelegramAuth(true)
+      setIsTelegramAuthPending(true)
+      void auth.authenticateTelegram(initData)
+        .catch((error: unknown) => {
+          setTelegramError(error instanceof Error ? error : new Error('Не удалось войти через Telegram.'))
+        })
+        .finally(() => setIsTelegramAuthPending(false))
     })
-  }, [auth, hostBridge])
+  }, [auth, hostBridge, initData, telegramAuthState])
 
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
@@ -52,7 +69,7 @@ export default function App({ hostBridge }: AppProps) {
     '--host-inset-right': `${insets.right}px`,
     '--host-inset-top': `${insets.top}px`,
   } as CSSProperties
-  if (!auth || auth.isBootstrapping) return <BootPreloader style={style} />
+  if (!auth || auth.isBootstrapping || (telegramAuthState && shouldKeepTelegramAuthPreloader(telegramAuthState))) return <BootPreloader style={style} />
   if (!auth.user) {
     return (
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
@@ -60,6 +77,8 @@ export default function App({ hostBridge }: AppProps) {
         <div className="mt-8"><InlineError onRetry={() => {
           telegramAttempted.current = false
           setTelegramError(null)
+          setHasStartedTelegramAuth(false)
+          setIsTelegramAuthPending(false)
           void auth.retrySession()
         }} /></div>
         {telegramError ? <Typography className="mt-3" tone="muted" variant="memoryMeta">Проверьте соединение и повторите попытку.</Typography> : null}
