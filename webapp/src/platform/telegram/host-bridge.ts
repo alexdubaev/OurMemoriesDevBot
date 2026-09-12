@@ -44,6 +44,7 @@ type TelegramWebApp = {
 type BrowserHost = {
   Telegram?: unknown
   history?: { back?: unknown }
+  location?: { search?: unknown }
 }
 
 const botUrl = 'https://t.me/OurMemoriesDevBot'
@@ -63,7 +64,7 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
       ? webApp.initData
       : null,
-    inviteToken: () => inviteTokenFromInitData(webApp?.initData),
+    inviteToken: () => inviteTokenFromInitData(webApp?.initData) ?? inviteTokenFromSearch(browserHost?.location?.search),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -113,7 +114,7 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     },
     openInvite: (rawToken) => {
       if (typeof webApp?.openTelegramLink === 'function') {
-        webApp.openTelegramLink(`${botUrl}?startapp=invite_${encodeURIComponent(rawToken)}`)
+        webApp.openTelegramLink(`${botUrl}?start=invite_${encodeURIComponent(rawToken)}`)
       }
     },
     getInsets: () => normalizedInsets(webApp),
@@ -185,9 +186,18 @@ function finiteNumber(value: unknown) {
 function inviteTokenFromInitData(initData: unknown) {
   if (typeof initData !== 'string' || initData.length === 0) return null
   const startParam = new URLSearchParams(initData).get('start_param')
+  return inviteTokenFromStartParam(startParam)
+}
+
+function inviteTokenFromSearch(search: unknown) {
+  if (typeof search !== 'string') return null
+  return inviteTokenFromStartParam(new URLSearchParams(search).get('tgWebAppStartParam'))
+}
+
+function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
-  return /^[A-Za-z0-9_-]{32,128}$/.test(token) ? token : null
+  return /^[A-Za-z0-9_-]{32,57}$/.test(token) ? token : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

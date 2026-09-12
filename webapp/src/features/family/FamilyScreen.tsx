@@ -120,7 +120,7 @@ export function FamilyScreen({
                   role: inviteRole,
                   inviteeDisplayName: inviteAlias || undefined,
                 })
-                setInviteReady({ url: `https://t.me/OurMemoriesDevBot?startapp=invite_${invitation.rawToken}`, expiresAt: invitation.expiresAt })
+                setInviteReady({ url: `https://t.me/OurMemoriesDevBot?start=invite_${invitation.rawToken}`, expiresAt: invitation.expiresAt })
                 setInviteAlias('')
                 setInviteRole('viewer')
               })} type="button">

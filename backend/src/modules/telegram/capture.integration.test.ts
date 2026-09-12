@@ -37,6 +37,7 @@ maybeDescribe('Telegram durable capture', () => {
     DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
     CORS_ORIGINS: 'http://localhost:5173', AUTH_RATE_LIMIT_MAX: '10000',
     TELEGRAM_BOT_TOKEN: '123456:synthetic-only', TELEGRAM_INBOX_ENCRYPTION_KEY: key,
+    TELEGRAM_MINI_APP_URL: 'https://app.example.test',
     PRIVATE_STORAGE_DRIVER: 'filesystem', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot,
     PRIVATE_STORAGE_LOCAL_PUBLIC_URL: 'http://localhost:4000', MEDIA_FAMILY_QUOTA_BYTES: '10000000',
   })
@@ -129,6 +130,16 @@ maybeDescribe('Telegram durable capture', () => {
     await process(commandTask.payload)
     expect(await prisma.memory.count()).toBe(1)
     expect(sent.at(-1)?.text).toContain('заметки, фото, видео и голосовые')
+
+    await accept(command(103, 13, owner.subject, `/start invite_${'a'.repeat(43)}`))
+    const inviteInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 103n } })
+    const inviteTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inviteInbox.id}` } })
+    await process(inviteTask.payload)
+    expect(sent.at(-1)).toEqual({
+      chatId: owner.subject,
+      text: 'Откройте приглашение в Mini App, чтобы присоединиться к семейной ленте.',
+      options: { buttons: [{ text: 'Открыть приглашение', webAppUrl: `https://app.example.test/?tgWebAppStartParam=invite_${'a'.repeat(43)}` }] },
+    })
   })
 
   test('stores a captioned photo through private Media before publishing its receipt', async () => {

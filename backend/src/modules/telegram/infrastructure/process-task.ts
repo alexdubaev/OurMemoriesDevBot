@@ -68,8 +68,9 @@ async function processInbox(
         return
       }
     }
+    const inviteToken = event.command === 'start' ? inviteTokenFromStartArgument(event.argument) : null
     const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
-    await api.sendMessage(event.chatId, commandText(event.command, cancelled), commandButtons(env, event.command, event.argument))
+    await api.sendMessage(event.chatId, commandText(event.command, cancelled, inviteToken !== null), commandButtons(env, event.command, inviteToken))
   } else if (event.kind === 'caption_reply') {
     await consumeCaptionReply(db, api, event)
   } else {
@@ -572,7 +573,8 @@ async function sendAlbumReceipt(
   await db.telegramSource.updateMany({ where, data: { receiptSentAt: new Date() } })
 }
 
-function commandText(command: string, cancelled = false) {
+function commandText(command: string, cancelled = false, inviteStart = false) {
+  if (command === 'start' && inviteStart) return 'Откройте приглашение в Mini App, чтобы присоединиться к семейной ленте.'
   if (command === 'start') return 'Отправьте сюда заметку, фото, видео или голосовое — материал автоматически сохранится в семейную ленту. Данные ребёнка заполняются в Mini App.'
   if (command === 'help') return 'Поддерживаются заметки, фото, видео и голосовые до 20 МБ. Подпись можно добавить в Mini App; удалить запись тоже можно там.'
   if (command === 'privacy') return 'Бот принимает материалы только в личном чате. Групповые сообщения не сохраняются и не анализируются.'
@@ -581,12 +583,23 @@ function commandText(command: string, cancelled = false) {
   return 'Неизвестная команда. Используйте /help.'
 }
 
-function commandButtons(env: AppEnv, command: string, argument: string) {
+function commandButtons(env: AppEnv, command: string, inviteToken: string | null) {
   if (!env.TELEGRAM_MINI_APP_URL || !['start', 'app'].includes(command)) return undefined
-  const url = command === 'start' && argument
-    ? `https://t.me/OurMemoriesDevBot?startapp=invite_${encodeURIComponent(argument)}`
+  const url = command === 'start' && inviteToken
+    ? inviteMiniAppUrl(env.TELEGRAM_MINI_APP_URL, inviteToken)
     : env.TELEGRAM_MINI_APP_URL
-  return { buttons: [{ text: command === 'start' && argument ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
+  return { buttons: [{ text: command === 'start' && inviteToken ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
+}
+
+function inviteMiniAppUrl(miniAppUrl: string, rawToken: string) {
+  const url = new URL(miniAppUrl)
+  url.searchParams.set('tgWebAppStartParam', `invite_${rawToken}`)
+  return url.toString()
+}
+
+function inviteTokenFromStartArgument(argument: string) {
+  const match = /^invite_([A-Za-z0-9_-]{32,57})$/.exec(argument)
+  return match?.[1] ?? null
 }
 
 function openButton(env: AppEnv, memoryId?: string) {

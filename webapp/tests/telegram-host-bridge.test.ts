@@ -104,7 +104,7 @@ describe('Telegram HostBridge', () => {
     expect(backCalls).toBe(1)
     expect(openedLinks).toEqual([
       'https://t.me/OurMemoriesDevBot',
-      'https://t.me/OurMemoriesDevBot?startapp=invite_opaque-token_1',
+      'https://t.me/OurMemoriesDevBot?start=invite_opaque-token_1',
       'https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF',
     ])
   })
@@ -114,6 +114,21 @@ describe('Telegram HostBridge', () => {
       Telegram: { WebApp: { initData: 'query_id=signed&start_param=invite_abcdefghijklmnopqrstuvwxyzABCDEF' } },
     })
     expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
+  })
+
+  test('reads an opaque start context passed to a Mini App button URL', () => {
+    const bridge = createTelegramHostBridge({
+      location: { search: '?tgWebAppStartParam=invite_abcdefghijklmnopqrstuvwxyzABCDEF' },
+      Telegram: { WebApp: { initData: 'query_id=signed' } },
+    })
+    expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
+  })
+
+  test('rejects a start payload that exceeds Telegram bot deep-link limits', () => {
+    const bridge = createTelegramHostBridge({
+      Telegram: { WebApp: { initData: `query_id=signed&start_param=invite_${'a'.repeat(58)}` } },
+    })
+    expect(bridge.inviteToken()).toBeNull()
   })
 
   test('provides a safe browser-dev adapter without inventing Telegram authentication', () => {
