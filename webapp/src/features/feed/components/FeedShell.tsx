@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode, Ref } from 'react'
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
-import { AvatarLetter } from '@/features/session'
+import { ChildAvatar } from '@/features/family'
 import { cn } from '@/lib/utils'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 
@@ -22,6 +22,8 @@ export type FeedShellProps = {
   addButtonRef?: Ref<HTMLButtonElement>
   childName: string
   childSubtitle: string
+  childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
+  childAvatarUrl?: string | null
   children: ReactNode
   insets: TelegramInsets
   onAdd?: () => void
@@ -37,6 +39,8 @@ export function FeedShell({
   addButtonRef,
   childName,
   childSubtitle,
+  childAvatarCrop = null,
+  childAvatarUrl = null,
   children,
   insets,
   onAdd,
@@ -74,7 +78,7 @@ export function FeedShell({
             </button>
           </div>
           <div className="mt-3 flex min-w-0 items-center gap-2.5" data-slot="child-profile">
-            <AvatarLetter name={childName} />
+            <ChildAvatar avatarCrop={childAvatarCrop} avatarUrl={childAvatarUrl} name={childName} size="feed-header" />
             <div className="min-w-0 flex-1">
               <Typography
                 className="line-clamp-2 break-words"

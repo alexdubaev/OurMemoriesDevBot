@@ -9,6 +9,8 @@ import { InlineError } from '@/features/feed'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
 import { formatChildAge, familyMemberName, roleLabel } from './model'
+import { ChildAvatar } from './ChildAvatar'
+import { useChildAvatar } from './useChildAvatar'
 
 export function FamilyScreen({
   familyResponse,
@@ -192,7 +194,7 @@ function ChildCard({ avatarUrl, child, onEdit, timezone }: { avatarUrl: string |
   const age = child.birthDate ? formatChildAge(child.birthDate, timezone) : null
   return (
     <section className="mt-5 flex items-center gap-3 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" aria-label="Профиль ребёнка">
-      {avatarUrl ? <img alt={`Аватар ${child.name}`} className="size-11 rounded-full object-cover" src={avatarUrl} style={child.avatarCrop ? { objectPosition: `${(child.avatarCrop.x + child.avatarCrop.width / 2) * 100}% ${(child.avatarCrop.y + child.avatarCrop.height / 2) * 100}%`, transform: `scale(${1 / Math.min(child.avatarCrop.width, child.avatarCrop.height)})` } : undefined} /> : <AvatarLetter name={child.name} />}
+      <ChildAvatar avatarCrop={child.avatarCrop} avatarUrl={avatarUrl} name={child.name} size="family-card" />
       <div className="min-w-0">
         <Typography className="truncate" variant="memoryChild">{child.name}</Typography>
         <Typography tone="muted" variant="memoryMeta">{age ?? 'Профиль ребёнка'}{child.birthDate ? ` · ${child.birthDate}` : ''}</Typography>
@@ -200,28 +202,6 @@ function ChildCard({ avatarUrl, child, onEdit, timezone }: { avatarUrl: string |
       {onEdit ? <Button className="ml-auto" onClick={onEdit} type="button" variant="ghost"><Typography variant="memoryMeta">Изменить</Typography></Button> : null}
     </section>
   )
-}
-
-function useChildAvatar(transport: AuthenticatedTransport, familyId: string, mediaId: string | null) {
-  const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(null)
-  useEffect(() => {
-    if (!mediaId) return
-    let cancelled = false
-    let objectUrl: string | null = null
-    void transport.raw(
-      `/api/v1/families/${encodeURIComponent(familyId)}/media/${encodeURIComponent(mediaId)}/content?variant=display`,
-    ).then(async (response) => {
-      if (!response.ok) return
-      objectUrl = URL.createObjectURL(await response.blob())
-      if (cancelled) return
-      setLoaded({ key: mediaId, url: objectUrl })
-    }).catch(() => undefined)
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [familyId, mediaId, transport])
-  return mediaId && loaded?.key === mediaId ? loaded.url : null
 }
 
 function MemberCard({

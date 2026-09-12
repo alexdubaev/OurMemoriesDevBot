@@ -29,10 +29,13 @@ import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app/startup-routing'
+import { useChildAvatar } from '@/features/family'
 
 type Props = {
   childName: string
   childSubtitle: string
+  childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
+  childAvatarMediaId?: string | null
   familyId: string
   familyTimezone: string
   filter: FeedFilter
@@ -47,10 +50,11 @@ type Props = {
 }
 
 export function FeedPage({
-  childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
+  childAvatarCrop = null, childAvatarMediaId = null, childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
   isAppBootstrapped = true, onAccessLost, onFilterChange, role, transport,
 }: Props) {
   const queryClient = useQueryClient()
+  const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
   const feed = useFeedQuery(transport, familyId, filter)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
@@ -119,7 +123,7 @@ export function FeedPage({
 
   return (
     <MediaPlaybackCoordinator>
-    <FeedShell activeFilter={filter} childName={childName} childSubtitle={childSubtitle} insets={insets}
+    <FeedShell activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
       {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
