@@ -12,3 +12,10 @@ test('fails closed when the local API is unavailable', () => {
   expect(result.status).toBe(1)
   expect(`${result.stdout}${result.stderr}`).toContain('API unavailable')
 })
+
+test('keeps a non-zero API stability window in the default acceptance gate', async () => {
+  const source = await Bun.file(resolve(import.meta.dirname, 'dev-acceptance-check.mjs')).text()
+
+  expect(source).toContain("ACCEPTANCE_STABILITY_MS ?? '15000'")
+  expect(source).toContain("await requireResponse('API after stability window'")
+})

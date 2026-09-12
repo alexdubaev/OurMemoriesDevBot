@@ -7,6 +7,7 @@ const repositoryRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..
 const apiUrl = process.env.ACCEPTANCE_API_URL ?? 'http://127.0.0.1:3000'
 const viteUrl = process.env.ACCEPTANCE_VITE_URL ?? 'http://127.0.0.1:5173'
 const funnelUrl = process.env.ACCEPTANCE_FUNNEL_URL ?? 'https://desktop-7sch55t.tail879033.ts.net'
+const stabilityMs = Number.parseInt(process.env.ACCEPTANCE_STABILITY_MS ?? '15000', 10)
 
 async function requireResponse(label, url, expectedStatus, json = false) {
   let response
@@ -61,6 +62,10 @@ async function main() {
   await requireResponse('Funnel root', `${funnelUrl}/`, 200)
   await requireResponse('Funnel API auth boundary', `${funnelUrl}/api/users/me`, 401, true)
   requireCurrentMigrations()
+  await requireDevProcesses()
+  await new Promise((resolveSleep) => setTimeout(resolveSleep, Number.isFinite(stabilityMs) && stabilityMs > 0 ? stabilityMs : 15_000))
+  await requireResponse('API after stability window', `${apiUrl}/health/ready`, 200, true)
+  await requireResponse('Funnel API after stability window', `${funnelUrl}/api/users/me`, 401, true)
   await requireDevProcesses()
   console.log('acceptance preflight passed')
 }
