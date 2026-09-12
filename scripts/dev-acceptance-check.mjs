@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { assertDevRuntimeProcesses } from './dev-runtime-processes.mjs'
+
 const repositoryRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const apiUrl = process.env.ACCEPTANCE_API_URL ?? 'http://127.0.0.1:3000'
 const viteUrl = process.env.ACCEPTANCE_VITE_URL ?? 'http://127.0.0.1:5173'
@@ -37,19 +39,19 @@ async function requireDevProcesses() {
   if (process.platform !== 'win32') throw new Error('runtime process inspection is supported by this local Windows preflight only')
   const result = spawnSync('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-Command',
-    'Get-CimInstance Win32_Process | Where-Object { $_.Name -notmatch "powershell|pwsh|cmd" } | Select-Object -ExpandProperty CommandLine',
+    "$processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -notmatch 'powershell|pwsh|cmd' } | Select-Object @{n='processId';e={$_.ProcessId}}, @{n='parentProcessId';e={$_.ParentProcessId}}, @{n='commandLine';e={$_.CommandLine}}); $apiListenerProcessIds = @(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); [PSCustomObject]@{ processes = $processes; apiListenerProcessIds = $apiListenerProcessIds } | ConvertTo-Json -Compress -Depth 3",
   ], { encoding: 'utf8' })
   if (result.status !== 0) throw new Error('cannot inspect runtime processes')
-  const lines = result.stdout.split(/\r?\n/)
-  const count = (pattern) => lines.filter((line) => pattern.test(line)).length
-  for (const [name, pattern] of [
-    ['API', /src[\\/]+index\.ts/i],
-    ['scheduler', /src[\\/]+scheduler\.ts/i],
-    ['Vite', /node_modules\\\.bin\\vite\.exe/i],
-  ]) {
-    const matches = count(pattern)
-    if (matches !== 1) throw new Error(`${name} process count is ${matches}, expected 1`)
-  }
+  const snapshot = JSON.parse(result.stdout)
+  const processes = Array.isArray(snapshot.processes) ? snapshot.processes : [snapshot.processes].filter(Boolean)
+  const viteProcessCount = processes.filter((process) => /node_modules[\\/]+\.bin[\\/]vite\.exe/i.test(process.commandLine ?? '')).length
+  assertDevRuntimeProcesses({
+    processes,
+    apiListenerProcessIds: Array.isArray(snapshot.apiListenerProcessIds)
+      ? snapshot.apiListenerProcessIds
+      : [snapshot.apiListenerProcessIds].filter((processId) => typeof processId === 'number'),
+    viteProcessCount,
+  })
   const envFile = await readFile(resolve(repositoryRoot, 'backend/.env'), 'utf8')
   if (!/^TELEGRAM_BOT_MODE="?polling"?\s*$/m.test(envFile) || !/^TELEGRAM_BOT_TOKEN="?\S+/m.test(envFile)) {
     throw new Error('bot polling is not configured for the checked API')
