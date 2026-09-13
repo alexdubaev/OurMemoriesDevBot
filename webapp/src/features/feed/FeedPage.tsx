@@ -260,7 +260,7 @@ export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOp
   onOpen?: () => void; disabled?: boolean; busy?: boolean
 }) {
   const aspectRatio = videoPosterAspectRatio(width, height)
-  return <button aria-label="Смотреть видео в Telegram" className="relative block w-full overflow-hidden bg-muted text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-60" disabled={disabled} onClick={onOpen} style={{ aspectRatio }} type="button">
+  return <button aria-label="Смотреть видео в Telegram" className="relative isolate block w-full overflow-hidden bg-muted text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-60" disabled={disabled} onClick={onOpen} style={{ aspectRatio }} type="button">
     {posterUrl
       ? <img alt="Кадр видео" className="size-full object-cover" src={posterUrl} />
       : <span className="absolute inset-0 flex items-center justify-center"><Typography as="span" tone="muted" variant="memoryBody">Видео</Typography></span>}

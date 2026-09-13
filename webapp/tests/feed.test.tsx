@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
+import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
@@ -93,6 +94,24 @@ test('a Telegram video poster renders a protected image and its duration', () =>
   expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
   expect(markup).toContain('data-slot="telegram-video-play-control"')
   expect(markup).not.toMatch(/<(?:video|audio)\b/)
+})
+
+test('a Telegram video poster keeps its overlays in a local stacking context below bottom navigation', () => {
+  const poster = renderToStaticMarkup(createElement(TelegramVideoPoster, {
+    durationMs: 24_000,
+    posterUrl: 'blob:private-telegram-video-poster',
+    width: 1_920,
+    height: 1_080,
+  }))
+  const navigation = renderToStaticMarkup(createElement(BottomNavigation, {
+    active: 'feed',
+    onFamily: () => undefined,
+    onFeed: () => undefined,
+    role: 'full',
+  }))
+
+  expect(poster).toContain('isolate')
+  expect(navigation).toContain('z-30')
 })
 
 test('a Telegram video handoff opens the verified link before closing the Mini App', async () => {

@@ -24,7 +24,7 @@ export function BottomNavigation({
   return (
     <nav
       aria-label="Основная навигация"
-      className="fixed inset-x-0 bottom-0 border-t bg-card pb-[var(--host-inset-bottom)]"
+      className="fixed inset-x-0 bottom-0 z-30 border-t bg-card pb-[var(--host-inset-bottom)]"
       data-slot="bottom-navigation"
     >
       <div className="mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-3 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]">
