@@ -8,6 +8,7 @@ import { Typography } from '@/components/typography'
 import { InlineError } from '@/features/feed'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
+import { createInviteLink } from './invite-link'
 import { formatChildAge, familyMemberName, roleLabel } from './model'
 import { ChildAvatar } from './ChildAvatar'
 import { useChildAvatar } from './useChildAvatar'
@@ -120,7 +121,7 @@ export function FamilyScreen({
                   role: inviteRole,
                   inviteeDisplayName: inviteAlias || undefined,
                 })
-                setInviteReady({ url: `https://t.me/OurMemoriesDevBot?start=invite_${invitation.rawToken}`, expiresAt: invitation.expiresAt })
+                setInviteReady({ url: createInviteLink(invitation.rawToken), expiresAt: invitation.expiresAt })
                 setInviteAlias('')
                 setInviteRole('viewer')
               })} type="button">
