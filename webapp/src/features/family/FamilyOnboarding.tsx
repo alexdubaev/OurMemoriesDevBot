@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
-import { InlineError } from '@/features/feed'
 import { resolveAvatarContentType } from '@/features/avatar'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { completeChildProfile, uploadChildAvatar } from './api'
@@ -10,6 +10,7 @@ import {
   familyCalendarDate,
   formatChildAge,
   isBirthDateOnOrBeforeFamilyToday,
+  onboardingSaveErrorMessage,
 } from './model'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
@@ -41,6 +42,7 @@ export function FamilyOnboarding({
   const [zoom, setZoom] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [aspect, setAspect] = useState(1)
+  const [cropImageLoaded, setCropImageLoaded] = useState(false)
   const [confirmedCrop, setConfirmedCrop] = useState<Crop>(
     initialChild?.avatarCrop ?? { x: 0, y: 0, width: 1, height: 1 },
   )
@@ -98,6 +100,7 @@ export function FamilyOnboarding({
     }
     setCropFile(next)
     setCropPreviewUrl(URL.createObjectURL(next))
+    setCropImageLoaded(false)
     setZoom(1)
     setPosition({ x: 0, y: 0 })
     setAspect(1)
@@ -162,7 +165,7 @@ export function FamilyOnboarding({
 
   return (
     <main className="mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]">
-      <Typography variant="memoryScreen">Наши воспоминания</Typography>
+      <BrandLogo className="w-[148px]" />
       <section aria-labelledby="child-onboarding-title" className="mx-auto mt-6 w-full max-w-md pb-10">
         <Typography id="child-onboarding-title" variant="memoryHero">{initialChild ? 'Профиль ребёнка' : 'Расскажите о ребёнке'}</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">
@@ -198,7 +201,10 @@ export function FamilyOnboarding({
               <img
                 alt="Предпросмотр кадрирования"
                 className="size-full object-cover"
-                onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)}
+                onLoad={(event) => {
+                  setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)
+                  setCropImageLoaded(true)
+                }}
                 src={cropPreviewUrl}
                 style={cropStyle(crop)}
               />
@@ -214,7 +220,7 @@ export function FamilyOnboarding({
               <Button onClick={() => moveCrop(0, 0.05)} type="button" variant="ghost"><Typography variant="memoryMeta">Сдвинуть вниз</Typography></Button>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать фото</Typography></Button>
+              <Button disabled={!cropImageLoaded} onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать фото</Typography></Button>
               <Button onClick={cancelCrop} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button>
             </div>
           </section>
@@ -257,7 +263,10 @@ export function FamilyOnboarding({
         </fieldset>
         <FieldError message={formErrors.sex} />
 
-        {requestError ? <div className="mt-5"><InlineError onRetry={() => void submit()} /></div> : null}
+        {requestError ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
+          <Typography variant="memoryBody">{onboardingSaveErrorMessage}</Typography>
+          <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button>
+        </section> : null}
         <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>

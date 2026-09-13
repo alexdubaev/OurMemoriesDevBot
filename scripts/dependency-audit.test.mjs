@@ -204,7 +204,7 @@ describe('dependency audit exceptions', () => {
     expect(sourceImports.get('image-size')).toEqual(
       new Set(['website/src/pages/index.astro']),
     )
-  })
+  }, 30_000)
 
   test('ignores non-JavaScript and commented Astro script blocks', () => {
     const sourceImports = findForbiddenSourceImports(

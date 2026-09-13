@@ -16,11 +16,6 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
   constructor(private readonly db: DbClient) {}
 
   async findAdmission(senderSubject: string): Promise<TelegramAdmission> {
-    const admitted = await this.db.pilotAdmission.findUnique({
-      where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
-      select: { revokedAt: true },
-    })
-    if (!admitted || admitted.revokedAt) return null
     const identity = await this.db.externalIdentity.findUnique({
       where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
       select: {
@@ -47,7 +42,7 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
     return { userId: identity.user.id, familyId: membership.familyId, childId: child.id, role: membership.role }
   }
 
-  async accept({ botId, event, encrypted, admission, now }: Parameters<TelegramAcceptRepository['accept']>[0]): Promise<AcceptedTelegramUpdate> {
+  async accept({ botId, event, encrypted, admission, now, queueInboxTask = true }: Parameters<TelegramAcceptRepository['accept']>[0]): Promise<AcceptedTelegramUpdate> {
     return this.db.$transaction(async (tx) => {
       const inboxId = randomUUID()
       const insertedInbox = await tx.telegramInbox.createMany({
@@ -71,7 +66,7 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
       }
 
       if (event.kind === 'command' || event.kind === 'denied_content' || event.kind === 'caption_reply') {
-        await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
+        if (queueInboxTask) await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
         return { inboxId, duplicate: false }
       }
       if (!isContent(event) || !admission || admission.role !== 'full') {
@@ -93,7 +88,9 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
           kind: event.kind === 'note' ? 'note' : event.mediaKind,
           mediaGroupId: event.kind === 'media' ? event.mediaGroupId : null,
           plannedMemoryId: randomUUID(),
-          plannedMediaId: event.kind === 'media' ? randomUUID() : null,
+          // The video itself remains a Telegram-only reference. A supplied Telegram thumbnail is
+          // the sole derived object we keep, using this stable id to make retries idempotent.
+          plannedMediaId: event.kind === 'media' && (event.mediaKind !== 'video' || event.thumbnail) ? randomUUID() : null,
           createdAt: now,
         }],
         skipDuplicates: true,

@@ -1,6 +1,6 @@
 import { Api } from 'grammy'
 
-import type { TelegramApiPort, TelegramDownload } from '../application/ports'
+import { TelegramMessageAlreadyAbsentError, TelegramReplyTargetMissingError, type TelegramApiPort, type TelegramDownload } from '../application/ports'
 
 export class TelegramProviderError extends Error {
   constructor(message: string, readonly retryAfterSeconds?: number) {
@@ -53,6 +53,23 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
         })
         return { messageId: String(result.message_id) }
       } catch (error) {
+        if (options?.replyToMessageId && isMissingReplyTarget(error)) throw new TelegramReplyTargetMissingError()
+        throw telegramProviderFailure(error)
+      }
+    },
+    async sendVideo(chatId, fileId) {
+      try {
+        const result = await api.sendVideo(chatId, fileId)
+        return { messageId: String(result.message_id) }
+      } catch (error) {
+        throw telegramProviderFailure(error)
+      }
+    },
+    async deleteMessage(chatId, messageId) {
+      try {
+        await api.deleteMessage(chatId, Number(messageId))
+      } catch (error) {
+        if (isAbsentTelegramMessage(error)) throw new TelegramMessageAlreadyAbsentError()
         throw telegramProviderFailure(error)
       }
     },
@@ -90,6 +107,18 @@ function readRetryAfter(error: unknown): number | undefined {
   if (typeof parameters !== 'object' || parameters === null || !('retry_after' in parameters)) return undefined
   const value = (parameters as { retry_after?: unknown }).retry_after
   return typeof value === 'number' && value > 0 ? value : undefined
+}
+
+function isAbsentTelegramMessage(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+  const description = 'description' in error ? (error as { description?: unknown }).description : undefined
+  return typeof description === 'string' && /message to delete not found|message can't be deleted/i.test(description)
+}
+
+function isMissingReplyTarget(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+  const description = 'description' in error ? (error as { description?: unknown }).description : undefined
+  return typeof description === 'string' && /replied message not found|reply message not found|message to be replied not found/i.test(description)
 }
 
 function limitStream(body: ReadableStream<Uint8Array>, limit: number) {

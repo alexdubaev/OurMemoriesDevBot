@@ -28,6 +28,7 @@ import {
 import { verifyTelegramInitData } from './infrastructure/telegram-init-data'
 import { verifyTelegramBotIdentity } from './infrastructure/telegram-bot-identity'
 import { createRequireAuth, createRequireRole, type AuthHttpEnv } from './transport/middleware'
+import { executeAuth } from './transport/errors'
 import { createLegacyAuthTestRoutes } from './transport/legacy-test-routes'
 import { createAuthRoutes } from './transport/routes'
 
@@ -63,6 +64,8 @@ export function createAuthModule({
   return {
     authenticateAccessToken: (accessToken: string | undefined) =>
       service.authenticateAccessToken(accessToken),
+    authenticateMediaAccess: (accessToken: string | undefined) =>
+      executeAuth(() => service.authenticateAccessToken(accessToken)),
     requireAuth,
     requireAdmin: createRequireRole('admin'),
     legacyTestRoutes: legacyPasswordAuthForTests

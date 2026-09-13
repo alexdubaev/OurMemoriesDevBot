@@ -209,6 +209,7 @@ export class PrismaMediaRepository implements MediaRepository {
         deletedAt: null,
         OR: [
           { purpose: 'memory', memories: { some: { memory: { status: 'published', deletedAt: null } } } },
+          { telegramVideoThumbnailFor: { memory: { status: 'published', deletedAt: null } } },
           { purpose: 'child_avatar', avatarForChildren: { some: { familyId: scope.familyId } } },
         ],
       },

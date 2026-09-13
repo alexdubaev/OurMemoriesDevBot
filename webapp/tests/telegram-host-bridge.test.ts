@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import {
   createBrowserDevHostBridge,
@@ -7,6 +9,55 @@ import {
 } from '../src/platform/telegram/host-bridge'
 
 describe('Telegram HostBridge', () => {
+  test('loads Telegram WebApp API before the React production bootstrap', () => {
+    const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
+    const html = readFileSync(indexPath, 'utf8')
+    const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
+    const reactBootstrap = '/src/main.tsx'
+
+    expect(html).toContain(`src="${telegramSdk}"`)
+    expect(html.indexOf(telegramSdk)).toBeLessThan(html.indexOf(reactBootstrap))
+  })
+
+  test('subscribes to Telegram BackButton without leaking stale callbacks', () => {
+    const handlers = new Set<() => void>()
+    let showCalls = 0
+    let hideCalls = 0
+    const bridge = createTelegramHostBridge({
+      Telegram: {
+        WebApp: {
+          BackButton: {
+            show: () => { showCalls += 1 },
+            hide: () => { hideCalls += 1 },
+            onClick: (handler: () => void) => { handlers.add(handler) },
+            offClick: (handler: () => void) => { handlers.delete(handler) },
+          },
+        },
+      },
+    })
+    let backCalls = 0
+
+    const unsubscribeFirst = bridge.onBack(() => { backCalls += 1 })
+    expect(showCalls).toBe(1)
+    expect(handlers.size).toBe(1)
+    handlers.forEach((handler) => handler())
+    expect(backCalls).toBe(1)
+
+    unsubscribeFirst()
+    unsubscribeFirst()
+    expect(hideCalls).toBe(1)
+    expect(handlers.size).toBe(0)
+    handlers.forEach((handler) => handler())
+    expect(backCalls).toBe(1)
+
+    const unsubscribeSecond = bridge.onBack(() => { backCalls += 1 })
+    expect(showCalls).toBe(2)
+    expect(handlers.size).toBe(1)
+    unsubscribeSecond()
+    expect(hideCalls).toBe(2)
+    expect(handlers.size).toBe(0)
+  })
+
   test('exposes verified-exchange input and only safe host metadata', () => {
     let readyCalls = 0
     let closeCalls = 0
@@ -46,12 +97,15 @@ describe('Telegram HostBridge', () => {
     bridge.back()
     bridge.openBot()
     bridge.openInvite('opaque-token_1')
+    expect(bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).toBe(true)
+    expect(bridge.openTelegramVideo('https://evil.example/?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).toBe(false)
     expect(readyCalls).toBe(1)
     expect(closeCalls).toBe(1)
     expect(backCalls).toBe(1)
     expect(openedLinks).toEqual([
       'https://t.me/OurMemoriesDevBot',
-      'https://t.me/OurMemoriesDevBot?startapp=invite_opaque-token_1',
+      'https://t.me/OurMemoriesDevBot?start=invite_opaque-token_1',
+      'https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF',
     ])
   })
 
@@ -60,6 +114,21 @@ describe('Telegram HostBridge', () => {
       Telegram: { WebApp: { initData: 'query_id=signed&start_param=invite_abcdefghijklmnopqrstuvwxyzABCDEF' } },
     })
     expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
+  })
+
+  test('reads an opaque start context passed to a Mini App button URL', () => {
+    const bridge = createTelegramHostBridge({
+      location: { search: '?tgWebAppStartParam=invite_abcdefghijklmnopqrstuvwxyzABCDEF' },
+      Telegram: { WebApp: { initData: 'query_id=signed' } },
+    })
+    expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
+  })
+
+  test('rejects a start payload that exceeds Telegram bot deep-link limits', () => {
+    const bridge = createTelegramHostBridge({
+      Telegram: { WebApp: { initData: `query_id=signed&start_param=invite_${'a'.repeat(58)}` } },
+    })
+    expect(bridge.inviteToken()).toBeNull()
   })
 
   test('provides a safe browser-dev adapter without inventing Telegram authentication', () => {
@@ -82,5 +151,6 @@ describe('Telegram HostBridge', () => {
     expect(() => bridge.back()).not.toThrow()
     expect(() => bridge.openBot()).not.toThrow()
     expect(() => bridge.openInvite('opaque-token')).not.toThrow()
+    expect(bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).toBe(false)
   })
 })

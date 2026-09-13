@@ -47,6 +47,9 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
         fileUniqueId: photo.file_unique_id as string,
         fileSize: isSafeInteger(photo.file_size) ? photo.file_size : null,
         contentType: 'image/jpeg',
+        width: isSafeInteger(photo.width) ? photo.width : null,
+        height: isSafeInteger(photo.height) ? photo.height : null,
+        durationMs: null,
         caption: typeof message.caption === 'string' ? message.caption : '',
         mediaGroupId: typeof message.media_group_id === 'string' ? message.media_group_id : null,
       }
@@ -60,6 +63,7 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
     const media = message[field]
     if (!isRecord(media) || typeof media.file_id !== 'string' ||
         typeof media.file_unique_id !== 'string') continue
+    const thumbnail = mediaKind === 'video' ? videoThumbnail(media.thumbnail) : undefined
     return {
       kind: 'media',
       ...identity,
@@ -68,12 +72,28 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
       fileUniqueId: media.file_unique_id,
       fileSize: isSafeInteger(media.file_size) ? media.file_size : null,
       contentType: typeof media.mime_type === 'string' ? media.mime_type : fallbackContentType,
+      width: isSafeInteger(media.width) ? media.width : null,
+      height: isSafeInteger(media.height) ? media.height : null,
+      durationMs: isSafeInteger(media.duration) ? media.duration * 1_000 : null,
+      ...(thumbnail ? { thumbnail } : {}),
       caption: typeof message.caption === 'string' ? message.caption : '',
       mediaGroupId: typeof message.media_group_id === 'string' ? message.media_group_id : null,
     }
   }
 
   return { kind: 'ignored', updateId }
+}
+
+function videoThumbnail(value: unknown) {
+  if (!isRecord(value) || typeof value.file_id !== 'string' || typeof value.file_unique_id !== 'string') return null
+  return {
+    fileId: value.file_id,
+    fileUniqueId: value.file_unique_id,
+    byteSize: isSafeInteger(value.file_size) ? value.file_size : null,
+    contentType: 'image/jpeg' as const,
+    width: isSafeInteger(value.width) ? value.width : null,
+    height: isSafeInteger(value.height) ? value.height : null,
+  }
 }
 
 function parseCommand(text: string): { command: TelegramCommand; argument: string } | null {

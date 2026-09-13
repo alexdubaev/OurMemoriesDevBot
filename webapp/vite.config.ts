@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const backendProxyTarget = process.env.VITE_API_URL ?? 'http://127.0.0.1:3000'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -41,5 +42,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
     dedupe: ['react', 'react-dom'],
+  },
+  server: {
+    allowedHosts: ['desktop-7sch55t.tail879033.ts.net'],
+    proxy: {
+      '/api': { target: backendProxyTarget, changeOrigin: true },
+      '/storage': { target: backendProxyTarget, changeOrigin: true },
+    },
   },
 })

@@ -10,6 +10,7 @@ import {
   memoryPageSchema,
   memoryParamsSchema,
   setLikeRequestSchema,
+  telegramVideoOpenResponseSchema,
   updateMemoryRequestSchema,
 } from '@web-app-demo/contracts'
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
@@ -19,6 +20,7 @@ import type { ZodType } from 'zod'
 import { validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
 import type { MemoryService } from '../application/memory-service'
+import type { TelegramVideoDeliveryService } from '../../telegram'
 import { executeMemory } from './errors'
 
 const bearerSecurity = [{ BearerAuth: [] }]
@@ -69,13 +71,20 @@ const likeRoute = createRoute({
   request: { params: memoryParamsSchema, body: { content: json(setLikeRequestSchema) } },
   responses: { ...errors, 200: { content: json(likeResponseSchema), description: 'Idempotent like state' } },
 })
+const telegramVideoRoute = createRoute({
+  method: 'post', path: '/families/{familyId}/memories/{memoryId}/telegram-video', security: bearerSecurity,
+  request: { params: memoryParamsSchema },
+  responses: { ...errors, 200: { content: json(telegramVideoOpenResponseSchema), description: 'Opaque Telegram navigation pointer' } },
+})
 
 export function createMemoryRoutes({
   requireAuth,
   service,
+  telegramVideoDelivery,
 }: {
   requireAuth: MiddlewareHandler<AuthHttpEnv>
   service: MemoryService
+  telegramVideoDelivery: TelegramVideoDeliveryService
 }) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   routes.use('/families/*', requireAuth)
@@ -110,6 +119,10 @@ export function createMemoryRoutes({
   routes.openapi(likeRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')
     return service.setLike(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json').liked)
+  })))
+  routes.openapi(telegramVideoRoute, async (c) => c.json(await executeMemory(() => {
+    const params = c.req.valid('param')
+    return telegramVideoDelivery.request(scope(c.var.user, params.familyId), params.memoryId)
   })))
   return routes
 }

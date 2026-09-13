@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { SignJWT } from 'jose'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
@@ -49,7 +50,11 @@ maybeDescribe('Private media API', () => {
     const viewer = await admittedUser('Зритель', '43002')
     const outsider = await admittedUser('Чужой', '43003')
     const family = await createFamily(owner.token, 'Семья')
+    const foreignFamily = await createFamily(outsider.token, 'Другая семья')
     await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const viewerMembership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
+    })
 
     const uploaded = await uploadPhoto(owner.token, family.body.family.id, 'memory', pngFixture)
     expect(uploaded.finalized.response.status).toBe(200)
@@ -87,8 +92,65 @@ maybeDescribe('Private media API', () => {
     expect(partial.headers.get('content-range')).toBe(`bytes 8-19/${pngFixture.byteLength}`)
     expect(Buffer.from(await partial.arrayBuffer())).toEqual(pngFixture.subarray(8, 20))
 
+    const mediaSession = await app.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    expect(mediaSession.status).toBe(204)
+    const mediaCookie = mediaSession.headers.get('set-cookie')?.split(';')[0]
+    expect(mediaCookie).toMatch(/^our_memories_media_access=/)
+
+    const playbackBytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 77, 52, 65, 32])
+    const playbackKey = `media-playback/${uploaded.reserved.body.assetId}`
+    await privateStorage.storage.writeObject({
+      key: playbackKey,
+      body: new Blob([playbackBytes]).stream(),
+      contentLength: playbackBytes.byteLength,
+      contentType: 'audio/mp4',
+    })
+    await prisma.mediaVariant.create({ data: {
+      familyId: family.body.family.id,
+      mediaId: uploaded.reserved.body.assetId,
+      variant: 'playback',
+      objectKey: playbackKey,
+      sha256: 'a'.repeat(64),
+      byteSize: BigInt(playbackBytes.byteLength),
+      mime: 'audio/mp4',
+      width: null,
+      height: null,
+      durationMs: 1_000,
+      codec: 'mp4a.40.2',
+    } })
+    const playbackPath = contentPath.replace('variant=original', 'variant=playback')
+    const cookieHead = await app.request(playbackPath, { method: 'HEAD', headers: { Cookie: mediaCookie! } })
+    expect(cookieHead.status).toBe(200)
+    expect(cookieHead.headers.get('content-type')).toBe('audio/mp4')
+    const playbackRange = await app.request(playbackPath, {
+      headers: { Cookie: mediaCookie!, Range: 'bytes=0-1023' },
+    })
+    expect(playbackRange.status).toBe(206)
+    expect(playbackRange.headers.get('accept-ranges')).toBe('bytes')
+    expect(playbackRange.headers.get('content-range')).toBe(`bytes 0-${playbackBytes.byteLength - 1}/${playbackBytes.byteLength}`)
+    expect(playbackRange.headers.get('content-type')).toBe('audio/mp4')
+
+    const cookieRange = await app.request(contentPath, {
+      headers: { Cookie: mediaCookie!, Range: 'bytes=8-19' },
+    })
+    expect(cookieRange.status).toBe(206)
+    expect(cookieRange.headers.get('accept-ranges')).toBe('bytes')
+    expect(cookieRange.headers.get('content-range')).toBe(`bytes 8-19/${pngFixture.byteLength}`)
+    expect(cookieRange.headers.get('content-length')).toBe('12')
+    expect(cookieRange.headers.get('content-type')).toBe('image/png')
+    expect((await app.request(contentPath, { headers: { Range: 'bytes=0-3' } })).status).toBe(401)
+    expect((await app.request(`/api/v1/families/${family.body.family.id}`)).status).toBe(401)
+    expect((await app.request(playbackPath, {
+      headers: { Cookie: await expiredCookie(viewer.userId, viewer.sessionId) },
+    })).status).toBe(401)
+
     expect((await app.request(contentPath, {
       headers: { Authorization: `Bearer ${outsider.token}` },
+    })).status).toBe(404)
+    expect((await app.request(contentPath.replace(family.body.family.id, foreignFamily.body.family.id), {
+      headers: { Cookie: mediaCookie! },
     })).status).toBe(404)
     for (const request of [
       app.request(contentPath.replace('variant=original', 'variant=preview'), { method: 'HEAD', headers: { Authorization: `Bearer ${outsider.token}` } }),
@@ -100,11 +162,21 @@ maybeDescribe('Private media API', () => {
     expect(unsatisfiable.status).toBe(416)
     expect(unsatisfiable.headers.get('content-range')).toBe(`bytes */${pngFixture.byteLength}`)
 
+    const revoked = await jsonRequest(
+      `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
+      owner.token,
+      'DELETE',
+      { expectedVersion: viewerMembership.version },
+    )
+    expect(revoked.response.status).toBe(204)
+    expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
+
     const deleted = await app.request(`/api/v1/families/${family.body.family.id}/memories/${memory.body.id}`, {
       method: 'DELETE', headers: { Authorization: `Bearer ${owner.token}`, 'If-Match': String(memory.body.version) },
     })
     expect(deleted.status).toBe(204)
     expect(await prisma.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.reserved.body.assetId}` } })).toBe(1)
+    expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
   })
 
   test('serializes quota reservations and viewers cannot reserve uploads', async () => {
@@ -296,7 +368,17 @@ maybeDescribe('Private media API', () => {
         refreshTokenFamilyHash: `family-${subject}`, expiresAt: new Date(Date.now() + 60_000),
       },
     })
-    return { userId: user.id, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }
+    return { userId: user.id, sessionId: session.id, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }
+  }
+
+  async function expiredCookie(userId: string, sessionId: string) {
+    const token = await new SignJWT({ sessionId })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(userId)
+      .setIssuedAt()
+      .setExpirationTime(0)
+      .sign(new TextEncoder().encode(env.JWT_SECRET))
+    return `${'our_memories_media_access'}=${token}`
   }
 
   async function createFamily(token: string, name: string) {

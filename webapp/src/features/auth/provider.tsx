@@ -27,6 +27,7 @@ import {
 import { AuthContext, type AuthContextValue } from './context'
 import { bootstrapAuthSession } from './bootstrap'
 import { subscribeToBrowserSessionChanges } from './session-coordinator'
+import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
@@ -36,8 +37,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0)
   const bootstrapGeneration = useRef(0)
 
+  useEffect(() => {
+    syncPrivateMediaAccessToken(null)
+  }, [])
+
   const setAccessToken = useCallback(
-    (nextAccessToken: string | null) => setAccessTokenState(nextAccessToken),
+    (nextAccessToken: string | null) => {
+      setAccessTokenState(nextAccessToken)
+      syncPrivateMediaAccessToken(nextAccessToken)
+    },
     [],
   )
   const clearLocalSession = useCallback(async () => {

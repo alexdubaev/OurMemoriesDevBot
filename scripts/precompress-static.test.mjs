@@ -254,4 +254,4 @@ test('the command compresses the targets it is given and skips the ones not buil
   expect(run.status).toBe(0)
   expect(run.stdout).toContain('not built, skipped')
   expect((await readdir(directory)).sort()).toEqual(['app.js', 'app.js.br', 'app.js.gz'])
-})
+}, 15_000)

@@ -1,21 +1,26 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import type { MemoryKind } from '../../../generated/prisma/enums'
 import { Client } from 'pg'
 import type { DbClient } from '../../../db'
 import type { AppEnv } from '../../../env'
+import type { PrismaTransactionClient } from '../../../idempotency'
 import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
 import { createSourceMemoryPublisher } from '../../memories'
 import { CaptionService } from '../application/captions'
+import { TelegramVideoDeliveryService } from '../application/video-delivery'
 import { PrismaCaptionRepository } from './prisma-caption-repository'
 import { PrismaTelegramRepository } from './prisma-telegram-repository'
 import type { TelegramApiPort } from '../application/ports'
-import type { TelegramInboundEvent } from '../domain/inbound-event'
+import type { TelegramInboundEvent, TelegramMediaEvent } from '../domain/inbound-event'
 
-type PayloadCrypto = { decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T }
+type PayloadCrypto = {
+  decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
+  encrypt(value: unknown): { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }
+}
 
 export function createTelegramTaskProcessor(options: {
   runtime: BackendRuntime
@@ -26,10 +31,11 @@ export function createTelegramTaskProcessor(options: {
   const access = createPrismaFamilyAccess(prisma)
   const media = createMediaService({ db: prisma, env, familyAccess: access, storage: options.runtime.privateStorage.storage })
   const memories = createSourceMemoryPublisher(prisma, access)
+  const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
 
   return async (payload: unknown, signal?: AbortSignal) => {
     const ids = taskPayload(payload)
-    if (ids.inboxId) return processInbox(prisma, options.api, options.crypto, env, ids.inboxId)
+    if (ids.inboxId) return processInbox(prisma, options.api, options.crypto, env, videoDelivery, ids.inboxId)
     if (ids.sourceId) return processSource(prisma, options.api, options.crypto, env, media, memories, ids.sourceId, signal)
     if (ids.albumId) return processAlbum(prisma, options.api, options.crypto, env, media, memories, ids.albumId, signal)
     throw new TerminalTaskError('Telegram task payload has no supported id')
@@ -41,6 +47,24 @@ async function processInbox(
   api: TelegramApiPort,
   crypto: PayloadCrypto,
   env: AppEnv,
+  videoDelivery: TelegramVideoDeliveryService,
+  inboxId: string,
+) {
+  const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
+  if (!inbox || inbox.processedAt) return 'skipped' as const
+  const event = decryptEvent(crypto, inbox)
+  if (!requiresInboxLock(event)) return processInboxLocked(db, api, crypto, env, videoDelivery, inboxId)
+  return withInboxLock(env.DATABASE_URL, inboxId, () =>
+    processInboxLocked(db, api, crypto, env, videoDelivery, inboxId),
+  )
+}
+
+async function processInboxLocked(
+  db: DbClient,
+  api: TelegramApiPort,
+  crypto: PayloadCrypto,
+  env: AppEnv,
+  videoDelivery: TelegramVideoDeliveryService,
   inboxId: string,
 ) {
   const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
@@ -49,8 +73,26 @@ async function processInbox(
   if (event.kind === 'denied_content') {
     await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
   } else if (event.kind === 'command') {
+    if (event.command === 'start') {
+      const delivery = await videoDelivery.deliverFromStart(event.senderId, event.chatId, event.argument, api, crypto)
+      if (delivery === 'denied') {
+        await api.sendMessage(event.chatId, 'Видео недоступно или у вас нет доступа.')
+      } else if (delivery === 'ambiguous') {
+        await api.sendMessage(event.chatId, 'Не удалось подтвердить доставку видео. Откройте его заново в Mini App.')
+      }
+      if (delivery !== 'not_video_pointer') {
+        await db.telegramInbox.update({ where: { id: inboxId }, data: processedInboxData() })
+        return
+      }
+    }
+    const inviteToken = event.command === 'start' ? inviteTokenFromStartArgument(event.argument) : null
     const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
-    await api.sendMessage(event.chatId, commandText(event.command, cancelled), commandButtons(env, event.command, event.argument))
+    const inviteStart = inviteToken ? await inviteStartResponse(db, env, inviteToken) : null
+    await api.sendMessage(
+      event.chatId,
+      inviteStart?.text ?? commandText(event.command, cancelled),
+      inviteStart ? inviteStart.options : commandButtons(env, event.command, null),
+    )
   } else if (event.kind === 'caption_reply') {
     await consumeCaptionReply(db, api, event)
   } else {
@@ -110,13 +152,65 @@ async function processSource(
   if (source.status === 'published') return sendSourceReceipt(db, api, env, source)
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const event = decryptEvent(crypto, source.inbox)
-  const mediaId = event.kind === 'media'
+  const mediaId = event.kind === 'media' && event.mediaKind !== 'video'
     ? await ingestSourceMedia(db, api, env, media, source, event, signal)
     : null
+  const thumbnailMediaId = event.kind === 'media' && event.mediaKind === 'video'
+    ? await ingestVideoThumbnail(db, api, env, media, source, event, signal)
+    : null
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
-  const published = await publishSingle(db, memories, source.id, event, mediaId)
+  const published = await publishSingle(db, memories, source.id, event, mediaId,
+    event.kind === 'media' && event.mediaKind === 'video'
+      ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId)
+      : undefined)
   if (!published) return rejectSource(db, api, env, source, 'access_revoked')
   await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
+}
+
+/**
+ * Handles an already accepted inbox record immediately while its durable outbox task remains the
+ * fallback. The processor still owns authorization and idempotent completion.
+ */
+export function createTelegramImmediateInboxProcessor(options: {
+  runtime: BackendRuntime
+  api: TelegramApiPort
+  crypto: PayloadCrypto
+}) {
+  const { prisma, env } = options.runtime
+  const access = createPrismaFamilyAccess(prisma)
+  const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
+  return (inboxId: string) => processInbox(prisma, options.api, options.crypto, env, videoDelivery, inboxId)
+}
+
+function requiresInboxLock(event: TelegramInboundEvent) {
+  return event.kind === 'denied_content' || isInviteStartEvent(event)
+}
+
+async function ingestVideoThumbnail(
+  db: DbClient,
+  api: TelegramApiPort,
+  env: AppEnv,
+  media: ReturnType<typeof createMediaService>,
+  source: Awaited<ReturnType<typeof loadSource>> & {},
+  event: TelegramMediaEvent,
+  signal?: AbortSignal,
+) {
+  const thumbnail = event.thumbnail
+  if (!thumbnail || !source.plannedMediaId) return null
+  const existing = await db.mediaAsset.findFirst({
+    where: { id: source.plannedMediaId, familyId: source.familyId, originalStatus: 'stored', deletedAt: null },
+  })
+  if (existing) return existing.id
+  const download = await api.download(thumbnail.fileId, thumbnail.byteSize, signal)
+  if (download.byteSize > env.TELEGRAM_FILE_MAX_BYTES) throw new TerminalTaskError('Telegram video thumbnail exceeds the MVP Bot API limit')
+  const result = await media.ingestTelegram(scopeFor(source), {
+    assetId: source.plannedMediaId,
+    kind: 'photo',
+    contentType: thumbnail.contentType,
+    byteSize: download.byteSize,
+    body: download.body,
+  })
+  return result.asset.id
 }
 
 async function processAlbum(
@@ -184,8 +278,10 @@ async function processAlbumLocked(
         await rejectSource(db, api, env, source, 'access_revoked')
         continue
       }
-      const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
-      const published = await publishSingle(db, memories, source.id, event, mediaId)
+      const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+      const thumbnailMediaId = event.mediaKind === 'video' ? await ingestVideoThumbnail(db, api, env, media, source, event, signal) : null
+      const published = await publishSingle(db, memories, source.id, event, mediaId,
+        event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId) : undefined)
       if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
     }
     return
@@ -194,7 +290,7 @@ async function processAlbumLocked(
   if (pending.length === 0) return 'skipped' as const
 
   const events = sources.map((source) => ({ source, event: decryptEvent(crypto, source.inbox) }))
-  const mediaEvents = events.filter((entry): entry is typeof entry & { event: Extract<TelegramInboundEvent, { kind: 'media' }> } => entry.event.kind === 'media')
+  const mediaEvents = events.filter((entry): entry is typeof entry & { event: TelegramMediaEvent } => entry.event.kind === 'media')
   if (mediaEvents.length !== events.length) throw new TerminalTaskError('Telegram album contains a non-media source')
   const photoOnly = mediaEvents.every(({ event }) => event.mediaKind === 'photo')
 
@@ -216,8 +312,10 @@ async function processAlbumLocked(
       await rejectSource(db, api, env, source, 'access_revoked')
       continue
     }
-    const mediaId = await ingestSourceMedia(db, api, env, media, source, event, signal)
-    const published = await publishSingle(db, memories, source.id, event, mediaId)
+    const mediaId = event.mediaKind === 'video' ? null : await ingestSourceMedia(db, api, env, media, source, event, signal)
+    const thumbnailMediaId = event.mediaKind === 'video' ? await ingestVideoThumbnail(db, api, env, media, source, event, signal) : null
+    const published = await publishSingle(db, memories, source.id, event, mediaId,
+      event.mediaKind === 'video' ? telegramVideoReferenceWrite(crypto, source.id, event, thumbnailMediaId) : undefined)
     if (published) await sendSourceReceipt(db, api, env, { ...source, memoryId: published.memoryId })
   }
 }
@@ -228,7 +326,7 @@ async function ingestSourceMedia(
   env: AppEnv,
   media: ReturnType<typeof createMediaService>,
   source: Awaited<ReturnType<typeof loadSource>> & {},
-  event: Extract<TelegramInboundEvent, { kind: 'media' }>,
+  event: TelegramMediaEvent,
   signal?: AbortSignal,
 ) {
   if (!source) throw new TerminalTaskError('Telegram source disappeared')
@@ -279,6 +377,7 @@ async function publishSingle(
   sourceId: string,
   event: TelegramInboundEvent,
   mediaId: string | null,
+  afterWrite?: (tx: PrismaTransactionClient, memoryId: string) => Promise<void>,
 ) {
   const source = await db.telegramSource.findUnique({ where: { id: sourceId } })
   if (!source) return null
@@ -291,6 +390,7 @@ async function publishSingle(
     occurredAt: new Date('occurredAt' in event ? event.occurredAt : source.createdAt),
     mediaIds: mediaId ? [mediaId] : [],
   }, async (tx, committedMemoryId) => {
+    await afterWrite?.(tx, committedMemoryId)
     await tx.telegramSource.update({
       where: { id: source.id },
       data: { status: 'published', memoryId: committedMemoryId, mediaId },
@@ -300,12 +400,57 @@ async function publishSingle(
   return { memoryId }
 }
 
+function telegramVideoReferenceWrite(
+  crypto: PayloadCrypto,
+  sourceId: string,
+  event: TelegramMediaEvent,
+  thumbnailMediaId: string | null,
+) {
+  if (event.mediaKind !== 'video') throw new TerminalTaskError('Telegram video reference requires a video event')
+  return async (tx: PrismaTransactionClient, memoryId: string) => {
+    const encrypted = crypto.encrypt(event.fileId)
+    const source = await tx.telegramSource.findUnique({
+      where: { id: sourceId },
+      select: { familyId: true, userId: true, chatId: true, messageId: true },
+    })
+    if (!source) throw new TerminalTaskError('Telegram source disappeared before video reference write')
+    const reference = await tx.telegramVideoReference.upsert({
+      where: { sourceId },
+      create: {
+        sourceId,
+        memoryId,
+        familyId: source.familyId,
+        fileIdCiphertext: Buffer.from(encrypted.ciphertext),
+        encryptionIv: Buffer.from(encrypted.iv),
+        encryptionAuthTag: Buffer.from(encrypted.authTag),
+        fileUniqueId: event.fileUniqueId,
+        width: event.width,
+        height: event.height,
+        durationMs: event.durationMs,
+        thumbnailMediaId,
+      },
+      update: {},
+    })
+    await tx.telegramVideoDeliveryTarget.upsert({
+      where: { referenceId_userId: { referenceId: reference.id, userId: source.userId } },
+      create: {
+        referenceId: reference.id,
+        userId: source.userId,
+        chatId: source.chatId,
+        messageId: source.messageId,
+        source: 'original',
+      },
+      update: {},
+    })
+  }
+}
+
 async function publishPhotoAlbum(
   db: DbClient,
   memories: ReturnType<typeof createSourceMemoryPublisher>,
   albumId: string,
   sourceIds: string[],
-  events: Array<Extract<TelegramInboundEvent, { kind: 'media' }>>,
+  events: TelegramMediaEvent[],
   mediaIds: string[],
 ) {
   const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
@@ -390,7 +535,7 @@ function memoryKind(event: TelegramInboundEvent): MemoryKind {
   throw new TerminalTaskError('Telegram source event cannot become a memory')
 }
 
-function mediaContentType(event: Extract<TelegramInboundEvent, { kind: 'media' }>) {
+function mediaContentType(event: TelegramMediaEvent) {
   if (event.mediaKind === 'photo') return 'image/jpeg' as const
   if (event.mediaKind === 'video') return 'video/mp4' as const
   return 'audio/ogg' as const
@@ -462,12 +607,41 @@ function commandText(command: string, cancelled = false) {
   return 'Неизвестная команда. Используйте /help.'
 }
 
-function commandButtons(env: AppEnv, command: string, argument: string) {
+function commandButtons(env: AppEnv, command: string, inviteToken: string | null) {
   if (!env.TELEGRAM_MINI_APP_URL || !['start', 'app'].includes(command)) return undefined
-  const url = command === 'start' && argument
-    ? `https://t.me/OurMemoriesDevBot?startapp=invite_${encodeURIComponent(argument)}`
+  const url = command === 'start' && inviteToken
+    ? inviteMiniAppUrl(env.TELEGRAM_MINI_APP_URL, inviteToken)
     : env.TELEGRAM_MINI_APP_URL
-  return { buttons: [{ text: command === 'start' && argument ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
+  return { buttons: [{ text: command === 'start' && inviteToken ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
+}
+
+async function inviteStartResponse(db: DbClient, env: AppEnv, rawToken: string) {
+  const invite = await db.familyInvite.findUnique({
+    where: { tokenHash: createHash('sha256').update(rawToken).digest('hex') },
+    include: { family: { select: { status: true } } },
+  })
+  if (!invite || invite.family.status !== 'active' || invite.revokedAt || invite.acceptedAt || invite.expiresAt <= new Date()) {
+    return { text: 'Приглашение недействительно или уже истекло.', options: undefined }
+  }
+  return {
+    text: 'Вас пригласили в семейную ленту memoLy.',
+    options: commandButtons(env, 'start', rawToken),
+  }
+}
+
+function isInviteStartEvent(event: TelegramInboundEvent) {
+  return event.kind === 'command' && event.command === 'start' && inviteTokenFromStartArgument(event.argument) !== null
+}
+
+function inviteMiniAppUrl(miniAppUrl: string, rawToken: string) {
+  const url = new URL(miniAppUrl)
+  url.searchParams.set('tgWebAppStartParam', `invite_${rawToken}`)
+  return url.toString()
+}
+
+function inviteTokenFromStartArgument(argument: string) {
+  const match = /^invite_([A-Za-z0-9_-]{32,57})$/.exec(argument)
+  return match?.[1] ?? null
 }
 
 function openButton(env: AppEnv, memoryId?: string) {
@@ -499,6 +673,19 @@ async function withAlbumLock<T>(databaseUrl: string, albumId: string, work: () =
       [lockName],
     )
     if (!result.rows[0]?.acquired) throw new Error('Telegram album is already being processed')
+    return await work()
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockName]).catch(() => undefined)
+    await client.end().catch(() => undefined)
+  }
+}
+
+async function withInboxLock<T>(databaseUrl: string, inboxId: string, work: () => Promise<T>) {
+  const client = new Client({ connectionString: databaseUrl })
+  await client.connect()
+  const lockName = `telegram-inbox:${inboxId}`
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [lockName])
     return await work()
   } finally {
     await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockName]).catch(() => undefined)

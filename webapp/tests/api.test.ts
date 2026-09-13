@@ -18,8 +18,7 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
   const calls: Array<{ path: string; authorization: string | null }> = []
 
   globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
+    const path = requestPath(input)
     const headers = new Headers(init?.headers)
     calls.push({ path, authorization: headers.get('Authorization') })
 
@@ -80,7 +79,7 @@ test('AuthApi refreshes a private raw request before retrying it', async () => {
   const calls: Array<{ path: string; authorization: string | null }> = []
 
   globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     const authorization = new Headers(init?.headers).get('Authorization')
     calls.push({ path, authorization })
     if (path === '/api/auth/refresh') return json({ accessToken: freshAccessToken }, 200)
@@ -104,7 +103,7 @@ test('AuthApi refreshes a private raw request before retrying it', async () => {
 test('AuthApi exchanges only Telegram initData and keeps the issued access token in memory', async () => {
   let accessToken: string | null = null
   globalThis.fetch = async (input, init) => {
-    expect(new URL(String(input)).pathname).toBe('/api/v1/auth/telegram')
+    expect(requestPath(input)).toBe('/api/v1/auth/telegram')
     expect(init?.method).toBe('POST')
     expect(init?.body).toBe(JSON.stringify({ initData: 'query_id=signed' }))
     return json({
@@ -128,8 +127,7 @@ test('AuthApi shares one refresh across concurrent unauthorized requests', async
   const calls: Array<{ path: string; authorization: string | null; credentials: RequestCredentials | undefined }> = []
 
   globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
+    const path = requestPath(input)
     const headers = new Headers(init?.headers)
     const authorization = headers.get('Authorization')
     calls.push({ path, authorization, credentials: init?.credentials })
@@ -187,8 +185,7 @@ test('AuthApi clears only local session state when refresh is unauthorized', asy
   const calls: Array<{ path: string; authorization: string | null }> = []
 
   globalThis.fetch = async (input, init) => {
-    const url = String(input)
-    const path = new URL(url).pathname
+    const path = requestPath(input)
     const headers = new Headers(init?.headers)
     calls.push({ path, authorization: headers.get('Authorization') })
 
@@ -237,7 +234,7 @@ test('AuthApi preserves the session when refresh fails transiently', async () =>
   let authExpiredCalls = 0
 
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
 
     if (path === '/api/auth/me') {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
@@ -283,7 +280,7 @@ test('AuthApi never refreshes an old request after another session epoch wins', 
 
   publishBrowserSessionState('authenticated')
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
     return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
   }
@@ -305,7 +302,7 @@ test('a late refresh 401 cannot clear a newer browser session epoch', async () =
   publishBrowserSessionState('authenticated')
 
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
     if (path === '/api/auth/refresh') {
       await refreshCanFinish
@@ -343,7 +340,7 @@ test('AuthApi discards a successful response from an older browser session epoch
   publishBrowserSessionState('authenticated')
 
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
     await requestCanFinish
     return json(
@@ -381,7 +378,7 @@ test('AuthApi never retries an authenticated request as a different principal', 
   publishBrowserSessionState('authenticated')
 
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
     if (path === '/api/auth/refresh') {
       return json({ accessToken: accountBAccessToken }, 200)
@@ -407,7 +404,7 @@ test('AuthApi never retries an authenticated request as a different principal', 
 
 test('AuthApi preserves backend error status, code, and message', async () => {
   globalThis.fetch = async (input) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
 
     if (path === '/api/auth/register') {
       return json(
@@ -448,7 +445,7 @@ test('AuthApi submits password reset requests and clears session state after con
   let accessToken: string | null = 'existing-access-token'
 
   globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push({
       path,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
@@ -497,7 +494,7 @@ test('AuthApi clearSession does not revoke a possibly newer shared browser cooki
   const calls: Array<{ path: string; method: string | undefined }> = []
 
   globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push({ path, method: init?.method })
 
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
@@ -588,7 +585,7 @@ test('AuthApi surfaces an aborted request as its AbortError, never as an expired
   const controller = new AbortController()
 
   globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
     if (path === '/api/auth/me') {
       // A 401 whose error body is still streaming when the caller aborts: the browser errors the
@@ -634,7 +631,7 @@ test('one caller aborting its request does not cancel the refresh other callers 
   globalThis.fetch = async (input, init) => {
     // Like the browser, refuse to start a request whose signal is already aborted.
     init?.signal?.throwIfAborted()
-    const path = new URL(String(input)).pathname
+    const path = requestPath(input)
     calls.push(path)
 
     if (path === '/api/auth/refresh') {
@@ -729,4 +726,8 @@ function accessTokenFor(subject: string, version: string) {
   const encode = (value: unknown) =>
     btoa(JSON.stringify(value)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
   return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: subject, version })}.signature`
+}
+
+function requestPath(input: RequestInfo | URL) {
+  return new URL(String(input), 'https://webapp.test').pathname
 }

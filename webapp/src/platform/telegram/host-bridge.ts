@@ -16,7 +16,9 @@ export type HostBridge = {
   ready(): void
   close(): void
   back(): void
+  onBack(handler: () => void): () => void
   openBot(): void
+  openTelegramVideo(deepLink: string): boolean
   openInvite(rawToken: string): void
   getInsets(): TelegramInsets
 }
@@ -35,12 +37,14 @@ type TelegramWebApp = {
   contentSafeAreaInset?: unknown
   ready?: unknown
   close?: unknown
+  BackButton?: unknown
   openTelegramLink?: unknown
 }
 
 type BrowserHost = {
   Telegram?: unknown
   history?: { back?: unknown }
+  location?: { search?: unknown }
 }
 
 const botUrl = 'https://t.me/OurMemoriesDevBot'
@@ -49,12 +53,18 @@ const zeroInsets: TelegramInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 export function createTelegramHostBridge(host: unknown): HostBridge {
   const webApp = readWebApp(host)
   const browserHost = isRecord(host) ? host as BrowserHost : null
+  const backButton = isRecord(webApp?.BackButton) ? webApp.BackButton : null
+  const subscribeBack = backButton?.onClick
+  const unsubscribeBack = backButton?.offClick
+  const showBack = backButton?.show
+  const hideBack = backButton?.hide
+  const backHandlers = new Set<() => void>()
   return {
     isAvailable: webApp !== null,
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
       ? webApp.initData
       : null,
-    inviteToken: () => inviteTokenFromInitData(webApp?.initData),
+    inviteToken: () => inviteTokenFromInitData(webApp?.initData) ?? inviteTokenFromSearch(browserHost?.location?.search),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -74,12 +84,37 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
     back: () => {
       if (typeof browserHost?.history?.back === 'function') browserHost.history.back()
     },
+    onBack: (handler) => {
+      if (!backButton || typeof subscribeBack !== 'function' || typeof unsubscribeBack !== 'function') {
+        return () => undefined
+      }
+      let subscribed = true
+      subscribeBack.call(backButton, handler)
+      backHandlers.add(handler)
+      if (backHandlers.size === 1 && typeof showBack === 'function') showBack.call(backButton)
+      return () => {
+        if (!subscribed) return
+        subscribed = false
+        unsubscribeBack.call(backButton, handler)
+        backHandlers.delete(handler)
+        if (backHandlers.size === 0 && typeof hideBack === 'function') hideBack.call(backButton)
+      }
+    },
     openBot: () => {
       if (typeof webApp?.openTelegramLink === 'function') webApp.openTelegramLink(botUrl)
     },
+    openTelegramVideo: (deepLink) => {
+      // The API creates this link after the Family + Memory guard. Do not compose bot links or
+      // accept any other host: the payload is an opaque server-side navigation pointer.
+      if (typeof webApp?.openTelegramLink === 'function' && isTelegramBotLink(deepLink)) {
+        webApp.openTelegramLink(deepLink)
+        return true
+      }
+      return false
+    },
     openInvite: (rawToken) => {
       if (typeof webApp?.openTelegramLink === 'function') {
-        webApp.openTelegramLink(`${botUrl}?startapp=invite_${encodeURIComponent(rawToken)}`)
+        webApp.openTelegramLink(`${botUrl}?start=invite_${encodeURIComponent(rawToken)}`)
       }
     },
     getInsets: () => normalizedInsets(webApp),
@@ -105,7 +140,9 @@ export function createBrowserDevHostBridge(
     ready: () => undefined,
     close: () => undefined,
     back: () => undefined,
+    onBack: () => () => undefined,
     openBot: () => undefined,
+    openTelegramVideo: () => false,
     openInvite: () => undefined,
     getInsets: () => safeInsets,
   }
@@ -149,11 +186,30 @@ function finiteNumber(value: unknown) {
 function inviteTokenFromInitData(initData: unknown) {
   if (typeof initData !== 'string' || initData.length === 0) return null
   const startParam = new URLSearchParams(initData).get('start_param')
+  return inviteTokenFromStartParam(startParam)
+}
+
+function inviteTokenFromSearch(search: unknown) {
+  if (typeof search !== 'string') return null
+  return inviteTokenFromStartParam(new URLSearchParams(search).get('tgWebAppStartParam'))
+}
+
+function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
-  return /^[A-Za-z0-9_-]{32,128}$/.test(token) ? token : null
+  return /^[A-Za-z0-9_-]{32,57}$/.test(token) ? token : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isTelegramBotLink(value: string) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 't.me' &&
+      url.pathname === '/OurMemoriesDevBot' && /^watch_[A-Za-z0-9_-]{32}$/.test(url.searchParams.get('start') ?? '')
+  } catch {
+    return false
+  }
 }

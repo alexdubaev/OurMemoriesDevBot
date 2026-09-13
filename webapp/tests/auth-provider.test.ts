@@ -146,7 +146,7 @@ function installFakeBackend(backend: {
 }) {
   const requests: string[] = []
   globalThis.fetch = async (input, init) => {
-    const path = new URL(String(input)).pathname
+    const path = new URL(String(input), 'https://webapp.test').pathname
     requests.push(`${init?.method ?? 'GET'} ${path}`)
     if (path === '/api/auth/refresh') return backend.refresh()
     if (path === '/api/auth/me') return backend.me()

@@ -12,6 +12,7 @@ import {
   sessionQueryKeys,
 } from '../src/features/auth/queries'
 import { avatarQueryKeys, avatarQueryOptions } from '../src/features/avatar/queries'
+import { feedQueryKeys } from '../src/features/feed/queries'
 import type { HttpRequestOptions } from '../src/platform/api'
 
 const user = {
@@ -216,8 +217,13 @@ test('every session-scoped feature cache is inside the namespace session cleanup
   queryClient.setQueryData(avatarQueryKeys.current(), {
     avatar: { downloadUrl: 'https://storage.example/previous-user.jpg' },
   })
+  queryClient.setQueryData(feedQueryKeys.list('family-1', 'all'), {
+    pages: [{ items: [{ id: 'private-memory' }], nextCursor: null }],
+    pageParams: [null],
+  })
 
   await clearAuthenticatedSession(queryClient, () => undefined)
 
   expect(queryClient.getQueryData(avatarQueryKeys.current())).toBeUndefined()
+  expect(queryClient.getQueryData(feedQueryKeys.list('family-1', 'all'))).toBeUndefined()
 })

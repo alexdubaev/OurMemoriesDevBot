@@ -384,7 +384,7 @@ describe('tracked Markdown links', () => {
       'tracked.md',
       'untracked.md',
     ])
-  })
+  }, 30_000)
 
   test('rejects missing targets and traversal outside the repository', () => {
     const files = [

@@ -15,7 +15,7 @@ test('switching the admin users query key aborts the request still in flight for
 
   globalThis.fetch = (input, init) =>
     new Promise<Response>((resolve, reject) => {
-      const url = new URL(String(input))
+      const url = new URL(String(input), 'https://webapp.test')
       const page = Number(url.searchParams.get('page'))
       const signal = init?.signal
       signal?.addEventListener('abort', () => reject(signal.reason), { once: true })

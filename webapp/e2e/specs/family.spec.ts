@@ -59,7 +59,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await page.goto('/')
   expect((await telegramExchange).status()).toBe(200)
   await expect(page.getByRole('button', { name: 'Создать семью' })).toBeVisible()
-  await page.getByRole('button', { name: 'Создать семью' }).dblclick()
+  await page.getByRole('button', { name: 'Создать семью' }).click()
   await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
 
   // A completed profile is intentionally stricter than the old optional-child bootstrap.
@@ -71,6 +71,9 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeDisabled()
+  await expect(page.locator('img[alt="Предпросмотр кадрирования"]')).toHaveJSProperty('complete', true)
+  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).click()
@@ -108,8 +111,8 @@ async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) 
   await inviteSection.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Приглашение готово' })).toBeVisible()
   const link = await page.getByLabel('Ссылка приглашения').inputValue()
-  const startParam = new URL(link).searchParams.get('startapp')
-  expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,128}$/)
+  const startParam = new URL(link).searchParams.get('start')
+  expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,57}$/)
   return startParam!
 }
 
@@ -139,7 +142,7 @@ async function inviteePage(
   return { context, page }
 }
 
-test('onboards a child and accepts a viewer invite only after explicit startapp confirmation', async ({ browser, page }) => {
+test('onboards a child and accepts a viewer invite only after explicit bot-start confirmation', async ({ browser, page }) => {
   const owner = await createCompletedOwner(page, 81000011)
   const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира')
 
@@ -152,7 +155,7 @@ test('onboards a child and accepts a viewer invite only after explicit startapp 
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
   await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
-  // Reloading a preview is a real startapp round trip, not an implicit accept.
+  // Reloading a preview preserves invite intent and never performs an implicit accept.
   await guest.page.reload()
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
   await expect.poll(() => requests.privateFamilyRequests).toEqual([])

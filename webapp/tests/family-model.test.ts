@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   familyCalendarDate,
+  feedChildSubtitle,
   formatChildAge,
   inviteIssueCode,
   inviteIssueMessage,
@@ -29,6 +30,31 @@ describe('family presentation model', () => {
     expect(formatChildAge('2024-02-29', 'UTC', now)).toBe('1 год')
     expect(formatChildAge('2025-03-02', 'UTC', now)).toBeNull()
     expect(formatChildAge('not-a-date', 'UTC', now)).toBeNull()
+  })
+
+  test('formats feed-header ages with Russian plurals from a fixed date', () => {
+    const now = new Date('2026-09-10T12:00:00.000Z')
+
+    expect(formatChildAge('2026-09-09', 'UTC', now)).toBe('1 день')
+    expect(formatChildAge('2026-09-08', 'UTC', now)).toBe('2 дня')
+    expect(formatChildAge('2026-09-05', 'UTC', now)).toBe('5 дней')
+    expect(formatChildAge('2026-08-10', 'UTC', now)).toBe('1 месяц')
+    expect(formatChildAge('2026-07-10', 'UTC', now)).toBe('2 месяца')
+    expect(formatChildAge('2026-04-10', 'UTC', now)).toBe('5 месяцев')
+    expect(formatChildAge('2025-09-10', 'UTC', now)).toBe('1 год')
+    expect(formatChildAge('2024-09-10', 'UTC', now)).toBe('2 года')
+    expect(formatChildAge('2021-09-10', 'UTC', now)).toBe('5 лет')
+    expect(formatChildAge('2024-02-10', 'UTC', now)).toBe('2 года 7 месяцев')
+    expect(formatChildAge('not-a-date', 'UTC', now)).toBeNull()
+  })
+
+  test('uses an age rather than an ISO birth date in the feed header', () => {
+    const now = new Date('2026-09-10T12:00:00.000Z')
+
+    expect(feedChildSubtitle('2024-02-10', 'UTC', now)).toBe('2 года 7 месяцев')
+    expect(feedChildSubtitle('not-a-date', 'UTC', now)).toBe('Профиль ребёнка')
+    expect(feedChildSubtitle(null, 'UTC', now)).toBe('Профиль ребёнка')
+    expect(feedChildSubtitle('2026-09-11', 'UTC', now)).toBe('Профиль ребёнка')
   })
 
   test('keeps invite errors distinct without turning unknown failures into not found', () => {

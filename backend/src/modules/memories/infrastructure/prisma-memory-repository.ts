@@ -173,8 +173,16 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (!concurrent) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         throw versionConflict()
       }
-      const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } })
-      for (const { mediaId } of linked) {
+      const [linked, telegramVideo] = await Promise.all([
+        tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } }),
+        tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
+          SELECT "thumbnail_media_id" AS "thumbnailMediaId"
+            FROM "telegram_video_references"
+           WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
+        `,
+      ])
+      const mediaIds = [...linked.map(({ mediaId }) => mediaId), ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : [])]
+      for (const mediaId of mediaIds) {
         await tx.mediaAsset.updateMany({ where: { id: mediaId, familyId: scope.familyId, deletedAt: null }, data: { deletedAt: now } })
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${mediaId}`,
           payload: { mediaId }, scheduledFor: now })
@@ -344,6 +352,9 @@ function memoryInclude() {
       orderBy: { position: 'asc' as const },
       include: { asset: { include: { variants: true } } },
     },
+    telegramVideoReference: {
+      select: { id: true, width: true, height: true, durationMs: true, thumbnailMedia: { select: { id: true, variants: { select: { variant: true } } } } },
+    },
   } as const
 }
 
@@ -367,9 +378,11 @@ function dto(
       width: number | null
       height: number | null
       durationMs: number | null
+      waveform: unknown
       renditionStatus: 'pending' | 'ready' | 'failed'
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
+    telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
   },
   principalUserId: string,
   role: MemberRole,
@@ -385,11 +398,13 @@ function dto(
     createdAt: memory.createdAt.toISOString(),
     version: memory.version,
     status: memory.status,
-    attachments: memory.media.map(({ asset }) => {
+    attachments: [
+      ...memory.media.map(({ asset }) => {
       const path = (variant: string) => `/api/v1/families/${memory.familyId}/media/${asset.id}/content?variant=${variant}`
       const variants = new Set(asset.variants.map(({ variant }) => variant))
       return {
         id: asset.id,
+        source: 'private_storage' as const,
         kind: asset.mediaKind,
         width: asset.width,
         height: asset.height,
@@ -399,15 +414,35 @@ function dto(
         displayPath: variants.has('display') ? path('display') : null,
         playbackPath: variants.has('playback') ? path('playback') : null,
         originalDownloadPath: path('original'),
-        waveform: null,
+        waveform: measuredWaveform(asset.waveform),
       }
-    }),
+      }),
+      ...(memory.telegramVideoReference ? [{
+        id: memory.telegramVideoReference.id,
+        source: 'telegram' as const,
+        kind: 'video' as const,
+        width: memory.telegramVideoReference.width,
+        height: memory.telegramVideoReference.height,
+        durationMs: memory.telegramVideoReference.durationMs,
+        thumbnailPath: memory.telegramVideoReference.thumbnailMedia?.variants.some(({ variant }) => variant === 'display')
+          ? `/api/v1/families/${memory.familyId}/media/${memory.telegramVideoReference.thumbnailMedia.id}/content?variant=display`
+          : null,
+        openInTelegramPath: `/api/v1/families/${memory.familyId}/memories/${memory.id}/telegram-video`,
+      }] : []),
+    ],
     likes: {
       count: memory.likes.length,
       likedByMe: memory.likes.some((like) => like.userId === principalUserId),
     },
     capabilities: { edit: role === 'full', delete: role === 'full', like: true },
   }
+}
+
+function measuredWaveform(value: unknown) {
+  return Array.isArray(value) && value.length === 48 && value.every((peak) =>
+    typeof peak === 'number' && Number.isFinite(peak) && peak >= 0 && peak <= 1)
+    ? value as number[]
+    : null
 }
 
 function memorySnapshot(snapshot: unknown): MemoryDto {

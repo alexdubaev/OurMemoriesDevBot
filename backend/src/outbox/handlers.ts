@@ -31,6 +31,21 @@ export const taskHandlers = {
       await createTelegramTasks(runtime).process(payload, signal)
     },
   },
+  'telegram:navigation-reply:cleanup': {
+    // Cleanup is intentionally one-shot best effort: retaining one short service message is
+    // harmless, while retrying it indefinitely would turn a secondary UX action into a queue
+    // poisoner. The handler itself treats an already-deleted message as a normal completion.
+    maxAttempts: 1,
+    deadlineMs: 30_000,
+    run: async ({ payload, now }, runtime) => {
+      const navigationReplyId = (payload as { navigationReplyId?: unknown })?.navigationReplyId
+      if (typeof navigationReplyId !== 'string' || !/^[0-9a-f-]{36}$/i.test(navigationReplyId)) {
+        throw new TerminalTaskError('Task payload is missing a usable Telegram navigation reply id')
+      }
+      const { createTelegramTasks } = await import('../modules/telegram')
+      return createTelegramTasks(runtime).cleanupNavigationReply({ navigationReplyId, now })
+    },
+  },
   'media:delete': {
     maxAttempts: 5,
     run: async ({ payload }, runtime) => {

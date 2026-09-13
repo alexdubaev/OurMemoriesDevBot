@@ -1,9 +1,10 @@
 import type { CSSProperties, ReactNode, Ref } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
+import { BrandLogo } from '@/components/BrandLogo'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
-import { AvatarLetter } from '@/features/session'
+import { ChildAvatar } from '@/features/family'
 import { cn } from '@/lib/utils'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 
@@ -22,6 +23,8 @@ export type FeedShellProps = {
   addButtonRef?: Ref<HTMLButtonElement>
   childName: string
   childSubtitle: string
+  childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
+  childAvatarUrl?: string | null
   children: ReactNode
   insets: TelegramInsets
   onAdd?: () => void
@@ -37,6 +40,8 @@ export function FeedShell({
   addButtonRef,
   childName,
   childSubtitle,
+  childAvatarCrop = null,
+  childAvatarUrl = null,
   children,
   insets,
   onAdd,
@@ -60,10 +65,8 @@ export function FeedShell({
         data-slot="feed-scroll"
       >
         <header>
-          <div className="flex min-h-11 min-w-0 items-start justify-between gap-2">
-            <Typography className="min-w-0 flex-1 py-2" variant="memoryScreen">
-              Наши воспоминания
-            </Typography>
+          <div className="flex min-h-11 min-w-0 items-center justify-between gap-2">
+            <BrandLogo className="min-w-0 w-[148px]" />
             <button
               aria-label="Помощь и конфиденциальность"
               className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground"
@@ -73,9 +76,9 @@ export function FeedShell({
               <WebpIcon decorative name="more" size={24} />
             </button>
           </div>
-          <div className="mt-3 flex min-w-0 items-center gap-2.5" data-slot="child-profile">
-            <AvatarLetter name={childName} />
-            <div className="min-w-0 flex-1">
+          <div className="mt-3 flex min-w-0 items-center gap-3.5" data-slot="child-profile">
+            <ChildAvatar avatarCrop={childAvatarCrop} avatarUrl={childAvatarUrl} name={childName} size="feed-header" />
+            <div className="min-w-0 flex-1 self-center">
               <Typography
                 className="line-clamp-2 break-words"
                 data-slot="child-name"
