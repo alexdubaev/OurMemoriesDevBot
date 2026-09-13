@@ -241,6 +241,62 @@ maybeDescribe('Telegram durable capture', () => {
     expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту.')
   })
 
+  test('publishes every supported capture type for a FULL member who joined by invite without pilot admission', async () => {
+    const owner = await familyOwner('52002')
+    await completeChildProfile(owner)
+    const invited = await admittedUser('52003', false)
+    const invite = await app.request(`/api/v1/families/${owner.familyId}/invites`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${owner.token}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
+      body: JSON.stringify({ role: 'full', inviteeDisplayName: 'Приглашённый' }),
+    })
+    expect(invite.status).toBe(201)
+    const inviteBody = await invite.json() as { rawToken: string }
+    const joined = await app.request('/api/v1/invites/accept', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${invited.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: inviteBody.rawToken }),
+    })
+    expect(joined.status).toBe(200)
+
+    await accept(note(202, 22, invited.subject, 'Текст от приглашённого'))
+    await accept(photo(203, 23, invited.subject, 'Фото от приглашённого'))
+    await accept(voice(204, 24, invited.subject, 'Голос от приглашённого'))
+    await accept(video(205, 25, invited.subject, 'Видео от приглашённого'))
+    const sources = await prisma.telegramSource.findMany({ orderBy: { messageId: 'asc' } })
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ familyId: owner.familyId, userId: invited.userId, kind: 'note' }),
+      expect.objectContaining({ familyId: owner.familyId, userId: invited.userId, kind: 'photo' }),
+      expect.objectContaining({ familyId: owner.familyId, userId: invited.userId, kind: 'voice' }),
+      expect.objectContaining({ familyId: owner.familyId, userId: invited.userId, kind: 'video' }),
+    ]))
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    for (const source of sources.filter((source) => source.kind !== 'voice')) {
+      const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-source:${source.id}` } })
+      await process(task.payload)
+    }
+
+    expect(await prisma.memory.findMany({ orderBy: { occurredAt: 'asc' } })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ familyId: owner.familyId, authorId: invited.userId, kind: 'note', body: 'Текст от приглашённого' }),
+      expect.objectContaining({ familyId: owner.familyId, authorId: invited.userId, kind: 'photo', body: 'Фото от приглашённого' }),
+      expect.objectContaining({ familyId: owner.familyId, authorId: invited.userId, kind: 'video', body: 'Видео от приглашённого' }),
+    ]))
+  })
+
+  test('denies a Telegram identity that has no active family membership', async () => {
+    const outsider = await admittedUser('52004', false)
+
+    await accept(note(206, 26, outsider.subject, 'Нельзя публиковать без семьи'))
+
+    expect(await prisma.telegramSource.count()).toBe(0)
+    expect(await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 206n } }))
+      .toMatchObject({ eventKind: 'denied' })
+  })
+
   test('keeps a Telegram video remote while storing only its supplied poster as private media', async () => {
     const owner = await familyOwner('52101')
     await accept(video(211, 22, owner.subject, 'Первый ролик'))
@@ -900,10 +956,10 @@ maybeDescribe('Telegram durable capture', () => {
     await prisma.user.deleteMany()
   }
 
-  async function admittedUser(subject: string) {
+  async function admittedUser(subject: string, withPilotAdmission = true) {
     const user = await prisma.user.create({ data: { displayName: `User ${subject}` } })
     await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } })
-    await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
+    if (withPilotAdmission) await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
     const session = await prisma.authSession.create({ data: {
       userId: user.id, refreshTokenHash: `refresh-${subject}`, refreshTokenFamilyHash: `family-${subject}`,
       expiresAt: new Date(Date.now() + 60_000),
@@ -922,6 +978,24 @@ maybeDescribe('Telegram durable capture', () => {
       data: { familyId: body.family.id, displayName: 'Legacy child' },
     })
     return { ...owner, familyId: body.family.id, childId: child.id }
+  }
+
+  async function completeChildProfile(owner: Awaited<ReturnType<typeof familyOwner>>) {
+    const avatar = await prisma.mediaAsset.create({ data: {
+      familyId: owner.familyId,
+      uploaderId: owner.userId,
+      sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+      originalKey: `media-originals/${randomUUID()}`,
+      declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'a'.repeat(64),
+      byteSize: 1n, width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    await prisma.child.update({
+      where: { id: owner.childId },
+      data: {
+        displayName: 'Приглашения разрешены', birthDate: new Date('2024-01-01T00:00:00.000Z'), sex: 'girl',
+        avatarMediaId: avatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+      },
+    })
   }
 
   async function activeInvite(
@@ -1041,6 +1115,14 @@ function video(updateId: number, messageId: number, subject: string, caption: st
     from: { id: Number(subject), is_bot: false, first_name: 'Тест' }, caption,
     video: { file_id: `video-file-${messageId}`, file_unique_id: `video-unique-${messageId}`, width: 640, height: 360, duration: 24, file_size: 2_000_000, mime_type: 'video/mp4',
       thumbnail: { file_id: `video-thumbnail-${messageId}`, file_unique_id: `video-thumbnail-unique-${messageId}`, width: 320, height: 180, file_size: photoFixture.byteLength } },
+  } })
+}
+
+function voice(updateId: number, messageId: number, subject: string, caption: string) {
+  return normalizeTelegramUpdate({ update_id: updateId, message: {
+    message_id: messageId, date: 1_788_000_000, chat: { id: Number(subject), type: 'private' },
+    from: { id: Number(subject), is_bot: false, first_name: 'Тест' }, caption,
+    voice: { file_id: `voice-file-${messageId}`, file_unique_id: `voice-unique-${messageId}`, duration: 4, file_size: 80_000, mime_type: 'audio/ogg' },
   } })
 }
 

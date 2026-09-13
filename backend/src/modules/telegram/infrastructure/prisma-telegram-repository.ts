@@ -16,11 +16,6 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
   constructor(private readonly db: DbClient) {}
 
   async findAdmission(senderSubject: string): Promise<TelegramAdmission> {
-    const admitted = await this.db.pilotAdmission.findUnique({
-      where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
-      select: { revokedAt: true },
-    })
-    if (!admitted || admitted.revokedAt) return null
     const identity = await this.db.externalIdentity.findUnique({
       where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
       select: {
