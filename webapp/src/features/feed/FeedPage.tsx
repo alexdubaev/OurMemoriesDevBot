@@ -28,7 +28,7 @@ import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
-import { shouldRenderInitialFeedError } from '@/features/app/startup-routing'
+import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
 
 type Props = {

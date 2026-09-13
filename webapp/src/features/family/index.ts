@@ -21,3 +21,4 @@ export {
   loadFamilyMe,
   loadFamilyMembers,
 } from './api'
+export { createFamilyErrorMessage } from './bootstrap'

@@ -8,12 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
 import { AuthContext } from '@/features/auth'
-import { BootPreloader } from '@/features/app/BootPreloader'
-import { decideStartupRoute } from '@/features/app/startup-routing'
-import { shouldKeepTelegramAuthPreloader, shouldStartTelegramAuth } from '@/features/app/telegram-auth-handoff'
+import { BootPreloader, decideStartupRoute, shouldKeepTelegramAuthPreloader, shouldStartTelegramAuth } from '@/features/app'
 import {
   acceptInvite,
   createFamilyBootstrap,
+  createFamilyErrorMessage,
   feedChildSubtitle,
   FamilyOnboarding,
   FamilyScreen,
@@ -28,7 +27,6 @@ import {
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { createFamilyErrorMessage } from '@/features/family/bootstrap'
 
 export type AppProps = { hostBridge: HostBridge }
 
