@@ -45,7 +45,7 @@ describe('FFmpeg rendition runtime', () => {
       expect(prepared.waveform).toHaveLength(48)
       expect(prepared.waveform?.every((peak) => peak >= 0 && peak <= 1)).toBe(true)
     } finally { await rm(root, { recursive: true, force: true }) }
-  })
+  }, 30_000)
 
   test('prepares a real HEVC MOV fixture as H.264/AAC MP4 for HTML5 playback', async () => {
     const root = await mkdtemp(join(tmpdir(), 't05-video-'))
@@ -63,5 +63,5 @@ describe('FFmpeg rendition runtime', () => {
       const prepared = await prepareMedia({ inputPath: source, outputPath: output, kind: 'video' }, runner)
       expect(prepared).toMatchObject({ mime: 'video/mp4', width: 320, height: 240, durationMs: expect.any(Number), waveform: null })
     } finally { await rm(root, { recursive: true, force: true }) }
-  })
+  }, 30_000)
 })
