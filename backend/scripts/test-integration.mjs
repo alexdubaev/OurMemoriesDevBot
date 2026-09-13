@@ -22,8 +22,8 @@ const repositoryRoot = resolve(backendRoot, '..')
  *
  * bun's default, 5 s, is a unit-test budget. The scenarios here hash passwords with argon2id
  * several times each and cross a Docker network: 0.3-0.6 s idle, and can exceed 30 s on a
- * saturated machine while an isolated upgrade test runs nested Prisma deploy processes.
- * machine. A test that times out does not fail cleanly either - bun lets its body run on into the
+ * saturated machine while an isolated upgrade test runs nested Prisma deploy processes. A test
+ * that times out does not fail cleanly either - bun lets its body run on into the
  * next test's cleanup, so the failure is reported against an unrelated later assertion. The budget
  * is longer than the request-path transaction timeouts in `src/db.ts` (15 s and 20 s), so a lock
  * held too long is still reported through the request that held it - Prisma expires that
