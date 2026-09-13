@@ -23,6 +23,38 @@ test('delivers a newly accepted valid video pointer immediately without queueing
   expect(delivered).toEqual(['inbox-1'])
 })
 
+test('delivers a newly accepted invite start immediately while retaining its outbox fallback', async () => {
+  let queueInboxTask: boolean | undefined
+  const delivered: string[] = []
+  const accept = createAcceptTelegramUpdate({
+    botId: 1n,
+    repository: repository(async (input) => { queueInboxTask = input.queueInboxTask; return { inboxId: 'inbox-invite', duplicate: false } }),
+    api: { sendMessage: async () => undefined },
+    encrypt: encrypted,
+    onInviteStart: async (inboxId) => { delivered.push(inboxId) },
+  })
+
+  await accept(start(`invite_${'a'.repeat(43)}`))
+
+  expect(queueInboxTask).toBe(true)
+  expect(delivered).toEqual(['inbox-invite'])
+})
+
+test('preserves a durable invite outbox fallback when immediate delivery fails', async () => {
+  let queueInboxTask: boolean | undefined
+  const accept = createAcceptTelegramUpdate({
+    botId: 1n,
+    repository: repository(async (input) => { queueInboxTask = input.queueInboxTask; return { inboxId: 'inbox-invite', duplicate: false } }),
+    api: { sendMessage: async () => undefined },
+    encrypt: encrypted,
+    onInviteStart: async () => { throw new Error('synthetic Telegram failure') },
+  })
+
+  await expect(accept(start(`invite_${'b'.repeat(43)}`))).resolves.toEqual({ inboxId: 'inbox-invite', duplicate: false })
+
+  expect(queueInboxTask).toBe(true)
+})
+
 test('keeps invalid and duplicate start commands out of the immediate delivery path', async () => {
   const queued: boolean[] = []
   const delivered: string[] = []

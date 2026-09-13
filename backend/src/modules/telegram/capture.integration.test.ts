@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -45,6 +45,8 @@ maybeDescribe('Telegram durable capture', () => {
   const app = createApp({ env, prisma, privateStorage })
   const sent: Array<{ chatId: string; text: string; options: Parameters<TelegramApiPort['sendMessage']>[2] }> = []
   let finalReceiptFailuresRemaining = 0
+  let inviteResponseFailuresRemaining = 0
+  let inviteResponseDelayMs = 0
   let downloadCalls = 0
   const sentVideos: Array<{ chatId: string; fileId: string }> = []
   const deletedMessages: Array<{ chatId: string; messageId: string }> = []
@@ -58,10 +60,15 @@ maybeDescribe('Telegram durable capture', () => {
       }
     },
     sendMessage: async (chatId, text, options) => {
+      if (text === 'Вас пригласили в семейную ленту memoLy.' && inviteResponseFailuresRemaining > 0) {
+        inviteResponseFailuresRemaining -= 1
+        throw new Error('synthetic invite response failure')
+      }
       if (text.startsWith('Сохранено') && finalReceiptFailuresRemaining > 0) {
         finalReceiptFailuresRemaining -= 1
         throw new Error('synthetic Telegram 429')
       }
+      if (text === 'Вас пригласили в семейную ленту memoLy.' && inviteResponseDelayMs > 0) await Bun.sleep(inviteResponseDelayMs)
       sent.push({ chatId, text, options })
       return { messageId: String(9_000 + sent.length) }
     },
@@ -88,12 +95,15 @@ maybeDescribe('Telegram durable capture', () => {
     api,
     encrypt: crypto.encrypt,
     onVideoNavigation: createTelegramImmediateVideoStartProcessor({ runtime, api, crypto }),
+    onInviteStart: createTelegramImmediateVideoStartProcessor({ runtime, api, crypto }),
   })
 
   beforeEach(async () => {
     await clearFixtures()
     sent.length = 0
     finalReceiptFailuresRemaining = 0
+    inviteResponseFailuresRemaining = 0
+    inviteResponseDelayMs = 0
     downloadCalls = 0
     sentVideos.length = 0
     deletedMessages.length = 0
@@ -131,15 +141,93 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await prisma.memory.count()).toBe(1)
     expect(sent.at(-1)?.text).toContain('заметки, фото, видео и голосовые')
 
-    await accept(command(103, 13, owner.subject, `/start invite_${'a'.repeat(43)}`))
+    const inviteToken = 'a'.repeat(43)
+    await activeInvite(owner, inviteToken)
+    await accept(command(103, 13, owner.subject, `/start invite_${inviteToken}`))
     const inviteInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 103n } })
     const inviteTask = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inviteInbox.id}` } })
-    await process(inviteTask.payload)
     expect(sent.at(-1)).toEqual({
       chatId: owner.subject,
-      text: 'Откройте приглашение в Mini App, чтобы присоединиться к семейной ленте.',
-      options: { buttons: [{ text: 'Открыть приглашение', webAppUrl: `https://app.example.test/?tgWebAppStartParam=invite_${'a'.repeat(43)}` }] },
+      text: 'Вас пригласили в семейную ленту memoLy.',
+      options: { buttons: [{ text: 'Открыть приглашение', webAppUrl: `https://app.example.test/?tgWebAppStartParam=invite_${inviteToken}` }] },
     })
+    await process(inviteTask.payload)
+    expect(sent.filter(({ text }) => text === 'Вас пригласили в семейную ленту memoLy.')).toHaveLength(1)
+  })
+
+  test('does not duplicate an immediate invite response when Telegram retries the same update', async () => {
+    const owner = await familyOwner('51002')
+    const inviteToken = 'b'.repeat(43)
+    await activeInvite(owner, inviteToken)
+    const event = command(104, 14, owner.subject, `/start invite_${inviteToken}`)
+
+    await accept(event)
+    await accept(event)
+
+    expect(sent).toHaveLength(1)
+  })
+
+  test('serializes concurrent direct and queued processing of one invite inbox', async () => {
+    const owner = await familyOwner('510021')
+    const inviteToken = 'f'.repeat(43)
+    await activeInvite(owner, inviteToken)
+    const queuedAccept = createAcceptTelegramUpdate({ botId: 777n, repository, api, encrypt: crypto.encrypt })
+    await queuedAccept(command(109, 19, owner.subject, `/start invite_${inviteToken}`))
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 109n } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inbox.id}` } })
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    inviteResponseDelayMs = 25
+
+    await Promise.all([process({ inboxId: inbox.id }), process(task.payload)])
+
+    expect(sent.filter(({ text }) => text === 'Вас пригласили в семейную ленту memoLy.')).toHaveLength(1)
+  })
+
+  test('uses the queued inbox task after an immediate invite response failure', async () => {
+    const owner = await familyOwner('51003')
+    const inviteToken = 'c'.repeat(43)
+    await activeInvite(owner, inviteToken)
+    inviteResponseFailuresRemaining = 1
+
+    await accept(command(105, 15, owner.subject, `/start invite_${inviteToken}`))
+
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 105n } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inbox.id}` } })
+    expect(inbox.processedAt).toBeNull()
+    expect(sent).toHaveLength(0)
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    expect(sent).toHaveLength(1)
+    expect((await prisma.telegramInbox.findUniqueOrThrow({ where: { id: inbox.id } })).processedAt).toEqual(expect.any(Date))
+  })
+
+  test('keeps the generic welcome and Open Feed button for a normal start', async () => {
+    const owner = await familyOwner('51004')
+    await accept(command(106, 16, owner.subject, '/start'))
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 106n } })
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })({ inboxId: inbox.id })
+
+    expect(sent).toEqual([{
+      chatId: owner.subject,
+      text: 'Отправьте сюда заметку, фото, видео или голосовое — материал автоматически сохранится в семейную ленту. Данные ребёнка заполняются в Mini App.',
+      options: { buttons: [{ text: 'Открыть ленту', webAppUrl: 'https://app.example.test' }] },
+    }])
+  })
+
+  test('uses a safe error instead of the generic welcome for invalid and expired invites', async () => {
+    const owner = await familyOwner('51005')
+    const expiredToken = 'd'.repeat(43)
+    await activeInvite(owner, expiredToken, new Date(Date.now() - 1_000))
+
+    await accept(command(107, 17, owner.subject, `/start invite_${'e'.repeat(43)}`))
+    await accept(command(108, 18, owner.subject, `/start invite_${expiredToken}`))
+
+    expect(sent).toEqual([
+      { chatId: owner.subject, text: 'Приглашение недействительно или уже истекло.', options: undefined },
+      { chatId: owner.subject, text: 'Приглашение недействительно или уже истекло.', options: undefined },
+    ])
   })
 
   test('stores a captioned photo through private Media before publishing its receipt', async () => {
@@ -834,6 +922,20 @@ maybeDescribe('Telegram durable capture', () => {
       data: { familyId: body.family.id, displayName: 'Legacy child' },
     })
     return { ...owner, familyId: body.family.id, childId: child.id }
+  }
+
+  async function activeInvite(
+    owner: { familyId: string; userId: string },
+    rawToken: string,
+    expiresAt = new Date(Date.now() + 60_000),
+  ) {
+    await prisma.familyInvite.create({ data: {
+      familyId: owner.familyId,
+      role: 'viewer',
+      tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+      expiresAt,
+      createdBy: owner.userId,
+    } })
   }
 
   async function prepareVideoPointer(

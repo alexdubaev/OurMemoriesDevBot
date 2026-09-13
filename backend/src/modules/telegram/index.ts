@@ -20,13 +20,14 @@ export function createTelegramModule(options: {
   }
   const api = options.api ?? createTelegramApi(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_FILE_MAX_BYTES)
   const crypto = createTelegramPayloadCrypto(env.TELEGRAM_INBOX_ENCRYPTION_KEY)
-  const onVideoNavigation = createTelegramImmediateVideoStartProcessor({ runtime: options.runtime, api, crypto })
+  const processImmediateStart = createTelegramImmediateVideoStartProcessor({ runtime: options.runtime, api, crypto })
   const acceptUpdate = createAcceptTelegramUpdate({
     botId: options.botId,
     repository: new PrismaTelegramRepository(options.runtime.prisma),
     api,
     encrypt: crypto.encrypt,
-    onVideoNavigation,
+    onVideoNavigation: processImmediateStart,
+    onInviteStart: processImmediateStart,
   })
   return {
     acceptUpdate,

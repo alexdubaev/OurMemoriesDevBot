@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import type { MemoryKind } from '../../../generated/prisma/enums'
 import { Client } from 'pg'
@@ -53,6 +53,23 @@ async function processInbox(
   const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
   if (!inbox || inbox.processedAt) return 'skipped' as const
   const event = decryptEvent(crypto, inbox)
+  if (!isInviteStartEvent(event)) return processInboxLocked(db, api, crypto, env, videoDelivery, inboxId)
+  return withInboxLock(env.DATABASE_URL, inboxId, () =>
+    processInboxLocked(db, api, crypto, env, videoDelivery, inboxId),
+  )
+}
+
+async function processInboxLocked(
+  db: DbClient,
+  api: TelegramApiPort,
+  crypto: PayloadCrypto,
+  env: AppEnv,
+  videoDelivery: TelegramVideoDeliveryService,
+  inboxId: string,
+) {
+  const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
+  if (!inbox || inbox.processedAt) return 'skipped' as const
+  const event = decryptEvent(crypto, inbox)
   if (event.kind === 'denied_content') {
     await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
   } else if (event.kind === 'command') {
@@ -70,7 +87,12 @@ async function processInbox(
     }
     const inviteToken = event.command === 'start' ? inviteTokenFromStartArgument(event.argument) : null
     const cancelled = event.command === 'cancel' ? await cancelCaption(db, event) : false
-    await api.sendMessage(event.chatId, commandText(event.command, cancelled, inviteToken !== null), commandButtons(env, event.command, inviteToken))
+    const inviteStart = inviteToken ? await inviteStartResponse(db, env, inviteToken) : null
+    await api.sendMessage(
+      event.chatId,
+      inviteStart?.text ?? commandText(event.command, cancelled),
+      inviteStart ? inviteStart.options : commandButtons(env, event.command, null),
+    )
   } else if (event.kind === 'caption_reply') {
     await consumeCaptionReply(db, api, event)
   } else {
@@ -573,8 +595,7 @@ async function sendAlbumReceipt(
   await db.telegramSource.updateMany({ where, data: { receiptSentAt: new Date() } })
 }
 
-function commandText(command: string, cancelled = false, inviteStart = false) {
-  if (command === 'start' && inviteStart) return 'Откройте приглашение в Mini App, чтобы присоединиться к семейной ленте.'
+function commandText(command: string, cancelled = false) {
   if (command === 'start') return 'Отправьте сюда заметку, фото, видео или голосовое — материал автоматически сохранится в семейную ленту. Данные ребёнка заполняются в Mini App.'
   if (command === 'help') return 'Поддерживаются заметки, фото, видео и голосовые до 20 МБ. Подпись можно добавить в Mini App; удалить запись тоже можно там.'
   if (command === 'privacy') return 'Бот принимает материалы только в личном чате. Групповые сообщения не сохраняются и не анализируются.'
@@ -589,6 +610,24 @@ function commandButtons(env: AppEnv, command: string, inviteToken: string | null
     ? inviteMiniAppUrl(env.TELEGRAM_MINI_APP_URL, inviteToken)
     : env.TELEGRAM_MINI_APP_URL
   return { buttons: [{ text: command === 'start' && inviteToken ? 'Открыть приглашение' : 'Открыть ленту', webAppUrl: url }] }
+}
+
+async function inviteStartResponse(db: DbClient, env: AppEnv, rawToken: string) {
+  const invite = await db.familyInvite.findUnique({
+    where: { tokenHash: createHash('sha256').update(rawToken).digest('hex') },
+    include: { family: { select: { status: true } } },
+  })
+  if (!invite || invite.family.status !== 'active' || invite.revokedAt || invite.acceptedAt || invite.expiresAt <= new Date()) {
+    return { text: 'Приглашение недействительно или уже истекло.', options: undefined }
+  }
+  return {
+    text: 'Вас пригласили в семейную ленту memoLy.',
+    options: commandButtons(env, 'start', rawToken),
+  }
+}
+
+function isInviteStartEvent(event: TelegramInboundEvent) {
+  return event.kind === 'command' && event.command === 'start' && inviteTokenFromStartArgument(event.argument) !== null
 }
 
 function inviteMiniAppUrl(miniAppUrl: string, rawToken: string) {
@@ -631,6 +670,19 @@ async function withAlbumLock<T>(databaseUrl: string, albumId: string, work: () =
       [lockName],
     )
     if (!result.rows[0]?.acquired) throw new Error('Telegram album is already being processed')
+    return await work()
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockName]).catch(() => undefined)
+    await client.end().catch(() => undefined)
+  }
+}
+
+async function withInboxLock<T>(databaseUrl: string, inboxId: string, work: () => Promise<T>) {
+  const client = new Client({ connectionString: databaseUrl })
+  await client.connect()
+  const lockName = `telegram-inbox:${inboxId}`
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [lockName])
     return await work()
   } finally {
     await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockName]).catch(() => undefined)
