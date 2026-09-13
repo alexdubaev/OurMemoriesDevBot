@@ -976,6 +976,55 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } })).toMatchObject({ body: 'Подпись из точного ответа' })
   })
 
+  test('denies a caption reply when its member is revoked after the initial access check', async () => {
+    const owner = await familyOwner('55011')
+    const full = await admittedUser('55012')
+    const membership = await prisma.familyMember.create({
+      data: { familyId: owner.familyId, userId: full.userId, role: 'full' },
+    })
+    const memory = await prisma.memory.create({ data: {
+      familyId: owner.familyId, childId: owner.childId, authorId: full.userId,
+      kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(),
+    } })
+    await prisma.captionRequest.create({ data: {
+      familyId: owner.familyId, userId: full.userId, memoryId: memory.id, chatId: 55012n,
+      promptMessageId: 9911n, expectedVersion: memory.version, expiresAt: new Date(Date.now() + 10 * 60_000),
+    } })
+    let releaseFinalPublish!: () => void
+    let reportInitialAccess!: () => void
+    const initialAccess = new Promise<void>((resolve) => { reportInitialAccess = resolve })
+    const release = new Promise<void>((resolve) => { releaseFinalPublish = resolve })
+    await accept(reply(611, 71, full.subject, 9911, 'Запрещённая подпись'))
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 611n } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inbox.id}` } })
+    const raceRuntime = {
+      ...runtime,
+      prisma: captionDbWithInitialAccessBarrier(prisma, async () => { reportInitialAccess(); await release }),
+    }
+    const process = createTelegramTaskProcessor({ runtime: raceRuntime, api, crypto })
+    const consuming = process(task.payload)
+    await initialAccess
+    const revoked = await app.request(`/api/v1/families/${owner.familyId}/members/${full.userId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: membership.version }),
+    })
+    expect(revoked.status).toBe(204)
+    releaseFinalPublish()
+
+    await consuming
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id } }))
+      .toMatchObject({ body: 'Исходная подпись', version: memory.version })
+    expect(await prisma.captionRequest.findUniqueOrThrow({ where: {
+      chatId_promptMessageId: { chatId: 55012n, promptMessageId: 9911n },
+    } })).toMatchObject({ consumedAt: null, cancelledAt: expect.any(Date) })
+    expect(await prisma.telegramInbox.findUniqueOrThrow({ where: { id: inbox.id } })).toMatchObject({ processedAt: expect.any(Date) })
+    expect(sent.filter(({ text }) => text === 'Подпись не сохранена: доступ к семейному архиву недоступен.')).toHaveLength(1)
+
+    await process(task.payload)
+    expect(sent.filter(({ text }) => text === 'Подпись не сохранена: доступ к семейному архиву недоступен.')).toHaveLength(1)
+  })
+
   async function clearFixtures() {
     await prisma.telegramVideoDelivery.deleteMany()
     await prisma.telegramVideoReference.deleteMany()
@@ -1122,6 +1171,39 @@ maybeDescribe('Telegram durable capture', () => {
        ORDER BY pid
     `)
     throw new Error(`Timed out waiting for a blocked PostgreSQL query containing ${queryFragment}: ${JSON.stringify(activity.rows)}`)
+  }
+
+  function captionDbWithInitialAccessBarrier(
+    db: typeof prisma,
+    afterInitialAccess: () => Promise<void>,
+  ): typeof prisma {
+    let initialAccessReported = false
+    return new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') return Reflect.get(target, property, receiver)
+        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => target.$transaction(async (tx) => {
+          const familyMember = new Proxy(tx.familyMember, {
+            get(memberTarget, memberProperty, memberReceiver) {
+              if (memberProperty !== 'count') return Reflect.get(memberTarget, memberProperty, memberReceiver)
+              return async (...args: Parameters<typeof tx.familyMember.count>) => {
+                const count = await tx.familyMember.count(...args)
+                if (!initialAccessReported) {
+                  initialAccessReported = true
+                  await afterInitialAccess()
+                }
+                return count
+              }
+            },
+          })
+          return callback(new Proxy(tx, {
+            get(transactionTarget, transactionProperty, transactionReceiver) {
+              if (transactionProperty === 'familyMember') return familyMember
+              return Reflect.get(transactionTarget, transactionProperty, transactionReceiver)
+            },
+          }) as typeof prisma)
+        })
+      },
+    }) as typeof prisma
   }
 
   async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string; userId: string }) {

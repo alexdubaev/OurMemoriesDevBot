@@ -108,6 +108,8 @@ async function consumeCaptionReply(db: DbClient, api: TelegramApiPort, event: Ex
     chatId: event.chatId, replyToMessageId: event.replyToMessageId, text: event.text })
   if (result.kind === 'expired') {
     await api.sendMessage(event.chatId, 'Срок добавления подписи истёк. Откройте запись в семейной ленте, чтобы изменить её.')
+  } else if (result.kind === 'forbidden') {
+    await api.sendMessage(event.chatId, 'Подпись не сохранена: доступ к семейному архиву недоступен.')
   } else if (result.kind === 'stale') {
     await renewCaptionRequest(db, api, admission, event)
   }

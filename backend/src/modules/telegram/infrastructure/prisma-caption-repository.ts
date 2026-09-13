@@ -1,4 +1,5 @@
 import type { DbClient } from '../../../db'
+import type { PrismaTransactionClient } from '../../../idempotency'
 import type { CaptionRepository } from '../application/captions'
 
 export class PrismaCaptionRepository implements CaptionRepository {
@@ -14,7 +15,10 @@ export class PrismaCaptionRepository implements CaptionRepository {
       if (request.cancelledAt || request.expiresAt <= new Date()) return { kind: 'expired' as const }
       const full = await tx.familyMember.count({ where: { familyId: input.familyId, userId: input.userId, role: 'full', revokedAt: null,
         family: { status: 'active' } } })
-      if (full !== 1) return { kind: 'forbidden' as const }
+      if (full !== 1 || !(await lockCurrentFullMember(tx, input.familyId, input.userId))) {
+        await tx.captionRequest.update({ where: { id: request.id }, data: { cancelledAt: new Date() } })
+        return { kind: 'forbidden' as const }
+      }
       const updated = await tx.memory.updateMany({ where: { id: request.memoryId, familyId: input.familyId, deletedAt: null,
         version: request.expectedVersion }, data: { body: input.text, version: { increment: 1 } } })
       if (updated.count !== 1) return { kind: 'stale' as const }
@@ -32,4 +36,19 @@ export class PrismaCaptionRepository implements CaptionRepository {
       expiresAt: { gt: new Date() } }, data: { cancelledAt: new Date() } })
     return result.count === 1
   }
+}
+
+async function lockCurrentFullMember(tx: PrismaTransactionClient, familyId: string, userId: string) {
+  const rows = await tx.$queryRaw<Array<{ role: string }>>`
+    SELECT fm.role::text AS role
+      FROM family_members fm
+      JOIN families f ON f.id = fm.family_id
+     WHERE fm.family_id = ${familyId}::uuid
+       AND fm.user_id = ${userId}::uuid
+       AND fm.role = 'full'
+       AND fm.revoked_at IS NULL
+       AND f.status = 'active'
+     FOR SHARE OF fm, f
+  `
+  return rows.length === 1
 }
