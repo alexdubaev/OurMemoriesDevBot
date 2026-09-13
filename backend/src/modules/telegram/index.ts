@@ -5,7 +5,7 @@ import type { TelegramApiPort } from './application/ports'
 import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { createTelegramApi } from './infrastructure/telegram-api'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
-import { createTelegramImmediateVideoStartProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
+import { createTelegramImmediateInboxProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
 import { cleanupTelegramVideoNavigationReply } from './application/video-delivery'
 import { createTelegramWebhook } from './transport/webhook'
 
@@ -20,14 +20,15 @@ export function createTelegramModule(options: {
   }
   const api = options.api ?? createTelegramApi(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_FILE_MAX_BYTES)
   const crypto = createTelegramPayloadCrypto(env.TELEGRAM_INBOX_ENCRYPTION_KEY)
-  const processImmediateStart = createTelegramImmediateVideoStartProcessor({ runtime: options.runtime, api, crypto })
+  const processImmediateInbox = createTelegramImmediateInboxProcessor({ runtime: options.runtime, api, crypto })
   const acceptUpdate = createAcceptTelegramUpdate({
     botId: options.botId,
     repository: new PrismaTelegramRepository(options.runtime.prisma),
     api,
     encrypt: crypto.encrypt,
-    onVideoNavigation: processImmediateStart,
-    onInviteStart: processImmediateStart,
+    onVideoNavigation: processImmediateInbox,
+    onInviteStart: processImmediateInbox,
+    onDeniedContent: processImmediateInbox,
   })
   return {
     acceptUpdate,

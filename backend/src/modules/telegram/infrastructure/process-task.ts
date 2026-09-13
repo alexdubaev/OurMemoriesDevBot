@@ -53,7 +53,7 @@ async function processInbox(
   const inbox = await db.telegramInbox.findUnique({ where: { id: inboxId } })
   if (!inbox || inbox.processedAt) return 'skipped' as const
   const event = decryptEvent(crypto, inbox)
-  if (!isInviteStartEvent(event)) return processInboxLocked(db, api, crypto, env, videoDelivery, inboxId)
+  if (!requiresInboxLock(event)) return processInboxLocked(db, api, crypto, env, videoDelivery, inboxId)
   return withInboxLock(env.DATABASE_URL, inboxId, () =>
     processInboxLocked(db, api, crypto, env, videoDelivery, inboxId),
   )
@@ -168,11 +168,10 @@ async function processSource(
 }
 
 /**
- * Handles a syntactically valid `/start watch_…` immediately after its inbox record commits.
- * The delivery service still owns every authorization and single-use check; this function merely
- * bypasses the outbox drain that would otherwise add queue latency to a user-initiated action.
+ * Handles an already accepted inbox record immediately while its durable outbox task remains the
+ * fallback. The processor still owns authorization and idempotent completion.
  */
-export function createTelegramImmediateVideoStartProcessor(options: {
+export function createTelegramImmediateInboxProcessor(options: {
   runtime: BackendRuntime
   api: TelegramApiPort
   crypto: PayloadCrypto
@@ -181,6 +180,10 @@ export function createTelegramImmediateVideoStartProcessor(options: {
   const access = createPrismaFamilyAccess(prisma)
   const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
   return (inboxId: string) => processInbox(prisma, options.api, options.crypto, env, videoDelivery, inboxId)
+}
+
+function requiresInboxLock(event: TelegramInboundEvent) {
+  return event.kind === 'denied_content' || isInviteStartEvent(event)
 }
 
 async function ingestVideoThumbnail(

@@ -20,7 +20,7 @@ import { cleanupTelegramVideoNavigationReply, TelegramVideoDeliveryService } fro
 import { TelegramMessageAlreadyAbsentError, TelegramReplyTargetMissingError } from './application/ports'
 import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
-import { createTelegramImmediateVideoStartProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
+import { createTelegramImmediateInboxProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
 import { normalizeTelegramUpdate } from './transport/update-mapping'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -46,6 +46,7 @@ maybeDescribe('Telegram durable capture', () => {
   const sent: Array<{ chatId: string; text: string; options: Parameters<TelegramApiPort['sendMessage']>[2] }> = []
   let finalReceiptFailuresRemaining = 0
   let inviteResponseFailuresRemaining = 0
+  let denialResponseFailuresRemaining = 0
   let inviteResponseDelayMs = 0
   let downloadCalls = 0
   const sentVideos: Array<{ chatId: string; fileId: string }> = []
@@ -63,6 +64,10 @@ maybeDescribe('Telegram durable capture', () => {
       if (text === 'Вас пригласили в семейную ленту memoLy.' && inviteResponseFailuresRemaining > 0) {
         inviteResponseFailuresRemaining -= 1
         throw new Error('synthetic invite response failure')
+      }
+      if (text.startsWith('Материал не сохранён:') && denialResponseFailuresRemaining > 0) {
+        denialResponseFailuresRemaining -= 1
+        throw new Error('synthetic denial response failure')
       }
       if (text.startsWith('Сохранено') && finalReceiptFailuresRemaining > 0) {
         finalReceiptFailuresRemaining -= 1
@@ -94,8 +99,9 @@ maybeDescribe('Telegram durable capture', () => {
     repository,
     api,
     encrypt: crypto.encrypt,
-    onVideoNavigation: createTelegramImmediateVideoStartProcessor({ runtime, api, crypto }),
-    onInviteStart: createTelegramImmediateVideoStartProcessor({ runtime, api, crypto }),
+    onVideoNavigation: createTelegramImmediateInboxProcessor({ runtime, api, crypto }),
+    onInviteStart: createTelegramImmediateInboxProcessor({ runtime, api, crypto }),
+    onDeniedContent: createTelegramImmediateInboxProcessor({ runtime, api, crypto }),
   })
 
   beforeEach(async () => {
@@ -103,6 +109,7 @@ maybeDescribe('Telegram durable capture', () => {
     sent.length = 0
     finalReceiptFailuresRemaining = 0
     inviteResponseFailuresRemaining = 0
+    denialResponseFailuresRemaining = 0
     inviteResponseDelayMs = 0
     downloadCalls = 0
     sentVideos.length = 0
@@ -199,6 +206,44 @@ maybeDescribe('Telegram durable capture', () => {
     await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
 
     expect(sent).toHaveLength(1)
+    expect((await prisma.telegramInbox.findUniqueOrThrow({ where: { id: inbox.id } })).processedAt).toEqual(expect.any(Date))
+  })
+
+  test('sends a viewer denial immediately and leaves its queued fallback unable to duplicate it', async () => {
+    const owner = await familyOwner('510031')
+    const viewer = await admittedUser('510032')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+
+    await accept(note(110, 20, viewer.subject, 'Нельзя публиковать'))
+
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 110n } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inbox.id}` } })
+    expect(sent.filter(({ text }) => text.startsWith('Материал не сохранён:'))).toHaveLength(1)
+    expect((await prisma.telegramInbox.findUniqueOrThrow({ where: { id: inbox.id } })).processedAt).toEqual(expect.any(Date))
+    expect(await prisma.memory.count()).toBe(0)
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    expect(sent.filter(({ text }) => text.startsWith('Материал не сохранён:'))).toHaveLength(1)
+  })
+
+  test('keeps the queued denial fallback when its immediate Telegram response fails', async () => {
+    const owner = await familyOwner('510033')
+    const viewer = await admittedUser('510034')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: viewer.userId, role: 'viewer' } })
+    denialResponseFailuresRemaining = 1
+
+    await accept(note(111, 21, viewer.subject, 'Нельзя публиковать'))
+
+    const inbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 111n } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: `telegram-inbox:${inbox.id}` } })
+    expect(inbox.processedAt).toBeNull()
+    expect(sent.filter(({ text }) => text.startsWith('Материал не сохранён:'))).toHaveLength(0)
+    expect(await prisma.memory.count()).toBe(0)
+
+    await createTelegramTaskProcessor({ runtime, api, crypto })(task.payload)
+
+    expect(sent.filter(({ text }) => text.startsWith('Материал не сохранён:'))).toHaveLength(1)
     expect((await prisma.telegramInbox.findUniqueOrThrow({ where: { id: inbox.id } })).processedAt).toEqual(expect.any(Date))
   })
 

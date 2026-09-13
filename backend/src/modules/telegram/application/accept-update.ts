@@ -10,6 +10,8 @@ export function createAcceptTelegramUpdate(options: {
   onVideoNavigation?: (inboxId: string) => Promise<unknown>
   /** Runs after a new invite start is durably accepted; the queued inbox task remains its fallback. */
   onInviteStart?: (inboxId: string) => Promise<unknown>
+  /** Runs after a rejected content update is durably accepted; the queued inbox task remains its fallback. */
+  onDeniedContent?: (inboxId: string) => Promise<unknown>
   now?: () => Date
 }) {
   const now = options.now ?? (() => new Date())
@@ -32,6 +34,7 @@ export function createAcceptTelegramUpdate(options: {
     }
     const immediateVideoNavigation = isVideoNavigationStart(event) && options.onVideoNavigation !== undefined
     const immediateInviteStart = isInviteStart(event) && options.onInviteStart !== undefined
+    const immediateDeniedContent = acceptedEvent.kind === 'denied_content' && options.onDeniedContent !== undefined
     const result = await options.repository.accept({
       botId: options.botId,
       event: acceptedEvent,
@@ -45,6 +48,9 @@ export function createAcceptTelegramUpdate(options: {
     }
     if (immediateInviteStart && !result.duplicate && result.inboxId) {
       await options.onInviteStart!(result.inboxId).catch(() => undefined)
+    }
+    if (immediateDeniedContent && !result.duplicate && result.inboxId) {
+      await options.onDeniedContent!(result.inboxId).catch(() => undefined)
     }
     if (!result.duplicate && (event.kind === 'note' || event.kind === 'media') && acceptedEvent.kind !== 'denied_content') {
       await options.api.sendMessage(event.chatId, 'Получено. Сохраняем…').catch(() => undefined)
