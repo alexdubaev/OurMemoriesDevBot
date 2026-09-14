@@ -44,6 +44,7 @@ const envSchema = z.object({
   MAX_BOT_EXPECTED_USERNAME: optionalStringSchema,
   MAX_WEBHOOK_URL: optionalUrlSchema,
   MAX_WEBHOOK_SECRET: optionalStringSchema,
+  MAX_INBOX_ENCRYPTION_KEY: optionalStringSchema,
   MAX_MINI_APP_URL: optionalUrlSchema,
   MAX_WEBHOOK_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(512 * 1024),
   MAX_FILE_MAX_BYTES: z.coerce.number().int().positive().max(20_000_000).default(20_000_000),
@@ -310,6 +311,7 @@ function validateMaxEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
     for (const [key, value] of [
       ['MAX_BOT_TOKEN', env.MAX_BOT_TOKEN],
       ['MAX_WEBHOOK_SECRET', env.MAX_WEBHOOK_SECRET],
+      ['MAX_INBOX_ENCRYPTION_KEY', env.MAX_INBOX_ENCRYPTION_KEY],
     ] as const) {
       if (value !== undefined) {
         ctx.addIssue({
@@ -349,6 +351,26 @@ function validateMaxEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
       path: ['MAX_WEBHOOK_SECRET'],
       message: 'MAX_WEBHOOK_SECRET must carry at least 32 bytes of random base64url-safe data when MAX is enabled',
     })
+  }
+  if (!isInboxEncryptionKey(env.MAX_INBOX_ENCRYPTION_KEY)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_INBOX_ENCRYPTION_KEY'],
+      message: 'MAX_INBOX_ENCRYPTION_KEY must be a base64url-encoded 32-byte key when MAX is enabled',
+    })
+  }
+  for (const [key, value] of [
+    ['MAX_BOT_TOKEN', env.MAX_BOT_TOKEN],
+    ['MAX_WEBHOOK_SECRET', env.MAX_WEBHOOK_SECRET],
+    ...(env.TELEGRAM_ENABLED ? [['TELEGRAM_INBOX_ENCRYPTION_KEY', env.TELEGRAM_INBOX_ENCRYPTION_KEY] as const] : []),
+  ] as const) {
+    if (env.MAX_INBOX_ENCRYPTION_KEY && value === env.MAX_INBOX_ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MAX_INBOX_ENCRYPTION_KEY'],
+        message: `MAX_INBOX_ENCRYPTION_KEY must differ from ${key}`,
+      })
+    }
   }
   if (env.MAX_WEBHOOK_SECRET === env.MAX_BOT_TOKEN) {
     ctx.addIssue({

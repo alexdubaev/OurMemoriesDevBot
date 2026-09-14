@@ -69,6 +69,65 @@ model MaxAuthReplay {
   @@map("max_auth_replays")
 }
 
+/// Encrypted, durable MAX ingress. Only the normalized event is stored in the temporary payload;
+/// its event key remains permanently for provider-event deduplication.
+model MaxInbox {
+  id                String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventKey          String             @unique(map: "max_inbox_event_key_key") @map("event_key")
+  botId             BigInt             @map("bot_id")
+  eventKind         MaxInboxEventKind  @map("event_kind")
+  encryptedPayload  Bytes              @map("encrypted_payload")
+  encryptionIv      Bytes              @map("encryption_iv")
+  encryptionAuthTag Bytes              @map("encryption_auth_tag")
+  status            MaxInboxStatus     @default(accepted)
+  receivedAt        DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
+  source            MaxSource?
+  responses         MaxOutgoingResponse[]
+
+  @@index([status, receivedAt], map: "max_inbox_processing_idx")
+  @@map("max_inbox")
+}
+
+model MaxSource {
+  id              String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  inboxId         String           @unique(map: "max_sources_inbox_id_key") @map("inbox_id") @db.Uuid
+  botId           BigInt           @map("bot_id")
+  senderSubject   String           @map("sender_subject")
+  recipientId     BigInt           @map("recipient_id")
+  messageId       String           @map("message_id")
+  status          MaxSourceStatus  @default(accepted)
+  plannedMemoryId String           @map("planned_memory_id") @db.Uuid
+  memoryId        String?          @map("memory_id") @db.Uuid
+  userId          String?          @map("user_id") @db.Uuid
+  familyId        String?          @map("family_id") @db.Uuid
+  childId         String?          @map("child_id") @db.Uuid
+  rejectionCode   String?          @map("rejection_code")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  inbox           MaxInbox         @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_sources_inbox_id_fkey")
+
+  @@unique([botId, recipientId, messageId], map: "max_sources_bot_recipient_message_key")
+  @@index([status, updatedAt], map: "max_sources_status_idx")
+  @@map("max_sources")
+}
+
+model MaxOutgoingResponse {
+  id                 String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  inboxId            String                    @map("inbox_id") @db.Uuid
+  destinationUserId  BigInt                    @map("destination_user_id")
+  kind               MaxOutgoingResponseKind
+  text               String
+  deliveredAt        DateTime?                 @map("delivered_at") @db.Timestamptz(6)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  inbox              MaxInbox                  @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_outgoing_responses_inbox_id_fkey")
+
+  @@unique([inboxId, kind], map: "max_outgoing_responses_inbox_kind_key")
+  @@index([deliveredAt, createdAt], map: "max_outgoing_responses_pending_delivery_idx")
+  @@map("max_outgoing_responses")
+}
+
 /// Encrypted, durable Telegram ingress. The raw Bot API update never enters logs or a public DTO;
 /// only the normalized minimum needed by the worker is encrypted here.
 model TelegramInbox {
@@ -710,6 +769,39 @@ enum TelegramInboxKind {
   denied
 
   @@map("telegram_inbox_kind")
+}
+
+enum MaxInboxEventKind {
+  message_created
+  bot_started
+
+  @@map("max_inbox_event_kind")
+}
+
+enum MaxInboxStatus {
+  accepted
+  processed
+
+  @@map("max_inbox_status")
+}
+
+enum MaxSourceStatus {
+  accepted
+  published
+  denied
+  unsupported_media
+
+  @@map("max_source_status")
+}
+
+enum MaxOutgoingResponseKind {
+  accepted
+  saved
+  denied
+  unsupported_media
+  welcome
+
+  @@map("max_outgoing_response_kind")
 }
 
 enum TelegramSourceKind {

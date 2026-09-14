@@ -32,6 +32,7 @@ describe('loadEnv', () => {
       MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
       MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
       MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
       MAX_MINI_APP_URL: 'https://app.example.com',
       PRIVATE_STORAGE_DRIVER: 's3',
       PRIVATE_STORAGE_REGION: 'ru-central1',
@@ -54,6 +55,7 @@ describe('loadEnv', () => {
       MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
       MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
       MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
       MAX_MINI_APP_URL: 'https://app.example.com',
     }
 
@@ -75,6 +77,52 @@ describe('loadEnv', () => {
       .toThrow('MAX_WEBHOOK_SECRET')
     expect(() => loadEnv({ ...base, MAX_MINI_APP_URL: 'http://app.example.com' }))
       .toThrow('MAX_MINI_APP_URL')
+  })
+
+  test('requires an independent MAX inbox encryption key when MAX is enabled', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      MAX_ENABLED: 'true',
+      MAX_BOT_TOKEN: 'max:adapter-secret',
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+      MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_MINI_APP_URL: 'https://app.example.com',
+    }
+
+    expect(() => loadEnv(base)).toThrow('MAX_INBOX_ENCRYPTION_KEY')
+    expect(() => loadEnv({ ...base, MAX_INBOX_ENCRYPTION_KEY: 'too-short' }))
+      .toThrow('MAX_INBOX_ENCRYPTION_KEY')
+    expect(loadEnv({ ...base, MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43) }))
+      .toMatchObject({ MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43) })
+    expect(() => loadEnv({ ...base, MAX_ENABLED: 'false', MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43) }))
+      .toThrow('MAX_INBOX_ENCRYPTION_KEY')
+  })
+
+  test('keeps the MAX inbox encryption key distinct from other provider secrets', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      MAX_ENABLED: 'true',
+      MAX_BOT_TOKEN: 'B'.repeat(43),
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+      MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_MINI_APP_URL: 'https://app.example.com',
+      MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+      TELEGRAM_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: '123456:telegram-secret',
+      TELEGRAM_INBOX_ENCRYPTION_KEY: 'T'.repeat(43),
+    }
+
+    for (const [field, value] of [
+      ['MAX_BOT_TOKEN', 'A'.repeat(43)],
+      ['MAX_WEBHOOK_SECRET', 'A'.repeat(43)],
+      ['TELEGRAM_INBOX_ENCRYPTION_KEY', 'A'.repeat(43)],
+    ] as const) {
+      expect(() => loadEnv({ ...base, [field]: value })).toThrow('MAX_INBOX_ENCRYPTION_KEY')
+    }
   })
 
   test('rejects a MAX webhook secret reused as the bot token', () => {
