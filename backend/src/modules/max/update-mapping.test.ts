@@ -30,10 +30,23 @@ describe('MAX update mapping', () => {
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, recipient: { chat_id: 5, chat_type: 'chat', user_id: null } } })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: null } })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: { mid: 'mid-2', link: { type: 'forward' } } } })).toEqual({ kind: 'ignored' })
+    expect(normalizeMaxUpdate({
+      ...messageFixture,
+      message: {
+        ...messageFixture.message,
+        link: { type: 'forward', message: { mid: 'forwarded-mid' } },
+        body: { mid: 'mid-3', text: null, attachments: [] },
+      },
+    })).toEqual({ kind: 'ignored' })
   })
 
   test('rejects malformed supported identities, timestamps, and payloads', () => {
     expect(() => normalizeMaxUpdate({ ...messageFixture, timestamp: -1 })).toThrow()
+    expect(() => normalizeMaxUpdate({ update_type: 'message_created', timestamp: 1 })).toThrow()
+    expect(() => normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, recipient: null },
+    })).toThrow()
     expect(() => normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, sender: { user_id: 0 } } })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 'x'.repeat(513) })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 3 })).toThrow()

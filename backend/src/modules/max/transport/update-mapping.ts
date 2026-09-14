@@ -27,10 +27,11 @@ function normalizeBotStarted(input: Record<string, unknown>, occurredAt: string)
 }
 
 function normalizeMessage(input: Record<string, unknown>, occurredAt: string): MaxMappedUpdate {
-  if (!isRecord(input.message)) return { kind: 'ignored' }
+  if (!isRecord(input.message)) throw new Error('Invalid MAX message')
   const message = input.message
   if (message.body === null || message.body === undefined) return { kind: 'ignored' }
-  if (!isRecord(message.sender) || !isRecord(message.recipient)) return { kind: 'ignored' }
+  if (!isRecord(message.sender)) return { kind: 'ignored' }
+  if (!isRecord(message.recipient)) throw new Error('Invalid MAX recipient')
   // MAX always supplies all Recipient keys. A direct dialog has a null chat_id and a positive
   // user_id; group/channel recipients have a positive chat_id and are ignored at this boundary.
   if (!Object.hasOwn(message.recipient, 'chat_id') || !Object.hasOwn(message.recipient, 'chat_type') ||
@@ -49,15 +50,16 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const text = body.text === null || body.text === undefined ? null :
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
-  if (text === null && attachments.length === 0 && isForwardOnly(body)) return { kind: 'ignored' }
+  if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
     kind: 'message_created', senderId: String(message.sender.user_id), recipientId: String(message.recipient.user_id),
     messageId, occurredAt, text, hasAttachments: attachments.length > 0,
   }
 }
 
-function isForwardOnly(body: Record<string, unknown>) {
-  return isRecord(body.link) && body.link.type === 'forward'
+function isForwardOnly(message: Record<string, unknown>, body: Record<string, unknown>) {
+  return (isRecord(message.link) && message.link.type === 'forward') ||
+    (isRecord(body.link) && body.link.type === 'forward')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
