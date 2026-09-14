@@ -3,6 +3,96 @@ import { describe, expect, test } from 'bun:test'
 import { loadEnv } from './env'
 
 describe('loadEnv', () => {
+  test('defaults provider enablement safely while preserving token-configured Telegram development startup', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+
+    expect(loadEnv(base)).toMatchObject({ MAX_ENABLED: false, TELEGRAM_ENABLED: false })
+    expect(
+      loadEnv({
+        ...base,
+        TELEGRAM_BOT_TOKEN: '123456:adapter-secret',
+        TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+      }).TELEGRAM_ENABLED,
+    ).toBe(true)
+  })
+
+  test('allows a production MAX runtime with Telegram explicitly disabled', () => {
+    const env = loadEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '0123456789abcdef'.repeat(4),
+      COOKIE_SECURE: 'true',
+      CORS_ORIGINS: 'https://web.example.com',
+      TELEGRAM_ENABLED: 'false',
+      MAX_ENABLED: 'true',
+      MAX_BOT_TOKEN: 'max:production-secret',
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+      MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_MINI_APP_URL: 'https://app.example.com',
+      PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_REGION: 'ru-central1',
+      PRIVATE_STORAGE_BUCKET: 'uploads',
+      PRIVATE_STORAGE_ENDPOINT: 'https://storage.example.com',
+      PRIVATE_STORAGE_ACCESS_KEY_ID: 'access-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'secret-key',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    })
+
+    expect(env).toMatchObject({ MAX_ENABLED: true, TELEGRAM_ENABLED: false })
+  })
+
+  test('requires the complete MAX webhook configuration when enabled', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      MAX_ENABLED: 'true',
+      MAX_BOT_TOKEN: 'max:adapter-secret',
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+      MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_MINI_APP_URL: 'https://app.example.com',
+    }
+
+    for (const omitted of [
+      'MAX_BOT_TOKEN',
+      'MAX_BOT_EXPECTED_USERNAME',
+      'MAX_WEBHOOK_URL',
+      'MAX_WEBHOOK_SECRET',
+      'MAX_MINI_APP_URL',
+    ]) {
+      const partial: Record<string, string> = { ...base }
+      delete partial[omitted]
+      expect(() => loadEnv(partial)).toThrow(omitted)
+    }
+
+    expect(() => loadEnv({ ...base, MAX_WEBHOOK_URL: 'http://api.example.com/webhooks/max' }))
+      .toThrow('MAX_WEBHOOK_URL')
+    expect(() => loadEnv({ ...base, MAX_WEBHOOK_SECRET: 'too-short' }))
+      .toThrow('MAX_WEBHOOK_SECRET')
+    expect(() => loadEnv({ ...base, MAX_MINI_APP_URL: 'http://app.example.com' }))
+      .toThrow('MAX_MINI_APP_URL')
+  })
+
+  test('refuses credential-shaped MAX and Telegram values when those providers are explicitly disabled', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+
+    expect(() => loadEnv({ ...base, MAX_ENABLED: 'false', MAX_BOT_TOKEN: 'max:ignored-secret' }))
+      .toThrow('MAX_BOT_TOKEN')
+    expect(() => loadEnv({ ...base, MAX_ENABLED: 'false', MAX_WEBHOOK_SECRET: 'M'.repeat(43) }))
+      .toThrow('MAX_WEBHOOK_SECRET')
+    expect(() => loadEnv({ ...base, TELEGRAM_ENABLED: 'false', TELEGRAM_BOT_TOKEN: '123456:ignored-secret' }))
+      .toThrow('TELEGRAM_BOT_TOKEN')
+    expect(() => loadEnv({ ...base, TELEGRAM_ENABLED: 'false', TELEGRAM_WEBHOOK_SECRET: 'T'.repeat(43) }))
+      .toThrow('TELEGRAM_WEBHOOK_SECRET')
+  })
+
   test('splits a comma-separated origin list, trimming the spaces people leave in .env', () => {
     // Only the parsing is worth asserting. Reading `.default()` literals back out of the schema
     // asserts nothing - there is no code between the default and the assertion - and turns every

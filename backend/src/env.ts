@@ -39,6 +39,15 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
+  MAX_ENABLED: booleanStringSchema,
+  MAX_BOT_TOKEN: optionalStringSchema,
+  MAX_BOT_EXPECTED_USERNAME: optionalStringSchema,
+  MAX_WEBHOOK_URL: optionalUrlSchema,
+  MAX_WEBHOOK_SECRET: optionalStringSchema,
+  MAX_MINI_APP_URL: optionalUrlSchema,
+  MAX_WEBHOOK_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(512 * 1024),
+  MAX_FILE_MAX_BYTES: z.coerce.number().int().positive().max(20_000_000).default(20_000_000),
+  TELEGRAM_ENABLED: booleanStringSchema,
   TELEGRAM_BOT_TOKEN: optionalStringSchema,
   TELEGRAM_BOT_EXPECTED_USERNAME: stringWithDefault('OurMemoriesDevBot')
     .pipe(z.string().regex(/^[A-Za-z0-9_]{5,32}$/)),
@@ -128,13 +137,17 @@ const envSchema = z.object({
   validateTrustedProxy(env, ctx)
   validatePrivateStorageEnv(env, ctx)
   validateEmailEnv(env, ctx)
+  validateMaxEnv(env, ctx)
   validateTelegramEnv(env, ctx)
 })
 
 export type AppEnv = z.infer<typeof envSchema>
 
 export function loadEnv(source: Record<string, string | undefined>) {
-  return envSchema.parse(source)
+  const telegramEnabled = source.TELEGRAM_ENABLED ?? (
+    source.TELEGRAM_BOT_TOKEN?.trim() || source.NODE_ENV === 'production' ? 'true' : 'false'
+  )
+  return envSchema.parse({ ...source, TELEGRAM_ENABLED: telegramEnabled })
 }
 
 function validateWebappOrigin(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
@@ -231,19 +244,36 @@ function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.Refine
 }
 
 function validateTelegramEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
-  if (env.NODE_ENV === 'production' && !env.TELEGRAM_BOT_TOKEN) {
+  if (!env.TELEGRAM_ENABLED) {
+    for (const [key, value] of [
+      ['TELEGRAM_BOT_TOKEN', env.TELEGRAM_BOT_TOKEN],
+      ['TELEGRAM_WEBHOOK_SECRET', env.TELEGRAM_WEBHOOK_SECRET],
+      ['TELEGRAM_INBOX_ENCRYPTION_KEY', env.TELEGRAM_INBOX_ENCRYPTION_KEY],
+    ] as const) {
+      if (value !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${key} is set but TELEGRAM_ENABLED=false, so it would be ignored`,
+        })
+      }
+    }
+    return
+  }
+
+  if (!env.TELEGRAM_BOT_TOKEN) {
     ctx.addIssue({
       code: 'custom',
       path: ['TELEGRAM_BOT_TOKEN'],
-      message: 'TELEGRAM_BOT_TOKEN is required in production',
+      message: 'TELEGRAM_BOT_TOKEN is required when TELEGRAM_ENABLED=true',
     })
   }
 
-  if (env.TELEGRAM_BOT_TOKEN && !isInboxEncryptionKey(env.TELEGRAM_INBOX_ENCRYPTION_KEY)) {
+  if (!isInboxEncryptionKey(env.TELEGRAM_INBOX_ENCRYPTION_KEY)) {
     ctx.addIssue({
       code: 'custom',
       path: ['TELEGRAM_INBOX_ENCRYPTION_KEY'],
-      message: 'TELEGRAM_INBOX_ENCRYPTION_KEY must be a base64url-encoded 32-byte key when Telegram is configured',
+      message: 'TELEGRAM_INBOX_ENCRYPTION_KEY must be a base64url-encoded 32-byte key when Telegram is enabled',
     })
   }
 
@@ -272,6 +302,60 @@ function validateTelegramEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCt
 
   if (env.TELEGRAM_MINI_APP_URL && new URL(env.TELEGRAM_MINI_APP_URL).protocol !== 'https:') {
     ctx.addIssue({ code: 'custom', path: ['TELEGRAM_MINI_APP_URL'], message: 'TELEGRAM_MINI_APP_URL must use HTTPS' })
+  }
+}
+
+function validateMaxEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (!env.MAX_ENABLED) {
+    for (const [key, value] of [
+      ['MAX_BOT_TOKEN', env.MAX_BOT_TOKEN],
+      ['MAX_WEBHOOK_SECRET', env.MAX_WEBHOOK_SECRET],
+    ] as const) {
+      if (value !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${key} is set but MAX_ENABLED=false, so it would be ignored`,
+        })
+      }
+    }
+    return
+  }
+
+  if (!env.MAX_BOT_TOKEN) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_BOT_TOKEN'],
+      message: 'MAX_BOT_TOKEN is required when MAX_ENABLED=true',
+    })
+  }
+  if (!env.MAX_BOT_EXPECTED_USERNAME || !/^[A-Za-z0-9_]{5,32}$/.test(env.MAX_BOT_EXPECTED_USERNAME)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_BOT_EXPECTED_USERNAME'],
+      message: 'MAX_BOT_EXPECTED_USERNAME must be 5-32 letters, numbers, or underscores when MAX is enabled',
+    })
+  }
+  if (!env.MAX_WEBHOOK_URL || new URL(env.MAX_WEBHOOK_URL).protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_WEBHOOK_URL'],
+      message: 'MAX_WEBHOOK_URL must be an HTTPS URL when MAX is enabled',
+    })
+  }
+  if (!env.MAX_WEBHOOK_SECRET || !/^[A-Za-z0-9_-]{43,256}$/.test(env.MAX_WEBHOOK_SECRET)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_WEBHOOK_SECRET'],
+      message: 'MAX_WEBHOOK_SECRET must carry at least 32 bytes of random base64url-safe data when MAX is enabled',
+    })
+  }
+  if (!env.MAX_MINI_APP_URL || new URL(env.MAX_MINI_APP_URL).protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_MINI_APP_URL'],
+      message: 'MAX_MINI_APP_URL must use HTTPS when MAX is enabled',
+    })
   }
 }
 
