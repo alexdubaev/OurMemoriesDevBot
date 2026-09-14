@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { SignJWT } from 'jose'
+import { Hono } from 'hono'
 
 import type { DbClient } from './db'
 import { loadEnv } from './env'
@@ -219,6 +220,16 @@ test('account mutations share bounded write-rate protection', async () => {
   expect(limited.status).toBe(429)
   expect(limited.headers.get('retry-after')).toBeTruthy()
   expect((await limited.json()).error.message).toBe('Слишком много запросов. Попробуйте позже')
+})
+
+test('mounts the returned MAX route only when composition supplies it', async () => {
+  const prisma = { $queryRaw: async () => [{ '?column?': 1 }] } as unknown as DbClient
+  const disabled = createApp({ env, prisma })
+  expect((await disabled.request('/webhooks/max')).status).toBe(404)
+
+  const maxRoutes = new Hono().get('/webhooks/max', (c) => c.text('max'))
+  const mounted = createApp({ env, prisma, maxRoutes })
+  expect((await mounted.request('/webhooks/max')).status).toBe(200)
 })
 
 test('admin user reads share one bounded budget across filters, sessions, and client addresses', async () => {

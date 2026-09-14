@@ -3,11 +3,13 @@ import { startTelegramPolling } from './modules/telegram'
 import { createBackendRuntime } from './runtime'
 import { shutdownBackend } from './shutdown'
 import { startTelegramIfEnabled } from './telegram-startup'
+import { startMaxIfEnabled } from './max-startup'
 
 const runtime = createBackendRuntime()
 const telegram = runtime.env.NODE_ENV === 'test'
   ? null
   : await startTelegramIfEnabled({ runtime })
+const max = await startMaxIfEnabled({ runtime })
 const app = createApp({
   backgroundTasks: runtime.backgroundTasks,
   emailDelivery: runtime.emailDelivery,
@@ -15,6 +17,7 @@ const app = createApp({
   prisma: runtime.prisma,
   privateStorage: runtime.privateStorage,
   telegramRoutes: telegram?.routes,
+  maxRoutes: max?.routes,
 })
 
 const server = Bun.serve({
