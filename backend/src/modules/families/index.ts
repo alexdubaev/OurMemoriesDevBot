@@ -8,6 +8,7 @@ import { createPrismaFamilyAccess } from './infrastructure/family-access'
 export { createPrismaFamilyAccess } from './infrastructure/family-access'
 import { prismaPersistenceErrors } from './infrastructure/persistence-errors'
 import { createFamilyRoutes } from './transport/routes'
+export { createInviteStartResolver } from './application/invite-start'
 
 export function createFamiliesModule({
   db,
