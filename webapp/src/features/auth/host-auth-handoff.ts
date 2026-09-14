@@ -1,5 +1,5 @@
 import type { HostAuthProvider } from './context'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AuthContextValue, HostAuthAttemptOptions } from './context'
 
 export type HostAuthHandoffState = {
@@ -39,6 +39,7 @@ type HostAuthHandoffOptions = {
 export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }: HostAuthHandoffOptions) {
   const attemptedKey = useRef<string | null>(null)
   const activeAttempt = useRef<{ key: string; controller: AbortController } | null>(null)
+  const committedAttemptKey = useRef<string | null>(null)
   const [hostAuthError, setHostAuthError] = useState<Error | null>(null)
   const [hasStartedHostAuth, setHasStartedHostAuth] = useState(false)
   const [startedHostAuthKey, setStartedHostAuthKey] = useState<string | null>(null)
@@ -55,40 +56,50 @@ export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }
     isHostAvailable,
   } : null, [auth, authAttemptKey, hasStartedHostAuth, initData, isHostAuthPending, isHostAvailable, provider, startedHostAuthKey])
 
-  useEffect(() => {
-    const previous = activeAttempt.current
-    if (previous && previous.key !== authAttemptKey) {
-      previous.controller.abort()
-      activeAttempt.current = null
+  const invalidateAttempt = () => {
+    activeAttempt.current?.controller.abort()
+    activeAttempt.current = null
+    attemptedKey.current = null
+  }
+
+  useLayoutEffect(() => {
+    if (committedAttemptKey.current !== authAttemptKey) {
+      committedAttemptKey.current = authAttemptKey
+      invalidateAttempt()
       setHostAuthError(null)
       setIsHostAuthPending(false)
     }
 
+    return invalidateAttempt
+  }, [authAttemptKey])
+
+  useEffect(() => {
     if (!auth || !provider || !initData || !hostAuthState || !shouldStartHostAuth(hostAuthState)) return
     if (!authAttemptKey || attemptedKey.current === authAttemptKey) return
 
     const key = authAttemptKey
     const controller = new AbortController()
+    const attempt = { key, controller }
     attemptedKey.current = key
-    activeAttempt.current = { key, controller }
+    activeAttempt.current = attempt
     setHostAuthError(null)
 
     queueMicrotask(() => {
-      if (activeAttempt.current?.key !== key || controller.signal.aborted) return
+      if (activeAttempt.current !== attempt || controller.signal.aborted) return
       setStartedHostAuthKey(key)
       setHasStartedHostAuth(true)
       setIsHostAuthPending(true)
       const options: HostAuthAttemptOptions = {
         signal: controller.signal,
-        isCurrent: () => activeAttempt.current?.key === key && !controller.signal.aborted,
+        isCurrent: () => activeAttempt.current === attempt && !controller.signal.aborted,
       }
       void auth.authenticateHost(provider, initData, options)
         .catch((error: unknown) => {
-          if (activeAttempt.current?.key !== key) return
+          if (activeAttempt.current !== attempt) return
           setHostAuthError(error instanceof Error ? error : new Error('Не удалось войти.'))
         })
         .finally(() => {
-          if (activeAttempt.current?.key !== key) return
+          if (activeAttempt.current !== attempt) return
           activeAttempt.current = null
           setIsHostAuthPending(false)
         })
@@ -96,8 +107,7 @@ export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }
   }, [auth, authAttemptKey, hostAuthState, initData, provider])
 
   const resetHostAuth = useCallback(() => {
-    activeAttempt.current?.controller.abort()
-    activeAttempt.current = null
+    invalidateAttempt()
     attemptedKey.current = null
     setHostAuthError(null)
     setHasStartedHostAuth(false)
