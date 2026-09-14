@@ -11,7 +11,7 @@ Updated: 2026-09-14
 | MAX-05 | APPROVED | Durable text ingestion and retry-safe responses |
 | MAX-06 | WAITING_FOR_LIVE_PROBE | Owner must install `MAX_BOT_TOKEN` into approved secret environment; preserve the approved synthetic image probe without weakening its requirements |
 | MAX-07 | WAITING | First prove stable MAX-hosted video reference/retrieval on real MAX; do not store MAX video originals privately without a new owner decision |
-| MAX-08 | IN_PROGRESS | MAX invite links, signed start routing, and provider-neutral Core invite reuse |
+| MAX-08 | APPROVED | MAX invite links, signed start routing, and provider-neutral Core invite reuse; local verification and two fresh whole-change reviews completed |
 
 Publication state: local only. No push, PR, merge, deployment, webhook registration, subscription mutation, or live MAX API call is authorized by this ledger.
 
