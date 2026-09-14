@@ -21,9 +21,11 @@ type BrowserHost = {
   location?: { search?: unknown }
 }
 
+export type MaxHostBridgeOptions = { maxBotUsername?: string }
+
 const zeroInsets: TelegramInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
-export function createMaxHostBridge(host: unknown): HostBridge {
+export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions = {}): HostBridge {
   const browserHost = isRecord(host) ? host as BrowserHost : null
   const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
   const available = isMeaningfulMaxWebApp(host)
@@ -38,6 +40,7 @@ export function createMaxHostBridge(host: unknown): HostBridge {
       if (signed.present) return inviteTokenFromStartParam(signed.value)
       return inviteTokenFromSearch(browserHost?.location?.search)
     },
+    inviteLink: (rawToken) => createMaxInviteLink(rawToken, options.maxBotUsername),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -131,7 +134,15 @@ function inviteTokenFromSearch(search: unknown) {
 function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
-  return /^[A-Za-z0-9_-]{32,57}$/.test(token) ? token : null
+  return /^[A-Za-z0-9_-]{32,128}$/.test(token) ? token : null
+}
+
+function createMaxInviteLink(rawToken: string, username: string | undefined) {
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(rawToken)) return null
+  if (!username || !/^[A-Za-z0-9_]{5,32}$/.test(username)) return null
+  const payload = `invite_${rawToken}`
+  if (payload.length > 512) return null
+  return `https://max.ru/${username}?startapp=${payload}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -42,6 +42,7 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
       ? webApp.initData
       : null,
     inviteToken: () => inviteTokenFromInitData(webApp?.initData) ?? inviteTokenFromSearch(browserHost?.location?.search),
+    inviteLink: (rawToken) => createTelegramInviteLink(rawToken),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -115,6 +116,7 @@ export function createBrowserDevHostBridge(
     initData: () => null,
     rawAuthData: () => null,
     inviteToken: () => null,
+    inviteLink: () => null,
     metadata: () => metadata,
     ready: () => undefined,
     close: () => undefined,
@@ -177,6 +179,13 @@ function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
   return /^[A-Za-z0-9_-]{32,57}$/.test(token) ? token : null
+}
+
+function createTelegramInviteLink(rawToken: string) {
+  if (!/^[A-Za-z0-9_-]{32,57}$/.test(rawToken)) return null
+  const payload = `invite_${rawToken}`
+  if (payload.length > 512) return null
+  return `${botUrl}?startapp=${payload}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -20,6 +20,7 @@ export type HostBridge = {
   initData(): string | null
   rawAuthData(): string | null
   inviteToken(): string | null
+  inviteLink(rawToken: string): string | null
   metadata(): TelegramHostMetadata | null
   ready(): void
   close(): void
@@ -36,9 +37,16 @@ export type BrowserDevHostOptions = {
   insets?: Partial<TelegramInsets>
 }
 
+export type HostBridgeOptions = {
+  maxBotUsername?: string
+}
+
 /** Selects one host deterministically. MAX wins only for a meaningful MAX WebApp surface. */
-export function createHostBridge(host: unknown = typeof window === 'undefined' ? undefined : window): HostBridge {
-  if (isMeaningfulMaxWebApp(host)) return createMaxHostBridge(host)
+export function createHostBridge(
+  host: unknown = typeof window === 'undefined' ? undefined : window,
+  options: HostBridgeOptions = {},
+): HostBridge {
+  if (isMeaningfulMaxWebApp(host)) return createMaxHostBridge(host, options)
   if (hasTelegramWebApp(host)) return createTelegramHostBridge(host)
   return createBrowserDevHostBridge()
 }

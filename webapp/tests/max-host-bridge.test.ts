@@ -10,6 +10,27 @@ import {
 const invite = 'invite_abcdefghijklmnopqrstuvwxyzABCDEF'
 
 describe('MAX HostBridge', () => {
+  test('serializes valid opaque invite tokens with the configured MAX bot username', () => {
+    const token = 'A'.repeat(32)
+    const bridge = createMaxHostBridge({ WebApp: { initData: 'query_id=signed' } }, { maxBotUsername: 'OurMemoriesMaxBot' })
+
+    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+    expect(bridge.inviteLink('A'.repeat(128))).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${'A'.repeat(128)}`)
+    expect(bridge.inviteLink('A'.repeat(31))).toBeNull()
+    expect(bridge.inviteLink('A'.repeat(129))).toBeNull()
+    expect(bridge.inviteLink('A'.repeat(31) + '.')).toBeNull()
+    expect(bridge.inviteLink(token)).not.toContain('familyId')
+    expect(bridge.inviteLink(token)).not.toContain('userId')
+    expect(bridge.inviteLink(token)).not.toContain('childId')
+  })
+
+  test('fails closed when MAX username configuration is missing or invalid', () => {
+    const bridge = createMaxHostBridge({ WebApp: { initData: 'query_id=signed' } })
+    expect(bridge.inviteLink('A'.repeat(32))).toBeNull()
+    expect(createMaxHostBridge({}, { maxBotUsername: 'bad-name' }).inviteLink('A'.repeat(32))).toBeNull()
+    expect(createMaxHostBridge({}, { maxBotUsername: 'x'.repeat(33) }).inviteLink('A'.repeat(32))).toBeNull()
+  })
+
   test('loads the documented MAX SDK before the React production bootstrap', () => {
     const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
     const html = readFileSync(indexPath, 'utf8')
@@ -90,5 +111,20 @@ describe('MAX HostBridge', () => {
       WebApp: { initData: 'query_id=signed' },
     })
     expect(fallback.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
+  })
+
+  test('accepts the full 128-character signed invite token', () => {
+    const token = 'Z'.repeat(128)
+    const bridge = createMaxHostBridge({ WebApp: { initData: `query_id=signed&start_param=invite_${token}` } })
+    expect(bridge.inviteToken()).toBe(token)
+  })
+
+  test('blocks query fallback when signed start_param is duplicated', () => {
+    const token = 'Z'.repeat(32)
+    const bridge = createMaxHostBridge({
+      location: { search: `?startapp=invite_${token}` },
+      WebApp: { initData: `query_id=signed&start_param=invite_${token}&start_param=invite_${token}` },
+    })
+    expect(bridge.inviteToken()).toBeNull()
   })
 })

@@ -7,7 +7,9 @@ import { AuthProvider } from './features/auth'
 import { createHostBridge } from './platform/telegram'
 import './production.css'
 
-const hostBridge = createHostBridge(window)
+const hostBridge = createHostBridge(window, {
+  maxBotUsername: import.meta.env.VITE_MAX_BOT_USERNAME,
+})
 hostBridge.ready()
 
 const root = createRoot(document.getElementById('root')!)
