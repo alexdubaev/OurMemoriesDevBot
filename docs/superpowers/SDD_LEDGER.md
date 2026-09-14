@@ -1,0 +1,18 @@
+# memoLy MAX SDD Ledger
+
+Updated: 2026-09-14
+
+| Task | Status | Note |
+|---|---|---|
+| MAX-01 | APPROVED | Provider enablement and startup isolation |
+| MAX-02 | APPROVED | MAX identity persistence and Mini App authentication |
+| MAX-03 | APPROVED | Provider-neutral HostBridge and MAX auth bootstrap |
+| MAX-04 | APPROVED | MAX API client, bot identity, and webhook boundary |
+| MAX-05 | APPROVED | Durable text ingestion and retry-safe responses |
+| MAX-06 | WAITING_FOR_LIVE_PROBE | Owner must install `MAX_BOT_TOKEN` into approved secret environment; preserve the approved synthetic image probe without weakening its requirements |
+| MAX-07 | WAITING | First prove stable MAX-hosted video reference/retrieval on real MAX; do not store MAX video originals privately without a new owner decision |
+| MAX-08 | IN_PROGRESS | MAX invite links, signed start routing, and provider-neutral Core invite reuse |
+
+Publication state: local only. No push, PR, merge, deployment, webhook registration, subscription mutation, or live MAX API call is authorized by this ledger.
+
+After MAX-08, the next action is to resume the MAX-06 synthetic live image probe when the owner regains computer access. Do not advance to MAX-09 or MAX-10 first.
