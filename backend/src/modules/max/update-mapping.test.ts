@@ -51,6 +51,13 @@ describe('MAX update mapping', () => {
       ...messageFixture,
       message: { ...messageFixture.message, recipient: null },
     })).toThrow()
+    expect(() => normalizeMaxUpdate({
+      ...messageFixture,
+      message: {
+        ...messageFixture.message,
+        recipient: { chat_id: null, chat_type: 'dialog' },
+      },
+    })).toThrow()
     expect(() => normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, sender: { user_id: 0 } } })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 'x'.repeat(513) })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 3 })).toThrow()
