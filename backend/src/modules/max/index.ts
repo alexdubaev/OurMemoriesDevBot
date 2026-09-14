@@ -3,6 +3,7 @@ import { createMaxAcceptUpdate } from './application/accept-update'
 import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
+import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
 
@@ -20,8 +21,10 @@ export function createMaxModule(options: {
     repository: new PrismaMaxRepository(options.runtime.prisma),
     encrypt: crypto.encrypt,
   })
+  const processTask = createMaxTaskProcessor({ runtime: options.runtime, crypto })
   return {
     api,
+    processTask,
     routes: createMaxWebhook({
       secret: env.MAX_WEBHOOK_SECRET,
       bodyLimitBytes: env.MAX_WEBHOOK_BODY_LIMIT_BYTES,

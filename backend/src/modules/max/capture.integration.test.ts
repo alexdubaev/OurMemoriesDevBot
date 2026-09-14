@@ -7,6 +7,7 @@ import { createMaxAcceptUpdate } from './application/accept-update'
 import { createMaxModule } from './index'
 import type { MaxApiPort, MaxInboundEvent } from './application/ports'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
+import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
@@ -40,6 +41,12 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.maxSource.deleteMany()
     await prisma.maxInbox.deleteMany()
     await prisma.taskOutbox.deleteMany()
+    await prisma.memoryMedia.deleteMany()
+    await prisma.memory.deleteMany()
+    await prisma.child.deleteMany()
+    await prisma.family.deleteMany()
+    await prisma.externalIdentity.deleteMany()
+    await prisma.user.deleteMany()
   })
   afterAll(async () => { await prisma.$disconnect() })
 
@@ -123,5 +130,78 @@ maybeDescribe('MAX durable capture', () => {
     expect(tasks).toHaveLength(2)
     expect(tasks.every((task) => Object.keys(task.payload as object).length === 1)).toBe(true)
     expect(JSON.stringify(tasks.map((task) => task.payload))).not.toContain('caption')
+  })
+
+  test('publishes one fixed-id note for an authorized MAX owner', async () => {
+    const user = await prisma.user.create({ data: { displayName: 'MAX owner' } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: '77' } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: {
+        ownerUserId: user.id, name: 'MAX family', timezone: 'Europe/Moscow',
+      } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'MAX child' } })
+
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '77', recipientId: '900', messageId: 'max-message-publish',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Original MAX note', hasAttachments: false,
+    }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })
+    await Promise.all(Array.from({ length: 10 }, () => process(task.payload)))
+
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.memory.findFirstOrThrow()).toMatchObject({
+      id: expect.any(String), familyId: family.id, childId: child.id, body: 'Original MAX note',
+      kind: 'note', occurredAt: new Date('2026-09-14T10:00:00.000Z'),
+    })
+    expect(await prisma.maxSource.count({ where: { status: 'published', memoryId: { not: null } } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
+    expect(await prisma.maxInbox.findFirstOrThrow()).toMatchObject({ status: 'processed', processedAt: expect.any(Date) })
+    expect((await prisma.maxInbox.findFirstOrThrow()).encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('terminally denies an unauthorized text without creating a Memory', async () => {
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '77', recipientId: '900', messageId: 'max-message-denied',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Private text', hasAttachments: false,
+    }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(task.payload)
+
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.findFirstOrThrow()).toMatchObject({ status: 'denied', rejectionCode: 'denied' })
+    expect(await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { kind: 'denied' } })).toMatchObject({
+      text: 'Не удалось сохранить это сообщение в memoLy.', destinationUserId: 77n,
+    })
+    expect((await prisma.maxInbox.findFirstOrThrow()).encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('terminally ignores attachment and bot-started events without core records', async () => {
+    const attachment: MaxInboundEvent = {
+      kind: 'message_created', senderId: '77', recipientId: '900', messageId: 'max-message-media',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Caption', hasAttachments: true,
+    }
+    await accept(attachment)
+    const attachmentTask = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(attachmentTask.payload)
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.mediaAsset.count()).toBe(0)
+    expect(await prisma.maxSource.findFirstOrThrow()).toMatchObject({ status: 'unsupported_media' })
+
+    await prisma.taskOutbox.deleteMany()
+    const started: MaxInboundEvent = { kind: 'bot_started', chatId: '88', userId: '77', occurredAt: '2026-09-14T10:00:00.000Z', payload: null }
+    await accept(started)
+    const startedTask = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(startedTask.payload)
+    expect(await prisma.user.count()).toBe(0)
+    expect(await prisma.externalIdentity.count()).toBe(0)
+    expect(await prisma.family.count()).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxInbox.count({ where: { status: 'processed' } })).toBe(2)
   })
 })
