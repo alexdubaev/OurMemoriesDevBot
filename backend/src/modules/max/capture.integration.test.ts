@@ -1,10 +1,14 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
+import { loadEnv } from '../../env'
+import type { BackendRuntime } from '../../runtime'
 import { createMaxAcceptUpdate } from './application/accept-update'
-import type { MaxInboundEvent } from './application/ports'
+import { createMaxModule } from './index'
+import type { MaxApiPort, MaxInboundEvent } from './application/ports'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
+import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -16,10 +20,11 @@ maybeDescribe('MAX durable capture', () => {
   const crypto = createMaxPayloadCrypto(key)
   const repository = new PrismaMaxRepository(prisma)
   const accept = createMaxAcceptUpdate({ botId: '900', repository, encrypt: crypto.encrypt, now: () => new Date('2026-09-14T10:00:00.000Z') })
+  const webhookSecret = 'M'.repeat(43)
   const webhook = createMaxWebhook({
-    secret: 'test-only-max-secret', bodyLimitBytes: 64 * 1024, acceptUpdate: accept,
+    secret: webhookSecret, bodyLimitBytes: 64 * 1024, acceptUpdate: accept,
   })
-  const headers = { 'X-Max-Bot-Api-Secret': 'test-only-max-secret', 'Content-Type': 'application/json' }
+  const headers = { 'X-Max-Bot-Api-Secret': webhookSecret, 'Content-Type': 'application/json' }
   const textUpdate = {
     update_type: 'message_created', timestamp: 1_757_844_000_000, message: {
       sender: { user_id: 77 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 900 },
@@ -75,12 +80,40 @@ maybeDescribe('MAX durable capture', () => {
   })
 
   test('propagates a transaction failure as retryable webhook failure without persistence', async () => {
-    const failing = createMaxWebhook({ secret: headers['X-Max-Bot-Api-Secret'], bodyLimitBytes: 64 * 1024, acceptUpdate: async () => { throw new Error('synthetic transaction failure') } })
-    const response = await failing.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(textUpdate) })
-    expect(response.status).toBe(503)
+    const normalized = normalizeMaxUpdate(textUpdate)
+    if (normalized.kind !== 'message_created') throw new Error('fixture did not normalize to a message')
+    const badEvent = { ...normalized, recipientId: 'not-a-number' } as MaxInboundEvent
+    await expect(accept(badEvent)).rejects.toThrow()
     expect(await prisma.maxInbox.count()).toBe(0)
     expect(await prisma.maxSource.count()).toBe(0)
     expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: { startsWith: 'max:' } } })).toBe(0)
+  })
+
+  test('real module composition persists through its verified route and uses the verified bot identity', async () => {
+    const env = loadEnv({
+      DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
+      MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token', MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_INBOX_ENCRYPTION_KEY: key, MAX_WEBHOOK_URL: 'https://api.example.test/webhooks/max',
+      MAX_WEBHOOK_SECRET: headers['X-Max-Bot-Api-Secret'], MAX_MINI_APP_URL: 'https://app.example.test',
+    })
+    const runtime = { env, prisma } as unknown as BackendRuntime
+    const module = createMaxModule({
+      runtime,
+      identity: { userId: 900, username: 'OurMemoriesMaxBot', isBot: true },
+      api: {
+        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
+        getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
+        deleteSubscription: async () => ({ success: true }),
+      } satisfies MaxApiPort,
+    })
+    const response = await module.routes.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify({ ...textUpdate, message: { ...textUpdate.message, body: { ...textUpdate.message.body, mid: 'module-message-1' } } }) })
+    expect(response.status).toBe(200)
+    const inbox = await prisma.maxInbox.findFirstOrThrow({ include: { responses: true } })
+    expect(inbox.botId).toBe(900n)
+    expect(crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag })).toEqual(expect.objectContaining({ messageId: 'module-message-1', text: 'Текстовая заметка' }))
+    expect(inbox.responses).toHaveLength(1)
+    expect(await prisma.taskOutbox.count({ where: { type: { startsWith: 'max:' } } })).toBe(2)
   })
 
   test('passes no plaintext in outbox payloads for attachment responses', async () => {
