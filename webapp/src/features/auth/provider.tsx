@@ -24,7 +24,7 @@ import {
   useLogoutMutation,
   useRegisterMutation,
 } from './queries'
-import { AuthContext, type AuthContextValue } from './context'
+import { AuthContext, type AuthContextValue, type HostAuthProvider } from './context'
 import { bootstrapAuthSession } from './bootstrap'
 import { subscribeToBrowserSessionChanges } from './session-coordinator'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
@@ -143,11 +143,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
-  const authenticateTelegram = useCallback(async (initData: string) => {
-    const result = await api.authenticateTelegram(initData)
+  const authenticateHost = useCallback(async (provider: HostAuthProvider, initData: string) => {
+    const result = await (provider === 'max'
+      ? api.authenticateMax(initData)
+      : api.authenticateTelegram(initData))
     setAccessToken(result.data.accessToken)
     queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
   }, [api, queryClient, setAccessToken])
+
+  const authenticateTelegram = useCallback((initData: string) => authenticateHost('telegram', initData), [authenticateHost])
+  const authenticateMax = useCallback((initData: string) => authenticateHost('max', initData), [authenticateHost])
 
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {
@@ -200,14 +205,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       sessionError,
       retrySession,
       transport,
+      authenticateHost,
       authenticateTelegram,
+      authenticateMax,
       register,
       login,
       logout,
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [authenticateTelegram, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
+    [authenticateHost, authenticateMax, authenticateTelegram, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

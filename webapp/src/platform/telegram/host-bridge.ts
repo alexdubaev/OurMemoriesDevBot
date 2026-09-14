@@ -1,32 +1,5 @@
-export type TelegramInsets = { top: number; right: number; bottom: number; left: number }
-
-export type TelegramHostMetadata = {
-  version: string
-  platform: string
-  colorScheme: 'light' | 'dark'
-  safeAreaInset: TelegramInsets
-  contentSafeAreaInset: TelegramInsets
-}
-
-export type HostBridge = {
-  readonly isAvailable: boolean
-  initData(): string | null
-  inviteToken(): string | null
-  metadata(): TelegramHostMetadata | null
-  ready(): void
-  close(): void
-  back(): void
-  onBack(handler: () => void): () => void
-  openBot(): void
-  openTelegramVideo(deepLink: string): boolean
-  openInvite(rawToken: string): void
-  getInsets(): TelegramInsets
-}
-
-export type BrowserDevHostOptions = {
-  colorScheme?: 'light' | 'dark'
-  insets?: Partial<TelegramInsets>
-}
+import type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
+export type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
 
 type TelegramWebApp = {
   initData?: unknown
@@ -60,8 +33,12 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
   const hideBack = backButton?.hide
   const backHandlers = new Set<() => void>()
   return {
+    kind: 'telegram',
     isAvailable: webApp !== null,
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
+      ? webApp.initData
+      : null,
+    rawAuthData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
       ? webApp.initData
       : null,
     inviteToken: () => inviteTokenFromInitData(webApp?.initData) ?? inviteTokenFromSearch(browserHost?.location?.search),
@@ -133,8 +110,10 @@ export function createBrowserDevHostBridge(
     contentSafeAreaInset: safeInsets,
   }
   return {
+    kind: 'browser',
     isAvailable: false,
     initData: () => null,
+    rawAuthData: () => null,
     inviteToken: () => null,
     metadata: () => metadata,
     ready: () => undefined,

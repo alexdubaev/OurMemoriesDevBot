@@ -4,6 +4,7 @@ import {
   cookieRefreshRequestSchema,
   cookieRefreshResponseSchema,
   loginRequestSchema,
+  maxAuthRequestSchema,
   meResponseSchema,
   passwordResetConfirmRequestSchema,
   passwordResetRequestResponseSchema,
@@ -90,6 +91,18 @@ export class AuthApi {
     const payload = telegramAuthRequestSchema.parse({ initData })
     return this.authCoordinator(async () => {
       const data = await this.http.request('/api/v1/auth/telegram', cookieAuthResponseSchema, {
+        method: 'POST', body: payload,
+      })
+      this.options.setAccessToken(data.accessToken)
+      const sessionEvent = publishBrowserSessionState('authenticated')
+      return { data, sessionEpoch: sessionEvent.epoch }
+    })
+  }
+
+  authenticateMax(initData: string): Promise<BrowserSessionTransition<CookieAuthResponse>> {
+    const payload = maxAuthRequestSchema.parse({ initData })
+    return this.authCoordinator(async () => {
+      const data = await this.http.request('/api/v1/auth/max', cookieAuthResponseSchema, {
         method: 'POST', body: payload,
       })
       this.options.setAccessToken(data.accessToken)
