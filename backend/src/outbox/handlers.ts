@@ -16,6 +16,24 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
  */
 export const taskHandlers = {
+  'max:process': {
+    maxAttempts: 5,
+    deadlineMs: 90_000,
+    retryDelayMs: providerRetryDelay,
+    run: async ({ payload, signal }, runtime) => {
+      const { createMaxTasks } = await import('../modules/max')
+      return createMaxTasks(runtime).process(payload, signal)
+    },
+  },
+  'max:deliver-response': {
+    maxAttempts: 5,
+    deadlineMs: 30_000,
+    retryDelayMs: providerRetryDelay,
+    run: async ({ payload, signal }, runtime) => {
+      const { createMaxTasks } = await import('../modules/max')
+      return createMaxTasks(runtime).deliverResponse(payload, signal)
+    },
+  },
   'telegram:process': {
     maxAttempts: 5,
     deadlineMs: 90_000,
@@ -109,6 +127,16 @@ export const taskHandlers = {
   //   },
   // },
 } satisfies TaskHandlerRegistry
+
+function providerRetryDelay(error: unknown, attempt: number) {
+  const retryAfter = typeof error === 'object' && error !== null && 'retryAfterSeconds' in error
+    ? (error as { retryAfterSeconds?: unknown }).retryAfterSeconds
+    : undefined
+  if (typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(retryAfter, 86_400) * 1_000
+  }
+  return [5_000, 30_000, 120_000, 600_000][Math.min(attempt - 1, 3)]!
+}
 
 /**
  * A payload is whatever JSON the enqueuing code wrote, so every handler validates its own. A

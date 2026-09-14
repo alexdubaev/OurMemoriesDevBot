@@ -3,6 +3,7 @@ import { createMaxAcceptUpdate } from './application/accept-update'
 import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
+import { createMaxResponseDelivery } from './infrastructure/deliver-response'
 import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
@@ -33,5 +34,19 @@ export function createMaxModule(options: {
   }
 }
 
+export function createMaxTasks(runtime: BackendRuntime) {
+  const env = runtime.env
+  if (!env.MAX_BOT_TOKEN || !env.MAX_INBOX_ENCRYPTION_KEY) {
+    throw new Error('MAX task ran without server-side MAX configuration')
+  }
+  const api = createMaxApi(env.MAX_BOT_TOKEN)
+  const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
+  const processTask = createMaxTaskProcessor({ runtime, crypto })
+  return {
+    process: (payload: unknown, _signal?: AbortSignal) => processTask(payload),
+    deliverResponse: createMaxResponseDelivery({ prisma: runtime.prisma, api }),
+  }
+}
+
 export { createMaxApi, MaxProviderError } from './infrastructure/max-api'
-export type { MaxApiPort, MaxBotIdentity, MaxInboundEvent, MaxSubscription, MaxSubscriptionInput } from './application/ports'
+export type { MaxApiPort, MaxBotIdentity, MaxInboundEvent, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput } from './application/ports'

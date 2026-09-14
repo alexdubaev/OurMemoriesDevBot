@@ -85,6 +85,57 @@ describe('MAX API client', () => {
     expect(fetchCalls).toBe(0)
   })
 
+  test('sends a narrow message request with only the recipient in the query and token in the header', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, {
+      fetch: async (input, init) => {
+        request = new Request(input, init)
+        return response({ message: { body: 'accepted' } })
+      },
+    })
+
+    await expect(api.sendMessage({ userId: '77', text: 'Сохраняем…' })).resolves.toBeUndefined()
+    expect(request!.method).toBe('POST')
+    expect(request!.url).toBe('https://platform-api2.max.ru/messages?user_id=77')
+    expect(request!.headers.get('content-type')).toBe('application/json')
+    expect(request!.headers.get('authorization')).toBe(token)
+    expect(await request!.json()).toEqual({ text: 'Сохраняем…' })
+    expect(request!.url).not.toContain(token)
+  })
+
+  test('validates decimal recipients, the 4000-code-point bound, and the documented response envelope', async () => {
+    let fetchCalls = 0
+    const api = createMaxApi(token, {
+      fetch: async () => {
+        fetchCalls += 1
+        return response({ message: {} })
+      },
+    })
+
+    for (const userId of ['', '0', '-1', '1.2', 'abc']) {
+      await expect(api.sendMessage({ userId, text: 'ok' })).rejects.toBeInstanceOf(MaxProviderError)
+    }
+    await expect(api.sendMessage({ userId: '77', text: '💛'.repeat(4_001) })).rejects.toBeInstanceOf(MaxProviderError)
+    await expect(api.sendMessage({ userId: '77', text: 'ok' })).resolves.toBeUndefined()
+    await expect(createMaxApi(token, { fetch: async () => response({}) }).sendMessage({ userId: '77', text: 'ok' }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+    expect(fetchCalls).toBe(1)
+  })
+
+  test('exposes only a sanitized numeric retry delay for a rate limit', async () => {
+    const api = createMaxApi(token, {
+      fetch: async () => new Response(JSON.stringify({ message: token }), {
+        status: 429,
+        headers: { 'retry-after': '17.5', 'content-type': 'application/json' },
+      }),
+    })
+
+    await expect(api.sendMessage({ userId: '77', text: 'ok' })).rejects.toMatchObject({
+      name: 'MaxProviderError', retryAfterSeconds: 17.5,
+    })
+    await expect(api.sendMessage({ userId: '77', text: 'ok' })).rejects.not.toThrow(token)
+  })
+
   test('rejects non-2xx, malformed responses, and network failures generically', async () => {
     const statuses = [
       async () => response({ message: token }, 500),

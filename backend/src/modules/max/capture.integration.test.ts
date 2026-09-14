@@ -9,6 +9,7 @@ import { createMaxModule } from './index'
 import type { MaxApiPort, MaxInboundEvent } from './application/ports'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
 import { createMaxTaskProcessor } from './infrastructure/process-task'
+import { createMaxResponseDelivery } from './infrastructure/deliver-response'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
@@ -112,7 +113,7 @@ maybeDescribe('MAX durable capture', () => {
       api: {
         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
-        deleteSubscription: async () => ({ success: true }),
+        deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
       } satisfies MaxApiPort,
     })
     const response = await module.routes.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify({ ...textUpdate, message: { ...textUpdate.message, body: { ...textUpdate.message.body, mid: 'module-message-1' } } }) })
@@ -163,6 +164,41 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
     expect(await prisma.maxInbox.findFirstOrThrow()).toMatchObject({ status: 'processed', processedAt: expect.any(Date) })
     expect((await prisma.maxInbox.findFirstOrThrow()).encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('retries a failed response without rerunning publication or changing its source state', async () => {
+    const user = await prisma.user.create({ data: { displayName: 'MAX delivery owner' } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: '22010' } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: 'MAX delivery family', timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    await prisma.child.create({ data: { familyId: family.id, displayName: 'Delivery child' } })
+    await accept({ kind: 'message_created', senderId: '22010', recipientId: '900', messageId: 'max-message-reply-retry', occurredAt: '2026-09-14T10:00:00.000Z', text: 'Reply retry note', hasAttachments: false })
+    const processTask = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(processTask.payload)
+    const saved = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { kind: 'saved' } })
+    const sourceBefore = await prisma.maxSource.findFirstOrThrow()
+    let attempts = 0
+    const delivery = createMaxResponseDelivery({
+      prisma,
+      api: {
+        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
+        getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
+        deleteSubscription: async () => ({ success: true }),
+        sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+      },
+    })
+    await expect(delivery({ responseId: saved.id })).rejects.toThrow('synthetic provider outage')
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: sourceBefore.id } })).toMatchObject({ status: 'published', memoryId: sourceBefore.memoryId })
+    expect(await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { id: saved.id } })).toMatchObject({ deliveredAt: null })
+    await expect(delivery({ responseId: saved.id })).resolves.toBe('done')
+    await expect(delivery({ responseId: saved.id })).resolves.toBe('skipped')
+    expect(attempts).toBe(2)
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { id: saved.id } })).toMatchObject({ deliveredAt: expect.any(Date) })
   })
 
   test('terminally denies an unauthorized text without creating a Memory', async () => {

@@ -18,11 +18,17 @@ export type MaxSubscriptionInput = {
 
 export type MaxSubscriptionResult = { success: boolean }
 
+export type MaxSendMessageInput = {
+  userId: string
+  text: string
+}
+
 export type MaxApiPort = {
   getMe(signal?: AbortSignal): Promise<MaxBotIdentity>
   getSubscriptions(signal?: AbortSignal): Promise<MaxSubscription[]>
   createSubscription(input: MaxSubscriptionInput, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   deleteSubscription(url: string, signal?: AbortSignal): Promise<MaxSubscriptionResult>
+  sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
 }
 
 export type MaxInboundEvent =

@@ -10,9 +10,12 @@ const MAX_API_BASE = 'https://platform-api2.max.ru'
 const REQUEST_TIMEOUT_MS = 10_000
 
 export class MaxProviderError extends Error {
-  constructor() {
+  readonly retryAfterSeconds?: number
+
+  constructor(retryAfterSeconds?: number) {
     super('MAX provider request failed')
     this.name = 'MaxProviderError'
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -31,7 +34,7 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         headers: { ...(init.headers ?? {}), Authorization: token },
         signal: controller.signal,
       })
-      if (!response.ok) throw new MaxProviderError()
+      if (!response.ok) throw new MaxProviderError(retryAfterSeconds(response))
       try {
         return await response.json()
       } catch {
@@ -67,6 +70,15 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       return normalizeSubscriptionResult(await request(`/subscriptions?${query}`, {
         method: 'DELETE',
       }, signal))
+    },
+    async sendMessage(input, signal) {
+      validateSendMessageInput(input)
+      const value = await request(`/messages?${new URLSearchParams({ user_id: input.userId }).toString()}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: input.text }),
+      }, signal)
+      if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
     },
   }
 }
@@ -108,6 +120,21 @@ function validateSubscriptionInput(input: MaxSubscriptionInput) {
       typeof input.secret !== 'string' || !/^[A-Za-z0-9_-]{5,256}$/.test(input.secret)) {
     throw new MaxProviderError()
   }
+}
+
+function validateSendMessageInput(input: { userId: string; text: string }) {
+  if (typeof input.userId !== 'string' || !/^[1-9][0-9]*$/.test(input.userId) ||
+      typeof input.text !== 'string' || input.text.length === 0 || [...input.text].length > 4_000) {
+    throw new MaxProviderError()
+  }
+}
+
+function retryAfterSeconds(response: Response) {
+  if (response.status !== 429) return undefined
+  const value = response.headers.get('retry-after')
+  if (!value || !/^[0-9]+(?:\.[0-9]+)?$/.test(value)) return undefined
+  const seconds = Number(value)
+  return Number.isFinite(seconds) && seconds > 0 && seconds <= 86_400 ? seconds : undefined
 }
 
 function isHttpsUrl(value: unknown): value is string {
