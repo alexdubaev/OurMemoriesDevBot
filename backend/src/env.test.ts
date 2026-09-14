@@ -123,6 +123,12 @@ describe('loadEnv', () => {
     ] as const) {
       expect(() => loadEnv({ ...base, [field]: value })).toThrow('MAX_INBOX_ENCRYPTION_KEY')
     }
+
+    expect(() => loadEnv({
+      ...base,
+      MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(42) + 'B',
+      TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
+    })).toThrow('MAX_INBOX_ENCRYPTION_KEY')
   })
 
   test('rejects a MAX webhook secret reused as the bot token', () => {

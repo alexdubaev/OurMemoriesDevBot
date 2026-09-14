@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto'
+
 import { z } from 'zod'
 
 import { isUsableEmailAddress } from './email/address'
@@ -364,7 +366,7 @@ function validateMaxEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
     ['MAX_WEBHOOK_SECRET', env.MAX_WEBHOOK_SECRET],
     ...(env.TELEGRAM_ENABLED ? [['TELEGRAM_INBOX_ENCRYPTION_KEY', env.TELEGRAM_INBOX_ENCRYPTION_KEY] as const] : []),
   ] as const) {
-    if (env.MAX_INBOX_ENCRYPTION_KEY && value === env.MAX_INBOX_ENCRYPTION_KEY) {
+    if (env.MAX_INBOX_ENCRYPTION_KEY && areSameDecodedInboxKey(env.MAX_INBOX_ENCRYPTION_KEY, value)) {
       ctx.addIssue({
         code: 'custom',
         path: ['MAX_INBOX_ENCRYPTION_KEY'],
@@ -392,6 +394,17 @@ function isInboxEncryptionKey(value: string | undefined) {
   if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return false
   try {
     return Buffer.from(value, 'base64url').byteLength === 32
+  } catch {
+    return false
+  }
+}
+
+function areSameDecodedInboxKey(left: string, right: string | undefined) {
+  if (!right) return false
+  try {
+    const leftBytes = Buffer.from(left, 'base64url')
+    const rightBytes = Buffer.from(right, 'base64url')
+    return leftBytes.byteLength === 32 && rightBytes.byteLength === 32 && timingSafeEqual(leftBytes, rightBytes)
   } catch {
     return false
   }
