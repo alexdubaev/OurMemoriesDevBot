@@ -9,7 +9,6 @@ import type {
 
 const acceptedText = 'Получено. Сохраняем…'
 const unsupportedMediaText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
-const welcomeText = 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.'
 const maxTextCodePoints = 8_000
 
 export function isPublishableMaxText(input: { text: string | null; hasAttachments: boolean }) {
@@ -18,9 +17,7 @@ export function isPublishableMaxText(input: { text: string | null; hasAttachment
 }
 
 export function selectMaxImmediateResponse(event: MaxInboundEvent): MaxImmediateResponse | null {
-  if (event.kind === 'bot_started') {
-    return { kind: 'welcome', text: welcomeText, destinationUserId: event.userId }
-  }
+  if (event.kind === 'bot_started') return null
   if (event.hasAttachments) {
     return { kind: 'unsupported_media', text: unsupportedMediaText, destinationUserId: event.senderId }
   }

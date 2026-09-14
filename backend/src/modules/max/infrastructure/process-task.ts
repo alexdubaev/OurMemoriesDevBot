@@ -3,7 +3,7 @@ import type { DbClient } from '../../../db'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
-import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
+import { createInviteStartResolver, createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createSourceMemoryPublisher } from '../../memories'
 import type { MaxInboundEvent } from '../application/ports'
 
@@ -14,12 +14,16 @@ type PayloadCrypto = {
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedMediaText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
 const welcomeText = 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.'
+const inviteGuidanceText = 'Приглашение получено. Откройте приложение memoLy, чтобы присоединиться.'
+const invalidInviteText = 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.'
 
 export function createMaxTaskProcessor(options: {
   runtime: BackendRuntime
   crypto: PayloadCrypto
+  resolveInviteStart?: (rawToken: string) => Promise<'active' | 'invalid'>
 }): (payload: unknown) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
+  const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
 
@@ -35,7 +39,11 @@ export function createMaxTaskProcessor(options: {
     })
 
     if (event.kind === 'bot_started') {
-      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, welcomeText) ? 'done' : 'skipped'
+      const token = inviteTokenFromPayload(event.payload)
+      const responseText = token
+        ? (await resolveInviteStart(token)) === 'active' ? inviteGuidanceText : invalidInviteText
+        : welcomeText
+      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, responseText) ? 'done' : 'skipped'
     }
 
     const source = inbox.source
@@ -94,6 +102,12 @@ export function createMaxTaskProcessor(options: {
       throw error
     }
   }
+}
+
+function inviteTokenFromPayload(payload: string | null) {
+  if (!payload?.startsWith('invite_')) return null
+  const token = payload.slice('invite_'.length)
+  return /^[A-Za-z0-9_-]{32,128}$/.test(token) && payload.length <= 512 ? token : null
 }
 
 function taskPayload(payload: unknown): string {

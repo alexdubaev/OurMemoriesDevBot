@@ -21,9 +21,7 @@ describe('MAX durable acceptance policy', () => {
       kind: 'unsupported_media', text: 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.', destinationUserId: '11',
     })
     expect(selectMaxImmediateResponse({ ...plain, text: ' ' })).toBeNull()
-    expect(selectMaxImmediateResponse({ kind: 'bot_started', chatId: '7', userId: '11', occurredAt: plain.occurredAt, payload: null })).toEqual({
-      kind: 'welcome', text: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', destinationUserId: '11',
-    })
+    expect(selectMaxImmediateResponse({ kind: 'bot_started', chatId: '7', userId: '11', occurredAt: plain.occurredAt, payload: null })).toBeNull()
   })
 
   test('passes normalized event, stable key, encrypted payload, identity and response to repository', async () => {

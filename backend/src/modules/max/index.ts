@@ -1,4 +1,5 @@
 import type { BackendRuntime } from '../../runtime'
+import { createInviteStartResolver } from '../families'
 import { createMaxAcceptUpdate } from './application/accept-update'
 import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
@@ -22,7 +23,11 @@ export function createMaxModule(options: {
     repository: new PrismaMaxRepository(options.runtime.prisma),
     encrypt: crypto.encrypt,
   })
-  const processTask = createMaxTaskProcessor({ runtime: options.runtime, crypto })
+  const processTask = createMaxTaskProcessor({
+    runtime: options.runtime,
+    crypto,
+    resolveInviteStart: createInviteStartResolver(options.runtime.prisma),
+  })
   return {
     api,
     processTask,
@@ -41,7 +46,11 @@ export function createMaxTasks(runtime: BackendRuntime) {
   }
   const api = createMaxApi(env.MAX_BOT_TOKEN)
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
-  const processTask = createMaxTaskProcessor({ runtime, crypto })
+  const processTask = createMaxTaskProcessor({
+    runtime,
+    crypto,
+    resolveInviteStart: createInviteStartResolver(runtime.prisma),
+  })
   return {
     process: (payload: unknown, _signal?: AbortSignal) => processTask(payload),
     deliverResponse: createMaxResponseDelivery({ prisma: runtime.prisma, api }),

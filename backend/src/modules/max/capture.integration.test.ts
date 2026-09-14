@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
@@ -79,13 +79,126 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.taskOutbox.count({ where: { type: { startsWith: 'max:' } } })).toBe(2)
   })
 
-  test('bot_started has only a welcome response and no source', async () => {
+  test('bot_started queues processing before creating one welcome response and no source', async () => {
     const response = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(botStarted) })
     expect(response.status).toBe(200)
     const inbox = await prisma.maxInbox.findFirstOrThrow({ include: { responses: true } })
     expect(await prisma.maxSource.count()).toBe(0)
-    expect(inbox.responses).toHaveLength(1)
-    expect(inbox.responses[0]).toMatchObject({ kind: 'welcome', destinationUserId: 77n })
+    expect(inbox.responses).toHaveLength(0)
+    const processTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${inbox.id}` } } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(processTask.payload)
+    const completed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: inbox.id }, include: { responses: true } })
+    expect(completed.responses).toHaveLength(1)
+    expect(completed.responses[0]).toMatchObject({ kind: 'welcome', destinationUserId: 77n })
+    expect(completed.encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('routes valid and invalid invite starts without accepting or creating Core data', async () => {
+    const active = await maxFamily('23001', 'full')
+    const inactive = await maxFamily('23002', 'full')
+    const activeToken = token('active')
+    const expiredToken = token('expired')
+    const revokedToken = token('revoked')
+    const usedToken = token('used')
+    const inactiveToken = token('inactive')
+    await prisma.familyInvite.createMany({ data: [
+      invite(active.familyId, active.userId, activeToken),
+      invite(active.familyId, active.userId, expiredToken, { expiresAt: new Date('2026-09-14T10:00:00.000Z') }),
+      invite(active.familyId, active.userId, revokedToken, { revokedAt: new Date('2026-09-14T10:00:00.000Z') }),
+      invite(active.familyId, active.userId, usedToken, { acceptedAt: new Date('2026-09-14T10:00:00.000Z'), acceptedBy: active.userId }),
+      invite(inactive.familyId, inactive.userId, inactiveToken),
+    ] })
+    await prisma.family.update({ where: { id: inactive.familyId }, data: { status: 'deleting' } })
+    const before = await Promise.all([
+      prisma.familyInvite.count(), prisma.familyMember.count(), prisma.user.count(), prisma.externalIdentity.count(),
+    ])
+    const cases = [
+      { payload: `invite_${activeToken}`, expected: 'Приглашение получено. Откройте приложение memoLy, чтобы присоединиться.' },
+      { payload: `invite_${expiredToken}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
+      { payload: `invite_${revokedToken}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
+      { payload: `invite_${usedToken}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
+      { payload: `invite_${inactiveToken}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
+      { payload: 'invite_short', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.' },
+      { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.' },
+      { payload: null, expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.' },
+    ] as const
+    for (const [index, fixture] of cases.entries()) {
+      const accepted = await accept({ kind: 'bot_started', chatId: '88', userId: '77', occurredAt: `2026-09-15T10:0${index}:00.000Z`, payload: fixture.payload })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
+      await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(task.payload)
+      const processed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId }, include: { responses: true } })
+      expect(processed.responses[0]?.text).toBe(fixture.expected)
+      expect(processed.responses[0]?.text).not.toContain(activeToken)
+      expect(processed.encryptedPayload.byteLength).toBe(0)
+    }
+    expect(await Promise.all([
+      prisma.familyInvite.count(), prisma.familyMember.count(), prisma.user.count(), prisma.externalIdentity.count(),
+    ])).toEqual(before)
+  })
+
+  test('concurrent processing creates one welcome response and clears the inbox once', async () => {
+    const family = await maxFamily('23010', 'full')
+    const rawToken = token('concurrent')
+    await prisma.familyInvite.create({ data: invite(family.familyId, family.userId, rawToken) })
+    const accepted = await accept({ kind: 'bot_started', chatId: '89', userId: '77', occurredAt: '2026-09-15T11:00:00.000Z', payload: `invite_${rawToken}` })
+    const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
+    let resolverCalls = 0
+    const process = createMaxTaskProcessor({
+      runtime: { prisma } as unknown as BackendRuntime,
+      crypto,
+      resolveInviteStart: async (value) => { resolverCalls += 1; expect(value).toBe(rawToken); return 'active' },
+    })
+    await Promise.all(Array.from({ length: 10 }, () => process(task.payload)))
+    expect(resolverCalls).toBe(10)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'welcome' } })).toBe(1)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } })).toBe(1)
+    expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })).encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('leaves the encrypted inbox retryable when invite resolution fails', async () => {
+    const rawToken = token('failure')
+    const accepted = await accept({ kind: 'bot_started', chatId: '90', userId: '77', occurredAt: '2026-09-15T12:00:00.000Z', payload: `invite_${rawToken}` })
+    const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
+    const process = createMaxTaskProcessor({
+      runtime: { prisma } as unknown as BackendRuntime,
+      crypto,
+      resolveInviteStart: async () => { throw new Error('synthetic resolver outage') },
+    })
+    await expect(process(task.payload)).rejects.toThrow('synthetic resolver outage')
+    const inbox = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })
+    expect(inbox.status).toBe('accepted')
+    expect(inbox.encryptedPayload.byteLength).toBeGreaterThan(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId } })).toBe(0)
+  })
+
+  test('delivery retries do not rerun invite classification', async () => {
+    const family = await maxFamily('23011', 'full')
+    const rawToken = token('delivery')
+    await prisma.familyInvite.create({ data: invite(family.familyId, family.userId, rawToken) })
+    const accepted = await accept({ kind: 'bot_started', chatId: '91', userId: '77', occurredAt: '2026-09-15T13:00:00.000Z', payload: `invite_${rawToken}` })
+    const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
+    let resolverCalls = 0
+    await createMaxTaskProcessor({
+      runtime: { prisma } as unknown as BackendRuntime,
+      crypto,
+      resolveInviteStart: async () => { resolverCalls += 1; return 'active' },
+    })(task.payload)
+    const response = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: accepted.inboxId, kind: 'welcome' } } })
+    let attempts = 0
+    const delivery = createMaxResponseDelivery({
+      prisma,
+      api: {
+        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
+        getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
+        deleteSubscription: async () => ({ success: true }),
+        sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+      },
+    })
+    await expect(delivery({ responseId: response.id })).rejects.toThrow('synthetic provider outage')
+    await expect(delivery({ responseId: response.id })).resolves.toBe('done')
+    await expect(delivery({ responseId: response.id })).resolves.toBe('skipped')
+    expect(attempts).toBe(2)
+    expect(resolverCalls).toBe(1)
   })
 
   test('propagates a transaction failure as retryable webhook failure without persistence', async () => {
@@ -416,3 +529,23 @@ maybeDescribe('MAX durable capture', () => {
     return { userId, subject: subject ?? '', familyId: family.id, childId: child?.id ?? null }
   }
 })
+
+function token(label: string) {
+  return `${label}_${randomUUID().replaceAll('-', '')}`.padEnd(32, 'x')
+}
+
+function hash(rawToken: string) {
+  return createHash('sha256').update(rawToken).digest('hex')
+}
+
+function invite(
+  familyId: string,
+  createdBy: string,
+  rawToken: string,
+  overrides: Partial<{ expiresAt: Date; acceptedAt: Date; acceptedBy: string; revokedAt: Date }> = {},
+) {
+  return {
+    familyId, role: 'viewer' as const, tokenHash: hash(rawToken), createdBy,
+    expiresAt: new Date('2026-09-16T10:00:00.000Z'), ...overrides,
+  }
+}

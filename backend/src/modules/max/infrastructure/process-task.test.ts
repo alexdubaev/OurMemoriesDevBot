@@ -7,6 +7,37 @@ import { createMaxTaskProcessor } from './process-task'
 const inboxId = '019c0000-0000-7000-8000-000000000001'
 
 describe('MAX task processor payload boundary', () => {
+  test('routes bot_started payloads only after classifying a complete invite token', async () => {
+    const cases = [
+      { payload: null, expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', resolution: null, resolverCalls: 0 },
+      { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', resolution: null, resolverCalls: 0 },
+      { payload: `invite_${'A'.repeat(32)}`, expected: 'Приглашение получено. Откройте приложение memoLy, чтобы присоединиться.', resolution: 'active' as const, resolverCalls: 1 },
+      { payload: `invite_${'B'.repeat(32)}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.', resolution: 'invalid' as const, resolverCalls: 1 },
+      { payload: 'invite_short', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', resolution: null, resolverCalls: 0 },
+    ]
+
+    for (const fixture of cases) {
+      let resolverCalls = 0
+      let responseText: string | undefined
+      const process = createMaxTaskProcessor({
+        runtime: startedRuntime(() => {
+          resolverCalls += 1
+          return fixture.resolution ?? 'invalid'
+        }, (text) => { responseText = text }),
+        crypto: { decrypt: () => ({ kind: 'bot_started', chatId: '88', userId: '77', occurredAt: '2026-09-15T10:00:00.000Z', payload: fixture.payload }) } as never,
+        resolveInviteStart: async (rawToken) => {
+          resolverCalls += 1
+          expect(rawToken).not.toContain('invite_')
+          return fixture.resolution ?? 'invalid'
+        },
+      })
+
+      await expect(process({ inboxId })).resolves.toBe('done')
+      expect(responseText).toBe(fixture.expected)
+      expect(resolverCalls).toBe(fixture.resolverCalls)
+    }
+  })
+
   test('rejects a payload unless it contains exactly one usable inbox UUID', async () => {
     const process = createMaxTaskProcessor({
       runtime: {} as BackendRuntime,
@@ -61,3 +92,19 @@ describe('MAX task processor payload boundary', () => {
     expect(responseKind).toBe('denied')
   })
 })
+
+function startedRuntime(
+  _unusedResolver: () => Promise<'active' | 'invalid'> | 'active' | 'invalid',
+  capture: (text: string) => void,
+) {
+  return {
+    prisma: {
+      maxInbox: { findUnique: async () => ({ id: inboxId, status: 'accepted', processedAt: null, encryptedPayload: new Uint8Array([1]), encryptionIv: new Uint8Array([2]), encryptionAuthTag: new Uint8Array([3]), source: null }) },
+      $transaction: async (callback: (tx: any) => Promise<unknown>) => callback({
+        maxInbox: { updateMany: async () => ({ count: 1 }) },
+        maxOutgoingResponse: { upsert: async ({ create }: { create: { text: string } }) => { capture(create.text); return { id: inboxId } } },
+        taskOutbox: { createMany: async () => ({ count: 1 }) },
+      }),
+    },
+  } as unknown as BackendRuntime
+}
