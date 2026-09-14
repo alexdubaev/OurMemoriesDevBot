@@ -24,6 +24,7 @@ function createHarness(
       displayName: 'Max User',
     },
     replayFingerprintHash: 'b'.repeat(64),
+    authDateSeconds: Math.floor(now.getTime() / 1000),
   }),
 ) {
   const exchanges: unknown[] = []
@@ -89,6 +90,21 @@ describe('MaxAuthService', () => {
       },
     })
     expect(exchanges).toHaveLength(1)
+  })
+
+  test('keeps a future-tolerated payload replay-blocked through its accepted lifetime', async () => {
+    const futureAuthDateSeconds = Math.floor(now.getTime() / 1000) + 30
+    const { exchanges, service } = createHarness('issued', () => ({
+      identity: { provider: 'max', subject: '31415926', displayName: 'Max User' },
+      replayFingerprintHash: 'b'.repeat(64),
+      authDateSeconds: futureAuthDateSeconds,
+    }))
+
+    await service.exchange('future-init-data', undefined, {})
+
+    expect((exchanges[0] as { replayExpiresAt: Date }).replayExpiresAt).toEqual(
+      new Date((futureAuthDateSeconds + 300 + 1) * 1000),
+    )
   })
 
   test('allows a replay only when the caller presents the same active session', async () => {

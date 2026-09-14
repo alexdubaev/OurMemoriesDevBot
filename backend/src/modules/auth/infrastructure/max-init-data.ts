@@ -1,6 +1,10 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { MaxIdentity, VerifiedMaxInitData } from '../application/ports'
+import {
+  maxAuthDataFutureToleranceSeconds,
+  maxAuthDataMaxAgeSeconds,
+} from '../application/max-auth-policy'
 
 export type MaxInitDataFailure =
   | 'duplicate_field'
@@ -29,8 +33,8 @@ export function verifyMaxInitData(
   {
     botToken,
     now,
-    maxAgeSeconds = 300,
-    futureToleranceSeconds = 30,
+    maxAgeSeconds = maxAuthDataMaxAgeSeconds,
+    futureToleranceSeconds = maxAuthDataFutureToleranceSeconds,
   }: VerifyMaxInitDataOptions,
 ): VerifiedMaxInitData {
   const fields = parseUniqueFields(rawInitData)
@@ -61,6 +65,7 @@ export function verifyMaxInitData(
   return {
     identity: parseMaxUser(userRaw),
     replayFingerprintHash: createHash('sha256').update(suppliedHash.toLowerCase()).digest('hex'),
+    authDateSeconds: authDate,
   }
 }
 

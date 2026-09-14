@@ -107,6 +107,7 @@ export type VerifiedTelegramInitData = {
 export type VerifiedMaxInitData = {
   identity: MaxIdentity
   replayFingerprintHash: string
+  authDateSeconds: number
 }
 
 export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {

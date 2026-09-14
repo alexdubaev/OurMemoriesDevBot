@@ -1,5 +1,6 @@
 import { sessionExpiresAt, type SessionMetadata } from '../domain/session'
 import { AuthFailure } from '../domain/errors'
+import { maxAuthDataMaxAgeSeconds, maxAuthReplayBoundaryPaddingSeconds } from './max-auth-policy'
 import type {
   AccessTokens,
   Clock,
@@ -42,7 +43,9 @@ export class MaxAuthService {
     const exchanged = await this.dependencies.repository.exchangeMaxIdentity({
       identity: verified.identity,
       fingerprintHash: verified.replayFingerprintHash,
-      replayExpiresAt: new Date(now.getTime() + 5 * 60 * 1000),
+      replayExpiresAt: new Date(
+        (verified.authDateSeconds + maxAuthDataMaxAgeSeconds + maxAuthReplayBoundaryPaddingSeconds) * 1000,
+      ),
       existingSessionId,
       now,
       session: {

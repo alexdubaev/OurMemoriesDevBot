@@ -17,6 +17,7 @@ describe('MAX Mini App initData verification', () => {
         displayName: 'Max User',
       },
       replayFingerprintHash: 'b29271a7f830c6ceb01fb036a9d5d89076066898cd146625ba660f26d87558ad',
+      authDateSeconds: 1788955200,
     })
   })
 

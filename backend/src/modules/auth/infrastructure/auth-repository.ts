@@ -389,6 +389,9 @@ export function createPrismaMaxAuthRepository(
     async exchangeMaxIdentity(input) {
       try {
         return await db.$transaction(async (tx) => {
+          await tx.$executeRaw(
+            Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`max-auth:${input.identity.provider}:${input.identity.subject}`}, 0))`,
+          )
           await tx.maxAuthReplay.deleteMany({
             where: { expiresAt: { lte: input.now } },
           })

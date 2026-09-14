@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
@@ -79,6 +79,40 @@ maybeDescribe('MAX authentication exchange', () => {
     expect(await prisma.user.count()).toBe(2)
   })
 
+  test('retains a future-tolerated payload as a replay until its full accepted lifetime', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    const initData = signedMaxInitData(
+      { id: 16180339, first_name: 'Future' },
+      'future-query',
+      nowSeconds + 30,
+    )
+
+    const response = await exchangeMax(initData)
+    const replay = await prisma.maxAuthReplay.findUniqueOrThrow({
+      where: {
+        fingerprintHash: createHash('sha256')
+          .update(new URLSearchParams(initData).get('hash')!.toLowerCase())
+          .digest('hex'),
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(replay.expiresAt.getTime()).toBeGreaterThanOrEqual((nowSeconds + 330) * 1000)
+  })
+
+  test('serializes concurrent first logins for one MAX subject', async () => {
+    const [first, second] = await Promise.all([
+      exchangeMax(signedMaxInitData({ id: 11235813, first_name: 'Concurrent' }, 'race-one')),
+      exchangeMax(signedMaxInitData({ id: 11235813, first_name: 'Concurrent' }, 'race-two')),
+    ])
+
+    expect([first.status, second.status].sort()).toEqual([200, 200])
+    expect(await prisma.user.count()).toBe(1)
+    expect(await prisma.externalIdentity.count({ where: { provider: 'max', subject: '11235813' } })).toBe(1)
+    expect(await prisma.authSession.count()).toBe(2)
+    expect(await prisma.maxAuthReplay.count()).toBe(2)
+  })
+
   function exchangeMax(initData: string, cookie?: string) {
     return app.request('/api/v1/auth/max', {
       method: 'POST',
@@ -103,9 +137,13 @@ maybeDescribe('MAX authentication exchange', () => {
   }
 })
 
-function signedMaxInitData(user: { id: number; first_name: string }, queryId: string) {
+function signedMaxInitData(
+  user: { id: number; first_name: string },
+  queryId: string,
+  authDate = Math.floor(Date.now() / 1000),
+) {
   const fields = new URLSearchParams({
-    auth_date: String(Math.floor(Date.now() / 1000)),
+    auth_date: String(authDate),
     query_id: queryId,
     user: JSON.stringify(user),
   })
