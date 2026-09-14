@@ -23,6 +23,10 @@ describe('MAX update mapping', () => {
       kind: 'bot_started', chatId: '99', userId: '42',
       occurredAt: '2023-11-14T22:13:20.456Z', payload: null,
     })
+    expect(normalizeMaxUpdate({
+      update_type: 'bot_started', timestamp: 1700000000456,
+      chat_id: 99, user: { user_id: 42 }, payload: '🙂'.repeat(512),
+    })).toMatchObject({ kind: 'bot_started', payload: '🙂'.repeat(512) })
   })
 
   test('ignores unsupported, group, missing-body, and forward-only messages without leakage', () => {

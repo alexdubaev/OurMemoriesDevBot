@@ -17,7 +17,7 @@ function normalizeBotStarted(input: Record<string, unknown>, occurredAt: string)
     throw new Error('Invalid MAX bot_started update')
   }
   if (input.payload !== undefined && input.payload !== null &&
-      (typeof input.payload !== 'string' || input.payload.length > 512)) {
+      (typeof input.payload !== 'string' || [...input.payload].length > 512)) {
     throw new Error('Invalid MAX bot_started payload')
   }
   return {
