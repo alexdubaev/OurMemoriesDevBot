@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
@@ -204,4 +205,178 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.memory.count()).toBe(0)
     expect(await prisma.maxInbox.count({ where: { status: 'processed' } })).toBe(2)
   })
+
+  test('does not create a denial response when a stale processor loses the source transition', async () => {
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '77', recipientId: '900', messageId: 'max-message-stale-denial',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Private text', hasAttachments: false,
+    }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    let reportResolver!: () => void
+    let releaseResolver!: () => void
+    const resolverReported = new Promise<void>((resolve) => { reportResolver = resolve })
+    const resolverRelease = new Promise<void>((resolve) => { releaseResolver = resolve })
+    const gatedPrisma = new Proxy(prisma, {
+      get(target, property, receiver) {
+        if (property !== 'externalIdentity') return Reflect.get(target, property, receiver)
+        return new Proxy(target.externalIdentity, {
+          get(identityTarget, identityProperty, identityReceiver) {
+            if (identityProperty !== 'findUnique') return Reflect.get(identityTarget, identityProperty, identityReceiver)
+            return async () => {
+              reportResolver()
+              await resolverRelease
+              return null
+            }
+          },
+        })
+      },
+    }) as typeof prisma
+
+    const process = createMaxTaskProcessor({ runtime: { prisma: gatedPrisma } as unknown as BackendRuntime, crypto })
+    const running = process(task.payload)
+    await resolverReported
+    const source = await prisma.maxSource.findFirstOrThrow()
+    await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'published', memoryId: randomUUID() } })
+    releaseResolver()
+
+    expect(await running).toBe('skipped')
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(0)
+    expect(await prisma.maxInbox.findFirstOrThrow()).toMatchObject({ status: 'accepted' })
+    expect((await prisma.maxInbox.findFirstOrThrow()).encryptedPayload.byteLength).toBeGreaterThan(0)
+  })
+
+  test('admits invited full members and denies viewer, revoked, inactive, and childless contexts', async () => {
+    const owner = await maxFamily('22001', 'full')
+    const invited = await maxMember('22002', 'full')
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: invited.userId, role: 'full' } })
+    const invitedResult = await processEvent({
+      kind: 'message_created', senderId: invited.subject, recipientId: '900', messageId: 'max-message-invited',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Invited full note', hasAttachments: false,
+    })
+    expect(invitedResult).toBe('done')
+    expect(await prisma.memory.findFirstOrThrow()).toMatchObject({ familyId: owner.familyId, authorId: invited.userId, body: 'Invited full note' })
+
+    const viewer = await maxFamily('22003', 'viewer')
+    await processEvent({
+      kind: 'message_created', senderId: viewer.subject, recipientId: '900', messageId: 'max-message-viewer',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Viewer note', hasAttachments: false,
+    })
+    const revoked = await maxFamilyWithMember('22004', 'full')
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: revoked.familyId, userId: revoked.userId } }, data: { revokedAt: new Date() } })
+    await processEvent({
+      kind: 'message_created', senderId: revoked.subject, recipientId: '900', messageId: 'max-message-revoked',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Revoked note', hasAttachments: false,
+    })
+    const inactive = await maxFamily('22005', 'full')
+    await prisma.family.update({ where: { id: inactive.familyId }, data: { status: 'deleting' } })
+    await processEvent({
+      kind: 'message_created', senderId: inactive.subject, recipientId: '900', messageId: 'max-message-inactive',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Inactive note', hasAttachments: false,
+    })
+    const childless = await maxFamily('22006', 'full', false)
+    await processEvent({
+      kind: 'message_created', senderId: childless.subject, recipientId: '900', messageId: 'max-message-childless',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Childless note', hasAttachments: false,
+    })
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(4)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(4)
+  })
+
+  test('uses Unicode code points for the 8000/8001 text boundary', async () => {
+    const owner = await maxFamily('22008', 'full')
+    await processEvent({
+      kind: 'message_created', senderId: owner.subject, recipientId: '900', messageId: 'max-message-8000',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: '💛'.repeat(8_000), hasAttachments: false,
+    })
+    await processEvent({
+      kind: 'message_created', senderId: owner.subject, recipientId: '900', messageId: 'max-message-8001',
+      occurredAt: '2026-09-14T10:01:00.000Z', text: '💛'.repeat(8_001), hasAttachments: false,
+    })
+
+    expect(await prisma.memory.count()).toBe(1)
+    expect([...((await prisma.memory.findFirstOrThrow()).body)].length).toBe(8_000)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+  })
+
+  test('denies when revocation commits before the publisher membership lock', async () => {
+    const owner = await maxFamilyWithMember('22009', 'full')
+    await accept({
+      kind: 'message_created', senderId: owner.subject, recipientId: '900', messageId: 'max-message-revocation-race',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Race note', hasAttachments: false,
+    })
+    const source = await prisma.maxSource.findFirstOrThrow()
+    const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
+    let lockReported!: () => void
+    let releaseLock!: () => void
+    const lockEntered = new Promise<void>((resolve) => { lockReported = resolve })
+    const lockRelease = new Promise<void>((resolve) => { releaseLock = resolve })
+    const gatedPrisma = new Proxy(prisma, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') return Reflect.get(target, property, receiver)
+        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => target.$transaction(async (tx) => callback(new Proxy(tx, {
+          get(transactionTarget, transactionProperty, transactionReceiver) {
+            if (transactionProperty !== '$queryRaw') return Reflect.get(transactionTarget, transactionProperty, transactionReceiver)
+            return async (...args: Parameters<typeof tx.$queryRaw>) => {
+              lockReported()
+              await lockRelease
+              return tx.$queryRaw(...args)
+            }
+          },
+        }) as typeof prisma))
+      },
+    }) as typeof prisma
+    const running = createMaxTaskProcessor({ runtime: { prisma: gatedPrisma } as unknown as BackendRuntime, crypto })(task.payload)
+    await lockEntered
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: owner.familyId, userId: owner.userId } }, data: { revokedAt: new Date() } })
+    releaseLock()
+
+    expect(await running).toBe('done')
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+  })
+
+  async function processEvent(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
+    await accept(event)
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { botId_recipientId_messageId: { botId: 900n, recipientId: BigInt(event.recipientId), messageId: event.messageId } } })
+    const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
+    return createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(task.payload)
+  }
+
+  async function maxMember(subject: string, role: 'full' | 'viewer') {
+    const user = await prisma.user.create({ data: { displayName: subject } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
+    return { userId: user.id, subject, role }
+  }
+
+  async function maxFamily(subject: string, role: 'full' | 'viewer', withChild = true) {
+    if (role === 'full') {
+      const member = await maxMember(subject, role)
+      return maxFamilyForUser(member.userId, `Family ${subject}`, member.subject, role, withChild)
+    }
+    const owner = await maxMember(`${subject}9`, 'full')
+    const family = await maxFamilyForUser(owner.userId, `Family ${subject}`, owner.subject, 'full', withChild)
+    const member = await maxMember(subject, role)
+    await prisma.familyMember.create({ data: { familyId: family.familyId, userId: member.userId, role } })
+    return { ...family, userId: member.userId, subject: member.subject }
+  }
+
+  async function maxFamilyWithMember(subject: string, role: 'full' | 'viewer') {
+    const owner = await maxFamily(`${subject}9`, 'full')
+    const member = await maxMember(subject, role)
+    await prisma.familyMember.create({ data: { familyId: owner.familyId, userId: member.userId, role } })
+    return { ...owner, userId: member.userId, subject: member.subject }
+  }
+
+  async function maxFamilyForUser(userId: string, name: string, subject?: string, role: 'full' | 'viewer' = 'full', withChild = true) {
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: userId, name, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId, role } })
+      return created
+    })
+    const child = withChild ? await prisma.child.create({ data: { familyId: family.id, displayName: 'Matrix child' } }) : null
+    return { userId, subject: subject ?? '', familyId: family.id, childId: child?.id ?? null }
+  }
 })

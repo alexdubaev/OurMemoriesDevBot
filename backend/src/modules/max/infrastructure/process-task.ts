@@ -35,8 +35,7 @@ export function createMaxTaskProcessor(options: {
     })
 
     if (event.kind === 'bot_started') {
-      await terminalInbox(prisma, inbox.id, 'welcome', event.userId, welcomeText)
-      return 'done'
+      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, welcomeText) ? 'done' : 'skipped'
     }
 
     const source = inbox.source
@@ -44,20 +43,17 @@ export function createMaxTaskProcessor(options: {
     if (source.status !== 'accepted') return 'skipped'
 
     if (event.hasAttachments) {
-      await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText)
-      return 'done'
+      return await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText) ? 'done' : 'skipped'
     }
 
     if (!isPublishableText(event.text)) {
-      await deny(prisma, source)
-      return 'done'
+      return await deny(prisma, source) ? 'done' : 'skipped'
     }
     const text = event.text
 
     const admission = await findAdmission(prisma, event.senderId)
     if (!admission) {
-      await deny(prisma, source)
-      return 'done'
+      return await deny(prisma, source) ? 'done' : 'skipped'
     }
 
     const scope: FamilyScope = {
@@ -157,38 +153,44 @@ async function findAdmission(db: DbClient, senderSubject: string) {
 }
 
 async function deny(db: DbClient, source: MaxSource) {
-  await db.$transaction(async (tx) => {
-    await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
+  return db.$transaction(async (tx) => {
+    const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
       status: 'denied', rejectionCode: 'denied',
     } })
+    if (changed.count !== 1) return false
     await markInboxProcessed(tx, source.inboxId)
     await createResponseAndTask(tx, {
       inboxId: source.inboxId, destinationUserId: source.senderSubject, kind: 'denied', text: deniedText,
     })
+    return true
   })
 }
 
 async function terminalSource(db: DbClient, source: MaxSource, kind: 'unsupported_media', destinationUserId: string, text: string) {
-  await db.$transaction(async (tx) => {
-    await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
+  return db.$transaction(async (tx) => {
+    const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
       status: kind, rejectionCode: kind,
     } })
+    if (changed.count !== 1) return false
     await markInboxProcessed(tx, source.inboxId)
     await createResponseAndTask(tx, { inboxId: source.inboxId, destinationUserId, kind, text })
+    return true
   })
 }
 
 async function terminalInbox(db: DbClient, inboxId: string, kind: 'welcome', destinationUserId: string, text: string) {
-  await db.$transaction(async (tx) => {
-    await markInboxProcessed(tx, inboxId)
+  return db.$transaction(async (tx) => {
+    if (!(await markInboxProcessed(tx, inboxId))) return false
     await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text })
+    return true
   })
 }
 
 async function markInboxProcessed(tx: PrismaTransactionClient, inboxId: string) {
-  await tx.maxInbox.update({ where: { id: inboxId }, data: {
+  const changed = await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: {
     status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
   } })
+  return changed.count === 1
 }
 
 async function createResponseAndTask(
