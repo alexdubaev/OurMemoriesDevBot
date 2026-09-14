@@ -93,14 +93,44 @@ export type TelegramIdentity = {
   displayName: string
 }
 
+export type MaxIdentity = {
+  provider: 'max'
+  subject: string
+  displayName: string
+}
+
 export type VerifiedTelegramInitData = {
   identity: TelegramIdentity
+  replayFingerprintHash: string
+}
+
+export type VerifiedMaxInitData = {
+  identity: MaxIdentity
   replayFingerprintHash: string
 }
 
 export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {
   exchangeTelegramIdentity(input: {
     identity: TelegramIdentity
+    fingerprintHash: string
+    replayExpiresAt: Date
+    existingSessionId?: string
+    now: Date
+    session: {
+      refreshTokenHash: string
+      refreshTokenFamilyHash: string
+      expiresAt: Date
+      metadata: SessionMetadata
+    }
+  }): Promise<
+    | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
+    | { state: 'replayed' }
+  >
+}
+
+export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {
+  exchangeMaxIdentity(input: {
+    identity: MaxIdentity
     fingerprintHash: string
     replayExpiresAt: Date
     existingSessionId?: string

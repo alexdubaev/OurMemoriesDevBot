@@ -9,6 +9,8 @@ export type AuthFailureKind =
   | 'session_invalid'
   | 'telegram_init_data_invalid'
   | 'telegram_init_data_replayed'
+  | 'max_init_data_invalid'
+  | 'max_init_data_replayed'
 
 export class AuthFailure extends Error {
   constructor(

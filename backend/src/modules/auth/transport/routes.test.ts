@@ -22,6 +22,12 @@ describe('public Block 01 auth routes', () => {
     expect(response.status).toBe(413)
   })
 
+  test('limits MAX exchange bodies before signature work and keeps its route cookie-shaped', async () => {
+    const app = createApp({ env: { ...env, AUTH_BODY_LIMIT_BYTES: 32 }, prisma: {} as DbClient })
+    const response = await maxRequest(app, { initData: 'x'.repeat(64) })
+    expect(response.status).toBe(413)
+  })
+
   test('rate limits repeated Telegram exchanges by the configured client address', async () => {
     const app = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma: {} as DbClient })
     const request = () => telegramRequest(app, { initData: 'invalid' }, {
@@ -38,6 +44,15 @@ describe('public Block 01 auth routes', () => {
   test('rejects secure cookie writes from an untrusted origin before auth work', async () => {
     const app = createApp({ env, prisma: {} as DbClient })
     const response = await telegramRequest(app, { initData: 'invalid' }, {
+      Origin: 'https://attacker.example',
+    })
+    expect(response.status).toBe(403)
+    expect((await response.json()).error.code).toBe('FORBIDDEN')
+  })
+
+  test('rejects MAX exchanges from an untrusted origin before auth work', async () => {
+    const app = createApp({ env, prisma: {} as DbClient })
+    const response = await maxRequest(app, { initData: 'invalid' }, {
       Origin: 'https://attacker.example',
     })
     expect(response.status).toBe(403)
@@ -82,6 +97,22 @@ function telegramRequest(
   headers: Record<string, string> = {},
 ) {
   return app.request('/api/v1/auth/telegram', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://web.example.com',
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+function maxRequest(
+  app: ReturnType<typeof createApp>,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
+  return app.request('/api/v1/auth/max', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -58,6 +58,17 @@ model TelegramAuthReplay {
   @@map("telegram_auth_replays")
 }
 
+model MaxAuthReplay {
+  fingerprintHash String       @id @map("fingerprint_hash")
+  sessionId       String?      @map("session_id") @db.Uuid
+  expiresAt       DateTime     @map("expires_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  session         AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "max_auth_replays_session_id_fkey")
+
+  @@index([expiresAt], map: "max_auth_replays_expires_at_idx")
+  @@map("max_auth_replays")
+}
+
 /// Encrypted, durable Telegram ingress. The raw Bot API update never enters logs or a public DTO;
 /// only the normalized minimum needed by the worker is encrypted here.
 model TelegramInbox {
@@ -501,6 +512,7 @@ model UploadReservation {
 
 enum ExternalIdentityProvider {
   telegram
+  max
 
   @@map("external_identity_provider")
 }
@@ -749,6 +761,7 @@ model AuthSession {
   updatedAt                DateTime             @updatedAt @map("updated_at")
   user                     User                 @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
   telegramAuthReplays      TelegramAuthReplay[]
+  maxAuthReplays           MaxAuthReplay[]
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")

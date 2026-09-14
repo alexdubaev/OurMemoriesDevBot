@@ -5,7 +5,7 @@ import {
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import { enqueueTask } from '../../../outbox'
-import type { AuthRepository, TelegramAuthRepository } from '../application/ports'
+import type { AuthRepository, MaxAuthRepository, TelegramAuthRepository } from '../application/ports'
 import { AuthFailure } from '../domain/errors'
 
 export function createPrismaAuthRepository(db: DbClient): AuthRepository {
@@ -369,6 +369,94 @@ export function createPrismaTelegramAuthRepository(
         }, userAuthenticationSessionTransactionOptions)
       } catch (error) {
         const replay = await db.telegramAuthReplay.findUnique({
+          where: { fingerprintHash: input.fingerprintHash },
+          select: { sessionId: true },
+        })
+        if (isUniqueConstraintError(error) && replay) return { state: 'replayed' as const }
+        throw error
+      }
+    },
+  }
+}
+
+export function createPrismaMaxAuthRepository(
+  db: DbClient,
+  sessions: AuthRepository,
+): MaxAuthRepository {
+  return {
+    findActiveRefreshSession: sessions.findActiveRefreshSession,
+
+    async exchangeMaxIdentity(input) {
+      try {
+        return await db.$transaction(async (tx) => {
+          await tx.maxAuthReplay.deleteMany({
+            where: { expiresAt: { lte: input.now } },
+          })
+          const replay = await tx.maxAuthReplay.findUnique({
+            where: { fingerprintHash: input.fingerprintHash },
+            select: { sessionId: true },
+          })
+          if (replay) {
+            if (!input.existingSessionId || replay.sessionId !== input.existingSessionId) {
+              return { state: 'replayed' as const }
+            }
+            const existing = await tx.authSession.findFirst({
+              where: {
+                id: input.existingSessionId,
+                revokedAt: null,
+                expiresAt: { gt: input.now },
+              },
+              include: { user: true },
+            })
+            return existing
+              ? { state: 'same_session' as const, user: existing.user, session: { id: existing.id } }
+              : { state: 'replayed' as const }
+          }
+
+          const externalIdentity = await tx.externalIdentity.upsert({
+            where: {
+              provider_subject: {
+                provider: input.identity.provider,
+                subject: input.identity.subject,
+              },
+            },
+            update: {},
+            create: {
+              provider: input.identity.provider,
+              subject: input.identity.subject,
+              user: {
+                create: {
+                  email: null,
+                  passwordHash: null,
+                  displayName: input.identity.displayName,
+                  role: 'user',
+                },
+              },
+            },
+            include: { user: true },
+          })
+          const session = await tx.authSession.create({
+            data: {
+              userId: externalIdentity.userId,
+              refreshTokenHash: input.session.refreshTokenHash,
+              refreshTokenFamilyHash: input.session.refreshTokenFamilyHash,
+              expiresAt: input.session.expiresAt,
+              userAgent: input.session.metadata.userAgent,
+              ipAddress: input.session.metadata.ipAddress,
+            },
+            select: { id: true },
+          })
+          await tx.maxAuthReplay.create({
+            data: {
+              fingerprintHash: input.fingerprintHash,
+              sessionId: session.id,
+              expiresAt: input.replayExpiresAt,
+            },
+          })
+          return { state: 'issued' as const, user: externalIdentity.user, session }
+        }, userAuthenticationSessionTransactionOptions)
+      } catch (error) {
+        const replay = await db.maxAuthReplay.findUnique({
           where: { fingerprintHash: input.fingerprintHash },
           select: { sessionId: true },
         })
