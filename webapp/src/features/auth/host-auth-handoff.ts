@@ -4,6 +4,7 @@ export type HostAuthHandoffState = {
   provider: HostAuthProvider
   hasInitData: boolean
   hasStartedAuth: boolean
+  hasPreviousAuthAttempt?: boolean
   isAuthenticated: boolean
   isAuthBootstrapping: boolean
   isAuthPending: boolean
@@ -14,7 +15,7 @@ export function shouldStartHostAuth(state: Omit<HostAuthHandoffState, 'isAuthPen
   return state.isHostAvailable
     && state.hasInitData
     && !state.isAuthBootstrapping
-    && !state.isAuthenticated
+    && (!state.isAuthenticated || state.hasPreviousAuthAttempt === true)
     && !state.hasStartedAuth
 }
 

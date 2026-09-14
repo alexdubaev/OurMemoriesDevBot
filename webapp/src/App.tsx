@@ -35,36 +35,43 @@ export default function App({ hostBridge }: AppProps) {
   const authAttempted = useRef<string | null>(null)
   const [hostAuthError, setHostAuthError] = useState<Error | null>(null)
   const [hasStartedHostAuth, setHasStartedHostAuth] = useState(false)
+  const [startedHostAuthKey, setStartedHostAuthKey] = useState<string | null>(null)
   const [isHostAuthPending, setIsHostAuthPending] = useState(false)
   const hostAuthProvider: HostAuthProvider | null = hostBridge.kind === 'max' || hostBridge.kind === 'telegram'
     ? hostBridge.kind
     : null
-  const initData = hostBridge.initData()
+  const initData = hostBridge.rawAuthData()
+  const authAttemptKey = hostAuthAttemptKey(hostAuthProvider, initData)
   const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
     provider: hostAuthProvider,
-    hasStartedAuth: hasStartedHostAuth,
+    hasStartedAuth: startedHostAuthKey === authAttemptKey,
+    hasPreviousAuthAttempt: hasStartedHostAuth,
     hasInitData: Boolean(initData),
     isAuthenticated: auth.isAuthenticated,
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
-  } : null, [auth, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, hostBridge.isAvailable])
-  const authAttemptKey = hostAuthAttemptKey(hostAuthProvider, initData)
+  } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, startedHostAuthKey, hostBridge.isAvailable])
 
   useEffect(() => {
     if (!auth || !hostAuthProvider || !initData || !hostAuthState || !shouldStartHostAuth(hostAuthState)) return
     if (authAttemptKey && authAttempted.current === authAttemptKey) return
+    if (isHostAuthPending) return
     authAttempted.current = authAttemptKey
     queueMicrotask(() => {
+      setStartedHostAuthKey(authAttemptKey)
       setHasStartedHostAuth(true)
       setIsHostAuthPending(true)
       void auth.authenticateHost(hostAuthProvider, initData)
         .catch((error: unknown) => {
+          if (authAttempted.current !== authAttemptKey) return
           setHostAuthError(error instanceof Error ? error : new Error('Не удалось войти.'))
         })
-        .finally(() => setIsHostAuthPending(false))
+        .finally(() => {
+          if (authAttempted.current === authAttemptKey) setIsHostAuthPending(false)
+        })
     })
-  }, [auth, authAttemptKey, hostAuthProvider, hostAuthState, initData])
+  }, [auth, authAttemptKey, hostAuthProvider, hostAuthState, initData, isHostAuthPending])
 
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
@@ -83,6 +90,7 @@ export default function App({ hostBridge }: AppProps) {
         <div className="mt-8"><InlineError onRetry={() => {
           authAttempted.current = null
           setHostAuthError(null)
+          setStartedHostAuthKey(null)
           setHasStartedHostAuth(false)
           setIsHostAuthPending(false)
           void auth.retrySession()

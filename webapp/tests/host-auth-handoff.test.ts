@@ -27,3 +27,16 @@ test('host auth handoff keeps the preloader until one exchange starts or finishe
   expect(shouldKeepHostAuthPreloader({ ...ready, hasStartedAuth: true, isAuthPending: true })).toBe(true)
   expect(shouldKeepHostAuthPreloader({ ...ready, hasStartedAuth: true, isAuthPending: false })).toBe(false)
 })
+
+test('a changed effective host payload can start a new exchange after a prior attempt', () => {
+  const changedPayload = {
+    provider: 'max' as const,
+    hasInitData: true,
+    hasStartedAuth: false,
+    hasPreviousAuthAttempt: true,
+    isAuthenticated: true,
+    isAuthBootstrapping: false,
+    isHostAvailable: true,
+  }
+  expect(shouldStartHostAuth(changedPayload)).toBe(true)
+})
