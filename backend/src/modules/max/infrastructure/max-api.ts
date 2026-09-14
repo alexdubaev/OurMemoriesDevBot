@@ -104,7 +104,8 @@ function normalizeSubscriptionResult(value: unknown): MaxSubscriptionResult {
 function validateSubscriptionInput(input: MaxSubscriptionInput) {
   if (!isHttpsUrl(input.url) || !Array.isArray(input.updateTypes) || input.updateTypes.length === 0 ||
       input.updateTypes.some((type) => type !== 'message_created' && type !== 'bot_started') ||
-      new Set(input.updateTypes).size !== input.updateTypes.length || typeof input.secret !== 'string' || input.secret.length === 0) {
+      new Set(input.updateTypes).size !== input.updateTypes.length ||
+      typeof input.secret !== 'string' || !/^[A-Za-z0-9_-]{5,256}$/.test(input.secret)) {
     throw new MaxProviderError()
   }
 }

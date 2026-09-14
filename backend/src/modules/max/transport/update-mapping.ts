@@ -31,9 +31,11 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   const message = input.message
   if (message.body === null || message.body === undefined) return { kind: 'ignored' }
   if (!isRecord(message.sender) || !isRecord(message.recipient)) return { kind: 'ignored' }
-  // A user recipient is the documented direct-dialog shape. Chat/channel recipients are ignored.
-  if (Object.hasOwn(message.recipient, 'chat_id') || Object.hasOwn(message.recipient, 'channel_id')) return { kind: 'ignored' }
-  if (!Object.hasOwn(message.recipient, 'user_id')) return { kind: 'ignored' }
+  // MAX always supplies all Recipient keys. A direct dialog has a null chat_id and a positive
+  // user_id; group/channel recipients have a positive chat_id and are ignored at this boundary.
+  if (!Object.hasOwn(message.recipient, 'chat_id') || !Object.hasOwn(message.recipient, 'chat_type') ||
+      !Object.hasOwn(message.recipient, 'user_id')) return { kind: 'ignored' }
+  if (message.recipient.chat_id !== null || message.recipient.chat_type !== 'dialog') return { kind: 'ignored' }
   if (!isPositiveSafeInteger(message.sender.user_id) || !isPositiveSafeInteger(message.recipient.user_id)) {
     throw new Error('Invalid MAX message identifiers')
   }

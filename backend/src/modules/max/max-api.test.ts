@@ -72,6 +72,19 @@ describe('MAX API client', () => {
     expect(request!.url).not.toContain(token)
   })
 
+  test('rejects subscription secrets outside the documented character and length bounds before fetch', async () => {
+    let fetchCalls = 0
+    const api = createMaxApi(token, { fetch: async () => {
+      fetchCalls += 1
+      return response({ success: true })
+    } })
+    const input = { url: 'https://example.com/hook', updateTypes: ['message_created'], secret: '' }
+    await expect(api.createSubscription({ ...input, secret: 'abcd' })).rejects.toBeInstanceOf(MaxProviderError)
+    await expect(api.createSubscription({ ...input, secret: 'a'.repeat(257) })).rejects.toBeInstanceOf(MaxProviderError)
+    await expect(api.createSubscription({ ...input, secret: 'abc$d' })).rejects.toBeInstanceOf(MaxProviderError)
+    expect(fetchCalls).toBe(0)
+  })
+
   test('rejects non-2xx, malformed responses, and network failures generically', async () => {
     const statuses = [
       async () => response({ message: token }, 500),

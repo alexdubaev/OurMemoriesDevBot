@@ -6,7 +6,7 @@ const messageFixture = {
   update_type: 'message_created', timestamp: 1700000000123,
   message: {
     body: { mid: 'mid-1', text: 'hello', attachments: [{ type: 'image' }] },
-    sender: { user_id: 42 }, recipient: { user_id: 99 },
+    sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 },
   },
 }
 
@@ -27,7 +27,7 @@ describe('MAX update mapping', () => {
 
   test('ignores unsupported, group, missing-body, and forward-only messages without leakage', () => {
     expect(normalizeMaxUpdate({ update_type: 'message_edited', secret: 'raw' })).toEqual({ kind: 'ignored' })
-    expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, recipient: { chat_id: 5 } } })).toEqual({ kind: 'ignored' })
+    expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, recipient: { chat_id: 5, chat_type: 'chat', user_id: null } } })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: null } })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: { mid: 'mid-2', link: { type: 'forward' } } } })).toEqual({ kind: 'ignored' })
   })
