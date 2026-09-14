@@ -10,7 +10,7 @@ const base = {
   JWT_SECRET: '12345678901234567890123456789012',
 }
 const maxSettings = {
-  MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token', MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+  MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token', MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot', MAX_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
   MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max', MAX_WEBHOOK_SECRET: 'M'.repeat(43), MAX_MINI_APP_URL: 'https://app.example.com',
 }
 
@@ -30,12 +30,14 @@ describe('optional MAX startup', () => {
 
   test('verifies identity before constructing the module', async () => {
     const harness = runtime(maxSettings); const calls: string[] = []; const module = {} as ReturnType<typeof createMaxModule>
+    let moduleOptions: Parameters<typeof createMaxModule>[0] | undefined
     await expect(startMaxIfEnabled({
       runtime: harness.runtime,
       createApi: () => ({ getMe: async () => { calls.push('getMe'); return { userId: 1, username: 'OurMemoriesMaxBot', isBot: true } } } as ReturnType<typeof createMaxApi>),
-      createModule: () => { calls.push('module'); return module },
+      createModule: (options) => { calls.push('module'); moduleOptions = options; return module },
     })).resolves.toBe(module)
     expect(calls).toEqual(['getMe', 'module'])
+    expect(moduleOptions?.identity).toEqual({ userId: 1, username: 'OurMemoriesMaxBot', isBot: true })
   })
 
   test('closes and rejects identity mismatch without constructing module', async () => {

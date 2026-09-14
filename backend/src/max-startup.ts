@@ -15,7 +15,7 @@ export async function startMaxIfEnabled(options: {
     const api = (options.createApi ?? createMaxApi)(runtime.env.MAX_BOT_TOKEN)
     const identity = await api.getMe()
     if (!identity.isBot || identity.username !== runtime.env.MAX_BOT_EXPECTED_USERNAME) throw new Error('MAX bot identity verification failed')
-    return (options.createModule ?? createMaxModule)({ runtime, api })
+    return (options.createModule ?? createMaxModule)({ runtime, api, identity })
   } catch {
     try { await runtime.close() } catch { /* preserve the sanitized startup failure */ }
     throw new Error('MAX startup failed')

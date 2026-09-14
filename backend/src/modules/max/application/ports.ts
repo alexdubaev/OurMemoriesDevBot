@@ -42,3 +42,28 @@ export type MaxInboundEvent =
       occurredAt: string
       payload: string | null
     }
+
+export type MaxAcceptResult = { inboxId: string; duplicate: boolean }
+
+export type MaxImmediateResponse = {
+  kind: 'accepted' | 'unsupported_media' | 'welcome'
+  text: string
+  destinationUserId: string
+}
+
+export type MaxAcceptRepository = {
+  accept(input: {
+    botId: string
+    event: MaxInboundEvent
+    eventKey: string
+    encrypted: EncryptedMaxPayload
+    response: MaxImmediateResponse | null
+    now: Date
+  }): Promise<MaxAcceptResult>
+}
+
+export type EncryptedMaxPayload = {
+  ciphertext: Uint8Array
+  iv: Uint8Array
+  authTag: Uint8Array
+}

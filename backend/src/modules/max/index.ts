@@ -1,18 +1,24 @@
 import type { BackendRuntime } from '../../runtime'
-import type { MaxApiPort } from './application/ports'
+import { createMaxAcceptUpdate } from './application/accept-update'
+import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
+import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
+import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
+  identity: MaxBotIdentity
   api?: MaxApiPort
-  acceptUpdate?: (event: import('./application/ports').MaxInboundEvent) => Promise<unknown>
 }) {
   const env = options.runtime.env
-  if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET) throw new Error('MAX adapter is not configured')
+  if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
   const api = options.api ?? createMaxApi(env.MAX_BOT_TOKEN)
-  const acceptUpdate = options.acceptUpdate ?? (async () => {
-    throw new Error('MAX update acceptance is not configured')
+  const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
+  const acceptUpdate = createMaxAcceptUpdate({
+    botId: String(options.identity.userId),
+    repository: new PrismaMaxRepository(options.runtime.prisma),
+    encrypt: crypto.encrypt,
   })
   return {
     api,
