@@ -10,6 +10,11 @@ import type { AuthenticatedTransport } from '@/platform/api'
 
 export type HostAuthProvider = 'max' | 'telegram'
 
+export type HostAuthAttemptOptions = {
+  signal?: AbortSignal
+  isCurrent?: () => boolean
+}
+
 export type AuthContextValue = {
   user: UserDto | null
   /**
@@ -22,7 +27,7 @@ export type AuthContextValue = {
   sessionError: Error | null
   retrySession: () => Promise<void>
   transport: AuthenticatedTransport
-  authenticateHost: (provider: HostAuthProvider, initData: string) => Promise<void>
+  authenticateHost: (provider: HostAuthProvider, initData: string, options?: HostAuthAttemptOptions) => Promise<void>
   authenticateTelegram: (initData: string) => Promise<void>
   authenticateMax: (initData: string) => Promise<void>
   register: (input: RegisterRequest) => Promise<void>

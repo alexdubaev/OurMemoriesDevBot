@@ -44,6 +44,11 @@ type AuthApiOptions = {
   authCoordinator?: BrowserAuthCoordinator
 }
 
+export type HostAuthAttemptOptions = {
+  signal?: AbortSignal
+  isCurrent?: () => boolean
+}
+
 class BrowserSessionEpochChangedError extends Error {}
 
 export class AuthApi {
@@ -87,24 +92,28 @@ export class AuthApi {
     })
   }
 
-  authenticateTelegram(initData: string): Promise<BrowserSessionTransition<CookieAuthResponse>> {
+  authenticateTelegram(initData: string, options: HostAuthAttemptOptions = {}): Promise<BrowserSessionTransition<CookieAuthResponse>> {
     const payload = telegramAuthRequestSchema.parse({ initData })
     return this.authCoordinator(async () => {
+      options.signal?.throwIfAborted()
       const data = await this.http.request('/api/v1/auth/telegram', cookieAuthResponseSchema, {
-        method: 'POST', body: payload,
+        method: 'POST', body: payload, signal: options.signal,
       })
+      ensureHostAuthAttemptCurrent(options)
       this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
     })
   }
 
-  authenticateMax(initData: string): Promise<BrowserSessionTransition<CookieAuthResponse>> {
+  authenticateMax(initData: string, options: HostAuthAttemptOptions = {}): Promise<BrowserSessionTransition<CookieAuthResponse>> {
     const payload = maxAuthRequestSchema.parse({ initData })
     return this.authCoordinator(async () => {
+      options.signal?.throwIfAborted()
       const data = await this.http.request('/api/v1/auth/max', cookieAuthResponseSchema, {
-        method: 'POST', body: payload,
+        method: 'POST', body: payload, signal: options.signal,
       })
+      ensureHostAuthAttemptCurrent(options)
       this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
@@ -289,6 +298,11 @@ export class AuthApi {
     await this.options.onAuthExpired?.()
     return true
   }
+}
+
+function ensureHostAuthAttemptCurrent(options: HostAuthAttemptOptions) {
+  options.signal?.throwIfAborted()
+  if (options.isCurrent?.() === false) throw new Error('Host auth attempt superseded')
 }
 
 function hasSamePrincipal(currentAccessToken: string, nextAccessToken: string) {

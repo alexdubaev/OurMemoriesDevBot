@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -7,7 +7,7 @@ import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
-import { AuthContext, hostAuthAttemptKey, shouldKeepHostAuthPreloader, shouldStartHostAuth, type HostAuthProvider } from '@/features/auth'
+import { AuthContext, shouldKeepHostAuthPreloader, useHostAuthHandoff, type HostAuthProvider } from '@/features/auth'
 import { BootPreloader, decideStartupRoute } from '@/features/app'
 import {
   acceptInvite,
@@ -32,16 +32,16 @@ export type AppProps = { hostBridge: HostBridge }
 
 export default function App({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
-  const authAttempted = useRef<string | null>(null)
-  const [hostAuthError, setHostAuthError] = useState<Error | null>(null)
-  const [hasStartedHostAuth, setHasStartedHostAuth] = useState(false)
-  const [startedHostAuthKey, setStartedHostAuthKey] = useState<string | null>(null)
-  const [isHostAuthPending, setIsHostAuthPending] = useState(false)
   const hostAuthProvider: HostAuthProvider | null = hostBridge.kind === 'max' || hostBridge.kind === 'telegram'
     ? hostBridge.kind
     : null
   const initData = hostBridge.rawAuthData()
-  const authAttemptKey = hostAuthAttemptKey(hostAuthProvider, initData)
+  const { authAttemptKey, hostAuthError, hasStartedHostAuth, isHostAuthPending, resetHostAuth, startedHostAuthKey } = useHostAuthHandoff({
+    auth,
+    initData,
+    isHostAvailable: hostBridge.isAvailable,
+    provider: hostAuthProvider,
+  })
   const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
     provider: hostAuthProvider,
     hasStartedAuth: startedHostAuthKey === authAttemptKey,
@@ -52,26 +52,6 @@ export default function App({ hostBridge }: AppProps) {
     isAuthPending: isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
   } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, startedHostAuthKey, hostBridge.isAvailable])
-
-  useEffect(() => {
-    if (!auth || !hostAuthProvider || !initData || !hostAuthState || !shouldStartHostAuth(hostAuthState)) return
-    if (authAttemptKey && authAttempted.current === authAttemptKey) return
-    if (isHostAuthPending) return
-    authAttempted.current = authAttemptKey
-    queueMicrotask(() => {
-      setStartedHostAuthKey(authAttemptKey)
-      setHasStartedHostAuth(true)
-      setIsHostAuthPending(true)
-      void auth.authenticateHost(hostAuthProvider, initData)
-        .catch((error: unknown) => {
-          if (authAttempted.current !== authAttemptKey) return
-          setHostAuthError(error instanceof Error ? error : new Error('Не удалось войти.'))
-        })
-        .finally(() => {
-          if (authAttempted.current === authAttemptKey) setIsHostAuthPending(false)
-        })
-    })
-  }, [auth, authAttemptKey, hostAuthProvider, hostAuthState, initData, isHostAuthPending])
 
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
@@ -88,11 +68,7 @@ export default function App({ hostBridge }: AppProps) {
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
         <BrandLogo className="w-[148px]" />
         <div className="mt-8"><InlineError onRetry={() => {
-          authAttempted.current = null
-          setHostAuthError(null)
-          setStartedHostAuthKey(null)
-          setHasStartedHostAuth(false)
-          setIsHostAuthPending(false)
+          resetHostAuth()
           void auth.retrySession()
         }} /></div>
         {hostAuthError ? <Typography className="mt-3" tone="muted" variant="memoryMeta">Проверьте соединение и повторите попытку.</Typography> : null}

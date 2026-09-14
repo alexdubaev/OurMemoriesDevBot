@@ -24,7 +24,7 @@ import {
   useLogoutMutation,
   useRegisterMutation,
 } from './queries'
-import { AuthContext, type AuthContextValue, type HostAuthProvider } from './context'
+import { AuthContext, type AuthContextValue, type HostAuthAttemptOptions, type HostAuthProvider } from './context'
 import { bootstrapAuthSession } from './bootstrap'
 import { subscribeToBrowserSessionChanges } from './session-coordinator'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
@@ -143,10 +143,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
-  const authenticateHost = useCallback(async (provider: HostAuthProvider, initData: string) => {
+  const authenticateHost = useCallback(async (provider: HostAuthProvider, initData: string, options: HostAuthAttemptOptions = {}) => {
     const result = await (provider === 'max'
-      ? api.authenticateMax(initData)
-      : api.authenticateTelegram(initData))
+      ? api.authenticateMax(initData, options)
+      : api.authenticateTelegram(initData, options))
+    options.signal?.throwIfAborted()
+    if (options.isCurrent?.() === false) return
     setAccessToken(result.data.accessToken)
     queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
   }, [api, queryClient, setAccessToken])
