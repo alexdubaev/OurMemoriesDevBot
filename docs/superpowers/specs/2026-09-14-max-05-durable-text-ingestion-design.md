@@ -1,8 +1,11 @@
 # MAX-05 Durable Text Ingestion Design
 
-**Status:** Owner-approved design  
-**Date:** 2026-09-14  
-**Branch:** `feat/max-adapter`  
+**Status:** Owner-approved design
+
+**Date:** 2026-09-14
+
+**Branch:** `feat/max-adapter`
+
 **Design base:** `1cf202f4ca6551f2bd17d78232fd1df765502eba`
 
 ## Goal
