@@ -350,6 +350,13 @@ function validateMaxEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
       message: 'MAX_WEBHOOK_SECRET must carry at least 32 bytes of random base64url-safe data when MAX is enabled',
     })
   }
+  if (env.MAX_WEBHOOK_SECRET === env.MAX_BOT_TOKEN) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAX_WEBHOOK_SECRET'],
+      message: 'MAX_WEBHOOK_SECRET must differ from MAX_BOT_TOKEN',
+    })
+  }
   if (!env.MAX_MINI_APP_URL || new URL(env.MAX_MINI_APP_URL).protocol !== 'https:') {
     ctx.addIssue({
       code: 'custom',

@@ -77,6 +77,21 @@ describe('loadEnv', () => {
       .toThrow('MAX_MINI_APP_URL')
   })
 
+  test('rejects a MAX webhook secret reused as the bot token', () => {
+    const sharedSecret = 'M'.repeat(43)
+
+    expect(() => loadEnv({
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+      MAX_ENABLED: 'true',
+      MAX_BOT_TOKEN: sharedSecret,
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+      MAX_WEBHOOK_SECRET: sharedSecret,
+      MAX_MINI_APP_URL: 'https://app.example.com',
+    })).toThrow('MAX_WEBHOOK_SECRET')
+  })
+
   test('refuses credential-shaped MAX and Telegram values when those providers are explicitly disabled', () => {
     const base = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
