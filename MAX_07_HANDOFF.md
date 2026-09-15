@@ -10,7 +10,7 @@ Prepared: 2026-09-15
 - MAX-04: APPROVED
 - MAX-05: APPROVED
 - MAX-06: APPROVED
-- MAX-07: IN_PROGRESS — VIDEO IMPLEMENTATION AUTHORIZED
+- MAX-07: IN_PROGRESS — VIDEO APPROVED; AUDIO/VOICE CONTRACT INVESTIGATION
 - MAX-08: APPROVED
 - Publication state: local only
 
@@ -66,21 +66,28 @@ downloaded on ingest and are not copied to Selectel/private storage.
 OWNER-ACCEPTED MVP RISK: MAX does not currently provide a proven/documented indefinite archival
 retention guarantee for inbound video. This is not a blocker.
 
+## MAX-07 VIDEO result
+
+VIDEO is APPROVED at local head `c225dc588f8a1a8034f5fb807e94ecc90334f798`.
+
+- one normal direct-dialog MAX video is published as a provider-owned `MaxVideoReference`;
+- durable identity is limited to message `mid`, `payload.id`, attachment position, and video type;
+- playback authorizes memoLy session, family, published Memory, and reference ownership before any MAX lookup;
+- current message/token and MP4 URL are resolved on demand; transient token and signed URL are not persisted or exposed;
+- CDN requests use HTTPS, the exact approved MAX CDN host family, no MAX authorization/cookies, manual redirects, bounded single-range streaming, caller cancellation, exact byte-length validation, and sanitized failures;
+- publication remains DB/outbox/idempotency authoritative and creates no `MediaAsset`, `MemoryMedia`, or private/MAX-original copy.
+
+Verification at the approved head: backend unit 447/447; contracts + feed 28/28; clean-database MAX integration 38/38; Media integration 7/7; all 26 migrations applied; backend/contracts typechecks, architecture check, Prisma validation, and diff check passed. Two fresh independent review passes fixed all confirmed P1/P2 findings and returned `production_ready`.
+
 ## MAX-07 current action
 
-Proceed through the repository Teamlead workflow using:
-
-- design: `docs/superpowers/specs/2026-09-15-max-07-video-reference-design.md`;
-- bounded implementation brief: `docs/superpowers/plans/2026-09-15-max-07-video-reference.md`.
-
-VIDEO must reach APPROVED before the separate audio/voice contract investigation begins. Do not wait
-for the informational retention checkpoints. Do not start MAX-09 or MAX-10 automatically.
+Perform a separate bounded audio/voice contract investigation. Do not assume that MAX audio or voice uses the video message/token/resolver contract. Do not implement audio/voice until its actual inbound and retrieval representation is established and a new bounded design/brief is approved. Do not wait for the informational video-retention checkpoints. Do not start MAX-09 or MAX-10 automatically.
 
 ## MAX-07 exclusions
 
 - no automatic permanent storage of MAX video originals;
 - no image-pipeline refactor;
-- no audio/voice until VIDEO is APPROVED; no generic file, stickers, contacts, or locations;
+- no audio/voice implementation until its separate contract investigation and bounded design are approved; no generic file, stickers, contacts, or locations;
 - no invite/start work (MAX-08 is already approved);
 - no account linking, groups, or channels;
 - no Telegram refactor;
@@ -104,6 +111,4 @@ Remain local unless the owner explicitly authorizes publication. Do not push, cr
 
 ## Next action
 
-Execute the lead-approved bounded VIDEO brief with one fresh worker, deterministic checks, a fresh
-independent review/fix pass, and a second fresh whole-change review. Remain local: no push, PR,
-merge, deployment, webhook registration, or subscription mutation without separate authorization.
+Complete the bounded audio/voice contract investigation and stop for an evidence-based architecture decision if live provider representation remains unknown. Remain local: no push, PR, merge, deployment, webhook registration, or subscription mutation without separate authorization.
