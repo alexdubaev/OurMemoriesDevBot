@@ -1,12 +1,34 @@
 import { describe, expect, test } from 'bun:test'
 
-import { assertSourcePublicationTransition, createMaxImageProcessor } from './process-image'
+import { assertSourcePublicationTransition, claimMaxSourceAttachment, createMaxImageProcessor, waitForMaxAttachmentPoll } from './process-image'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 
 describe('MAX image processor boundary', () => {
   test('requires the accepted-to-published source transition to win', async () => {
     const tx = { maxSource: { updateMany: async () => ({ count: 0 }) } }
     await expect(assertSourcePublicationTransition(tx as never, 'source')).rejects.toThrow()
+  })
+  test('claims one planned attachment with a durable lease before downloading', async () => {
+    let seen: unknown
+    const claimed = await claimMaxSourceAttachment({ maxSourceAttachment: {
+      updateMany: async (input: unknown) => { seen = input; return { count: 1 } },
+    } } as never, 'attachment', new Date('2026-09-15T10:00:00.000Z'))
+    expect(claimed).toMatchObject({ attachmentId: 'attachment', token: expect.any(String) })
+    expect(seen).toMatchObject({ where: { id: 'attachment', status: 'planned' }, data: { status: 'processing', claimToken: expect.any(String), claimUntil: expect.any(Date) } })
+  })
+  test('recovers an expired attachment lease without claiming a live contender', async () => {
+    let calls = 0
+    const claim = await claimMaxSourceAttachment({ maxSourceAttachment: {
+      updateMany: async () => { calls += 1; return { count: calls === 2 ? 1 : 0 } },
+    } } as never, 'attachment', new Date('2026-09-15T10:00:00.000Z'))
+    expect(claim).toMatchObject({ attachmentId: 'attachment', token: expect.any(String) })
+    expect(calls).toBe(2)
+  })
+  test('aborts a contender poll instead of spinning behind a live lease', async () => {
+    const controller = new AbortController()
+    const waiting = waitForMaxAttachmentPoll(controller.signal)
+    controller.abort()
+    await expect(waiting).rejects.toBeInstanceOf(Error)
   })
   test('does not download an over-limit quick-image message and terminally marks it unsupported', async () => {
     let downloads = 0

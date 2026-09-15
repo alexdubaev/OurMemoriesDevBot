@@ -1,5 +1,5 @@
 CREATE TYPE "max_source_attachment_kind" AS ENUM ('image', 'file');
-CREATE TYPE "max_source_attachment_status" AS ENUM ('planned', 'stored', 'failed');
+CREATE TYPE "max_source_attachment_status" AS ENUM ('planned', 'processing', 'stored', 'failed');
 
 ALTER TYPE "media_source_kind" ADD VALUE 'max';
 
@@ -12,6 +12,8 @@ CREATE TABLE "max_source_attachments" (
     "planned_media_id" UUID NOT NULL,
     "media_id" UUID,
     "status" "max_source_attachment_status" NOT NULL DEFAULT 'planned',
+    "claim_token" UUID,
+    "claim_until" TIMESTAMPTZ(6),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
     CONSTRAINT "max_source_attachments_pkey" PRIMARY KEY ("id")
@@ -20,6 +22,7 @@ CREATE TABLE "max_source_attachments" (
 CREATE UNIQUE INDEX "max_source_attachments_source_position_key" ON "max_source_attachments"("source_id", "position");
 CREATE UNIQUE INDEX "max_source_attachments_planned_media_id_key" ON "max_source_attachments"("planned_media_id");
 CREATE INDEX "max_source_attachments_source_kind_provider_idx" ON "max_source_attachments"("source_id", "provider_kind", "provider_attachment_id");
+CREATE INDEX "max_source_attachments_claim_idx" ON "max_source_attachments"("status", "claim_until");
 
 ALTER TABLE "max_source_attachments" ADD CONSTRAINT "max_source_attachments_source_id_fkey"
     FOREIGN KEY ("source_id") REFERENCES "max_sources"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -1,6 +1,7 @@
 import type { MediaAssetDto, MediaVariant } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import { Prisma } from '../../../generated/prisma/client'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import type { FamilyScope } from '../../families'
@@ -92,6 +93,7 @@ export class PrismaMediaRepository implements MediaRepository {
     const unique = [...new Set(input.assetIds)]
     if (unique.length === 0) return
     await this.db.$transaction(async (tx) => {
+      await lockMediaAssetsForUpdate(tx, await familyIdForAssets(tx, input.sourceKind, unique), unique)
       const assets = await tx.mediaAsset.findMany({ where: {
         id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
       }, select: { id: true, originalStatus: true } })
@@ -291,6 +293,22 @@ async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date, 
     type: 'media:delete', dedupeKey: `media-delete:${mediaId}`, payload: { mediaId }, scheduledFor: now,
   })
   return true
+}
+
+async function familyIdForAssets(tx: PrismaTransactionClient, sourceKind: 'telegram' | 'max', assetIds: string[]) {
+  const row = await tx.mediaAsset.findFirst({ where: { id: { in: assetIds }, sourceKind }, select: { familyId: true } })
+  return row?.familyId ?? '00000000-0000-0000-0000-000000000000'
+}
+
+async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string, mediaIds: string[]) {
+  const unique = [...new Set(mediaIds)].sort()
+  if (unique.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM media_assets
+     WHERE family_id = ${familyId}::uuid
+       AND id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
 }
 
 function pendingDto(reservation: Awaited<ReturnType<typeof reservationFor>> & {}) : PendingMediaUpload {

@@ -122,6 +122,8 @@ model MaxSourceAttachment {
   plannedMediaId        String                    @unique(map: "max_source_attachments_planned_media_id_key") @map("planned_media_id") @db.Uuid
   mediaId               String?                   @map("media_id") @db.Uuid
   status                MaxSourceAttachmentStatus @default(planned)
+  claimToken            String?                   @map("claim_token") @db.Uuid
+  claimUntil            DateTime?                 @map("claim_until") @db.Timestamptz(6)
   createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   source                MaxSource                  @relation(fields: [sourceId], references: [id], onDelete: Cascade, map: "max_source_attachments_source_id_fkey")
@@ -800,6 +802,7 @@ enum MaxSourceAttachmentKind {
 
 enum MaxSourceAttachmentStatus {
   planned
+  processing
   stored
   failed
 

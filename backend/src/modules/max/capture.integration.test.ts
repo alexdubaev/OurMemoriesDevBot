@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
@@ -15,9 +15,12 @@ import type { MaxApiPort, MaxInboundEvent } from './application/ports'
 import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
 import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { createMaxResponseDelivery } from './infrastructure/deliver-response'
+import { MaxMediaDownloadError } from './infrastructure/media-download'
+import { MaxProviderError } from './infrastructure/max-api'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
+import { createSourceMemoryPublisher } from '../memories'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -33,6 +36,7 @@ maybeDescribe('MAX durable capture', () => {
     secret: webhookSecret, bodyLimitBytes: 64 * 1024, acceptUpdate: accept,
   })
   const headers = { 'X-Max-Bot-Api-Secret': webhookSecret, 'Content-Type': 'application/json' }
+  const activeStorageRoots = new Set<string>()
   const textUpdate = {
     update_type: 'message_created', timestamp: 1_757_844_000_000, message: {
       sender: { user_id: 77 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 900 },
@@ -54,6 +58,10 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.family.deleteMany()
     await prisma.externalIdentity.deleteMany()
     await prisma.user.deleteMany()
+  })
+  afterEach(async () => {
+    for (const root of activeStorageRoots) await rm(root, { recursive: true, force: true })
+    activeStorageRoots.clear()
   })
   afterAll(async () => { await prisma.$disconnect() })
 
@@ -505,6 +513,7 @@ maybeDescribe('MAX durable capture', () => {
     })
     const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Image child' } })
     const storageRoot = `.max-image-${randomUUID()}`
+    activeStorageRoots.add(storageRoot)
     const env = loadEnv({ DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4), MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token',
       MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot', MAX_INBOX_ENCRYPTION_KEY: key, MAX_WEBHOOK_URL: 'https://api.example.test/webhooks/max', MAX_WEBHOOK_SECRET: webhookSecret,
       MAX_MINI_APP_URL: 'https://app.example.test', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot })
@@ -527,6 +536,286 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.mediaAsset.updateMany({ where: { sourceKind: 'max' }, data: { deletedAt: new Date() } })
     await rm(storageRoot, { recursive: true, force: true })
   })
+
+  test('publishes three quick images as one ordered photo Memory', async () => {
+    const fixture = await imageFixture('77124', 'three-images')
+    const attachments = ['1', '2', '3'].map((providerAttachmentId) => ({ kind: 'image' as const, providerAttachmentId }))
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77124', recipientId: '900', messageId: 'max-image-three', occurredAt: '2026-09-15T10:00:00.000Z', text: 'three images', attachments }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: { orderBy: { position: 'asc' } } } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
+    await expect(process(task.payload)).resolves.toBe('done')
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } } })
+    expect(memory.kind).toBe('photo')
+    expect(memory.media.map(({ mediaId }) => mediaId)).toEqual(source.attachments.map(({ plannedMediaId }) => plannedMediaId))
+    expect(memory.media.every(({ asset }) => asset.sha256 === createHash('sha256').update(pngFixture).digest('hex'))).toBe(true)
+    await fixture.cleanup()
+  })
+
+  test('resumes a ready deterministic asset after an attachment claim crash without downloading again', async () => {
+    const fixture = await imageFixture('771241', 'resume-ready')
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '771241', recipientId: '900', messageId: 'max-image-resume', occurredAt: '2026-09-15T10:00:00.000Z', text: 'resume', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
+    await fixture.media.ingestTrustedPhoto({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } }, { assetId: source.attachments[0]!.plannedMediaId, sourceKind: 'max', bytes: pngFixture })
+    await prisma.maxSourceAttachment.update({ where: { id: source.attachments[0]!.id }, data: { status: 'processing', claimToken: randomUUID(), claimUntil: new Date(Date.now() - 1_000) } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    let downloads = 0
+    const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })
+    await expect(process(task.payload)).resolves.toBe('done')
+    expect(downloads).toBe(0)
+    expect(await prisma.memory.count()).toBe(1)
+    await fixture.cleanup()
+  })
+
+  test('publishes one file attachment from octet-stream bytes with the exact SHA', async () => {
+    const fixture = await imageFixture('77125', 'file-image')
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77125', recipientId: '900', messageId: 'max-image-file', occurredAt: '2026-09-15T10:00:00.000Z', text: 'file caption', attachments: [{ kind: 'file', providerAttachmentId: 'payload-file-1', filename: 'photo.png', declaredSize: pngFixture.byteLength }] }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
+    await expect(process(task.payload)).resolves.toBe('done')
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { include: { asset: true } } } })
+    expect(memory).toMatchObject({ kind: 'photo', body: 'file caption' })
+    expect(memory.media[0]!.asset).toMatchObject({ sha256: createHash('sha256').update(pngFixture).digest('hex'), byteSize: BigInt(pngFixture.byteLength) })
+    await fixture.cleanup()
+  })
+
+  test('keeps two separate file messages as separate Memories', async () => {
+    const fixture = await imageFixture('77126', 'two-files')
+    for (const [index, body] of ['first file', 'second file'].entries()) {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77126', recipientId: '900', messageId: `max-image-file-${index}`, occurredAt: `2026-09-15T10:0${index}:00.000Z`, text: body, attachments: [{ kind: 'file', providerAttachmentId: `payload-file-${index}`, filename: 'photo.png', declaredSize: pngFixture.byteLength }] }
+      await accept(event)
+      const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+      await createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })(task.payload)
+      await prisma.taskOutbox.deleteMany({ where: { type: 'max:process' } })
+    }
+    expect(await prisma.memory.count()).toBe(2)
+    expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', originalStatus: 'stored' } })).toBe(2)
+    await fixture.cleanup()
+  })
+
+  test('retains an encrypted retryable inbox after a transient third-image failure and reuses first assets', async () => {
+    const fixture = await imageFixture('77127', 'transient-third')
+    const attachments = ['1', '2', '3'].map((providerAttachmentId) => ({ kind: 'image' as const, providerAttachmentId }))
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77127', recipientId: '900', messageId: 'max-image-transient', occurredAt: '2026-09-15T10:00:00.000Z', text: 'retry me', attachments }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const calls = new Map<string, number>()
+    const download = async (url: string) => { calls.set(url, (calls.get(url) ?? 0) + 1); if (url.endsWith('/3')) throw new MaxProviderError(); return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } }
+    const first = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download })
+    await expect(first(task.payload)).rejects.toBeInstanceOf(MaxProviderError)
+    expect(await prisma.memory.count()).toBe(0)
+    expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: source.inboxId } })).encryptedPayload.byteLength).toBeGreaterThan(0)
+    const retryDownload = async (url: string) => { calls.set(url, (calls.get(url) ?? 0) + 1); return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } }
+    const retry = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: retryDownload })
+    await expect(retry(task.payload)).resolves.toBe('done')
+    expect(calls).toEqual(new Map([['https://i.oneme.ru/1', 1], ['https://i.oneme.ru/2', 1], ['https://i.oneme.ru/3', 2]]))
+    expect(await prisma.memory.count()).toBe(1)
+    await fixture.cleanup()
+  })
+
+  test('permanent validation failure on a later image leaves no Memory and cleans partial media', async () => {
+    const fixture = await imageFixture('77128', 'permanent-third')
+    const attachments = ['1', '2', '3'].map((providerAttachmentId) => ({ kind: 'image' as const, providerAttachmentId }))
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77128', recipientId: '900', messageId: 'max-image-invalid', occurredAt: '2026-09-15T10:00:00.000Z', text: 'invalid later', attachments }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async (url) => { if (url.endsWith('/3')) throw new MaxMediaDownloadError(); return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })
+    await expect(process(task.payload)).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(2)
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(2)
+    await fixture.cleanup()
+  })
+
+  test('ten separate processor instances download each attachment once and publish once', async () => {
+    const fixture = await imageFixture('77129', 'concurrent-processors')
+    const attachments = ['1', '2'].map((providerAttachmentId) => ({ kind: 'image' as const, providerAttachmentId }))
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77129', recipientId: '900', messageId: 'max-image-concurrent', occurredAt: '2026-09-15T10:00:00.000Z', text: 'concurrent', attachments }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const calls = new Map<string, number>()
+    const download = async (url: string) => { calls.set(url, (calls.get(url) ?? 0) + 1); await new Promise((resolve) => setTimeout(resolve, 30)); return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } }
+    const processors = Array.from({ length: 10 }, () => createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download }))
+    await Promise.all(processors.map((process) => process(task.payload)))
+    expect(calls).toEqual(new Map([['https://i.oneme.ru/1', 1], ['https://i.oneme.ru/2', 1]]))
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max' } })).toBe(2)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
+    await fixture.cleanup()
+  })
+
+  test('cleanup-first row locking makes publication fail without a Memory', async () => {
+    const fixture = await imageFixture('77130', 'cleanup-first')
+    const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
+    const cleanupGate = transactionQueryGate(prisma)
+    const cleanupMedia = createMediaService({ db: cleanupGate.db, env: fixture.env, familyAccess: createPrismaFamilyAccess(prisma), storage: fixture.storage })
+    const cleanup = cleanupMedia.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
+    await cleanupGate.locked
+    const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
+    const publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: randomUUID(), childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
+    cleanupGate.release()
+    await cleanup
+    await expect(publication).rejects.toThrow()
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+    await fixture.cleanup()
+  })
+
+  test('publication-first row locking makes cleanup skip the attached asset', async () => {
+    const fixture = await imageFixture('77131', 'publication-first')
+    const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
+    const memoryId = randomUUID()
+    const publicationGate = transactionQueryGate(prisma, 2)
+    const publisher = createSourceMemoryPublisher(publicationGate.db, createPrismaFamilyAccess(prisma))
+    const publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: memoryId, childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
+    await publicationGate.locked
+    const cleanup = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
+    publicationGate.release()
+    await publication
+    await cleanup
+    expect(await prisma.memory.count({ where: { id: memoryId } })).toBe(1)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+    await fixture.cleanup()
+  })
+
+  test('image response delivery failure leaves publication durable and does not rerun processing', async () => {
+    const fixture = await imageFixture('77132', 'delivery-independent')
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77132', recipientId: '900', messageId: 'max-image-delivery', occurredAt: '2026-09-15T10:00:00.000Z', text: 'delivery later', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+    await accept(event)
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    let downloads = 0
+    const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })
+    await expect(process(task.payload)).resolves.toBe('done')
+    const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { kind: 'saved' } })
+    const delivery = createMaxResponseDelivery({ prisma, api: { ...fixture.api(event), sendMessage: async () => { throw new Error('synthetic response outage') } } })
+    await expect(delivery({ responseId: response.id })).rejects.toThrow('synthetic response outage')
+    await expect(process(task.payload)).resolves.toBe('skipped')
+    expect(downloads).toBe(1)
+    expect(await prisma.memory.count()).toBe(1)
+    expect((await prisma.maxSource.findFirstOrThrow()).status).toBe('published')
+    await fixture.cleanup()
+  })
+
+  test('image path denies viewer, revoked, inactive, and childless members before downloading', async () => {
+    const viewer = await maxFamily('77133', 'viewer')
+    const revoked = await maxFamilyWithMember('77134', 'full')
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: revoked.familyId, userId: revoked.userId } }, data: { revokedAt: new Date() } })
+    const inactive = await maxFamily('77135', 'full')
+    await prisma.family.update({ where: { id: inactive.familyId }, data: { status: 'deleting' } })
+    const childless = await maxFamily('77136', 'full', false)
+    const ambiguous = await maxFamily('77139', 'full')
+    const ambiguousDb = new Proxy(prisma, {
+      get(target, property, receiver) {
+        if (property !== 'externalIdentity') return Reflect.get(target, property, receiver)
+        return new Proxy(target.externalIdentity, {
+          get(identityTarget, identityProperty, identityReceiver) {
+            if (identityProperty !== 'findUnique') return Reflect.get(identityTarget, identityProperty, identityReceiver)
+            return async () => ({ user: { id: ambiguous.userId, familyMemberships: [{ familyId: ambiguous.familyId, role: 'full', family: { children: [{ id: ambiguous.childId }] } }, { familyId: randomUUID(), role: 'full', family: { children: [{ id: randomUUID() }] } }] } })
+          },
+        })
+      },
+    }) as typeof prisma
+    let downloads = 0
+    for (const [index, senderId] of [viewer.subject, revoked.subject, inactive.subject, childless.subject, ambiguous.subject].entries()) {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId, recipientId: '900', messageId: `max-image-auth-${index}`, occurredAt: '2026-09-15T10:00:00.000Z', text: 'not allowed', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+      await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
+      await createMaxTaskProcessor({ runtime: { prisma: senderId === ambiguous.subject ? ambiguousDb : prisma } as unknown as BackendRuntime, crypto, api: {
+        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+        getMessage: async () => ({ messageId: event.messageId, senderId, recipientId: event.recipientId, attachments: [{ kind: 'image' as const, providerAttachmentId: '1', url: 'https://i.oneme.ru/1' }] }),
+      }, media: {} as never, download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })(task.payload)
+    }
+    expect(downloads).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(5)
+  })
+
+  test('final membership revocation during image publication prevents Memory and cleans stored media', async () => {
+    const fixture = await imageFixture('77137', 'revocation-image')
+    const member = await maxMember('77138', 'full')
+    await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: member.userId, role: 'full' } })
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: member.subject, recipientId: '900', messageId: 'max-image-revocation', occurredAt: '2026-09-15T10:00:00.000Z', text: 'race image', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const gate = transactionQueryGate(prisma, 1, false)
+    const process = createMaxTaskProcessor({ runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
+    const running = process(task.payload)
+    await gate.locked
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: member.userId } }, data: { revokedAt: new Date() } })
+    gate.release()
+    await expect(running).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(0)
+    expect((await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).status).toBe('denied')
+    expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'unsupported_media' } })).toBe(0)
+    await fixture.cleanup()
+  })
+
+  async function imageFixture(subject: string, label: string) {
+    const user = await prisma.user.create({ data: { displayName: `MAX ${label}` } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `MAX ${label} family`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: `${label} child` } })
+    const storageRoot = `.max-image-${randomUUID()}`
+    activeStorageRoots.add(storageRoot)
+    const env = loadEnv({ DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4), MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token', MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot', MAX_INBOX_ENCRYPTION_KEY: key, MAX_WEBHOOK_URL: 'https://api.example.test/webhooks/max', MAX_WEBHOOK_SECRET: webhookSecret, MAX_MINI_APP_URL: 'https://app.example.test', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot })
+    const privateStorage = createPrivateStorage(env)
+    const media = createMediaService({ db: prisma, env, familyAccess: createPrismaFamilyAccess(prisma), storage: privateStorage.storage })
+    const runtime = { env, prisma, privateStorage, child } as unknown as BackendRuntime
+    return {
+      runtime,
+      media,
+      env,
+      storage: privateStorage.storage,
+      familyId: family.id,
+      userId: user.id,
+      childId: child.id,
+      api: (event: Extract<MaxInboundEvent, { kind: 'message_created' }>): MaxApiPort => ({
+        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+        getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` }) }),
+      }),
+      cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); activeStorageRoots.delete(storageRoot) },
+    }
+  }
+
+  function transactionQueryGate(db: typeof prisma, gateQuery = 1, afterQuery = true) {
+    let reportLock!: () => void
+    let releaseLock!: () => void
+    const locked = new Promise<void>((resolve) => { reportLock = resolve })
+    const release = new Promise<void>((resolve) => { releaseLock = resolve })
+    let queryCount = 0
+    const gated = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') return Reflect.get(target, property, receiver)
+        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => target.$transaction(async (tx) => callback(new Proxy(tx, {
+          get(transactionTarget, transactionProperty, transactionReceiver) {
+            if (transactionProperty !== '$queryRaw') return Reflect.get(transactionTarget, transactionProperty, transactionReceiver)
+            return async (...args: Parameters<typeof tx.$queryRaw>) => {
+              queryCount += 1
+              if (queryCount === gateQuery && !afterQuery) { reportLock(); await release }
+              const result = await tx.$queryRaw(...args)
+              if (queryCount === gateQuery && afterQuery) { reportLock(); await release }
+              return result
+            }
+          },
+        }) as typeof prisma))
+      },
+    }) as typeof prisma
+    return { db: gated, locked, release: releaseLock }
+  }
 
   async function processEvent(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
     await accept(event)

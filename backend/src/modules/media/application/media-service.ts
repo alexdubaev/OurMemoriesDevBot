@@ -165,6 +165,29 @@ export class MediaService {
     })
   }
 
+  /** Resume a deterministic trusted-photo reservation when a prior worker wrote the object but
+   * crashed before its adapter bookkeeping. Returns null only when the provider body is still
+   * required; it never performs provider I/O. */
+  async resumeTrustedPhoto(scope: FamilyScope, input: { assetId: string; sourceKind: 'telegram' | 'max' }) {
+    await this.access.requireFull(scope)
+    const preparation = this.repository.findTrustedIngestion
+      ? await this.repository.findTrustedIngestion(scope, input.assetId, input.sourceKind)
+      : await this.repository.findTelegramIngestion(scope, input.assetId)
+    if (!preparation || preparation.kind === 'pending') {
+      if (!preparation) return null
+      const head = await this.storage.headObject(preparation.upload.objectKey)
+      if (!head) return null
+      if (head.contentLength !== preparation.upload.byteSize || head.contentType !== preparation.upload.declaredMime) {
+        await this.repository.rejectUpload(scope, preparation.upload.uploadId, this.now())
+        throw new MediaFailure('invalid_file', 'Сохранённый оригинал не соответствует MAX-файлу')
+      }
+      return (await this.finalize(scope, preparation.upload.uploadId)).asset
+    }
+    if (preparation.kind === 'ready') return preparation.asset
+    if (preparation.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
+    throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+  }
+
   async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now?: Date }) {
     if (this.repository.discardTrustedSourceAssets) {
       await this.repository.discardTrustedSourceAssets({ sourceKind: input.sourceKind, assetIds: input.assetIds, now: input.now ?? this.now() })
