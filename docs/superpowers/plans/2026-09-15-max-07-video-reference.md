@@ -5,7 +5,7 @@
 **Task:** MAX-07 VIDEO
 **Worktree:** `D:\codex\TG_OurMemoriesDevBot\worktrees\max-adapter`
 **Branch:** `feat/max-adapter`
-**Implementation base:** to be recorded after the documentation decision commit
+**Documentation decision commit:** `2129169166bdd0cbce3ff7460cfedd7fab1f6b11`
 **Design:** `docs/superpowers/specs/2026-09-15-max-07-video-reference-design.md`
 
 ## Outcome
