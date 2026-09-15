@@ -114,9 +114,10 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null, signal?: Abor
     abortListener = () => reject(signal.reason)
     signal.addEventListener('abort', abortListener, { once: true })
   })
+  const cancellationWindow = Promise.resolve().then(() => Promise.resolve())
   try {
     if (signal.aborted) throw signal.reason
-    await Promise.race([cancellation, aborted])
+    await Promise.race([cancellation, aborted, cancellationWindow])
   } finally {
     if (abortListener) signal.removeEventListener('abort', abortListener)
   }
