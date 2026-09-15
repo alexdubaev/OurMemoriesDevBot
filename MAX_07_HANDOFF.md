@@ -10,7 +10,7 @@ Prepared: 2026-09-15
 - MAX-04: APPROVED
 - MAX-05: APPROVED
 - MAX-06: APPROVED
-- MAX-07: IN_PROGRESS — VIDEO APPROVED; AUDIO/VOICE CONTRACT INVESTIGATION
+- MAX-07: BLOCKED — VIDEO APPROVED; AUDIO/VOICE LIVE CONTRACT WAITING FOR HOST-KEY RE-VERIFICATION
 - MAX-08: APPROVED
 - Publication state: local only
 
@@ -81,7 +81,14 @@ Verification at the approved head: backend unit 447/447; contracts + feed 28/28;
 
 ## MAX-07 current action
 
-Perform a separate bounded audio/voice contract investigation. Do not assume that MAX audio or voice uses the video message/token/resolver contract. Do not implement audio/voice until its actual inbound and retrieval representation is established and a new bounded design/brief is approved. Do not wait for the informational video-retention checkpoints. Do not start MAX-09 or MAX-10 automatically.
+The separate bounded audio/voice investigation is recorded in `docs/superpowers/specs/2026-09-15-max-07-audio-voice-contract-investigation.md`. Official MAX docs confirm an `audio` upload/message type but do not establish the native voice event shape or an audio retrieval resolver. Do not assume that MAX audio or voice uses the video message/token/resolver contract. Do not implement audio/voice until its actual inbound and retrieval representation is established and a new bounded design/brief is approved.
+
+Live baseline is blocked before SSH. Owner-approved ED25519 fingerprint:
+`SHA256:zILDJSwxr8AxhBdQHRDk/aD5YCEChk2eW1NNmgFULZI`. Currently presented fingerprint from a fresh
+`ssh-keyscan -t ed25519 136.234.5.56`:
+`SHA256:zILDJSWxr8AxhBdQHRDk/aD5YCEChk2eWINNmgFULZI`. They do not match case-sensitively. No SSH
+connection, secret-source read, or MAX API call was made. The owner must independently verify the
+current key through Selectel and explicitly approve it before the probe resumes.
 
 ## MAX-07 exclusions
 
@@ -111,4 +118,4 @@ Remain local unless the owner explicitly authorizes publication. Do not push, cr
 
 ## Next action
 
-Complete the bounded audio/voice contract investigation and stop for an evidence-based architecture decision if live provider representation remains unknown. Remain local: no push, PR, merge, deployment, webhook registration, or subscription mutation without separate authorization.
+After owner host-key re-verification, resume with protected secret-file property checks, a read-only MAX baseline, and manual synthetic native-voice/audio instructions. Stop again after obtaining the live contract for an evidence-based architecture decision. Remain local: no push, PR, merge, deployment, webhook registration, or subscription mutation without separate authorization.
