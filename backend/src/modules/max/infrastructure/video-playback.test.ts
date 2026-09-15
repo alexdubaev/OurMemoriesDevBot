@@ -41,6 +41,14 @@ describe('MAX guarded video transport', () => {
     await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', 'bytes=0-1,2-3', 'GET', 250)).rejects.toThrow('Запрошенный диапазон')
   })
 
+  test('preserves the CDN total for an unsatisfiable range', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(null, { status: 416, headers: { 'content-range': 'bytes */10' } })) as unknown as typeof fetch
+    try {
+      await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', 'bytes=10-', 'GET', 250)).rejects.toMatchObject({ kind: 'range_not_satisfiable', details: { total: 10 } })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('passes the request abort signal and rejects a CDN body that exceeds declared length', async () => {
     const originalFetch = globalThis.fetch
     const controller = new AbortController()

@@ -88,19 +88,27 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
   const maxVideoContent = async (c: any, head: boolean) => {
     if (!maxVideoPlayback) return c.json({ error: { code: 'NOT_FOUND', message: 'Маршрут не найден' } }, 404)
     const params = maxVideoContentParamsSchema.parse(c.req.param())
-    const result = await executeMedia(() => maxVideoPlayback.content({ ...scope(c), familyId: params.familyId }, params.referenceId, c.req.header('Range'), head ? 'HEAD' : 'GET', c.req.raw.signal))
-    c.header('Content-Type', result.contentType)
-    c.header('Accept-Ranges', 'bytes')
-    c.header('Cache-Control', 'private, no-store')
-    c.header('Cross-Origin-Resource-Policy', 'same-origin')
-    c.header('Referrer-Policy', 'no-referrer')
-    if (result.range) {
-      c.header('Content-Range', `bytes ${result.range.start}-${result.range.end}/${result.range.total}`)
+    try {
+      const result = await executeMedia(() => maxVideoPlayback.content({ ...scope(c), familyId: params.familyId }, params.referenceId, c.req.header('Range'), head ? 'HEAD' : 'GET', c.req.raw.signal))
+      c.header('Content-Type', result.contentType)
+      c.header('Accept-Ranges', 'bytes')
+      c.header('Cache-Control', 'private, no-store')
+      c.header('Cross-Origin-Resource-Policy', 'same-origin')
+      c.header('Referrer-Policy', 'no-referrer')
+      if (result.range) {
+        c.header('Content-Range', `bytes ${result.range.start}-${result.range.end}/${result.range.total}`)
+        c.header('Content-Length', String(result.bodyLength))
+        return c.body(head ? null : result.body, 206)
+      }
       c.header('Content-Length', String(result.bodyLength))
-      return c.body(head ? null : result.body, 206)
+      return c.body(head ? null : result.body, 200)
+    } catch (error) {
+      if (error instanceof Error && (error as any).status === 416) {
+        const total = (error as any).diagnosticDetails?.total
+        c.header('Content-Range', `bytes */${typeof total === 'number' ? total : 0}`)
+      }
+      throw error
     }
-    c.header('Content-Length', String(result.bodyLength))
-    return c.body(head ? null : result.body, 200)
   }
   routes.get('/families/:familyId/media/max-videos/:referenceId/content', (c) => maxVideoContent(c, false))
   routes.on('HEAD', '/families/:familyId/media/max-videos/:referenceId/content', (c) => maxVideoContent(c, true))

@@ -73,7 +73,11 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
     throw new MediaFailure('storage_unavailable', 'Медиа недоступно')
   }
   if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
-  if (range && response.status !== 206) { await response.body?.cancel(); throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен') }
+  if (range && response.status !== 206) {
+    const total = response.status === 416 ? parseUnsatisfiedContentRange(response.headers.get('content-range')) : null
+    await response.body?.cancel()
+    throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', total === null ? undefined : { total })
+  }
   if (!range && response.status !== 200) { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
   if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
 
@@ -145,6 +149,13 @@ function parseContentRange(value: string | null) {
   const start = Number(match[1]); const end = Number(match[2]); const total = Number(match[3])
   return Number.isSafeInteger(start) && Number.isSafeInteger(end) && Number.isSafeInteger(total) && start <= end && total > end
     ? { start, end, total } : null
+}
+
+function parseUnsatisfiedContentRange(value: string | null) {
+  const match = value?.match(/^bytes \*\/(\d+)$/)
+  if (!match) return null
+  const total = Number(match[1])
+  return Number.isSafeInteger(total) && total > 0 ? total : null
 }
 
 function parseLength(value: string | null) {
