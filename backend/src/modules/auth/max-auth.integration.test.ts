@@ -20,6 +20,7 @@ maybeDescribe('MAX authentication exchange', () => {
     MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
     MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
     MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+    MAX_INBOX_ENCRYPTION_KEY: 'B'.repeat(43),
     MAX_MINI_APP_URL: 'https://app.example.com',
     TELEGRAM_BOT_TOKEN: telegramBotToken,
     TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
