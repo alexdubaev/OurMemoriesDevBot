@@ -86,6 +86,16 @@ describe('MAX guarded video transport', () => {
     } finally { globalThis.fetch = originalFetch }
   })
 
+  test('sanitizes failures while cancelling rejected CDN responses', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new ReadableStream({ cancel() { throw new Error('signed-url-token-leaked') } }), {
+      status: 302, headers: { location: 'https://maxvd1.okcdn.ru/next.mp4' },
+    })) as unknown as typeof fetch
+    try {
+      await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', undefined, 'GET', 250)).rejects.toMatchObject({ kind: 'unsupported_media', message: 'Медиа недоступно' })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('checks family membership before loading the MAX reference or calling the provider', async () => {
     let providerCalls = 0
     const playback = createMaxVideoPlayback({
