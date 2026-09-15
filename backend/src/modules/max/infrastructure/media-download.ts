@@ -26,6 +26,7 @@ export function createMaxMediaDownload(options: { fetch?: FetchLike; timeoutMs?:
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetchImpl(url, { method: 'GET', redirect: 'manual', headers: {}, signal: controller.signal })
+      if (response.status === 408 || response.status === 429 || response.status >= 500) throw new MaxProviderError()
       if (!response.ok || response.status >= 300 && response.status < 400 || !response.body) throw new MaxMediaDownloadError()
       const declared = response.headers.get('content-length')
       if (declared !== null && (!/^[0-9]+$/.test(declared) || Number(declared) > maxBytes)) throw new MaxMediaDownloadError()
@@ -38,7 +39,10 @@ export function createMaxMediaDownload(options: { fetch?: FetchLike; timeoutMs?:
           if (next.done) break
           const chunk = next.value
           total += chunk.byteLength
-          if (total > maxBytes) throw new MaxMediaDownloadError()
+          if (total > maxBytes) {
+            await reader.cancel().catch(() => undefined)
+            throw new MaxMediaDownloadError()
+          }
           chunks.push(chunk.slice())
         }
       } finally {

@@ -5,7 +5,7 @@ import { normalizeMaxUpdate } from './transport/update-mapping'
 const messageFixture = {
   update_type: 'message_created', timestamp: 1700000000123,
   message: {
-    body: { mid: 'mid-1', text: 'hello', attachments: [{ type: 'image', payload: { photo_id: 'photo-1', token: 'rotating-token', url: 'https://i.oneme.ru/image-1' } }] },
+    body: { mid: 'mid-1', text: 'hello', attachments: [{ type: 'image', payload: { photo_id: 1, token: 'rotating-token', url: 'https://i.oneme.ru/image-1' } }] },
     sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 },
   },
 }
@@ -14,7 +14,7 @@ describe('MAX update mapping', () => {
   test('maps documented direct message and bot-started envelopes', () => {
     expect(normalizeMaxUpdate(messageFixture)).toEqual({
       kind: 'message_created', senderId: '42', recipientId: '99', messageId: 'mid-1',
-      occurredAt: '2023-11-14T22:13:20.123Z', text: 'hello', attachments: [{ kind: 'image', providerAttachmentId: 'photo-1' }],
+      occurredAt: '2023-11-14T22:13:20.123Z', text: 'hello', attachments: [{ kind: 'image', providerAttachmentId: '1' }],
     })
     expect(normalizeMaxUpdate({
       update_type: 'bot_started', timestamp: 1700000000456,
@@ -61,5 +61,20 @@ describe('MAX update mapping', () => {
     expect(() => normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, sender: { user_id: 0 } } })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 'x'.repeat(513) })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'bot_started', timestamp: 1, chat_id: 1, user: { user_id: 2 }, payload: 3 })).toThrow()
+  })
+
+  test('normalizes numeric photo_id and top-level file metadata without retaining transport fields', () => {
+    const result = normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: {
+      mid: 'mid-file', text: 'caption', attachments: [
+        { type: 'image', payload: { photo_id: 12345, token: 'rotating-a', url: 'https://i.oneme.ru/a' } },
+      ],
+    } } })
+    expect(result).toEqual(expect.objectContaining({ attachments: [{ kind: 'image', providerAttachmentId: '12345' }] }))
+    const file = normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: {
+      mid: 'mid-file', text: null, attachments: [
+        { type: 'file', payload: { fileId: 'file-1', token: 'rotating-b', url: 'https://fd.oneme.ru/f' }, filename: 'photo.png', size: 9 },
+      ],
+    } } })
+    expect(file).toEqual(expect.objectContaining({ attachments: [{ kind: 'file', providerAttachmentId: 'file-1', filename: 'photo.png', declaredSize: 9 }] }))
   })
 })

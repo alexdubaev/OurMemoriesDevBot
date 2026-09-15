@@ -64,19 +64,29 @@ function normalizeAttachment(value: unknown) {
   if (value.type !== 'image' && value.type !== 'file') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
   if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
   const payload = value.payload
-  const providerAttachmentId = value.type === 'image' ? payload.photo_id : payload.fileId
-  if (typeof providerAttachmentId !== 'string' || providerAttachmentId.length === 0 || providerAttachmentId.length > 512) {
+  const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : payload.fileId
+  const providerAttachmentId = normalizeProviderAttachmentId(rawProviderAttachmentId, value.type === 'image')
+  if (!providerAttachmentId) {
     throw new Error('Invalid MAX attachment identity')
   }
   if (typeof payload.token !== 'string' || payload.token.length === 0 || typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) {
     throw new Error('Invalid MAX attachment transport')
   }
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId }
-  const filename = payload.filename === undefined || payload.filename === null ? null : payload.filename
+  const filename = value.filename === undefined || value.filename === null ? null : value.filename
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new Error('Invalid MAX filename')
-  const declaredSize = payload.size === undefined || payload.size === null ? null : payload.size
+  const declaredSize = value.size === undefined || value.size === null ? null : value.size
   if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new Error('Invalid MAX attachment size')
   return { kind: 'file' as const, providerAttachmentId, filename, declaredSize }
+}
+
+function normalizeProviderAttachmentId(value: unknown, numeric: boolean) {
+  if (numeric) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value)
+    if (typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && value.length <= 20) return value
+    return null
+  }
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 
 function isForwardOnly(message: Record<string, unknown>, body: Record<string, unknown>) {

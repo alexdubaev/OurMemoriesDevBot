@@ -1,5 +1,6 @@
 import type { BackendRuntime } from '../../../runtime'
 import type { DbClient } from '../../../db'
+import type { PrismaTransactionClient } from '../../../idempotency'
 import { TerminalTaskError } from '../../../outbox'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
@@ -11,6 +12,7 @@ import { MaxMediaDownloadError } from './media-download'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
+const sourceLocks = new Map<string, Promise<unknown>>()
 
 export function createMaxImageProcessor(options: {
   runtime: BackendRuntime
@@ -21,7 +23,7 @@ export function createMaxImageProcessor(options: {
   const prisma = options.runtime.prisma
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
-  return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
+  const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const policy = classifyMaxImageMessage(input.event)
@@ -59,7 +61,8 @@ export function createMaxImageProcessor(options: {
       const scope: FamilyScope = { familyId: admission.familyId, principal: { userId: admission.userId, sessionId: `max:${source.id}` } }
       await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: 'photo', body: policy.body,
         occurredAt: new Date(input.event.occurredAt), mediaIds }, async (tx, memoryId) => {
-        await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: { status: 'published', memoryId,
+        await assertSourcePublicationTransition(tx, source.id)
+        await tx.maxSource.update({ where: { id: source.id }, data: { status: 'published', memoryId,
           userId: admission.userId, familyId: admission.familyId, childId: admission.childId } })
         await tx.maxSourceAttachment.updateMany({ where: { sourceId: source.id }, data: { status: 'stored' } })
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(),
@@ -79,6 +82,17 @@ export function createMaxImageProcessor(options: {
       throw error
     }
   }
+  return (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }) => {
+    const previous = sourceLocks.get(input.sourceId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(() => process(input))
+    sourceLocks.set(input.sourceId, current)
+    return current.finally(() => { if (sourceLocks.get(input.sourceId) === current) sourceLocks.delete(input.sourceId) })
+  }
+}
+
+export async function assertSourcePublicationTransition(tx: Pick<PrismaTransactionClient, 'maxSource'>, sourceId: string) {
+  const changed = await tx.maxSource.updateMany({ where: { id: sourceId, status: 'accepted' }, data: { status: 'published' } })
+  if (changed.count !== 1) throw new Error('MAX source publication transition was lost')
 }
 
 function isPermanent(error: unknown) {

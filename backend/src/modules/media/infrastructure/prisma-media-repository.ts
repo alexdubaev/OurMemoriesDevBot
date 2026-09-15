@@ -96,10 +96,10 @@ export class PrismaMediaRepository implements MediaRepository {
         id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
       }, select: { id: true, originalStatus: true } })
       for (const asset of assets) {
-        if (asset.originalStatus === 'pending') await abandon(tx, asset.id, input.now)
+        if (asset.originalStatus === 'pending') await abandon(tx, asset.id, input.now, input.sourceKind)
         else if (asset.originalStatus === 'stored') {
-          await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null }, data: { deletedAt: input.now } })
-          await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`, payload: { mediaId: asset.id }, scheduledFor: input.now })
+          const changed = await tx.mediaAsset.updateMany({ where: { id: asset.id, sourceKind: input.sourceKind, purpose: 'memory', deletedAt: null, memories: { none: {} }, originalStatus: 'stored' }, data: { deletedAt: input.now } })
+          if (changed.count === 1) await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`, payload: { mediaId: asset.id }, scheduledFor: input.now })
         }
       }
     })
@@ -274,7 +274,9 @@ async function lockFamilyAndMember(tx: PrismaTransactionClient, scope: FamilySco
   return rows[0] ?? null
 }
 
-async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date) {
+async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date, sourceKind?: 'telegram' | 'max') {
+  const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, ...(sourceKind ? { sourceKind } : {}), originalStatus: 'pending', deletedAt: null, memories: { none: {} } }, data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' } })
+  if (marked.count !== 1) return false
   const reservation = await tx.uploadReservation.findFirst({ where: { mediaId } })
   if (reservation && !reservation.releasedAt) {
     const released = await tx.uploadReservation.updateMany({
@@ -285,13 +287,10 @@ async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date) 
         data: { storageReservedBytes: { decrement: reservation.bytes } } })
     }
   }
-  await tx.mediaAsset.updateMany({
-    where: { id: mediaId, deletedAt: null, originalStatus: 'pending' },
-    data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' },
-  })
   await insertTask(tx, {
     type: 'media:delete', dedupeKey: `media-delete:${mediaId}`, payload: { mediaId }, scheduledFor: now,
   })
+  return true
 }
 
 function pendingDto(reservation: Awaited<ReturnType<typeof reservationFor>> & {}) : PendingMediaUpload {

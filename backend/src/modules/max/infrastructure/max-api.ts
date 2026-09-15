@@ -83,7 +83,7 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
     },
     async getMessage(messageId, signal) {
       if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
-      return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_id: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
+      return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_ids: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
     },
   }
 }
@@ -103,15 +103,25 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
 function normalizeResolvedAttachment(value: unknown) {
   if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file') || !isRecord(value.payload)) throw new MaxProviderError()
   const payload = value.payload
-  const id = value.type === 'image' ? payload.photo_id : payload.fileId
-  if (typeof id !== 'string' || id.length === 0 || typeof payload.token !== 'string' || payload.token.length === 0 ||
+  const rawId = value.type === 'image' ? payload.photo_id : payload.fileId
+  const id = normalizeProviderAttachmentId(rawId, value.type === 'image')
+  if (!id || typeof payload.token !== 'string' || payload.token.length === 0 ||
       typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) throw new MaxProviderError()
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url }
-  const filename = payload.filename === undefined || payload.filename === null ? null : payload.filename
-  const declaredSize = payload.size === undefined || payload.size === null ? null : payload.size
+  const filename = value.filename === undefined || value.filename === null ? null : value.filename
+  const declaredSize = value.size === undefined || value.size === null ? null : value.size
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new MaxProviderError()
   if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new MaxProviderError()
   return { kind: 'file' as const, providerAttachmentId: id, filename, declaredSize, url: payload.url }
+}
+
+function normalizeProviderAttachmentId(value: unknown, numeric: boolean) {
+  if (numeric) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value)
+    if (typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && value.length <= 20) return value
+    return null
+  }
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 
 function normalizeBotIdentity(value: unknown): MaxBotIdentity {

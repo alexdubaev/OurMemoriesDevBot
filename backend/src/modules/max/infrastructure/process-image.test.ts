@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createMaxImageProcessor } from './process-image'
+import { assertSourcePublicationTransition, createMaxImageProcessor } from './process-image'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 
 describe('MAX image processor boundary', () => {
+  test('requires the accepted-to-published source transition to win', async () => {
+    const tx = { maxSource: { updateMany: async () => ({ count: 0 }) } }
+    await expect(assertSourcePublicationTransition(tx as never, 'source')).rejects.toThrow()
+  })
   test('does not download an over-limit quick-image message and terminally marks it unsupported', async () => {
     let downloads = 0
     const tx = {
