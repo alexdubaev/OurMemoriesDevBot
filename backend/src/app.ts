@@ -23,7 +23,7 @@ import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
 import { createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
-import { createMediaModule } from './modules/media'
+import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
@@ -47,6 +47,7 @@ type CreateAppOptions = {
   legacyPasswordAuthForTests?: boolean
   telegramRoutes?: import('hono').Hono | null
   maxRoutes?: import('hono').Hono | null
+  maxVideoPlayback?: MaxVideoPlayback
 }
 
 export function createApp({
@@ -58,6 +59,7 @@ export function createApp({
   legacyPasswordAuthForTests = false,
   telegramRoutes = null,
   maxRoutes = null,
+  maxVideoPlayback,
 }: CreateAppOptions) {
   if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
     throw new Error('Legacy password auth test routes cannot be mounted in production')
@@ -73,7 +75,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
   })
   const media = createMediaModule({ db: prisma, env, familyAccess: families.access,
-    authenticateMediaAccess: auth.authenticateMediaAccess, requireAuth: auth.requireAuth, storage: storage.storage })
+    authenticateMediaAccess: auth.authenticateMediaAccess, requireAuth: auth.requireAuth, storage: storage.storage, maxVideoPlayback })
   const memories = createMemoriesModule({
     db: prisma,
     idempotencyExecutor,

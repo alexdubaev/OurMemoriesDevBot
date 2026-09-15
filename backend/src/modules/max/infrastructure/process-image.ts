@@ -51,6 +51,7 @@ export function createMaxImageProcessor(options: {
       for (let index = 0; index < planned.length; index += 1) {
         const row = planned[index]!
         const current = resolved.attachments[index]!
+        if (current.kind === 'video') return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
         mediaIds.push(await ensureAttachmentStored({ prisma, media: options.media, download: options.download, scope, row, current, maxBytes: options.runtime.env.MAX_FILE_MAX_BYTES, signal: input.signal }))
       }
       await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: 'photo', body: policy.body,

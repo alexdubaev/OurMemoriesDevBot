@@ -50,8 +50,9 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
           },
         })
         const attachments = attachmentsOf(input.event)
-        if (input.response?.kind === 'accepted' && attachments.length > 0) {
-          await tx.maxSourceAttachment.createMany({ data: attachments.map((attachment, position) => ({
+        const imageFileAttachments = attachments.filter((attachment): attachment is Extract<typeof attachment, { kind: 'image' | 'file' }> => attachment.kind !== 'video')
+        if (input.response?.kind === 'accepted' && imageFileAttachments.length > 0 && imageFileAttachments.length === attachments.length) {
+          await tx.maxSourceAttachment.createMany({ data: imageFileAttachments.map((attachment, position) => ({
             sourceId: source.id,
             position,
             providerKind: attachment.kind,

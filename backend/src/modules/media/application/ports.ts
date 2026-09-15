@@ -40,6 +40,16 @@ export type ContentObject = {
   contentLength: number
 }
 
+export type MaxVideoPlayback = {
+  content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal): Promise<{
+    body: ReadableStream<Uint8Array> | null
+    contentType: string
+    contentLength: number
+    bodyLength: number
+    range: { start: number; end: number; total: number } | null
+  }>
+}
+
 export type FinalizePreparation =
   | { kind: 'pending'; upload: PendingMediaUpload }
   | { kind: 'ready'; asset: MediaAssetDto }

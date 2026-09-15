@@ -917,6 +917,61 @@ maybeDescribe('MAX durable capture', () => {
     await fixture.cleanup()
   })
 
+  test('publishes one MAX video reference without private media and makes retries idempotent', async () => {
+    const fixture = await imageFixture('77145', 'video-reference')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77145', recipientId: '900', messageId: 'max-video-one',
+        occurredAt: '2026-09-15T10:00:00.000Z', text: 'video caption',
+        attachments: [{ kind: 'video', providerAttachmentId: '123', durationSeconds: 7, width: 1280, height: 720 }],
+      }
+      await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+      let resolverCalls = 0
+      const api = { ...fixture.api(event), getVideo: async () => {
+        resolverCalls += 1
+        return { durationMs: 7000, renditions: [{ url: 'https://maxvd123.okcdn.ru/video-720.mp4?sig=opaque', width: 1280, height: 720, contentLength: 12 }] }
+      } }
+      const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })
+      await expect(process(task.payload)).resolves.toBe('done')
+      const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+      const reference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { memoryId: memory.id } })
+      expect(memory).toMatchObject({ familyId: fixture.familyId, childId: fixture.childId, kind: 'video', body: 'video caption', status: 'published' })
+      expect(reference).toMatchObject({ sourceId: source.id, memoryId: memory.id, familyId: fixture.familyId, attachmentPosition: 0, providerAttachmentId: '123', width: 1280, height: 720, durationMs: 7000 })
+      expect(await prisma.mediaAsset.count()).toBe(0)
+      expect(await prisma.memoryMedia.count()).toBe(0)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
+
+      await expect(process(task.payload)).resolves.toBe('skipped')
+      expect(resolverCalls).toBe(1)
+      expect(await prisma.memory.count()).toBe(1)
+      expect(await prisma.maxVideoReference.count()).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
+    } finally { await fixture.cleanup() }
+  })
+
+  test('denies MAX video before provider resolution for a viewer', async () => {
+    const viewer = await maxFamily('77146', 'viewer')
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+      kind: 'message_created', senderId: viewer.subject, recipientId: '900', messageId: 'max-video-viewer',
+      occurredAt: '2026-09-15T10:00:00.000Z', text: 'private video',
+      attachments: [{ kind: 'video', providerAttachmentId: '123', durationSeconds: 7, width: 1280, height: 720 }],
+    }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    let providerCalls = 0
+    await expect(createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto, api: {
+      getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+      getMessage: async () => { providerCalls += 1; throw new Error('provider must not be called') },
+      getVideo: async () => { providerCalls += 1; throw new Error('provider must not be called') },
+    } })(task.payload)).resolves.toBe('done')
+    expect(providerCalls).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'denied', rejectionCode: 'denied' })
+  })
+
   test('image path denies viewer, revoked, inactive, and childless members before downloading', async () => {
     const viewer = await maxFamily('77133', 'viewer')
     const revoked = await maxFamilyWithMember('77134', 'full')
@@ -1007,7 +1062,7 @@ maybeDescribe('MAX durable capture', () => {
       childId: child.id,
       api: (event: Extract<MaxInboundEvent, { kind: 'message_created' }>): MaxApiPort => ({
         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
-        getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` }) }),
+         getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : attachment.kind === 'file' ? { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` } : { kind: 'video' as const, providerAttachmentId: attachment.providerAttachmentId, currentToken: `token-${index}`, inboundDurationSeconds: attachment.durationSeconds, width: attachment.width, height: attachment.height }) }),
       }),
       cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); activeStorageRoots.delete(storageRoot) },
     }

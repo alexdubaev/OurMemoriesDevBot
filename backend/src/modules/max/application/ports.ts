@@ -30,21 +30,36 @@ export type MaxApiPort = {
   deleteSubscription(url: string, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
   getMessage(messageId: string, signal?: AbortSignal): Promise<MaxResolvedMessage>
+  getVideo?(videoToken: string, signal?: AbortSignal): Promise<MaxVideoResolution>
 }
 
 export type MaxInboundAttachment =
   | { kind: 'image'; providerAttachmentId: string }
   | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null }
+  | { kind: 'video'; providerAttachmentId: string; durationSeconds: number | null; width: number | null; height: number | null }
 
 export type MaxResolvedAttachment =
   | { kind: 'image'; providerAttachmentId: string; url: string }
   | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null; url: string }
+  | { kind: 'video'; providerAttachmentId: string; currentToken: string; inboundDurationSeconds: number | null; width: number | null; height: number | null }
 
 export type MaxResolvedMessage = {
   messageId: string
   senderId: string
   recipientId: string
   attachments: MaxResolvedAttachment[]
+}
+
+export type MaxVideoRendition = {
+  url: string
+  width: number | null
+  height: number | null
+  contentLength: number | null
+}
+
+export type MaxVideoResolution = {
+  renditions: MaxVideoRendition[]
+  durationMs: number | null
 }
 
 export type MaxInboundEvent =

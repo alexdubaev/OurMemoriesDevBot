@@ -9,7 +9,7 @@ describe('loadEnv', () => {
       JWT_SECRET: '12345678901234567890123456789012',
     }
 
-    expect(loadEnv(base)).toMatchObject({ MAX_ENABLED: false, TELEGRAM_ENABLED: false })
+    expect(loadEnv(base)).toMatchObject({ MAX_ENABLED: false, TELEGRAM_ENABLED: false, MAX_VIDEO_MAX_BYTES: 250_000_000 })
     expect(
       loadEnv({
         ...base,
@@ -17,6 +17,15 @@ describe('loadEnv', () => {
         TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
       }).TELEGRAM_ENABLED,
     ).toBe(true)
+  })
+
+  test('caps the MAX hosted video streaming ceiling at 250 MB', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+    expect(loadEnv({ ...base, MAX_VIDEO_MAX_BYTES: '250000000' }).MAX_VIDEO_MAX_BYTES).toBe(250_000_000)
+    expect(() => loadEnv({ ...base, MAX_VIDEO_MAX_BYTES: '250000001' })).toThrow('MAX_VIDEO_MAX_BYTES')
   })
 
   test('allows a production MAX runtime with Telegram explicitly disabled', () => {

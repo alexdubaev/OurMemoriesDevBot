@@ -7,6 +7,7 @@ import { createInviteStartResolver, createPrismaFamilyAccess, type FamilyScope }
 import { createSourceMemoryPublisher } from '../../memories'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { createMaxImageProcessor } from './process-image'
+import { createMaxVideoProcessor } from './process-video'
 import type { MaxDownloadedMedia } from './media-download'
 
 type PayloadCrypto = {
@@ -34,6 +35,7 @@ export function createMaxTaskProcessor(options: {
   const imageProcessor = options.api && options.media && options.download
     ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download })
     : null
+  const videoProcessor = options.api ? createMaxVideoProcessor({ runtime: options.runtime, api: options.api }) : null
 
   return async (payload, signal) => {
     const inboxId = taskPayload(payload)
@@ -67,6 +69,9 @@ export function createMaxTaskProcessor(options: {
 
     const hasAttachments = (event.attachments?.length ?? (event.hasAttachments ? 1 : 0)) > 0
     if (hasAttachments) {
+      if (videoProcessor && event.attachments?.length === 1 && event.attachments[0]?.kind === 'video') {
+        return videoProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
+      }
       if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
       return await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText) ? 'done' : 'skipped'
     }

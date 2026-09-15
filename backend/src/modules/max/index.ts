@@ -10,6 +10,7 @@ import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
 import { createMediaService } from '../media'
 import { createMaxMediaDownload } from './infrastructure/media-download'
+import { createMaxVideoPlayback } from './infrastructure/video-playback'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
@@ -37,6 +38,7 @@ export function createMaxModule(options: {
   return {
     api,
     processTask,
+    videoPlayback: createMaxVideoPlayback({ runtime: options.runtime, api }),
     routes: createMaxWebhook({
       secret: env.MAX_WEBHOOK_SECRET,
       bodyLimitBytes: env.MAX_WEBHOOK_BODY_LIMIT_BYTES,
@@ -67,4 +69,4 @@ export function createMaxTasks(runtime: BackendRuntime) {
 }
 
 export { createMaxApi, MaxProviderError } from './infrastructure/max-api'
-export type { MaxApiPort, MaxBotIdentity, MaxInboundAttachment, MaxInboundEvent, MaxResolvedAttachment, MaxResolvedMessage, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput } from './application/ports'
+export type { MaxApiPort, MaxBotIdentity, MaxInboundAttachment, MaxInboundEvent, MaxResolvedAttachment, MaxResolvedMessage, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput, MaxVideoResolution, MaxVideoRendition } from './application/ports'

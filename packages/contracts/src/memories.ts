@@ -76,7 +76,8 @@ export const backendMediaPathSchema = z.string().superRefine((value, context) =>
 
   const uuidSegment = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
   const contentPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/${uuidSegment}/content$`)
-  if (!contentPath.test(pathOnly)) {
+  const maxVideoPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/max-videos/${uuidSegment}/content$`)
+  if (!contentPath.test(pathOnly) && !maxVideoPath.test(pathOnly)) {
     context.addIssue({ code: 'custom', message: 'Media path must target the authenticated media endpoint' })
     return
   }
@@ -88,7 +89,7 @@ export const backendMediaPathSchema = z.string().superRefine((value, context) =>
     return
   }
   for (const [name, parameterValue] of parameters) {
-    if (name !== 'variant' || !['preview', 'display', 'playback', 'original'].includes(parameterValue)) {
+    if (maxVideoPath.test(pathOnly) || name !== 'variant' || !['preview', 'display', 'playback', 'original'].includes(parameterValue)) {
       context.addIssue({ code: 'custom', message: 'Media path contains an unsupported query parameter' })
       return
     }
@@ -108,6 +109,16 @@ export const mediaDtoSchema = z.object({
   playbackPath: backendMediaPathSchema.nullable(),
   originalDownloadPath: backendMediaPathSchema,
   waveform: z.array(z.number().min(0).max(1)).length(48).nullable(),
+}).strict()
+
+export const maxVideoAttachmentSchema = z.object({
+  id: uuid,
+  source: z.literal('max'),
+  kind: z.literal('video'),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  durationMs: z.number().int().positive().nullable(),
+  playbackPath: backendMediaPathSchema,
 }).strict()
 
 const telegramVideoOpenPathSchema = z.string().superRefine((value, context) => {
@@ -134,7 +145,7 @@ export const telegramVideoAttachmentSchema = z.object({
   openInTelegramPath: telegramVideoOpenPathSchema,
 }).strict()
 
-export const memoryAttachmentSchema = z.union([mediaDtoSchema, telegramVideoAttachmentSchema])
+export const memoryAttachmentSchema = z.union([mediaDtoSchema, telegramVideoAttachmentSchema, maxVideoAttachmentSchema])
 
 export const memoryDtoSchema = z.object({
   id: uuid,
@@ -174,6 +185,7 @@ export type UpdateMemoryRequest = z.infer<typeof updateMemoryRequestSchema>
 export type ListMemoriesQuery = z.infer<typeof listMemoriesQuerySchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
+export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>
 export type TelegramVideoAttachment = z.infer<typeof telegramVideoAttachmentSchema>
 export type MemoryAttachment = z.infer<typeof memoryAttachmentSchema>
 export type MemoryPage = z.infer<typeof memoryPageSchema>

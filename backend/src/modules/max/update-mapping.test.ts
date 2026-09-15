@@ -77,4 +77,18 @@ describe('MAX update mapping', () => {
     } } })
     expect(file).toEqual(expect.objectContaining({ attachments: [{ kind: 'file', providerAttachmentId: 'file-1', filename: 'photo.png', declaredSize: 9 }] }))
   })
+
+  test('accepts a dotted video mid and numeric payload id without retaining token or URL', () => {
+    const result = normalizeMaxUpdate({
+      update_type: 'message_created', timestamp: 1700000000123,
+      message: { sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'm.dotted', text: 'video caption', attachments: [{ type: 'video', payload: {
+          id: 123, token: 'rotating-token-shape', url: 'https://v.oneme.ru/current', duration: 7, width: 1280, height: 720,
+        } }],
+      } },
+    })
+    expect(result).toEqual(expect.objectContaining({ messageId: 'm.dotted', attachments: [{ kind: 'video', providerAttachmentId: '123', durationSeconds: 7, width: 1280, height: 720 }] }))
+    expect(JSON.stringify(result)).not.toContain('rotating-token-shape')
+    expect(JSON.stringify(result)).not.toContain('v.oneme.ru')
+  })
 })

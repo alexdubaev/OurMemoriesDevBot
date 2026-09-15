@@ -59,13 +59,13 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
 
 function normalizeAttachment(value: unknown) {
   if (!isRecord(value) || typeof value.type !== 'string') throw new Error('Invalid MAX attachment')
-  // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file
+  // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file/video
   // shapes are validated strictly so no transient URL/token can enter the encrypted event.
-  if (value.type !== 'image' && value.type !== 'file') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
+  if (value.type !== 'image' && value.type !== 'file' && value.type !== 'video') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
   if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
   const payload = value.payload
-  const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : payload.fileId
-  const providerAttachmentId = normalizeProviderAttachmentId(rawProviderAttachmentId, value.type === 'image')
+  const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
+  const providerAttachmentId = normalizeProviderAttachmentId(rawProviderAttachmentId, value.type === 'image' || value.type === 'video')
   if (!providerAttachmentId) {
     throw new Error('Invalid MAX attachment identity')
   }
@@ -73,6 +73,15 @@ function normalizeAttachment(value: unknown) {
     throw new Error('Invalid MAX attachment transport')
   }
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId }
+  if (value.type === 'video') {
+    const durationSeconds = value.duration ?? payload.duration
+    const width = value.width ?? payload.width
+    const height = value.height ?? payload.height
+    if (durationSeconds !== undefined && durationSeconds !== null && !isPositiveSafeInteger(durationSeconds)) throw new Error('Invalid MAX video duration')
+    if (width !== undefined && width !== null && !isPositiveSafeInteger(width)) throw new Error('Invalid MAX video width')
+    if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new Error('Invalid MAX video height')
+    return { kind: 'video' as const, providerAttachmentId, durationSeconds: durationSeconds ?? null, width: width ?? null, height: height ?? null }
+  }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new Error('Invalid MAX filename')
   const declaredSize = value.size === undefined || value.size === null ? null : value.size

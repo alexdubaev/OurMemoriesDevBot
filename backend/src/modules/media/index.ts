@@ -20,12 +20,14 @@ import { probeMediaWithRunner } from './infrastructure/media-probe'
 import { assertFfmpegCapabilities, createFfmpegRunner } from './infrastructure/ffmpeg-runner'
 import { prepareMedia } from './infrastructure/media-processor'
 import { createMediaRoutes } from './transport/routes'
+import type { MaxVideoPlayback } from './application/ports'
+export type { MaxVideoPlayback } from './application/ports'
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
   authenticateMediaAccess: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>
-  requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage }) {
+  requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage; maxVideoPlayback?: MaxVideoPlayback }) {
   const service = createMediaService(options)
-  return { routes: createMediaRoutes({ authenticateMediaAccess: options.authenticateMediaAccess, cookieSecure: options.env.COOKIE_SECURE, requireAuth: options.requireAuth, service }), service }
+  return { routes: createMediaRoutes({ authenticateMediaAccess: options.authenticateMediaAccess, cookieSecure: options.env.COOKIE_SECURE, requireAuth: options.requireAuth, service, maxVideoPlayback: options.maxVideoPlayback }), service }
 }
 
 export function createMediaService(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;

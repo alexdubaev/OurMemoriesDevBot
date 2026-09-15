@@ -18,6 +18,7 @@ const app = createApp({
   privateStorage: runtime.privateStorage,
   telegramRoutes: telegram?.routes,
   maxRoutes: max?.routes,
+  maxVideoPlayback: max?.videoPlayback,
 })
 
 const server = Bun.serve({

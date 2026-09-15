@@ -5,6 +5,7 @@ import type {
   MaxSubscriptionInput,
   MaxSubscriptionResult,
   MaxResolvedMessage,
+  MaxVideoResolution,
 } from '../application/ports'
 
 const MAX_API_BASE = 'https://platform-api2.max.ru'
@@ -85,6 +86,10 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
       return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_ids: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
     },
+    async getVideo(videoToken, signal) {
+      if (typeof videoToken !== 'string' || videoToken.length === 0 || videoToken.length > 4_096) throw new MaxProviderError()
+      return normalizeVideo(await request(`/videos/${encodeURIComponent(videoToken)}`, { method: 'GET' }, signal))
+    },
   }
 }
 
@@ -101,18 +106,66 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
 }
 
 function normalizeResolvedAttachment(value: unknown) {
-  if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file') || !isRecord(value.payload)) throw new MaxProviderError()
+  if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file' && value.type !== 'video') || !isRecord(value.payload)) throw new MaxProviderError()
   const payload = value.payload
-  const rawId = value.type === 'image' ? payload.photo_id : payload.fileId
-  const id = normalizeProviderAttachmentId(rawId, value.type === 'image')
+  const rawId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
+  const id = normalizeProviderAttachmentId(rawId, value.type === 'image' || value.type === 'video')
   if (!id || typeof payload.token !== 'string' || payload.token.length === 0 ||
       typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) throw new MaxProviderError()
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url }
+  if (value.type === 'video') {
+    const duration = value.duration ?? payload.duration
+    const width = value.width ?? payload.width
+    const height = value.height ?? payload.height
+    if (duration !== undefined && duration !== null && !isPositiveSafeInteger(duration)) throw new MaxProviderError()
+    if (width !== undefined && width !== null && !isPositiveSafeInteger(width)) throw new MaxProviderError()
+    if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new MaxProviderError()
+    return { kind: 'video' as const, providerAttachmentId: id, currentToken: payload.token, inboundDurationSeconds: duration ?? null, width: width ?? null, height: height ?? null }
+  }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   const declaredSize = value.size === undefined || value.size === null ? null : value.size
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new MaxProviderError()
   if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new MaxProviderError()
   return { kind: 'file' as const, providerAttachmentId: id, filename, declaredSize, url: payload.url }
+}
+
+function normalizeVideo(value: unknown): MaxVideoResolution {
+  const root = isRecord(value) && isRecord(value.video) ? value.video : value
+  const rawRenditions = isRecord(root) && Array.isArray(root.videos) ? root.videos
+    : isRecord(root) && Array.isArray(root.renditions) ? root.renditions
+      : isRecord(root) && Array.isArray(root.urls) ? root.urls
+        : isRecord(root) && isRecord(root.urls) ? Object.entries(root.urls).flatMap(([key, item]) => {
+          if (typeof item === 'string') return [{ url: item, height: inferRenditionHeight(key) }]
+          return isRecord(item) ? [{ ...item, height: item.height ?? inferRenditionHeight(key) }] : []
+        })
+        : isRecord(root) && typeof root.url === 'string' ? [root] : []
+  const renditions = rawRenditions.flatMap((item) => {
+    if (!isRecord(item) || typeof item.url !== 'string') return []
+    const url = parseHttpsUrl(item.url)
+    if (!url) return []
+    const width = item.width === undefined || item.width === null ? null : item.width
+    const height = item.height === undefined || item.height === null ? null : item.height
+    const contentLength = item.size === undefined || item.size === null ? null : item.size
+    if ((width !== null && !isPositiveSafeInteger(width)) || (height !== null && !isPositiveSafeInteger(height)) ||
+      (contentLength !== null && !isPositiveSafeInteger(contentLength))) return []
+    return [{ url, width, height, contentLength }]
+  })
+  if (renditions.length === 0) throw new MaxProviderError()
+  const duration = isRecord(root) ? root.duration : null
+  if (duration !== null && duration !== undefined && !isPositiveSafeInteger(duration)) throw new MaxProviderError()
+  return { renditions, durationMs: duration ?? null }
+}
+
+function parseHttpsUrl(value: unknown) {
+  if (typeof value !== 'string') return null
+  try { return new URL(value).protocol === 'https:' ? value : null } catch { return null }
+}
+
+function inferRenditionHeight(value: string) {
+  const match = /(?:^|_)(\d{3,5})(?:p)?$/i.exec(value)
+  if (!match) return null
+  const height = Number(match[1])
+  return Number.isSafeInteger(height) && height > 0 ? height : null
 }
 
 function normalizeProviderAttachmentId(value: unknown, numeric: boolean) {
@@ -187,10 +240,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-}
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }

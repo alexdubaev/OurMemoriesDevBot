@@ -107,8 +107,10 @@ model MaxSource {
   updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   inbox           MaxInbox         @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_sources_inbox_id_fkey")
   attachments     MaxSourceAttachment[]
+  videoReference  MaxVideoReference?
 
   @@unique([botId, recipientId, messageId], map: "max_sources_bot_recipient_message_key")
+  @@unique([id, familyId], map: "max_sources_id_family_id_key")
   @@index([status, updatedAt], map: "max_sources_status_idx")
   @@map("max_sources")
 }
@@ -131,6 +133,26 @@ model MaxSourceAttachment {
   @@unique([sourceId, position], map: "max_source_attachments_source_position_key")
   @@index([sourceId, providerKind, providerAttachmentId], map: "max_source_attachments_source_kind_provider_idx")
   @@map("max_source_attachments")
+}
+
+model MaxVideoReference {
+  id                   String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceId             String     @unique(map: "max_video_references_source_id_key") @map("source_id") @db.Uuid
+  memoryId             String     @unique(map: "max_video_references_memory_id_key") @map("memory_id") @db.Uuid
+  familyId             String     @map("family_id") @db.Uuid
+  attachmentPosition   Int        @map("attachment_position")
+  providerAttachmentId String     @map("provider_attachment_id")
+  width                Int?
+  height               Int?
+  durationMs           Int?       @map("duration_ms")
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  source               MaxSource  @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_source_id_family_id_fkey")
+  memory               Memory     @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_memory_id_family_id_fkey")
+
+  @@index([familyId], map: "max_video_references_family_id_idx")
+  @@unique([sourceId, familyId], map: "max_video_references_source_id_family_id_key")
+  @@unique([memoryId, familyId], map: "max_video_references_memory_id_family_id_key")
+  @@map("max_video_references")
 }
 
 model MaxOutgoingResponse {
@@ -386,6 +408,7 @@ model Memory {
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
   telegramVideoReference TelegramVideoReference?
+  maxVideoReference     MaxVideoReference?
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")

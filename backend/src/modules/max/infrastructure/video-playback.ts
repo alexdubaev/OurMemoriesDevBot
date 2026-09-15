@@ -1,0 +1,149 @@
+import type { BackendRuntime } from '../../../runtime'
+import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
+import { MediaFailure } from '../../media'
+import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
+
+const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
+const maxHeight = 720
+const fallbackMaxBytes = 250_000_000
+
+export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
+  const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? fallbackMaxBytes
+  const familyAccess = createPrismaFamilyAccess(options.runtime.prisma)
+  return {
+    async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
+      await familyAccess.requireMember(scope)
+      const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
+        id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
+        source: { select: { messageId: true, senderSubject: true, recipientId: true, familyId: true, memoryId: true } },
+        memory: { select: { id: true, familyId: true, status: true, deletedAt: true } },
+      } })
+      if (!reference || reference.source.familyId !== scope.familyId || reference.source.memoryId !== reference.memory.id || reference.memory.familyId !== scope.familyId ||
+        reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
+
+      const resolved = await options.api.getMessage(reference.source.messageId, signal)
+      const current = resolved.attachments[reference.attachmentPosition]
+      if (resolved.attachments.length !== 1 || reference.attachmentPosition !== 0 || !current || current.kind !== 'video' || resolved.messageId !== reference.source.messageId ||
+        resolved.senderId !== reference.source.senderSubject || resolved.recipientId !== String(reference.source.recipientId) ||
+        current.providerAttachmentId !== reference.providerAttachmentId) throw new MediaFailure('not_found', 'Медиа не найдено')
+
+      if (typeof options.api.getVideo !== 'function') throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+      const video = await options.api.getVideo(current.currentToken, signal)
+      const rendition = selectRendition(video.renditions)
+      if (!rendition) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+      return fetchCdnVideo(rendition.url, rangeHeader, method, maxBytes, signal)
+    },
+  }
+}
+
+export function selectRendition(renditions: MaxVideoRendition[]) {
+  return renditions
+    .filter((item) => isAllowedCdnUrl(item.url) && isMp4Url(item.url) && item.height !== null && item.height > 0 && item.height <= maxHeight)
+    .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0] ?? null
+}
+
+export async function fetchCdnVideo(url: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', maxBytes: number, signal?: AbortSignal) {
+  if (!isAllowedCdnUrl(url) || !isMp4Url(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  const range = rangeHeader === undefined ? null : parseRangeHeader(rangeHeader)
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method,
+      ...(rangeHeader === undefined ? {} : { headers: { Range: rangeHeader } }),
+      redirect: 'manual',
+      credentials: 'omit',
+      referrer: '',
+      signal,
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    throw new MediaFailure('storage_unavailable', 'Медиа недоступно')
+  }
+  if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if (range && response.status !== 206) { await response.body?.cancel(); throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен') }
+  if (!range && response.status !== 200) { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await response.body?.cancel(); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+
+  const contentLength = parseLength(response.headers.get('content-length'))
+  const contentRange = parseContentRange(response.headers.get('content-range'))
+  const total = range ? contentRange?.total ?? null : contentLength
+  if (!contentLength || contentLength > maxBytes || !total || total > maxBytes ||
+    (range && (!contentRange || (range.start !== null && contentRange.start !== range.start) ||
+      (range.end !== null && range.start !== null && contentRange.end > range.end) ||
+      (range.start === null && range.end !== null && contentLength > range.end) || contentRange.end - contentRange.start + 1 !== contentLength))) {
+    await response.body?.cancel()
+    throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  }
+  if (method === 'HEAD') {
+    await response.body?.cancel()
+    return { body: null, contentType: 'video/mp4', contentLength: total, bodyLength: contentLength, range: range ? { start: contentRange!.start, end: contentRange!.end, total: contentRange!.total } : null }
+  }
+  if (!response.body) throw new MediaFailure('storage_unavailable', 'Медиа недоступно')
+  return { body: guardBody(response.body, contentLength, signal), contentType: 'video/mp4', contentLength: total, bodyLength: contentLength, range: range ? { start: contentRange!.start, end: contentRange!.end, total: contentRange!.total } : null }
+}
+
+function guardBody(body: ReadableStream<Uint8Array>, expectedBytes: number, signal?: AbortSignal) {
+  const reader = body.getReader()
+  let total = 0
+  const abort = () => { void reader.cancel(signal?.reason) }
+  signal?.addEventListener('abort', abort, { once: true })
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await reader.read()
+      if (next.done) {
+        signal?.removeEventListener('abort', abort)
+        if (total !== expectedBytes) {
+          controller.error(new MediaFailure('storage_unavailable', 'Медиа недоступно'))
+          return
+        }
+        controller.close()
+        return
+      }
+      total += next.value.byteLength
+      if (total > expectedBytes) {
+        await reader.cancel()
+        signal?.removeEventListener('abort', abort)
+        controller.error(new MediaFailure('storage_unavailable', 'Медиа недоступно'))
+        return
+      }
+      controller.enqueue(next.value)
+    },
+    async cancel(reason) {
+      signal?.removeEventListener('abort', abort)
+      await reader.cancel(reason)
+    },
+  })
+}
+
+function parseRangeHeader(value: string) {
+  if (!/^bytes=\d*-\d*$/.test(value) || value.includes(',')) throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен')
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value)!
+  const start = match[1] === '' ? null : Number(match[1])
+  const end = match[2] === '' ? null : Number(match[2])
+  if ((start === null && end === null) || (start !== null && !Number.isSafeInteger(start)) || (end !== null && (!Number.isSafeInteger(end) || end < 0)) || (start !== null && end !== null && start > end)) {
+    throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен')
+  }
+  return { start, end }
+}
+
+function parseContentRange(value: string | null) {
+  const match = value?.match(/^bytes (\d+)-(\d+)\/(\d+)$/)
+  if (!match) return null
+  const start = Number(match[1]); const end = Number(match[2]); const total = Number(match[3])
+  return Number.isSafeInteger(start) && Number.isSafeInteger(end) && Number.isSafeInteger(total) && start <= end && total > end
+    ? { start, end, total } : null
+}
+
+function parseLength(value: string | null) {
+  if (!value || !/^\d+$/.test(value)) return null
+  const length = Number(value)
+  return Number.isSafeInteger(length) && length > 0 ? length : null
+}
+
+function isAllowedCdnUrl(value: string) {
+  try { const url = new URL(value); return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname) } catch { return false }
+}
+
+function isMp4Url(value: string) {
+  try { return new URL(value).pathname.toLowerCase().endsWith('.mp4') } catch { return false }
+}
