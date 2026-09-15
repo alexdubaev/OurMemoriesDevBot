@@ -236,6 +236,6 @@ The lead approves this bounded VIDEO design and its implementation brief at base
 
 The implementation reached APPROVED at `c225dc588f8a1a8034f5fb807e94ecc90334f798` after clean
 database verification and two fresh independent review/fix passes. The owner subsequently closed
-MAX-07 as APPROVED WITH EXPLICIT MVP LIMITATION: MAX video is supported by this design; native MAX
+MAX-07 as APPROVED with explicit MVP capability notes: MAX video is supported by this design; native MAX
 voice is unsupported; ordinary attached MP3/M4A remains an optional future investigation; Telegram
 voice is unchanged. The provider-retention risk in section 2 remains explicitly accepted.

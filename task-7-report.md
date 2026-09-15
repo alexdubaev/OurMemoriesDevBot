@@ -1,7 +1,7 @@
 # MAX-07 — MAX-hosted video and native-voice boundary
 
 Date: 2026-09-15
-Status: APPROVED WITH EXPLICIT MVP LIMITATION
+Status: APPROVED
 Model/workflow: Codex lead engineer (GPT-5); bounded scout, implementation worker, two fresh independent reviewers
 Branch: `feat/max-adapter`
 Worktree: `D:\codex\TG_OurMemoriesDevBot\worktrees\max-adapter`
@@ -119,7 +119,9 @@ errors are sanitized. Final verdict: `production_ready`; no unresolved P0/P1/P2.
 
 ## Final state and next step
 
-MAX-07 is APPROVED WITH EXPLICIT MVP LIMITATION. Preserve this branch/worktree. No push, PR, merge,
+MAX-07 is APPROVED with explicit MVP capability notes: MAX video is supported, native MAX voice is
+unsupported, generic attached MP3/M4A is an optional future follow-up, and Telegram voice remains
+supported and unchanged. Preserve this branch/worktree. No push, PR, merge,
 deployment, webhook registration, or subscription mutation was authorized or performed. Do not
 start MAX-10 automatically. Any future ordinary MP3/M4A probe or native-voice revisit is a separate
 owner-assigned task with its own evidence and bounded design.

@@ -10,7 +10,7 @@ Prepared: 2026-09-15
 - MAX-04: APPROVED
 - MAX-05: APPROVED
 - MAX-06: APPROVED
-- MAX-07: APPROVED WITH EXPLICIT MVP LIMITATION
+- MAX-07: APPROVED
 - MAX-08: APPROVED
 - Publication state: local only
 
@@ -102,7 +102,9 @@ made. Telegram voice is unchanged and remains supported.
 
 ## MAX-07 final status
 
-APPROVED WITH EXPLICIT MVP LIMITATION.
+APPROVED.
+
+Explicit MVP capability notes:
 
 Supported: MAX video through the approved provider-reference architecture.
 
@@ -117,7 +119,7 @@ The final block report is `task-7-report.md`.
 
 - no automatic permanent storage of MAX video originals;
 - no image-pipeline refactor;
-- no audio/voice implementation until its separate contract investigation and bounded design are approved; no generic file, stickers, contacts, or locations;
+- no native MAX voice implementation; no generic attached MP3/M4A, stickers, contacts, or locations;
 - no invite/start work (MAX-08 is already approved);
 - no account linking, groups, or channels;
 - no Telegram refactor;
