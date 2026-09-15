@@ -20,6 +20,8 @@ export function createMaxModule(options: {
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
   const api = options.api ?? createMaxApi(env.MAX_BOT_TOKEN)
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
+  const storage = options.runtime.privateStorage?.storage
+  const media = storage ? createMediaService({ db: options.runtime.prisma, env, familyAccess: createPrismaFamilyAccess(options.runtime.prisma), storage }) : undefined
   const acceptUpdate = createMaxAcceptUpdate({
     botId: String(options.identity.userId),
     repository: new PrismaMaxRepository(options.runtime.prisma),
@@ -29,8 +31,7 @@ export function createMaxModule(options: {
     runtime: options.runtime,
     crypto,
     api,
-    media: createMediaService({ db: options.runtime.prisma, env, familyAccess: createPrismaFamilyAccess(options.runtime.prisma), storage: options.runtime.privateStorage.storage }),
-    download: createMaxMediaDownload(),
+    ...(media ? { media, download: createMaxMediaDownload() } : {}),
     resolveInviteStart: createInviteStartResolver(options.runtime.prisma),
   })
   return {
