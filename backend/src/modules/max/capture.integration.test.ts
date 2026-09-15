@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import { createPrivateStorage } from '../../storage'
-import { createMediaService } from '../media'
+import { createMediaService, createMediaTasks } from '../media'
 import { pngFixture } from '../../storage/storage-contract'
 import { createPrismaFamilyAccess } from '../families'
 import type { BackendRuntime } from '../../runtime'
@@ -682,6 +682,81 @@ maybeDescribe('MAX durable capture', () => {
     expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).deletedAt).toBeNull()
     expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
     await fixture.cleanup()
+  })
+
+  test('lost publication cleans staged source media after a competing terminal transition', async () => {
+    const fixture = await imageFixture('77140', 'lost-publication-cleanup')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77140', recipientId: '900', messageId: 'max-image-lost-publication',
+        occurredAt: '2026-09-15T10:00:00.000Z', text: 'lost race', attachments: [{ kind: 'image', providerAttachmentId: '1' }],
+      }
+      await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+      const gate = transactionQueryGate(prisma, 1, false)
+      const process = createMaxTaskProcessor({
+        runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime,
+        crypto, api: fixture.api(event), media: fixture.media,
+        download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }),
+      })
+      const running = process(task.payload)
+      await gate.locked
+      await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
+      gate.release()
+      await expect(running).resolves.toBe('skipped')
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(1)
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageReservedBytes).toBe(0n)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  test('pending cleanup and finalization overlap with Family then MediaAsset lock order', async () => {
+    const fixture = await imageFixture('77141', 'pending-lock-order')
+    try {
+      const assetId = randomUUID()
+      const uploadId = randomUUID()
+      const objectKey = `media-originals/${assetId}`
+      const bytes = BigInt(pngFixture.byteLength)
+      await prisma.mediaAsset.create({ data: {
+        id: assetId, familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo',
+        originalKey: objectKey, declaredMime: 'image/png', byteSize: bytes,
+      } })
+      await prisma.uploadReservation.create({ data: {
+        id: uploadId, familyId: fixture.familyId, userId: fixture.userId, mediaId: assetId, bytes,
+        expiresAt: new Date(Date.now() + 60_000),
+      } })
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { storageReservedBytes: bytes } })
+      await fixture.storage.writeObject({ key: objectKey, body: new Blob([pngFixture]).stream(), contentLength: pngFixture.byteLength, contentType: 'image/png' })
+      const scope = { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:pending-lock' } }
+      const finalizeGate = transactionQueryGate(prisma, 1, true)
+      const finalizingMedia = createMediaService({ db: finalizeGate.db, env: fixture.env, familyAccess: createPrismaFamilyAccess(prisma), storage: fixture.storage })
+      const finalizing = finalizingMedia.finalize(scope, uploadId)
+      await finalizeGate.locked
+      const cleaning = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [assetId], now: new Date() })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      finalizeGate.release()
+      const overlap = await Promise.race([
+        Promise.allSettled([finalizing, cleaning]),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('pending cleanup/finalization deadlock')), 5_000)),
+      ])
+      expect(overlap).toBeDefined()
+      expect(overlap[1]!.status).toBe('fulfilled')
+      if (overlap[0]!.status === 'rejected') expect(overlap[0]!.reason).toMatchObject({ kind: 'upload_expired' })
+      const reservation = await prisma.uploadReservation.findUniqueOrThrow({ where: { id: uploadId } })
+      const completed = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } })
+      expect(reservation.releasedAt).not.toBeNull()
+      expect(completed.deletedAt).not.toBeNull()
+      expect(['failed', 'stored']).toContain(completed.originalStatus)
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageReservedBytes).toBe(0n)
+      if (completed.originalStatus === 'stored') await createMediaTasks({ prisma, privateStorage: fixture.runtime.privateStorage, env: fixture.env }).deleteAsset({ mediaId: assetId })
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageUsedBytes).toBe(0n)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 
   test('image response delivery failure leaves publication durable and does not rerun processing', async () => {

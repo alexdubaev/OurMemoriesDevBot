@@ -68,7 +68,10 @@ export function createMaxImageProcessor(options: {
       })
       return 'done'
     } catch (error) {
-      if (error instanceof SourcePublicationLostError) return 'skipped'
+      if (error instanceof SourcePublicationLostError) {
+        await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
+        return 'skipped'
+      }
       if (isPermanent(error)) {
         await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
         const denied = isAuthorizationFailure(error)

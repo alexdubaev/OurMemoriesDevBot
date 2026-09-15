@@ -93,7 +93,12 @@ export class PrismaMediaRepository implements MediaRepository {
     const unique = [...new Set(input.assetIds)]
     if (unique.length === 0) return
     await this.db.$transaction(async (tx) => {
-      await lockMediaAssetsForUpdate(tx, await familyIdForAssets(tx, input.sourceKind, unique), unique)
+      const candidates = await tx.mediaAsset.findMany({ where: {
+        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory',
+      }, select: { familyId: true } })
+      const familyIds = [...new Set(candidates.map(({ familyId }) => familyId))].sort()
+      await lockFamiliesForUpdate(tx, familyIds)
+      await lockMediaAssetsForUpdate(tx, familyIds, unique)
       const assets = await tx.mediaAsset.findMany({ where: {
         id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
       }, select: { id: true, originalStatus: true } })
@@ -109,6 +114,7 @@ export class PrismaMediaRepository implements MediaRepository {
 
   async prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation> {
     return this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, scope.familyId)
       const reservation = await reservationFor(tx, scope, uploadId)
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, scope)
@@ -127,6 +133,7 @@ export class PrismaMediaRepository implements MediaRepository {
 
   async rejectUpload(scope: FamilyScope, uploadId: string, now: Date) {
     await this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, scope.familyId)
       const reservation = await reservationFor(tx, scope, uploadId)
       if (reservation && !reservation.releasedAt) await abandon(tx, reservation.mediaId, now)
     })
@@ -146,6 +153,7 @@ export class PrismaMediaRepository implements MediaRepository {
     now: Date
   }): Promise<FinalizeCommit> {
     return this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, input.scope.familyId)
       const reservation = await reservationFor(tx, input.scope, input.uploadId)
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, input.scope)
@@ -295,17 +303,29 @@ async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date, 
   return true
 }
 
-async function familyIdForAssets(tx: PrismaTransactionClient, sourceKind: 'telegram' | 'max', assetIds: string[]) {
-  const row = await tx.mediaAsset.findFirst({ where: { id: { in: assetIds }, sourceKind }, select: { familyId: true } })
-  return row?.familyId ?? '00000000-0000-0000-0000-000000000000'
+async function lockFamilyRow(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string) {
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM families WHERE id = ${familyId}::uuid FOR UPDATE
+  `)
 }
 
-async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string, mediaIds: string[]) {
-  const unique = [...new Set(mediaIds)].sort()
+async function lockFamiliesForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyIds: string[]) {
+  const unique = [...new Set(familyIds)].sort()
   if (unique.length === 0) return
   await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM families
+     WHERE id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
+}
+
+async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyIds: string[], mediaIds: string[]) {
+  const unique = [...new Set(mediaIds)].sort()
+  const families = [...new Set(familyIds)].sort()
+  if (unique.length === 0 || families.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT id FROM media_assets
-     WHERE family_id = ${familyId}::uuid
+     WHERE family_id IN (${Prisma.join(families.map((id) => Prisma.sql`${id}::uuid`))})
        AND id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
      ORDER BY id FOR UPDATE
   `)
