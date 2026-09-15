@@ -1,6 +1,6 @@
 # MAX-07 VIDEO — MAX-hosted reference and guarded playback design
 
-**Status:** LEAD APPROVED
+**Status:** IMPLEMENTED AND APPROVED
 
 **Date:** 2026-09-15
 
@@ -231,3 +231,11 @@ uses token equality for dedupe, edits historical migrations, or requires unrelat
 
 The lead approves this bounded VIDEO design and its implementation brief at base
 `4b3595d739be144ced9adef437e7d5fec3d83353`. A fresh worker may implement only the allowed scope.
+
+## 14. Final result
+
+The implementation reached APPROVED at `c225dc588f8a1a8034f5fb807e94ecc90334f798` after clean
+database verification and two fresh independent review/fix passes. The owner subsequently closed
+MAX-07 as APPROVED WITH EXPLICIT MVP LIMITATION: MAX video is supported by this design; native MAX
+voice is unsupported; ordinary attached MP3/M4A remains an optional future investigation; Telegram
+voice is unchanged. The provider-retention risk in section 2 remains explicitly accepted.

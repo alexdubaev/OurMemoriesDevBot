@@ -1,6 +1,6 @@
 # MAX-07 AUDIO/VOICE — bounded contract investigation
 
-**Status:** COMPLETE — native voice contract insufficient; owner decision required
+**Status:** OWNER APPROVED LIMITATION — native MAX voice unsupported in MVP
 
 **Date:** 2026-09-15
 
@@ -85,8 +85,13 @@ a blocker for this native-voice verdict and no conclusion about ordinary attache
 
 ## Architecture decision after evidence
 
-Recommended owner decision: keep native MAX voice unsupported for this MVP and consider a concise
-MAX support request about the incomplete `message_created` payload. Prefer the existing private
-voice `MediaAsset` pipeline only if a future documented/observed contract provides safely
-retrievable bytes and satisfies the original-storage requirement. A provider-owned reference is
-eligible only if its resolver and lifecycle are separately established and approved.
+The owner confirmed that native MAX voice remains unsupported for this MVP. Do not invent or
+reverse-engineer a retrieval path, fabricate identifiers, add provider-specific hacks, or create an
+unbounded retry path for the identity-less event. Where an event can be durably identified and
+safely normalized, the existing generic unsupported-media semantics remain appropriate. This live
+event cannot be durably identified, so fail-safe behavior and this documented limitation are the
+accepted outcome.
+
+Ordinary attached MP3/M4A remains undecided and is an optional future probe, not a blocker for
+MAX-07. No conclusion about ordinary audio-file support is derived from native voice. Telegram
+voice remains supported and unchanged.

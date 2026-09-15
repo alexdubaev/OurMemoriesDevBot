@@ -1,4 +1,4 @@
-# HANDOFF — memoLy / MAX migration after MAX-06
+# HANDOFF — memoLy / MAX migration after MAX-07
 
 Prepared: 2026-09-15
 
@@ -10,7 +10,7 @@ Prepared: 2026-09-15
 - MAX-04: APPROVED
 - MAX-05: APPROVED
 - MAX-06: APPROVED
-- MAX-07: BLOCKED — VIDEO APPROVED; OWNER DECISION ON UNSUPPORTED NATIVE VOICE
+- MAX-07: APPROVED WITH EXPLICIT MVP LIMITATION
 - MAX-08: APPROVED
 - Publication state: local only
 
@@ -22,6 +22,9 @@ Worktree: `D:\codex\TG_OurMemoriesDevBot\worktrees\max-adapter`
 Original MAX feature base / origin/main / merge base: `7927c6e11c8444a658c819325c97bc586696778b`
 MAX-06 task base: `c8c6202e09453703fe71477ac95d3c4501dd43e8`
 MAX-06 implementation head: `3c407cffb16b696756d32f514469cd6b4ca00927`
+MAX-07 task base: `4b3595d739be144ced9adef437e7d5fec3d83353`
+MAX-07 video implementation/review head: `c225dc588f8a1a8034f5fb807e94ecc90334f798`
+MAX-07 owner-decision documentation base: `a7de0d7bd10089ff026f4453078708f354c888cf`
 
 The branch and worktree must be preserved. Do not switch this branch in another checkout, create nested isolation, reset, rebase, clean, or remove the worktree. No push, PR, merge, deployment, webhook registration, or subscription mutation has occurred.
 
@@ -38,13 +41,14 @@ New undeployed migration:
 
 `backend/prisma/migrations/20260915130000_max_image_capture/migration.sql`
 
-There are now three additive MAX-related migrations:
+There are now four additive MAX-related migrations:
 
 1. `20260914100000_max_auth_identity`
 2. `20260914130000_max_text_ingestion`
 3. `20260915130000_max_image_capture`
+4. `20260915150000_max_video_reference`
 
-Clean test databases applied all 25 repository migrations. Do not edit applied migration history.
+Clean test databases applied all 26 repository migrations. Do not edit applied migration history.
 
 ## MAX-07 owner decision — superseding approval, 2026-09-15
 
@@ -79,7 +83,7 @@ VIDEO is APPROVED at local head `c225dc588f8a1a8034f5fb807e94ecc90334f798`.
 
 Verification at the approved head: backend unit 447/447; contracts + feed 28/28; clean-database MAX integration 38/38; Media integration 7/7; all 26 migrations applied; backend/contracts typechecks, architecture check, Prisma validation, and diff check passed. Two fresh independent review passes fixed all confirmed P1/P2 findings and returned `production_ready`.
 
-## MAX-07 current action
+## MAX-07 native voice decision
 
 The separate bounded audio/voice investigation is recorded in `docs/superpowers/specs/2026-09-15-max-07-audio-voice-contract-investigation.md`. Official MAX docs confirm an `audio` upload/message type but do not establish the native voice event shape or an audio retrieval resolver. Do not assume that MAX audio or voice uses the video message/token/resolver contract.
 
@@ -90,10 +94,24 @@ were only `timestamp`, `update_type`, and `user_locale`. Repeated reads returned
 `body`, `mid`, or attachments. Without `mid`, exact `GET /messages`, stable identity, token/URL,
 MIME/codec/container, duration, late retrieval/redelivery, and resolver behavior cannot be proven.
 
-The native voice contract is insufficient for reliable MVP implementation. Recommendation: keep
-native MAX voice unsupported unless MAX documents/fixes this event or supplies a supported identity
-recovery path. An ordinary MP3/M4A attachment probe is optional follow-up and no conclusion about
-that distinct contract has been made.
+The native voice contract is insufficient for reliable MVP implementation. The owner accepted this
+boundary: native MAX voice is unsupported for MVP. No undocumented retrieval path, fabricated
+identifier, provider-specific hack, or unbounded retry path may be introduced. An ordinary MP3/M4A
+attachment probe is optional follow-up and no conclusion about that distinct contract has been
+made. Telegram voice is unchanged and remains supported.
+
+## MAX-07 final status
+
+APPROVED WITH EXPLICIT MVP LIMITATION.
+
+Supported: MAX video through the approved provider-reference architecture.
+
+Unsupported: native MAX voice.
+
+Optional follow-up: ordinary attached MP3/M4A.
+
+The unsupported native-voice capability is an accepted product limitation, not a P0/P1/P2 blocker.
+The final block report is `task-7-report.md`.
 
 ## MAX-07 exclusions
 
@@ -123,4 +141,4 @@ Remain local unless the owner explicitly authorizes publication. Do not push, cr
 
 ## Next action
 
-Owner decides whether native MAX voice remains unsupported for the MVP and whether MAX support should be asked about the incomplete event. Do not start an audio-file probe unless separately requested. Remain local: no push, PR, merge, deployment, webhook registration, or subscription mutation without separate authorization.
+STOP after this handoff. Do not start MAX-10, an audio-file probe, publication, deployment, webhook registration, or subscription mutation without a new explicit owner assignment.
