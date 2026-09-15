@@ -119,6 +119,47 @@ describe('MAX guarded video transport', () => {
     } finally { globalThis.fetch = originalFetch }
   })
 
+  test('preserves caller abort reason when CDN cancellation never settles', async () => {
+    const originalFetch = globalThis.fetch
+    const controller = new AbortController()
+    const callerError = new Error('caller-aborted')
+    let cancellationStarted!: () => void
+    const cancellationHasStarted = new Promise<void>((resolve) => { cancellationStarted = resolve })
+    globalThis.fetch = (async () => new Response(new ReadableStream({
+      cancel() {
+        cancellationStarted()
+        return new Promise<void>(() => {})
+      },
+    }), { status: 302, headers: { location: 'https://maxvd1.okcdn.ru/next.mp4' } })) as unknown as typeof fetch
+    try {
+      const request = fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', undefined, 'GET', 250, controller.signal)
+      let settled = false
+      let rejection: unknown
+      void request.then(() => { settled = true }, (error) => { settled = true; rejection = error })
+      await cancellationHasStarted
+      controller.abort(callerError)
+      for (let turn = 0; turn < 8 && !settled; turn += 1) await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(rejection).toBe(callerError)
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  test('sanitizes a never-settling CDN cancellation without a caller signal', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new ReadableStream({ cancel() { return new Promise<void>(() => {}) } }), {
+      status: 302, headers: { location: 'https://maxvd1.okcdn.ru/next.mp4' },
+    })) as unknown as typeof fetch
+    try {
+      const request = fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', undefined, 'GET', 250)
+      let settled = false
+      let rejection: unknown
+      void request.then(() => { settled = true }, (error) => { settled = true; rejection = error })
+      for (let turn = 0; turn < 8 && !settled; turn += 1) await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(rejection).toMatchObject({ kind: 'unsupported_media', message: 'Медиа недоступно' })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('checks family membership before loading the MAX reference or calling the provider', async () => {
     let providerCalls = 0
     const playback = createMaxVideoPlayback({

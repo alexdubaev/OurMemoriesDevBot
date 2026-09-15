@@ -101,9 +101,24 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
 
 async function cancelBody(body: ReadableStream<Uint8Array> | null, signal?: AbortSignal) {
   if (signal?.aborted) throw signal.reason
-  try { await body?.cancel() } catch (error) {
-    if (signal?.aborted) throw signal.reason ?? error
-    /* provider cancellation failures stay sanitized */
+  if (!body) return
+  const cancellation = Promise.resolve()
+    .then(() => body.cancel())
+    .catch(() => undefined) /* provider cancellation failures stay sanitized */
+  if (!signal) {
+    void cancellation
+    return
+  }
+  let abortListener: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abortListener = () => reject(signal.reason)
+    signal.addEventListener('abort', abortListener, { once: true })
+  })
+  try {
+    if (signal.aborted) throw signal.reason
+    await Promise.race([cancellation, aborted])
+  } finally {
+    if (abortListener) signal.removeEventListener('abort', abortListener)
   }
   if (signal?.aborted) throw signal.reason
 }
