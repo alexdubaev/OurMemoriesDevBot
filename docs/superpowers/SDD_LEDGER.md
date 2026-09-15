@@ -9,10 +9,10 @@ Updated: 2026-09-15
 | MAX-03 | APPROVED | Provider-neutral HostBridge and MAX auth bootstrap |
 | MAX-04 | APPROVED | MAX API client, bot identity, and webhook boundary |
 | MAX-05 | APPROVED | Durable text ingestion and retry-safe responses |
-| MAX-06 | WAITING_FOR_LIVE_PROBE | 2026-09-15 bounded auth diagnostic: approved Selectel secret file is non-empty, 168 bytes, mode 0600, UTF-8, with no leading/trailing whitespace, CR, LF, or NUL; exact raw-token Authorization construction produced `GET /me` 401 and `GET /subscriptions` 401. Owner must replace the invalid/revoked/wrong server-side token without sharing it in chat, then resume the unchanged probe from the auth gate |
+| MAX-06 | IN_PROGRESS | Image capture design brief owner-approved. The 1–10 `type=image` count is a memoLy application limit, not an official MAX inbound guarantee. Both native flows are in scope: exact MAX rendition bytes for quick images and exact validated image-file bytes for one `type=file` attachment per message. Implementation planning is active; MAX-07 remains excluded. |
 | MAX-07 | WAITING | First prove stable MAX-hosted video reference/retrieval on real MAX; do not store MAX video originals privately without a new owner decision |
 | MAX-08 | APPROVED | MAX invite links, signed start routing, and provider-neutral Core invite reuse; local verification and two fresh whole-change reviews completed |
 
-Publication state: local only. No push, PR, merge, deployment, webhook registration, or subscription mutation occurred. Owner-authorized read-only MAX-06 calls were limited to two `GET /subscriptions` attempts and one `GET /me`; all returned HTTP 401. No updates, messages, media, or mutation endpoint was called.
+Publication state: local only. No push, PR, merge, deployment, webhook registration, or subscription mutation occurred. The owner-authorized MAX-06 probe used only read-only MAX API calls and unauthenticated reads of the exact synthetic media URLs returned by MAX. No token, Authorization header, signed media URL, personal media, or personal account data was recorded.
 
-The next action is to replace the rejected credential in the approved server-side secret source and resume the unchanged MAX-06 synthetic live image probe from `GET /me`, then `GET /subscriptions`. Do not advance to MAX-07, MAX-09, or MAX-10.
+The next action is the bounded MAX-06 TDD implementation and review workflow defined by the approved design. Do not advance to MAX-07, MAX-09, or MAX-10.
