@@ -37,6 +37,9 @@ maybeDescribe('MAX durable capture', () => {
   })
   const headers = { 'X-Max-Bot-Api-Secret': webhookSecret, 'Content-Type': 'application/json' }
   const activeStorageRoots = new Set<string>()
+  const activeGateReleases = new Set<() => void>()
+  const activeGateTransactions = new Set<Promise<unknown>>()
+  const activeGateClients = new Set<ReturnType<typeof createPrisma>>()
   const textUpdate = {
     update_type: 'message_created', timestamp: 1_757_844_000_000, message: {
       sender: { user_id: 77 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 900 },
@@ -60,6 +63,15 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.user.deleteMany()
   })
   afterEach(async () => {
+    for (const release of activeGateReleases) release()
+    activeGateReleases.clear()
+    await Promise.race([
+      Promise.allSettled(activeGateTransactions),
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ])
+    activeGateTransactions.clear()
+    await Promise.all([...activeGateClients].map((client) => client.$disconnect()))
+    activeGateClients.clear()
     for (const root of activeStorageRoots) await rm(root, { recursive: true, force: true })
     activeStorageRoots.clear()
   })
@@ -382,6 +394,7 @@ maybeDescribe('MAX durable capture', () => {
     let releaseResolver!: () => void
     const resolverReported = new Promise<void>((resolve) => { reportResolver = resolve })
     const resolverRelease = new Promise<void>((resolve) => { releaseResolver = resolve })
+    activeGateReleases.add(releaseResolver)
     const gatedPrisma = new Proxy(prisma, {
       get(target, property, receiver) {
         if (property !== 'externalIdentity') return Reflect.get(target, property, receiver)
@@ -478,10 +491,12 @@ maybeDescribe('MAX durable capture', () => {
     let releaseLock!: () => void
     const lockEntered = new Promise<void>((resolve) => { lockReported = resolve })
     const lockRelease = new Promise<void>((resolve) => { releaseLock = resolve })
+    activeGateReleases.add(releaseLock)
     const gatedPrisma = new Proxy(prisma, {
       get(target, property, receiver) {
         if (property !== '$transaction') return Reflect.get(target, property, receiver)
-        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => target.$transaction(async (tx) => callback(new Proxy(tx, {
+        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => {
+          const transaction = target.$transaction(async (tx) => callback(new Proxy(tx, {
           get(transactionTarget, transactionProperty, transactionReceiver) {
             if (transactionProperty !== '$queryRaw') return Reflect.get(transactionTarget, transactionProperty, transactionReceiver)
             return async (...args: Parameters<typeof tx.$queryRaw>) => {
@@ -490,7 +505,11 @@ maybeDescribe('MAX durable capture', () => {
               return tx.$queryRaw(...args)
             }
           },
-        }) as typeof prisma))
+          }) as typeof prisma))
+          activeGateTransactions.add(transaction)
+          void transaction.finally(() => activeGateTransactions.delete(transaction)).catch(() => undefined)
+          return transaction
+        }
       },
     }) as typeof prisma
     const running = createMaxTaskProcessor({ runtime: { prisma: gatedPrisma } as unknown as BackendRuntime, crypto })(task.payload)
@@ -651,37 +670,56 @@ maybeDescribe('MAX durable capture', () => {
 
   test('cleanup-first row locking makes publication fail without a Memory', async () => {
     const fixture = await imageFixture('77130', 'cleanup-first')
-    const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
-    const cleanupGate = transactionQueryGate(prisma)
-    const cleanupMedia = createMediaService({ db: cleanupGate.db, env: fixture.env, familyAccess: createPrismaFamilyAccess(prisma), storage: fixture.storage })
-    const cleanup = cleanupMedia.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
-    await cleanupGate.locked
-    const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
-    const publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: randomUUID(), childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
-    cleanupGate.release()
-    await cleanup
-    await expect(publication).rejects.toThrow()
-    expect(await prisma.memory.count()).toBe(0)
-    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
-    await fixture.cleanup()
+    let cleanupGate: ReturnType<typeof transactionQueryGate> | undefined
+    let cleanup: Promise<unknown> | undefined
+    let publication: Promise<unknown> | undefined
+    let publisherPrisma: ReturnType<typeof createPrisma> | undefined
+    try {
+      const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
+      cleanupGate = transactionQueryGate(prisma)
+      const cleanupMedia = createMediaService({ db: cleanupGate.db, env: fixture.env, familyAccess: createPrismaFamilyAccess(prisma), storage: fixture.storage })
+      cleanup = cleanupMedia.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
+      await waitForGate(cleanupGate, 'cleanup-first')
+      publisherPrisma = createPrisma(databaseUrl!)
+      const publisher = createSourceMemoryPublisher(publisherPrisma, createPrismaFamilyAccess(publisherPrisma))
+      publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: randomUUID(), childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
+      cleanupGate.release()
+      await cleanup
+      await expect(publication).rejects.toThrow()
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+    } finally {
+      cleanupGate?.release()
+      await Promise.allSettled([cleanup, publication].filter((value): value is Promise<unknown> => value !== undefined))
+      await publisherPrisma?.$disconnect()
+      await fixture.cleanup()
+    }
   })
 
   test('publication-first row locking makes cleanup skip the attached asset', async () => {
     const fixture = await imageFixture('77131', 'publication-first')
-    const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
-    const memoryId = randomUUID()
-    const publicationGate = transactionQueryGate(prisma, 2)
-    const publisher = createSourceMemoryPublisher(publicationGate.db, createPrismaFamilyAccess(prisma))
-    const publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: memoryId, childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
-    await publicationGate.locked
-    const cleanup = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
-    publicationGate.release()
-    await publication
-    await cleanup
-    expect(await prisma.memory.count({ where: { id: memoryId } })).toBe(1)
-    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).deletedAt).toBeNull()
-    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
-    await fixture.cleanup()
+    let publicationGate: ReturnType<typeof transactionQueryGate> | undefined
+    let publication: Promise<unknown> | undefined
+    let cleanup: Promise<unknown> | undefined
+    try {
+      const asset = await prisma.mediaAsset.create({ data: { familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength), originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex') } })
+      const memoryId = randomUUID()
+      publicationGate = transactionQueryGate(prisma, 2)
+      const publisher = createSourceMemoryPublisher(publicationGate.db, createPrismaFamilyAccess(prisma))
+      publication = publisher.publish({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:lock' } }, { id: memoryId, childId: fixture.childId, kind: 'photo', body: '', occurredAt: new Date(), mediaIds: [asset.id] })
+      await waitForGate(publicationGate, 'publication-first')
+      cleanup = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [asset.id], now: new Date() })
+      publicationGate.release()
+      await publication
+      await cleanup
+      expect(await prisma.memory.count({ where: { id: memoryId } })).toBe(1)
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).deletedAt).toBeNull()
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+    } finally {
+      publicationGate?.release()
+      await Promise.allSettled([publication, cleanup].filter((value): value is Promise<unknown> => value !== undefined))
+      await fixture.cleanup()
+    }
   })
 
   test('lost publication cleans staged source media after a competing terminal transition', async () => {
@@ -701,7 +739,7 @@ maybeDescribe('MAX durable capture', () => {
         download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }),
       })
       const running = process(task.payload)
-      await gate.locked
+      await waitForGate(gate, 'lost-publication')
       await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
       gate.release()
       await expect(running).resolves.toBe('skipped')
@@ -765,6 +803,9 @@ maybeDescribe('MAX durable capture', () => {
 
   test('pending cleanup and finalization overlap with Family then MediaAsset lock order', async () => {
     const fixture = await imageFixture('77141', 'pending-lock-order')
+    let finalizeGate: ReturnType<typeof transactionQueryGate> | undefined
+    let finalizing: Promise<unknown> | undefined
+    let cleaning: Promise<unknown> | undefined
     try {
       const assetId = randomUUID()
       const uploadId = randomUUID()
@@ -781,11 +822,11 @@ maybeDescribe('MAX durable capture', () => {
       await prisma.family.update({ where: { id: fixture.familyId }, data: { storageReservedBytes: bytes } })
       await fixture.storage.writeObject({ key: objectKey, body: new Blob([pngFixture]).stream(), contentLength: pngFixture.byteLength, contentType: 'image/png' })
       const scope = { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max:pending-lock' } }
-      const finalizeGate = transactionQueryGate(prisma, 1, true)
+      finalizeGate = transactionQueryGate(prisma, 1, true)
       const finalizingMedia = createMediaService({ db: finalizeGate.db, env: fixture.env, familyAccess: createPrismaFamilyAccess(prisma), storage: fixture.storage })
-      const finalizing = finalizingMedia.finalize(scope, uploadId)
-      await finalizeGate.locked
-      const cleaning = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [assetId], now: new Date() })
+      finalizing = finalizingMedia.finalize(scope, uploadId)
+      await waitForGate(finalizeGate, 'pending-finalization')
+      cleaning = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [assetId], now: new Date() })
       await new Promise((resolve) => setTimeout(resolve, 50))
       finalizeGate.release()
       const overlap = await Promise.race([
@@ -804,6 +845,8 @@ maybeDescribe('MAX durable capture', () => {
       if (completed.originalStatus === 'stored') await createMediaTasks({ prisma, privateStorage: fixture.runtime.privateStorage, env: fixture.env }).deleteAsset({ mediaId: assetId })
       expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageUsedBytes).toBe(0n)
     } finally {
+      finalizeGate?.release()
+      await Promise.allSettled([finalizing, cleaning].filter((value): value is Promise<unknown> => value !== undefined))
       await fixture.cleanup()
     }
   })
@@ -828,6 +871,28 @@ maybeDescribe('MAX durable capture', () => {
       await deleting
       expect(locked).toBe(true)
       expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).storageDeletedAt).not.toBeNull()
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageUsedBytes).toBe(0n)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  test('media deletion removes deterministic photo derivatives even without variant rows', async () => {
+    const fixture = await imageFixture('77144', 'orphaned-photo-derivatives')
+    try {
+      const asset = await prisma.mediaAsset.create({ data: {
+        familyId: fixture.familyId, uploaderId: fixture.userId, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', byteSize: BigInt(pngFixture.byteLength),
+        originalStatus: 'stored', verifiedMime: 'image/png', sha256: createHash('sha256').update(pngFixture).digest('hex'), deletedAt: new Date(),
+      } })
+      const derivativeKeys = [asset.originalKey, asset.originalKey.replace('media-originals/', 'media-display/'), asset.originalKey.replace('media-originals/', 'media-preview/')]
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { storageUsedBytes: BigInt(pngFixture.byteLength) } })
+      for (const key of derivativeKeys) await fixture.storage.writeObject({ key, body: new Blob([pngFixture]).stream(), contentLength: pngFixture.byteLength, contentType: 'image/png' })
+      const tasks = createMediaTasks({ prisma, privateStorage: fixture.runtime.privateStorage, env: fixture.env })
+      await tasks.deleteAsset({ mediaId: asset.id })
+      for (const key of derivativeKeys) expect(await fixture.storage.headObject(key)).toBeNull()
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageUsedBytes).toBe(0n)
+      await tasks.deleteAsset({ mediaId: asset.id })
       expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).storageUsedBytes).toBe(0n)
     } finally {
       await fixture.cleanup()
@@ -889,25 +954,32 @@ maybeDescribe('MAX durable capture', () => {
 
   test('final membership revocation during image publication prevents Memory and cleans stored media', async () => {
     const fixture = await imageFixture('77137', 'revocation-image')
-    const member = await maxMember('77138', 'full')
-    await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: member.userId, role: 'full' } })
-    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: member.subject, recipientId: '900', messageId: 'max-image-revocation', occurredAt: '2026-09-15T10:00:00.000Z', text: 'race image', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
-    await accept(event)
-    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
-    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
-    const gate = transactionQueryGate(prisma, 1, false)
-    const process = createMaxTaskProcessor({ runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
-    const running = process(task.payload)
-    await gate.locked
-    await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: member.userId } }, data: { revokedAt: new Date() } })
-    gate.release()
-    await expect(running).resolves.toBe('done')
-    expect(await prisma.memory.count()).toBe(0)
-    expect((await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).status).toBe('denied')
-    expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(1)
-    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
-    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'unsupported_media' } })).toBe(0)
-    await fixture.cleanup()
+    let gate: ReturnType<typeof transactionQueryGate> | undefined
+    let running: Promise<unknown> | undefined
+    try {
+      const member = await maxMember('77138', 'full')
+      await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: member.userId, role: 'full' } })
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: member.subject, recipientId: '900', messageId: 'max-image-revocation', occurredAt: '2026-09-15T10:00:00.000Z', text: 'race image', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+      await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+      gate = transactionQueryGate(prisma, 1, false)
+      const process = createMaxTaskProcessor({ runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
+      running = process(task.payload)
+      await waitForGate(gate, 'final-revocation')
+      await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: member.userId } }, data: { revokedAt: new Date() } })
+      gate.release()
+      await expect(running).resolves.toBe('done')
+      expect(await prisma.memory.count()).toBe(0)
+      expect((await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).status).toBe('denied')
+      expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'unsupported_media' } })).toBe(0)
+    } finally {
+      gate?.release()
+      await Promise.allSettled([running].filter((value): value is Promise<unknown> => value !== undefined))
+      await fixture.cleanup()
+    }
   })
 
   async function imageFixture(subject: string, label: string) {
@@ -941,30 +1013,47 @@ maybeDescribe('MAX durable capture', () => {
     }
   }
 
-  function transactionQueryGate(db: typeof prisma, gateQuery = 1, afterQuery = true) {
+  function transactionQueryGate(_primaryDb: typeof prisma, gateQuery = 1, afterQuery = true) {
+    const gateClient = createPrisma(databaseUrl!)
+    activeGateClients.add(gateClient)
     let reportLock!: () => void
     let releaseLock!: () => void
     const locked = new Promise<void>((resolve) => { reportLock = resolve })
     const release = new Promise<void>((resolve) => { releaseLock = resolve })
     let queryCount = 0
-    const gated = new Proxy(db, {
+    const gated = new Proxy(gateClient, {
       get(target, property, receiver) {
         if (property !== '$transaction') return Reflect.get(target, property, receiver)
-        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => target.$transaction(async (tx) => callback(new Proxy(tx, {
-          get(transactionTarget, transactionProperty, transactionReceiver) {
+        return async <T>(callback: (tx: typeof prisma) => Promise<T>) => {
+          const transaction = target.$transaction(async (tx) => callback(new Proxy(tx, {
+            get(transactionTarget, transactionProperty, transactionReceiver) {
             if (transactionProperty !== '$queryRaw') return Reflect.get(transactionTarget, transactionProperty, transactionReceiver)
-            return async (...args: Parameters<typeof tx.$queryRaw>) => {
-              queryCount += 1
-              if (queryCount === gateQuery && !afterQuery) { reportLock(); await release }
+              return async (...args: Parameters<typeof tx.$queryRaw>) => {
+                queryCount += 1
+              const selected = queryCount === gateQuery
+              if (selected && !afterQuery) { reportLock(); await release }
               const result = await tx.$queryRaw(...args)
-              if (queryCount === gateQuery && afterQuery) { reportLock(); await release }
+              if (selected && afterQuery) { reportLock(); await release }
               return result
-            }
-          },
-        }) as typeof prisma))
+              }
+            },
+          }) as typeof prisma))
+          activeGateTransactions.add(transaction)
+          void transaction.finally(() => activeGateTransactions.delete(transaction)).catch(() => undefined)
+          return transaction
+        }
       },
     }) as typeof prisma
-    return { db: gated, locked, release: releaseLock }
+    const releaseGate = () => { releaseLock(); activeGateReleases.delete(releaseGate) }
+    activeGateReleases.add(releaseGate)
+    return { db: gated, locked, release: releaseGate }
+  }
+
+  async function waitForGate(gate: { locked: Promise<void> }, label: string) {
+    await Promise.race([
+      gate.locked,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label} gate did not reach its barrier`)), 5_000)),
+    ])
   }
 
   async function processEvent(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
