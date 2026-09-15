@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { createHash } from 'node:crypto'
+import { Prisma } from '../../generated/prisma/client'
 import { createWriteStream } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -54,9 +55,23 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
         await runtime.privateStorage.storage.deleteObject(key)
       }
       await runtime.prisma.$transaction(async (tx) => {
-        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null }, data: { storageDeletedAt: new Date() } })
-        if (marked.count === 1 && asset.originalStatus === 'stored') {
-          await tx.family.update({ where: { id: asset.familyId }, data: { storageUsedBytes: { decrement: asset.byteSize } } })
+        if (typeof tx.$queryRaw === 'function') {
+          await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM families WHERE id = ${asset.familyId}::uuid FOR UPDATE
+          `)
+          await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM media_assets
+             WHERE id = ${mediaId}::uuid AND family_id = ${asset.familyId}::uuid
+             FOR UPDATE
+          `)
+        }
+        const current = typeof tx.mediaAsset.findUnique === 'function'
+          ? await tx.mediaAsset.findUnique({ where: { id: mediaId } })
+          : asset
+        if (!current || current.storageDeletedAt || !current.deletedAt) return
+        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null, deletedAt: { not: null } }, data: { storageDeletedAt: new Date() } })
+        if (marked.count === 1 && current.originalStatus === 'stored') {
+          await tx.family.update({ where: { id: current.familyId }, data: { storageUsedBytes: { decrement: current.byteSize } } })
         }
       })
     },

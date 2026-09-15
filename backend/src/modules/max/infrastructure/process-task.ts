@@ -38,7 +38,11 @@ export function createMaxTaskProcessor(options: {
   return async (payload, signal) => {
     const inboxId = taskPayload(payload)
     const inbox = await prisma.maxInbox.findUnique({ where: { id: inboxId }, include: { source: true } })
-    if (!inbox || inbox.status === 'processed' || inbox.processedAt) return 'skipped'
+    if (!inbox) return 'skipped'
+    if (inbox.status === 'processed' || inbox.processedAt) {
+      await retryTerminalSourceCleanup(prisma, options.media, inbox.source)
+      return 'skipped'
+    }
 
     const event = options.crypto.decrypt<MaxInboundEvent>({
       ciphertext: inbox.encryptedPayload,
@@ -56,7 +60,10 @@ export function createMaxTaskProcessor(options: {
 
     const source = inbox.source
     if (!source) throw new TerminalTaskError('MAX message inbox has no source')
-    if (source.status !== 'accepted') return 'skipped'
+    if (source.status !== 'accepted') {
+      await retryTerminalSourceCleanup(prisma, options.media, source)
+      return 'skipped'
+    }
 
     const hasAttachments = (event.attachments?.length ?? (event.hasAttachments ? 1 : 0)) > 0
     if (hasAttachments) {
@@ -112,6 +119,17 @@ export function createMaxTaskProcessor(options: {
       throw error
     }
   }
+}
+
+async function retryTerminalSourceCleanup(
+  db: DbClient,
+  media: ReturnType<typeof import('../../media').createMediaService> | undefined,
+  source: MaxSource | null,
+) {
+  if (!media || !source || (source.status !== 'denied' && source.status !== 'unsupported_media')) return
+  const stored = await db.maxSource.findUnique({ where: { id: source.id }, include: { attachments: { select: { plannedMediaId: true } } } })
+  if (!stored || stored.status === 'published') return
+  await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: stored.attachments.map(({ plannedMediaId }) => plannedMediaId) })
 }
 
 function inviteTokenFromPayload(payload: string | null) {
