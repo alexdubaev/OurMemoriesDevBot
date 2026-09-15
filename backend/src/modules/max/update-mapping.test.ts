@@ -5,7 +5,7 @@ import { normalizeMaxUpdate } from './transport/update-mapping'
 const messageFixture = {
   update_type: 'message_created', timestamp: 1700000000123,
   message: {
-    body: { mid: 'mid-1', text: 'hello', attachments: [{ type: 'image' }] },
+    body: { mid: 'mid-1', text: 'hello', attachments: [{ type: 'image', payload: { photo_id: 'photo-1', token: 'rotating-token', url: 'https://i.oneme.ru/image-1' } }] },
     sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 },
   },
 }
@@ -14,7 +14,7 @@ describe('MAX update mapping', () => {
   test('maps documented direct message and bot-started envelopes', () => {
     expect(normalizeMaxUpdate(messageFixture)).toEqual({
       kind: 'message_created', senderId: '42', recipientId: '99', messageId: 'mid-1',
-      occurredAt: '2023-11-14T22:13:20.123Z', text: 'hello', hasAttachments: true,
+      occurredAt: '2023-11-14T22:13:20.123Z', text: 'hello', attachments: [{ kind: 'image', providerAttachmentId: 'photo-1' }],
     })
     expect(normalizeMaxUpdate({
       update_type: 'bot_started', timestamp: 1700000000456,

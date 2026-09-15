@@ -7,6 +7,10 @@ import type {
   MaxAcceptResult,
 } from '../application/ports'
 
+function attachmentsOf(event: Extract<Parameters<MaxAcceptRepository['accept']>[0]['event'], { kind: 'message_created' }>) {
+  return event.attachments ?? (event.hasAttachments ? [{ kind: 'file' as const, providerAttachmentId: 'unsupported:legacy', filename: null, declaredSize: null }] : [])
+}
+
 export class PrismaMaxRepository implements MaxAcceptRepository {
   constructor(private readonly db: DbClient) {}
 
@@ -33,7 +37,7 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
       }
 
       if (input.event.kind === 'message_created') {
-        await tx.maxSource.create({
+        const source = await tx.maxSource.create({
           data: {
             id: randomUUID(),
             inboxId,
@@ -45,6 +49,16 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
             createdAt: input.now,
           },
         })
+        const attachments = attachmentsOf(input.event)
+        if (input.response?.kind === 'accepted' && attachments.length > 0) {
+          await tx.maxSourceAttachment.createMany({ data: attachments.map((attachment, position) => ({
+            sourceId: source.id,
+            position,
+            providerKind: attachment.kind,
+            providerAttachmentId: attachment.providerAttachmentId,
+            plannedMediaId: randomUUID(),
+          })) })
+        }
       }
 
       await queue(tx, 'max:process', `max-process:${inboxId}`, { inboxId }, input.now)

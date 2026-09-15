@@ -106,10 +106,29 @@ model MaxSource {
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   inbox           MaxInbox         @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_sources_inbox_id_fkey")
+  attachments     MaxSourceAttachment[]
 
   @@unique([botId, recipientId, messageId], map: "max_sources_bot_recipient_message_key")
   @@index([status, updatedAt], map: "max_sources_status_idx")
   @@map("max_sources")
+}
+
+model MaxSourceAttachment {
+  id                    String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceId              String                    @map("source_id") @db.Uuid
+  position              Int
+  providerKind          MaxSourceAttachmentKind   @map("provider_kind")
+  providerAttachmentId  String                    @map("provider_attachment_id")
+  plannedMediaId        String                    @unique(map: "max_source_attachments_planned_media_id_key") @map("planned_media_id") @db.Uuid
+  mediaId               String?                   @map("media_id") @db.Uuid
+  status                MaxSourceAttachmentStatus @default(planned)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  source                MaxSource                  @relation(fields: [sourceId], references: [id], onDelete: Cascade, map: "max_source_attachments_source_id_fkey")
+
+  @@unique([sourceId, position], map: "max_source_attachments_source_position_key")
+  @@index([sourceId, providerKind, providerAttachmentId], map: "max_source_attachments_source_kind_provider_idx")
+  @@map("max_source_attachments")
 }
 
 model MaxOutgoingResponse {
@@ -612,6 +631,7 @@ enum MemoryStatus {
 enum MediaSourceKind {
   upload
   telegram
+  max
 
   @@map("media_source_kind")
 }
@@ -769,6 +789,21 @@ enum TelegramInboxKind {
   denied
 
   @@map("telegram_inbox_kind")
+}
+
+enum MaxSourceAttachmentKind {
+  image
+  file
+
+  @@map("max_source_attachment_kind")
+}
+
+enum MaxSourceAttachmentStatus {
+  planned
+  stored
+  failed
+
+  @@map("max_source_attachment_status")
 }
 
 enum MaxInboxEventKind {

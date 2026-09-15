@@ -29,6 +29,22 @@ export type MaxApiPort = {
   createSubscription(input: MaxSubscriptionInput, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   deleteSubscription(url: string, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
+  getMessage(messageId: string, signal?: AbortSignal): Promise<MaxResolvedMessage>
+}
+
+export type MaxInboundAttachment =
+  | { kind: 'image'; providerAttachmentId: string }
+  | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null }
+
+export type MaxResolvedAttachment =
+  | { kind: 'image'; providerAttachmentId: string; url: string }
+  | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null; url: string }
+
+export type MaxResolvedMessage = {
+  messageId: string
+  senderId: string
+  recipientId: string
+  attachments: MaxResolvedAttachment[]
 }
 
 export type MaxInboundEvent =
@@ -39,7 +55,9 @@ export type MaxInboundEvent =
       messageId: string
       occurredAt: string
       text: string | null
-      hasAttachments: boolean
+      attachments: MaxInboundAttachment[]
+      /** @deprecated compatibility for pre-MAX-06 callers; normalized events always include attachments. */
+      hasAttachments?: boolean
     }
   | {
       kind: 'bot_started'

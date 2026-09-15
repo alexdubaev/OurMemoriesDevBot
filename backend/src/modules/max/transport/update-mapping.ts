@@ -47,14 +47,36 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   if (body.attachments !== undefined && body.attachments !== null && !Array.isArray(body.attachments)) {
     throw new Error('Invalid MAX message attachments')
   }
-  const attachments = Array.isArray(body.attachments) ? body.attachments : []
+  const attachments = Array.isArray(body.attachments) ? body.attachments.map(normalizeAttachment) : []
   const text = body.text === null || body.text === undefined ? null :
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
   if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
     kind: 'message_created', senderId: String(message.sender.user_id), recipientId: String(message.recipient.user_id),
-    messageId, occurredAt, text, hasAttachments: attachments.length > 0,
+    messageId, occurredAt, text, attachments,
   }
+}
+
+function normalizeAttachment(value: unknown) {
+  if (!isRecord(value) || typeof value.type !== 'string') throw new Error('Invalid MAX attachment')
+  // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file
+  // shapes are validated strictly so no transient URL/token can enter the encrypted event.
+  if (value.type !== 'image' && value.type !== 'file') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
+  if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
+  const payload = value.payload
+  const providerAttachmentId = value.type === 'image' ? payload.photo_id : payload.fileId
+  if (typeof providerAttachmentId !== 'string' || providerAttachmentId.length === 0 || providerAttachmentId.length > 512) {
+    throw new Error('Invalid MAX attachment identity')
+  }
+  if (typeof payload.token !== 'string' || payload.token.length === 0 || typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) {
+    throw new Error('Invalid MAX attachment transport')
+  }
+  if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId }
+  const filename = payload.filename === undefined || payload.filename === null ? null : payload.filename
+  if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new Error('Invalid MAX filename')
+  const declaredSize = payload.size === undefined || payload.size === null ? null : payload.size
+  if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new Error('Invalid MAX attachment size')
+  return { kind: 'file' as const, providerAttachmentId, filename, declaredSize }
 }
 
 function isForwardOnly(message: Record<string, unknown>, body: Record<string, unknown>) {
@@ -72,4 +94,9 @@ function isPositiveSafeInteger(value: unknown): value is number {
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  try { return new URL(value).protocol === 'https:' } catch { return false }
 }
