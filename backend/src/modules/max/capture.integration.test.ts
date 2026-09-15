@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { rm } from 'node:fs/promises'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
+import { createPrivateStorage } from '../../storage'
+import { createMediaService } from '../media'
+import { pngFixture } from '../../storage/storage-contract'
+import { createPrismaFamilyAccess } from '../families'
 import type { BackendRuntime } from '../../runtime'
 import { createMaxAcceptUpdate } from './application/accept-update'
 import { createMaxModule } from './index'
@@ -488,6 +493,39 @@ maybeDescribe('MAX durable capture', () => {
     expect(await running).toBe('done')
     expect(await prisma.memory.count()).toBe(0)
     expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+  })
+
+  test('publishes one synthetic quick image with exact bytes and caption through private media', async () => {
+    const user = await prisma.user.create({ data: { displayName: 'MAX image owner' } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: '77123' } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: 'Image family', timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Image child' } })
+    const storageRoot = `.max-image-${randomUUID()}`
+    const env = loadEnv({ DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4), MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token',
+      MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot', MAX_INBOX_ENCRYPTION_KEY: key, MAX_WEBHOOK_URL: 'https://api.example.test/webhooks/max', MAX_WEBHOOK_SECRET: webhookSecret,
+      MAX_MINI_APP_URL: 'https://app.example.test', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot })
+    const privateStorage = createPrivateStorage(env)
+    const runtime = { env, prisma, privateStorage } as unknown as BackendRuntime
+    const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = { kind: 'message_created', senderId: '77123', recipientId: '900', messageId: 'max-image-one',
+      occurredAt: '2026-09-15T10:00:00.000Z', text: 'image caption', attachments: [{ kind: 'image', providerAttachmentId: '1' }] }
+    await accept(event)
+    const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+    const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime, crypto, api: {
+      getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+      getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: [{ kind: 'image', providerAttachmentId: '1', url: 'https://i.oneme.ru/synthetic' }] }),
+    }, media: createMediaService({ db: prisma, env, familyAccess: createPrismaFamilyAccess(prisma), storage: privateStorage.storage }), download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
+    await expect(process(task.payload)).resolves.toBe('done')
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { include: { asset: true } } } })
+    expect(memory).toMatchObject({ familyId: family.id, childId: child.id, kind: 'photo', body: 'image caption' })
+    expect(memory.media).toHaveLength(1)
+    expect(memory.media[0]!.asset).toMatchObject({ sourceKind: 'max', originalStatus: 'stored', sha256: createHash('sha256').update(pngFixture).digest('hex') })
+    await prisma.mediaAsset.updateMany({ where: { sourceKind: 'max' }, data: { deletedAt: new Date() } })
+    await rm(storageRoot, { recursive: true, force: true })
   })
 
   async function processEvent(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
