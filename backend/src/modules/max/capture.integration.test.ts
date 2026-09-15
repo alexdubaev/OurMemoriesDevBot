@@ -192,6 +192,7 @@ maybeDescribe('MAX durable capture', () => {
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
         deleteSubscription: async () => ({ success: true }),
         sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+        getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       },
     })
     await expect(delivery({ responseId: response.id })).rejects.toThrow('synthetic provider outage')
@@ -226,7 +227,8 @@ maybeDescribe('MAX durable capture', () => {
       api: {
         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
-        deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+         deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+         getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       } satisfies MaxApiPort,
     })
     const response = await module.routes.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify({ ...textUpdate, message: { ...textUpdate.message, body: { ...textUpdate.message.body, mid: 'module-message-1' } } }) })
@@ -301,6 +303,7 @@ maybeDescribe('MAX durable capture', () => {
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
         deleteSubscription: async () => ({ success: true }),
         sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+        getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       },
     })
     await expect(delivery({ responseId: saved.id })).rejects.toThrow('synthetic provider outage')

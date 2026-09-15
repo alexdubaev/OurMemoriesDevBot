@@ -5,7 +5,9 @@ import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
 import { createInviteStartResolver, createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createSourceMemoryPublisher } from '../../memories'
-import type { MaxInboundEvent } from '../application/ports'
+import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
+import { createMaxImageProcessor } from './process-image'
+import type { MaxDownloadedMedia } from './media-download'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
@@ -21,13 +23,19 @@ export function createMaxTaskProcessor(options: {
   runtime: BackendRuntime
   crypto: PayloadCrypto
   resolveInviteStart?: (rawToken: string) => Promise<'active' | 'invalid'>
-}): (payload: unknown) => Promise<'done' | 'skipped'> {
+  api?: MaxApiPort
+  media?: ReturnType<typeof import('../../media').createMediaService>
+  download?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxDownloadedMedia>
+}): (payload: unknown, signal?: AbortSignal) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
+  const imageProcessor = options.api && options.media && options.download
+    ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download })
+    : null
 
-  return async (payload) => {
+  return async (payload, signal) => {
     const inboxId = taskPayload(payload)
     const inbox = await prisma.maxInbox.findUnique({ where: { id: inboxId }, include: { source: true } })
     if (!inbox || inbox.status === 'processed' || inbox.processedAt) return 'skipped'
@@ -50,7 +58,9 @@ export function createMaxTaskProcessor(options: {
     if (!source) throw new TerminalTaskError('MAX message inbox has no source')
     if (source.status !== 'accepted') return 'skipped'
 
-    if (event.hasAttachments) {
+    const hasAttachments = (event.attachments?.length ?? (event.hasAttachments ? 1 : 0)) > 0
+    if (hasAttachments) {
+      if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
       return await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText) ? 'done' : 'skipped'
     }
 

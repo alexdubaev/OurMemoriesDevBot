@@ -4,6 +4,7 @@ import type {
   MaxSubscription,
   MaxSubscriptionInput,
   MaxSubscriptionResult,
+  MaxResolvedMessage,
 } from '../application/ports'
 
 const MAX_API_BASE = 'https://platform-api2.max.ru'
@@ -80,7 +81,37 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       }, signal)
       if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
     },
+    async getMessage(messageId, signal) {
+      if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
+      return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_id: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
+    },
   }
+}
+
+function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxResolvedMessage {
+  const candidate = isRecord(value) && Array.isArray(value.messages) ? value.messages[0] :
+    isRecord(value) && isRecord(value.message) ? value.message : value
+  if (!isRecord(candidate) || !isRecord(candidate.sender) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
+      !isPositiveSafeInteger(candidate.sender.user_id) || !isPositiveSafeInteger(candidate.recipient.user_id) ||
+      candidate.recipient.chat_id !== null || candidate.recipient.chat_type !== 'dialog' ||
+      typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
+      !Array.isArray(candidate.body.attachments)) throw new MaxProviderError()
+  const attachments = candidate.body.attachments.map(normalizeResolvedAttachment)
+  return { messageId: expectedMessageId, senderId: String(candidate.sender.user_id), recipientId: String(candidate.recipient.user_id), attachments }
+}
+
+function normalizeResolvedAttachment(value: unknown) {
+  if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file') || !isRecord(value.payload)) throw new MaxProviderError()
+  const payload = value.payload
+  const id = value.type === 'image' ? payload.photo_id : payload.fileId
+  if (typeof id !== 'string' || id.length === 0 || typeof payload.token !== 'string' || payload.token.length === 0 ||
+      typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) throw new MaxProviderError()
+  if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url }
+  const filename = payload.filename === undefined || payload.filename === null ? null : payload.filename
+  const declaredSize = payload.size === undefined || payload.size === null ? null : payload.size
+  if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new MaxProviderError()
+  if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new MaxProviderError()
+  return { kind: 'file' as const, providerAttachmentId: id, filename, declaredSize, url: payload.url }
 }
 
 function normalizeBotIdentity(value: unknown): MaxBotIdentity {

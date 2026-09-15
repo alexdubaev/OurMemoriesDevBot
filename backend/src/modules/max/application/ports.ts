@@ -55,7 +55,7 @@ export type MaxInboundEvent =
       messageId: string
       occurredAt: string
       text: string | null
-      attachments: MaxInboundAttachment[]
+      attachments?: MaxInboundAttachment[]
       /** @deprecated compatibility for pre-MAX-06 callers; normalized events always include attachments. */
       hasAttachments?: boolean
     }

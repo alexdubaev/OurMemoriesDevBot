@@ -16,6 +16,12 @@ export function detectDeclaredMedia(
   return detected
 }
 
+export function detectPhotoMime(bytes: Uint8Array): 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' {
+  const detected = detectMedia(bytes, 'photo')
+  if (!detected || !detected.startsWith('image/')) throw new MediaFailure('unsupported_media', 'Файл не является поддерживаемым изображением')
+  return detected as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic'
+}
+
 export function parseSingleRange(header: string, total: number) {
   if (!Number.isSafeInteger(total) || total <= 0 || !header.startsWith('bytes=') || header.includes(',')) {
     throw rangeFailure(total)

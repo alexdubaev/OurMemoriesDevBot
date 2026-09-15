@@ -24,6 +24,7 @@ function api(overrides: Partial<MaxApiPort> = {}): MaxApiPort {
     createSubscription: async () => ({ success: true }),
     deleteSubscription: async () => ({ success: true }),
     sendMessage: async () => undefined,
+    getMessage: async () => ({ messageId: 'unused', senderId: '1', recipientId: '1', attachments: [] }),
     ...overrides,
   }
 }

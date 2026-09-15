@@ -1,5 +1,5 @@
 import type { BackendRuntime } from '../../runtime'
-import { createInviteStartResolver } from '../families'
+import { createInviteStartResolver, createPrismaFamilyAccess } from '../families'
 import { createMaxAcceptUpdate } from './application/accept-update'
 import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
@@ -8,6 +8,8 @@ import { createMaxResponseDelivery } from './infrastructure/deliver-response'
 import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
+import { createMediaService } from '../media'
+import { createMaxMediaDownload } from './infrastructure/media-download'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
@@ -26,6 +28,9 @@ export function createMaxModule(options: {
   const processTask = createMaxTaskProcessor({
     runtime: options.runtime,
     crypto,
+    api,
+    media: createMediaService({ db: options.runtime.prisma, env, familyAccess: createPrismaFamilyAccess(options.runtime.prisma), storage: options.runtime.privateStorage.storage }),
+    download: createMaxMediaDownload(),
     resolveInviteStart: createInviteStartResolver(options.runtime.prisma),
   })
   return {
@@ -49,13 +54,16 @@ export function createMaxTasks(runtime: BackendRuntime) {
   const processTask = createMaxTaskProcessor({
     runtime,
     crypto,
+    api,
+    media: createMediaService({ db: runtime.prisma, env, familyAccess: createPrismaFamilyAccess(runtime.prisma), storage: runtime.privateStorage.storage }),
+    download: createMaxMediaDownload(),
     resolveInviteStart: createInviteStartResolver(runtime.prisma),
   })
   return {
-    process: (payload: unknown, _signal?: AbortSignal) => processTask(payload),
+    process: (payload: unknown, signal?: AbortSignal) => processTask(payload, signal),
     deliverResponse: createMaxResponseDelivery({ prisma: runtime.prisma, api }),
   }
 }
 
 export { createMaxApi, MaxProviderError } from './infrastructure/max-api'
-export type { MaxApiPort, MaxBotIdentity, MaxInboundEvent, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput } from './application/ports'
+export type { MaxApiPort, MaxBotIdentity, MaxInboundAttachment, MaxInboundEvent, MaxResolvedAttachment, MaxResolvedMessage, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput } from './application/ports'

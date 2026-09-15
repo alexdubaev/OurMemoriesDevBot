@@ -162,4 +162,25 @@ describe('MAX API client', () => {
     controller.abort()
     await expect(pending).rejects.toBeInstanceOf(MaxProviderError)
   }, 12_000)
+
+  test('looks up a message with only its encoded identity and returns ordered transient URLs', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      request = new Request(input, init)
+      return response({ messages: [{ sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'm/1', attachments: [
+          { type: 'image', payload: { photo_id: 'p-1', token: 'rotating', url: 'https://i.oneme.ru/a' } },
+          { type: 'file', payload: { fileId: 'f-1', token: 'rotating-2', url: 'https://fd.oneme.ru/b', filename: 'x.png', size: 12 } },
+        ],
+      } }] })
+    } })
+    await expect(api.getMessage('m/1')).resolves.toEqual({ messageId: 'm/1', senderId: '42', recipientId: '99', attachments: [
+      { kind: 'image', providerAttachmentId: 'p-1', url: 'https://i.oneme.ru/a' },
+      { kind: 'file', providerAttachmentId: 'f-1', filename: 'x.png', declaredSize: 12, url: 'https://fd.oneme.ru/b' },
+    ] })
+    expect(request!.method).toBe('GET')
+    expect(request!.url).toBe('https://platform-api2.max.ru/messages?message_id=m%2F1')
+    expect(request!.headers.get('authorization')).toBe(token)
+    expect(JSON.stringify(request)).not.toContain('rotating')
+  })
 })

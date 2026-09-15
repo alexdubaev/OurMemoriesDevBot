@@ -63,13 +63,13 @@ export class PrismaMediaRepository implements MediaRepository {
     })
   }
 
-  async findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null> {
+  async findTrustedIngestion(scope: FamilyScope, assetId: string, sourceKind: 'telegram' | 'max'): Promise<FinalizePreparation | null> {
     const asset = await this.db.mediaAsset.findFirst({
       where: {
         id: assetId,
         familyId: scope.familyId,
         uploaderId: scope.principal.userId,
-        sourceKind: 'telegram',
+        sourceKind,
         purpose: 'memory',
       },
       include: { variants: true, reservation: true },
@@ -82,6 +82,27 @@ export class PrismaMediaRepository implements MediaRepository {
       return { kind: 'expired' }
     }
     return { kind: 'pending', upload: pendingDto({ ...asset.reservation, asset }) }
+  }
+
+  async findTelegramIngestion(scope: FamilyScope, assetId: string) {
+    return this.findTrustedIngestion(scope, assetId, 'telegram')
+  }
+
+  async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now: Date }) {
+    const unique = [...new Set(input.assetIds)]
+    if (unique.length === 0) return
+    await this.db.$transaction(async (tx) => {
+      const assets = await tx.mediaAsset.findMany({ where: {
+        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
+      }, select: { id: true, originalStatus: true } })
+      for (const asset of assets) {
+        if (asset.originalStatus === 'pending') await abandon(tx, asset.id, input.now)
+        else if (asset.originalStatus === 'stored') {
+          await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null }, data: { deletedAt: input.now } })
+          await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`, payload: { mediaId: asset.id }, scheduledFor: input.now })
+        }
+      }
+    })
   }
 
   async prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation> {

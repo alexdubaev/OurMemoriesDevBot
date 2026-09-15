@@ -11,7 +11,7 @@ import type { ReserveMediaUploadRequest } from '@web-app-demo/contracts'
 import { createStorageObjectKey, StorageError, type PrivateStorage } from '../../../storage'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MediaFailure } from '../domain/errors'
-import { detectDeclaredMedia, parseSingleRange } from '../domain/media-policy'
+import { detectDeclaredMedia, detectPhotoMime, parseSingleRange } from '../domain/media-policy'
 import type { MediaProbe, MediaRepository, PhotoProcessor, StoredVariant } from './ports'
 
 export class MediaService {
@@ -66,10 +66,14 @@ export class MediaService {
     contentType: ReserveMediaUploadRequest['contentType']
     byteSize: number
     body: ReadableStream<Uint8Array>
+    sourceKind?: 'telegram' | 'max'
   }) {
     await this.access.requireFull(scope)
     const now = this.now()
-    let preparation = await this.repository.findTelegramIngestion(scope, input.assetId)
+    const sourceKind = input.sourceKind ?? 'telegram'
+    let preparation = this.repository.findTrustedIngestion
+      ? await this.repository.findTrustedIngestion(scope, input.assetId, sourceKind)
+      : await this.repository.findTelegramIngestion(scope, input.assetId)
     if (preparation?.kind === 'ready') return { asset: preparation.asset }
     if (preparation?.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
     if (preparation?.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
@@ -77,27 +81,45 @@ export class MediaService {
       const uploadId = randomUUID()
       const objectKey = createStorageObjectKey({ namespace: 'media-originals', id: input.assetId, now })
       const expiresAt = new Date(now.getTime() + this.config.reservationTtlSeconds * 1_000)
-      await this.repository.reserve({
-        uploadId,
-        assetId: input.assetId,
-        familyId: scope.familyId,
-        userId: scope.principal.userId,
-        sourceKind: 'telegram',
-        purpose: 'memory',
-        kind: input.kind,
-        objectKey,
-        declaredMime: input.contentType,
-        byteSize: input.byteSize,
-        expiresAt,
-        quotaBytes: this.config.familyQuotaBytes,
-        maxPendingUploads: this.config.maxPendingUploads,
-        now,
-      })
+      try {
+        await this.repository.reserve({
+          uploadId,
+          assetId: input.assetId,
+          familyId: scope.familyId,
+          userId: scope.principal.userId,
+          sourceKind,
+          purpose: 'memory',
+          kind: input.kind,
+          objectKey,
+          declaredMime: input.contentType,
+          byteSize: input.byteSize,
+          expiresAt,
+          quotaBytes: this.config.familyQuotaBytes,
+          maxPendingUploads: this.config.maxPendingUploads,
+          now,
+        })
+      } catch (error) {
+        if (!isUniqueConstraint(error)) throw error
+        const raced = this.repository.findTrustedIngestion
+          ? await this.repository.findTrustedIngestion(scope, input.assetId, sourceKind)
+          : await this.repository.findTelegramIngestion(scope, input.assetId)
+        if (raced) preparation = raced
+        else throw error
+      }
+      if (preparation) {
+        if (preparation.kind === 'ready') return { asset: preparation.asset }
+        if (preparation.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
+        if (preparation.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+      }
+      if (preparation) {
+        // A concurrent fixed-ID ingestion won the reservation; continue with its upload.
+      } else {
       preparation = { kind: 'pending', upload: {
         uploadId, assetId: input.assetId, familyId: scope.familyId, userId: scope.principal.userId,
-        sourceKind: 'telegram', purpose: 'memory', kind: input.kind, objectKey,
+        sourceKind, purpose: 'memory', kind: input.kind, objectKey,
         declaredMime: input.contentType, byteSize: input.byteSize, expiresAt,
       } }
+      }
     }
     const upload = preparation.upload
     if (upload.kind !== input.kind || upload.declaredMime !== input.contentType || upload.byteSize !== input.byteSize) {
@@ -125,6 +147,27 @@ export class MediaService {
     } catch (error) {
       if (error instanceof StorageError) throw storageFailure(error)
       throw error
+    }
+  }
+
+  async ingestTrustedPhoto(scope: FamilyScope, input: { assetId: string; sourceKind: 'telegram' | 'max'; bytes: Uint8Array }) {
+    const existing = this.repository.findTrustedIngestion
+      ? await this.repository.findTrustedIngestion(scope, input.assetId, input.sourceKind)
+      : await this.repository.findTelegramIngestion(scope, input.assetId)
+    if (existing?.kind === 'ready') return { asset: existing.asset }
+    if (existing?.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
+    if (existing?.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+    const contentType = detectPhotoMime(input.bytes)
+    return this.ingestTelegram(scope, {
+      assetId: input.assetId, sourceKind: input.sourceKind, kind: 'photo', contentType,
+      byteSize: input.bytes.byteLength,
+      body: new Blob([input.bytes.slice().buffer as ArrayBuffer]).stream(),
+    })
+  }
+
+  async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now?: Date }) {
+    if (this.repository.discardTrustedSourceAssets) {
+      await this.repository.discardTrustedSourceAssets({ sourceKind: input.sourceKind, assetIds: input.assetIds, now: input.now ?? this.now() })
     }
   }
 
@@ -253,6 +296,10 @@ async function sha256File(path: string) {
 
 function storageFailure(error: unknown) {
   return error instanceof MediaFailure ? error : new MediaFailure('storage_unavailable', 'Хранилище временно недоступно')
+}
+
+function isUniqueConstraint(error: unknown) {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002'
 }
 
 async function storageObjectMatches(storage: PrivateStorage, key: string, expectedLength: number, expectedSha256: string) {
