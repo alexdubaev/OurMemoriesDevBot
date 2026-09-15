@@ -26,8 +26,12 @@ FROM oven/bun:1.4.0 AS runtime
 WORKDIR /app
 
 # User media is prepared by the maintained OS package, never a stale npm-bundled binary.
-RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg \
+RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
+
+COPY backend/certificates/ /usr/local/share/ca-certificates/
+
+RUN update-ca-certificates
 
 COPY --from=build /app/package.json /app/bun.lock /app/bunfig.toml ./
 COPY --from=production-dependencies /app/node_modules ./node_modules
