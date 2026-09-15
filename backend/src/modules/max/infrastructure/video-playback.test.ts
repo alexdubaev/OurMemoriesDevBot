@@ -66,6 +66,18 @@ describe('MAX guarded video transport', () => {
     } finally { globalThis.fetch = originalFetch }
   })
 
+  test('sanitizes errors raised while reading or cancelling the CDN body', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new ReadableStream({
+      pull(controller) { controller.error(new Error('signed-url-token-leaked')) },
+      cancel() { throw new Error('signed-url-token-leaked') },
+    }), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '1' } })) as unknown as typeof fetch
+    try {
+      const result = await fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4?sig=opaque', undefined, 'GET', 250)
+      await expect(new Response(result.body).arrayBuffer()).rejects.toMatchObject({ kind: 'storage_unavailable', message: 'Медиа недоступно' })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('sanitizes CDN network failures', async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async () => { throw new Error('signed-url-token-leaked') }) as unknown as typeof fetch

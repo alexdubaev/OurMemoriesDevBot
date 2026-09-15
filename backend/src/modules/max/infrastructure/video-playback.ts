@@ -102,11 +102,19 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
 function guardBody(body: ReadableStream<Uint8Array>, expectedBytes: number, signal?: AbortSignal) {
   const reader = body.getReader()
   let total = 0
-  const abort = () => { void reader.cancel(signal?.reason) }
+  const abort = () => { void reader.cancel(signal?.reason).catch(() => undefined) }
   signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) abort()
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const next = await reader.read()
+      let next: Awaited<ReturnType<typeof reader.read>>
+      try {
+        next = await reader.read()
+      } catch {
+        signal?.removeEventListener('abort', abort)
+        controller.error(new MediaFailure('storage_unavailable', 'Медиа недоступно'))
+        return
+      }
       if (next.done) {
         signal?.removeEventListener('abort', abort)
         if (total !== expectedBytes) {
@@ -118,7 +126,7 @@ function guardBody(body: ReadableStream<Uint8Array>, expectedBytes: number, sign
       }
       total += next.value.byteLength
       if (total > expectedBytes) {
-        await reader.cancel()
+        await reader.cancel().catch(() => undefined)
         signal?.removeEventListener('abort', abort)
         controller.error(new MediaFailure('storage_unavailable', 'Медиа недоступно'))
         return
@@ -127,7 +135,7 @@ function guardBody(body: ReadableStream<Uint8Array>, expectedBytes: number, sign
     },
     async cancel(reason) {
       signal?.removeEventListener('abort', abort)
-      await reader.cancel(reason)
+      await reader.cancel(reason).catch(() => undefined)
     },
   })
 }
