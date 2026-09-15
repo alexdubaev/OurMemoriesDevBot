@@ -10,7 +10,7 @@ Prepared: 2026-09-15
 - MAX-04: APPROVED
 - MAX-05: APPROVED
 - MAX-06: APPROVED
-- MAX-07: WAITING — NOT STARTED
+- MAX-07: IN_PROGRESS — VIDEO IMPLEMENTATION AUTHORIZED
 - MAX-08: APPROVED
 - Publication state: local only
 
@@ -46,48 +46,41 @@ There are now three additive MAX-related migrations:
 
 Clean test databases applied all 25 repository migrations. Do not edit applied migration history.
 
-## MAX-07 owner decision — preserve exactly
+## MAX-07 owner decision — superseding approval, 2026-09-15
 
-MAX video нельзя автоматически начинать постоянно хранить в Selectel/private storage.
+The owner explicitly unblocked MAX-07 VIDEO implementation and accepted the MVP dependency on
+MAX-hosted video despite the absence of a proven or documented indefinite archival-retention
+guarantee. The 24-hour and seven-day retention checks are informational only and must not block
+implementation, review, merge readiness, or the MVP roadmap.
 
-MAX-07 должен СНАЧАЛА на реальном MAX доказать, можно ли:
+Approved architecture:
 
-- оставить оригинал видео в MAX;
-- хранить в memoLy стабильный provider reference/token;
-- позже надёжно получать/redeliver то же видео;
-- обновлять временные URL через стабильный reference.
+MAX stores and retains video
+→ memoLy stores stable `{ mid, payload.id, attachment position, type=video }`
+→ memoLy resolves a current token and supported playback URL when an authorized user requests it.
 
-Предпочтительно:
+Rotating tokens and signed provider/media URLs are transient transport data. They are never durable
+identity, task payload, public DTO state, log data, or report data. MAX video originals are not
+downloaded on ingest and are not copied to Selectel/private storage.
 
-MAX stores original video
-→ memoLy stores stable provider reference
-→ memoLy retrieves/redelivers video from MAX when needed.
+OWNER-ACCEPTED MVP RISK: MAX does not currently provide a proven/documented indefinite archival
+retention guarantee for inbound video. This is not a blocker.
 
-Если это невозможно или ненадёжно:
+## MAX-07 current action
 
-STOP и вернуть результаты owner.
-Не выбирать альтернативное хранение без отдельного одобрения.
+Proceed through the repository Teamlead workflow using:
 
-## MAX-07 required first action
+- design: `docs/superpowers/specs/2026-09-15-max-07-video-reference-design.md`;
+- bounded implementation brief: `docs/superpowers/plans/2026-09-15-max-07-video-reference.md`.
 
-MAX-07 is not authorized to implement video ingestion yet. After a new explicit owner assignment, begin with a bounded real-MAX feasibility investigation only:
-
-- verify the current branch/worktree/HEAD/status and canonical origin;
-- read `AGENTS.md`, MVP start/index, relevant private-media documentation, MAX-05 and MAX-06 design/plan/report;
-- verify the official and observed stable video identity/reference contract;
-- verify whether MAX can retain the original while memoLy later retrieves or redelivers the same video;
-- verify temporary URL refresh through the stable reference;
-- distinguish documented guarantees from short live observations;
-- use synthetic video only and perform no webhook/subscription mutation;
-- make no production-code or migration change before the owner adjudicates the evidence.
-
-If stable provider-hosted retrieval/redelivery is not proven, STOP. Do not choose Selectel/private permanent original storage, proxy storage, download-on-ingest, or any other fallback architecture without separate owner approval.
+VIDEO must reach APPROVED before the separate audio/voice contract investigation begins. Do not wait
+for the informational retention checkpoints. Do not start MAX-09 or MAX-10 automatically.
 
 ## MAX-07 exclusions
 
 - no automatic permanent storage of MAX video originals;
 - no image-pipeline refactor;
-- no audio/voice, generic file, stickers, contacts, or locations;
+- no audio/voice until VIDEO is APPROVED; no generic file, stickers, contacts, or locations;
 - no invite/start work (MAX-08 is already approved);
 - no account linking, groups, or channels;
 - no Telegram refactor;
@@ -111,4 +104,6 @@ Remain local unless the owner explicitly authorizes publication. Do not push, cr
 
 ## Next action
 
-STOP now. Do not begin MAX-07 automatically. Wait for explicit owner authorization for the bounded MAX-07 real-provider feasibility investigation.
+Execute the lead-approved bounded VIDEO brief with one fresh worker, deterministic checks, a fresh
+independent review/fix pass, and a second fresh whole-change review. Remain local: no push, PR,
+merge, deployment, webhook registration, or subscription mutation without separate authorization.
