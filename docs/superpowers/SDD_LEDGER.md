@@ -13,6 +13,6 @@ Updated: 2026-09-15
 | MAX-07 | WAITING | First prove stable MAX-hosted video reference/retrieval on real MAX; do not store MAX video originals privately without a new owner decision |
 | MAX-08 | APPROVED | MAX invite links, signed start routing, and provider-neutral Core invite reuse; local verification and two fresh whole-change reviews completed |
 
-Publication state: local only. No push, PR, merge, deployment, webhook registration, subscription mutation, or live MAX API call is authorized by this ledger.
+Publication state: local only. No push, PR, merge, deployment, webhook registration, or subscription mutation occurred. The only live MAX call was the owner-authorized read-only MAX-06 gate `GET /subscriptions`, which returned HTTP 401; no later probe call ran.
 
 The next action is to validate the approved server-side MAX credential and resume the unchanged MAX-06 synthetic live image probe from `GET /subscriptions`. Do not advance to MAX-07, MAX-09, or MAX-10.
