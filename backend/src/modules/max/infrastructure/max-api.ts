@@ -13,11 +13,13 @@ const REQUEST_TIMEOUT_MS = 10_000
 
 export class MaxProviderError extends Error {
   readonly retryAfterSeconds?: number
+  readonly retryable: boolean
 
-  constructor(retryAfterSeconds?: number) {
+  constructor(retryAfterSeconds?: number, retryable = false) {
     super('MAX provider request failed')
     this.name = 'MaxProviderError'
     this.retryAfterSeconds = retryAfterSeconds
+    this.retryable = retryable
   }
 }
 
@@ -36,7 +38,7 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         headers: { ...(init.headers ?? {}), Authorization: token },
         signal: controller.signal,
       })
-      if (!response.ok) throw new MaxProviderError(retryAfterSeconds(response))
+      if (!response.ok) throw new MaxProviderError(retryAfterSeconds(response), true)
       try {
         return await response.json()
       } catch {
@@ -44,7 +46,7 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       }
     } catch (error) {
       if (error instanceof MaxProviderError) throw error
-      throw new MaxProviderError()
+      throw new MaxProviderError(undefined, true)
     } finally {
       clearTimeout(timeout)
       callerSignal?.removeEventListener('abort', onCallerAbort)

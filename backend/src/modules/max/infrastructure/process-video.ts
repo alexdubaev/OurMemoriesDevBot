@@ -6,6 +6,7 @@ import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createSourceMemoryPublisher } from '../../memories'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { classifyMaxVideoMessage, normalizeVideoDurationMs } from '../application/video-policy'
+import { MaxProviderError } from './max-api'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
@@ -30,7 +31,13 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
     const admission = await findAdmission(prisma, input.event.senderId)
     if (!admission) return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId, deniedText)
 
-    const resolved = await options.api.getMessage(input.event.messageId, input.signal)
+    let resolved
+    try {
+      resolved = await options.api.getMessage(input.event.messageId, input.signal)
+    } catch (error) {
+      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      throw error
+    }
     const attachment = resolved.attachments.length === 1 ? resolved.attachments[0] : null
     if (!attachment || attachment.kind !== 'video' || resolved.messageId !== input.event.messageId ||
       resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
@@ -38,7 +45,13 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
     }
 
-    const video = await options.api.getVideo(attachment.currentToken, input.signal)
+    let video
+    try {
+      video = await options.api.getVideo(attachment.currentToken, input.signal)
+    } catch (error) {
+      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      throw error
+    }
     const rendition = video.renditions
       .filter((candidate) => isAllowedCdnUrl(candidate.url) && isMp4Url(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
       .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0]
@@ -137,4 +150,8 @@ function isExpectedAuthorizationFailure(error: unknown) {
 
 function isUniqueConstraint(error: unknown) {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002'
+}
+
+function isTerminalProviderShape(error: unknown) {
+  return error instanceof MaxProviderError && !error.retryable
 }

@@ -149,6 +149,14 @@ describe('MAX API client', () => {
     }
   })
 
+  test('distinguishes malformed video responses from retryable provider failures', async () => {
+    const malformed = createMaxApi(token, { fetch: async () => response({ urls: { mp4_720: 'http://unsafe.example/video.mp4' } }) })
+    await expect(malformed.getVideo!('rotating/token')).rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+
+    const unavailable = createMaxApi(token, { fetch: async () => { throw new Error('network unavailable') } })
+    await expect(unavailable.getVideo!('rotating/token')).rejects.toMatchObject({ name: 'MaxProviderError', retryable: true })
+  })
+
   test('combines the fixed timeout with caller cancellation', async () => {
     const api = createMaxApi(token, {
       fetch: (_input, init) => new Promise<Response>((_resolve, reject) => {

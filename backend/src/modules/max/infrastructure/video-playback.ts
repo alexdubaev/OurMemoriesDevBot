@@ -2,6 +2,7 @@ import type { BackendRuntime } from '../../../runtime'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { MediaFailure } from '../../media'
 import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
+import { MaxProviderError } from './max-api'
 
 const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
 const maxHeight = 720
@@ -21,14 +22,26 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       if (!reference || reference.source.familyId !== scope.familyId || reference.source.memoryId !== reference.memory.id || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
-      const resolved = await options.api.getMessage(reference.source.messageId, signal)
+      let resolved
+      try {
+        resolved = await options.api.getMessage(reference.source.messageId, signal)
+      } catch (error) {
+        if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+        throw error
+      }
       const current = resolved.attachments[reference.attachmentPosition]
       if (resolved.attachments.length !== 1 || reference.attachmentPosition !== 0 || !current || current.kind !== 'video' || resolved.messageId !== reference.source.messageId ||
         resolved.senderId !== reference.source.senderSubject || resolved.recipientId !== String(reference.source.recipientId) ||
         current.providerAttachmentId !== reference.providerAttachmentId) throw new MediaFailure('not_found', 'Медиа не найдено')
 
       if (typeof options.api.getVideo !== 'function') throw new MediaFailure('unsupported_media', 'Медиа недоступно')
-      const video = await options.api.getVideo(current.currentToken, signal)
+      let video
+      try {
+        video = await options.api.getVideo(current.currentToken, signal)
+      } catch (error) {
+        if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+        throw error
+      }
       const rendition = selectRendition(video.renditions)
       if (!rendition) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
       return fetchCdnVideo(rendition.url, rangeHeader, method, maxBytes, signal)
@@ -146,4 +159,8 @@ function isAllowedCdnUrl(value: string) {
 
 function isMp4Url(value: string) {
   try { return new URL(value).pathname.toLowerCase().endsWith('.mp4') } catch { return false }
+}
+
+function isTerminalProviderShape(error: unknown) {
+  return error instanceof MaxProviderError && !error.retryable
 }
