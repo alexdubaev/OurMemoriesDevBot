@@ -72,14 +72,14 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
     if (signal?.aborted) throw error
     throw new MediaFailure('storage_unavailable', 'Медиа недоступно')
   }
-  if (response.status >= 300 && response.status < 400) { await cancelBody(response.body); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if (response.status >= 300 && response.status < 400) { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
   if (range && response.status !== 206) {
     const total = response.status === 416 ? parseUnsatisfiedContentRange(response.headers.get('content-range')) : null
-    await cancelBody(response.body)
+    await cancelBody(response.body, signal)
     throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', total === null ? undefined : { total })
   }
-  if (!range && response.status !== 200) { await cancelBody(response.body); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
-  if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await cancelBody(response.body); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if (!range && response.status !== 200) { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
 
   const contentLength = parseLength(response.headers.get('content-length'))
   const contentRange = parseContentRange(response.headers.get('content-range'))
@@ -88,19 +88,24 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
     (range && (!contentRange || (range.start !== null && contentRange.start !== range.start) ||
       (range.end !== null && range.start !== null && contentRange.end > range.end) ||
       (range.start === null && range.end !== null && contentLength > range.end) || contentRange.end - contentRange.start + 1 !== contentLength))) {
-    await cancelBody(response.body)
+    await cancelBody(response.body, signal)
     throw new MediaFailure('unsupported_media', 'Медиа недоступно')
   }
   if (method === 'HEAD') {
-    await cancelBody(response.body)
+    await cancelBody(response.body, signal)
     return { body: null, contentType: 'video/mp4', contentLength: total, bodyLength: contentLength, range: range ? { start: contentRange!.start, end: contentRange!.end, total: contentRange!.total } : null }
   }
   if (!response.body) throw new MediaFailure('storage_unavailable', 'Медиа недоступно')
   return { body: guardBody(response.body, contentLength, signal), contentType: 'video/mp4', contentLength: total, bodyLength: contentLength, range: range ? { start: contentRange!.start, end: contentRange!.end, total: contentRange!.total } : null }
 }
 
-async function cancelBody(body: ReadableStream<Uint8Array> | null) {
-  try { await body?.cancel() } catch { /* provider cancellation failures stay sanitized */ }
+async function cancelBody(body: ReadableStream<Uint8Array> | null, signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason
+  try { await body?.cancel() } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error
+    /* provider cancellation failures stay sanitized */
+  }
+  if (signal?.aborted) throw signal.reason
 }
 
 function guardBody(body: ReadableStream<Uint8Array>, expectedBytes: number, signal?: AbortSignal) {

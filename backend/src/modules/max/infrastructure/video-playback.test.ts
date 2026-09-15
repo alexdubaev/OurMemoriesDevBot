@@ -96,6 +96,29 @@ describe('MAX guarded video transport', () => {
     } finally { globalThis.fetch = originalFetch }
   })
 
+  test('preserves caller abort reason when cancellation overlaps a rejected CDN response', async () => {
+    const originalFetch = globalThis.fetch
+    const controller = new AbortController()
+    const callerError = new Error('caller-aborted')
+    let cancellationStarted!: () => void
+    let finishCancellation!: () => void
+    const cancellationHasStarted = new Promise<void>((resolve) => { cancellationStarted = resolve })
+    const cancellationResult = new Promise<void>((_resolve, reject) => { finishCancellation = () => reject(new Error('signed-url-token-leaked')) })
+    globalThis.fetch = (async () => new Response(new ReadableStream({
+      cancel() {
+        cancellationStarted()
+        return cancellationResult
+      },
+    }), { status: 302, headers: { location: 'https://maxvd1.okcdn.ru/next.mp4' } })) as unknown as typeof fetch
+    try {
+      const request = fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', undefined, 'GET', 250, controller.signal)
+      await cancellationHasStarted
+      controller.abort(callerError)
+      finishCancellation()
+      await expect(request).rejects.toBe(callerError)
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('checks family membership before loading the MAX reference or calling the provider', async () => {
     let providerCalls = 0
     const playback = createMaxVideoPlayback({
