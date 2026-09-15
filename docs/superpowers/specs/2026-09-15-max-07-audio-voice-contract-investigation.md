@@ -1,6 +1,6 @@
 # MAX-07 AUDIO/VOICE — bounded contract investigation
 
-**Status:** BLOCKED — live representation not established
+**Status:** COMPLETE — native voice contract insufficient; owner decision required
 
 **Date:** 2026-09-15
 
@@ -52,36 +52,41 @@ Sources checked:
   retention, and deletion rules.
 - Whether native voice and uploaded audio/file have the same representation.
 
-## Required live evidence
+## Live native-voice probe result
 
-After the SSH host key is independently re-verified by the owner, establish a fresh read-only
-baseline and ask the owner to send two separate synthetic direct messages to the existing MAX bot:
+The owner independently corrected and approved the authoritative staging ED25519 fingerprint as
+`SHA256:zILDJSWxr8AxhBdQHRDk/aD5YCEChk2eWINNmgFULZI`. A fresh scan matched it exactly. The protected
+secret source was a non-empty regular `root:root` file with mode `600`; its value was not printed.
+`GET /me` and `GET /subscriptions` returned 200, the expected bot identity was confirmed, and there
+were zero active subscriptions. No subscription or webhook was changed.
 
-1. one short native voice recording;
-2. one short synthetic audio file through the normal MAX attachment UI, if that UI exposes it.
+The fresh `GET /updates` baseline marker was `10503`. After the owner sent one synthetic native voice
+recording, reading from that marker returned exactly one new event and next marker `10505`:
 
-For each new exact message `mid`, inspect the redacted inbound shape and repeat
-`GET /messages?message_ids=<URL-encoded-mid>`. Record attachment count, position, type, stable ID,
-MIME, duration, size, and presence/rotation of transient token/URL. Do not fetch media bytes or call
-an undocumented resolver during this contract-only probe.
+- `update_type = message_created`;
+- event keys were exactly `timestamp`, `update_type`, and `user_locale`;
+- the event contained no `message`, `body`, `mid`, or attachments.
 
-## Current blocker
+The same marker was read repeatedly, both with and without a `types=message_created` filter, and
+returned the same incomplete shape. Because no `mid` was delivered, an exact `GET /messages`
+lookup could not be formed. Consequently the probe cannot establish attachment type, stable
+attachment identity, token/URL behavior, MIME, codec/container, duration, repeated message lookup,
+late retrieval/redelivery, or a resolver contract.
 
-The owner-approved staging ED25519 fingerprint is
-`SHA256:zILDJSwxr8AxhBdQHRDk/aD5YCEChk2eW1NNmgFULZI`. On 2026-09-15 both the existing `known_hosts`
-entry and a fresh `ssh-keyscan -t ed25519 136.234.5.56` produced
-`SHA256:zILDJSWxr8AxhBdQHRDk/aD5YCEChk2eWINNmgFULZI`. The comparison was case-sensitive and did not
-match. Per the owner's explicit SSH rule, no SSH connection, secret-source inspection, or MAX API
-call was made.
+## Verdict
 
-The owner must independently verify the currently presented fingerprint through the Selectel
-console and explicitly approve it before the live baseline can continue. Do not replace or bypass
-strict host-key checking.
+The observed native voice contract is not sufficient for a reliable memoLy MVP integration. There
+is no stable reference or safe retrieval boundary to implement from this event, and inferring
+generic audio or video semantics would be guesswork. Native MAX voice should remain unsupported
+unless MAX documents/fixes the event or provides a supported way to recover its message identity.
+
+An ordinary MP3/M4A attachment probe is optional follow-up for a distinct `audio` feature. It is not
+a blocker for this native-voice verdict and no conclusion about ordinary attached audio is made.
 
 ## Architecture decision after evidence
 
-Prefer the existing private voice `MediaAsset` pipeline only if a documented/observed MAX contract
-provides safely retrievable audio bytes and the original-storage requirement can be met. A
-provider-owned reference is eligible only if its resolver and lifecycle are established and the
-owner explicitly accepts the different retention policy. Otherwise keep MAX audio/voice
-unsupported.
+Recommended owner decision: keep native MAX voice unsupported for this MVP and consider a concise
+MAX support request about the incomplete `message_created` payload. Prefer the existing private
+voice `MediaAsset` pipeline only if a future documented/observed contract provides safely
+retrievable bytes and satisfies the original-storage requirement. A provider-owned reference is
+eligible only if its resolver and lifecycle are separately established and approved.
