@@ -1,4 +1,5 @@
 import type { MemoryKind } from '../../../generated/prisma/enums'
+import { Prisma } from '../../../generated/prisma/client'
 import type { DbClient } from '../../../db'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
@@ -32,6 +33,7 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
           if (existing.childId !== input.childId || existing.kind !== input.kind) {
             throw new MemoryFailure('invalid_input', 'Источник не соответствует сохранённому воспоминанию')
           }
+          await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
           await reconcileOrderedMedia(tx, scope.familyId, existing.id, existing.media.map(({ mediaId }) => mediaId), input.mediaIds)
           await afterWrite?.(tx, existing.id)
           return existing.id
@@ -39,6 +41,7 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         const child = await tx.child.findFirst({ where: { id: input.childId, familyId: scope.familyId }, select: { id: true } })
         if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
         if (input.kind === 'note' && input.mediaIds.length !== 0) throw new MemoryFailure('invalid_input', 'У заметки не бывает вложений')
+        if (input.kind !== 'note') await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
         if (input.kind !== 'note' && !(await readyMediaCount(tx, scope.familyId, input.mediaIds))) {
           throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
         }
@@ -76,6 +79,7 @@ async function reconcileOrderedMedia(
   linkedIds: string[],
   mediaIds: string[],
 ) {
+  await lockMediaAssetsForUpdate(tx, familyId, mediaIds)
   const newlyAttached = mediaIds.filter((id) => !linkedIds.includes(id))
   if (!(await readyMediaCount(tx, familyId, newlyAttached))) {
     throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
@@ -100,6 +104,17 @@ async function readyMediaCount(
     id: { in: unique }, familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
     memories: { none: {} },
   } })) === unique.length
+}
+
+async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string, mediaIds: string[]) {
+  const unique = [...new Set(mediaIds)].sort()
+  if (unique.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM media_assets
+     WHERE family_id = ${familyId}::uuid
+       AND id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
 }
 
 async function lockFullMember(tx: PrismaTransactionClient, scope: FamilyScope) {

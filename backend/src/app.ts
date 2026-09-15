@@ -23,7 +23,7 @@ import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
 import { createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
-import { createMediaModule } from './modules/media'
+import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
 import {
@@ -46,6 +46,8 @@ type CreateAppOptions = {
   /** Test-only compatibility for legacy auth regression suites; production rejects it. */
   legacyPasswordAuthForTests?: boolean
   telegramRoutes?: import('hono').Hono | null
+  maxRoutes?: import('hono').Hono | null
+  maxVideoPlayback?: MaxVideoPlayback
 }
 
 export function createApp({
@@ -56,6 +58,8 @@ export function createApp({
   privateStorage,
   legacyPasswordAuthForTests = false,
   telegramRoutes = null,
+  maxRoutes = null,
+  maxVideoPlayback,
 }: CreateAppOptions) {
   if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
     throw new Error('Legacy password auth test routes cannot be mounted in production')
@@ -71,7 +75,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
   })
   const media = createMediaModule({ db: prisma, env, familyAccess: families.access,
-    authenticateMediaAccess: auth.authenticateMediaAccess, requireAuth: auth.requireAuth, storage: storage.storage })
+    authenticateMediaAccess: auth.authenticateMediaAccess, requireAuth: auth.requireAuth, storage: storage.storage, maxVideoPlayback })
   const memories = createMemoriesModule({
     db: prisma,
     idempotencyExecutor,
@@ -194,6 +198,7 @@ export function createApp({
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
   if (telegramRoutes) app.route('/', telegramRoutes)
+  if (maxRoutes) app.route('/', maxRoutes)
 
   // Only the filesystem driver needs the backend to serve the URLs it signs. With an S3 driver
   // the browser uploads straight to the bucket and there is nothing to mount here.

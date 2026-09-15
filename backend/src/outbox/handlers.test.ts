@@ -7,6 +7,14 @@ import type { TaskHandlerRegistry } from './handlers'
 const registry = { 'test:work': { run: async () => undefined } } satisfies TaskHandlerRegistry
 
 describe('the task type registry', () => {
+  test('registers MAX processing and independent response delivery lazily', () => {
+    expect(isTaskType('max:process')).toBe(true)
+    expect(isTaskType('max:deliver-response')).toBe(true)
+    expect(taskHandlers['max:process']!.maxAttempts).toBe(5)
+    expect(taskHandlers['max:deliver-response']!.deadlineMs).toBe(30_000)
+    expect(taskHandlers['max:deliver-response']!.retryDelayMs!({ retryAfterSeconds: 17 }, 1)).toBe(17_000)
+  })
+
   test('uses Telegram retry_after and the 5/30/120/600 second fallback schedule', () => {
     const retry = taskHandlers['telegram:process'].retryDelayMs!
     expect(retry({}, 1)).toBe(5_000)

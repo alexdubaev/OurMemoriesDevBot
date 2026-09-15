@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -7,8 +7,8 @@ import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
-import { AuthContext } from '@/features/auth'
-import { BootPreloader, decideStartupRoute, shouldKeepTelegramAuthPreloader, shouldStartTelegramAuth } from '@/features/app'
+import { AuthContext, shouldKeepHostAuthPreloader, useHostAuthHandoff, type HostAuthProvider } from '@/features/auth'
+import { BootPreloader, decideStartupRoute } from '@/features/app'
 import {
   acceptInvite,
   createFamilyBootstrap,
@@ -32,33 +32,26 @@ export type AppProps = { hostBridge: HostBridge }
 
 export default function App({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
-  const telegramAttempted = useRef(false)
-  const [telegramError, setTelegramError] = useState<Error | null>(null)
-  const [hasStartedTelegramAuth, setHasStartedTelegramAuth] = useState(false)
-  const [isTelegramAuthPending, setIsTelegramAuthPending] = useState(false)
-  const initData = hostBridge.initData()
-  const telegramAuthState = useMemo(() => auth ? {
-    hasStartedTelegramAuth,
+  const hostAuthProvider: HostAuthProvider | null = hostBridge.kind === 'max' || hostBridge.kind === 'telegram'
+    ? hostBridge.kind
+    : null
+  const initData = hostBridge.rawAuthData()
+  const { authAttemptKey, hostAuthError, hasStartedHostAuth, isHostAuthPending, resetHostAuth, startedHostAuthKey } = useHostAuthHandoff({
+    auth,
+    initData,
+    isHostAvailable: hostBridge.isAvailable,
+    provider: hostAuthProvider,
+  })
+  const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
+    provider: hostAuthProvider,
+    hasStartedAuth: startedHostAuthKey === authAttemptKey,
+    hasPreviousAuthAttempt: hasStartedHostAuth,
     hasInitData: Boolean(initData),
     isAuthenticated: auth.isAuthenticated,
     isAuthBootstrapping: auth.isBootstrapping,
-    isTelegramAuthPending,
-    isTelegramAvailable: hostBridge.isAvailable,
-  } : null, [auth, hasStartedTelegramAuth, initData, isTelegramAuthPending, hostBridge.isAvailable])
-
-  useEffect(() => {
-    if (!auth || !initData || !shouldStartTelegramAuth(telegramAuthState!)) return
-    telegramAttempted.current = true
-    queueMicrotask(() => {
-      setHasStartedTelegramAuth(true)
-      setIsTelegramAuthPending(true)
-      void auth.authenticateTelegram(initData)
-        .catch((error: unknown) => {
-          setTelegramError(error instanceof Error ? error : new Error('Не удалось войти через Telegram.'))
-        })
-        .finally(() => setIsTelegramAuthPending(false))
-    })
-  }, [auth, hostBridge, initData, telegramAuthState])
+    isAuthPending: isHostAuthPending,
+    isHostAvailable: hostBridge.isAvailable,
+  } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, startedHostAuthKey, hostBridge.isAvailable])
 
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
@@ -69,19 +62,16 @@ export default function App({ hostBridge }: AppProps) {
     '--host-inset-right': `${insets.right}px`,
     '--host-inset-top': `${insets.top}px`,
   } as CSSProperties
-  if (!auth || auth.isBootstrapping || (telegramAuthState && shouldKeepTelegramAuthPreloader(telegramAuthState))) return <BootPreloader style={style} />
+  if (!auth || auth.isBootstrapping || (hostAuthState && shouldKeepHostAuthPreloader(hostAuthState))) return <BootPreloader style={style} />
   if (!auth.user) {
     return (
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
         <BrandLogo className="w-[148px]" />
         <div className="mt-8"><InlineError onRetry={() => {
-          telegramAttempted.current = false
-          setTelegramError(null)
-          setHasStartedTelegramAuth(false)
-          setIsTelegramAuthPending(false)
+          resetHostAuth()
           void auth.retrySession()
         }} /></div>
-        {telegramError ? <Typography className="mt-3" tone="muted" variant="memoryMeta">Проверьте соединение и повторите попытку.</Typography> : null}
+        {hostAuthError ? <Typography className="mt-3" tone="muted" variant="memoryMeta">Проверьте соединение и повторите попытку.</Typography> : null}
       </main>
     )
   }
@@ -188,7 +178,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (screen === 'feed') {
     return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
   }
-  return <div style={insetsStyle}><FamilyScreen currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
+  return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }
 
 function InvitePreview({ preview, style, onAccept }: { preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {

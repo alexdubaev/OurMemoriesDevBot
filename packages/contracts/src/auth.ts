@@ -31,6 +31,12 @@ export const telegramAuthRequestSchema = z
   })
   .strict()
 
+export const maxAuthRequestSchema = z
+  .object({
+    initData: z.string().min(1).max(16_384),
+  })
+  .strict()
+
 export const registerRequestSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
@@ -87,6 +93,7 @@ export const meResponseSchema = z.object({
 
 export type UserDto = z.infer<typeof userSchema>
 export type TelegramAuthRequest = z.infer<typeof telegramAuthRequestSchema>
+export type MaxAuthRequest = z.infer<typeof maxAuthRequestSchema>
 export type UserRole = z.infer<typeof userRoleSchema>
 export type RegisterRequest = z.input<typeof registerRequestSchema>
 export type RegisterPayload = z.output<typeof registerRequestSchema>

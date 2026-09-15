@@ -1,6 +1,7 @@
 import type { MediaAssetDto, MediaVariant } from '@web-app-demo/contracts'
 
 import type { DbClient } from '../../../db'
+import { Prisma } from '../../../generated/prisma/client'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import type { FamilyScope } from '../../families'
@@ -63,13 +64,13 @@ export class PrismaMediaRepository implements MediaRepository {
     })
   }
 
-  async findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null> {
+  async findTrustedIngestion(scope: FamilyScope, assetId: string, sourceKind: 'telegram' | 'max'): Promise<FinalizePreparation | null> {
     const asset = await this.db.mediaAsset.findFirst({
       where: {
         id: assetId,
         familyId: scope.familyId,
         uploaderId: scope.principal.userId,
-        sourceKind: 'telegram',
+        sourceKind,
         purpose: 'memory',
       },
       include: { variants: true, reservation: true },
@@ -84,8 +85,36 @@ export class PrismaMediaRepository implements MediaRepository {
     return { kind: 'pending', upload: pendingDto({ ...asset.reservation, asset }) }
   }
 
+  async findTelegramIngestion(scope: FamilyScope, assetId: string) {
+    return this.findTrustedIngestion(scope, assetId, 'telegram')
+  }
+
+  async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now: Date }) {
+    const unique = [...new Set(input.assetIds)]
+    if (unique.length === 0) return
+    await this.db.$transaction(async (tx) => {
+      const candidates = await tx.mediaAsset.findMany({ where: {
+        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory',
+      }, select: { familyId: true } })
+      const familyIds = [...new Set(candidates.map(({ familyId }) => familyId))].sort()
+      await lockFamiliesForUpdate(tx, familyIds)
+      await lockMediaAssetsForUpdate(tx, familyIds, unique)
+      const assets = await tx.mediaAsset.findMany({ where: {
+        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
+      }, select: { id: true, originalStatus: true } })
+      for (const asset of assets) {
+        if (asset.originalStatus === 'pending') await abandon(tx, asset.id, input.now, input.sourceKind)
+        else if (asset.originalStatus === 'stored') {
+          const changed = await tx.mediaAsset.updateMany({ where: { id: asset.id, sourceKind: input.sourceKind, purpose: 'memory', deletedAt: null, memories: { none: {} }, originalStatus: 'stored' }, data: { deletedAt: input.now } })
+          if (changed.count === 1) await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`, payload: { mediaId: asset.id }, scheduledFor: input.now })
+        }
+      }
+    })
+  }
+
   async prepareFinalize(scope: FamilyScope, uploadId: string, now: Date): Promise<FinalizePreparation> {
     return this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, scope.familyId)
       const reservation = await reservationFor(tx, scope, uploadId)
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, scope)
@@ -104,6 +133,7 @@ export class PrismaMediaRepository implements MediaRepository {
 
   async rejectUpload(scope: FamilyScope, uploadId: string, now: Date) {
     await this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, scope.familyId)
       const reservation = await reservationFor(tx, scope, uploadId)
       if (reservation && !reservation.releasedAt) await abandon(tx, reservation.mediaId, now)
     })
@@ -123,6 +153,7 @@ export class PrismaMediaRepository implements MediaRepository {
     now: Date
   }): Promise<FinalizeCommit> {
     return this.db.$transaction(async (tx) => {
+      await lockFamilyRow(tx, input.scope.familyId)
       const reservation = await reservationFor(tx, input.scope, input.uploadId)
       if (!reservation) throw new MediaFailure('not_found', 'Загрузка не найдена')
       const access = await lockFamilyAndMember(tx, input.scope)
@@ -253,7 +284,9 @@ async function lockFamilyAndMember(tx: PrismaTransactionClient, scope: FamilySco
   return rows[0] ?? null
 }
 
-async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date) {
+async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date, sourceKind?: 'telegram' | 'max') {
+  const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, ...(sourceKind ? { sourceKind } : {}), originalStatus: 'pending', deletedAt: null, memories: { none: {} } }, data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' } })
+  if (marked.count !== 1) return false
   const reservation = await tx.uploadReservation.findFirst({ where: { mediaId } })
   if (reservation && !reservation.releasedAt) {
     const released = await tx.uploadReservation.updateMany({
@@ -264,13 +297,38 @@ async function abandon(tx: PrismaTransactionClient, mediaId: string, now: Date) 
         data: { storageReservedBytes: { decrement: reservation.bytes } } })
     }
   }
-  await tx.mediaAsset.updateMany({
-    where: { id: mediaId, deletedAt: null, originalStatus: 'pending' },
-    data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' },
-  })
   await insertTask(tx, {
     type: 'media:delete', dedupeKey: `media-delete:${mediaId}`, payload: { mediaId }, scheduledFor: now,
   })
+  return true
+}
+
+async function lockFamilyRow(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string) {
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM families WHERE id = ${familyId}::uuid FOR UPDATE
+  `)
+}
+
+async function lockFamiliesForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyIds: string[]) {
+  const unique = [...new Set(familyIds)].sort()
+  if (unique.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM families
+     WHERE id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
+}
+
+async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyIds: string[], mediaIds: string[]) {
+  const unique = [...new Set(mediaIds)].sort()
+  const families = [...new Set(familyIds)].sort()
+  if (unique.length === 0 || families.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM media_assets
+     WHERE family_id IN (${Prisma.join(families.map((id) => Prisma.sql`${id}::uuid`))})
+       AND id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
 }
 
 function pendingDto(reservation: Awaited<ReturnType<typeof reservationFor>> & {}) : PendingMediaUpload {

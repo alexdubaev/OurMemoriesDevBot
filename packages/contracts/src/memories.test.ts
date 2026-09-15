@@ -4,6 +4,7 @@ import {
   createMemoryRequestSchema,
   listMemoriesQuerySchema,
   mediaDtoSchema,
+  maxVideoAttachmentSchema,
   memoryDtoSchema,
   telegramVideoAttachmentSchema,
 } from './memories'
@@ -140,5 +141,16 @@ describe('memory contracts', () => {
     expect(telegramVideoAttachmentSchema.parse(attachment)).toEqual(attachment)
     expect(() => telegramVideoAttachmentSchema.parse({ ...attachment, fileId: 'private-file-id' })).toThrow()
     expect(() => telegramVideoAttachmentSchema.parse({ ...attachment, playbackPath: '/api/v1/families/018f01d8-0c2a-7c25-bf83-ae68985c7e91/media/018f01d8-0c2a-7c25-bf83-ae68985c7e95/content?variant=playback' })).toThrow()
+  })
+
+  test('represents MAX video with only an opaque reference and memoLy playback path', () => {
+    const attachment = {
+      id: '018f01d8-0c2a-7c25-bf83-ae68985c7e96',
+      source: 'max', kind: 'video', width: 1280, height: 720, durationMs: 7_000,
+      playbackPath: '/api/v1/families/018f01d8-0c2a-7c25-bf83-ae68985c7e91/media/max-videos/018f01d8-0c2a-7c25-bf83-ae68985c7e96/content',
+    } as const
+    expect(maxVideoAttachmentSchema.parse(attachment)).toEqual(attachment)
+    expect(() => maxVideoAttachmentSchema.parse({ ...attachment, token: 'rotating' })).toThrow()
+    expect(() => maxVideoAttachmentSchema.parse({ ...attachment, playbackPath: 'https://maxvd1.okcdn.ru/video.mp4' })).toThrow()
   })
 })

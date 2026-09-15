@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { createHash } from 'node:crypto'
+import { Prisma } from '../../generated/prisma/client'
 import { createWriteStream } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,12 +20,14 @@ import { probeMediaWithRunner } from './infrastructure/media-probe'
 import { assertFfmpegCapabilities, createFfmpegRunner } from './infrastructure/ffmpeg-runner'
 import { prepareMedia } from './infrastructure/media-processor'
 import { createMediaRoutes } from './transport/routes'
+import type { MaxVideoPlayback } from './application/ports'
+export type { MaxVideoPlayback } from './application/ports'
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
   authenticateMediaAccess: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>
-  requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage }) {
+  requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage; maxVideoPlayback?: MaxVideoPlayback }) {
   const service = createMediaService(options)
-  return { routes: createMediaRoutes({ authenticateMediaAccess: options.authenticateMediaAccess, cookieSecure: options.env.COOKIE_SECURE, requireAuth: options.requireAuth, service }), service }
+  return { routes: createMediaRoutes({ authenticateMediaAccess: options.authenticateMediaAccess, cookieSecure: options.env.COOKIE_SECURE, requireAuth: options.requireAuth, service, maxVideoPlayback: options.maxVideoPlayback }), service }
 }
 
 export function createMediaService(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
@@ -50,13 +53,32 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
     async deleteAsset({ mediaId }: { mediaId: string }) {
       const asset = await runtime.prisma.mediaAsset.findUnique({ where: { id: mediaId }, include: { variants: true } })
       if (!asset || asset.storageDeletedAt || !asset.deletedAt) return
-      for (const key of [asset.originalKey, ...asset.variants.map(({ objectKey }) => objectKey)]) {
+      const keys = [asset.originalKey, ...asset.variants.map(({ objectKey }) => objectKey)]
+      if (asset.mediaKind === 'photo') keys.push(
+        asset.originalKey.replace('media-originals/', 'media-display/'),
+        asset.originalKey.replace('media-originals/', 'media-preview/'),
+      )
+      for (const key of new Set(keys)) {
         await runtime.privateStorage.storage.deleteObject(key)
       }
       await runtime.prisma.$transaction(async (tx) => {
-        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null }, data: { storageDeletedAt: new Date() } })
-        if (marked.count === 1 && asset.originalStatus === 'stored') {
-          await tx.family.update({ where: { id: asset.familyId }, data: { storageUsedBytes: { decrement: asset.byteSize } } })
+        if (typeof tx.$queryRaw === 'function') {
+          await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM families WHERE id = ${asset.familyId}::uuid FOR UPDATE
+          `)
+          await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM media_assets
+             WHERE id = ${mediaId}::uuid AND family_id = ${asset.familyId}::uuid
+             FOR UPDATE
+          `)
+        }
+        const current = typeof tx.mediaAsset.findUnique === 'function'
+          ? await tx.mediaAsset.findUnique({ where: { id: mediaId } })
+          : asset
+        if (!current || current.storageDeletedAt || !current.deletedAt) return
+        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null, deletedAt: { not: null } }, data: { storageDeletedAt: new Date() } })
+        if (marked.count === 1 && current.originalStatus === 'stored') {
+          await tx.family.update({ where: { id: current.familyId }, data: { storageUsedBytes: { decrement: current.byteSize } } })
         }
       })
     },

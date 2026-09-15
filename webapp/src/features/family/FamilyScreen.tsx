@@ -8,7 +8,6 @@ import { Typography } from '@/components/typography'
 import { InlineError } from '@/features/feed'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
-import { createInviteLink } from './invite-link'
 import { formatChildAge, familyMemberName, roleLabel } from './model'
 import { ChildAvatar } from './ChildAvatar'
 import { useChildAvatar } from './useChildAvatar'
@@ -22,6 +21,7 @@ export function FamilyScreen({
   onEditChild,
   onFeed,
   onRefresh,
+  createInviteLink,
 }: {
   familyResponse: FamilyResponse
   invites: FamilyInviteDto[]
@@ -31,6 +31,7 @@ export function FamilyScreen({
   onEditChild: () => void
   onFeed: () => void
   onRefresh: () => Promise<void>
+  createInviteLink: (rawToken: string) => string | null
 }) {
   const [inviteRole, setInviteRole] = useState<'viewer' | 'full'>('viewer')
   const [inviteAlias, setInviteAlias] = useState('')
@@ -121,7 +122,9 @@ export function FamilyScreen({
                   role: inviteRole,
                   inviteeDisplayName: inviteAlias || undefined,
                 })
-                setInviteReady({ url: createInviteLink(invitation.rawToken), expiresAt: invitation.expiresAt })
+                const url = createInviteLink(invitation.rawToken)
+                if (!url) throw new Error('Не удалось создать ссылку приглашения.')
+                setInviteReady({ url, expiresAt: invitation.expiresAt })
                 setInviteAlias('')
                 setInviteRole('viewer')
               })} type="button">

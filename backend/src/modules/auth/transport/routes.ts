@@ -4,6 +4,7 @@ import {
   cookieLogoutRequestSchema,
   cookieRefreshRequestSchema,
   cookieRefreshResponseSchema,
+  maxAuthRequestSchema,
   telegramAuthRequestSchema,
 } from '@web-app-demo/contracts'
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
@@ -15,6 +16,7 @@ import { AppError, validationErrorHook } from '../../../http/errors'
 import { clientAddress } from '../../../http/security'
 import type { AuthService } from '../application/auth-service'
 import type { TelegramAuthService } from '../application/telegram-auth-service'
+import type { MaxAuthService } from '../application/max-auth-service'
 import { executeAuth } from './errors'
 import type { AuthHttpEnv } from './middleware'
 
@@ -57,6 +59,22 @@ const refreshRoute = createRoute({
   },
 })
 
+const maxRoute = createRoute({
+  method: 'post',
+  path: '/auth/max',
+  request: { body: { content: { 'application/json': { schema: maxAuthRequestSchema } } } },
+  responses: {
+    ...authWriteErrorResponses,
+    200: {
+      content: { 'application/json': { schema: cookieAuthResponseSchema } },
+      description: 'Verified MAX identity and application session',
+    },
+    422: { content: errorResponseContent, description: 'Invalid payload' },
+    401: { content: errorResponseContent, description: 'Invalid, expired, or replayed initData' },
+    403: { content: errorResponseContent, description: 'Untrusted browser origin' },
+  },
+})
+
 const logoutRoute = createRoute({
   method: 'post',
   path: '/auth/logout',
@@ -73,14 +91,27 @@ type CreateAuthRoutesOptions = {
   env: AppEnv
   service: AuthService
   telegramService: TelegramAuthService
+  maxService: MaxAuthService
 }
 
-export function createAuthRoutes({ env, service, telegramService }: CreateAuthRoutesOptions) {
+export function createAuthRoutes({ env, service, telegramService, maxService }: CreateAuthRoutesOptions) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
 
   routes.openapi(telegramRoute, async (c) => {
     assertTrustedCookieOrigin(c, env)
     const result = await executeAuth(() => telegramService.exchange(
+      c.req.valid('json').initData,
+      getRefreshCookie(c),
+      requestMetadata(c, env),
+    ))
+    if (result.refreshTokenToSet) setRefreshCookie(c, result.refreshTokenToSet, env)
+    const { refreshTokenToSet: _refreshTokenToSet, ...response } = result
+    return c.json(response, 200)
+  })
+
+  routes.openapi(maxRoute, async (c) => {
+    assertTrustedCookieOrigin(c, env)
+    const result = await executeAuth(() => maxService.exchange(
       c.req.valid('json').initData,
       getRefreshCookie(c),
       requestMetadata(c, env),

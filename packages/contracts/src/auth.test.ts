@@ -17,6 +17,7 @@ import {
   tokenLogoutRequestSchema,
   tokenRefreshRequestSchema,
   tokenRefreshResponseSchema,
+  maxAuthRequestSchema,
   telegramAuthRequestSchema,
   userSchema,
 } from './index'
@@ -30,6 +31,15 @@ const validUser = {
 } satisfies UserDto
 
 describe('auth contracts', () => {
+  test('accepts only raw MAX initData for the public authentication exchange', () => {
+    expect(maxAuthRequestSchema.parse({ initData: 'auth_date=1&user=%7B%7D&hash=abc' })).toEqual({
+      initData: 'auth_date=1&user=%7B%7D&hash=abc',
+    })
+    expect(() => maxAuthRequestSchema.parse({ initData: '' })).toThrow()
+    expect(() => maxAuthRequestSchema.parse({ initData: 'valid', userId: '123' })).toThrow()
+    expect(() => maxAuthRequestSchema.parse({ initData: 'x'.repeat(16_385) })).toThrow()
+  })
+
   test('accepts only raw Telegram initData for the public authentication exchange', () => {
     expect(telegramAuthRequestSchema.parse({ initData: 'query_id=q&auth_date=1&hash=h' })).toEqual({
       initData: 'query_id=q&auth_date=1&hash=h',

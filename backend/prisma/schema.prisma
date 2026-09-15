@@ -58,6 +58,119 @@ model TelegramAuthReplay {
   @@map("telegram_auth_replays")
 }
 
+model MaxAuthReplay {
+  fingerprintHash String       @id @map("fingerprint_hash")
+  sessionId       String?      @map("session_id") @db.Uuid
+  expiresAt       DateTime     @map("expires_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  session         AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "max_auth_replays_session_id_fkey")
+
+  @@index([expiresAt], map: "max_auth_replays_expires_at_idx")
+  @@map("max_auth_replays")
+}
+
+/// Encrypted, durable MAX ingress. Only the normalized event is stored in the temporary payload;
+/// its event key remains permanently for provider-event deduplication.
+model MaxInbox {
+  id                String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventKey          String             @unique(map: "max_inbox_event_key_key") @map("event_key")
+  botId             BigInt             @map("bot_id")
+  eventKind         MaxInboxEventKind  @map("event_kind")
+  encryptedPayload  Bytes              @map("encrypted_payload")
+  encryptionIv      Bytes              @map("encryption_iv")
+  encryptionAuthTag Bytes              @map("encryption_auth_tag")
+  status            MaxInboxStatus     @default(accepted)
+  receivedAt        DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
+  source            MaxSource?
+  responses         MaxOutgoingResponse[]
+
+  @@index([status, receivedAt], map: "max_inbox_processing_idx")
+  @@map("max_inbox")
+}
+
+model MaxSource {
+  id              String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  inboxId         String           @unique(map: "max_sources_inbox_id_key") @map("inbox_id") @db.Uuid
+  botId           BigInt           @map("bot_id")
+  senderSubject   String           @map("sender_subject")
+  recipientId     BigInt           @map("recipient_id")
+  messageId       String           @map("message_id")
+  status          MaxSourceStatus  @default(accepted)
+  plannedMemoryId String           @map("planned_memory_id") @db.Uuid
+  memoryId        String?          @map("memory_id") @db.Uuid
+  userId          String?          @map("user_id") @db.Uuid
+  familyId        String?          @map("family_id") @db.Uuid
+  childId         String?          @map("child_id") @db.Uuid
+  rejectionCode   String?          @map("rejection_code")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  inbox           MaxInbox         @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_sources_inbox_id_fkey")
+  attachments     MaxSourceAttachment[]
+  videoReference  MaxVideoReference?
+
+  @@unique([botId, recipientId, messageId], map: "max_sources_bot_recipient_message_key")
+  @@unique([id, familyId], map: "max_sources_id_family_id_key")
+  @@index([status, updatedAt], map: "max_sources_status_idx")
+  @@map("max_sources")
+}
+
+model MaxSourceAttachment {
+  id                    String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceId              String                    @map("source_id") @db.Uuid
+  position              Int
+  providerKind          MaxSourceAttachmentKind   @map("provider_kind")
+  providerAttachmentId  String                    @map("provider_attachment_id")
+  plannedMediaId        String                    @unique(map: "max_source_attachments_planned_media_id_key") @map("planned_media_id") @db.Uuid
+  mediaId               String?                   @map("media_id") @db.Uuid
+  status                MaxSourceAttachmentStatus @default(planned)
+  claimToken            String?                   @map("claim_token") @db.Uuid
+  claimUntil            DateTime?                 @map("claim_until") @db.Timestamptz(6)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  source                MaxSource                  @relation(fields: [sourceId], references: [id], onDelete: Cascade, map: "max_source_attachments_source_id_fkey")
+
+  @@unique([sourceId, position], map: "max_source_attachments_source_position_key")
+  @@index([sourceId, providerKind, providerAttachmentId], map: "max_source_attachments_source_kind_provider_idx")
+  @@map("max_source_attachments")
+}
+
+model MaxVideoReference {
+  id                   String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceId             String     @unique(map: "max_video_references_source_id_key") @map("source_id") @db.Uuid
+  memoryId             String     @unique(map: "max_video_references_memory_id_key") @map("memory_id") @db.Uuid
+  familyId             String     @map("family_id") @db.Uuid
+  attachmentPosition   Int        @map("attachment_position")
+  providerAttachmentId String     @map("provider_attachment_id")
+  width                Int?
+  height               Int?
+  durationMs           Int?       @map("duration_ms")
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  source               MaxSource  @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_source_id_family_id_fkey")
+  memory               Memory     @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_memory_id_family_id_fkey")
+
+  @@index([familyId], map: "max_video_references_family_id_idx")
+  @@unique([sourceId, familyId], map: "max_video_references_source_id_family_id_key")
+  @@unique([memoryId, familyId], map: "max_video_references_memory_id_family_id_key")
+  @@map("max_video_references")
+}
+
+model MaxOutgoingResponse {
+  id                 String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  inboxId            String                    @map("inbox_id") @db.Uuid
+  destinationUserId  BigInt                    @map("destination_user_id")
+  kind               MaxOutgoingResponseKind
+  text               String
+  deliveredAt        DateTime?                 @map("delivered_at") @db.Timestamptz(6)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  inbox              MaxInbox                  @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_outgoing_responses_inbox_id_fkey")
+
+  @@unique([inboxId, kind], map: "max_outgoing_responses_inbox_kind_key")
+  @@index([deliveredAt, createdAt], map: "max_outgoing_responses_pending_delivery_idx")
+  @@map("max_outgoing_responses")
+}
+
 /// Encrypted, durable Telegram ingress. The raw Bot API update never enters logs or a public DTO;
 /// only the normalized minimum needed by the worker is encrypted here.
 model TelegramInbox {
@@ -295,6 +408,7 @@ model Memory {
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
   telegramVideoReference TelegramVideoReference?
+  maxVideoReference     MaxVideoReference?
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
@@ -501,6 +615,7 @@ model UploadReservation {
 
 enum ExternalIdentityProvider {
   telegram
+  max
 
   @@map("external_identity_provider")
 }
@@ -541,6 +656,7 @@ enum MemoryStatus {
 enum MediaSourceKind {
   upload
   telegram
+  max
 
   @@map("media_source_kind")
 }
@@ -700,6 +816,55 @@ enum TelegramInboxKind {
   @@map("telegram_inbox_kind")
 }
 
+enum MaxSourceAttachmentKind {
+  image
+  file
+
+  @@map("max_source_attachment_kind")
+}
+
+enum MaxSourceAttachmentStatus {
+  planned
+  processing
+  stored
+  failed
+
+  @@map("max_source_attachment_status")
+}
+
+enum MaxInboxEventKind {
+  message_created
+  bot_started
+
+  @@map("max_inbox_event_kind")
+}
+
+enum MaxInboxStatus {
+  accepted
+  processed
+
+  @@map("max_inbox_status")
+}
+
+enum MaxSourceStatus {
+  accepted
+  published
+  denied
+  unsupported_media
+
+  @@map("max_source_status")
+}
+
+enum MaxOutgoingResponseKind {
+  accepted
+  saved
+  denied
+  unsupported_media
+  welcome
+
+  @@map("max_outgoing_response_kind")
+}
+
 enum TelegramSourceKind {
   note
   photo
@@ -749,6 +914,7 @@ model AuthSession {
   updatedAt                DateTime             @updatedAt @map("updated_at")
   user                     User                 @relation(fields: [userId], references: [id], onDelete: Cascade, map: "auth_sessions_user_id_fkey")
   telegramAuthReplays      TelegramAuthReplay[]
+  maxAuthReplays           MaxAuthReplay[]
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")

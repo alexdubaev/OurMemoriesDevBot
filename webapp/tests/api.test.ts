@@ -120,6 +120,27 @@ test('AuthApi exchanges only Telegram initData and keeps the issued access token
   expect(accessToken).toBe(response.data.accessToken)
 })
 
+test('AuthApi exchanges only MAX raw initData at the MAX endpoint', async () => {
+  let accessToken: string | null = null
+  const rawInitData = 'query_id=max-signed&user=%7B%22id%22%3A1%7D'
+  globalThis.fetch = async (input, init) => {
+    expect(requestPath(input)).toBe('/api/v1/auth/max')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBe(JSON.stringify({ initData: rawInitData }))
+    return json({
+      accessToken: accessTokenFor('max_user', 'fresh'),
+      user: {
+        id: 'max_user', email: null, displayName: 'MAX User', role: 'user',
+        createdAt: '2026-09-10T00:00:00.000Z',
+      },
+    }, 200)
+  }
+  const api = new AuthApi({ getAccessToken: () => accessToken, setAccessToken: (next) => { accessToken = next } })
+  const response = await api.authenticateMax(rawInitData)
+  expect(response.data.user.id).toBe('max_user')
+  expect(accessToken).toBe(response.data.accessToken)
+})
+
 test('AuthApi shares one refresh across concurrent unauthorized requests', async () => {
   const expiredAccessToken = accessTokenFor('user_1', 'expired')
   const freshAccessToken = accessTokenFor('user_1', 'fresh')

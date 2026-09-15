@@ -1,24 +1,15 @@
 import { createApp } from './app'
-import { verifyTelegramBotIdentity } from './modules/auth'
-import { createTelegramApi, createTelegramModule, startTelegramPolling } from './modules/telegram'
+import { startTelegramPolling } from './modules/telegram'
 import { createBackendRuntime } from './runtime'
 import { shutdownBackend } from './shutdown'
+import { startTelegramIfEnabled } from './telegram-startup'
+import { startMaxIfEnabled } from './max-startup'
 
 const runtime = createBackendRuntime()
-let telegram: ReturnType<typeof createTelegramModule> | null = null
-if (runtime.env.TELEGRAM_BOT_TOKEN && runtime.env.NODE_ENV !== 'test') {
-  try {
-    const identity = await verifyTelegramBotIdentity({
-      token: runtime.env.TELEGRAM_BOT_TOKEN,
-      expectedUsername: runtime.env.TELEGRAM_BOT_EXPECTED_USERNAME,
-    })
-    const api = createTelegramApi(runtime.env.TELEGRAM_BOT_TOKEN, runtime.env.TELEGRAM_FILE_MAX_BYTES)
-    telegram = createTelegramModule({ runtime, botId: identity.id, api })
-  } catch (error) {
-    await runtime.close()
-    throw error
-  }
-}
+const telegram = runtime.env.NODE_ENV === 'test'
+  ? null
+  : await startTelegramIfEnabled({ runtime })
+const max = await startMaxIfEnabled({ runtime })
 const app = createApp({
   backgroundTasks: runtime.backgroundTasks,
   emailDelivery: runtime.emailDelivery,
@@ -26,6 +17,8 @@ const app = createApp({
   prisma: runtime.prisma,
   privateStorage: runtime.privateStorage,
   telegramRoutes: telegram?.routes,
+  maxRoutes: max?.routes,
+  maxVideoPlayback: max?.videoPlayback,
 })
 
 const server = Bun.serve({

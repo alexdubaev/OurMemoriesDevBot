@@ -1,32 +1,5 @@
-export type TelegramInsets = { top: number; right: number; bottom: number; left: number }
-
-export type TelegramHostMetadata = {
-  version: string
-  platform: string
-  colorScheme: 'light' | 'dark'
-  safeAreaInset: TelegramInsets
-  contentSafeAreaInset: TelegramInsets
-}
-
-export type HostBridge = {
-  readonly isAvailable: boolean
-  initData(): string | null
-  inviteToken(): string | null
-  metadata(): TelegramHostMetadata | null
-  ready(): void
-  close(): void
-  back(): void
-  onBack(handler: () => void): () => void
-  openBot(): void
-  openTelegramVideo(deepLink: string): boolean
-  openInvite(rawToken: string): void
-  getInsets(): TelegramInsets
-}
-
-export type BrowserDevHostOptions = {
-  colorScheme?: 'light' | 'dark'
-  insets?: Partial<TelegramInsets>
-}
+import type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
+export type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
 
 type TelegramWebApp = {
   initData?: unknown
@@ -60,11 +33,16 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
   const hideBack = backButton?.hide
   const backHandlers = new Set<() => void>()
   return {
+    kind: 'telegram',
     isAvailable: webApp !== null,
     initData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
       ? webApp.initData
       : null,
+    rawAuthData: () => typeof webApp?.initData === 'string' && webApp.initData.length > 0
+      ? webApp.initData
+      : null,
     inviteToken: () => inviteTokenFromInitData(webApp?.initData) ?? inviteTokenFromSearch(browserHost?.location?.search),
+    inviteLink: (rawToken) => createTelegramInviteLink(rawToken),
     metadata: (): TelegramHostMetadata | null => {
       if (!webApp) return null
       return {
@@ -133,9 +111,12 @@ export function createBrowserDevHostBridge(
     contentSafeAreaInset: safeInsets,
   }
   return {
+    kind: 'browser',
     isAvailable: false,
     initData: () => null,
+    rawAuthData: () => null,
     inviteToken: () => null,
+    inviteLink: () => null,
     metadata: () => metadata,
     ready: () => undefined,
     close: () => undefined,
@@ -198,6 +179,13 @@ function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
   return /^[A-Za-z0-9_-]{32,57}$/.test(token) ? token : null
+}
+
+function createTelegramInviteLink(rawToken: string) {
+  if (!/^[A-Za-z0-9_-]{32,57}$/.test(rawToken)) return null
+  const payload = `invite_${rawToken}`
+  if (payload.length > 512) return null
+  return `${botUrl}?startapp=${payload}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

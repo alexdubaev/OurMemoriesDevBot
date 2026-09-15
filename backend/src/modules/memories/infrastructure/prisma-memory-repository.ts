@@ -355,6 +355,9 @@ function memoryInclude() {
     telegramVideoReference: {
       select: { id: true, width: true, height: true, durationMs: true, thumbnailMedia: { select: { id: true, variants: { select: { variant: true } } } } },
     },
+    maxVideoReference: {
+      select: { id: true, width: true, height: true, durationMs: true },
+    },
   } as const
 }
 
@@ -383,6 +386,7 @@ function dto(
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
     telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
+    maxVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null } | null
   },
   principalUserId: string,
   role: MemberRole,
@@ -428,6 +432,15 @@ function dto(
           ? `/api/v1/families/${memory.familyId}/media/${memory.telegramVideoReference.thumbnailMedia.id}/content?variant=display`
           : null,
         openInTelegramPath: `/api/v1/families/${memory.familyId}/memories/${memory.id}/telegram-video`,
+      }] : []),
+      ...(memory.maxVideoReference ? [{
+        id: memory.maxVideoReference.id,
+        source: 'max' as const,
+        kind: 'video' as const,
+        width: memory.maxVideoReference.width,
+        height: memory.maxVideoReference.height,
+        durationMs: memory.maxVideoReference.durationMs,
+        playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${memory.maxVideoReference.id}/content`,
       }] : []),
     ],
     likes: {

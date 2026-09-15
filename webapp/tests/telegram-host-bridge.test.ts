@@ -116,6 +116,14 @@ describe('Telegram HostBridge', () => {
     expect(bridge.inviteToken()).toBe('abcdefghijklmnopqrstuvwxyzABCDEF')
   })
 
+  test('serializes valid opaque invite tokens to the existing Telegram link', () => {
+    const token = 'A'.repeat(32)
+    const bridge = createTelegramHostBridge({ Telegram: { WebApp: {} } })
+    expect(bridge.inviteLink(token)).toBe(`https://t.me/OurMemoriesDevBot?startapp=invite_${token}`)
+    expect(bridge.inviteLink('A'.repeat(31))).toBeNull()
+    expect(bridge.inviteLink('A'.repeat(129))).toBeNull()
+  })
+
   test('reads an opaque start context passed to a Mini App button URL', () => {
     const bridge = createTelegramHostBridge({
       location: { search: '?tgWebAppStartParam=invite_abcdefghijklmnopqrstuvwxyzABCDEF' },
@@ -152,5 +160,6 @@ describe('Telegram HostBridge', () => {
     expect(() => bridge.openBot()).not.toThrow()
     expect(() => bridge.openInvite('opaque-token')).not.toThrow()
     expect(bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).toBe(false)
+    expect(bridge.inviteLink('A'.repeat(32))).toBeNull()
   })
 })

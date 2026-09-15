@@ -6,10 +6,17 @@ import { tmpdir } from 'node:os'
 import sharp from 'sharp'
 
 import { MediaFailure } from './domain/errors'
-import { detectDeclaredMedia, parseSingleRange } from './domain/media-policy'
+import { detectDeclaredMedia, detectPhotoMime, parseSingleRange } from './domain/media-policy'
 import { processPhoto } from './infrastructure/photo-processor'
 
 describe('media policy', () => {
+  test('detects supported photo MIME from magic bytes independently of declared MIME', () => {
+    expect(detectPhotoMime(Uint8Array.of(0xff, 0xd8, 0xff))).toBe('image/jpeg')
+    expect(detectPhotoMime(Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))).toBe('image/png')
+    const webp = new Uint8Array(12); webp.set([...new TextEncoder().encode('RIFF'), 0, 0, 0, 0, ...new TextEncoder().encode('WEBP')])
+    expect(detectPhotoMime(webp)).toBe('image/webp')
+    expect(() => detectPhotoMime(Uint8Array.of(1, 2, 3))).toThrow()
+  })
   test('detects supported magic bytes and never trusts HTML or SVG declarations', () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
     expect(detectDeclaredMedia(png, 'photo', 'image/png')).toBe('image/png')

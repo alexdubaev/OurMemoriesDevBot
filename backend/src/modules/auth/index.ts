@@ -5,11 +5,13 @@ import { drainPassCapacity } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
 import { TelegramAuthService } from './application/telegram-auth-service'
+import { MaxAuthService } from './application/max-auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
 import { toBaseUserDto } from './domain/user'
 import {
   createPrismaAuthRepository,
   createPrismaTelegramAuthRepository,
+  createPrismaMaxAuthRepository,
 } from './infrastructure/auth-repository'
 import { signAccessToken, verifyAccessToken } from './infrastructure/access-tokens'
 import { hashPassword, verifyPassword } from './infrastructure/passwords'
@@ -26,6 +28,7 @@ import {
   hashRefreshTokenFamily,
 } from './infrastructure/refresh-tokens'
 import { verifyTelegramInitData } from './infrastructure/telegram-init-data'
+import { verifyMaxInitData } from './infrastructure/max-init-data'
 import { verifyTelegramBotIdentity } from './infrastructure/telegram-bot-identity'
 import { createRequireAuth, createRequireRole, type AuthHttpEnv } from './transport/middleware'
 import { executeAuth } from './transport/errors'
@@ -59,6 +62,7 @@ export function createAuthModule({
 }: CreateAuthModuleOptions) {
   const service = buildAuthService({ clock, db, emailDelivery, env, logoutCleanup, projectUser })
   const telegramService = buildTelegramAuthService({ clock, db, env, projectUser })
+  const maxService = buildMaxAuthService({ clock, db, env, projectUser })
   const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
 
   return {
@@ -71,8 +75,42 @@ export function createAuthModule({
     legacyTestRoutes: legacyPasswordAuthForTests
       ? createLegacyAuthTestRoutes({ env, requireAuth, service })
       : undefined,
-    routes: createAuthRoutes({ env, service, telegramService }),
+    routes: createAuthRoutes({ env, service, telegramService, maxService }),
   }
+}
+
+function buildMaxAuthService({
+  clock,
+  db,
+  env,
+  projectUser,
+}: Pick<Required<CreateAuthModuleOptions>, 'clock' | 'db' | 'env' | 'projectUser'>) {
+  const sessions = createPrismaAuthRepository(db)
+  return new MaxAuthService({
+    accessTokens: {
+      sign: (payload) => signAccessToken(payload, env),
+      verify: (token) => verifyAccessToken(token, env),
+    },
+    clock,
+    projectUser,
+    refreshReuseGraceSeconds: env.REFRESH_REUSE_GRACE_SECONDS,
+    refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
+    refreshTokens: {
+      create: () => createRefreshToken(env.JWT_SECRET),
+      hash: hashRefreshToken,
+      familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
+      rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
+    },
+    repository: createPrismaMaxAuthRepository(db, sessions),
+    verifyInitData: (rawInitData) => {
+      if (!env.MAX_BOT_TOKEN) throw new Error('MAX authentication is not configured')
+      return verifyMaxInitData(rawInitData, {
+        botToken: env.MAX_BOT_TOKEN,
+        now: clock.now(),
+      })
+    },
+  })
 }
 
 type BuildAuthServiceOptions = Required<Omit<CreateAuthModuleOptions, 'legacyPasswordAuthForTests'>>
