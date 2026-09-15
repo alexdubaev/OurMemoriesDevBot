@@ -2,12 +2,13 @@
 
 Date: 2026-09-15
 Status: APPROVED
-Model/workflow: Codex lead engineer (GPT-5); bounded scout, implementation worker, two fresh independent reviewers
+Model/workflow: Codex lead engineer (GPT-5); bounded scout/worker; fresh independent whole-change reviews; lead adjudication of repeated cancellation findings
 Branch: `feat/max-adapter`
 Worktree: `D:\codex\TG_OurMemoriesDevBot\worktrees\max-adapter`
 Task base: `4b3595d739be144ced9adef437e7d5fec3d83353`
 Video implementation/review head: `c225dc588f8a1a8034f5fb807e94ecc90334f798`
 Owner-decision documentation base: `a7de0d7bd10089ff026f4453078708f354c888cf`
+Final code and verification head: `5ec8965380f8dc9a9fccf3fe767d10aec807c927`
 Origin/main and merge base: `7927c6e11c8444a658c819325c97bc586696778b`
 Publication: local only; not pushed, no PR, no merge, no deployment
 
@@ -77,16 +78,18 @@ was changed.
 
 ## Verification
 
-- Backend unit: 447 passed, 0 failed, 1,316 assertions, exit 0.
-- Contracts plus feed regression: 28 passed, 0 failed, 80 assertions, exit 0.
-- Clean-database MAX capture integration: 38 passed, 0 failed, 218 assertions, exit 0.
-- Clean-database Media integration: 7 passed, 0 failed, 70 assertions, exit 0.
-- Clean migration deploy: all 26 migrations, exit 0.
-- Backend typecheck: PASS, exit 0.
-- Contracts typecheck: PASS, exit 0.
-- Architecture check: PASS, 671 source files, exit 0.
-- Prisma schema validation: PASS, exit 0.
-- `git diff --check`: PASS.
+Final commands on code head `5ec8965380f8dc9a9fccf3fe767d10aec807c927`:
+
+- `bun test backend/src/modules/max/max-api.test.ts backend/src/modules/max/infrastructure/video-playback.test.ts backend/src/modules/max/video-policy.test.ts backend/src/modules/max/update-mapping.test.ts packages/contracts/src/memories.test.ts webapp/tests/feed.test.tsx webapp/tests/playback.test.tsx webapp/tests/voice-waveform.test.ts`: 73 passed, 0 failed, 209 assertions, 8 files, exit 0.
+- `bun run --cwd backend test:unit`: 452 passed, 0 failed, 1,324 assertions, 84 files, exit 0.
+- `bun run --cwd backend test:integration src/modules/max/capture.integration.test.ts src/modules/media/media-access.integration.test.ts src/modules/telegram/capture.integration.test.ts`: MAX 38/38 (218 assertions), Media 7/7 (70 assertions), Telegram 36/36 (221 assertions), exit 0.
+- The integration runner created one disposable PostgreSQL database and `prisma migrate deploy` applied all 26 migrations from empty state, exit 0.
+- `bun run --cwd backend typecheck`: PASS, exit 0.
+- `bun run --cwd packages/contracts typecheck`: PASS, exit 0.
+- `bun run architecture:check`: PASS, 671 source files, exit 0.
+- `bun run --cwd backend prisma:validate`: PASS, exit 0.
+- `git diff --check 4b3595d739be144ced9adef437e7d5fec3d83353...HEAD`: PASS, exit 0.
+- Added-diff secret/forbidden-scope scan: zero non-empty secret assignments, zero Authorization logging, zero Telegram production-file changes, zero historical migration edits, and zero token/URL columns in `MaxVideoReference`; exit 0. Signed-URL pattern matches were confined to synthetic regression fixtures.
 - No visual UI change required screenshots.
 
 An earlier combined integration run completed MAX 36/36 and Media 7/7, then the unchanged Memories
@@ -99,9 +102,21 @@ The first fresh reviewer fixed two P1 and four P2 findings: live `urls.mp4_720` 
 transaction rollback on a lost source transition, bounded rendition selection, exact stream length
 and cancellation, stale attachment-shape rejection, UUID validation, and real-DB video coverage.
 
-The second fresh whole-change reviewer fixed three P2 findings: malformed resolver responses now
+The original second fresh whole-change reviewer fixed three P2 findings: malformed resolver responses now
 terminalize safely, 416 Range responses preserve total metadata, and upstream stream read/cancel
-errors are sanitized. Final verdict: `production_ready`; no unresolved P0/P1/P2.
+errors are sanitized.
+
+Finalization review then completed under the Teamlead repeated-finding rule. The first fresh pass
+returned `production_ready` with no finding. The next fresh whole-change pass found one P2 in early
+CDN response-body cancellation; commit `07198dd947c2aa539183f33126f712fe902d0346`
+sanitized provider cancellation failures. Post-adjudication scrutiny exposed two facets of the same
+cancellation lifecycle: caller abort had to retain priority, and a never-settling provider cancel
+promise could not block the response. Bounded worker commits
+`9d6e59ced41c40982aab410541be498dc107e626`,
+`7d52ce56c37855062805b1603d651bbe3c089ffe`, and
+`5ec8965380f8dc9a9fccf3fe767d10aec807c927` added regression coverage and the final bounded,
+best-effort cancellation behavior. The lead stopped the automatic review loop, inspected every
+fix, and reran the full deterministic gate. No unresolved P0/P1/P2 remains.
 
 ## Live evidence and explicit limitations
 

@@ -239,3 +239,9 @@ database verification and two fresh independent review/fix passes. The owner sub
 MAX-07 as APPROVED with explicit MVP capability notes: MAX video is supported by this design; native MAX
 voice is unsupported; ordinary attached MP3/M4A remains an optional future investigation; Telegram
 voice is unchanged. The provider-retention risk in section 2 remains explicitly accepted.
+
+Finalization hardening reached `5ec8965380f8dc9a9fccf3fe767d10aec807c927`: rejected CDN
+response-body cancellation is best-effort and bounded, provider cancellation errors stay sanitized,
+and caller abort retains priority during the immediate cancellation overlap. Fresh regressions cover
+throwing and never-settling cancellation with and without a caller signal. The full deterministic
+MAX/media/Telegram gate remained green.
