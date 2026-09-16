@@ -50,6 +50,8 @@
         window.__memoLyBootstrapDiagnostic = {
           emit,
           markIndexInlineStart: () => emit('/__diag/index-inline-start'),
+          markMaxSdkCompleted: () => emit('/__diag/max-sdk-completed'),
+          markTelegramSdkCompleted: () => emit('/__diag/telegram-sdk-completed'),
           markMainModuleEvaluated: () => {
             errorStage = 'main-bootstrap'
             return emit('/__diag/main-module-evaluated')

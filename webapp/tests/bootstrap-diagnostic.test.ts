@@ -123,6 +123,34 @@ describe('MAX pre-auth bootstrap diagnostics', () => {
     expect(requests).toContain('/__diag/uncaught-error/TypeError/index-inline')
   })
 
+  test('inline recorder emits completion markers after each external SDK', async () => {
+    const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
+    const html = readFileSync(indexPath, 'utf8')
+    const inlineScript = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1]
+    const maxCompletionScript = html.match(/<script>(window\.__memoLyBootstrapDiagnostic\?\.markMaxSdkCompleted\(\))<\/script>/)?.[1]
+    const telegramCompletionScript = html.match(/<script>(window\.__memoLyBootstrapDiagnostic\?\.markTelegramSdkCompleted\(\))<\/script>/)?.[1]
+    expect(inlineScript).toBeDefined()
+    expect(maxCompletionScript).toBeDefined()
+    expect(telegramCompletionScript).toBeDefined()
+
+    const requests: string[] = []
+    const window = {
+      fetch: (path: string) => {
+        requests.push(path)
+        return Promise.resolve()
+      },
+      addEventListener: () => undefined,
+    }
+    const context = { window }
+    runInNewContext(inlineScript!, context)
+    runInNewContext(maxCompletionScript!, context)
+    runInNewContext(telegramCompletionScript!, context)
+    await Promise.resolve()
+
+    expect(requests).toContain('/__diag/max-sdk-completed')
+    expect(requests).toContain('/__diag/telegram-sdk-completed')
+  })
+
   test('stage markers reach the auth handoff boundary', () => {
     const recorder: BootstrapDiagnosticRecorder = createBootstrapDiagnosticRecorder(() => Promise.resolve(new Response(null, { status: 204 })))
     expect(recorder.markMainModuleEvaluated()).toBe(true)
