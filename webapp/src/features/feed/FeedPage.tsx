@@ -278,25 +278,55 @@ function MaxVideo({ attachment, hostBridge }: {
   attachment: Extract<MemoryAttachment, { source: 'max' }>
   hostBridge: HostBridge
 }) {
-  const url = usePrivateMediaSource(attachment.playbackPath)
-  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} src={url} width={attachment.width} />
+  const source = useMaxVideoSource(attachment.playbackPath)
+  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} sourceStatus={source.status} src={source.url} width={attachment.width} />
 }
 
-export function MaxVideoPreview({ durationMs, height, onOpen, src, width }: {
+export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src, width }: {
   durationMs: number | null
   height: number | null
   onOpen: () => void
+  sourceStatus?: 'loading' | 'ready' | 'error'
   src: string | null
   width: number | null
 }) {
+  const video = useRef<HTMLVideoElement | null>(null)
+  const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
+  const [started, setStarted] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const sourceFailed = sourceStatus === 'error'
   const aspectRatio = videoPosterAspectRatio(width, height)
-  return <div className="relative isolate w-full overflow-hidden bg-muted" style={{ aspectRatio }}>
-    <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" muted preload="metadata" playsInline src={src ? `${src}#t=0.001` : undefined} />
-    <button aria-label="Открыть видео в memoLy" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" onClick={onOpen} type="button">
-      <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
-    </button>
-    <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+  return <div className="w-full">
+    <div className="relative isolate w-full overflow-hidden bg-muted" style={{ aspectRatio }}>
+      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={() => setFailed(true)} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} src={src ? `${src}#t=0.001` : undefined} />
+      {!started && !failed && !sourceFailed ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
+        const element = video.current
+        if (!element) return
+        try { await element.play() } catch { setFailed(true) }
+      })()} type="button">
+        <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
+      </button> : null}
+      {!src && !failed && !sourceFailed ? <Typography as="span" className="pointer-events-none absolute inset-0 flex items-center justify-center" tone="muted" variant="memoryBody">Видео</Typography> : null}
+      {failed || sourceFailed ? <Typography as="span" className="pointer-events-none absolute inset-0 flex items-center justify-center px-5 text-center" role="alert" variant="memoryMeta">Не удалось загрузить видео</Typography> : null}
+      <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+    </div>
+    <Button className="mt-2" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
   </div>
+}
+
+function useMaxVideoSource(path: string | null) {
+  const [state, setState] = useState<{ path: string | null; status: 'loading' | 'ready' | 'error'; url: string | null }>({ path: null, status: 'loading', url: null })
+  useEffect(() => {
+    let cancelled = false
+    if (!path) return () => { cancelled = true }
+    void privateMediaSource(path).then((url) => {
+      if (!cancelled) setState({ path, status: url ? 'ready' : 'error', url })
+    }).catch(() => {
+      if (!cancelled) setState({ path, status: 'error', url: null })
+    })
+    return () => { cancelled = true }
+  }, [path])
+  return state.path === path ? state : { path, status: 'loading' as const, url: null }
 }
 
 function videoPosterAspectRatio(width: number | null, height: number | null) {

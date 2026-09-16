@@ -240,7 +240,7 @@ test('a private photo uses its intrinsic dimensions without a fixed crop', () =>
   }
 })
 
-test('a MAX video preview uses the source ratio, metadata preload, and contain rendering', () => {
+test('a MAX video preview embeds native playback and keeps MAX as a secondary action', () => {
   for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
     const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
       durationMs: 24_000,
@@ -251,14 +251,47 @@ test('a MAX video preview uses the source ratio, metadata preload, and contain r
     }))
 
     expect(markup).toContain('<video')
+    expect(markup).toContain('controls=""')
     expect(markup).toContain('preload="metadata"')
+    expect(markup).toContain('playsInline=""')
     expect(markup).toContain('content#t=0.001')
     expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
     expect(markup).toContain('object-contain')
-    expect(markup).toContain('Открыть видео в memoLy')
+    expect(markup).toContain('Смотреть видео')
+    expect(markup).toContain('Открыть в MAX')
+    expect(markup).not.toContain('Открыть видео в memoLy')
     expect(markup).not.toContain('aspect-video')
     expect(markup).not.toContain('object-cover')
   }
+})
+
+test('a MAX video without an authenticated source keeps a safe video fallback', () => {
+  const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+    durationMs: null,
+    height: null,
+    onOpen: () => undefined,
+    src: null,
+    width: null,
+  }))
+
+  expect(markup).toContain('Видео')
+  expect(markup).toContain('Открыть в MAX')
+  expect(markup).toContain('aspect-ratio:16 / 9')
+})
+
+test('a failed MAX source shows a load error while retaining the safe fallback and MAX action', () => {
+  const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+    durationMs: 24_000,
+    height: 720,
+    onOpen: () => undefined,
+    sourceStatus: 'error',
+    src: null,
+    width: 1_280,
+  }))
+
+  expect(markup).toContain('Не удалось загрузить видео')
+  expect(markup).toContain('Открыть в MAX')
+  expect(markup).toContain('aspect-ratio:1280 / 720')
 })
 
 test('overlapping keyset pages render one card per memory id', () => {
