@@ -12,6 +12,8 @@ export type BootstrapDiagnosticErrorStage = 'index-inline' | 'main-bootstrap'
 export type BootstrapDiagnosticRecorder = {
   emit(path: unknown): boolean
   markIndexInlineStart(): boolean
+  markMaxSdkCompleted(): boolean
+  markTelegramSdkCompleted(): boolean
   markMainModuleEvaluated(): boolean
   markHostDetected(hostKind: unknown, webAppExists: unknown, initDataPresent: unknown): boolean
   markAuthStarted(): boolean
@@ -35,6 +37,8 @@ const allowedUncaughtErrorPaths = new Set(allowedErrorNames.flatMap((errorName) 
 ]))
 const allowedPaths = new Set([
   '/__diag/index-inline-start',
+  '/__diag/max-sdk-completed',
+  '/__diag/telegram-sdk-completed',
   '/__diag/main-module-evaluated',
   '/__diag/auth-started',
   ...allowedHostDetectedPaths,
@@ -77,6 +81,8 @@ export function createBootstrapDiagnosticRecorder(
   return {
     emit,
     markIndexInlineStart: () => emit('/__diag/index-inline-start'),
+    markMaxSdkCompleted: () => emit('/__diag/max-sdk-completed'),
+    markTelegramSdkCompleted: () => emit('/__diag/telegram-sdk-completed'),
     markMainModuleEvaluated: () => emit('/__diag/main-module-evaluated'),
     markHostDetected,
     markAuthStarted: () => emit('/__diag/auth-started'),

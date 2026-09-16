@@ -17,12 +17,16 @@ describe('MAX pre-auth bootstrap diagnostics', () => {
     })
 
     recorder.markIndexInlineStart()
+    recorder.markMaxSdkCompleted()
+    recorder.markTelegramSdkCompleted()
     recorder.markMainModuleEvaluated()
     recorder.markHostDetected('max', true, true)
     recorder.markAuthStarted()
 
     expect(requests.map(({ path }) => path)).toEqual([
       '/__diag/index-inline-start',
+      '/__diag/max-sdk-completed',
+      '/__diag/telegram-sdk-completed',
       '/__diag/main-module-evaluated',
       '/__diag/host-detected/max/webapp-true/initdata-true',
       '/__diag/auth-started',
@@ -75,15 +79,21 @@ describe('MAX pre-auth bootstrap diagnostics', () => {
     const html = readFileSync(indexPath, 'utf8')
     const inlineMarker = html.indexOf('/__diag/index-inline-start')
     const maxScript = '<script src="https://st.max.ru/js/max-web-app.js"></script>'
+    const maxCompletedScript = '<script>window.__memoLyBootstrapDiagnostic?.markMaxSdkCompleted()</script>'
     const telegramScript = '<script src="https://telegram.org/js/telegram-web-app.js?63"></script>'
+    const telegramCompletedScript = '<script>window.__memoLyBootstrapDiagnostic?.markTelegramSdkCompleted()</script>'
     const moduleScript = '<script type="module" src="/src/main.tsx"></script>'
 
     expect(inlineMarker).toBeGreaterThanOrEqual(0)
     expect(inlineMarker).toBeLessThan(html.indexOf(maxScript))
-    expect(html.indexOf(maxScript)).toBeLessThan(html.indexOf(telegramScript))
-    expect(html.indexOf(telegramScript)).toBeLessThan(html.indexOf(moduleScript))
+    expect(html.indexOf(maxScript)).toBeLessThan(html.indexOf(maxCompletedScript))
+    expect(html.indexOf(maxCompletedScript)).toBeLessThan(html.indexOf(telegramScript))
+    expect(html.indexOf(telegramScript)).toBeLessThan(html.indexOf(telegramCompletedScript))
+    expect(html.indexOf(telegramCompletedScript)).toBeLessThan(html.indexOf(moduleScript))
     expect(html).toContain(maxScript)
+    expect(html).toContain(maxCompletedScript)
     expect(html).toContain(telegramScript)
+    expect(html).toContain(telegramCompletedScript)
     expect(html).toContain(moduleScript)
   })
 
