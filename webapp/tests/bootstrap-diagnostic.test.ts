@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { runInNewContext } from 'node:vm'
 
 import {
   createBootstrapDiagnosticRecorder,
@@ -83,6 +84,32 @@ describe('MAX pre-auth bootstrap diagnostics', () => {
     expect(html).toContain(maxScript)
     expect(html).toContain(telegramScript)
     expect(html).toContain(moduleScript)
+  })
+
+  test('inline recorder handles browser error events without throwing', async () => {
+    const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
+    const html = readFileSync(indexPath, 'utf8')
+    const inlineScript = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1]
+    expect(inlineScript).toBeDefined()
+
+    const requests: string[] = []
+    let errorListener: ((event: { error?: { name?: unknown } }) => void) | null = null
+    const window = {
+      fetch: (path: string) => {
+        requests.push(path)
+        return Promise.resolve()
+      },
+      addEventListener: (type: string, listener: (event: { error?: { name?: unknown } }) => void) => {
+        if (type === 'error') errorListener = listener
+      },
+    }
+
+    runInNewContext(inlineScript!, { window })
+    expect(errorListener).not.toBeNull()
+    expect(() => errorListener!({ error: { name: 'TypeError' } })).not.toThrow()
+    await Promise.resolve()
+
+    expect(requests).toContain('/__diag/uncaught-error/TypeError/index-inline')
   })
 
   test('stage markers reach the auth handoff boundary', () => {

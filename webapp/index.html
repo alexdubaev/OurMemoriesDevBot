@@ -60,7 +60,7 @@
           markUncaughtError,
         }
         window.addEventListener('error', (event) => {
-          const errorName = typeof event.error?.name === 'string' && errorNames.has(event.error.name) ? event.error.name : 'Error'
+          const errorName = typeof event.error?.name === 'string' && errorNames.includes(event.error.name) ? event.error.name : 'Error'
           markUncaughtError(errorName, errorStage)
         })
         window.addEventListener('unhandledrejection', () => {
