@@ -11,6 +11,44 @@ const messageFixture = {
 }
 
 describe('MAX update mapping', () => {
+  test('maps a live-shaped direct dialog with a numeric chat id', () => {
+    expect(normalizeMaxUpdate({
+      update_type: 'message_created', timestamp: 1700000000123,
+      message: {
+        sender: { user_id: 42 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 99 },
+        body: { mid: 'live-dialog-1', text: 'hello from MAX', attachments: [] },
+      },
+    })).toEqual({
+      kind: 'message_created', senderId: '42', recipientId: '99', messageId: 'live-dialog-1',
+      occurredAt: '2023-11-14T22:13:20.123Z', text: 'hello from MAX', attachments: [],
+    })
+  })
+
+  test('keeps group and channel messages out of direct-dialog capture', () => {
+    expect(normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, recipient: { chat_type: 'group', chat_id: 901, user_id: 99 } },
+    })).toEqual({ kind: 'ignored' })
+    expect(normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, recipient: { chat_type: 'channel', chat_id: 902, user_id: 99 } },
+    })).toEqual({ kind: 'ignored' })
+  })
+
+  test('ignores malformed direct-dialog recipient chat ids safely', () => {
+    for (const recipient of [
+      { chat_type: 'dialog', chat_id: '900', user_id: 99 },
+      { chat_type: 'dialog', chat_id: 0, user_id: 99 },
+      { chat_type: 'dialog', chat_id: 1.5, user_id: 99 },
+      { chat_type: 'invalid', chat_id: 900, user_id: 99 },
+    ]) {
+      expect(normalizeMaxUpdate({
+        ...messageFixture,
+        message: { ...messageFixture.message, recipient },
+      })).toEqual({ kind: 'ignored' })
+    }
+  })
+
   test('maps documented direct message and bot-started envelopes', () => {
     expect(normalizeMaxUpdate(messageFixture)).toEqual({
       kind: 'message_created', senderId: '42', recipientId: '99', messageId: 'mid-1',

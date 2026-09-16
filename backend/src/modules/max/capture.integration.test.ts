@@ -42,7 +42,7 @@ maybeDescribe('MAX durable capture', () => {
   const activeGateClients = new Set<ReturnType<typeof createPrisma>>()
   const textUpdate = {
     update_type: 'message_created', timestamp: 1_757_844_000_000, message: {
-      sender: { user_id: 77 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 900 },
+      sender: { user_id: 77 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
       body: { mid: 'max-message-1', text: 'Текстовая заметка', attachments: [] },
     },
   }
@@ -286,20 +286,27 @@ maybeDescribe('MAX durable capture', () => {
     })
     const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'MAX child' } })
 
-    const event: MaxInboundEvent = {
-      kind: 'message_created', senderId: '77', recipientId: '900', messageId: 'max-message-publish',
-      occurredAt: '2026-09-14T10:00:00.000Z', text: 'Original MAX note', hasAttachments: false,
+    const liveDialogUpdate = {
+      update_type: 'message_created', timestamp: 1_757_845_200_000, message: {
+        sender: { user_id: 77 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
+        body: { mid: 'max-webhook-live-text-1', text: 'Live-shaped MAX text note', attachments: [] },
+      },
     }
-    await accept(event)
+    const response = await webhook.request('/webhooks/max', {
+      method: 'POST', headers, body: JSON.stringify(liveDialogUpdate),
+    })
+    expect(response.status).toBe(200)
     const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
     const process = createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })
     await Promise.all(Array.from({ length: 10 }, () => process(task.payload)))
 
     expect(await prisma.memory.count()).toBe(1)
     expect(await prisma.memory.findFirstOrThrow()).toMatchObject({
-      id: expect.any(String), familyId: family.id, childId: child.id, body: 'Original MAX note',
-      kind: 'note', occurredAt: new Date('2026-09-14T10:00:00.000Z'),
+      id: expect.any(String), familyId: family.id, childId: child.id, body: 'Live-shaped MAX text note',
+      kind: 'note', occurredAt: new Date('2025-09-14T10:20:00.000Z'),
     })
+    expect(await prisma.maxInbox.count()).toBe(1)
+    expect(await prisma.maxSource.count()).toBe(1)
     expect(await prisma.maxSource.count({ where: { status: 'published', memoryId: { not: null } } })).toBe(1)
     expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
     expect(await prisma.maxInbox.findFirstOrThrow()).toMatchObject({ status: 'processed', processedAt: expect.any(Date) })
