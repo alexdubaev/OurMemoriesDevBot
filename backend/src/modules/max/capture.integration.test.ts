@@ -7,7 +7,7 @@ import { loadEnv } from '../../env'
 import { createPrivateStorage } from '../../storage'
 import { createMediaService, createMediaTasks } from '../media'
 import { pngFixture } from '../../storage/storage-contract'
-import { createPrismaFamilyAccess } from '../families'
+import { createInviteStartResolver, createPrismaFamilyAccess } from '../families'
 import type { BackendRuntime } from '../../runtime'
 import { createMaxAcceptUpdate } from './application/accept-update'
 import { createMaxModule } from './index'
@@ -119,6 +119,7 @@ maybeDescribe('MAX durable capture', () => {
   })
 
   test('routes valid and invalid invite starts without accepting or creating Core data', async () => {
+    const fixedNow = new Date('2026-09-15T10:00:00.000Z')
     const active = await maxFamily('23001', 'full')
     const inactive = await maxFamily('23002', 'full')
     const activeToken = token('active')
@@ -150,7 +151,11 @@ maybeDescribe('MAX durable capture', () => {
     for (const [index, fixture] of cases.entries()) {
       const accepted = await accept({ kind: 'bot_started', chatId: '88', userId: '77', occurredAt: `2026-09-15T10:0${index}:00.000Z`, payload: fixture.payload })
       const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
-      await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(task.payload)
+      await createMaxTaskProcessor({
+        runtime: { prisma } as unknown as BackendRuntime,
+        crypto,
+        resolveInviteStart: createInviteStartResolver(prisma, () => fixedNow),
+      })(task.payload)
       const processed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId }, include: { responses: true } })
       expect(processed.responses[0]?.text).toBe(fixture.expected)
       expect(processed.responses[0]?.text).not.toContain(activeToken)
