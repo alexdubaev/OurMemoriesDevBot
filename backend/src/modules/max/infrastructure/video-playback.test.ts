@@ -12,6 +12,17 @@ describe('MAX guarded video transport', () => {
     ])).toMatchObject({ height: 720, width: 1280 })
   })
 
+  test('accepts extensionless signed MAX CDN URLs while keeping the host allowlist', () => {
+    expect(selectRendition([
+      { url: 'https://maxvd123.okcdn.ru/3f8e5c?sig=opaque', width: 1280, height: 720, contentLength: 1 },
+      { url: 'https://maxvd123.okcdn.ru/480.mp4?sig=opaque', width: 854, height: 480, contentLength: 1 },
+      { url: 'https://maxvd123.evil.example/720?sig=opaque', width: 1280, height: 720, contentLength: 1 },
+      { url: 'https://user:pass@maxvd123.okcdn.ru/720?sig=opaque', width: 1280, height: 720, contentLength: 1 },
+      { url: 'https://maxvd123.okcdn.ru:8443/720?sig=opaque', width: 1280, height: 720, contentLength: 1 },
+      { url: 'https://maxvd123.okcdn.ru/1080?sig=opaque', width: 1920, height: 1080, contentLength: 1 },
+    ])).toMatchObject({ height: 720, width: 1280, url: 'https://maxvd123.okcdn.ru/3f8e5c?sig=opaque' })
+  })
+
   test('forwards one Range without MAX credentials and returns consistent 206 headers', async () => {
     const originalFetch = globalThis.fetch
     let request: Request | undefined
@@ -31,6 +42,33 @@ describe('MAX guarded video transport', () => {
       expect(result.range).toEqual({ start: 4, end: 5, total: 10 })
       expect(result.bodyLength).toBe(2)
       expect(await new Response(result.body).arrayBuffer()).toHaveLength(2)
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  test('fetches an extensionless signed MAX CDN URL after validating the video response', async () => {
+    const originalFetch = globalThis.fetch
+    let requestedUrl: string | undefined
+    globalThis.fetch = (async (input) => {
+      requestedUrl = String(input)
+      return new Response(new Uint8Array([1, 2]), { status: 200, headers: {
+        'content-type': 'video/mp4', 'content-length': '2',
+      } })
+    }) as typeof fetch
+    try {
+      const result = await fetchCdnVideo('https://maxvd123.okcdn.ru/3f8e5c?sig=opaque', undefined, 'GET', 250)
+      expect(requestedUrl).toBe('https://maxvd123.okcdn.ru/3f8e5c?sig=opaque')
+      expect(await new Response(result.body).arrayBuffer()).toHaveLength(2)
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  test('still rejects an extensionless MAX CDN URL when the response is not video/mp4', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new Uint8Array([1, 2]), { status: 200, headers: {
+      'content-type': 'application/octet-stream', 'content-length': '2',
+    } })) as unknown as typeof fetch
+    try {
+      await expect(fetchCdnVideo('https://maxvd123.okcdn.ru/3f8e5c?sig=opaque', undefined, 'GET', 250))
+        .rejects.toMatchObject({ kind: 'unsupported_media', message: 'Медиа недоступно' })
     } finally { globalThis.fetch = originalFetch }
   })
 

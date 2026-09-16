@@ -53,7 +53,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       throw error
     }
     const rendition = video.renditions
-      .filter((candidate) => isAllowedCdnUrl(candidate.url) && isMp4Url(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
+      .filter((candidate) => isAllowedCdnUrl(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
       .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0]
     if (!rendition) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
 
@@ -110,10 +110,6 @@ function isAllowedCdnUrl(value: string) {
     const url = new URL(value)
     return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname)
   } catch { return false }
-}
-
-function isMp4Url(value: string) {
-  try { return new URL(value).pathname.toLowerCase().endsWith('.mp4') } catch { return false }
 }
 
 function positiveOrNull(value: number | null) {
