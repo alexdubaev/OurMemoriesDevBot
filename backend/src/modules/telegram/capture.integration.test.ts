@@ -1052,10 +1052,10 @@ maybeDescribe('Telegram durable capture', () => {
 
   async function admittedUser(subject: string, withPilotAdmission = true) {
     const user = await prisma.user.create({ data: { displayName: `User ${subject}` } })
-    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } })
+    const identity = await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } })
     if (withPilotAdmission) await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
     const session = await prisma.authSession.create({ data: {
-      userId: user.id, refreshTokenHash: `refresh-${subject}`, refreshTokenFamilyHash: `family-${subject}`,
+      userId: user.id, externalIdentityId: identity.id, refreshTokenHash: `refresh-${subject}`, refreshTokenFamilyHash: `family-${subject}`,
       expiresAt: new Date(Date.now() + 60_000),
     } })
     return { userId: user.id, subject, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }

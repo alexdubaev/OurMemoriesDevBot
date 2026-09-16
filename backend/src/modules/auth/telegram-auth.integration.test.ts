@@ -43,6 +43,21 @@ maybeDescribe('Telegram authentication exchange', () => {
     expect(first.headers.get('set-cookie')).toContain('HttpOnly')
     expect(firstBody).not.toHaveProperty('refreshToken')
     expect(firstBody.user).toMatchObject({ email: null, displayName: 'Александр' })
+    expect(firstBody.user).not.toHaveProperty('externalIdentity')
+    const [bound] = await prisma.$queryRaw<Array<{
+      sessionId: string
+      externalIdentityId: string | null
+      provider: string | null
+      subject: string | null
+    }>>`
+      SELECT s.id AS "sessionId", s.external_identity_id AS "externalIdentityId", i.provider::text AS provider, i.subject
+        FROM auth_sessions s
+        LEFT JOIN external_identities i ON i.id = s.external_identity_id
+       WHERE s.id = (
+         SELECT r.session_id FROM telegram_auth_replays r ORDER BY r.created_at DESC LIMIT 1
+       )
+    `
+    expect(bound).toMatchObject({ provider: 'telegram', subject: '99281912' })
     expect(await prisma.authSession.count()).toBe(1)
 
     const reorderedInitData = new URLSearchParams(
@@ -67,6 +82,12 @@ maybeDescribe('Telegram authentication exchange', () => {
     })
     expect(refresh.status).toBe(200)
     expect(await refresh.json()).toHaveProperty('accessToken')
+    const [afterRefresh] = await prisma.$queryRaw<Array<{ externalIdentityId: string | null }>>`
+      SELECT external_identity_id AS "externalIdentityId"
+        FROM auth_sessions
+       WHERE id = ${bound.sessionId}
+    `
+    expect(afterRefresh?.externalIdentityId).toBe(bound?.externalIdentityId)
   })
 
   test('rejects forged Telegram data and keeps legacy public auth routes absent', async () => {

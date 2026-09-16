@@ -26,7 +26,7 @@ import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import { FamilyFailure } from '../domain/errors'
 import { isBirthDateOnOrBeforeFamilyToday } from '../domain/family-date'
-import type { FamilyAccess, FamilyScope, PersistenceErrorClassifier } from './ports'
+import type { FamilyAccess, FamilyCreatePrincipal, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
 type TransactionClient = Parameters<Parameters<DbClient['$transaction']>[0]>[0]
@@ -66,7 +66,7 @@ export class FamilyService {
   }
 
   async createFamily(
-    principal: Principal,
+    principal: FamilyCreatePrincipal,
     input: CreateFamilyRequest,
     idempotencyKey: string,
   ): Promise<FamilyResponse> {
@@ -79,12 +79,12 @@ export class FamilyService {
         payloadHash,
         now: this.now(),
         execute: async (tx) => {
-          const identity = await tx.externalIdentity.findFirst({
-            where: { userId: principal.userId, provider: 'telegram' },
-            select: { subject: true },
-          })
-          const admitted = identity && await tx.pilotAdmission.findFirst({
-            where: { provider: 'telegram', subject: identity.subject, revokedAt: null },
+          const admitted = principal.externalIdentity && await tx.pilotAdmission.findFirst({
+            where: {
+              provider: principal.externalIdentity.provider,
+              subject: principal.externalIdentity.subject,
+              revokedAt: null,
+            },
             select: { id: true },
           })
           if (!admitted) {

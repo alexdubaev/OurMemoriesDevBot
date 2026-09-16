@@ -322,6 +322,7 @@ export class AuthService {
     return {
       ...(await this.dependencies.projectUser(session.user)),
       sessionId: session.id,
+      externalIdentity: session.externalIdentity,
     }
   }
 

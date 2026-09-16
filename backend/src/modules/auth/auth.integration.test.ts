@@ -54,6 +54,13 @@ maybeDescribe('auth API integration', () => {
     expect(registerBody.refreshToken).toBeString()
     expect(register.headers.get('set-cookie')).toBeNull()
 
+    const [passwordSession] = await prisma.$queryRaw<Array<{ externalIdentityId: string | null }>>`
+      SELECT external_identity_id AS "externalIdentityId"
+        FROM auth_sessions
+       WHERE user_id = (SELECT id FROM users WHERE email = 'user@example.com')
+    `
+    expect(passwordSession?.externalIdentityId).toBeNull()
+
     const me = await app.request('/api/auth/me', {
       headers: {
         Authorization: `Bearer ${registerBody.accessToken}`,
@@ -63,6 +70,7 @@ maybeDescribe('auth API integration', () => {
     const meBody = await me.json()
     expect(meBody).toEqual({ user: registerBody.user })
     expect('sessionId' in meBody.user).toBe(false)
+    expect('externalIdentity' in meBody.user).toBe(false)
 
     const refresh = await app.request('/api/auth/token/refresh', {
       method: 'POST',
@@ -77,6 +85,13 @@ maybeDescribe('auth API integration', () => {
     expect(refreshBody.refreshToken).toBeString()
     expect(refreshBody.refreshToken).not.toBe(registerBody.refreshToken)
     expect(refresh.headers.get('set-cookie')).toBeNull()
+
+    const [passwordSessionAfterRefresh] = await prisma.$queryRaw<Array<{ externalIdentityId: string | null }>>`
+      SELECT external_identity_id AS "externalIdentityId"
+        FROM auth_sessions
+       WHERE user_id = (SELECT id FROM users WHERE email = 'user@example.com')
+    `
+    expect(passwordSessionAfterRefresh?.externalIdentityId).toBeNull()
 
     const meWithPreRefreshAccessToken = await app.request('/api/auth/me', {
       headers: {
@@ -122,6 +137,30 @@ maybeDescribe('auth API integration', () => {
       body: JSON.stringify({ refreshToken: staleRefreshBody.refreshToken }),
     })
     expect(revokedRefresh.status).toBe(401)
+  })
+
+  test('keeps password-login sessions unbound to an external identity', async () => {
+    const registered = await app.request('/api/auth/token/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'password-login@example.com', password: 'password123' }),
+    })
+    expect(registered.status).toBe(201)
+
+    const login = await app.request('/api/auth/token/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'password-login@example.com', password: 'password123' }),
+    })
+    expect(login.status).toBe(200)
+    const [passwordLoginSession] = await prisma.$queryRaw<Array<{ externalIdentityId: string | null }>>`
+      SELECT external_identity_id AS "externalIdentityId"
+        FROM auth_sessions
+       WHERE user_id = (SELECT id FROM users WHERE email = 'password-login@example.com')
+       ORDER BY created_at DESC
+       LIMIT 1
+    `
+    expect(passwordLoginSession?.externalIdentityId).toBeNull()
   })
 
   test('a password change that cannot queue its notice is rolled back', async () => {

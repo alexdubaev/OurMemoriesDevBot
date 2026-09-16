@@ -9,8 +9,15 @@ export type AuthUserRecord = {
   createdAt: Date
 }
 
+export type SessionExternalIdentity = {
+  id: string
+  provider: 'telegram' | 'max'
+  subject: string
+}
+
 export type AuthenticatedPrincipal = UserDto & {
   sessionId: string
+  externalIdentity: SessionExternalIdentity | null
 }
 
 export function toBaseUserDto(user: AuthUserRecord): UserDto {
@@ -24,6 +31,6 @@ export function toBaseUserDto(user: AuthUserRecord): UserDto {
 }
 
 export function userDtoFromPrincipal(principal: AuthenticatedPrincipal): UserDto {
-  const { sessionId: _sessionId, ...user } = principal
+  const { sessionId: _sessionId, externalIdentity: _externalIdentity, ...user } = principal
   return user
 }
