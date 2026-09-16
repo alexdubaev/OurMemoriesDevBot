@@ -111,7 +111,9 @@ function normalizeResolvedAttachment(value: unknown) {
   if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file' && value.type !== 'video') || !isRecord(value.payload)) throw new MaxProviderError()
   const payload = value.payload
   const rawId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
-  const id = normalizeProviderAttachmentId(rawId, value.type === 'image' || value.type === 'video')
+  const id = value.type === 'file'
+    ? normalizeFileAttachmentId(rawId)
+    : normalizeProviderAttachmentId(rawId, true)
   if (!id || typeof payload.token !== 'string' || payload.token.length === 0 ||
       typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) throw new MaxProviderError()
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url }
@@ -176,6 +178,11 @@ function normalizeProviderAttachmentId(value: unknown, numeric: boolean) {
     if (typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && value.length <= 20) return value
     return null
   }
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
+}
+
+function normalizeFileAttachmentId(value: unknown) {
+  if (typeof value === 'number') return isPositiveSafeInteger(value) ? String(value) : null
   return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 

@@ -116,6 +116,21 @@ describe('MAX update mapping', () => {
     expect(file).toEqual(expect.objectContaining({ attachments: [{ kind: 'file', providerAttachmentId: 'file-1', filename: 'photo.png', declaredSize: 9 }] }))
   })
 
+  test('maps a live-shaped file image with a numeric fileId and rejects invalid numeric fileIds', () => {
+    const update = (fileId: unknown) => ({ ...messageFixture, message: { ...messageFixture.message, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 99 }, body: {
+      mid: 'mid-numeric-file', text: null, attachments: [
+        { type: 'file', payload: { fileId, token: 'rotating-file', url: 'https://fd.oneme.ru/file' }, filename: 'photo.png', size: 9 },
+      ],
+    } } })
+
+    expect(normalizeMaxUpdate(update(12345))).toEqual(expect.objectContaining({
+      kind: 'message_created', attachments: [{ kind: 'file', providerAttachmentId: '12345', filename: 'photo.png', declaredSize: 9 }],
+    }))
+    for (const fileId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => normalizeMaxUpdate(update(fileId))).toThrow('Invalid MAX attachment identity')
+    }
+  })
+
   test('accepts a dotted video mid and numeric payload id without retaining token or URL', () => {
     const result = normalizeMaxUpdate({
       update_type: 'message_created', timestamp: 1700000000123,
