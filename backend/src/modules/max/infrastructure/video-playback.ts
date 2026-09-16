@@ -51,12 +51,12 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
 
 export function selectRendition(renditions: MaxVideoRendition[]) {
   return renditions
-    .filter((item) => isAllowedCdnUrl(item.url) && isMp4Url(item.url) && item.height !== null && item.height > 0 && item.height <= maxHeight)
+    .filter((item) => isAllowedCdnUrl(item.url) && item.height !== null && item.height > 0 && item.height <= maxHeight)
     .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0] ?? null
 }
 
 export async function fetchCdnVideo(url: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', maxBytes: number, signal?: AbortSignal) {
-  if (!isAllowedCdnUrl(url) || !isMp4Url(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  if (!isAllowedCdnUrl(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
   const range = rangeHeader === undefined ? null : parseRangeHeader(rangeHeader)
   let response: Response
   try {
@@ -199,10 +199,6 @@ function parseLength(value: string | null) {
 
 function isAllowedCdnUrl(value: string) {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname) } catch { return false }
-}
-
-function isMp4Url(value: string) {
-  try { return new URL(value).pathname.toLowerCase().endsWith('.mp4') } catch { return false }
 }
 
 function isTerminalProviderShape(error: unknown) {

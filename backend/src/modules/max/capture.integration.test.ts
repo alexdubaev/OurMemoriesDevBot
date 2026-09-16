@@ -943,7 +943,7 @@ maybeDescribe('MAX durable capture', () => {
       let resolverCalls = 0
       const api = { ...fixture.api(event), getVideo: async () => {
         resolverCalls += 1
-        return { durationMs: 7000, renditions: [{ url: 'https://maxvd123.okcdn.ru/video-720.mp4?sig=opaque', width: 1280, height: 720, contentLength: 12 }] }
+        return { durationMs: 7000, renditions: [{ url: 'https://maxvd123.okcdn.ru/3f8e5c?sig=opaque', width: 1280, height: 720, contentLength: 12 }] }
       } }
       const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })
       await expect(process(task.payload)).resolves.toBe('done')
