@@ -52,6 +52,7 @@ export function createBootstrapDiagnosticRecorder(
         credentials: 'omit',
         keepalive: true,
         body: null,
+        referrerPolicy: 'no-referrer',
       })).catch(() => undefined)
     } catch {
       // Diagnostics must never affect application bootstrap.

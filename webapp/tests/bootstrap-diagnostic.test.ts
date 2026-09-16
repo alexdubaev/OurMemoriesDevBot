@@ -33,6 +33,7 @@ describe('MAX pre-auth bootstrap diagnostics', () => {
         credentials: 'omit',
         keepalive: true,
         body: null,
+        referrerPolicy: 'no-referrer',
       })
     }
   })
