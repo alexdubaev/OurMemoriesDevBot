@@ -13,6 +13,8 @@ type MaxWebApp = {
   contentSafeAreaInset?: unknown
   ready?: unknown
   close?: unknown
+  openLink?: unknown
+  openMaxLink?: unknown
 }
 
 type BrowserHost = {
@@ -61,8 +63,12 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
       if (typeof browserHost?.history?.back === 'function') browserHost.history.back()
     },
     onBack: () => () => undefined,
-    // MAX does not expose a Telegram bot/deep-link capability in this boundary.
-    openBot: () => undefined,
+    openBot: () => {
+      // Direct bot navigation is supported by MAX openLink. openMaxLink is reserved for
+      // mini-app startapp links and must not receive an arbitrary direct-chat URL.
+      if (!webApp || !isValidMaxBotUsername(options.maxBotUsername) || typeof webApp.openLink !== 'function') return
+      webApp.openLink.call(webApp, `https://max.ru/${options.maxBotUsername}`)
+    },
     openTelegramVideo: () => false,
     openInvite: () => undefined,
     getInsets: () => normalizedInsets(webApp),
@@ -139,10 +145,14 @@ function inviteTokenFromStartParam(startParam: string | null) {
 
 function createMaxInviteLink(rawToken: string, username: string | undefined) {
   if (!/^[A-Za-z0-9_-]{32,128}$/.test(rawToken)) return null
-  if (!username || !/^[A-Za-z0-9_]{5,32}$/.test(username)) return null
+  if (!isValidMaxBotUsername(username)) return null
   const payload = `invite_${rawToken}`
   if (payload.length > 512) return null
   return `https://max.ru/${username}?startapp=${payload}`
+}
+
+function isValidMaxBotUsername(username: string | undefined) {
+  return typeof username === 'string' && /^[A-Za-z0-9_]{5,32}$/.test(username)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

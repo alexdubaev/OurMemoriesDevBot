@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeedPage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
@@ -220,6 +220,45 @@ test('a Telegram video without a poster preserves the safe fallback', () => {
   expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
   expect(markup).toContain('data-slot="telegram-video-play-control"')
   expect(markup).toContain('Длительность уточняется')
+})
+
+test('a private photo uses its intrinsic dimensions without a fixed crop', () => {
+  for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
+    const markup = renderToStaticMarkup(createElement(PhotoImage, {
+      alt: 'Воспоминание',
+      height,
+      src: 'blob:private-photo',
+      width,
+    }))
+
+    expect(markup).toContain(`width="${width}"`)
+    expect(markup).toContain(`height="${height}"`)
+    expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
+    expect(markup).toContain('object-contain')
+    expect(markup).not.toContain('object-cover')
+    expect(markup).not.toContain('aspect-[4/3]')
+  }
+})
+
+test('a MAX video preview uses the source ratio, metadata preload, and contain rendering', () => {
+  for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
+    const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+      durationMs: 24_000,
+      height,
+      onOpen: () => undefined,
+      src: '/api/v1/families/family/media/max-videos/video/content',
+      width,
+    }))
+
+    expect(markup).toContain('<video')
+    expect(markup).toContain('preload="metadata"')
+    expect(markup).toContain('content#t=0.001')
+    expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
+    expect(markup).toContain('object-contain')
+    expect(markup).toContain('Открыть видео в memoLy')
+    expect(markup).not.toContain('aspect-video')
+    expect(markup).not.toContain('object-cover')
+  }
 })
 
 test('overlapping keyset pages render one card per memory id', () => {

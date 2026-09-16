@@ -198,6 +198,7 @@ function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoInde
   transport: AuthenticatedTransport
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
+  if (attachment.source === 'max') return <MaxVideo attachment={attachment} hostBridge={hostBridge} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} hostBridge={hostBridge} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
   return <PrivateVideo path={attachment.playbackPath} />
@@ -273,10 +274,39 @@ export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOp
   </button>
 }
 
+function MaxVideo({ attachment, hostBridge }: {
+  attachment: Extract<MemoryAttachment, { source: 'max' }>
+  hostBridge: HostBridge
+}) {
+  const url = usePrivateMediaSource(attachment.playbackPath)
+  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} src={url} width={attachment.width} />
+}
+
+export function MaxVideoPreview({ durationMs, height, onOpen, src, width }: {
+  durationMs: number | null
+  height: number | null
+  onOpen: () => void
+  src: string | null
+  width: number | null
+}) {
+  const aspectRatio = videoPosterAspectRatio(width, height)
+  return <div className="relative isolate w-full overflow-hidden bg-muted" style={{ aspectRatio }}>
+    <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" muted preload="metadata" playsInline src={src ? `${src}#t=0.001` : undefined} />
+    <button aria-label="Открыть видео в memoLy" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" onClick={onOpen} type="button">
+      <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
+    </button>
+    <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+  </div>
+}
+
 function videoPosterAspectRatio(width: number | null, height: number | null) {
+  return mediaAspectRatio(width, height) ?? '16 / 9'
+}
+
+function mediaAspectRatio(width: number | null, height: number | null) {
   return Number.isFinite(width) && Number.isFinite(height) && width! > 0 && height! > 0
     ? `${width} / ${height}`
-    : '16 / 9'
+    : undefined
 }
 
 function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transport }: {
@@ -290,14 +320,25 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   const url = usePrivateObjectUrl(path, transport)
   const viewerSession = useRef<AbortController | null>(null)
   useEffect(() => () => { viewerSession.current?.abort() }, [])
-  if (!url) return <div aria-label="Загрузка фотографии" className="aspect-[4/3] bg-muted" />
+  if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) }} />
   return <button aria-label="Открыть фото" className="block w-full" onClick={(event) => {
     viewerSession.current?.abort()
     const session = new AbortController()
     viewerSession.current = session
     void showPrivatePhotoAlbum(photoAlbum, photoIndex, transport, event.currentTarget, hostBridge, session.signal)
       .finally(() => { if (viewerSession.current === session) viewerSession.current = null })
-  }} type="button"><img alt="Воспоминание" className="aspect-[4/3] w-full object-cover" height={attachment.height ?? undefined} src={url} width={attachment.width ?? undefined} /></button>
+  }} type="button"><PhotoImage alt="Воспоминание" height={attachment.height} src={url} width={attachment.width} /></button>
+}
+
+export function PhotoImage({ alt, height, src, width }: {
+  alt: string
+  height: number | null
+  src: string
+  width: number | null
+}) {
+  const aspectRatio = mediaAspectRatio(width, height)
+  if (!aspectRatio) return <img alt={alt} className="block w-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} />
+  return <span className="relative block w-full overflow-hidden" style={{ aspectRatio }}><img alt={alt} className="absolute inset-0 size-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {

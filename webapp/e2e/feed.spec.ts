@@ -8,6 +8,22 @@ import { FilesystemPrivateStorage } from '../../backend/src/storage/filesystem-s
 import { pngImage } from './helpers/images'
 import { expect, test } from './helpers/test'
 
+type E2EAttachment = {
+  id?: string
+  source?: string
+  kind?: string
+  width?: number | null
+  height?: number | null
+  [key: string]: unknown
+}
+
+type E2EMemoryFixture = {
+  familyId: string
+  body?: string
+  attachments: E2EAttachment[]
+  [key: string]: unknown
+}
+
 const subject = '81000013'
 const databaseUrl = process.env.TEST_DATABASE_URL!
 const backendUrl = process.env.E2E_BACKEND_URL!
@@ -48,10 +64,144 @@ test.describe.serial('T07 live feed', () => {
     await prisma.$disconnect()
   })
 
-  test.beforeEach(async ({ page }) => {
-    await installTelegramHost(page, signedInitData(Number(subject), 'Лента E2E'))
+  test.beforeEach(async ({ page }, testInfo) => {
+    const initData = signedInitData(Number(subject), 'Лента E2E')
+    if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot') {
+      await installMaxHost(page, initData)
+      await installMaxAuthRoute(page)
+    } else {
+      await installTelegramHost(page, initData)
+    }
     await page.goto('/')
     await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+  })
+
+  test('renders intrinsic photo and MAX video ratios and opens the memoLy bot', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const maxVideos = [
+      { body: 'MAX portrait video UX E2E', width: 720, height: 1_280, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=orange:s=180x320:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+      { body: 'MAX landscape video UX E2E', width: 1_280, height: 720, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=320x180:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+      { body: 'MAX square video UX E2E', width: 900, height: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=240x240:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+    ].map((video) => ({ ...video, id: randomUUID() }))
+    const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
+    let feedPatched = false
+    const maxVideoRequests: string[] = []
+
+    page.on('request', (request) => {
+      const url = request.url()
+      if (url.includes('/media/max-videos/') && url.endsWith('/content')) maxVideoRequests.push(url)
+    })
+
+    await page.route('**/api/v1/families/*/media/max-videos/*/content', async (route) => {
+      const segments = new URL(route.request().url()).pathname.split('/')
+      const referenceId = segments[segments.length - 2]
+      const bytes = referenceId ? maxVideoById.get(referenceId) : undefined
+      if (!bytes) return route.continue()
+      await route.fulfill({ body: bytes, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' } })
+    })
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      const requestUrl = new URL(route.request().url())
+      if (feedPatched || requestUrl.searchParams.has('cursor')) return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      const first = payload.items[0]
+      if (!first) return route.fulfill({ response, body: JSON.stringify(payload) })
+      const now = new Date().toISOString()
+      payload.items = [
+        ...maxVideos.map((video) => ({
+          ...first,
+          id: video.id,
+          kind: 'video',
+          body: video.body,
+          occurredAt: now,
+          createdAt: now,
+          attachments: [{
+            id: randomUUID(), source: 'max', kind: 'video', width: video.width, height: video.height,
+            durationMs: 2_000, playbackPath: `/api/v1/families/${first.familyId}/media/max-videos/${video.id}/content`,
+          }],
+        })),
+        ...payload.items.map((item) => {
+          if (item.body === 'Фотоальбом E2E') {
+            return { ...item, attachments: item.attachments.map((attachment, index) => {
+              const changed = index === 0 ? { ...attachment, width: 360, height: 640 } : { ...attachment, width: 640, height: 360 }
+              return changed
+            }) }
+          }
+          if (item.body === 'Одиночное фото E2E') {
+            return { ...item, attachments: item.attachments.map((attachment) => {
+              const changed = { ...attachment, width: 500, height: 500 }
+              return changed
+            }) }
+          }
+          return item
+        }),
+      ]
+      feedPatched = true
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+
+    // Keep this browser-only provider fixture on the page request path so Playwright can
+    // deterministically serve the synthetic MP4; the production service worker remains covered
+    // by the existing private-media E2E cases.
+    await page.evaluate(async () => {
+      await Promise.all((await navigator.serviceWorker?.getRegistrations() ?? []).map((registration) => registration.unregister()))
+    })
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, get: () => undefined })
+    })
+    await page.reload()
+    await openFeed(page)
+    const ratios = [
+      ['Фотоальбом E2E', 'img', 360 / 640],
+      ['Одиночное фото E2E', 'img', 1],
+      ...maxVideos.map((video) => [video.body, 'video', video.width / video.height] as const),
+    ] as const
+    for (const [body, element, expected] of ratios) {
+      const card = page.locator('[data-memory-id]').filter({ hasText: body })
+      await expect(card).toBeVisible()
+      const media = card.locator(element).first()
+      await expect(media).toBeVisible()
+      const actual = await media.evaluate((entry) => {
+        const rect = entry.getBoundingClientRect()
+        return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
+      })
+      expect(actual.ratio).toBeCloseTo(expected, 2)
+      expect(actual.objectFit).toBe('contain')
+    }
+
+    await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux.png'), fullPage: true })
+    const albumOpener = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' }).getByRole('button', { name: 'Открыть фото' })
+    await albumOpener.click()
+    const fullscreenPhoto = page.locator('.pswp__zoom-wrap > img').first()
+    await expect(fullscreenPhoto).toBeVisible()
+    const fullscreenRatio = await fullscreenPhoto.evaluate((entry) => {
+      const rect = entry.getBoundingClientRect()
+      return rect.width / rect.height
+    })
+    expect(fullscreenRatio).toBeCloseTo(360 / 640, 2)
+    await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux-fullscreen.png') })
+    await page.locator('.pswp__button--close').click()
+
+    const maxVideoCard = page.locator('[data-memory-id]').filter({ hasText: maxVideos[0]!.body })
+    const maxVideo = maxVideoCard.locator('video').first()
+    await expect(maxVideo).toHaveAttribute('preload', 'metadata')
+    await expect(maxVideo).toHaveAttribute('src', /\/media\/max-videos\/[^#]+\/content#t=0\.001$/)
+    await expect.poll(() => maxVideo.evaluate((entry) => entry.readyState)).toBeGreaterThanOrEqual(2)
+    expect(maxVideoRequests.length).toBeGreaterThan(0)
+    expect(maxVideoRequests.every((url) => !url.includes('#'))).toBe(true)
+    const previewPixel = await maxVideo.evaluate((entry) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 1
+      canvas.height = 1
+      const context = canvas.getContext('2d')
+      if (!context) return null
+      context.drawImage(entry, 0, 0, 1, 1)
+      return [...context.getImageData(0, 0, 1, 1).data]
+    })
+    expect(previewPixel).not.toBeNull()
+    expect(previewPixel!.slice(0, 3)).not.toEqual([0, 0, 0])
+    await maxVideoCard.getByRole('button', { name: 'Открыть видео в memoLy' }).click()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBe('https://max.ru/memoLy')
   })
 
   test('keeps page one through a next-page failure, retries, and deduplicates 40+ memories', async ({ page }) => {
@@ -468,6 +618,33 @@ async function installTelegramHost(page: Page, initData: string) {
       openTelegramLink(url: string) { testWindow.__openedTelegramLink = url },
     } } })
   }, initData)
+}
+
+async function installMaxHost(page: Page, initData: string) {
+  await page.addInitScript(({ initData: signedData }) => {
+    const testWindow = window as typeof window & { __openedMaxLink?: string }
+    const webApp = {
+      initData: signedData,
+      version: '1.0',
+      ready() {},
+      openLink(url: string) { testWindow.__openedMaxLink = url },
+    }
+    Object.defineProperty(window, 'WebApp', { configurable: false, get: () => webApp })
+  }, { initData })
+}
+
+async function installMaxAuthRoute(page: Page) {
+  // Keep the existing Telegram-backed E2E identity while exercising the MAX client boundary;
+  // no MAX backend or provider is enabled by this browser-only test.
+  await page.route('**/api/v1/auth/max', async (route) => {
+    const response = await route.fetch({
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      postData: route.request().postData() ?? undefined,
+      url: `${backendUrl}/api/v1/auth/telegram`,
+    })
+    await route.fulfill({ response })
+  })
 }
 
 async function installObjectUrlTracker(page: Page) {
