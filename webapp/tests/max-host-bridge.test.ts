@@ -31,6 +31,31 @@ describe('MAX HostBridge', () => {
     expect(createMaxHostBridge({}, { maxBotUsername: 'x'.repeat(33) }).inviteLink('A'.repeat(32))).toBeNull()
   })
 
+  test('opens the configured memoLy bot through MAX openLink', () => {
+    const opened: string[] = []
+    const bridge = createMaxHostBridge({
+      WebApp: {
+        initData: 'query_id=signed',
+        openLink: (url: string) => { opened.push(url) },
+      },
+    }, { maxBotUsername: 'memoLy' })
+
+    bridge.openBot()
+
+    expect(opened).toEqual(['https://max.ru/memoLy'])
+  })
+
+  test('fails closed for a missing or invalid MAX bot username', () => {
+    const opened: string[] = []
+    const host = { WebApp: { initData: 'query_id=signed', openLink: (url: string) => { opened.push(url) } } }
+
+    createMaxHostBridge(host).openBot()
+    createMaxHostBridge(host, { maxBotUsername: 'bad-name' }).openBot()
+    createMaxHostBridge(host, { maxBotUsername: 'https://evil.example' }).openBot()
+
+    expect(opened).toEqual([])
+  })
+
   test('loads the documented MAX SDK before the React production bootstrap', () => {
     const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
     const html = readFileSync(indexPath, 'utf8')
