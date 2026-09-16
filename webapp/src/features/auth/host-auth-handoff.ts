@@ -1,6 +1,7 @@
 import type { HostAuthProvider } from './context'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AuthContextValue, HostAuthAttemptOptions } from './context'
+import { markAuthStarted } from '../../platform/bootstrap-diagnostic'
 
 export type HostAuthHandoffState = {
   provider: HostAuthProvider
@@ -93,6 +94,7 @@ export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }
         signal: controller.signal,
         isCurrent: () => activeAttempt.current === attempt && !controller.signal.aborted,
       }
+      if (provider === 'max') markAuthStarted()
       void auth.authenticateHost(provider, initData, options)
         .catch((error: unknown) => {
           if (activeAttempt.current !== attempt) return

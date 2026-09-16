@@ -4,12 +4,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from './App'
 import { AuthProvider } from './features/auth'
+import { markHostDetected, markMainModuleEvaluated } from './platform/bootstrap-diagnostic'
 import { createHostBridge } from './platform/telegram'
 import './production.css'
+
+markMainModuleEvaluated()
 
 const hostBridge = createHostBridge(window, {
   maxBotUsername: import.meta.env.VITE_MAX_BOT_USERNAME,
 })
+const maxWebApp = (window as unknown as { WebApp?: unknown }).WebApp
+markHostDetected(hostBridge.kind, maxWebApp !== undefined && maxWebApp !== null, Boolean(hostBridge.rawAuthData()))
 hostBridge.ready()
 
 const root = createRoot(document.getElementById('root')!)
