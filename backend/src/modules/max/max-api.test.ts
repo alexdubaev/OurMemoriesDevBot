@@ -204,6 +204,28 @@ describe('MAX API client', () => {
     })
   })
 
+  test('resolves a live-shaped file image with a numeric fileId and rejects invalid numeric fileIds', async () => {
+    const message = (fileId: unknown) => ({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'live-file/1', attachments: [
+          { type: 'file', payload: { fileId, token: 'rotating-file', url: 'https://fd.oneme.ru/file' }, filename: 'photo.png', size: 9 },
+        ],
+      },
+    }] })
+
+    const api = createMaxApi(token, { fetch: async () => response(message(12345)) })
+    await expect(api.getMessage('live-file/1')).resolves.toEqual({
+      messageId: 'live-file/1', senderId: '42', recipientId: '99', attachments: [
+        { kind: 'file', providerAttachmentId: '12345', filename: 'photo.png', declaredSize: 9, url: 'https://fd.oneme.ru/file' },
+      ],
+    })
+
+    for (const fileId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const invalid = createMaxApi(token, { fetch: async () => response(message(fileId)) })
+      await expect(invalid.getMessage('live-file/1')).rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+    }
+  })
+
   test('looks up a live-shaped video and resolves its exact encoded rotating token', async () => {
     const requests: Request[] = []
     const api = createMaxApi(token, { fetch: async (input, init) => {

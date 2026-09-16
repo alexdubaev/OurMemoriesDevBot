@@ -66,7 +66,9 @@ function normalizeAttachment(value: unknown) {
   if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
   const payload = value.payload
   const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
-  const providerAttachmentId = normalizeProviderAttachmentId(rawProviderAttachmentId, value.type === 'image' || value.type === 'video')
+  const providerAttachmentId = value.type === 'file'
+    ? normalizeFileAttachmentId(rawProviderAttachmentId)
+    : normalizeProviderAttachmentId(rawProviderAttachmentId, true)
   if (!providerAttachmentId) {
     throw new Error('Invalid MAX attachment identity')
   }
@@ -96,6 +98,11 @@ function normalizeProviderAttachmentId(value: unknown, numeric: boolean) {
     if (typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && value.length <= 20) return value
     return null
   }
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
+}
+
+function normalizeFileAttachmentId(value: unknown) {
+  if (typeof value === 'number') return isPositiveSafeInteger(value) ? String(value) : null
   return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 
