@@ -192,6 +192,18 @@ describe('MAX API client', () => {
     expect(JSON.stringify(request)).not.toContain('rotating')
   })
 
+  test('accepts a live-shaped direct dialog with a positive numeric chat id', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'live-m/1', attachments: [],
+      },
+    }] }) })
+
+    await expect(api.getMessage('live-m/1')).resolves.toEqual({
+      messageId: 'live-m/1', senderId: '42', recipientId: '99', attachments: [],
+    })
+  })
+
   test('looks up a live-shaped video and resolves its exact encoded rotating token', async () => {
     const requests: Request[] = []
     const api = createMaxApi(token, { fetch: async (input, init) => {

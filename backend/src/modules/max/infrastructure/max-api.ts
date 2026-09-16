@@ -100,7 +100,7 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
     isRecord(value) && isRecord(value.message) ? value.message : value
   if (!isRecord(candidate) || !isRecord(candidate.sender) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
       !isPositiveSafeInteger(candidate.sender.user_id) || !isPositiveSafeInteger(candidate.recipient.user_id) ||
-      candidate.recipient.chat_id !== null || candidate.recipient.chat_type !== 'dialog' ||
+      (candidate.recipient.chat_id !== null && !isPositiveSafeInteger(candidate.recipient.chat_id)) || candidate.recipient.chat_type !== 'dialog' ||
       typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
       !Array.isArray(candidate.body.attachments)) throw new MaxProviderError()
   const attachments = candidate.body.attachments.map(normalizeResolvedAttachment)
