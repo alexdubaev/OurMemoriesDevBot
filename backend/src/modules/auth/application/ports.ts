@@ -5,7 +5,7 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { SessionMetadata } from '../domain/session'
-import type { AuthUserRecord } from '../domain/user'
+import type { AuthUserRecord, SessionExternalIdentity } from '../domain/user'
 
 export type AccessTokenPayload = {
   sub: string
@@ -59,7 +59,11 @@ export type AuthRepository = {
     userId: string
     now: Date
     createdAfter: Date
-  }): Promise<{ id: string; user: AuthUserRecord } | null>
+  }): Promise<{
+    id: string
+    user: AuthUserRecord
+    externalIdentity: SessionExternalIdentity | null
+  } | null>
   revokeSession(input: {
     refreshTokenHash: string
     refreshTokenFamilyHash: string

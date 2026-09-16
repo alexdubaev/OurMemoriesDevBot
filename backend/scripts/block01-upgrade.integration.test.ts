@@ -93,6 +93,7 @@ test('upgrades Block 00 legacy users and sessions to Block 01 without data loss'
     expect(legacySession).toMatchObject({
       id: legacySessionId,
       userId: legacyUserId,
+      externalIdentityId: null,
       refreshTokenHash: 'legacy-refresh-hash',
       refreshTokenFamilyHash: 'legacy-family-hash',
       revokedAt: null,

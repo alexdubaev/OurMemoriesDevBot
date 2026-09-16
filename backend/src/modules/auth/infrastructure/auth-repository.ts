@@ -167,8 +167,19 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
           revokedAt: null,
           expiresAt: { gt: input.now },
           createdAt: { gt: input.createdAfter },
+          OR: [
+            { externalIdentityId: null },
+            { externalIdentity: { is: { userId: input.userId } } },
+          ],
         },
-        include: { user: true },
+        include: {
+          user: true,
+          externalIdentity: { select: { id: true, provider: true, subject: true } },
+        },
+      }).then((session) => session && {
+        id: session.id,
+        user: session.user,
+        externalIdentity: session.externalIdentity,
       })
     },
 
@@ -350,6 +361,7 @@ export function createPrismaTelegramAuthRepository(
           const session = await tx.authSession.create({
             data: {
               userId: externalIdentity.userId,
+              externalIdentityId: externalIdentity.id,
               refreshTokenHash: input.session.refreshTokenHash,
               refreshTokenFamilyHash: input.session.refreshTokenFamilyHash,
               expiresAt: input.session.expiresAt,
@@ -441,6 +453,7 @@ export function createPrismaMaxAuthRepository(
           const session = await tx.authSession.create({
             data: {
               userId: externalIdentity.userId,
+              externalIdentityId: externalIdentity.id,
               refreshTokenHash: input.session.refreshTokenHash,
               refreshTokenFamilyHash: input.session.refreshTokenFamilyHash,
               expiresAt: input.session.expiresAt,

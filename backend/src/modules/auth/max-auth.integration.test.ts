@@ -52,6 +52,21 @@ maybeDescribe('MAX authentication exchange', () => {
     expect(first.headers.get('set-cookie')).toContain('HttpOnly')
     expect(firstBody).not.toHaveProperty('refreshToken')
     expect(firstBody.user).toMatchObject({ email: null, displayName: 'Max' })
+    expect(firstBody.user).not.toHaveProperty('externalIdentity')
+    const [bound] = await prisma.$queryRaw<Array<{
+      sessionId: string
+      externalIdentityId: string | null
+      provider: string | null
+      subject: string | null
+    }>>`
+      SELECT s.id AS "sessionId", s.external_identity_id AS "externalIdentityId", i.provider::text AS provider, i.subject
+        FROM auth_sessions s
+        LEFT JOIN external_identities i ON i.id = s.external_identity_id
+       WHERE s.id = (
+         SELECT r.session_id FROM max_auth_replays r ORDER BY r.created_at DESC LIMIT 1
+       )
+    `
+    expect(bound).toMatchObject({ provider: 'max', subject: '31415926' })
     expect(await prisma.authSession.count()).toBe(1)
     expect(await prisma.maxAuthReplay.count()).toBe(1)
 
@@ -61,6 +76,24 @@ maybeDescribe('MAX authentication exchange', () => {
     expect((await exchangeMax(reordered)).status).toBe(401)
     expect((await exchangeMax(initData, cookie)).status).toBe(200)
     expect(await prisma.authSession.count()).toBe(1)
+
+    const refresh = await app.request('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'http://localhost:5173',
+        Cookie: cookie!,
+      },
+      body: '{}',
+    })
+    expect(refresh.status).toBe(200)
+
+    const [afterRefresh] = await prisma.$queryRaw<Array<{ externalIdentityId: string | null }>>`
+      SELECT external_identity_id AS "externalIdentityId"
+        FROM auth_sessions
+       WHERE id = ${bound.sessionId}
+    `
+    expect(afterRefresh?.externalIdentityId).toBe(bound?.externalIdentityId)
 
     const second = await exchangeMax(
       signedMaxInitData({ id: 31415926, first_name: 'Max' }, 'second-query'),

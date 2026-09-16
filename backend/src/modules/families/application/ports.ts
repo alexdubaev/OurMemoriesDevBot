@@ -1,5 +1,14 @@
 import type { FamilyRole } from '../domain/family-policy'
 
+export type FamilyCreatePrincipal = {
+  userId: string
+  sessionId: string
+  externalIdentity: {
+    provider: 'telegram' | 'max'
+    subject: string
+  } | null
+}
+
 export type FamilyScope = {
   principal: { userId: string; sessionId: string }
   familyId: string

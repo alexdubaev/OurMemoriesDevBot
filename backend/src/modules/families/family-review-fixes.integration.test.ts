@@ -356,11 +356,12 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     role: 'user' | 'admin' = 'user',
   ) {
     const user = await prisma.user.create({ data: { email: null, displayName, role } })
-    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } })
+    const identity = await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } })
     await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
     const session = await prisma.authSession.create({
       data: {
         userId: user.id,
+        externalIdentityId: identity.id,
         refreshTokenHash: `hash-${subject}`,
         refreshTokenFamilyHash: `family-${subject}`,
         expiresAt: new Date(Date.now() + 60_000),

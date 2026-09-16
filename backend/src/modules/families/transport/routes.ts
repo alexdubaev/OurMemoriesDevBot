@@ -148,7 +148,7 @@ export function createFamilyRoutes({
   routes.use('/invites/*', requireAuth)
 
   routes.openapi(meRoute, async (c) => c.json(await executeFamily(() => {
-    const { sessionId: _sessionId, ...user } = c.var.user
+    const { sessionId: _sessionId, externalIdentity: _externalIdentity, ...user } = c.var.user
     return service.getMe(user)
   }), 200))
   routes.openapi(createFamilyRoute, async (c) => c.json(await executeFamily(() =>
@@ -217,7 +217,11 @@ export function createFamilyRoutes({
 }
 
 function principal(user: AuthHttpEnv['Variables']['user']) {
-  return { userId: user.id, sessionId: user.sessionId }
+  return {
+    userId: user.id,
+    sessionId: user.sessionId,
+    externalIdentity: user.externalIdentity ?? null,
+  }
 }
 
 function scope(user: AuthHttpEnv['Variables']['user'], familyId: string) {
