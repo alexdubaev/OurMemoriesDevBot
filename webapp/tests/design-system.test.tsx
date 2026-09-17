@@ -126,6 +126,12 @@ test('memoLy feed presentation composes the child hero, filters, and scoped navi
   expect(markup).toContain('aria-pressed="true"')
 })
 
+test('memoLy content rail keeps date groups and cards separated', async () => {
+  const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+
+  expect(css).toContain('[data-memoly-feed] .memoly-feed-content { display: flex; flex-direction: column; gap: 12px;')
+})
+
 test('memoLy shell keeps horizontal host insets at the narrow breakpoint and consumes them once in navigation', async () => {
   const markup = render(
     createElement(
