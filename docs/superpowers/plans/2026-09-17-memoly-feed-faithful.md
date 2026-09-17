@@ -32,6 +32,8 @@
 - Modify `webapp/src/features/feed/FeedPage.tsx`: retain controller/media logic, replace old layout/card JSX with presentation components and render slots.
 - Modify `webapp/src/components/BottomNavigation.tsx`: add an explicit `appearance="memoly"` mode without changing the default Family appearance or behavior.
 - Modify `webapp/src/features/feed/components/index.ts`: stop exporting the old FeedShell to production and expose only still-used primitives.
+- Modify `webapp/src/features/feed/api.ts` and `webapp/src/features/feed/queries.ts`: import `FeedFilter` from the new presentation package.
+- Modify `webapp/src/features/feed/index.ts`: export `FeedFilter` from the new presentation package while preserving the public barrel used by `App.tsx`.
 - Delete `webapp/src/features/feed/components/FeedShell.tsx` after no production or test imports remain.
 - Modify `webapp/tests/design-system.test.tsx`: cover feed presentation structure and memoLy navigation semantics.
 - Modify `webapp/tests/feed.test.tsx`: cover card mapping, permissions, real media slots, overlays, and no demo fallback.
@@ -50,6 +52,9 @@
 - Create: `webapp/src/features/feed/presentation/index.ts`
 - Modify: `webapp/src/components/BottomNavigation.tsx`
 - Modify: `webapp/src/components/webp-icon-types.ts`
+- Modify: `webapp/src/features/feed/api.ts`
+- Modify: `webapp/src/features/feed/queries.ts`
+- Modify: `webapp/src/features/feed/index.ts`
 - Modify: `assets/manifest.json`
 - Add: `webapp/public/assets/brand/memoly-cloud-stars.webp`
 - Add: `assets/icons/gear-{default,active}@{2x,3x}.webp`
@@ -77,6 +82,8 @@ export type FeedPresentationProps = {
   onMore?: () => void
   role: 'full' | 'viewer'
 }
+
+export type FeedFilter = 'all' | 'photo' | 'video' | 'voice' | 'note'
 ```
 
 - [ ] **Step 1: Write the failing shell and navigation tests**
@@ -190,7 +197,7 @@ Expected: tests pass; the diff command prints no Family or App changes.
 - [ ] **Step 6: Commit Task 1**
 
 ```powershell
-git add -- webapp/src/features/feed/presentation webapp/src/components/BottomNavigation.tsx webapp/src/features/feed/components/FeedShell.tsx webapp/tests/design-system.test.tsx
+git add -- assets/manifest.json assets/icons webapp/public/assets webapp/src/components/BottomNavigation.tsx webapp/src/components/webp-icon-types.ts webapp/src/features/feed/api.ts webapp/src/features/feed/queries.ts webapp/src/features/feed/index.ts webapp/src/features/feed/presentation webapp/src/features/feed/components/FeedShell.tsx webapp/tests/design-system.test.tsx
 git diff --cached --check
 git commit -m "feat(feed): add faithful memoLy presentation shell"
 ```
