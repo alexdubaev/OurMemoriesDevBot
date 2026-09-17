@@ -31,6 +31,7 @@ import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-wavefo
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
 import { FeedMemoryList } from '@/features/memoly-ui/FeedPresentation'
+import { AddSheetPresentation } from '@/features/memoly-ui/AddSheetPresentation'
 
 type Props = {
   childName: string
@@ -64,6 +65,8 @@ export function FeedPage({
   const deletion = useMemoryDelete(transport, familyId, () => setDeleteError(true))
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
+  const [addSheetOpen, setAddSheetOpen] = useState(false)
+  const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const [newAvailable, setNewAvailable] = useState(false)
   const knownFirstId = useRef<string | null>(null)
   const items = useMemo(() => {
@@ -125,6 +128,7 @@ export function FeedPage({
   return (
     <MediaPlaybackCoordinator>
     <FeedShell activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
+      addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
       {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
@@ -141,6 +145,13 @@ export function FeedPage({
       {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
       {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} transport={transport} /> : null}
     </FeedShell>
+    <AddSheetPresentation
+      hostBridge={hostBridge}
+      onOpenChange={setAddSheetOpen}
+      open={addSheetOpen}
+      returnFocusRef={addButtonRef}
+      role={role}
+    />
     </MediaPlaybackCoordinator>
   )
 }

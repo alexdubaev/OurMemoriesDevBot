@@ -39,7 +39,7 @@ export function BottomNavigation({
             aria-label="Добавить"
             className="group flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]"
             data-nav-position="add"
-            onClick={onAdd}
+            onClick={onAdd ?? noop}
             ref={addButtonRef}
             type="button"
           >
@@ -100,3 +100,5 @@ function NavButton({
     </button>
   )
 }
+
+function noop() {}

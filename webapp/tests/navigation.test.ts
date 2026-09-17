@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test'
 import type { UserRole } from '@web-app-demo/contracts'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
+import { BottomNavigation } from '../src/components/BottomNavigation'
 import {
   homePathForRole,
   navigationItemsForRole,
@@ -10,6 +13,8 @@ import {
 } from '../src/features/navigation/model'
 import { router } from '../src/routes'
 
+const noop = () => undefined
+
 test('role navigation exposes only the current workspace', () => {
   // Asserted as a boundary, not as a list: a new menu entry is a product decision, while an admin
   // path reachable from the user menu is a bug.
@@ -17,6 +22,19 @@ test('role navigation exposes only the current workspace', () => {
   expect(navigationItemsForRole('admin').every((item) => item.to.startsWith('/admin'))).toBe(true)
   expect(homePathForRole('user')).toBe('/app')
   expect(homePathForRole('admin')).toBe('/admin')
+})
+
+test('viewer bottom navigation keeps the center position non-interactive', () => {
+  const markup = renderToStaticMarkup(createElement(BottomNavigation, {
+    active: 'feed',
+    onFamily: noop,
+    onFeed: noop,
+    role: 'viewer',
+  }))
+
+  expect(markup).not.toContain('aria-label="Добавить"')
+  expect(markup).toContain('data-nav-viewer="true"')
+  expect(markup).toContain('Просмотр')
 })
 
 test('cross-role destinations resolve to the current role home', () => {

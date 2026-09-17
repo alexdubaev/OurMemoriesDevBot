@@ -6,9 +6,9 @@ import { resolve } from 'node:path'
 
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { WebpIcon } from '../src/components/WebpIcon'
+import { AddSheetPanel, VoiceOrVideoAction } from '../src/features/memoly-ui/AddSheetPresentation'
 import { Drawer } from '../src/components/ui/drawer'
 import {
-  AddSheetPanel,
   DateHeading,
   EmptyState,
   FeedShell,
@@ -177,23 +177,32 @@ test('FeedShell provides the left spacer required by the memoLy three-column top
   expect(css).toContain('width: 44px')
 })
 
-test('AddSheet panel contains only the three approved actions and an accessible title', () => {
+test('production AddSheet exposes only the voice-or-video handoff and an accessible title', () => {
   const markup = render(
     createElement(
       Drawer,
       { open: true },
-      createElement(AddSheetPanel, { onClose: () => undefined }),
+      createElement(AddSheetPanel, { onClose: () => undefined, onOpenBot: () => undefined }),
     ),
   )
 
   expect(markup).toContain('Что добавить?')
-  expect(markup).toContain('Фото или видео')
-  expect(markup).toContain('Заметка')
-  expect(markup).toContain('Голосовое в боте')
+  expect(markup).toContain('Голос или видео')
+  expect(markup).not.toContain('Фото')
+  expect(markup).not.toContain('Заметка')
   expect(markup).toContain('Материалы увидят участники вашей семьи')
   expect(markup).not.toContain('Событие')
   expect(markup).not.toContain('Календарь')
   expect(markup).not.toContain('AI')
-  expect(markup.match(/data-add-action=/g)).toHaveLength(3)
+  expect(markup.match(/data-add-action=/g)).toHaveLength(1)
   expect(markup).toContain('aria-label="Закрыть"')
+})
+
+test('voice-or-video action invokes the supplied bot handoff', () => {
+  let opened = false
+  const action = VoiceOrVideoAction({ onClick: () => { opened = true } })
+  if (action.type !== 'button') throw new Error('expected a button action')
+
+  action.props.onClick()
+  expect(opened).toBe(true)
 })
