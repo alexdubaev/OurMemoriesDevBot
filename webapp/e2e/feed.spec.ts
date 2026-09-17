@@ -284,9 +284,9 @@ test.describe.serial('T07 live feed', () => {
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic like failure' } }),
     }))
     const albumCard = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' })
-    await expect(albumCard.getByRole('button', { name: /Сердечко/ })).toBeEnabled()
+    await expect(albumCard.getByRole('button', { name: /сердечко/i })).toBeEnabled()
     await expect(albumCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(0)
-    const like = albumCard.getByRole('button', { name: /Сердечко/ })
+    const like = albumCard.getByRole('button', { name: /сердечко/i })
     await like.click()
     await expect(like).toHaveAttribute('aria-pressed', 'false')
     await expect(albumCard).toContainText('Фотоальбом E2E')
@@ -633,6 +633,7 @@ function signedInitData(id: number, name: string) {
 }
 
 async function installTelegramHost(page: Page, initData: string) {
+  await page.route(/telegram\.org\/js\/telegram-web-app\.js(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }))
   await page.addInitScript((value) => {
     const backHandlers = new Set<() => void>()
     const testWindow = window as typeof window & {
