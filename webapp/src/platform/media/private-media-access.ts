@@ -7,8 +7,7 @@ export function syncPrivateMediaAccessToken(accessToken: string | null) {
 }
 
 export async function privateMediaSource(path: string) {
-  const registration = await ensurePrivateMediaAccess()
-  if (registration && currentAccessToken) return path
+  await ensurePrivateMediaAccess()
   return currentAccessToken && await bootstrapMediaSession(path) ? path : null
 }
 

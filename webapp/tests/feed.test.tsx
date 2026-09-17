@@ -265,6 +265,36 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
   }
 })
 
+test('a MAX video frame keeps the source ratio, contains playback, and caps its height', () => {
+  const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+    durationMs: 24_000,
+    height: 1_920,
+    onOpen: () => undefined,
+    src: '/api/v1/families/family/media/max-videos/video/content',
+    width: 1_080,
+  }))
+
+  expect(markup).toContain('data-slot="max-video-frame"')
+  expect(markup).toContain('aspect-ratio:1080 / 1920')
+  expect(markup).toContain('width:min(100%, calc(75dvh * 1080 / 1920))')
+  expect(markup).toContain('max-h-[75dvh]')
+  expect(markup).toContain('object-contain')
+})
+
+test('a MAX video exposes only a numeric media error code for diagnostics', () => {
+  const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+    durationMs: 24_000,
+    height: 720,
+    onOpen: () => undefined,
+    src: '/api/v1/families/family/media/max-videos/video/content',
+    width: 1_280,
+  }))
+
+  expect(markup).toContain('data-media-error-code="0"')
+  expect(markup).not.toContain('access-token')
+  expect(markup).not.toContain('bearer=')
+})
+
 test('a MAX video without an authenticated source keeps a safe video fallback', () => {
   const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
     durationMs: null,

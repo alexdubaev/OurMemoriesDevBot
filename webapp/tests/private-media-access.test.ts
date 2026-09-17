@@ -46,8 +46,8 @@ test('a browser without Service Worker support bootstraps an HttpOnly media sess
   expect(source).not.toContain('token=')
 })
 
-test('a controlled Service Worker keeps the existing protected source path without a cookie bootstrap', async () => {
-  const requests: string[] = []
+test('a controlled Service Worker bootstraps the HttpOnly media session before returning the protected source', async () => {
+  const requests: Array<{ input: string; init: RequestInit | undefined }> = []
   const active = {
     postMessage(_message: unknown, ports: MessagePort[]) { ports[0]!.postMessage(undefined) },
   }
@@ -59,8 +59,8 @@ test('a controlled Service Worker keeps the existing protected source path witho
         register: async () => ({ active, installing: null, waiting: null }),
       },
     },
-    fetch: async (input: RequestInfo | URL) => {
-      requests.push(String(input))
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), init })
       return new Response(null, { status: 204 })
     },
     window: { clearTimeout, setTimeout },
@@ -72,7 +72,14 @@ test('a controlled Service Worker keeps the existing protected source path witho
   syncPrivateMediaAccessToken('access-token-for-test')
 
   expect(await privateMediaSource(path)).toBe(path)
-  expect(requests.some((input) => input.includes('/playback-session'))).toBe(false)
+  expect(requests.find(({ input }) => input.includes('/playback-session'))).toEqual({
+    input: '/api/v1/families/11111111-1111-4111-8111-111111111111/media/playback-session',
+    init: expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+      headers: expect.objectContaining({ Authorization: 'Bearer access-token-for-test' }),
+    }),
+  })
 })
 
 test('a no-Service-Worker source is assigned before native audio play is called', async () => {

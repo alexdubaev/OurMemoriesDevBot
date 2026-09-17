@@ -294,11 +294,12 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [mediaErrorCode, setMediaErrorCode] = useState(0)
   const sourceFailed = sourceStatus === 'error'
-  const aspectRatio = videoPosterAspectRatio(width, height)
+  const frameStyle = videoFrameStyle(width, height)
   return <div className="w-full">
-    <div className="relative isolate w-full overflow-hidden bg-muted" style={{ aspectRatio }}>
-      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={() => setFailed(true)} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} src={src ? `${src}#t=0.001` : undefined} />
+    <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
+      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true) }} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} src={src ? `${src}#t=0.001` : undefined} />
       {!started && !failed && !sourceFailed ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
@@ -331,6 +332,17 @@ function useMaxVideoSource(path: string | null) {
 
 function videoPosterAspectRatio(width: number | null, height: number | null) {
   return mediaAspectRatio(width, height) ?? '16 / 9'
+}
+
+function videoFrameStyle(width: number | null, height: number | null) {
+  const validDimensions = Number.isFinite(width) && Number.isFinite(height) && width! > 0 && height! > 0
+  const frameWidth = validDimensions ? width! : 16
+  const frameHeight = validDimensions ? height! : 9
+  return {
+    aspectRatio: `${frameWidth} / ${frameHeight}`,
+    marginInline: 'auto',
+    width: `min(100%, calc(75dvh * ${frameWidth} / ${frameHeight}))`,
+  }
 }
 
 function mediaAspectRatio(width: number | null, height: number | null) {
