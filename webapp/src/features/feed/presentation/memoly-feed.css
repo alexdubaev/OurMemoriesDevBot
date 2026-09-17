@@ -72,7 +72,8 @@
 [data-memoly-feed] [data-slot="memoly-note-layout"] { display: flex; align-items: center; gap: 10px; padding: 10px 14px 12px; }
 [data-memoly-feed] .memoly-memory-copy { gap: 9px; padding: 11px 2px 2px; }
 [data-memoly-feed] .memoly-memory-open { min-width: 0; flex: 1; padding: 0; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
-[data-memoly-feed] .memoly-memory-open-empty { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+[data-memoly-feed] .memoly-memory-open-empty { display: inline-flex; min-width: 76px; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 7px 12px; border: 1px solid var(--memoly-line); border-radius: 22px; color: var(--memoly-muted); background: #fffaf5; box-shadow: 0 3px 8px #89706020; text-align: center; }
+[data-memoly-feed] .memoly-memory-open-empty:focus-visible { outline: 3px solid #8064ff80; outline-offset: 2px; }
 [data-memoly-feed] .memoly-like-button { display: inline-flex; min-height: 44px; min-width: 58px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; border-radius: 25px; color: var(--memoly-muted); background: #fffaf5; box-shadow: 0 3px 8px #89706020; font-size: 13px; }
 [data-memoly-feed] .memoly-like-button [data-slot="webp-icon"] { flex: 0 0 auto; }
 [data-memoly-feed] .memoly-like-button.is-liked { color: #b53969; background: #ffedf1; }
@@ -83,6 +84,7 @@
 [data-memoly-feed] .memoly-video-row > :first-child { min-width: 0; }
 [data-memoly-feed] .memoly-video-row .memoly-memory-copy { min-width: 0; flex-direction: column; align-items: stretch; justify-content: center; }
 [data-memoly-feed] .memoly-video-row .memoly-memory-open { flex: 0 1 auto; }
+[data-memoly-feed] .memoly-video-row .memoly-memory-open-empty { align-self: flex-start; }
 [data-memoly-feed] .memoly-audio { width: 100%; padding: 7px 10px 7px 6px; border-radius: 40px; background: linear-gradient(110deg, #eee6fb, #f3eef8); }
 [data-memoly-feed] .memoly-audio-row { display: flex; width: 100%; align-items: center; gap: 10px; }
 [data-memoly-feed] .memoly-audio-play { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #fff; background: linear-gradient(150deg, #b5a3ff, #8064ff); }

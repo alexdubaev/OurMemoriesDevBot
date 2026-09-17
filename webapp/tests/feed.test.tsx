@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { MemoryDto } from '@web-app-demo/contracts'
 import { expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { createElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -130,28 +131,38 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
   expect(markup).not.toContain('/assets/photo-park.webp')
 })
 
-test('a photo card with an empty body keeps an accessible open-memory action', () => {
+test('media cards with an empty body keep a visible nested open-memory action', () => {
   let opens = 0
-  const card = MemoryCardPresentation({
-    actions: null,
-    authorInitials: 'М',
-    authorName: 'Мама',
-    body: '',
-    kind: 'photo',
-    liked: false,
-    likeCount: 0,
-    media: createElement('div', null, 'photo'),
-    memoryId: photoMemory.id,
-    occurredTime: '12 мая 2024, 10:24',
-    onLike: () => undefined,
-    onOpen: () => { opens += 1 },
-  })
+  for (const kind of ['photo', 'video', 'voice'] as const) {
+    const card = MemoryCardPresentation({
+      actions: null,
+      authorInitials: 'М',
+      authorName: 'Мама',
+      body: '',
+      kind,
+      liked: false,
+      likeCount: 0,
+      media: createElement('div', null, kind),
+      memoryId: `${kind}-empty-body`,
+      occurredTime: '12 мая 2024, 10:24',
+      onLike: () => undefined,
+      onOpen: () => { opens += 1 },
+    })
 
-  const openAction = findOpenAction(card)
-  expect(renderToStaticMarkup(card)).toContain('aria-label="Открыть воспоминание photo"')
-  expect(openAction).not.toBeNull()
-  openAction?.props.onOpen?.()
-  expect(opens).toBe(1)
+    const markup = renderToStaticMarkup(card)
+    const openAction = findOpenAction(card)
+    expect(markup).toContain(`data-memory-kind="${kind}"`)
+    expect(markup).toContain('Открыть')
+    expect(markup).toContain(`aria-label="Открыть воспоминание ${kind}"`)
+    expect(markup).toContain('memoly-memory-open-empty')
+    expect(openAction).not.toBeNull()
+    openAction?.props.onOpen?.()
+  }
+
+  const css = readFileSync(new URL('../src/features/feed/presentation/memoly-feed.css', import.meta.url), 'utf8')
+  expect(css).toMatch(/\.memoly-memory-open-empty\s*\{[^}]*display:\s*inline-flex[^}]*min-height:\s*44px/)
+  expect(css).not.toMatch(/\.memoly-memory-open-empty\s*\{[^}]*position:\s*absolute/)
+  expect(opens).toBe(3)
 })
 
 test('viewer cards keep like enabled while omitting the delete action', () => {
@@ -582,6 +593,6 @@ function findOpenAction(node: ReactNode): ReactElement<{ body?: string; kind?: M
   }
   if (!node || typeof node !== 'object' || !('type' in node) || !('props' in node)) return null
   const element = node as ReactElement<{ body?: string; kind?: MemoryDto['kind']; onOpen?: () => void }>
-  if (typeof element.type === 'function' && element.props.kind && element.props.onOpen) return element
+  if (typeof element.type === 'function' && element.type.name === 'MemoryOpenButton' && element.props.kind && element.props.onOpen) return element
   return findOpenAction(element.props.children)
 }
