@@ -62,7 +62,7 @@ function MemorySlot({ children, className, slot }: { children: ReactNode; classN
 }
 
 function MemoryOpenButton({ body, className, kind, onOpen }: { body: string; className?: string; kind: MemoryDto['kind']; onOpen: () => void }) {
-  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`memoly-memory-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{className === 'memoly-note-body' ? <><WebpIcon decorative name="note" size={27} /><span>{body}</span></> : body}</button></Typography>
+  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`memoly-memory-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{className === 'memoly-note-body' ? <><WebpIcon decorative name="note" size={27} /><Typography as="span" variant="memoryCaption">{body}</Typography></> : body}</button></Typography>
 }
 
 function LikeButton({ liked, likeCount, onLike }: { liked: boolean; likeCount: number; onLike: () => void }) {
