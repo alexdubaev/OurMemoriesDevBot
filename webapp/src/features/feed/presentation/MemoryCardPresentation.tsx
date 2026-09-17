@@ -35,7 +35,9 @@ export function MemoryCardPresentation({
 }: MemoryCardPresentationProps) {
   const captionAndLike = (
     <div className="memoly-memory-copy">
-      <MemoryOpenButton body={body} className={body ? undefined : 'memoly-memory-open-empty'} kind={kind} onOpen={onOpen} />
+      {kind === 'video'
+        ? body ? <Typography className="memoly-video-caption" variant="memoryCaption">{body}</Typography> : null
+        : <MemoryOpenButton body={body} className={body ? undefined : 'memoly-memory-open-empty'} kind={kind} onOpen={onOpen} />}
       <LikeButton liked={liked} likeCount={likeCount} onLike={onLike} />
     </div>
   )
@@ -48,7 +50,7 @@ export function MemoryCardPresentation({
         <MemoryActions>{actions}</MemoryActions>
       </div>
       {kind === 'photo' ? <MemorySlot slot="memoly-photo-layout">{media}{captionAndLike}</MemorySlot> : null}
-      {kind === 'video' ? <MemorySlot className="memoly-video-row" slot="memoly-video-layout">{media}{captionAndLike}</MemorySlot> : null}
+      {kind === 'video' ? <MemorySlot className={`memoly-video-row${body ? ' has-caption' : ''}`} slot="memoly-video-layout">{media}{captionAndLike}</MemorySlot> : null}
       {kind === 'voice' ? <MemorySlot slot="memoly-voice-layout">{media}{captionAndLike}</MemorySlot> : null}
       {kind === 'note' ? <MemorySlot slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="memoly-note-body" kind={kind} onOpen={onOpen} /> : null}<LikeButton liked={liked} likeCount={likeCount} onLike={onLike} /></MemorySlot> : null}
     </article>

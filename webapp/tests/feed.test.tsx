@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { MemoryDto } from '@web-app-demo/contracts'
 import { expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { createElement, type ReactElement, type ReactNode } from 'react'
+import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster, loadMaxVideoSourceOnce } from '../src/features/feed/FeedPage'
@@ -131,9 +130,54 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
   expect(markup).not.toContain('/assets/photo-park.webp')
 })
 
-test('media cards with an empty body keep a visible nested open-memory action', () => {
+test('video cards remove the standalone open action and collapse when the caption is empty', () => {
+  const card = MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-empty-body',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  })
+
+  const markup = renderToStaticMarkup(card)
+  expect(markup).toContain('data-memory-kind="video"')
+  expect(markup).toContain('class="memoly-video-row"')
+  expect(markup).not.toContain('Открыть')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+})
+
+test('video captions remain visible without becoming a separate detail button', () => {
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: 'Первые шаги',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-with-caption',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  expect(markup).toContain('Первые шаги')
+  expect(markup).toContain('memoly-video-caption')
+  expect(markup).not.toContain('Открыть воспоминание')
+  expect(markup).not.toContain('>Открыть<')
+})
+
+test('photo and voice cards keep their caption detail action when the body is empty', () => {
   let opens = 0
-  for (const kind of ['photo', 'video', 'voice'] as const) {
+  for (const kind of ['photo', 'voice'] as const) {
     const card = MemoryCardPresentation({
       actions: null,
       authorInitials: 'М',
@@ -159,17 +203,14 @@ test('media cards with an empty body keep a visible nested open-memory action', 
     openAction?.props.onOpen?.()
   }
 
-  const css = readFileSync(new URL('../src/features/feed/presentation/memoly-feed.css', import.meta.url), 'utf8')
-  expect(css).toMatch(/\.memoly-memory-open-empty\s*\{[^}]*display:\s*inline-flex[^}]*min-height:\s*44px/)
-  expect(css).not.toMatch(/\.memoly-memory-open-empty\s*\{[^}]*position:\s*absolute/)
-  expect(opens).toBe(3)
+  expect(opens).toBe(2)
 })
 
 test('viewer cards keep like enabled while omitting the delete action', () => {
   const viewerMemory = { ...memory, capabilities: { ...memory.capabilities, delete: false } }
   const markup = renderFeed(feedClientWith([viewerMemory]), 'viewer')
 
-  expect(markup).not.toContain('aria-label="Действия с воспоминанием"')
+  expect(markup).toContain('aria-label="Действия с воспоминанием"')
   expect(markup).toContain('aria-label="Поставить сердечко"')
   expect(markup).toContain('aria-pressed="false"')
   expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
@@ -496,7 +537,7 @@ test('optimistic deletion removes a memory from every cached family filter', () 
   expect(snapshot).toHaveLength(2)
 })
 
-test('delete action is available only when the memory capability permits it', () => {
+test('memory actions menu is available to every role while delete remains capability-gated', () => {
   const fullMarkup = renderFeed(feedClient())
   expect(fullMarkup).toContain('aria-label="Действия с воспоминанием"')
 
@@ -504,7 +545,7 @@ test('delete action is available only when the memory capability permits it', ()
   viewerClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
     pages: [{ items: [{ ...memory, capabilities: { ...memory.capabilities, delete: false } }], nextCursor: null }], pageParams: [null],
   })
-  expect(renderFeed(viewerClient)).not.toContain('aria-label="Действия с воспоминанием"')
+  expect(renderFeed(viewerClient)).toContain('aria-label="Действия с воспоминанием"')
 })
 
 function feedClient() {

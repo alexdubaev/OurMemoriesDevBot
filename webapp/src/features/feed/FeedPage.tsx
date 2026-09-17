@@ -137,7 +137,7 @@ export function FeedPage({
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
           attachment.source === 'private_storage' && attachment.kind === 'photo')
         return <MemoryCardPresentation
-          actions={memory.capabilities.delete ? <MemoryDeleteAction memory={memory} onDelete={(target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) }} /> : null}
+          actions={<MemoryActions memory={memory} onDelete={memory.capabilities.delete ? (target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) } : undefined} onOpen={() => setDetail(memory)} />}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
           body={memory.body}
@@ -218,11 +218,11 @@ export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, tran
   </div>
 }
 
-function MemoryDeleteAction({ memory, onDelete }: { memory: MemoryDto; onDelete: (memory: MemoryDto) => Promise<unknown> }) {
+function MemoryActions({ memory, onDelete, onOpen }: { memory: MemoryDto; onDelete?: (memory: MemoryDto) => Promise<unknown>; onOpen: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const confirm = async () => {
-    if (submitting) return
+    if (submitting || !onDelete) return
     setSubmitting(true)
     try {
       await onDelete(memory)
@@ -237,7 +237,8 @@ function MemoryDeleteAction({ memory, onDelete }: { memory: MemoryDto; onDelete:
         <button aria-label="Действия с воспоминанием" className="flex size-11 items-center justify-center rounded-full text-muted-foreground" type="button"><WebpIcon decorative name="more" size={24} /></button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem className="min-h-11 px-3" onSelect={() => setConfirming(true)} variant="destructive">Удалить воспоминание</DropdownMenuItem>
+        <DropdownMenuItem className="min-h-11 px-3" onSelect={onOpen}>Подробнее</DropdownMenuItem>
+        {onDelete ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => setConfirming(true)} variant="destructive">Удалить воспоминание</DropdownMenuItem> : null}
       </DropdownMenuContent>
     </DropdownMenu>
     <AlertDialogContent className="mx-4 max-w-[calc(100%-2rem)] rounded-[var(--radius-sheet)]">
