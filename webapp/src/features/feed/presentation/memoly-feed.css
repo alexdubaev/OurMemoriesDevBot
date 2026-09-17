@@ -61,7 +61,7 @@
 [data-memoly-feed] .memoly-filters button[aria-pressed="true"] { color: #fff; background: linear-gradient(160deg, #baa9ff, #8b74ff 48%, #7658f5); box-shadow: inset 0 2px 3px #fffa, 0 6px 14px #9374ee45; }
 [data-memoly-feed] .memoly-feed-content { padding-top: 0; padding-right: calc(16px + var(--host-inset-right)); padding-bottom: 0; padding-left: calc(16px + var(--host-inset-left)); }
 
-[data-memoly-feed] .memoly-bottom-nav { inset-inline: auto; right: auto; bottom: calc(16px + var(--host-inset-bottom)); left: calc(50% + (var(--host-inset-left) - var(--host-inset-right)) / 2); width: min(460px, calc(100% - 36px - var(--host-inset-left) - var(--host-inset-right))); height: var(--memoly-nav-height); transform: translateX(-50%); border: 1px solid #fff; border-radius: 23px 23px 34px 34px; background: linear-gradient(135deg, #fffaf5f7, #fcf4edf7); box-shadow: 0 -4px 20px #8d746410, 0 8px 22px #9c837b15; backdrop-filter: blur(16px); padding-bottom: 0; }
+[data-memoly-feed] .memoly-bottom-nav { inset-inline: auto; right: auto; bottom: calc(16px + var(--host-inset-bottom)); left: 50%; width: min(460px, 100%); height: var(--memoly-nav-height); transform: translateX(-50%); border: 1px solid #fff; border-radius: 23px 23px 34px 34px; background: linear-gradient(135deg, #fffaf5f7, #fcf4edf7); box-shadow: 0 -4px 20px #8d746410, 0 8px 22px #9c837b15; backdrop-filter: blur(16px); padding-bottom: 0; }
 [data-memoly-feed] .memoly-bottom-nav-grid { grid-template-columns: 1fr 1fr 1fr; width: 100%; height: 100%; max-width: none; align-items: center; padding-top: 9px; padding-right: calc(21px + var(--host-inset-right)); padding-bottom: 11px; padding-left: calc(21px + var(--host-inset-left)); }
 [data-memoly-feed] .memoly-bottom-nav-grid > button,
 [data-memoly-feed] .memoly-nav-viewer { min-height: 60px; align-items: center; justify-content: center; gap: 3px; color: #85809c; }
@@ -71,14 +71,14 @@
 @media (max-width: 520px) {
   [data-memoly-feed] { padding: 0; }
   [data-memoly-feed] .memoly-feed-shell { max-width: 100%; min-height: 100dvh; border: 0; border-radius: 0; }
-  [data-memoly-feed] .memoly-bottom-nav { bottom: var(--host-inset-bottom); left: calc(50% + (var(--host-inset-left) - var(--host-inset-right)) / 2); width: calc(100% - var(--host-inset-left) - var(--host-inset-right)); border-radius: 23px 23px 0 0; }
+  [data-memoly-feed] .memoly-bottom-nav { bottom: var(--host-inset-bottom); left: 50%; width: 100%; border-radius: 23px 23px 0 0; }
   [data-memoly-feed] .memoly-cloud-art { right: -5px; }
   [data-memoly-feed] .memoly-feed-content { padding-inline: calc(14px + var(--host-inset-left)) calc(14px + var(--host-inset-right)); }
 }
 
 @media (max-width: 370px) {
   [data-memoly-feed] .memoly-logo { width: 144px; }
-  [data-memoly-feed] .memoly-child-hero { gap: 12px; margin-inline: 16px; }
+  [data-memoly-feed] .memoly-child-hero { gap: 12px; margin-left: calc(16px + var(--host-inset-left)); margin-right: calc(16px + var(--host-inset-right)); }
   [data-memoly-feed] .memoly-child-hero [data-slot="child-avatar"],
   [data-memoly-feed] .memoly-child-hero [data-slot="avatar-letter"] { width: 76px; height: 76px; flex-basis: 76px; }
   [data-memoly-feed] .memoly-filters button { padding-inline: 10px; font-size: 12px; }

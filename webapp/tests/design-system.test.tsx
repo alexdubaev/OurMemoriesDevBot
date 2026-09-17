@@ -126,7 +126,7 @@ test('memoLy feed presentation composes the child hero, filters, and scoped navi
   expect(markup).toContain('aria-pressed="true"')
 })
 
-test('memoLy shell keeps horizontal host insets in feed content and navigation gutters', async () => {
+test('memoLy shell keeps horizontal host insets at the narrow breakpoint and consumes them once in navigation', async () => {
   const markup = render(
     createElement(
       FeedPresentation,
@@ -151,6 +151,10 @@ test('memoLy shell keeps horizontal host insets in feed content and navigation g
   expect(css).toContain('padding-right: calc(16px + var(--host-inset-right))')
   expect(css).toContain('padding-left: calc(21px + var(--host-inset-left))')
   expect(css).toContain('padding-right: calc(21px + var(--host-inset-right))')
+  expect(css).toContain('margin-left: calc(16px + var(--host-inset-left))')
+  expect(css).toContain('margin-right: calc(16px + var(--host-inset-right))')
+  expect(css).toContain('width: min(460px, 100%)')
+  expect(css).not.toContain('width: min(460px, calc(100% - 36px - var(--host-inset-left) - var(--host-inset-right)))')
 })
 
 test('FeedShell applies normalized host insets once and lets long names grow safely', () => {
