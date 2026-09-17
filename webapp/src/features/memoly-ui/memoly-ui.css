@@ -88,7 +88,7 @@
 .ml-note { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px; border: 0; color: var(--ml-ink); text-align: left; background: var(--ml-soft); }
 .ml-note p { margin: 0; white-space: pre-wrap; font-size: 16px; line-height: 24px; }
 .ml-note-like { justify-content: flex-end; }
-.ml-bottom-nav { position: fixed; z-index: 30; inset-inline: 0; bottom: 0; display: grid; min-height: var(--layout-bottom-nav, 72px); grid-template-columns: repeat(3, minmax(0, 1fr)); padding-inline: var(--host-inset-left, 0px) var(--host-inset-right, 0px); border-top: 1px solid var(--ml-line); background: var(--ml-surface); }
+.ml-bottom-nav { position: fixed; z-index: 30; inset-inline: 0; bottom: 0; display: grid; min-height: var(--layout-bottom-nav, 72px); grid-template-columns: repeat(3, minmax(0, 1fr)); padding-inline: var(--host-inset-left, 0px) var(--host-inset-right, 0px); padding-bottom: var(--host-inset-bottom, 0px); border-top: 1px solid var(--ml-line); background: var(--ml-surface); }
 .ml-bottom-nav > button { display: flex; min-height: 60px; align-items: center; justify-content: center; gap: 2px; border: 0; color: var(--ml-muted); }
 .ml-bottom-nav > button.active { color: var(--ml-accent); }
 .ml-bottom-nav > button.add b { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; color: var(--ml-ink); background: var(--ml-accent-soft); }

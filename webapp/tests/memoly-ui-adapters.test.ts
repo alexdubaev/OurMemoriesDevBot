@@ -1,5 +1,7 @@
 import type { MemoryDto } from '@web-app-demo/contracts'
 import { expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { toCapabilities, toChildPresentation, toMemoryPresentation, toMemberPresentation, toInvitePresentation } from '../src/features/memoly-ui/adapters'
 
@@ -46,6 +48,17 @@ test('maps a private-photo memory without changing its private path', () => {
   })
 })
 
+test('uses the display or preview path when a private photo has no playback path', () => {
+  const photoWithoutPlayback: MemoryDto = {
+    ...memory,
+    attachments: [{ ...memory.attachments[0]!, playbackPath: null }],
+  }
+
+  expect(toMemoryPresentation(photoWithoutPlayback, 'Europe/Moscow').images).toEqual([
+    memory.attachments[0]!.displayPath,
+  ])
+})
+
 test('maps date labels using the family timezone', () => {
   const presentation = toMemoryPresentation(memory, 'Europe/Moscow')
 
@@ -54,13 +67,18 @@ test('maps date labels using the family timezone', () => {
   expect(presentation.timeLabel).toBe('03:30')
 })
 
-test('maps owner, full, and viewer capabilities only from supplied values', () => {
-  expect(toCapabilities({ role: 'viewer', isOwner: false })).toMatchObject({
+test('passes through existing capability values without deriving permissions from role or owner', () => {
+  const supplied = {
     canContribute: false,
     canDeleteMemories: false,
-  })
-  expect(toCapabilities({ role: 'full', isOwner: false }).canContribute).toBe(true)
-  expect(toCapabilities({ role: 'viewer', isOwner: true }).canManageFamily).toBe(true)
+    canEditMemories: false,
+    canManageFamily: false,
+    canInvite: false,
+    canEditChild: false,
+    canLeaveFamily: true,
+  }
+
+  expect(toCapabilities({ capabilities: supplied })).toEqual(supplied)
 })
 
 test('maps child, member, and invite values without inventing media or tokens', () => {
@@ -97,4 +115,10 @@ test('maps child, member, and invite values without inventing media or tokens', 
     expiresAt: '2026-09-20T00:00:00.000Z',
     createdAt: '2026-09-17T00:00:00.000Z',
   })).toMatchObject({ id: memoryId, label: 'Дедушка', role: 'VIEWER', status: 'pending' })
+})
+
+test('reserves the normalized bottom host inset for the namespaced navigation', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+
+  expect(css).toContain('padding-bottom: var(--host-inset-bottom, 0px)')
 })

@@ -2,7 +2,6 @@ import type {
   FamilyInviteDto,
   FamilyMemberDto,
   FamilyResponse,
-  FamilyRole,
   MemoryAttachment,
   MemoryDto,
 } from '@web-app-demo/contracts'
@@ -10,7 +9,6 @@ import type {
 import { feedChildSubtitle, familyMemberName } from '@/features/family/model'
 
 import type {
-  AccessRole,
   Capabilities,
   ChildPresentation,
   FamilyPresentation,
@@ -47,7 +45,10 @@ export function toMemoryPresentation(memory: MemoryDto, timezone = 'UTC'): Memor
     liked: memory.likes.likedByMe,
     likeCount: memory.likes.count,
     attachments,
-    images: privatePhotos.flatMap((attachment) => attachment.playbackPath ? [attachment.playbackPath] : []),
+    images: privatePhotos.flatMap((attachment) => {
+      const path = attachment.playbackPath ?? attachment.displayPath ?? attachment.previewPath
+      return path ? [path] : []
+    }),
     posterPath: firstVideo ? videoPosterPath(firstVideo) : null,
     videoPath: firstVideo ? videoPlaybackPath(firstVideo) : null,
     audioPath: firstVoice?.playbackPath ?? null,
@@ -57,31 +58,8 @@ export function toMemoryPresentation(memory: MemoryDto, timezone = 'UTC'): Memor
   }
 }
 
-export function toCapabilities(source: {
-  role: FamilyRole | AccessRole
-  isOwner: boolean
-  canContribute?: boolean
-  canDeleteMemories?: boolean
-  canEditMemories?: boolean
-  canManageFamily?: boolean
-  canInvite?: boolean
-  canEditChild?: boolean
-  canLeaveFamily?: boolean
-  memoryCapabilities?: Pick<MemoryDto['capabilities'], 'edit' | 'delete'>
-}): Capabilities {
-  const owner = source.isOwner || source.role === 'OWNER'
-  const full = source.role === 'full' || source.role === 'FULL' || owner
-  const viewer = source.role === 'viewer' || source.role === 'VIEWER'
-
-  return {
-    canContribute: source.canContribute ?? !viewer,
-    canDeleteMemories: source.canDeleteMemories ?? source.memoryCapabilities?.delete ?? full,
-    canEditMemories: source.canEditMemories ?? source.memoryCapabilities?.edit ?? full,
-    canManageFamily: source.canManageFamily ?? full,
-    canInvite: source.canInvite ?? full,
-    canEditChild: source.canEditChild ?? owner,
-    canLeaveFamily: source.canLeaveFamily ?? !owner,
-  }
+export function toCapabilities(source: { capabilities: Capabilities }): Capabilities {
+  return { ...source.capabilities }
 }
 
 export function toChildPresentation(child: ChildDto, timezone: string, now = new Date()): ChildPresentation {
