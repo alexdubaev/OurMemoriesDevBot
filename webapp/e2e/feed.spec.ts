@@ -84,7 +84,7 @@ test.describe.serial('T07 live feed', () => {
       { body: 'MAX square video UX E2E', width: 900, height: 900, decodedWidth: 900, decodedHeight: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=900x900:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
     ].map((video) => ({ ...video, id: randomUUID() }))
     const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
-    let feedPatched = false
+    const maxVideoLikedByMe = new Map(maxVideos.map((video) => [video.id, false]))
     const maxVideoRequests: string[] = []
 
     page.on('request', (request) => {
@@ -101,7 +101,7 @@ test.describe.serial('T07 live feed', () => {
     })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const requestUrl = new URL(route.request().url())
-      if (feedPatched || requestUrl.searchParams.has('cursor')) return route.continue()
+      if (requestUrl.searchParams.has('cursor')) return route.continue()
       const response = await route.fetch()
       const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
       const first = payload.items[0]
@@ -115,6 +115,7 @@ test.describe.serial('T07 live feed', () => {
           body: video.body,
           occurredAt: now,
           createdAt: now,
+          likes: { count: maxVideoLikedByMe.get(video.id) ? 1 : 0, likedByMe: maxVideoLikedByMe.get(video.id) ?? false },
           attachments: [{
             id: randomUUID(), source: 'max', kind: 'video', width: video.width, height: video.height,
             durationMs: 2_000, playbackPath: `/api/v1/families/${first.familyId}/media/max-videos/${video.id}/content`,
@@ -136,8 +137,16 @@ test.describe.serial('T07 live feed', () => {
           return item
         }),
       ]
-      feedPatched = true
       await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await page.route('**/api/v1/families/*/memories/*/like', async (route) => {
+      const segments = new URL(route.request().url()).pathname.split('/')
+      const targetId = segments[segments.length - 2]
+      if (!targetId || !maxVideoLikedByMe.has(targetId)) return route.continue()
+      const payload = route.request().postDataJSON() as { liked?: unknown }
+      if (typeof payload.liked !== 'boolean') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INVALID_REQUEST' } }) })
+      maxVideoLikedByMe.set(targetId, payload.liked)
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ count: payload.liked ? 1 : 0, likedByMe: payload.liked }) })
     })
 
     // Keep this browser-only provider fixture on the page request path so Playwright can
@@ -236,8 +245,12 @@ test.describe.serial('T07 live feed', () => {
     expect(await maxVideo.evaluate((entry) => entry.muted)).toBe(false)
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть', exact: true })).toHaveCount(0)
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
+    const like = maxVideoCard.getByRole('button', { name: 'Поставить сердечко' })
+    await like.click()
+    await expect(maxVideoCard.getByRole('button', { name: 'Убрать сердечко' })).toHaveAttribute('aria-pressed', 'true')
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
     await page.getByRole('menuitem', { name: 'Подробнее' }).click()
     await expect(page.getByRole('dialog')).toContainText(maxVideos[0]!.body)
     await page.getByRole('dialog').getByRole('button', { name: 'Закрыть' }).click()
