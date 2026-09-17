@@ -77,8 +77,8 @@
 [data-memoly-feed] .memoly-like-button.is-liked { color: #b53969; background: #ffedf1; }
 [data-memoly-feed] [data-slot="memoly-photo-layout"] > :first-child { width: 100%; }
 [data-memoly-feed] [data-slot="memoly-photo-layout"] > button { display: block; overflow: hidden; border-radius: 16px; background: #eee4dd; }
-[data-memoly-feed] [data-slot="memoly-video-layout"] > .memoly-video-row > :first-child { overflow: hidden; border-radius: 16px; }
-[data-memoly-feed] .memoly-video-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(130px, .8fr); align-items: stretch; }
+[data-memoly-feed] [data-slot="memoly-video-layout"] > :first-child { overflow: hidden; border-radius: 16px; }
+[data-memoly-feed] .memoly-video-row { display: grid; grid-template-columns: 53% minmax(0, 1fr); gap: 13px; align-items: stretch; }
 [data-memoly-feed] .memoly-video-row > :first-child { min-width: 0; }
 [data-memoly-feed] .memoly-video-row .memoly-memory-copy { min-width: 0; flex-direction: column; align-items: stretch; justify-content: center; }
 [data-memoly-feed] .memoly-video-row .memoly-memory-open { flex: 0 1 auto; }
@@ -116,6 +116,7 @@
   [data-memoly-feed] .memoly-child-hero [data-slot="child-avatar"],
   [data-memoly-feed] .memoly-child-hero [data-slot="avatar-letter"] { width: 76px; height: 76px; flex-basis: 76px; }
   [data-memoly-feed] .memoly-filters button { padding-inline: 10px; font-size: 12px; }
+  [data-memoly-feed] .memoly-video-row { gap: 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
