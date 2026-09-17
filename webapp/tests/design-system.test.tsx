@@ -211,17 +211,18 @@ test('voice-or-video action invokes the supplied bot handoff', () => {
 test('production add sheet closes when the host Back lifecycle fires and unsubscribes cleanly', () => {
   let onBackHandler: (() => void) | undefined
   let unsubscribed = false
-  let closed = false
+  let closeCalls = 0
   const unsubscribe = subscribeAddSheetBack({
     onBack: (handler) => {
       onBackHandler = handler
       return () => { unsubscribed = true }
     },
-  }, () => { closed = true })
+  }, () => { closeCalls += 1 })
 
   expect(onBackHandler).toBeDefined()
   onBackHandler?.()
-  expect(closed).toBe(true)
+  onBackHandler?.()
+  expect(closeCalls).toBe(1)
 
   unsubscribe()
   expect(unsubscribed).toBe(true)

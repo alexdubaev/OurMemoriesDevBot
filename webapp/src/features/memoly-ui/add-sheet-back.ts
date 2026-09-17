@@ -4,5 +4,10 @@ export function subscribeAddSheetBack(
   hostBridge: Pick<HostBridge, 'onBack'>,
   close: () => void,
 ) {
-  return hostBridge.onBack(close)
+  let consumed = false
+  return hostBridge.onBack(() => {
+    if (consumed) return
+    consumed = true
+    close()
+  })
 }
