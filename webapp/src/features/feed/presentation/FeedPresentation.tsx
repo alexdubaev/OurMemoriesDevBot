@@ -54,6 +54,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
         </header>
         <section className="memoly-child-hero" data-slot="memoly-child-hero">
           <ChildAvatar avatarCrop={props.childAvatarCrop ?? null} avatarUrl={props.childAvatarUrl ?? null} name={props.childName} size="feed-header" />
+          <span aria-hidden="true" className="memoly-heart-dot"><WebpIcon decorative name="heart-filled" size={14} state="active" /></span>
           <div className="memoly-child-copy">
             <h1>{props.childName}</h1>
             <p>{props.childSubtitle}</p>

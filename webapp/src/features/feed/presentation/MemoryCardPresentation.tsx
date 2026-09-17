@@ -50,7 +50,7 @@ export function MemoryCardPresentation({
       {kind === 'photo' ? <MemorySlot slot="memoly-photo-layout">{media}{captionAndLike}</MemorySlot> : null}
       {kind === 'video' ? <MemorySlot className="memoly-video-row" slot="memoly-video-layout">{media}{captionAndLike}</MemorySlot> : null}
       {kind === 'voice' ? <MemorySlot slot="memoly-voice-layout">{media}{captionAndLike}</MemorySlot> : null}
-      {kind === 'note' ? <MemorySlot slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} kind={kind} onOpen={onOpen} /> : null}<LikeButton liked={liked} likeCount={likeCount} onLike={onLike} /></MemorySlot> : null}
+      {kind === 'note' ? <MemorySlot slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="memoly-note-body" kind={kind} onOpen={onOpen} /> : null}<LikeButton liked={liked} likeCount={likeCount} onLike={onLike} /></MemorySlot> : null}
     </article>
   )
 }
@@ -61,8 +61,8 @@ function MemorySlot({ children, className, slot }: { children: ReactNode; classN
   return <div className={className} data-slot={slot}>{children}</div>
 }
 
-function MemoryOpenButton({ body, kind, onOpen }: { body: string; kind: MemoryDto['kind']; onOpen: () => void }) {
-  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className="memoly-memory-open" onClick={onOpen} type="button">{body}</button></Typography>
+function MemoryOpenButton({ body, className, kind, onOpen }: { body: string; className?: string; kind: MemoryDto['kind']; onOpen: () => void }) {
+  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`memoly-memory-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{className === 'memoly-note-body' ? <><WebpIcon decorative name="note" size={27} /><span>{body}</span></> : body}</button></Typography>
 }
 
 function LikeButton({ liked, likeCount, onLike }: { liked: boolean; likeCount: number; onLike: () => void }) {
