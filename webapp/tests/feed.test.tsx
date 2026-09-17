@@ -49,6 +49,56 @@ const memory: MemoryDto = {
   capabilities: { edit: true, delete: true, like: true },
 }
 
+const photoMemory: MemoryDto = {
+  ...memory,
+  id: '66666666-6666-4666-8666-666666666666',
+  kind: 'photo',
+  body: 'Прогулка в парке',
+  attachments: [{
+    id: '77777777-7777-4777-8777-777777777777',
+    source: 'private_storage',
+    kind: 'photo',
+    width: 1_280,
+    height: 960,
+    durationMs: null,
+    renditionStatus: 'ready',
+    previewPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=preview`,
+    displayPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=display`,
+    playbackPath: null,
+    originalDownloadPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=original`,
+    waveform: null,
+  }],
+}
+
+const videoMemory: MemoryDto = {
+  ...memory,
+  id: '88888888-8888-4888-8888-888888888888',
+  kind: 'video',
+  body: 'Первые шаги',
+  attachments: [{
+    id: '99999999-9999-4999-8999-999999999999',
+    source: 'private_storage',
+    kind: 'video',
+    width: 1_920,
+    height: 1_080,
+    durationMs: 24_000,
+    renditionStatus: 'ready',
+    previewPath: null,
+    displayPath: null,
+    playbackPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=playback`,
+    originalDownloadPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=original`,
+    waveform: null,
+  }],
+}
+
+const noteMemory: MemoryDto = {
+  ...memory,
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  kind: 'note',
+  body: 'Сегодня впервые улыбнулась.',
+  attachments: [],
+}
+
 test('a next-page error keeps already displayed memories on screen', () => {
   const queryClient = feedClient()
   const query = queryClient.getQueryCache().find({ queryKey: feedQueryKeys.list(familyId, 'all') })
@@ -64,6 +114,29 @@ test('a next-page error keeps already displayed memories on screen', () => {
   })
 
   expect(renderFeed(queryClient)).toContain('Первое слово')
+})
+
+test('real memory DTOs map to explicit memoLy card layouts without demo media', () => {
+  const markup = renderFeed(feedClientWith([photoMemory, videoMemory, memory, noteMemory]))
+
+  expect(markup).toContain('data-memory-kind="photo"')
+  expect(markup).toContain('data-slot="memoly-author-row"')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('data-slot="memoly-photo-layout"')
+  expect(markup).toContain('data-slot="memoly-video-layout"')
+  expect(markup).toContain('data-slot="memoly-voice-layout"')
+  expect(markup).toContain('data-slot="memoly-note-layout"')
+  expect(markup).not.toContain('/assets/photo-park.webp')
+})
+
+test('viewer cards keep like enabled while omitting the delete action', () => {
+  const viewerMemory = { ...memory, capabilities: { ...memory.capabilities, delete: false } }
+  const markup = renderFeed(feedClientWith([viewerMemory]), 'viewer')
+
+  expect(markup).not.toContain('aria-label="Действия с воспоминанием"')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('aria-pressed="false"')
+  expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
 })
 
 test('a prepared voice renders every measured waveform peak', () => {
@@ -399,15 +472,19 @@ test('delete action is available only when the memory capability permits it', ()
 })
 
 function feedClient() {
+  return feedClientWith([memory])
+}
+
+function feedClientWith(items: MemoryDto[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
-    pages: [{ items: [memory], nextCursor: 'page-2' }],
+    pages: [{ items, nextCursor: 'page-2' }],
     pageParams: [null],
   })
   return queryClient
 }
 
-function renderFeed(queryClient: QueryClient) {
+function renderFeed(queryClient: QueryClient, role: 'full' | 'viewer' = 'full') {
   return renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(FeedPage, {
     childName: 'Лиза',
     childSubtitle: '2 года',
@@ -418,7 +495,7 @@ function renderFeed(queryClient: QueryClient) {
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
     onFamily: () => undefined,
     onFilterChange: () => undefined,
-    role: 'full',
+    role,
     transport,
   })))
 }

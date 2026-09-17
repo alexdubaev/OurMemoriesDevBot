@@ -1,6 +1,7 @@
 import type { MemoryAttachment, MemoryDto } from '@web-app-demo/contracts'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import 'photoswipe/style.css'
 
 import { Button } from '@/components/ui/button'
@@ -22,7 +23,8 @@ import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
-import { EmptyState, FeedShell, FeedSkeleton, InlineError, MemoryCardFrame, type FeedFilter } from './components'
+import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
+import { FeedPresentation, MemoryCardPresentation } from './presentation'
 import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryLike } from './queries'
 import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
@@ -123,22 +125,37 @@ export function FeedPage({
 
   return (
     <MediaPlaybackCoordinator>
-    <FeedShell activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
+    <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
       {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && items.length === 0 ? <EmptyState mode={role} /> : null}
       {deleteError ? <Typography role="alert" variant="memoryMeta">Не удалось удалить воспоминание. Попробуйте ещё раз.</Typography> : null}
-      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} hostBridge={hostBridge}
-        items={items} onLike={(memory) => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
-        onDelete={(memory) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: memory.id, version: memory.version }) }}
-        onOpen={setDetail} transport={transport} /> : null}
+      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={items} renderCard={(memory) => {
+        const primary = memory.attachments[0]
+        const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
+          attachment.source === 'private_storage' && attachment.kind === 'photo')
+        return <MemoryCardPresentation
+          actions={memory.capabilities.delete ? <MemoryDeleteAction memory={memory} onDelete={(target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) }} /> : null}
+          authorInitials={initials(memory.author.name)}
+          authorName={memory.author.name}
+          body={memory.body}
+          kind={memory.kind}
+          liked={memory.likes.likedByMe}
+          likeCount={memory.likes.count}
+          media={primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} transport={transport} /> : null}
+          memoryId={memory.id}
+          occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
+          onLike={() => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
+          onOpen={() => setDetail(memory)}
+        />
+      }} /> : null}
       <div aria-label="Загрузить ещё" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
       {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
       {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} transport={transport} /> : null}
-    </FeedShell>
+    </FeedPresentation>
     </MediaPlaybackCoordinator>
   )
 }
@@ -153,40 +170,17 @@ async function refreshFromTop(
   setNewAvailable(false)
 }
 
-function MemoryList({ familyTimezone, hostBridge, items, onDelete, onLike, onOpen, transport }: {
-  familyTimezone: string; hostBridge: HostBridge; items: MemoryDto[]; onLike: (memory: MemoryDto) => void
-  onDelete: (memory: MemoryDto) => Promise<unknown>; onOpen: (memory: MemoryDto) => void; transport: AuthenticatedTransport
+function MemoryList({ familyTimezone, items, renderCard }: {
+  familyTimezone: string; items: MemoryDto[]; renderCard: (memory: MemoryDto) => ReactNode
 }) {
   return <>{items.map((memory, index) => {
     const date = dayLabel(memory.occurredAt, familyTimezone)
     const previousDate = index > 0 ? dayLabel(items[index - 1]!.occurredAt, familyTimezone) : null
     return <div className="flex flex-col gap-3" key={memory.id}>
       {date !== previousDate ? <Typography data-slot="date-heading" variant="memoryDate">{date}</Typography> : null}
-      <MemoryCard familyTimezone={familyTimezone} hostBridge={hostBridge} memory={memory} onDelete={onDelete} onLike={onLike} onOpen={onOpen} transport={transport} />
+      {renderCard(memory)}
     </div>
   })}</>
-}
-
-function MemoryCard({ familyTimezone, hostBridge, memory, onDelete, onLike, onOpen, transport }: {
-  familyTimezone: string; hostBridge: HostBridge; memory: MemoryDto; onLike: (memory: MemoryDto) => void; onOpen: (memory: MemoryDto) => void; transport: AuthenticatedTransport
-  onDelete: (memory: MemoryDto) => Promise<unknown>
-}) {
-  const primary = memory.attachments[0]
-  const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
-    attachment.source === 'private_storage' && attachment.kind === 'photo')
-  return <MemoryCardFrame data-memory-id={memory.id}>
-    {primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} transport={transport} /> : null}
-    <div className="flex items-center justify-between gap-3 px-4 pt-3"><Typography variant="memoryMeta">{memory.author.name}</Typography><div className="flex items-center gap-1"><Typography tone="muted" variant="memoryMeta">{timeLabel(memory.occurredAt, familyTimezone)}</Typography>{memory.capabilities.delete ? <MemoryDeleteAction memory={memory} onDelete={onDelete} /> : null}</div></div>
-    <button aria-label={`Открыть воспоминание ${memory.body || memory.kind}`} className="block w-full px-4 pb-4 pt-2 text-left" onClick={() => onOpen(memory)} type="button">
-      {memory.body ? <Typography className="mt-2 whitespace-pre-wrap" variant="memoryBody">{memory.body}</Typography> : null}
-    </button>
-    <div className="flex items-center justify-between border-t border-border px-4 py-2">
-      <Typography asChild variant="memoryMeta"><button aria-pressed={memory.likes.likedByMe} className="min-h-11 rounded-[var(--radius-pill)] px-2" onClick={() => onLike(memory)} type="button">
-        {memory.likes.likedByMe ? 'С сердечком' : 'Сердечко'} · {memory.likes.count}
-      </button></Typography>
-      <Typography tone="muted" variant="memoryMeta">{kindLabel(memory.kind)}</Typography>
-    </div>
-  </MemoryCardFrame>
 }
 
 function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoIndex = 0, transport }: {
@@ -564,7 +558,7 @@ async function showPhoto(
 function dayLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone }).format(new Date(value)) }
 function dateTimeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short', timeZone: timezone }).format(new Date(value)) }
 function timeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value)) }
-function kindLabel(kind: MemoryDto['kind']) { return ({ note: 'Заметка', photo: 'Фото', video: 'Видео', voice: 'Голос' })[kind] }
+function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '•' }
 function seconds(value: number) { return Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00' }
 function roundedSeconds(value: number) { return Number.isFinite(value) ? seconds(Math.round(value)) : '0:00' }
 function formatDuration(value: number | null) { return value ? seconds(value / 1_000) : 'Длительность уточняется' }
