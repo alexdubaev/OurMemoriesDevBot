@@ -7,6 +7,7 @@ import { resolve } from 'node:path'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { WebpIcon } from '../src/components/WebpIcon'
 import { AddSheetPanel, VoiceOrVideoAction } from '../src/features/memoly-ui/AddSheetPresentation'
+import { subscribeAddSheetBack } from '../src/features/memoly-ui/add-sheet-back'
 import { Drawer } from '../src/components/ui/drawer'
 import {
   DateHeading,
@@ -205,4 +206,23 @@ test('voice-or-video action invokes the supplied bot handoff', () => {
 
   action.props.onClick()
   expect(opened).toBe(true)
+})
+
+test('production add sheet closes when the host Back lifecycle fires and unsubscribes cleanly', () => {
+  let onBackHandler: (() => void) | undefined
+  let unsubscribed = false
+  let closed = false
+  const unsubscribe = subscribeAddSheetBack({
+    onBack: (handler) => {
+      onBackHandler = handler
+      return () => { unsubscribed = true }
+    },
+  }, () => { closed = true })
+
+  expect(onBackHandler).toBeDefined()
+  onBackHandler?.()
+  expect(closed).toBe(true)
+
+  unsubscribe()
+  expect(unsubscribed).toBe(true)
 })

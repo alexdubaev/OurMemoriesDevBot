@@ -3,6 +3,8 @@ import { useCallback, useEffect, type RefObject } from 'react'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
+import { subscribeAddSheetBack } from './add-sheet-back'
+import type { HostBridge } from '@/platform/host-bridge'
 import {
   Drawer,
   DrawerContent,
@@ -13,7 +15,7 @@ import {
 const historyMarker = 'our-memories:add-sheet'
 
 export type AddSheetPresentationProps = {
-  hostBridge: { openBot: () => void }
+  hostBridge: Pick<HostBridge, 'onBack' | 'openBot'>
   onOpenChange: (open: boolean) => void
   open: boolean
   returnFocusRef?: RefObject<HTMLElement | null>
@@ -43,10 +45,15 @@ export function AddSheetPresentation({
       '',
       window.location.href,
     )
-    const closeOnBack = () => onOpenChange(false)
-    window.addEventListener('popstate', closeOnBack)
-    return () => window.removeEventListener('popstate', closeOnBack)
-  }, [onOpenChange, open, role])
+    const closeOnHistoryBack = () => onOpenChange(false)
+    const closeOnHostBack = () => close()
+    window.addEventListener('popstate', closeOnHistoryBack)
+    const unsubscribeHostBack = subscribeAddSheetBack(hostBridge, closeOnHostBack)
+    return () => {
+      window.removeEventListener('popstate', closeOnHistoryBack)
+      unsubscribeHostBack()
+    }
+  }, [close, hostBridge, onOpenChange, open, role])
 
   if (role !== 'full') return null
 

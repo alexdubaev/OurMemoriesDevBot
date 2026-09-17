@@ -122,3 +122,15 @@ test('reserves the normalized bottom host inset for the namespaced navigation', 
 
   expect(css).toContain('padding-bottom: var(--host-inset-bottom, 0px)')
 })
+
+test('memoLy presentation CSS keeps captions readable and outer gutters single at 320px', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+
+  expect(css).toContain('overflow-wrap: anywhere')
+  expect(css).toContain('-webkit-line-clamp: 4')
+  expect(css).toContain('.ml-topbar,\n.ml-simple-header {')
+  expect(css).toContain('padding: 0 0 8px;')
+  expect(css).toContain('.ml-child-hero {')
+  expect(css).toContain('margin: 8px 0 12px;')
+  expect(css).toContain('.ml-family-content { padding: 0; }')
+})

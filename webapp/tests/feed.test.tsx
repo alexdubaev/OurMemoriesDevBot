@@ -433,6 +433,21 @@ test('memoLy feed card preserves line breaks in a multi-line memory body', () =>
   expect(markup).toContain('Первая строка\nВторая строка')
 })
 
+test('memoLy feed card clamps long captions without changing the full body passed to detail', () => {
+  const body = 'ОченьДлинныйТокен'.repeat(500)
+  const markup = renderToStaticMarkup(createElement(FeedMemoryCard, {
+    familyTimezone: 'Europe/Moscow',
+    memory: { ...memory, body },
+    onDelete: () => Promise.resolve(),
+    onLike: () => undefined,
+    onOpen: () => undefined,
+    renderAttachment: () => null,
+  }))
+
+  expect(markup).toContain('line-clamp-4')
+  expect(markup).toContain(body)
+})
+
 function feedClient() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
