@@ -153,6 +153,27 @@ test('video cards remove the standalone open action and collapse when the captio
   expect(markup).toContain('aria-label="Поставить сердечко"')
 })
 
+test('video cards treat whitespace-only captions as empty', () => {
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '   \n\t',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-whitespace-body',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  expect(markup).toContain('class="memoly-video-row"')
+  expect(markup).not.toContain('memoly-video-row has-caption')
+  expect(markup).not.toContain('memoly-video-caption')
+})
+
 test('video captions remain visible without becoming a separate detail button', () => {
   const markup = renderToStaticMarkup(MemoryCardPresentation({
     actions: null,
