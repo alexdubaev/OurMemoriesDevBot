@@ -89,6 +89,10 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await page.getByRole('button', { name: 'Семья' }).click()
   await expect(page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Близкие' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Семейный архив' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Помощь и приватность' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Изменить' }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
@@ -211,6 +215,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await expect(full.page.getByText('Дедушка Павел', { exact: true })).toBeVisible()
+  await expect(full.page.locator('[data-slot="family-presentation"]')).toBeVisible()
   await expect(full.page.getByRole('button', { name: 'Создать приглашение' })).toBeVisible()
   await expect(full.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(0)
   await expect(full.page.getByRole('button', { name: 'Владелец' })).toHaveCount(0)

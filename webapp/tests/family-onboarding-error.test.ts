@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
 
 import { FamilyOnboarding } from '../src/features/family/FamilyOnboarding'
 import { onboardingSaveErrorMessage } from '../src/features/family/model'
+import { FamilyPresentation } from '../src/features/memoly-ui/FamilyPresentation'
 import type { AuthenticatedTransport } from '../src/platform/api'
 
 test('onboarding save failures use onboarding-specific copy instead of feed refresh copy', () => {
@@ -23,6 +25,68 @@ test('onboarding renders the memoLy logo rather than the former visible brand te
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
 })
+
+test('viewer family presentation keeps leave access while hiding owner actions', () => {
+  const markup = renderToStaticMarkup(createElement(FamilyPresentation, {
+    busy: false,
+    canEditChild: false,
+    canInvite: false,
+    canLeaveFamily: true,
+    childAvatarUrl: null,
+    copyState: 'idle',
+    familyResponse: viewerFamily,
+    invites: [],
+    memberActions: { [viewer.userId]: { canEditAlias: false, canManageRole: false, canRemove: false } },
+    members: [viewer],
+    onCloseInvite: () => undefined,
+    onCopyInvite: async () => undefined,
+    onCreateInvite: async () => undefined,
+    onEditChild: () => undefined,
+    onLeaveFamily: async () => undefined,
+    onRefresh: () => undefined,
+    onRefreshUsage: () => undefined,
+    onRemoveMember: async () => undefined,
+    onRevokeInvite: async () => undefined,
+    onShareInvite: async () => undefined,
+    onUpdateMember: async () => undefined,
+    inviteReady: null,
+    usage: null,
+    usageFailed: false,
+  }))
+
+  expect(markup).not.toContain('Пригласить близкого')
+  expect(markup).not.toContain('Удалить участника')
+  expect(markup).toContain('Выйти из семьи')
+})
+
+const viewerFamily: FamilyResponse = {
+  family: {
+    id: '55555555-5555-4555-8555-555555555555',
+    name: 'Наша семья',
+    ownerUserId: '66666666-6666-4666-8666-666666666666',
+    timezone: 'Europe/Moscow',
+  },
+  child: {
+    id: '77777777-7777-4777-8777-777777777777',
+    name: 'Варя',
+    birthDate: null,
+    sex: 'girl',
+    avatarMediaId: null,
+    avatarCrop: null,
+    version: 1,
+    isComplete: true,
+  },
+}
+
+const viewer: FamilyMemberDto = {
+  userId: '88888888-8888-4888-8888-888888888888',
+  displayName: 'Бабушка Оля',
+  familyDisplayName: null,
+  role: 'viewer',
+  isOwner: false,
+  joinedAt: '2026-09-17T00:00:00.000Z',
+  version: 1,
+}
 
 const transport: AuthenticatedTransport = {
   request: async () => { throw new Error('unexpected request') },
