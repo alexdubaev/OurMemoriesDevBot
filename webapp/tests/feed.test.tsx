@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster, loadMaxVideoSourceOnce } from '../src/features/feed/FeedPage'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
@@ -254,7 +254,7 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).toContain('controls=""')
     expect(markup).toContain('preload="metadata"')
     expect(markup).toContain('playsInline=""')
-    expect(markup).toContain('content#t=0.001')
+    expect(markup).not.toContain('#t=0.001')
     expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
     expect(markup).toContain('object-contain')
     expect(markup).toContain('Смотреть видео')
@@ -263,6 +263,25 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).not.toContain('aspect-video')
     expect(markup).not.toContain('object-cover')
   }
+})
+
+test('a MAX video source is assigned and loaded once per distinct source', () => {
+  const loads: string[] = []
+  const video = {
+    src: '',
+    load() { loads.push(this.src) },
+    removeAttribute(name: string) { if (name === 'src') this.src = '' },
+  }
+  let assigned: string | null = null
+
+  assigned = loadMaxVideoSourceOnce(video, '/video-a.mp4', assigned)
+  assigned = loadMaxVideoSourceOnce(video, '/video-a.mp4', assigned)
+  assigned = loadMaxVideoSourceOnce(video, '/video-b.mp4', assigned)
+  assigned = loadMaxVideoSourceOnce(video, null, assigned)
+  assigned = loadMaxVideoSourceOnce(video, null, assigned)
+
+  expect(loads).toEqual(['/video-a.mp4', '/video-b.mp4', ''])
+  expect(assigned).toBeNull()
 })
 
 test('a MAX video frame keeps the source ratio, contains playback, and caps its height', () => {

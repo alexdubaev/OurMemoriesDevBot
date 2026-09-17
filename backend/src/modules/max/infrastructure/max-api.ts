@@ -155,9 +155,12 @@ function normalizeVideo(value: unknown): MaxVideoResolution {
     return [{ url, width, height, contentLength }]
   })
   if (renditions.length === 0) throw new MaxProviderError()
+  const width = isRecord(root) && root.width !== undefined && root.width !== null ? root.width : null
+  const height = isRecord(root) && root.height !== undefined && root.height !== null ? root.height : null
+  if ((width !== null && !isPositiveSafeInteger(width)) || (height !== null && !isPositiveSafeInteger(height))) throw new MaxProviderError()
   const duration = isRecord(root) ? root.duration : null
   if (duration !== null && duration !== undefined && !isPositiveSafeInteger(duration)) throw new MaxProviderError()
-  return { renditions, durationMs: duration ?? null }
+  return { width, height, renditions, durationMs: duration ?? null }
 }
 
 function parseHttpsUrl(value: unknown) {
