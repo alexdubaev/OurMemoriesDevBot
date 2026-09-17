@@ -3,7 +3,7 @@ import { QueryClient, useInfiniteQuery, useMutation, useQueryClient } from '@tan
 
 import type { AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
-import type { FeedFilter } from './components'
+import type { FeedFilter } from './presentation'
 import { deleteMemory, loadFeed, setMemoryLike } from './api'
 
 export const feedQueryKeys = {

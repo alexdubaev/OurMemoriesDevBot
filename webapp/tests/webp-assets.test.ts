@@ -11,6 +11,9 @@ const requiredNames = [
   'chevron',
   'close',
   'family',
+  'gear',
+  'heart',
+  'heart-filled',
   'home',
   'info',
   'lock',
@@ -20,6 +23,8 @@ const requiredNames = [
   'play',
   'plus',
   'retry',
+  'star',
+  'video',
   'voice',
   'warning',
 ] as const
@@ -30,7 +35,7 @@ test('the runtime icon directory contains complete optimized WebP RGBA pairs', a
   const files = (await readdir(publicIcons)).toSorted()
   const expected = requiredNames
     .flatMap((name) =>
-      (name === 'play' ? ['active', 'default', 'white'] : ['active', 'default']).flatMap((state) =>
+      (['heart', 'heart-filled', 'play'].includes(name) ? ['active', 'default', 'white'] : ['active', 'default']).flatMap((state) =>
         [2, 3].map((density) => `${name}-${state}@${density}x.webp`),
       ),
     )

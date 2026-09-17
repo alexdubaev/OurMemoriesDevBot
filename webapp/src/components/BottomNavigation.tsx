@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 export type BottomNavigationProps = {
   active: 'feed' | 'family'
   addButtonRef?: Ref<HTMLButtonElement>
+  appearance?: 'default' | 'memoly'
   onAdd?: () => void
   onFamily: () => void
   onFeed: () => void
@@ -16,6 +17,7 @@ export type BottomNavigationProps = {
 export function BottomNavigation({
   active,
   addButtonRef,
+  appearance,
   onAdd,
   onFamily,
   onFeed,
@@ -24,10 +26,17 @@ export function BottomNavigation({
   return (
     <nav
       aria-label="Основная навигация"
-      className="fixed inset-x-0 bottom-0 z-30 border-t bg-card pb-[var(--host-inset-bottom)]"
+      className={cn(
+        'fixed inset-x-0 bottom-0 z-30 border-t bg-card pb-[var(--host-inset-bottom)]',
+        appearance === 'memoly' && 'memoly-bottom-nav',
+      )}
+      data-bottom-navigation-appearance={appearance}
       data-slot="bottom-navigation"
     >
-      <div className="mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-3 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]">
+      <div className={cn(
+        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-3 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
+        appearance === 'memoly' && 'memoly-bottom-nav-grid',
+      )}>
         <NavButton
           active={active === 'feed'}
           icon="home"
@@ -37,13 +46,19 @@ export function BottomNavigation({
         {role === 'full' ? (
           <button
             aria-label="Добавить"
-            className="group flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]"
+            className={cn(
+              'group flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]',
+              appearance === 'memoly' && 'memoly-nav-add',
+            )}
             data-nav-position="add"
             onClick={onAdd}
             ref={addButtonRef}
             type="button"
           >
-            <span className="flex size-12 items-center justify-center rounded-full bg-[var(--memory-accent-soft)] transition-transform duration-[var(--duration-standard)] group-active:scale-95">
+            <span className={cn(
+              'flex size-12 items-center justify-center rounded-full bg-[var(--memory-accent-soft)] transition-transform duration-[var(--duration-standard)] group-active:scale-95',
+              appearance === 'memoly' && 'memoly-nav-add-circle',
+            )}>
               <WebpIcon decorative name="plus" size={24} state="active" />
             </span>
             <Typography variant="memoryNav">Добавить</Typography>
@@ -51,7 +66,10 @@ export function BottomNavigation({
         ) : (
           <div
             aria-label="Режим просмотра"
-            className="flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground"
+            className={cn(
+              'flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground',
+              appearance === 'memoly' && 'memoly-nav-viewer',
+            )}
             data-nav-position="viewer"
             data-nav-viewer="true"
             role="img"

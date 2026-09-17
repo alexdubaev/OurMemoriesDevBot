@@ -2,6 +2,7 @@ export const webpIconNames = [
   'chevron',
   'close',
   'family',
+  'gear',
   'home',
   'info',
   'lock',
@@ -11,7 +12,11 @@ export const webpIconNames = [
   'play',
   'plus',
   'retry',
+  'heart',
+  'heart-filled',
   'voice',
+  'star',
+  'video',
   'warning',
 ] as const
 

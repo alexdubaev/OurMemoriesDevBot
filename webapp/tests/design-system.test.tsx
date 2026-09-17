@@ -13,6 +13,7 @@ import {
   InlineError,
   MemoryCardFrame,
 } from '../src/features/feed/components'
+import { FeedPresentation } from '../src/features/feed/presentation'
 import { AvatarLetter } from '../src/features/session/components/AvatarLetter'
 
 function render(component: Parameters<typeof renderToStaticMarkup>[0]) {
@@ -96,6 +97,31 @@ test('viewer navigation replaces add with a non-focusable viewing label', () => 
   expect(markup).toContain('data-nav-viewer="true"')
   expect(markup).toContain('Просмотр')
   expect(markup).not.toContain('tabindex="0"')
+})
+
+test('memoLy feed presentation composes the child hero, filters, and scoped navigation', () => {
+  const markup = render(
+    createElement(
+      FeedPresentation,
+      {
+        activeFilter: 'all',
+        childName: 'Саша',
+        childSubtitle: '2 года 8 месяцев',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        onFamily: () => undefined,
+        onFeed: () => undefined,
+        onFilterChange: () => undefined,
+        role: 'full',
+      },
+      createElement('article', { 'data-memory-id': 'm1' }),
+    ),
+  )
+
+  expect(markup).toContain('data-memoly-feed="true"')
+  expect(markup).toContain('data-slot="memoly-child-hero"')
+  expect(markup).toContain('data-slot="memoly-filter-rail"')
+  expect(markup).toContain('data-bottom-navigation-appearance="memoly"')
+  expect(markup).toContain('aria-pressed="true"')
 })
 
 test('FeedShell applies normalized host insets once and lets long names grow safely', () => {

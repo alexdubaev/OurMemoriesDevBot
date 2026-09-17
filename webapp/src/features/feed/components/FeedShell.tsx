@@ -7,8 +7,7 @@ import { Typography } from '@/components/typography'
 import { ChildAvatar } from '@/features/family'
 import { cn } from '@/lib/utils'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
-
-export type FeedFilter = 'all' | 'photo' | 'video' | 'voice' | 'note'
+import type { FeedFilter } from '../presentation'
 
 const filters: ReadonlyArray<{ label: string; value: FeedFilter }> = [
   { label: 'Все', value: 'all' },
