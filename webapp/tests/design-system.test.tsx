@@ -124,6 +124,33 @@ test('FeedShell applies normalized host insets once and lets long names grow saf
   expect(markup).toContain('max-w-[var(--layout-max-width)]')
 })
 
+test('FeedShell mounts the memoLy feed presentation and keeps the bottom navigation layer above media', () => {
+  const markup = render(
+    createElement(
+      FeedShell,
+      {
+        activeFilter: 'all',
+        childName: 'Лиза',
+        childSubtitle: 'Семейная лента',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        onFilterChange: () => undefined,
+        role: 'full',
+      },
+      createElement('div', { className: 'ml-memory' }, createElement('div', { className: 'ml-play' })),
+    ),
+  )
+
+  expect(markup).toContain('class="ml-page')
+  expect(markup).toContain('class="ml-shell')
+  expect(markup).toContain('class="ml-topbar')
+  expect(markup).toContain('class="ml-child-hero')
+  expect(markup).toContain('class="ml-filters')
+  expect(markup).toContain('ml-filter')
+  expect(markup).toContain('class="ml-memory"')
+  expect(markup).toContain('data-slot="bottom-navigation"')
+  expect(markup).toContain('z-30')
+})
+
 test('AddSheet panel contains only the three approved actions and an accessible title', () => {
   const markup = render(
     createElement(

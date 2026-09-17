@@ -59,13 +59,13 @@ export function FeedShell({
   } as CSSProperties
 
   return (
-    <div className="min-h-screen min-h-dvh bg-background" data-slot="feed-shell" style={insetsStyle}>
+    <div className="ml-page min-h-screen min-h-dvh bg-background" data-slot="feed-shell" style={insetsStyle}>
       <main
-        className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-[calc(var(--layout-gutter)+var(--host-inset-left))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))] pb-[calc(var(--layout-bottom-nav)+var(--host-inset-bottom)+var(--layout-gutter))]"
+        className="ml-shell mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-[calc(var(--layout-gutter)+var(--host-inset-left))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))] pb-[calc(var(--layout-bottom-nav)+var(--host-inset-bottom)+var(--layout-gutter))]"
         data-slot="feed-scroll"
       >
         <header>
-          <div className="flex min-h-11 min-w-0 items-center justify-between gap-2">
+          <div className="ml-topbar flex min-h-11 min-w-0 items-center justify-between gap-2">
             <BrandLogo className="min-w-0 w-[148px]" />
             <button
               aria-label="Помощь и конфиденциальность"
@@ -76,9 +76,9 @@ export function FeedShell({
               <WebpIcon decorative name="more" size={24} />
             </button>
           </div>
-          <div className="mt-3 flex min-w-0 items-center gap-3.5" data-slot="child-profile">
+          <div className="ml-child-hero mt-3 flex min-w-0 items-center gap-3.5" data-slot="child-profile">
             <ChildAvatar avatarCrop={childAvatarCrop} avatarUrl={childAvatarUrl} name={childName} size="feed-header" />
-            <div className="min-w-0 flex-1 self-center">
+            <div className="ml-child-copy min-w-0 flex-1 self-center">
               <Typography
                 className="line-clamp-2 break-words"
                 data-slot="child-name"
@@ -91,7 +91,7 @@ export function FeedShell({
           </div>
           <div
             aria-label="Фильтр воспоминаний"
-            className="-mx-1 mt-4 flex min-h-11 gap-2 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="ml-filters -mx-1 mt-4 flex min-h-11 gap-2 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role="group"
           >
             {filters.map((filter) => {
@@ -100,9 +100,9 @@ export function FeedShell({
                 <button
                   aria-pressed={selected}
                   className={cn(
-                    'flex min-h-11 shrink-0 items-center rounded-[var(--radius-pill)] px-3 transition-colors duration-[var(--duration-standard)]',
+                    'ml-filter flex min-h-11 shrink-0 items-center rounded-[var(--radius-pill)] px-3 transition-colors duration-[var(--duration-standard)]',
                     selected
-                      ? 'bg-accent text-accent-foreground'
+                      ? 'active bg-accent text-accent-foreground'
                       : 'bg-card text-muted-foreground',
                   )}
                   key={filter.value}

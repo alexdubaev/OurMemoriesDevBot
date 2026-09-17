@@ -55,7 +55,7 @@
 .ml-filters { display: flex; gap: 8px; overflow-x: auto; padding: 4px var(--layout-gutter, 16px) 14px; scrollbar-width: none; }
 .ml-filter { display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 8px 13px; border: 1px solid var(--ml-line); border-radius: 999px; color: var(--ml-muted); background: var(--ml-surface); white-space: nowrap; }
 .ml-filter.active { border-color: var(--ml-accent); color: #fff; background: var(--ml-accent); }
-.ml-content,
+.ml-content { padding: 0; }
 .ml-family-content { padding: 0 var(--layout-gutter, 16px); }
 .ml-date { margin: 8px 4px 12px; color: var(--ml-muted); font-size: 15px; line-height: 22px; font-weight: 600; }
 .ml-memory { margin-bottom: 16px; overflow: hidden; border: 1px solid var(--ml-line); border-radius: var(--radius-card, 16px); background: var(--ml-surface); box-shadow: var(--shadow-card, 0 4px 16px rgba(48, 42, 46, .06)); }

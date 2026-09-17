@@ -22,7 +22,7 @@ import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
-import { EmptyState, FeedShell, FeedSkeleton, InlineError, MemoryCardFrame, type FeedFilter } from './components'
+import { EmptyState, FeedShell, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryLike } from './queries'
 import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
@@ -30,6 +30,7 @@ import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
+import { FeedMemoryList } from '@/features/memoly-ui/FeedPresentation'
 
 type Props = {
   childName: string
@@ -130,10 +131,11 @@ export function FeedPage({
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && items.length === 0 ? <EmptyState mode={role} /> : null}
       {deleteError ? <Typography role="alert" variant="memoryMeta">Не удалось удалить воспоминание. Попробуйте ещё раз.</Typography> : null}
-      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} hostBridge={hostBridge}
+      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <FeedMemoryList familyTimezone={familyTimezone}
         items={items} onLike={(memory) => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
         onDelete={(memory) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: memory.id, version: memory.version }) }}
-        onOpen={setDetail} transport={transport} /> : null}
+        onOpen={setDetail} renderAttachment={(attachment, memory, photoAlbum, photoIndex) => <Attachment attachment={attachment} hostBridge={hostBridge} memory={memory} photoAlbum={photoAlbum} photoIndex={photoIndex} transport={transport} />}
+        renderDeleteAction={(memory, onDelete) => <MemoryDeleteAction memory={memory} onDelete={onDelete} />} /> : null}
       <div aria-label="Загрузить ещё" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
       {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
@@ -151,42 +153,6 @@ async function refreshFromTop(
   const result = await refetch()
   knownFirstId.current = result.data?.pages[0]?.items[0]?.id ?? knownFirstId.current
   setNewAvailable(false)
-}
-
-function MemoryList({ familyTimezone, hostBridge, items, onDelete, onLike, onOpen, transport }: {
-  familyTimezone: string; hostBridge: HostBridge; items: MemoryDto[]; onLike: (memory: MemoryDto) => void
-  onDelete: (memory: MemoryDto) => Promise<unknown>; onOpen: (memory: MemoryDto) => void; transport: AuthenticatedTransport
-}) {
-  return <>{items.map((memory, index) => {
-    const date = dayLabel(memory.occurredAt, familyTimezone)
-    const previousDate = index > 0 ? dayLabel(items[index - 1]!.occurredAt, familyTimezone) : null
-    return <div className="flex flex-col gap-3" key={memory.id}>
-      {date !== previousDate ? <Typography data-slot="date-heading" variant="memoryDate">{date}</Typography> : null}
-      <MemoryCard familyTimezone={familyTimezone} hostBridge={hostBridge} memory={memory} onDelete={onDelete} onLike={onLike} onOpen={onOpen} transport={transport} />
-    </div>
-  })}</>
-}
-
-function MemoryCard({ familyTimezone, hostBridge, memory, onDelete, onLike, onOpen, transport }: {
-  familyTimezone: string; hostBridge: HostBridge; memory: MemoryDto; onLike: (memory: MemoryDto) => void; onOpen: (memory: MemoryDto) => void; transport: AuthenticatedTransport
-  onDelete: (memory: MemoryDto) => Promise<unknown>
-}) {
-  const primary = memory.attachments[0]
-  const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
-    attachment.source === 'private_storage' && attachment.kind === 'photo')
-  return <MemoryCardFrame data-memory-id={memory.id}>
-    {primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} transport={transport} /> : null}
-    <div className="flex items-center justify-between gap-3 px-4 pt-3"><Typography variant="memoryMeta">{memory.author.name}</Typography><div className="flex items-center gap-1"><Typography tone="muted" variant="memoryMeta">{timeLabel(memory.occurredAt, familyTimezone)}</Typography>{memory.capabilities.delete ? <MemoryDeleteAction memory={memory} onDelete={onDelete} /> : null}</div></div>
-    <button aria-label={`Открыть воспоминание ${memory.body || memory.kind}`} className="block w-full px-4 pb-4 pt-2 text-left" onClick={() => onOpen(memory)} type="button">
-      {memory.body ? <Typography className="mt-2 whitespace-pre-wrap" variant="memoryBody">{memory.body}</Typography> : null}
-    </button>
-    <div className="flex items-center justify-between border-t border-border px-4 py-2">
-      <Typography asChild variant="memoryMeta"><button aria-pressed={memory.likes.likedByMe} className="min-h-11 rounded-[var(--radius-pill)] px-2" onClick={() => onLike(memory)} type="button">
-        {memory.likes.likedByMe ? 'С сердечком' : 'Сердечко'} · {memory.likes.count}
-      </button></Typography>
-      <Typography tone="muted" variant="memoryMeta">{kindLabel(memory.kind)}</Typography>
-    </div>
-  </MemoryCardFrame>
 }
 
 function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoIndex = 0, transport }: {
@@ -218,7 +184,7 @@ export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, tran
     }
   })
   const openHandoff = () => { void handoff().catch(() => undefined) }
-  return <div className="bg-muted">
+  return <div className="ml-media-slot bg-muted">
     <TelegramVideoPoster busy={busy} disabled={busy} durationMs={attachment.durationMs} height={attachment.height} onOpen={openHandoff} posterUrl={posterUrl} width={attachment.width} />
     {failed ? <Typography className="px-5 py-3 text-center" role="alert" variant="memoryMeta">Не удалось открыть видео в Telegram. Попробуйте ещё раз.</Typography> : null}
   </div>
@@ -308,7 +274,7 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
-  return <div className="w-full">
+  return <div className="ml-media-slot w-full">
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
       <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true) }} onLoadedMetadata={(event) => {
         const element = event.currentTarget
@@ -395,7 +361,7 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   const viewerSession = useRef<AbortController | null>(null)
   useEffect(() => () => { viewerSession.current?.abort() }, [])
   if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) }} />
-  return <button aria-label="Открыть фото" className="block w-full" onClick={(event) => {
+  return <button aria-label="Открыть фото" className="ml-media-button block w-full" onClick={(event) => {
     viewerSession.current?.abort()
     const session = new AbortController()
     viewerSession.current = session
@@ -424,7 +390,7 @@ function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null
   const [duration, setDuration] = useState(() => durationMs ? durationMs / 1_000 : 0)
   const updateDuration = (element: HTMLAudioElement) => { if (Number.isFinite(element.duration) && element.duration >= 0) setDuration(element.duration) }
   const syncCurrent = (element: HTMLAudioElement) => setCurrent(element.currentTime)
-  return <div className="p-4"><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={(e) => { activate(); syncCurrent(e.currentTarget) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
+  return <div className="ml-audio p-4"><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={(e) => { activate(); syncCurrent(e.currentTarget) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
     <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => void (async () => { const element = audio.current; if (!element) return; setPlaying(await toggleMediaPlayback(element)) })()} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div>
     <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position; setCurrent(position) }} waveform={waveform} />
   </div>
@@ -450,7 +416,7 @@ function PrivateVideo({ path }: { path: string | null }) {
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
   const canFullscreen = typeof HTMLVideoElement !== 'undefined' && 'requestFullscreen' in HTMLVideoElement.prototype
-  return <div className="bg-muted"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="none" ref={video} src={url ?? undefined} />
+  return <div className="ml-video-row bg-muted"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="none" ref={video} src={url ?? undefined} />
     <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
     <input aria-label="Позиция видео" className="mb-3 w-full px-3" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
   </div>
@@ -561,10 +527,7 @@ async function showPhoto(
   })
 }
 
-function dayLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone }).format(new Date(value)) }
 function dateTimeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short', timeZone: timezone }).format(new Date(value)) }
-function timeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value)) }
-function kindLabel(kind: MemoryDto['kind']) { return ({ note: 'Заметка', photo: 'Фото', video: 'Видео', voice: 'Голос' })[kind] }
 function seconds(value: number) { return Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00' }
 function roundedSeconds(value: number) { return Number.isFinite(value) ? seconds(Math.round(value)) : '0:00' }
 function formatDuration(value: number | null) { return value ? seconds(value / 1_000) : 'Длительность уточняется' }

@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster, loadMaxVideoSourceOnce } from '../src/features/feed/FeedPage'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
+import { FeedMemoryCard } from '../src/features/memoly-ui/FeedPresentation'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
@@ -396,6 +397,25 @@ test('delete action is available only when the memory capability permits it', ()
     pages: [{ items: [{ ...memory, capabilities: { ...memory.capabilities, delete: false } }], nextCursor: null }], pageParams: [null],
   })
   expect(renderFeed(viewerClient)).not.toContain('aria-label="Действия с воспоминанием"')
+})
+
+test('memoLy feed card keeps the media slot and open-memory callback around a private album', () => {
+  let opened = false
+  const markup = renderToStaticMarkup(createElement(FeedMemoryCard, {
+    familyTimezone: 'Europe/Moscow',
+    memory,
+    onDelete: () => Promise.resolve(),
+    onLike: () => undefined,
+    onOpen: () => { opened = true },
+    renderAttachment: () => createElement('div', { 'data-slot': 'private-photo-album' }, 'PhotoSwipe slot'),
+    renderDeleteAction: () => null,
+  }))
+
+  expect(markup).toContain('class="ml-memory ')
+  expect(markup).toContain('data-slot="private-photo-album"')
+  expect(markup).toContain('Открыть воспоминание Первое слово')
+  expect(markup).not.toContain('/api/v1/families/')
+  expect(opened).toBe(false)
 })
 
 function feedClient() {
