@@ -72,6 +72,7 @@
 [data-memoly-feed] [data-slot="memoly-note-layout"] { display: flex; align-items: center; gap: 10px; padding: 10px 14px 12px; }
 [data-memoly-feed] .memoly-memory-copy { gap: 9px; padding: 11px 2px 2px; }
 [data-memoly-feed] .memoly-memory-open { min-width: 0; flex: 1; padding: 0; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+[data-memoly-feed] .memoly-memory-open-empty { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 [data-memoly-feed] .memoly-like-button { display: inline-flex; min-height: 44px; min-width: 58px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; border-radius: 25px; color: var(--memoly-muted); background: #fffaf5; box-shadow: 0 3px 8px #89706020; font-size: 13px; }
 [data-memoly-feed] .memoly-like-button [data-slot="webp-icon"] { flex: 0 0 auto; }
 [data-memoly-feed] .memoly-like-button.is-liked { color: #b53969; background: #ffedf1; }

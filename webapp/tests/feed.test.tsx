@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { MemoryDto } from '@web-app-demo/contracts'
 import { expect, test } from 'bun:test'
-import { createElement } from 'react'
+import { createElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster, loadMaxVideoSourceOnce } from '../src/features/feed/FeedPage'
@@ -10,6 +10,7 @@ import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
+import { MemoryCardPresentation } from '../src/features/feed/presentation'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
 
@@ -127,6 +128,30 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
   expect(markup).toContain('data-slot="memoly-voice-layout"')
   expect(markup).toContain('data-slot="memoly-note-layout"')
   expect(markup).not.toContain('/assets/photo-park.webp')
+})
+
+test('a photo card with an empty body keeps an accessible open-memory action', () => {
+  let opens = 0
+  const card = MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '',
+    kind: 'photo',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'photo'),
+    memoryId: photoMemory.id,
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => { opens += 1 },
+  })
+
+  const openAction = findOpenAction(card)
+  expect(renderToStaticMarkup(card)).toContain('aria-label="Открыть воспоминание photo"')
+  expect(openAction).not.toBeNull()
+  openAction?.props.onOpen?.()
+  expect(opens).toBe(1)
 })
 
 test('viewer cards keep like enabled while omitting the delete action', () => {
@@ -545,4 +570,18 @@ const hostBridge: HostBridge = {
   openTelegramVideo: () => false,
   openInvite: () => undefined,
   getInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}
+
+function findOpenAction(node: ReactNode): ReactElement<{ body?: string; kind?: MemoryDto['kind']; onOpen?: () => void }> | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findOpenAction(child)
+      if (match) return match
+    }
+    return null
+  }
+  if (!node || typeof node !== 'object' || !('type' in node) || !('props' in node)) return null
+  const element = node as ReactElement<{ body?: string; kind?: MemoryDto['kind']; onOpen?: () => void }>
+  if (typeof element.type === 'function' && element.props.kind && element.props.onOpen) return element
+  return findOpenAction(element.props.children)
 }

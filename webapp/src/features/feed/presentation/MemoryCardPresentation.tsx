@@ -35,7 +35,7 @@ export function MemoryCardPresentation({
 }: MemoryCardPresentationProps) {
   const captionAndLike = (
     <div className="memoly-memory-copy">
-      {body ? <MemoryOpenButton body={body} kind={kind} onOpen={onOpen} /> : null}
+      <MemoryOpenButton body={body} className={body ? undefined : 'memoly-memory-open-empty'} kind={kind} onOpen={onOpen} />
       <LikeButton liked={liked} likeCount={likeCount} onLike={onLike} />
     </div>
   )

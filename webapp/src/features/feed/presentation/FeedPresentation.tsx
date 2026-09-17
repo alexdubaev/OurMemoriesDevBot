@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 
 import { BrandLogo } from '@/components/BrandLogo'
 import { BottomNavigation } from '@/components/BottomNavigation'
+import { Typography } from '@/components/typography'
 import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
 import { ChildAvatar } from '@/features/family'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
@@ -35,6 +36,7 @@ export type FeedPresentationProps = {
 }
 
 export function FeedPresentation(props: FeedPresentationProps) {
+  const { children } = props
   const style = {
     '--host-inset-top': `${props.insets.top}px`,
     '--host-inset-right': `${props.insets.right}px`,
@@ -56,16 +58,16 @@ export function FeedPresentation(props: FeedPresentationProps) {
           <ChildAvatar avatarCrop={props.childAvatarCrop ?? null} avatarUrl={props.childAvatarUrl ?? null} name={props.childName} size="feed-header" />
           <span aria-hidden="true" className="memoly-heart-dot"><WebpIcon decorative name="heart-filled" size={14} state="active" /></span>
           <div className="memoly-child-copy">
-            <h1>{props.childName}</h1>
-            <p>{props.childSubtitle}</p>
-            <span className="memoly-archive-pill"><WebpIcon decorative name="star" size={16} />Наши воспоминания</span>
+            <Typography as="h1" variant="memoryHero">{props.childName}</Typography>
+            <Typography as="p" tone="muted" variant="memoryCaption">{props.childSubtitle}</Typography>
+            <span className="memoly-archive-pill"><WebpIcon decorative name="star" size={16} /><Typography as="span" variant="memoryMeta">Наши воспоминания</Typography></span>
           </div>
           <img alt="" aria-hidden="true" className="memoly-cloud-art" src="/assets/brand/memoly-cloud-stars.webp" />
         </section>
         <div aria-label="Фильтр воспоминаний" className="memoly-filters" data-slot="memoly-filter-rail" role="group">
-          {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}{item.label}</button>)}
+          {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
         </div>
-        <main className="memoly-feed-content">{props.children}</main>
+        <main className="memoly-feed-content">{children}</main>
         <BottomNavigation appearance="memoly" active="feed" onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />
       </div>
     </div>
