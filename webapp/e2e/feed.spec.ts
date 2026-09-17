@@ -432,7 +432,7 @@ test.describe.serial('T07 live feed', () => {
     await openFeed(page)
     const card = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' })
     await expect(card.locator('[data-slot="telegram-video-play-control"]')).toHaveCSS('z-index', '10')
-    await card.getByRole('button', { name: 'Смотреть в Telegram' }).click()
+    await card.getByRole('button', { name: 'Смотреть видео в Telegram' }).click()
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)).toMatch(/^https:\/\/t\.me\/OurMemoriesDevBot\?start=watch_[A-Za-z0-9_-]{32}$/)
     const deepLink = await page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)
     expect(deepLink).not.toContain('synthetic-file-id')
@@ -446,6 +446,10 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const card = page.locator('[data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
+    for (let pageIndex = 0; pageIndex < 4 && await card.count() === 0; pageIndex += 1) {
+      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
+      await page.waitForTimeout(250)
+    }
     await card.scrollIntoViewIfNeeded()
     await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
     await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
