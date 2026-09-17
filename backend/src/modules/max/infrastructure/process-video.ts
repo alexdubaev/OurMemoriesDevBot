@@ -77,12 +77,11 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         }
         await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
           memoryId: currentSource.memoryId, familyId: admission.familyId, attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
-          width: positiveOrNull(rendition.width ?? attachment.width), height: positiveOrNull(rendition.height ?? attachment.height), durationMs,
+          ...resolveVideoDimensions(rendition, attachment), durationMs,
         }, create: {
           id: randomUUID(), sourceId: source.id, memoryId: currentSource.memoryId, familyId: admission.familyId,
           attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
-          width: positiveOrNull(rendition.width ?? attachment.width),
-          height: positiveOrNull(rendition.height ?? attachment.height), durationMs,
+          ...resolveVideoDimensions(rendition, attachment), durationMs,
         } })
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
@@ -114,6 +113,21 @@ function isAllowedCdnUrl(value: string) {
 
 function positiveOrNull(value: number | null) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : null
+}
+
+export function resolveVideoDimensions(
+  rendition: { width: number | null; height: number | null },
+  inbound: { width: number | null; height: number | null },
+) {
+  const renditionWidth = positiveOrNull(rendition.width)
+  const renditionHeight = positiveOrNull(rendition.height)
+  if (renditionWidth !== null && renditionHeight !== null) return { width: renditionWidth, height: renditionHeight }
+
+  const inboundWidth = positiveOrNull(inbound.width)
+  const inboundHeight = positiveOrNull(inbound.height)
+  if (inboundWidth !== null && inboundHeight !== null) return { width: inboundWidth, height: inboundHeight }
+
+  return { width: null, height: null }
 }
 
 async function findAdmission(db: DbClient, senderSubject: string) {
