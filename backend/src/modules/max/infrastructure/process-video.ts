@@ -77,11 +77,11 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         }
         await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
           memoryId: currentSource.memoryId, familyId: admission.familyId, attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
-          ...resolveVideoDimensions(rendition, attachment), durationMs,
+          ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         }, create: {
           id: randomUUID(), sourceId: source.id, memoryId: currentSource.memoryId, familyId: admission.familyId,
           attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
-          ...resolveVideoDimensions(rendition, attachment), durationMs,
+          ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         } })
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
@@ -118,7 +118,12 @@ function positiveOrNull(value: number | null) {
 export function resolveVideoDimensions(
   rendition: { width: number | null; height: number | null },
   inbound: { width: number | null; height: number | null },
+  provider?: { width: number | null; height: number | null },
 ) {
+  const providerWidth = positiveOrNull(provider?.width ?? null)
+  const providerHeight = positiveOrNull(provider?.height ?? null)
+  if (providerWidth !== null && providerHeight !== null) return { width: providerWidth, height: providerHeight }
+
   const renditionWidth = positiveOrNull(rendition.width)
   const renditionHeight = positiveOrNull(rendition.height)
   if (renditionWidth !== null && renditionHeight !== null) return { width: renditionWidth, height: renditionHeight }

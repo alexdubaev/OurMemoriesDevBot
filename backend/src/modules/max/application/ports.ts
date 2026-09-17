@@ -58,6 +58,8 @@ export type MaxVideoRendition = {
 }
 
 export type MaxVideoResolution = {
+  width: number | null
+  height: number | null
   renditions: MaxVideoRendition[]
   durationMs: number | null
 }

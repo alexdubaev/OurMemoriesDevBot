@@ -295,11 +295,31 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
   const [mediaErrorCode, setMediaErrorCode] = useState(0)
+  const [intrinsicDimensions, setIntrinsicDimensions] = useState<{ width: number; height: number } | null>(null)
+  const loadedSource = useRef<string | null>(null)
   const sourceFailed = sourceStatus === 'error'
-  const frameStyle = videoFrameStyle(width, height)
+  const frameDimensions = intrinsicDimensions ?? { width, height }
+  const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
+  useEffect(() => {
+    setIntrinsicDimensions(null)
+    setStarted(false)
+    setFailed(false)
+    setMediaErrorCode(0)
+    const element = video.current
+    if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
+  }, [src])
   return <div className="w-full">
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
-      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true) }} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} src={src ? `${src}#t=0.001` : undefined} />
+      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true) }} onLoadedMetadata={(event) => {
+        const element = event.currentTarget
+        if (Number.isFinite(element.videoWidth) && Number.isFinite(element.videoHeight) && element.videoWidth > 0 && element.videoHeight > 0) {
+          setIntrinsicDimensions({ width: element.videoWidth, height: element.videoHeight })
+        }
+        const seekableEnd = element.seekable.length > 0 ? element.seekable.end(element.seekable.length - 1) : 0
+        if ((Number.isFinite(element.duration) && element.duration > 0.001) || seekableEnd > 0.001) {
+          try { element.currentTime = 0.001 } catch { /* Some WebViews reject a seek before the first frame is buffered. */ }
+        }
+      }} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} />
       {!started && !failed && !sourceFailed ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
@@ -313,6 +333,18 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
     </div>
     <Button className="mt-2" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
   </div>
+}
+
+export function loadMaxVideoSourceOnce(video: Pick<HTMLMediaElement, 'src' | 'load' | 'removeAttribute'>, src: string | null, loadedSource: string | null) {
+  if (loadedSource === src) return loadedSource
+  if (src === null) {
+    video.removeAttribute('src')
+    video.load()
+    return null
+  }
+  video.src = src
+  video.load()
+  return src
 }
 
 function useMaxVideoSource(path: string | null) {

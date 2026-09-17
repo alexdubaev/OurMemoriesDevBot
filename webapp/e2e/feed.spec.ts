@@ -79,9 +79,9 @@ test.describe.serial('T07 live feed', () => {
   test('renders intrinsic photo and MAX video ratios and opens the memoLy bot', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     const maxVideos = [
-      { body: 'MAX portrait video UX E2E', width: 720, height: 1_280, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=orange:s=180x320:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
-      { body: 'MAX landscape video UX E2E', width: 1_280, height: 720, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=320x180:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
-      { body: 'MAX square video UX E2E', width: 900, height: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=240x240:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+      { body: 'MAX portrait video UX E2E', width: null, height: 720, decodedWidth: 720, decodedHeight: 1_280, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=orange:s=720x1280:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+      { body: 'MAX landscape video UX E2E', width: 1_280, height: 720, decodedWidth: 1_280, decodedHeight: 720, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=1280x720:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
+      { body: 'MAX square video UX E2E', width: 900, height: 900, decodedWidth: 900, decodedHeight: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=900x900:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
     ].map((video) => ({ ...video, id: randomUUID() }))
     const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
     let feedPatched = false
@@ -149,12 +149,37 @@ test.describe.serial('T07 live feed', () => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'serviceWorker', { configurable: true, get: () => undefined })
     })
+    await page.addInitScript(() => {
+      const originalLoad = HTMLMediaElement.prototype.load
+      const sourceDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')
+      let explicitLoadCalls = 0
+      let maxVideoSourceAssignments = 0
+      HTMLMediaElement.prototype.load = function () {
+        if (this.getAttribute('src')?.includes('/media/max-videos/')) explicitLoadCalls += 1
+        return originalLoad.call(this)
+      }
+      if (sourceDescriptor?.get && sourceDescriptor.set) {
+        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+          configurable: sourceDescriptor.configurable,
+          enumerable: sourceDescriptor.enumerable,
+          get: sourceDescriptor.get,
+          set(value: string) {
+            if (this instanceof HTMLVideoElement && value.includes('/media/max-videos/')) maxVideoSourceAssignments += 1
+            sourceDescriptor.set!.call(this, value)
+          },
+        })
+      }
+      Object.defineProperties(window, {
+        __maxVideoExplicitLoadCalls: { configurable: true, get: () => explicitLoadCalls },
+        __maxVideoSourceAssignments: { configurable: true, get: () => maxVideoSourceAssignments },
+      })
+    })
     await page.reload()
     await openFeed(page)
     const ratios = [
       ['Фотоальбом E2E', 'img', 360 / 640],
       ['Одиночное фото E2E', 'img', 1],
-      ...maxVideos.map((video) => [video.body, 'video', video.width / video.height] as const),
+      ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
       const card = page.locator('[data-memory-id]').filter({ hasText: body })
@@ -185,7 +210,10 @@ test.describe.serial('T07 live feed', () => {
     const maxVideoCard = page.locator('[data-memory-id]').filter({ hasText: maxVideos[0]!.body })
     const maxVideo = maxVideoCard.locator('video').first()
     await expect(maxVideo).toHaveAttribute('preload', 'metadata')
-    await expect(maxVideo).toHaveAttribute('src', /\/media\/max-videos\/[^#]+\/content#t=0\.001$/)
+    await expect(maxVideo).toHaveAttribute('src', /\/media\/max-videos\/[^#]+\/content$/)
+    expect(await maxVideo.evaluate((entry) => entry.src.includes('#'))).toBe(false)
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxVideoExplicitLoadCalls?: number }).__maxVideoExplicitLoadCalls ?? 0)).toBe(maxVideos.length)
+    expect(await page.evaluate(() => (window as typeof window & { __maxVideoSourceAssignments?: number }).__maxVideoSourceAssignments ?? 0)).toBe(maxVideos.length)
     await expect.poll(() => maxVideo.evaluate((entry) => entry.readyState)).toBeGreaterThanOrEqual(2)
     expect(maxVideoRequests.length).toBeGreaterThan(0)
     expect(maxVideoRequests.every((url) => !url.includes('#'))).toBe(true)

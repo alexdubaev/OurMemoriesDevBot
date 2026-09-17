@@ -16,4 +16,20 @@ describe('MAX video metadata boundary', () => {
       { width: 1_080, height: 1_920 },
     )).toEqual({ width: 720, height: 1_280 })
   })
+
+  test('uses the complete provider root pair before rendition and inbound dimensions', () => {
+    expect(resolveVideoDimensions(
+      { width: null, height: 720 },
+      { width: 720, height: 1_280 },
+      { width: 720, height: 1_280 },
+    )).toEqual({ width: 720, height: 1_280 })
+  })
+
+  test('falls back to the complete rendition pair when provider root dimensions are incomplete', () => {
+    expect(resolveVideoDimensions(
+      { width: 720, height: 1_280 },
+      { width: 1_080, height: 1_920 },
+      { width: 720, height: null },
+    )).toEqual({ width: 720, height: 1_280 })
+  })
 })
