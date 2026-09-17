@@ -66,7 +66,8 @@ export function FeedShell({
       >
         <header>
           <div className="ml-topbar flex min-h-11 min-w-0 items-center justify-between gap-2">
-            <BrandLogo className="min-w-0 w-[148px]" />
+            <span aria-hidden="true" className="ml-topbar-spacer" data-slot="topbar-spacer" />
+            <BrandLogo className="ml-logo min-w-0 w-[148px]" />
             <button
               aria-label="Помощь и конфиденциальность"
               className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground"

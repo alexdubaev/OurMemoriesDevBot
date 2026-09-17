@@ -43,6 +43,7 @@
 
 .ml-simple-header { display: flex; justify-content: center; }
 .ml-logo { width: min(166px, 100%); height: auto; justify-self: center; }
+.ml-topbar-spacer { display: block; width: 44px; min-width: 44px; min-height: 44px; grid-column: 1; }
 .ml-circle-button { display: grid; min-width: 44px; min-height: 44px; place-items: center; border: 0; border-radius: 999px; color: var(--ml-muted); background: var(--ml-surface); }
 .ml-child-hero { display: flex; min-height: 120px; align-items: center; gap: 16px; margin: 8px var(--layout-gutter, 16px) 12px; }
 .ml-child-avatar-button { position: relative; z-index: 1; width: 76px; height: 76px; flex: 0 0 auto; padding: 4px; border: 0; border-radius: 50%; background: var(--ml-surface); }
@@ -71,6 +72,7 @@
 .ml-caption,
 .ml-note-like { display: flex; align-items: center; gap: 9px; padding: 10px 14px 14px; }
 .ml-caption p { min-width: 0; flex: 1; margin: 0; white-space: pre-wrap; font-size: 15px; line-height: 22px; }
+.ml-caption-text { min-width: 0; flex: 1; margin: 0; white-space: pre-wrap; font-size: 15px; line-height: 22px; }
 .ml-like { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; border: 0; border-radius: 999px; color: var(--ml-muted); background: var(--ml-soft); }
 .ml-like.liked { color: var(--ml-accent); background: var(--ml-tint); }
 .ml-video-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 2px; }

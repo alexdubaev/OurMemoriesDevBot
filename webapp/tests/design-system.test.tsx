@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { WebpIcon } from '../src/components/WebpIcon'
@@ -149,6 +151,30 @@ test('FeedShell mounts the memoLy feed presentation and keeps the bottom navigat
   expect(markup).toContain('class="ml-memory"')
   expect(markup).toContain('data-slot="bottom-navigation"')
   expect(markup).toContain('z-30')
+})
+
+test('FeedShell provides the left spacer required by the memoLy three-column topbar', () => {
+  const markup = render(
+    createElement(
+      FeedShell,
+      {
+        activeFilter: 'all',
+        childName: 'Лиза',
+        childSubtitle: 'Семейная лента',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        onFilterChange: () => undefined,
+        role: 'viewer',
+      },
+      createElement('div', null),
+    ),
+  )
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+
+  expect(markup).toContain('data-slot="topbar-spacer"')
+  expect(markup).toContain('class="ml-topbar-spacer"')
+  expect(css).toContain('.ml-topbar-spacer')
+  expect(css).toContain('grid-column: 1')
+  expect(css).toContain('width: 44px')
 })
 
 test('AddSheet panel contains only the three approved actions and an accessible title', () => {

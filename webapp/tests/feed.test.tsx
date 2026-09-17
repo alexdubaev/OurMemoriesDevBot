@@ -418,6 +418,21 @@ test('memoLy feed card keeps the media slot and open-memory callback around a pr
   expect(opened).toBe(false)
 })
 
+test('memoLy feed card preserves line breaks in a multi-line memory body', () => {
+  const markup = renderToStaticMarkup(createElement(FeedMemoryCard, {
+    familyTimezone: 'Europe/Moscow',
+    memory: { ...memory, body: 'Первая строка\nВторая строка' },
+    onDelete: () => Promise.resolve(),
+    onLike: () => undefined,
+    onOpen: () => undefined,
+    renderAttachment: () => null,
+  }))
+
+  expect(markup).toContain('ml-caption-text')
+  expect(markup).toContain('whitespace-pre-wrap')
+  expect(markup).toContain('Первая строка\nВторая строка')
+})
+
 function feedClient() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {

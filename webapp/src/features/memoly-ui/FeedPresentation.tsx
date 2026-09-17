@@ -104,7 +104,7 @@ export function FeedMemoryCard({
         onClick={() => onOpen(memory)}
         type="button"
       >
-        {presentation.body ? <Typography as="span" className="ml-caption-text" variant="memoryCaption">{presentation.body}</Typography> : null}
+        {presentation.body ? <Typography as="span" className="ml-caption-text whitespace-pre-wrap" variant="memoryCaption">{presentation.body}</Typography> : null}
       </button>
       <div className="ml-note-like border-t border-border">
         <Typography asChild variant="memoryMeta"><button aria-pressed={presentation.liked} className={`ml-like${presentation.liked ? ' liked' : ''}`} onClick={() => onLike(memory)} type="button">
