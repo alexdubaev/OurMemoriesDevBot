@@ -28,7 +28,7 @@
   min-height: 100dvh;
   margin: 0 auto;
   padding-bottom: calc(var(--layout-bottom-nav, 72px) + var(--layout-gutter, 16px) + var(--host-inset-bottom, 0px));
-  overflow: hidden;
+  overflow-x: clip;
 }
 
 .ml-topbar,

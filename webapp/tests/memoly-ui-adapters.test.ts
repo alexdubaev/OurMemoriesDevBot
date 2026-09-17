@@ -134,3 +134,12 @@ test('memoLy presentation CSS keeps captions readable and outer gutters single a
   expect(css).toContain('margin: 8px 0 12px;')
   expect(css).toContain('.ml-family-content { padding: 0; }')
 })
+
+test('memoLy shell clips horizontal overflow without creating a sticky ancestor', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+  const shellRule = css.match(/\.ml-shell\s*\{([\s\S]*?)\n\}/)?.[1]
+
+  expect(shellRule).toBeDefined()
+  expect(shellRule).toContain('overflow-x: clip;')
+  expect(shellRule).not.toContain('overflow: hidden;')
+})
