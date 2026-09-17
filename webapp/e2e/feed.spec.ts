@@ -184,7 +184,9 @@ test.describe.serial('T07 live feed', () => {
     for (const [body, element, expected] of ratios) {
       const card = page.locator('[data-memory-id]').filter({ hasText: body })
       await expect(card).toBeVisible()
-      const media = card.locator(element).first()
+      const media = element === 'img'
+        ? card.locator('[data-slot="memoly-photo-layout"] img').first()
+        : card.locator('video').first()
       await expect(media).toBeVisible()
       const actual = await media.evaluate((entry) => {
         const rect = entry.getBoundingClientRect()
@@ -234,7 +236,6 @@ test.describe.serial('T07 live feed', () => {
     expect(await maxVideo.evaluate((entry) => entry.muted)).toBe(false)
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть', exact: true })).toHaveCount(0)
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    await maxVideoCard.getByRole('button', { name: /сердечко/i }).click()
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
     await page.getByRole('menuitem', { name: 'Подробнее' }).click()
