@@ -27,3 +27,15 @@ test('keeps PhotoSwipe unblocked and mobile form controls at 16px', async () => 
   expect(styles).not.toMatch(/touch-action\s*:\s*none/i)
   expect(select).toContain('text-base')
 })
+
+test('reserves the bottom navigation safe area and preserves the media stacking contract', async () => {
+  const [feedShell, navigation] = await Promise.all([
+    readFile(resolve(webappRoot, 'src/features/feed/components/FeedShell.tsx'), 'utf8'),
+    readFile(resolve(webappRoot, 'src/components/BottomNavigation.tsx'), 'utf8'),
+  ])
+
+  expect(feedShell).toContain('pb-[calc(var(--layout-bottom-nav)+var(--host-inset-bottom)+var(--layout-gutter))]')
+  expect(navigation).toContain('data-testid="bottom-navigation"')
+  expect(navigation).toContain('fixed inset-x-0 bottom-0 z-30')
+  expect(navigation).toContain('pb-[var(--host-inset-bottom)]')
+})

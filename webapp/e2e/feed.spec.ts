@@ -66,14 +66,75 @@ test.describe.serial('T07 live feed', () => {
 
   test.beforeEach(async ({ page }, testInfo) => {
     const initData = signedInitData(Number(subject), 'Лента E2E')
+    const responsiveWidth = testInfo.title.match(/feed is usable at (\d+)px$/)?.[1]
     if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot') {
       await installMaxHost(page, initData)
       await installMaxAuthRoute(page)
     } else {
-      await installTelegramHost(page, initData)
+      await installTelegramHost(page, initData, responsiveWidth ? { bottom: 18 } : undefined)
     }
+    if (responsiveWidth) await page.setViewportSize({ width: Number(responsiveWidth), height: 844 })
     await page.goto('/')
     await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+  })
+
+  for (const width of [320, 390, 430, 480]) {
+    test(`feed is usable at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await openFeed(page)
+      await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+      const metrics = await page.evaluate(() => {
+        const navigation = document.querySelector('[data-testid="bottom-navigation"]')
+        const feedScroll = document.querySelector('[data-slot="feed-scroll"]')
+        if (!navigation || !feedScroll) return null
+        const navStyle = getComputedStyle(navigation)
+        const scrollStyle = getComputedStyle(feedScroll)
+        const navRect = navigation.getBoundingClientRect()
+        return {
+          clientWidth: document.documentElement.clientWidth,
+          navBottom: navRect.bottom,
+          navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
+          navWidth: navRect.width,
+          scrollPaddingBottom: Number.parseFloat(scrollStyle.paddingBottom),
+          viewportHeight: window.innerHeight,
+        }
+      })
+
+      expect(metrics).not.toBeNull()
+      expect(metrics!.clientWidth).toBe(width)
+      expect(metrics!.navWidth).toBe(width)
+      expect(metrics!.navBottom).toBe(metrics!.viewportHeight)
+      expect(metrics!.navPaddingBottom).toBe(18)
+      expect(metrics!.scrollPaddingBottom).toBeGreaterThan(metrics!.navPaddingBottom + 16)
+      await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
+    })
+  }
+
+  test('keeps card video overlays below navigation while fullscreen media covers it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openFeed(page)
+    const layers = await page.evaluate(() => {
+      const navigation = document.querySelector('[data-testid="bottom-navigation"]')
+      const overlay = document.querySelector('[data-slot="telegram-video-play-control"]')
+      if (!navigation || !overlay) return null
+      return {
+        navigationPosition: getComputedStyle(navigation).position,
+        navigationZIndex: Number.parseInt(getComputedStyle(navigation).zIndex, 10),
+        overlayZIndex: Number.parseInt(getComputedStyle(overlay).zIndex, 10),
+      }
+    })
+
+    expect(layers).not.toBeNull()
+    expect(layers!.navigationPosition).toBe('fixed')
+    expect(layers!.navigationZIndex).toBeGreaterThan(layers!.overlayZIndex)
+
+    const opener = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' }).getByRole('button', { name: 'Открыть фото' }).first()
+    await opener.scrollIntoViewIfNeeded()
+    await opener.click()
+    await expect(page.locator('.pswp')).toBeVisible()
+    const fullscreenZIndex = await page.locator('.pswp').evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10))
+    expect(fullscreenZIndex).toBeGreaterThan(layers!.navigationZIndex)
+    await page.locator('.pswp__button--close').click()
   })
 
   test('renders intrinsic photo and MAX video ratios and opens the memoLy bot', async ({ page }) => {
@@ -627,8 +688,8 @@ function signedInitData(id: number, name: string) {
   return fields.toString()
 }
 
-async function installTelegramHost(page: Page, initData: string) {
-  await page.addInitScript((value) => {
+async function installTelegramHost(page: Page, initData: string, insets: { bottom?: number } = {}) {
+  await page.addInitScript(({ bottomInset, initData: value }) => {
     const backHandlers = new Set<() => void>()
     const testWindow = window as typeof window & {
       __openedTelegramLink?: string
@@ -641,8 +702,8 @@ async function installTelegramHost(page: Page, initData: string) {
       initData: value,
       version: '8.0',
       platform: 'tdesktop',
-      safeAreaInset: {},
-      contentSafeAreaInset: {},
+      safeAreaInset: { bottom: bottomInset },
+      contentSafeAreaInset: { bottom: bottomInset },
       BackButton: {
         show() {},
         hide() {},
@@ -652,7 +713,7 @@ async function installTelegramHost(page: Page, initData: string) {
       ready() {},
       openTelegramLink(url: string) { testWindow.__openedTelegramLink = url },
     } } })
-  }, initData)
+  }, { bottomInset: insets.bottom ?? 0, initData })
 }
 
 async function installMaxHost(page: Page, initData: string) {
