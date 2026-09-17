@@ -267,7 +267,7 @@ test.describe.serial('T07 live feed', () => {
     await page.getByLabel('Загрузить ещё').scrollIntoViewIfNeeded()
     await expect(page.getByText('Заметка E2E 42')).toBeVisible()
 
-    const cards = page.locator('[data-slot="memory-card-frame"]')
+    const cards = page.locator('[data-memory-id]')
     await expect(cards).toHaveCount(fixture.memoryCount)
     const ids = await cards.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-memory-id')))
     expect(new Set(ids).size).toBe(ids.length)
@@ -276,12 +276,16 @@ test.describe.serial('T07 live feed', () => {
 
   test('rolls back a failed like without losing the memory', async ({ page }) => {
     await openFeed(page)
+    await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toContainText('Просмотр')
+    await expect(page.getByRole('button', { name: 'Добавить' })).toHaveCount(0)
     await page.route('**/api/v1/families/*/memories/*/like', (route) => route.fulfill({
       status: 503,
       contentType: 'application/json',
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic like failure' } }),
     }))
     const albumCard = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' })
+    await expect(albumCard.getByRole('button', { name: /Сердечко/ })).toBeEnabled()
+    await expect(albumCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(0)
     const like = albumCard.getByRole('button', { name: /Сердечко/ })
     await like.click()
     await expect(like).toHaveAttribute('aria-pressed', 'false')
@@ -427,6 +431,7 @@ test.describe.serial('T07 live feed', () => {
   test('opens Telegram-only video through the guarded opaque hand-off', async ({ page }) => {
     await openFeed(page)
     const card = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' })
+    await expect(card.locator('[data-slot="telegram-video-play-control"]')).toHaveCSS('z-index', '10')
     await card.getByRole('button', { name: 'Смотреть в Telegram' }).click()
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)).toMatch(/^https:\/\/t\.me\/OurMemoriesDevBot\?start=watch_[A-Za-z0-9_-]{32}$/)
     const deepLink = await page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)
@@ -739,5 +744,9 @@ function triggerTelegramBack(page: Page) {
 
 async function openFeed(page: Page) {
   await page.getByRole('button', { name: 'Лента' }).click()
+  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+  await expect(page.locator('[data-slot="memoly-filter-rail"]')).toBeVisible()
+  await expect(page.locator('[data-memory-kind="photo"]').first()).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
 }
