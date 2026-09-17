@@ -1,3 +1,4 @@
 @import "./index.css";
+@import "./features/memoly-ui/memoly-ui.css";
 
 @source not "./stories";
