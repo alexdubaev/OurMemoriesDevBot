@@ -10,6 +10,8 @@ import type {
   MaxVideoUploadSession,
 } from '../application/ports'
 
+const processingLeaseMs = 60_000
+
 export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepository {
   constructor(private readonly db: DbClient) {}
 
@@ -89,7 +91,17 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
         return { session: current, claimed: false }
       }
       const claimed = await tx.maxVideoUploadSession.updateMany({
-        where: { id: sessionId, familyId, state: { in: ['reserved', 'uploaded', 'processing', 'message_sent'] } },
+        where: {
+          id: sessionId,
+          familyId,
+          OR: [
+            { state: { in: ['reserved', 'uploaded', 'message_sent'] } },
+            // A crashed process can leave a durable claim behind. Only reclaim it
+            // after the provider request deadline has elapsed; a live concurrent
+            // finalize must observe claimed=false and never send again.
+            { state: 'processing', lastRetryAt: { lt: new Date(now.getTime() - processingLeaseMs) } },
+          ],
+        },
         data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
       })
       const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })

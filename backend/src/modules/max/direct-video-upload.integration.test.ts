@@ -108,4 +108,29 @@ describe('MAX direct video upload application service', () => {
       api: api(), repository: state.repository, publisher: { publish: async () => state.getSession().plannedMemoryId } as never })
     await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'forbidden' })
   })
+
+  test('does not send while another finalize owns the durable processing claim', async () => {
+    const state = repository()
+    let sends = 0
+    const service = createMaxDirectVideoUploadService({ access: access(), repository: {
+      ...state.repository,
+      claim: async () => ({ session: state.getSession(), claimed: false }),
+    }, api: api({ sendVideoMessage: async () => { sends += 1; return { messageId: 'message-1' } } }),
+      publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    await expect(service.finalize(scope, session().id)).resolves.toMatchObject({ state: 'processing', retryable: true })
+    expect(sends).toBe(0)
+  })
+
+  test('returns a retryable result and releases the claim after a provider failure', async () => {
+    const state = repository()
+    const service = createMaxDirectVideoUploadService({ access: access(), repository: state.repository,
+      api: api({ sendVideoMessage: async () => { throw new Error('provider outage') } }),
+      publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'provider_unavailable' })
+    expect(state.getSession()).toMatchObject({ state: 'uploaded', lastErrorCode: 'provider_unavailable' })
+  })
 })

@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { AppError, validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
+import { toFamilyAppError } from '../../families/transport/errors'
 import { MaxDirectUploadFailure, type DirectVideoUploadReserveInput } from '../application/direct-video-upload'
 
 const bearerSecurity = [{ BearerAuth: [] }]
@@ -53,7 +54,7 @@ export function createMaxDirectVideoUploadRoutes(options: {
     try {
       return c.json(await options.service.reserve(scope(c.var.user, params.familyId), input), 201)
     } catch (error) {
-      throw toAppError(error)
+      throw toAppError(toFamilyAppError(error))
     }
   })
   routes.openapi(finalizeRoute, async (c) => {
@@ -61,7 +62,7 @@ export function createMaxDirectVideoUploadRoutes(options: {
     try {
       return c.json(await options.service.finalize(scope(c.var.user, params.familyId), params.sessionId, c.req.valid('json').uploadToken), 200)
     } catch (error) {
-      throw toAppError(error)
+      throw toAppError(toFamilyAppError(error))
     }
   })
   return routes

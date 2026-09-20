@@ -211,6 +211,7 @@ export function createMaxDirectVideoUploadService(options: {
           await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'attachment_not_ready' })
           return { state: 'processing', sessionId: session.id, retryable: true, code: 'attachment_not_ready' }
         }
+        await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'provider_unavailable' })
         throw new MaxDirectUploadFailure('retryable', 'Публикация видео временно недоступна', 'provider_unavailable')
       }
     },
