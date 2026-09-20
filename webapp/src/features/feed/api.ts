@@ -6,7 +6,7 @@ import {
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
-import type { FeedFilter } from './components'
+import type { FeedFilter } from './presentation'
 
 export function loadFeed(
   transport: AuthenticatedTransport,

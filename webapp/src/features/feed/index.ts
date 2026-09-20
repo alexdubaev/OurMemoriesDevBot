@@ -7,7 +7,7 @@ export {
   FeedSkeleton,
   InlineError,
   MemoryCardFrame,
-  type FeedFilter,
 } from './components'
+export { FeedPresentation, type FeedFilter } from './presentation'
 export { FeedPage } from './FeedPage'
 export { MediaPlaybackCoordinator } from './playback'

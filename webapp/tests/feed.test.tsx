@@ -11,6 +11,7 @@ import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
+import { MemoryCardPresentation } from '../src/features/feed/presentation'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
 
@@ -50,6 +51,56 @@ const memory: MemoryDto = {
   capabilities: { edit: true, delete: true, like: true },
 }
 
+const photoMemory: MemoryDto = {
+  ...memory,
+  id: '66666666-6666-4666-8666-666666666666',
+  kind: 'photo',
+  body: 'Прогулка в парке',
+  attachments: [{
+    id: '77777777-7777-4777-8777-777777777777',
+    source: 'private_storage',
+    kind: 'photo',
+    width: 1_280,
+    height: 960,
+    durationMs: null,
+    renditionStatus: 'ready',
+    previewPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=preview`,
+    displayPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=display`,
+    playbackPath: null,
+    originalDownloadPath: `/api/v1/families/${familyId}/media/77777777-7777-4777-8777-777777777777/content?variant=original`,
+    waveform: null,
+  }],
+}
+
+const videoMemory: MemoryDto = {
+  ...memory,
+  id: '88888888-8888-4888-8888-888888888888',
+  kind: 'video',
+  body: 'Первые шаги',
+  attachments: [{
+    id: '99999999-9999-4999-8999-999999999999',
+    source: 'private_storage',
+    kind: 'video',
+    width: 1_920,
+    height: 1_080,
+    durationMs: 24_000,
+    renditionStatus: 'ready',
+    previewPath: null,
+    displayPath: null,
+    playbackPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=playback`,
+    originalDownloadPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=original`,
+    waveform: null,
+  }],
+}
+
+const noteMemory: MemoryDto = {
+  ...memory,
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  kind: 'note',
+  body: 'Сегодня впервые улыбнулась.',
+  attachments: [],
+}
+
 test('a next-page error keeps already displayed memories on screen', () => {
   const queryClient = feedClient()
   const query = queryClient.getQueryCache().find({ queryKey: feedQueryKeys.list(familyId, 'all') })
@@ -65,6 +116,126 @@ test('a next-page error keeps already displayed memories on screen', () => {
   })
 
   expect(renderFeed(queryClient)).toContain('Первое слово')
+})
+
+test('real memory DTOs map to explicit memoLy card layouts without demo media', () => {
+  const markup = renderFeed(feedClientWith([photoMemory, videoMemory, memory, noteMemory]))
+
+  expect(markup).toContain('data-memory-kind="photo"')
+  expect(markup).toContain('data-slot="memoly-author-row"')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('data-slot="memoly-photo-layout"')
+  expect(markup).toContain('data-slot="memoly-video-layout"')
+  expect(markup).toContain('data-slot="memoly-voice-layout"')
+  expect(markup).toContain('data-slot="memoly-note-layout"')
+  expect(markup).not.toContain('/assets/photo-park.webp')
+})
+
+test('video cards remove the standalone open action and collapse when the caption is empty', () => {
+  const card = MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-empty-body',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  })
+
+  const markup = renderToStaticMarkup(card)
+  expect(markup).toContain('data-memory-kind="video"')
+  expect(markup).toContain('class="memoly-video-row"')
+  expect(markup).not.toContain('Открыть')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+})
+
+test('video cards treat whitespace-only captions as empty', () => {
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '   \n\t',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-whitespace-body',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  expect(markup).toContain('class="memoly-video-row"')
+  expect(markup).not.toContain('memoly-video-row has-caption')
+  expect(markup).not.toContain('memoly-video-caption')
+})
+
+test('video captions remain visible without becoming a separate detail button', () => {
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: 'Первые шаги',
+    kind: 'video',
+    liked: false,
+    likeCount: 0,
+    media: createElement('div', null, 'video'),
+    memoryId: 'video-with-caption',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  expect(markup).toContain('Первые шаги')
+  expect(markup).toContain('memoly-video-caption')
+  expect(markup).not.toContain('Открыть воспоминание')
+  expect(markup).not.toContain('>Открыть<')
+})
+
+test('photo and voice cards keep their caption detail action when the body is empty', () => {
+  let opens = 0
+  for (const kind of ['photo', 'voice'] as const) {
+    const card = MemoryCardPresentation({
+      actions: null,
+      authorInitials: 'М',
+      authorName: 'Мама',
+      body: '',
+      kind,
+      liked: false,
+      likeCount: 0,
+      media: createElement('div', null, kind),
+      memoryId: `${kind}-empty-body`,
+      occurredTime: '12 мая 2024, 10:24',
+      onLike: () => undefined,
+      onOpen: () => { opens += 1 },
+    })
+
+    const markup = renderToStaticMarkup(card)
+    const openAction = findOpenAction(card)
+    expect(markup).toContain(`data-memory-kind="${kind}"`)
+    expect(markup).toContain('Открыть')
+    expect(markup).toContain(`aria-label="Открыть воспоминание ${kind}"`)
+    expect(markup).toContain('memoly-memory-open-empty')
+    expect(openAction).not.toBeNull()
+    openAction?.props.onOpen?.()
+  }
+
+  expect(opens).toBe(2)
+})
+
+test('viewer cards keep like enabled while omitting the delete action', () => {
+  const viewerMemory = { ...memory, capabilities: { ...memory.capabilities, delete: false } }
+  const markup = renderFeed(feedClientWith([viewerMemory]), 'viewer')
+
+  expect(markup).toContain('aria-label="Действия с воспоминанием"')
+  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('aria-pressed="false"')
+  expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
 })
 
 test('a prepared voice renders every measured waveform peak', () => {
@@ -388,7 +559,7 @@ test('optimistic deletion removes a memory from every cached family filter', () 
   expect(snapshot).toHaveLength(2)
 })
 
-test('delete action is available only when the memory capability permits it', () => {
+test('memory actions menu is available to every role while delete remains capability-gated', () => {
   const fullMarkup = renderFeed(feedClient())
   expect(fullMarkup).toContain('aria-label="Действия с воспоминанием"')
 
@@ -396,7 +567,7 @@ test('delete action is available only when the memory capability permits it', ()
   viewerClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
     pages: [{ items: [{ ...memory, capabilities: { ...memory.capabilities, delete: false } }], nextCursor: null }], pageParams: [null],
   })
-  expect(renderFeed(viewerClient)).not.toContain('aria-label="Действия с воспоминанием"')
+  expect(renderFeed(viewerClient)).toContain('aria-label="Действия с воспоминанием"')
 })
 
 test('memoLy feed card keeps the media slot and open-memory callback around a private album', () => {
@@ -449,15 +620,19 @@ test('memoLy feed card clamps long captions without changing the full body passe
 })
 
 function feedClient() {
+  return feedClientWith([memory])
+}
+
+function feedClientWith(items: MemoryDto[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
-    pages: [{ items: [memory], nextCursor: 'page-2' }],
+    pages: [{ items, nextCursor: 'page-2' }],
     pageParams: [null],
   })
   return queryClient
 }
 
-function renderFeed(queryClient: QueryClient) {
+function renderFeed(queryClient: QueryClient, role: 'full' | 'viewer' = 'full') {
   return renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(FeedPage, {
     childName: 'Лиза',
     childSubtitle: '2 года',
@@ -468,7 +643,7 @@ function renderFeed(queryClient: QueryClient) {
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
     onFamily: () => undefined,
     onFilterChange: () => undefined,
-    role: 'full',
+    role,
     transport,
   })))
 }
@@ -518,4 +693,18 @@ const hostBridge: HostBridge = {
   openTelegramVideo: () => false,
   openInvite: () => undefined,
   getInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}
+
+function findOpenAction(node: ReactNode): ReactElement<{ body?: string; kind?: MemoryDto['kind']; onOpen?: () => void }> | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findOpenAction(child)
+      if (match) return match
+    }
+    return null
+  }
+  if (!node || typeof node !== 'object' || !('type' in node) || !('props' in node)) return null
+  const element = node as ReactElement<{ body?: string; kind?: MemoryDto['kind']; onOpen?: () => void }>
+  if (typeof element.type === 'function' && element.type.name === 'MemoryOpenButton' && element.props.kind && element.props.onOpen) return element
+  return findOpenAction(element.props.children)
 }
