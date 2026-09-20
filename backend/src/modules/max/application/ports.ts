@@ -163,10 +163,23 @@ export type MaxVideoUploadReservation = {
   created: boolean
 }
 
+export type MaxVideoUploadCapabilityClaim = {
+  session: MaxVideoUploadSession
+  claimed: boolean
+}
+
+export type MaxVideoUploadCapabilityPersistence = {
+  session: MaxVideoUploadSession
+  persisted: boolean
+}
+
 export type MaxOutboundSourceInput = Omit<MaxOutboundSource, 'id' | 'createdAt' | 'updatedAt'>
 
 export type MaxDirectUploadRepository = {
   reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation>
+  claimUploadCapability(familyId: string, sessionId: string, now: Date): Promise<MaxVideoUploadCapabilityClaim | null>
+  persistUploadCapability(session: MaxVideoUploadSession, token: string): Promise<MaxVideoUploadCapabilityPersistence>
+  releaseUploadCapability(session: MaxVideoUploadSession, expired: boolean): Promise<MaxVideoUploadSession | null>
   createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource>
   find(familyId: string, sessionId: string): Promise<MaxVideoUploadSession | null>
   claim(familyId: string, sessionId: string, now: Date): Promise<{ session: MaxVideoUploadSession; claimed: boolean } | null>

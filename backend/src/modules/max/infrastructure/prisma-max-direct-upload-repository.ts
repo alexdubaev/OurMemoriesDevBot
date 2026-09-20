@@ -69,6 +69,65 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
     }
   }
 
+  async claimUploadCapability(familyId: string, sessionId: string, now: Date) {
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
+      if (!row) return null
+      const current = normalizeSession(row)
+      if (current.providerUploadToken || current.state === 'finalized' || current.state === 'failed' || current.state === 'expired') {
+        return { session: current, claimed: false }
+      }
+      const leaseCutoff = new Date(now.getTime() - processingLeaseMs)
+      const claimed = await tx.maxVideoUploadSession.updateMany({
+        where: {
+          id: sessionId,
+          familyId,
+          providerUploadToken: null,
+          OR: [
+            { state: { in: ['reserved', 'uploaded'] } },
+            { state: 'processing', lastRetryAt: { lt: leaseCutoff } },
+          ],
+        },
+        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
+      })
+      const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
+      if (!fresh) return null
+      return { session: normalizeSession(fresh), claimed: claimed.count === 1 }
+    })
+  }
+
+  async persistUploadCapability(session: MaxVideoUploadSession, token: string) {
+    const persisted = await this.db.maxVideoUploadSession.updateMany({
+      where: {
+        id: session.id,
+        familyId: session.familyId,
+        state: 'processing',
+        providerUploadToken: null,
+        retryCount: session.retryCount,
+        lastRetryAt: session.lastRetryAt ?? undefined,
+      },
+      data: { providerUploadToken: token, state: 'reserved', lastErrorCode: null },
+    })
+    const fresh = await this.db.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: session.id, familyId: session.familyId } } })
+    return { session: fresh ? normalizeSession(fresh) : session, persisted: persisted.count === 1 }
+  }
+
+  async releaseUploadCapability(session: MaxVideoUploadSession, expired: boolean) {
+    await this.db.maxVideoUploadSession.updateMany({
+      where: {
+        id: session.id,
+        familyId: session.familyId,
+        state: 'processing',
+        providerUploadToken: null,
+        retryCount: session.retryCount,
+        lastRetryAt: session.lastRetryAt ?? undefined,
+      },
+      data: { state: expired ? 'expired' : 'reserved', lastErrorCode: expired ? 'upload_expired' : 'upload_capability_unavailable' },
+    })
+    const fresh = await this.db.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: session.id, familyId: session.familyId } } })
+    return fresh ? normalizeSession(fresh) : null
+  }
+
   async createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource> {
     const created = await this.db.maxOutboundSource.create({ data: {
       id: randomUUID(),

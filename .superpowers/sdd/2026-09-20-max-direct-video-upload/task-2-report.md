@@ -74,5 +74,25 @@
       "summary": "TypeScript check passed."
     },
     "decision": "Capabilities are single-flight per session and retained in-process until durable token persistence succeeds; existing durable tokens are never rotated. Unique-conflict lookup runs after the transaction has rolled back, through the primary client."
+  },
+  "round_3_fix": {
+    "base_sha": "dd86c9e06cf9f450aa6d0f41bca4fd134102eae9",
+    "review_finding": "Process-local capability single-flight allowed multiple service instances to issue capabilities and unconditionally overwrite the durable provider token.",
+    "red": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts",
+      "result": "fail",
+      "summary": "Two service instances both returned reserved capabilities in the new multi-instance regression, demonstrating duplicate provider capability creation."
+    },
+    "green": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts src/modules/max/capture.integration.test.ts",
+      "result": "pass",
+      "summary": "Unit suite 470/470; direct-upload tests 10/10 including multi-instance claim ownership; capture regression 38/38."
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "result": "pass",
+      "summary": "TypeScript check passed."
+    },
+    "decision": "A durable processing-state lease claims capability creation; conditional persistence requires the claim version and never overwrites an existing provider token. Failed provider or persistence attempts release the claim, while expired claims become terminal. Losing instances return existing-session state without capability data."
   }
 }

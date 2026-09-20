@@ -54,10 +54,33 @@ function repository(initial = session()) {
   let current = initial
   let reservations = 0
   let outbound = 0
+  let capabilityClaimed = false
   const repository: MaxDirectUploadRepository = {
     reserve: async (input) => {
       reservations += 1
+      if (reservations === 1) current = { ...current, familyId: input.familyId, authorId: input.authorId, childId: input.childId,
+        body: input.body, occurredAt: input.occurredAt, idempotencyFingerprint: input.idempotencyFingerprint,
+        idempotencyKey: input.idempotencyKey, expiresAt: input.expiresAt, providerUploadToken: null, state: 'reserved' }
       return { session: current, created: reservations === 1 }
+    },
+    claimUploadCapability: async () => {
+      if (current.providerUploadToken || capabilityClaimed || current.state === 'processing') return { session: current, claimed: false }
+      capabilityClaimed = true
+      current = { ...current, state: 'processing', retryCount: current.retryCount + 1, lastRetryAt: new Date() }
+      return { session: current, claimed: true }
+    },
+    persistUploadCapability: async (claimed, token) => {
+      if (!capabilityClaimed || current.state !== 'processing' || current.retryCount !== claimed.retryCount) return { session: current, persisted: false }
+      capabilityClaimed = false
+      current = { ...current, state: 'reserved', providerUploadToken: token, lastErrorCode: null }
+      return { session: current, persisted: true }
+    },
+    releaseUploadCapability: async (claimed, expired) => {
+      if (capabilityClaimed && current.state === 'processing' && current.retryCount === claimed.retryCount) {
+        capabilityClaimed = false
+        current = { ...current, state: expired ? 'expired' : 'reserved', lastErrorCode: expired ? 'upload_expired' : 'upload_capability_unavailable' }
+      }
+      return current
     },
     createOutboundSource: async (input) => {
       outbound += 1
@@ -114,10 +137,10 @@ describe('MAX direct video upload application service', () => {
       },
     }), repository: {
       ...state.repository,
-      update: async (current, patch) => {
+      persistUploadCapability: async (claimed, token) => {
         updateCalls += 1
         if (updateCalls === 1) throw new Error('database outage')
-        return originalUpdate(current, patch)
+        return originalUpdate(claimed, { providerUploadToken: token }).then((updated) => ({ session: updated, persisted: true }))
       },
     }, publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
       now: () => new Date('2026-09-20T10:00:00.000Z') })
@@ -243,6 +266,56 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
       expect(reservations.filter((result) => result.created)).toHaveLength(1)
       expect([...new Set(reservations.map((result) => result.session.id))]).toHaveLength(1)
       expect(await prisma.maxVideoUploadSession.count({ where: { familyId: family.id } })).toBe(1)
+    } finally {
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.user.delete({ where: { id: user.id } })
+    }
+  })
+
+  test('two service instances share one durable capability claim', async () => {
+    const user = await prisma.user.create({ data: { displayName: `direct-upload-${randomUUID()}` } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `direct-upload-${randomUUID()}`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Direct upload child' } })
+
+    try {
+      const repository = new PrismaMaxDirectUploadRepository(prisma)
+      let capabilityCalls = 0
+      const delayedApi = (label: string): MaxApiPort => api({
+        createVideoUpload: async () => {
+          capabilityCalls += 1
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          return { url: `https://upload.max.example/${label}`, token: `token-${label}` }
+        },
+      })
+      const serviceOptions = {
+        access: access(), repository,
+        publisher: { publish: async () => randomUUID() } as never,
+        now: () => new Date('2026-09-20T10:00:00.000Z'),
+      }
+      const firstService = createMaxDirectVideoUploadService({ ...serviceOptions, api: delayedApi('first') })
+      const secondService = createMaxDirectVideoUploadService({ ...serviceOptions, api: delayedApi('second') })
+      const uploadScope: FamilyScope = { familyId: family.id, principal: { userId: user.id, sessionId: 'multi-instance-session' } }
+      const input = { childId: child.id, body: 'multi-instance video', occurredAt: '2026-09-20T10:00:00.000Z',
+        fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `multi-${randomUUID()}` }
+
+      const results = await Promise.all([firstService.reserve(uploadScope, input), secondService.reserve(uploadScope, input)])
+      const reserved = results.find((result) => result.state === 'reserved')
+      const existing = results.find((result) => result.state === 'existing')
+
+      expect(results.filter((result) => result.state === 'reserved')).toHaveLength(1)
+      expect(results.filter((result) => result.state === 'existing')).toHaveLength(1)
+      expect(capabilityCalls).toBe(1)
+      expect(reserved?.uploadToken).toBeTruthy()
+      expect(existing).not.toHaveProperty('uploadUrl')
+      expect(existing).not.toHaveProperty('uploadToken')
+      const durable = await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { familyId_idempotencyKey: { familyId: family.id, idempotencyKey: input.idempotencyKey } } })
+      expect(durable.providerUploadToken).toBe(reserved?.uploadToken ?? null)
     } finally {
       await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
       await prisma.child.delete({ where: { id: child.id } })
