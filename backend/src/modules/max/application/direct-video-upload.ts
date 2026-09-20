@@ -26,9 +26,10 @@ export type DirectVideoUploadReserveInput = {
 }
 
 export type DirectVideoUploadReserveResult = {
+  state: 'reserved' | 'existing'
   sessionId: string
   expiresAt: string
-  uploadUrl: string
+  uploadUrl?: string
   uploadToken?: string
 }
 
@@ -105,13 +106,22 @@ export function createMaxDirectVideoUploadService(options: {
         throw error
       }
 
+      if (!reserved.created) {
+        return {
+          state: 'existing',
+          sessionId: reserved.session.id,
+          expiresAt: reserved.session.expiresAt.toISOString(),
+        }
+      }
+
       // The durable row is written before this provider call. The capability is intentionally
       // returned only as the ephemeral browser operation result and is never included in errors.
       const capability = await options.api.createVideoUpload()
-      if (reserved.session.providerUploadToken !== capability.token && capability.token) {
+      if (capability.token) {
         await options.repository.update(reserved.session, { providerUploadToken: capability.token })
       }
       return {
+        state: 'reserved',
         sessionId: reserved.session.id,
         expiresAt: reserved.session.expiresAt.toISOString(),
         uploadUrl: capability.url,

@@ -17,7 +17,7 @@ const reserveBody = z.object({
   idempotencyKey: z.string().min(1).max(128),
 }).strict()
 const finalizeBody = z.object({ uploadToken: z.string().min(1).max(4_096) }).strict()
-const reserveResponse = z.object({ sessionId: z.uuid(), expiresAt: z.string().datetime(), uploadUrl: z.string().url(), uploadToken: z.string().optional() }).strict()
+const reserveResponse = z.object({ state: z.enum(['reserved', 'existing']), sessionId: z.uuid(), expiresAt: z.string().datetime(), uploadUrl: z.string().url().optional(), uploadToken: z.string().optional() }).strict()
 const finalizeResponse = z.object({
   state: z.enum(['finalized', 'processing', 'expired', 'failed']), sessionId: z.uuid(), memoryId: z.uuid().optional(),
   memory: z.unknown().optional(), retryable: z.boolean().optional(), code: z.string().optional(),

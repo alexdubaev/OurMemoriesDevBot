@@ -70,7 +70,13 @@ function repository(initial = session()) {
 describe('MAX direct video upload application service', () => {
   test('reserves only supported metadata and does not issue a second durable session on idempotent retry', async () => {
     const state = repository()
-    const service = createMaxDirectVideoUploadService({ access: access(), api: api(), repository: state.repository,
+    let capabilityCalls = 0
+    const service = createMaxDirectVideoUploadService({ access: access(), api: api({
+      createVideoUpload: async () => {
+        capabilityCalls += 1
+        return { url: `https://upload.max.example/video-${capabilityCalls}`, token: `provider-token-${capabilityCalls}` }
+      },
+    }), repository: state.repository,
       publisher: { publish: async () => state.getSession().plannedMemoryId } as never, now: () => new Date('2026-09-20T10:00:00.000Z') })
 
     const first = await service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
@@ -79,7 +85,12 @@ describe('MAX direct video upload application service', () => {
       fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: 'request-1' })
 
     expect(first.sessionId).toBe(second.sessionId)
+    expect(second.state).toBe('existing')
+    expect(second).not.toHaveProperty('uploadUrl')
+    expect(second).not.toHaveProperty('uploadToken')
     expect(state.getReservations()).toBe(2)
+    expect(capabilityCalls).toBe(1)
+    expect(state.getSession().providerUploadToken).toBe('provider-token-1')
     await expect(service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
       fileName: 'clip.exe', fileSize: 128, mimeType: 'application/octet-stream', idempotencyKey: 'bad' })).rejects.toMatchObject({ kind: 'invalid_input' })
     await expect(service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
