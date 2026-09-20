@@ -2,12 +2,16 @@ import { afterAll, describe, expect, test } from 'bun:test'
 
 import { randomUUID } from 'node:crypto'
 
+import { createApp } from '../../app'
 import { createPrisma } from '../../db'
+import { loadEnv } from '../../env'
+import type { BackendRuntime } from '../../runtime'
 
 import type { FamilyAccess, FamilyScope } from '../families'
 import type { MaxApiPort, MaxDirectUploadRepository, MaxVideoUploadSession } from './application/ports'
 import { createMaxDirectVideoUploadService } from './application/direct-video-upload'
 import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
+import { createMaxModule } from './index'
 
 const scope: FamilyScope = {
   familyId: '11111111-1111-4111-8111-111111111111',
@@ -349,6 +353,87 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
       await prisma.child.delete({ where: { id: child.id } })
       await prisma.family.delete({ where: { id: family.id } })
       await prisma.user.delete({ where: { id: user.id } })
+    }
+  })
+
+  test('a leaked capability cannot finalize through the authenticated route for another member, family, or session', async () => {
+    const env = loadEnv({
+      DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
+      MAX_ENABLED: 'true', MAX_BOT_TOKEN: 'max:test-only-token', MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+      MAX_INBOX_ENCRYPTION_KEY: Buffer.alloc(32, 17).toString('base64url'),
+      MAX_WEBHOOK_URL: 'https://api.example.test/webhooks/max', MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+      MAX_MINI_APP_URL: 'https://app.example.test',
+    })
+    let sends = 0
+    const module = createMaxModule({
+      runtime: { env, prisma } as unknown as BackendRuntime,
+      identity: { userId: 900, username: 'OurMemoriesMaxBot', isBot: true },
+      api: api({ sendVideoMessage: async () => { sends += 1; return { messageId: 'message-1' } } }),
+    })
+    const app = createApp({ env, prisma, maxRoutes: module.routes, legacyPasswordAuthForTests: true })
+    const ownerRegistration = await app.request('/api/auth/token/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: `max-direct-owner-${randomUUID()}@example.test`, password: 'password123' }),
+    })
+    const otherRegistration = await app.request('/api/auth/token/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: `max-direct-other-${randomUUID()}@example.test`, password: 'password123' }),
+    })
+    expect(ownerRegistration.status).toBe(201)
+    expect(otherRegistration.status).toBe(201)
+    const ownerBody = await ownerRegistration.json() as { accessToken: string; user: { id: string } }
+    const otherBody = await otherRegistration.json() as { accessToken: string; user: { id: string } }
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: {
+        ownerUserId: ownerBody.user.id, name: `MAX direct ${randomUUID()}`, timezone: 'Europe/Moscow',
+      } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: ownerBody.user.id, role: 'full' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: otherBody.user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Synthetic child' } })
+
+    try {
+      const reserve = await app.request(`/api/v1/families/${family.id}/max-video-uploads/reserve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ownerBody.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ childId: child.id, body: 'Synthetic route boundary', occurredAt: '2026-09-20T10:00:00.000Z',
+          fileName: 'synthetic.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `route-${randomUUID()}` }),
+      })
+      expect(reserve.status).toBe(201)
+      const reserved = await reserve.json() as { sessionId: string; uploadToken: string }
+      expect(reserved.uploadToken).toBeTruthy()
+
+      const otherMemberFinalize = await app.request(`/api/v1/families/${family.id}/max-video-uploads/${reserved.sessionId}/finalize`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${otherBody.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadToken: reserved.uploadToken }),
+      })
+      expect(otherMemberFinalize.status).toBe(403)
+
+      const wrongFamilyFinalize = await app.request(`/api/v1/families/${randomUUID()}/max-video-uploads/${reserved.sessionId}/finalize`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ownerBody.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadToken: reserved.uploadToken }),
+      })
+      expect(wrongFamilyFinalize.status).toBe(404)
+
+      const wrongSessionFinalize = await app.request(`/api/v1/families/${family.id}/max-video-uploads/${randomUUID()}/finalize`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ownerBody.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadToken: reserved.uploadToken }),
+      })
+      expect(wrongSessionFinalize.status).toBe(404)
+      expect(sends).toBe(0)
+      expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(0)
+      expect(await prisma.maxOutboundSource.count({ where: { familyId: family.id } })).toBe(0)
+      expect(await prisma.maxVideoReference.count({ where: { familyId: family.id } })).toBe(0)
+      expect(await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { id: reserved.sessionId } })).toMatchObject({ state: 'reserved' })
+    } finally {
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.user.deleteMany({ where: { id: { in: [ownerBody.user.id, otherBody.user.id] } } })
     }
   })
 })

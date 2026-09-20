@@ -5,6 +5,17 @@ synthetic video generated for the run. Do not use family photos, family video,
 personal captions, production accounts, a real bot credential, or a copied
 provider capability URL/token.
 
+## NO-DEPLOY gate
+
+- [ ] Confirm this run is local, test, or staging only; production is out of
+  scope.
+- [ ] Confirm no deploy, migration against a shared/production database,
+  webhook change, bot configuration change, or credential use is part of this
+  checklist.
+- [ ] Stop immediately if the requested acceptance step would deploy or require
+  a production credential. Record `Deployment performed: NO` in the acceptance
+  record and obtain a separate owner-approved release task before any deploy.
+
 ## Scope and safe evidence
 
 - [ ] Record the build commit, environment name, date, and operator only.
@@ -103,6 +114,7 @@ Use this safe summary; do not attach raw network captures or unredacted logs.
 
 - Build commit: ____________________
 - Test environment: ____________________
+- Deployment performed (must be `NO`): ____________________
 - Synthetic fixture hash (optional): ____________________
 - Authorized upload/finalize: pass / fail
 - Playback and feed deduplication: pass / fail
