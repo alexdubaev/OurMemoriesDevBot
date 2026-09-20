@@ -41,6 +41,8 @@ No Ansible is used on these two paths: there is no host to configure. Terraform 
 serverless resources; the release script owns image build, migration ordering, static publication,
 and verification. Ansible becomes useful only on the own-server path.
 
+For the existing Selectel host deployment, use the reviewed [container ownership runbook](../deploy/selectel/README.md).
+
 ## Release sequence
 
 ```mermaid

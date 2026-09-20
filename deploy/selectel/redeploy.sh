@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# This script owns only the internal Compose project. The host-port gateway is
+# an existing manually managed Caddy container and must remain outside Compose.
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
+COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
+ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
+COMPOSE_PROJECT=${COMPOSE_PROJECT:-memoly}
+GATEWAY_CONTAINER=${GATEWAY_CONTAINER:-memoly-webapp-1}
+EDGE_NETWORK=${MEMOLY_EDGE_NETWORK:-memoly_default}
+PUBLIC_URL=${PUBLIC_URL:-https://app.memoly.ru}
+SERVER_EDGE_CADDYFILE=${SERVER_EDGE_CADDYFILE:-"$SERVER_ROOT/Caddyfile"}
+SERVER_STATIC_CADDYFILE=${SERVER_STATIC_CADDYFILE:-"$SERVER_ROOT/Caddyfile.static"}
+GATEWAY_CADDYFILE=${GATEWAY_CADDYFILE:-/etc/caddy/Caddyfile}
+GATEWAY_CADDY_CONFIG=${GATEWAY_CADDY_CONFIG:-/tmp/memoly-edge-candidate.Caddyfile}
+MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-}
+MEMOLY_PRODUCT_SHA=${MEMOLY_PRODUCT_SHA:-}
+export MEMOLY_PRODUCT_SHA
+BACKUP_DIR=
+EDGE_CANDIDATE=
+
+die() {
+	printf 'ERROR: %s\n' "$*" >&2
+	exit 1
+}
+
+require_command() {
+	command -v "$1" >/dev/null 2>&1 || die "required command is missing: $1"
+}
+
+acquire_deploy_lock() {
+	local lock_file="$SERVER_ROOT/.selectel-deploy.lock"
+	exec 9>"$lock_file" || die "cannot open deployment lock: $lock_file"
+	flock -n 9 || die "another Selectel deployment is already running"
+}
+
+compose() {
+	docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
+}
+
+load_secret() {
+	local variable=$1 path=$2 value
+	[ -r "$path" ] || die "required secret file is missing: $path"
+	value=$(<"$path")
+	[ -n "$value" ] || die "required secret file is empty: $path"
+	export "$variable=$value"
+}
+
+load_runtime_secrets() {
+	load_secret MAX_BOT_TOKEN "$SERVER_ROOT/secrets/max_bot_token"
+	load_secret MAX_WEBHOOK_SECRET "$SERVER_ROOT/secrets/max_webhook_secret"
+	load_secret MAX_INBOX_ENCRYPTION_KEY "$SERVER_ROOT/secrets/max_inbox_encryption_key"
+}
+
+cleanup_candidate() {
+	if [ -n "$EDGE_CANDIDATE" ]; then
+		rm -f -- "$EDGE_CANDIDATE"
+		EDGE_CANDIDATE=
+	fi
+}
+
+trap cleanup_candidate EXIT
+
+backup_server_state() {
+	local container_ids
+	[ -n "$BACKUP_DIR" ] && return 0
+	BACKUP_DIR="$SERVER_ROOT/backups/compose.pre-selectel-$(date -u +%Y%m%dT%H%M%SZ)"
+	mkdir -p "$BACKUP_DIR"
+	for path in "$COMPOSE_FILE" "$SERVER_EDGE_CADDYFILE" "$SERVER_STATIC_CADDYFILE"; do
+		[ -f "$path" ] && cp -p "$path" "$BACKUP_DIR/$(basename "$path")"
+	done
+	docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}} {{.Ports}}' > "$BACKUP_DIR/container-inventory.txt"
+	container_ids=$(docker ps -aq)
+	if [ -n "$container_ids" ]; then
+		docker inspect --format '{{.Name}} image={{.Config.Image}} restart={{json .HostConfig.RestartPolicy}} networks={{json .NetworkSettings.Networks}} mounts={{range .Mounts}}{{.Source}}:{{.Destination}};{{end}}' $container_ids > "$BACKUP_DIR/container-runtime-inventory.txt"
+	else
+		: > "$BACKUP_DIR/container-runtime-inventory.txt"
+	fi
+	printf 'Saved non-secret deployment backup in %s\n' "$BACKUP_DIR"
+}
+
+render_edge_candidate() {
+	local edge_pattern='\${MEMOLY_PUBLIC_HOST:?set MEMOLY_PUBLIC_HOST}'
+	[ -n "$MEMOLY_PUBLIC_HOST" ] || die "MEMOLY_PUBLIC_HOST is not set"
+	case "$MEMOLY_PUBLIC_HOST" in
+		*[!A-Za-z0-9.-]*) die "MEMOLY_PUBLIC_HOST must be a hostname" ;;
+	esac
+	cleanup_candidate
+	EDGE_CANDIDATE=$(mktemp)
+	sed "s|$edge_pattern|$MEMOLY_PUBLIC_HOST|g" "$SCRIPT_DIR/Caddyfile.edge.template" > "$EDGE_CANDIDATE"
+}
+
+validate_candidate_caddy() {
+	[ -n "$EDGE_CANDIDATE" ] || die "edge candidate has not been rendered"
+	docker cp "$EDGE_CANDIDATE" "$GATEWAY_CONTAINER:$GATEWAY_CADDY_CONFIG"
+	docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDY_CONFIG" --adapter caddyfile
+}
+
+install_internal_config() {
+	local compose_tmp static_tmp
+	[ -f "$SCRIPT_DIR/compose.yml.template" ] || die "tracked Compose template is missing"
+	[ -f "$SCRIPT_DIR/Caddyfile.static.template" ] || die "tracked static Caddy template is missing"
+	compose_tmp="$COMPOSE_FILE.tmp.$$"
+	static_tmp="$SERVER_STATIC_CADDYFILE.tmp.$$"
+	install -m 0644 "$SCRIPT_DIR/compose.yml.template" "$compose_tmp"
+	install -m 0644 "$SCRIPT_DIR/Caddyfile.static.template" "$static_tmp"
+	docker compose -f "$compose_tmp" -p "$COMPOSE_PROJECT" config >/dev/null
+	mv -f "$compose_tmp" "$COMPOSE_FILE"
+	mv -f "$static_tmp" "$SERVER_STATIC_CADDYFILE"
+	compose config >/dev/null
+}
+
+activate_gateway() {
+	local edge_tmp
+	[ -n "$EDGE_CANDIDATE" ] || die "edge candidate has not been rendered"
+	edge_tmp="$SERVER_EDGE_CADDYFILE.tmp.$$"
+	install -m 0644 "$EDGE_CANDIDATE" "$edge_tmp"
+	mv -f "$edge_tmp" "$SERVER_EDGE_CADDYFILE"
+	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
+}
+
+gateway_preflight() {
+	local status labels networks
+	status=$(docker inspect --format '{{.State.Status}}' "$GATEWAY_CONTAINER" 2>/dev/null) || die "configured gateway is missing: $GATEWAY_CONTAINER"
+	[ "$status" = running ] || die "configured gateway is not running: $GATEWAY_CONTAINER ($status)"
+
+	labels=$(docker inspect --format '{{json .Config.Labels}}' "$GATEWAY_CONTAINER")
+	case "$labels" in
+		*com.docker.compose.project*|*com.docker.compose.service*)
+			die "gateway has Compose ownership labels; refuse deployment until ownership is unambiguous"
+			;;
+	esac
+
+	docker network inspect "$EDGE_NETWORK" >/dev/null 2>&1 || die "configured edge network is missing: $EDGE_NETWORK"
+	networks=$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$GATEWAY_CONTAINER")
+	case "$networks" in
+		*"\"$EDGE_NETWORK\""*) ;;
+		*) die "gateway is not attached to edge network: $EDGE_NETWORK" ;;
+	esac
+}
+
+validate_inputs() {
+	local mode=${1:-current}
+	[ -f "$COMPOSE_FILE" ] || die "Compose template is missing: $COMPOSE_FILE"
+	[ -n "${MEMOLY_BACKEND_IMAGE_TAG:-}" ] || die "MEMOLY_BACKEND_IMAGE_TAG is not set"
+	[ -n "${MEMOLY_WEBAPP_IMAGE_TAG:-}" ] || die "MEMOLY_WEBAPP_IMAGE_TAG is not set"
+	for tag_name in MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG; do
+		local tag=${!tag_name}
+		[ "${#tag}" -eq 40 ] || die "$tag_name must be a 40-character lowercase Git SHA"
+		case "$tag" in
+			*[!a-f0-9]*) die "$tag_name must be a 40-character lowercase Git SHA" ;;
+		esac
+	done
+	if [ "$mode" = current ]; then
+		[ -n "$MEMOLY_PRODUCT_SHA" ] || die "MEMOLY_PRODUCT_SHA is not set"
+		[ "${#MEMOLY_PRODUCT_SHA}" -eq 40 ] || die "MEMOLY_PRODUCT_SHA must be a 40-character lowercase Git SHA"
+		case "$MEMOLY_PRODUCT_SHA" in
+			*[!a-f0-9]*) die "MEMOLY_PRODUCT_SHA must be a 40-character lowercase Git SHA" ;;
+		esac
+		[ "$MEMOLY_BACKEND_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] || die "backend image tag must equal MEMOLY_PRODUCT_SHA"
+		[ "$MEMOLY_WEBAPP_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] || die "webapp image tag must equal MEMOLY_PRODUCT_SHA"
+	fi
+	docker image inspect "memoly-backend:$MEMOLY_BACKEND_IMAGE_TAG" >/dev/null 2>&1 || die "immutable backend image is not present locally: memoly-backend:$MEMOLY_BACKEND_IMAGE_TAG"
+	docker image inspect "memoly-webapp:$MEMOLY_WEBAPP_IMAGE_TAG" >/dev/null 2>&1 || die "immutable webapp image is not present locally: memoly-webapp:$MEMOLY_WEBAPP_IMAGE_TAG"
+}
+
+preflight() {
+	require_command docker
+	load_runtime_secrets
+	validate_inputs
+	gateway_preflight
+	[ -f "$SCRIPT_DIR/Caddyfile.edge.template" ] || die "edge Caddy template is missing"
+	[ -f "$SCRIPT_DIR/Caddyfile.static.template" ] || die "static Caddy template is missing"
+	render_edge_candidate
+	validate_candidate_caddy
+	cleanup_candidate
+	compose config >/dev/null
+	printf 'Preflight passed: gateway is unmanaged, edge network is shared, candidate Caddy is valid.\n'
+}
+
+prepare_configuration() {
+	backup_server_state
+	render_edge_candidate
+	validate_candidate_caddy
+	install_internal_config
+	printf 'Installed tracked Compose and static Caddy configuration after backup; live edge Caddy remains unchanged.\n'
+}
+
+migration_status() {
+	compose run --rm --no-deps backend bunx prisma migrate status
+}
+
+promote_backend() {
+	compose up -d --no-deps --force-recreate backend
+}
+
+promote_jobs() {
+	compose up -d --no-deps --force-recreate worker scheduler
+}
+
+promote_static() {
+	compose up -d --no-deps --force-recreate static
+}
+
+wait_backend_internal() {
+	local endpoint attempts
+	for endpoint in /health/live /health/ready; do
+		attempts=${1:-30}
+		while [ "$attempts" -gt 0 ]; do
+			if compose exec -T backend bun -e "const r = await fetch('http://127.0.0.1:3000${endpoint}'); process.exit(r.ok ? 0 : 1)" >/dev/null 2>&1; then
+				break
+			fi
+			attempts=$((attempts - 1))
+			sleep 2
+		done
+		[ "$attempts" -gt 0 ] || die "backend internal readiness check failed: $endpoint"
+	done
+}
+
+verify_static_internal() {
+	compose exec -T backend bun -e "const r = await fetch('http://static:80/'); process.exit(r.ok ? 0 : 1)" >/dev/null 2>&1 || die "static internal readiness check failed"
+}
+
+wait_public() {
+	local path=$1 attempts=${2:-30} url
+	url="${PUBLIC_URL%/}${path}"
+	while [ "$attempts" -gt 0 ]; do
+		if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; then
+			return 0
+		fi
+		attempts=$((attempts - 1))
+		sleep 2
+	done
+	die "public readiness check failed: $url"
+}
+
+readiness() {
+	local running service
+	running=$(compose ps --status running --services)
+	for service in backend worker scheduler static; do
+		case $'\n'"$running"$'\n' in
+			*$'\n'"$service"$'\n'*) ;;
+			*) die "required Compose service is not running: $service" ;;
+		esac
+	done
+	wait_public /health/live
+	wait_public /health/ready
+	wait_public /
+}
+
+rollback() {
+	[ -f "$ROLLBACK_ENV" ] || die "rollback env is missing: $ROLLBACK_ENV"
+	# shellcheck disable=SC1090
+	set -a
+	. "$ROLLBACK_ENV"
+	set +a
+	[ "${MEMOLY_DB_ROLLBACK_ALLOWED:-false}" = false ] || die "database rollback is forbidden"
+	[ -n "${PREVIOUS_BACKEND_IMAGE_TAG:-}" ] || die "previous backend image tag is missing"
+	[ -n "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" ] || die "previous webapp image tag is missing"
+	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
+	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
+	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
+		*__SET_*|*latest*) die "rollback tags must be immutable, not placeholders or latest" ;;
+	esac
+	load_runtime_secrets
+	validate_inputs rollback
+	gateway_preflight
+	compose config >/dev/null
+	compose up -d --no-deps --force-recreate backend worker scheduler static
+	wait_backend_internal
+	verify_static_internal
+	render_edge_candidate
+	validate_candidate_caddy
+	activate_gateway
+	cleanup_candidate
+	readiness
+	printf 'Application rollback complete; additive migrations remain applied.\n'
+}
+
+deploy() {
+	preflight
+	prepare_configuration
+	migration_status
+	promote_backend
+	wait_backend_internal
+	promote_jobs
+	promote_static
+	verify_static_internal
+	activate_gateway
+	readiness
+	printf 'Promotion complete. Previous images remain available for rollback.\n'
+}
+
+usage() {
+	cat <<'EOF'
+Usage: redeploy.sh {preflight|deploy|rollback|migration-status}
+
+Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
+GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
+EOF
+}
+
+main() {
+	local action=${1:-}
+	require_command curl
+	require_command flock
+	acquire_deploy_lock
+	case "$action" in
+		preflight) preflight ;;
+		deploy) deploy ;;
+		rollback) rollback ;;
+		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
+		reload-gateway) die "reload-gateway is disabled; use deploy so static readiness gates edge activation" ;;
+		*) usage; exit 2 ;;
+	esac
+}
+
+main "$@"
