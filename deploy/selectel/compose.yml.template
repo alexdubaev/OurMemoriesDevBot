@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    env_file:
+      - /opt/memoly/env/postgres.env
+    volumes:
+      - /opt/memoly/data/postgres:/var/lib/postgresql
+      - /opt/memoly/restore:/restore:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.40
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - edge
+
+  backend:
+    image: memoly-backend:${MEMOLY_BACKEND_IMAGE_TAG:-__SET_IMMUTABLE_BACKEND_TAG__}
+    env_file:
+      - /opt/memoly/env/backend.env
+    expose:
+      - "3000"
+    environment:
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:?MAX_BOT_TOKEN is required}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:?MAX_WEBHOOK_SECRET is required}
+      MAX_INBOX_ENCRYPTION_KEY: ${MAX_INBOX_ENCRYPTION_KEY:?MAX_INBOX_ENCRYPTION_KEY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+    restart: unless-stopped
+    volumes:
+      - /opt/memoly/data/storage:/data/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(r.ok ? 0 : 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    mem_limit: 640m
+    cpus: 0.75
+    pids_limit: 192
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  worker:
+    image: memoly-backend:${MEMOLY_BACKEND_IMAGE_TAG:-__SET_IMMUTABLE_BACKEND_TAG__}
+    env_file:
+      - /opt/memoly/env/backend.env
+    command: ["bun", "src/worker.ts"]
+    environment:
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:?MAX_BOT_TOKEN is required}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:?MAX_WEBHOOK_SECRET is required}
+      MAX_INBOX_ENCRYPTION_KEY: ${MAX_INBOX_ENCRYPTION_KEY:?MAX_INBOX_ENCRYPTION_KEY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /opt/memoly/data/storage:/data/storage
+    networks:
+      - edge
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.35
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  scheduler:
+    image: memoly-backend:${MEMOLY_BACKEND_IMAGE_TAG:-__SET_IMMUTABLE_BACKEND_TAG__}
+    env_file:
+      - /opt/memoly/env/backend.env
+    command: ["bun", "src/scheduler.ts"]
+    environment:
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:?MAX_BOT_TOKEN is required}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:?MAX_WEBHOOK_SECRET is required}
+      MAX_INBOX_ENCRYPTION_KEY: ${MAX_INBOX_ENCRYPTION_KEY:?MAX_INBOX_ENCRYPTION_KEY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /opt/memoly/data/storage:/data/storage
+    networks:
+      - edge
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.25
+    pids_limit: 96
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  static:
+    image: memoly-webapp:${MEMOLY_WEBAPP_IMAGE_TAG:-__SET_IMMUTABLE_WEBAPP_TAG__}
+    expose:
+      - "80"
+    configs:
+      - source: static_caddyfile
+        target: /etc/caddy/Caddyfile
+    networks:
+      - edge
+    restart: unless-stopped
+
+configs:
+  static_caddyfile:
+    file: /opt/memoly/Caddyfile.static
+
+networks:
+  edge:
+    external: true
+    name: ${MEMOLY_EDGE_NETWORK:-memoly_default}
