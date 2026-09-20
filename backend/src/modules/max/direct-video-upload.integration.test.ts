@@ -133,4 +133,20 @@ describe('MAX direct video upload application service', () => {
     await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'provider_unavailable' })
     expect(state.getSession()).toMatchObject({ state: 'uploaded', lastErrorCode: 'provider_unavailable' })
   })
+
+  test('does not publish after the reservation expires during provider processing', async () => {
+    const state = repository()
+    let currentNow = new Date('2026-09-20T10:00:00.000Z')
+    let published = 0
+    const service = createMaxDirectVideoUploadService({ access: access(), repository: state.repository,
+      api: api({ getMessage: async () => {
+        currentNow = new Date('2026-09-20T10:16:00.000Z')
+        return api().getMessage!('message-1')
+      } }),
+      publisher: { publish: async () => { published += 1; return state.getSession().plannedMemoryId } } as never,
+      now: () => currentNow })
+
+    await expect(service.finalize(scope, session().id)).resolves.toMatchObject({ state: 'expired', retryable: false })
+    expect(published).toBe(0)
+  })
 })

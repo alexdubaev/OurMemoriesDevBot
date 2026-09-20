@@ -146,6 +146,10 @@ export function createMaxDirectVideoUploadService(options: {
       if (uploadToken !== undefined && session.providerUploadToken !== null && uploadToken !== session.providerUploadToken) {
         throw new MaxDirectUploadFailure('forbidden', 'Сессия загрузки недоступна')
       }
+      if (session.expiresAt <= now()) {
+        await options.repository.update(session, { state: 'expired', lastErrorCode: 'upload_expired' })
+        return { state: 'expired', sessionId: session.id, retryable: false, code: 'upload_expired' }
+      }
 
       try {
         let providerMessageId = session.providerMessageId ?? sentProviderMessageIds.get(session.id) ?? null
@@ -170,6 +174,10 @@ export function createMaxDirectVideoUploadService(options: {
         const video = providerMessage.attachments.find((attachment) => attachment.kind === 'video')
         if (!video || providerMessage.messageId !== providerMessageId) {
           throw new MaxDirectUploadFailure('retryable', 'Видео в MAX ещё не готово', 'attachment_not_ready')
+        }
+        if (session.expiresAt <= now()) {
+          await options.repository.update(session, { state: 'expired', lastErrorCode: 'upload_expired' })
+          return { state: 'expired', sessionId: session.id, retryable: false, code: 'upload_expired' }
         }
         const outbound = existingOutbound ?? await options.repository.createOutboundSource({
           uploadSessionId: session.id,
