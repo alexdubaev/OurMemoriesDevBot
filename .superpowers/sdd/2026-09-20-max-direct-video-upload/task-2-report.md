@@ -51,5 +51,28 @@
       "summary": "Unit suite 470/470; direct-upload tests 7/7; capture regression 38/38."
     },
     "decision": "Only a newly-created reservation requests one ephemeral provider capability. Duplicate reservations return state existing with session identity and expiry only, leaving the original provider token untouched."
+  },
+  "round_2_fix": {
+    "base_sha": "222d2ddd1b600531605455a63dae66631fd1d814",
+    "review_findings": [
+      "A persisted reservation without a durable provider token could never recover after capability creation or token persistence failed.",
+      "P2002 conflict recovery queried through the aborted interactive transaction under PostgreSQL concurrency."
+    ],
+    "red": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts",
+      "result": "fail",
+      "summary": "Recovery regression failed on the unsanitized persistence error; concurrent repository regression failed before safe cleanup while exercising the unique-conflict path."
+    },
+    "green": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts src/modules/max/capture.integration.test.ts",
+      "result": "pass",
+      "summary": "Unit suite 470/470; direct-upload tests 9/9 including 10-way concurrent reservation; capture regression 38/38."
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "result": "pass",
+      "summary": "TypeScript check passed."
+    },
+    "decision": "Capabilities are single-flight per session and retained in-process until durable token persistence succeeds; existing durable tokens are never rotated. Unique-conflict lookup runs after the transaction has rolled back, through the primary client."
   }
 }

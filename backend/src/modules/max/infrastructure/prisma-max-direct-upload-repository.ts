@@ -21,48 +21,52 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
       throw new Error('Invalid MAX video upload reservation')
     }
 
-    return this.db.$transaction(async (tx) => {
-      const existingByKey = await tx.maxVideoUploadSession.findUnique({
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const existingByKey = await tx.maxVideoUploadSession.findUnique({
+          where: { familyId_idempotencyKey: { familyId: input.familyId, idempotencyKey: input.idempotencyKey } },
+        })
+        if (existingByKey && existingByKey.idempotencyFingerprint !== input.idempotencyFingerprint) {
+          throw new Error('MAX direct upload idempotency key was reused with different metadata')
+        }
+        const existing = existingByKey ?? await tx.maxVideoUploadSession.findUnique({
+          where: { familyId_idempotencyFingerprint: { familyId: input.familyId, idempotencyFingerprint: input.idempotencyFingerprint } },
+        })
+        if (existing) return { session: normalizeSession(existing), created: false }
+
+        const data = {
+          id: randomUUID(),
+          familyId: input.familyId,
+          authorId: input.authorId,
+          childId: input.childId,
+          plannedMemoryId: input.plannedMemoryId,
+          body,
+          occurredAt: input.occurredAt,
+          idempotencyFingerprint: input.idempotencyFingerprint,
+          idempotencyKey: input.idempotencyKey,
+          expiresAt: input.expiresAt,
+          state: 'reserved' as const,
+          retryCount: 0,
+          createdAt: input.now,
+          updatedAt: input.now,
+        }
+        const created = await tx.maxVideoUploadSession.create({ data })
+        return { session: normalizeSession(created), created: true }
+      })
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error
+      const existingByKey = await this.db.maxVideoUploadSession.findUnique({
         where: { familyId_idempotencyKey: { familyId: input.familyId, idempotencyKey: input.idempotencyKey } },
       })
       if (existingByKey && existingByKey.idempotencyFingerprint !== input.idempotencyFingerprint) {
         throw new Error('MAX direct upload idempotency key was reused with different metadata')
       }
-      const existing = existingByKey ?? await tx.maxVideoUploadSession.findUnique({
+      const raced = existingByKey ?? await this.db.maxVideoUploadSession.findUnique({
         where: { familyId_idempotencyFingerprint: { familyId: input.familyId, idempotencyFingerprint: input.idempotencyFingerprint } },
       })
-      if (existing) return { session: normalizeSession(existing), created: false }
-
-      const data = {
-        id: randomUUID(),
-        familyId: input.familyId,
-        authorId: input.authorId,
-        childId: input.childId,
-        plannedMemoryId: input.plannedMemoryId,
-        body,
-        occurredAt: input.occurredAt,
-        idempotencyFingerprint: input.idempotencyFingerprint,
-        idempotencyKey: input.idempotencyKey,
-        expiresAt: input.expiresAt,
-        state: 'reserved' as const,
-        retryCount: 0,
-        createdAt: input.now,
-        updatedAt: input.now,
-      }
-      try {
-        const created = await tx.maxVideoUploadSession.create({ data })
-        return { session: normalizeSession(created), created: true }
-      } catch (error) {
-        if (!isUniqueViolation(error)) throw error
-        const raced = await tx.maxVideoUploadSession.findUnique({
-          where: { familyId_idempotencyKey: { familyId: input.familyId, idempotencyKey: input.idempotencyKey } },
-        }) ?? await tx.maxVideoUploadSession.findUnique({
-          where: { familyId_idempotencyFingerprint: { familyId: input.familyId, idempotencyFingerprint: input.idempotencyFingerprint } },
-        })
-        if (!raced) throw error
-        return { session: normalizeSession(raced), created: false }
-      }
-    })
+      if (!raced) throw error
+      return { session: normalizeSession(raced), created: false }
+    }
   }
 
   async createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource> {

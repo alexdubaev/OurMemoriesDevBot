@@ -8,6 +8,7 @@ import type { SourceMemoryInput } from '../../memories/infrastructure/source-mem
 import type {
   MaxApiPort,
   MaxDirectUploadRepository,
+  MaxVideoUploadCapability,
   MaxVideoUploadSession,
 } from './ports'
 
@@ -77,6 +78,33 @@ export function createMaxDirectVideoUploadService(options: {
   const now = options.now ?? (() => new Date())
   const ttl = options.reservationTtlMs ?? reservationTtlMs
   const sentProviderMessageIds = new Map<string, string>()
+  const pendingCapabilities = new Map<string, Promise<MaxVideoUploadCapability>>()
+
+  const createOrReuseCapability = (sessionId: string) => {
+    const existing = pendingCapabilities.get(sessionId)
+    if (existing) return existing
+    const pending = Promise.resolve()
+      .then(() => options.api.createVideoUpload())
+      .catch(() => {
+        pendingCapabilities.delete(sessionId)
+        throw new MaxDirectUploadFailure('retryable', 'Не удалось подготовить загрузку видео', 'upload_capability_unavailable')
+      })
+    pendingCapabilities.set(sessionId, pending)
+    return pending
+  }
+
+  const persistCapability = async (session: MaxVideoUploadSession, capability: MaxVideoUploadCapability) => {
+    if (!capability.token) {
+      pendingCapabilities.delete(session.id)
+      throw new MaxDirectUploadFailure('retryable', 'Не удалось подготовить загрузку видео', 'upload_capability_unavailable')
+    }
+    try {
+      await options.repository.update(session, { providerUploadToken: capability.token })
+      pendingCapabilities.delete(session.id)
+    } catch {
+      throw new MaxDirectUploadFailure('retryable', 'Не удалось подготовить загрузку видео', 'upload_capability_unavailable')
+    }
+  }
 
   return {
     async reserve(scope: FamilyScope, input: DirectVideoUploadReserveInput): Promise<DirectVideoUploadReserveResult> {
@@ -107,6 +135,17 @@ export function createMaxDirectVideoUploadService(options: {
       }
 
       if (!reserved.created) {
+        if (!reserved.session.providerUploadToken) {
+          const capability = await createOrReuseCapability(reserved.session.id)
+          await persistCapability(reserved.session, capability)
+          return {
+            state: 'reserved',
+            sessionId: reserved.session.id,
+            expiresAt: reserved.session.expiresAt.toISOString(),
+            uploadUrl: capability.url,
+            uploadToken: capability.token,
+          }
+        }
         return {
           state: 'existing',
           sessionId: reserved.session.id,
@@ -116,10 +155,8 @@ export function createMaxDirectVideoUploadService(options: {
 
       // The durable row is written before this provider call. The capability is intentionally
       // returned only as the ephemeral browser operation result and is never included in errors.
-      const capability = await options.api.createVideoUpload()
-      if (capability.token) {
-        await options.repository.update(reserved.session, { providerUploadToken: capability.token })
-      }
+      const capability = await createOrReuseCapability(reserved.session.id)
+      await persistCapability(reserved.session, capability)
       return {
         state: 'reserved',
         sessionId: reserved.session.id,

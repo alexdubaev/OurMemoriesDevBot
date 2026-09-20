@@ -1,8 +1,13 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
+
+import { randomUUID } from 'node:crypto'
+
+import { createPrisma } from '../../db'
 
 import type { FamilyAccess, FamilyScope } from '../families'
 import type { MaxApiPort, MaxDirectUploadRepository, MaxVideoUploadSession } from './application/ports'
 import { createMaxDirectVideoUploadService } from './application/direct-video-upload'
+import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
 
 const scope: FamilyScope = {
   familyId: '11111111-1111-4111-8111-111111111111',
@@ -97,6 +102,37 @@ describe('MAX direct video upload application service', () => {
       fileName: 'clip.mp4', fileSize: 250 * 1024 * 1024 + 1, mimeType: 'video/mp4', idempotencyKey: 'large' })).rejects.toMatchObject({ kind: 'invalid_input' })
   })
 
+  test('recovers one capability after durable token persistence fails', async () => {
+    const state = repository(session({ providerUploadToken: null }))
+    let capabilityCalls = 0
+    let updateCalls = 0
+    const originalUpdate = state.repository.update
+    const service = createMaxDirectVideoUploadService({ access: access(), api: api({
+      createVideoUpload: async () => {
+        capabilityCalls += 1
+        return { url: 'https://upload.max.example/recovered', token: 'recovered-token' }
+      },
+    }), repository: {
+      ...state.repository,
+      update: async (current, patch) => {
+        updateCalls += 1
+        if (updateCalls === 1) throw new Error('database outage')
+        return originalUpdate(current, patch)
+      },
+    }, publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    const input = { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
+      fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: 'recover-1' }
+    await expect(service.reserve(scope, input)).rejects.toMatchObject({ kind: 'retryable', code: 'upload_capability_unavailable' })
+    const retry = await service.reserve(scope, input)
+
+    expect(retry).toMatchObject({ state: 'reserved', uploadUrl: 'https://upload.max.example/recovered', uploadToken: 'recovered-token' })
+    expect(capabilityCalls).toBe(1)
+    expect(updateCalls).toBe(2)
+    expect(state.getSession().providerUploadToken).toBe('recovered-token')
+  })
+
   test('publishes a fixed memory once and bounds attachment-not-ready retries', async () => {
     const state = repository()
     let sends = 0
@@ -174,5 +210,44 @@ describe('MAX direct video upload application service', () => {
 
     await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'attachment_not_ready' })
     expect(published).toBe(0)
+  })
+})
+
+const databaseUrl = process.env.TEST_DATABASE_URL
+const maybeDatabaseDescribe = databaseUrl ? describe : describe.skip
+
+maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
+  const prisma = createPrisma(databaseUrl!)
+
+  afterAll(async () => { await prisma.$disconnect() })
+
+  test('concurrent reservations return one committed session after a unique conflict', async () => {
+    const user = await prisma.user.create({ data: { displayName: `direct-upload-${randomUUID()}` } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `direct-upload-${randomUUID()}`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Direct upload child' } })
+
+    try {
+      const repository = new PrismaMaxDirectUploadRepository(prisma)
+      const input = {
+        familyId: family.id, authorId: user.id, childId: child.id,
+        body: 'concurrent video', occurredAt: new Date('2026-09-20T10:00:00.000Z'),
+        idempotencyKey: `concurrent-${randomUUID()}`, idempotencyFingerprint: `fingerprint-${randomUUID()}`,
+        expiresAt: new Date('2026-09-20T10:15:00.000Z'), now: new Date('2026-09-20T10:00:00.000Z'),
+      }
+      const reservations = await Promise.all(Array.from({ length: 10 }, () => repository.reserve({ ...input, plannedMemoryId: randomUUID() })))
+
+      expect(reservations.filter((result) => result.created)).toHaveLength(1)
+      expect([...new Set(reservations.map((result) => result.session.id))]).toHaveLength(1)
+      expect(await prisma.maxVideoUploadSession.count({ where: { familyId: family.id } })).toBe(1)
+    } finally {
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.user.delete({ where: { id: user.id } })
+    }
   })
 })
