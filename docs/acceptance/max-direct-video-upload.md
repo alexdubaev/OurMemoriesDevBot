@@ -96,6 +96,13 @@ fixture with a family recording to make the test more realistic.
   operation obtains a new capability.
 - [ ] Repeat finalize concurrently. Confirm one durable processing claim, one
   provider message, one outbound source/reference, and one Memory.
+- [ ] Exercise an uncertain provider send with the production MAX adapter (no
+  idempotent message lookup) by losing the post-send database write. A retry
+  must return a sanitized retryable `send_recovery_unavailable` result, make no
+  second MAX send, and create no Memory, outbound source, or video reference.
+  Escalate this session for manual provider reconciliation; do not retry it
+  repeatedly and do not copy a capability URL, upload token, or Authorization
+  header into the incident record.
 
 ## Accepted provider-URL residual risk
 
@@ -107,6 +114,15 @@ role, author, child, expiry, and idempotent finalize checks remain server-side.
 This is an accepted MVP residual risk, not an expiry guarantee. Handle the URL
 and token as sensitive ephemeral values, minimize exposure, and rotate/revoke
 them through the provider if MAX later exposes such a control.
+
+If MAX accepts a video message and memoLy loses the durable provider-message
+write, the production adapter cannot safely infer whether a resend would
+duplicate that message. The conservative recovery policy therefore blocks the
+resend, records `send_recovery_unavailable`, and leaves Memory publication
+unstarted. An operator must manually reconcile the MAX provider message under an
+approved incident procedure before deciding whether to repair the session or
+start a new reservation; raw provider capabilities and tokens never belong in
+that record.
 
 ## Acceptance record
 

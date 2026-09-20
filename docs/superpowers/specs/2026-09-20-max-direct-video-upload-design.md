@@ -39,8 +39,13 @@ message identity, then calls `createSourceMemoryPublisher.publish` with the
 fixed Memory ID and creates the compatible video reference in its after-write
 transaction. A duplicate request returns the existing session outcome. If a
 provider send succeeds but the database write is lost, recovery first looks up
-the durable send identity before any second send; the residual risk is a MAX
-provider orphan if MAX offers no idempotency key.
+the durable send identity before any second send. When the production MAX
+adapter cannot perform that lookup or offer idempotent resend, the service
+records `send_recovery_unavailable`, makes no second provider call, creates no
+Memory/outbound source/reference, and returns a sanitized retryable operational
+error for manual recovery. The residual risk is a MAX provider orphan if MAX
+offers no idempotency key; operators must reconcile that provider message before
+starting a new reservation.
 
 ## API and UI
 

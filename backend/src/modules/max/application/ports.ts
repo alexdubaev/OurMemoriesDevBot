@@ -184,7 +184,7 @@ export type MaxDirectUploadRepository = {
   releaseUploadCapability(session: MaxVideoUploadSession, expired: boolean): Promise<MaxVideoUploadSession | null>
   createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource>
   find(familyId: string, sessionId: string): Promise<MaxVideoUploadSession | null>
-  claim(familyId: string, sessionId: string, now: Date): Promise<{ session: MaxVideoUploadSession; claimed: boolean } | null>
+  claim(familyId: string, sessionId: string, now: Date): Promise<{ session: MaxVideoUploadSession; claimed: boolean; sendIntentCreated?: boolean } | null>
   update(session: MaxVideoUploadSession, patch: Partial<Pick<MaxVideoUploadSession, 'state' | 'providerUploadToken' | 'providerMessageId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode'>>): Promise<MaxVideoUploadSession>
   findOutboundSource?(uploadSessionId: string, familyId: string): Promise<MaxOutboundSource | null>
   findRecipientId?(familyId: string, userId: string): Promise<string | null>

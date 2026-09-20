@@ -12,6 +12,7 @@ import { createSourceMemoryPublisher } from '../memories'
 import type { MaxApiPort, MaxDirectUploadRepository, MaxVideoUploadSession } from './application/ports'
 import { createMaxDirectVideoUploadService } from './application/direct-video-upload'
 import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
+import { createMaxApi } from './infrastructure/max-api'
 import { createMaxModule } from './index'
 
 const scope: FamilyScope = {
@@ -93,8 +94,9 @@ function repository(initial = session()) {
     },
     find: async () => current,
     claim: async () => {
+      const sendIntentCreated = current.providerSendIntentId === null
       current = { ...current, state: 'processing', providerSendIntentId: current.providerSendIntentId ?? 'send-intent-1' }
-      return { session: current, claimed: true }
+      return { session: current, claimed: true, sendIntentCreated }
     },
     update: async (_session, patch) => { current = { ...current, ...patch }; return current },
     findRecipientId: async () => '123',
@@ -272,6 +274,35 @@ describe('MAX direct video upload application service', () => {
 
     await expect(secondService.finalize(scope, session().id)).resolves.toMatchObject({ state: 'finalized' })
     expect(sends).toBe(1)
+  })
+
+  test('does not resend after an uncertain send when the production MAX adapter has no idempotent lookup', async () => {
+    const state = repository()
+    let providerPosts = 0
+    let lostProviderWrite = true
+    let published = 0
+    const productionApi = createMaxApi('max:test-token', { fetch: async (_input, init) => {
+      if (init?.method === 'POST') providerPosts += 1
+      return new Response(JSON.stringify({ message: { mid: 'uncertain-message-1' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    } })
+    const failingRepository: MaxDirectUploadRepository = {
+      ...state.repository,
+      update: async (current, patch) => {
+        if (lostProviderWrite && patch.providerMessageId) { lostProviderWrite = false; throw new Error('lost post-send write') }
+        return state.repository.update(current, patch)
+      },
+    }
+    const publisher = { publish: async () => { published += 1; return state.getSession().plannedMemoryId } } as never
+    const firstService = createMaxDirectVideoUploadService({ access: access(), api: productionApi,
+      repository: failingRepository, publisher, now: () => new Date('2026-09-20T10:00:00.000Z') })
+    await expect(firstService.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'provider_unavailable' })
+
+    const restartedService = createMaxDirectVideoUploadService({ access: access(), api: productionApi,
+      repository: state.repository, publisher, now: () => new Date('2026-09-20T10:01:00.000Z') })
+    await expect(restartedService.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'send_recovery_unavailable' })
+    expect(providerPosts).toBe(1)
+    expect(published).toBe(0)
+    expect(state.getSession()).toMatchObject({ state: 'uploaded', lastErrorCode: 'send_recovery_unavailable', providerMessageId: null })
   })
 
   test('a leaked provider capability cannot publish a Memory for another authorized family member', async () => {

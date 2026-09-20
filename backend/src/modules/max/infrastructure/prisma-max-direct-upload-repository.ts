@@ -88,7 +88,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
             { state: 'processing', lastRetryAt: { lt: leaseCutoff } },
           ],
         },
-        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 }, providerSendIntentId: current.providerSendIntentId ?? randomUUID() },
+        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
       })
       const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
       if (!fresh) return null
@@ -170,7 +170,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
       })
       const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
       if (!fresh) return null
-      return { session: normalizeSession(fresh), claimed: claimed.count === 1 }
+      return { session: normalizeSession(fresh), claimed: claimed.count === 1, sendIntentCreated: claimed.count === 1 && current.providerSendIntentId === null }
     })
   }
 

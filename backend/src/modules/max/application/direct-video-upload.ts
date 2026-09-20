@@ -214,6 +214,7 @@ export function createMaxDirectVideoUploadService(options: {
         return { state: 'processing', sessionId: claimed.session.id, retryable: true, code: 'finalize_in_progress' }
       }
       const session = claimed.session
+      const sendIntentCreated = claimed.sendIntentCreated === true
       if (session.familyId !== scope.familyId || session.authorId !== scope.principal.userId) {
         throw new MaxDirectUploadFailure('forbidden', 'Сессия загрузки недоступна')
       }
@@ -247,10 +248,17 @@ export function createMaxDirectVideoUploadService(options: {
               providerMessageId = recovered.messageId
               await options.repository.update(session, { providerMessageId, state: 'message_sent' })
             }
-          } else {
-            await options.repository.update(session, { lastErrorCode: 'send_recovery_unavailable' })
           }
           if (!providerMessageId) {
+            if (!sendIntentCreated) {
+              await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'send_recovery_unavailable' })
+              throw new MaxDirectUploadFailure('retryable', 'Публикация видео требует ручного восстановления', 'send_recovery_unavailable')
+            }
+            try {
+              await options.repository.update(session, { lastErrorCode: 'send_pending' })
+            } catch {
+              throw new MaxDirectUploadFailure('retryable', 'Публикация видео требует ручного восстановления', 'send_recovery_unavailable')
+            }
             try {
               await options.access.requireFull(scope)
             } catch (error) {

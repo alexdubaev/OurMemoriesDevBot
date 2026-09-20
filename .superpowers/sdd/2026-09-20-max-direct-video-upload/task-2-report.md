@@ -120,5 +120,25 @@
       "summary": "Prisma generation and TypeScript check passed after adding the durable provider send-intent field and port."
     },
     "decision": "The provider send intent is assigned by the durable claim transaction and persisted before any provider send. Recovery uses an optional provider identity lookup when available; otherwise the session records send_recovery_unavailable and the orphan risk remains explicit. The process-local message map was removed. Claims for message_sent sessions wait for the processing lease, preventing immediate concurrent republishing while preserving crash recovery."
+  },
+  "round_5_fix": {
+    "base_sha": "719364a1c98ffb2c70ecbec4e12bddd58f6cd596",
+    "review_finding": "When production MAX cannot look up an uncertain provider send, retrying could send a second message.",
+    "red": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts",
+      "result": "fail",
+      "summary": "The real createMaxApi/no-lookup regression observed a second provider POST and an unsafe recovery path after the post-send durable write was lost."
+    },
+    "green": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts src/modules/max/capture.integration.test.ts",
+      "result": "pass",
+      "summary": "Unit suite 471/471; direct-upload integration 20/20; capture integration 38/38. The real createMaxApi regression now proves one provider POST, no Memory publication, and no outbound/reference creation after uncertain send recovery."
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "result": "pass",
+      "summary": "Prisma generation and TypeScript check passed."
+    },
+    "decision": "Finalize claims now report whether the durable provider send intent was created by this claim. If an existing intent has no provider message and the production adapter has no idempotent lookup, the service records send_recovery_unavailable, performs no second MAX send, creates no outbound source/reference or Memory, and returns a sanitized retryable operational error. The design and acceptance runbook document manual provider reconciliation and the accepted orphan risk."
   }
 }
