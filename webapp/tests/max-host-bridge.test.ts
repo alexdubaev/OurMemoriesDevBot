@@ -154,23 +154,64 @@ describe('MAX HostBridge', () => {
     expect(bridge.inviteToken()).toBeNull()
   })
 
-  test('gates the video composer to the exact MAX acceptance launch parameter', () => {
+  test('routes acceptance from the signed MAX start_param', () => {
     expect(isMaxVideoUploadAcceptanceLaunch({
       WebApp: { initData: 'query_id=signed&start_param=max-video-upload-acceptance', ready: () => undefined },
     })).toBe(true)
+  })
+
+  test('routes acceptance from initDataUnsafe when signed initData has no start_param', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      WebApp: {
+        initData: 'query_id=signed',
+        initDataUnsafe: { start_param: 'max-video-upload-acceptance' },
+        ready: () => undefined,
+      },
+    })).toBe(true)
+  })
+
+  test('routes acceptance from the documented WebAppStartParam URL fallback', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?WebAppStartParam=max-video-upload-acceptance' },
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    })).toBe(true)
+  })
+
+  test('does not let unsafe or URL values override a signed non-acceptance start_param', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?WebAppStartParam=max-video-upload-acceptance' },
+      WebApp: {
+        initData: 'query_id=signed&start_param=other',
+        initDataUnsafe: { start_param: 'max-video-upload-acceptance' },
+        ready: () => undefined,
+      },
+    })).toBe(false)
+  })
+
+  test('rejects duplicate signed start_param values without using a fallback', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?WebAppStartParam=max-video-upload-acceptance' },
+      WebApp: {
+        initData: 'query_id=signed&start_param=max-video-upload-acceptance&start_param=max-video-upload-acceptance',
+        initDataUnsafe: { start_param: 'max-video-upload-acceptance' },
+        ready: () => undefined,
+      },
+    })).toBe(false)
+  })
+
+  test('rejects ordinary MAX launches and non-MAX hosts', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    })).toBe(false)
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?WebAppStartParam=max-video-upload-acceptance' },
+    })).toBe(false)
+  })
+
+  test('does not treat the external startapp deep-link parameter as an internal fallback', () => {
     expect(isMaxVideoUploadAcceptanceLaunch({
       location: { search: '?startapp=max-video-upload-acceptance' },
       WebApp: { initData: 'query_id=signed', ready: () => undefined },
-    })).toBe(true)
-    expect(isMaxVideoUploadAcceptanceLaunch({
-      WebApp: { initData: 'query_id=signed&start_param=other', ready: () => undefined },
-    })).toBe(false)
-    expect(isMaxVideoUploadAcceptanceLaunch({
-      location: { search: '?startapp=max-video-upload-acceptance' },
-      WebApp: { initData: 'query_id=signed&start_param=other', ready: () => undefined },
-    })).toBe(false)
-    expect(isMaxVideoUploadAcceptanceLaunch({
-      location: { search: '?startapp=max-video-upload-acceptance' },
     })).toBe(false)
   })
 })

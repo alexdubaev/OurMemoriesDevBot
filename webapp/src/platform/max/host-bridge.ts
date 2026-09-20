@@ -6,6 +6,7 @@ import type {
 
 type MaxWebApp = {
   initData?: unknown
+  initDataUnsafe?: { start_param?: unknown }
   version?: unknown
   platform?: unknown
   colorScheme?: unknown
@@ -94,12 +95,14 @@ export function isMaxVideoUploadAcceptanceLaunch(host: unknown): boolean {
   if (!isMeaningfulMaxWebApp(host)) return false
   const browserHost = isRecord(host) ? host as BrowserHost : null
   const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
-  const raw = rawInitData(webApp)
-  const signed = raw ? new URLSearchParams(raw).getAll('start_param') : []
-  if (signed.length > 0) return signed.length === 1 && signed[0] === 'max-video-upload-acceptance'
-  if (typeof browserHost?.location?.search !== 'string') return false
-  const startapp = new URLSearchParams(browserHost.location.search).getAll('startapp')
-  return startapp.length === 1 && startapp[0] === 'max-video-upload-acceptance'
+  const signed = startParamResult(rawInitData(webApp))
+  if (signed.present) return signed.value === 'max-video-upload-acceptance'
+
+  const unsafe = unsafeStartParamResult(webApp)
+  if (unsafe.present) return unsafe.value === 'max-video-upload-acceptance'
+
+  const documented = queryStartParamResult(browserHost?.location?.search, 'WebAppStartParam')
+  return documented.present && documented.value === 'max-video-upload-acceptance'
 }
 
 function rawInitData(webApp: MaxWebApp | null) {
@@ -140,8 +143,19 @@ function finiteNumber(value: unknown) {
 
 function startParamResult(initData: string | null) {
   if (!initData) return { present: false, value: null as string | null }
-  const params = new URLSearchParams(initData)
-  const values = params.getAll('start_param')
+  return queryStartParamResult(initData, 'start_param')
+}
+
+function unsafeStartParamResult(webApp: MaxWebApp | null) {
+  const value = webApp?.initDataUnsafe?.start_param
+  return typeof value === 'string'
+    ? { present: true, value }
+    : { present: false, value: null as string | null }
+}
+
+function queryStartParamResult(search: unknown, name: string) {
+  if (typeof search !== 'string') return { present: false, value: null as string | null }
+  const values = new URLSearchParams(search).getAll(name)
   return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null }
 }
 
