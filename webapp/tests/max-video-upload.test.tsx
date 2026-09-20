@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { createElement } from 'react'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
@@ -121,3 +122,268 @@ test('idempotency keys are opaque and fresh for retries', () => {
   expect(first).not.toBe(second)
   expect(first).toMatch(/^[a-z0-9-]{16,}$/i)
 })
+
+test('interactive processing retry reuses the uploaded session and disables the picker while saving', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown> }> = []
+  const reserve = deferred<{
+    state: 'reserved'
+    sessionId: string
+    expiresAt: string
+    uploadUrl: string
+    uploadToken: string
+  }>()
+  let finalizeCount = 0
+  const transport = interactiveTransport((path, body) => {
+    requests.push({ path, body })
+    if (path.endsWith('/reserve')) return reserve.promise
+    finalizeCount += 1
+    return Promise.resolve(finalizeCount === 1
+      ? { state: 'processing', sessionId: 'session-1', retryable: true, code: 'attachment_not_ready' }
+      : { state: 'finalized', sessionId: 'session-1', memoryId: 'memory-1' })
+  })
+  const xhrs: FakeUploadXHR[] = []
+  installUploadXHR(xhrs)
+  let successCount = 0
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => {
+      root.render(createElement(VideoComposer, {
+        childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+        onSuccess: () => { successCount += 1 }, transport,
+      }))
+    })
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const selected = file('retry.mp4', 24)
+    fileInput.files = [selected]
+    await act(async () => invoke(fileInput, 'onChange'))
+    caption.value = 'Первый ролик'
+    await act(async () => invoke(caption, 'onChange'))
+    await act(async () => invoke(save(), 'onClick'))
+    expect(fileInput.disabled).toBe(true)
+    expect(requests.filter(({ path }) => path.endsWith('/reserve'))).toHaveLength(1)
+
+    await act(async () => {
+      reserve.resolve({ state: 'reserved', sessionId: 'session-1', expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: 'https://upload.max.test/opaque', uploadToken: 'token-1' })
+      await flushInteractive()
+    })
+    expect(xhrs).toHaveLength(1)
+    xhrs[0]?.complete()
+    await act(async () => { await flushInteractive() })
+    expect(finalizeCount).toBe(1)
+    expect(fileInput.disabled).toBe(false)
+    expect(textOf(browser.container)).toContain('Видео ещё обрабатывается')
+
+    await act(async () => invoke(save(), 'onClick'))
+    await act(async () => { await flushInteractive() })
+    expect(finalizeCount).toBe(2)
+    expect(requests.filter(({ path }) => path.endsWith('/reserve'))).toHaveLength(1)
+    expect(xhrs).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.includes('/finalize')).map(({ body }) => body.uploadToken)).toEqual(['token-1', 'token-1'])
+    expect(successCount).toBe(1)
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    restoreUploadXHR()
+  }
+})
+
+test('interactive expired finalize clears the operation and a new selection reserves again with caption/date preserved', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown> }> = []
+  let reserveCount = 0
+  let finalizeCount = 0
+  const transport = interactiveTransport((path, body) => {
+    requests.push({ path, body })
+    if (path.endsWith('/reserve')) {
+      reserveCount += 1
+      return Promise.resolve({ state: 'reserved', sessionId: `session-${reserveCount}`, expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: `https://upload.max.test/${reserveCount}`, uploadToken: `token-${reserveCount}` })
+    }
+    finalizeCount += 1
+    return Promise.resolve(finalizeCount === 1
+      ? { state: 'expired', sessionId: 'session-1', retryable: false, code: 'upload_expired' }
+      : { state: 'finalized', sessionId: 'session-2', memoryId: 'memory-2' })
+  })
+  const xhrs: FakeUploadXHR[] = []
+  installUploadXHR(xhrs)
+  let successCount = 0
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      onSuccess: () => { successCount += 1 }, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    caption.value = 'Сохранить дату'
+    await act(async () => invoke(caption, 'onChange'))
+    date.value = '2026-09-19'
+    await act(async () => invoke(date, 'onChange'))
+
+    const chooseAndSave = async (name: string) => {
+      fileInput.files = [file(name, 24)]
+      await act(async () => invoke(fileInput, 'onChange'))
+      await act(async () => invoke(save(), 'onClick'))
+      await act(async () => { await flushInteractive() })
+      xhrs.at(-1)?.complete()
+      await act(async () => { await flushInteractive() })
+    }
+    await chooseAndSave('expired.mp4')
+    expect(finalizeCount).toBe(1)
+    expect(fileInput.value).toBe('')
+    expect(caption.value).toBe('Сохранить дату')
+    expect(date.value).toBe('2026-09-19')
+
+    await chooseAndSave('fresh.mp4')
+    expect(reserveCount).toBe(2)
+    expect(xhrs).toHaveLength(2)
+    expect(finalizeCount).toBe(2)
+    expect(successCount).toBe(1)
+    const reserveBodies = requests.filter(({ path }) => path.endsWith('/reserve')).map(({ body }) => body)
+    expect(reserveBodies.map((body) => body.body)).toEqual(['Сохранить дату', 'Сохранить дату'])
+    expect(reserveBodies.map((body) => body.occurredAt)).toEqual(['2026-09-19T12:00:00.000Z', '2026-09-19T12:00:00.000Z'])
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    restoreUploadXHR()
+  }
+})
+
+type InteractiveNode = {
+  nodeType: number
+  nodeName: string
+  tagName: string
+  ownerDocument: InteractiveDocument
+  parentNode: InteractiveNode | null
+  childNodes: InteractiveNode[]
+  style: Record<string, string>
+  attributes: Record<string, string>
+  listeners: Map<string, Set<(event: Record<string, unknown>) => void>>
+  value: string
+  type: string
+  disabled: boolean
+  files: File[]
+  textContent: string
+  appendChild(child: InteractiveNode): InteractiveNode
+  insertBefore(child: InteractiveNode, before: InteractiveNode | null): InteractiveNode
+  removeChild(child: InteractiveNode): InteractiveNode
+  setAttribute(name: string, value: string): void
+  removeAttribute(name: string): void
+  addEventListener(name: string, listener: (event: Record<string, unknown>) => void): void
+  removeEventListener(name: string, listener: (event: Record<string, unknown>) => void): void
+  dispatchEvent(event: Record<string, unknown>): boolean
+  focus(): void
+}
+
+type InteractiveDocument = {
+  nodeType: number
+  activeElement: InteractiveNode | null
+  body: InteractiveNode
+  documentElement: InteractiveNode
+  createElement(name: string): InteractiveNode
+  createTextNode(value: string): InteractiveNode
+  addEventListener(): void
+  removeEventListener(): void
+}
+
+function interactiveTransport(handler: (path: string, body: Record<string, unknown>) => unknown): AuthenticatedTransport {
+  return { request: async (path, _schema, options) => handler(path, options?.body as Record<string, unknown>) as never, raw: async () => new Response() }
+}
+
+class FakeUploadXHR {
+  static instances: FakeUploadXHR[] = []
+  upload = { addEventListener: (name: string, listener: (event: ProgressEvent) => void) => { void name; void listener } }
+  status = 200
+  private listeners = new Map<string, () => void>()
+  open(method: string, url: string) { void method; void url }
+  send(body: FormData) { void body; FakeUploadXHR.instances.push(this) }
+  abort() { this.listeners.get('abort')?.() }
+  addEventListener(name: string, listener: () => void) { this.listeners.set(name, listener) }
+  complete() { this.listeners.get('load')?.() }
+}
+
+function installUploadXHR(instances: FakeUploadXHR[]) {
+  FakeUploadXHR.instances = instances
+  // @ts-expect-error browser test double
+  globalThis.XMLHttpRequest = FakeUploadXHR
+}
+
+function restoreUploadXHR() {
+  delete (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest
+}
+
+function installInteractiveDom() {
+  const priorDocument = globalThis.document
+  const priorWindow = globalThis.window
+  const document = createInteractiveDocument()
+  const window = { document, HTMLIFrameElement: class {}, event: undefined, addEventListener() {}, removeEventListener() {} }
+  Object.assign(globalThis, { document, window, IS_REACT_ACT_ENVIRONMENT: true })
+  return { container: document.createElement('div'), restore() { Object.assign(globalThis, { document: priorDocument, window: priorWindow }); delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT } }
+}
+
+function createInteractiveDocument(): InteractiveDocument {
+  const document = {} as InteractiveDocument
+  const make = (name: string): InteractiveNode => {
+    const node: InteractiveNode = {
+      nodeType: 1, nodeName: name.toUpperCase(), tagName: name.toUpperCase(), ownerDocument: document,
+      parentNode: null, childNodes: [], style: {}, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, files: [], textContent: '',
+      appendChild(child) { child.parentNode = node; node.childNodes.push(child); return child },
+      insertBefore(child, before) { child.parentNode = node; const index = before ? node.childNodes.indexOf(before) : -1; if (index < 0) node.childNodes.push(child); else node.childNodes.splice(index, 0, child); return child },
+      removeChild(child) { const index = node.childNodes.indexOf(child); if (index >= 0) node.childNodes.splice(index, 1); child.parentNode = null; return child },
+      setAttribute(name, value) { node.attributes[name] = value; if (name === 'type') node.type = value; if (name === 'disabled') node.disabled = true },
+      removeAttribute(name) { delete node.attributes[name]; if (name === 'disabled') node.disabled = false },
+      addEventListener(name, listener) { const entries = node.listeners.get(name) ?? new Set(); entries.add(listener); node.listeners.set(name, entries) },
+      removeEventListener(name, listener) { node.listeners.get(name)?.delete(listener) },
+      dispatchEvent(input) { const event = input.target ? input : { ...input, target: node, defaultPrevented: false, preventDefault() { this.defaultPrevented = true } }; event.currentTarget = node; node.listeners.get(String(event.type))?.forEach((listener) => listener(event)); if (event.bubbles && node.parentNode) node.parentNode.dispatchEvent(event); return true },
+      focus() { document.activeElement = node },
+    }
+    return node
+  }
+  document.nodeType = 9
+  document.createElement = (name) => make(name)
+  document.createTextNode = (value) => ({ ...make('#text'), nodeType: 3, nodeName: '#text', tagName: '#text', textContent: value, nodeValue: value } as unknown as InteractiveNode)
+  document.body = make('body')
+  document.documentElement = make('html')
+  document.addEventListener = () => undefined
+  document.removeEventListener = () => undefined
+  return document
+}
+
+function findOne(container: InteractiveNode, predicate: (node: InteractiveNode) => boolean) {
+  const found = findAll(container, predicate)[0]
+  if (!found) throw new Error('interactive node not found')
+  return found
+}
+
+function findAll(node: InteractiveNode, predicate: (node: InteractiveNode) => boolean): InteractiveNode[] {
+  return [predicate(node) ? node : null, ...node.childNodes.flatMap((child) => findAll(child, predicate))].filter((item): item is InteractiveNode => Boolean(item))
+}
+
+function textOf(node: InteractiveNode): string {
+  return `${node.textContent}${node.childNodes.map(textOf).join('')}`
+}
+
+function invoke(node: InteractiveNode, propName: string) {
+  const propsKey = Reflect.ownKeys(node).find((key) => typeof key === 'string' && key.startsWith('__reactProps$'))
+  const props = propsKey ? (node[propsKey as keyof InteractiveNode] as unknown as Record<string, (event: Record<string, unknown>) => void>) : null
+  const handler = props?.[propName]
+  if (!handler) throw new Error(`React prop handler not found: ${propName}`)
+  handler({ target: node, currentTarget: node, preventDefault() {}, stopPropagation() {} })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
+async function flushInteractive() {
+  await new Promise<void>((resolve) => queueMicrotask(resolve))
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}

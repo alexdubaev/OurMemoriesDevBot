@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { finalizeMaxVideo, reserveMaxVideo, validateVideoFile, type MaxVideoReservation } from './api'
 import { uploadVideoToMax } from './xhr-upload'
 
@@ -48,6 +48,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
   }
 
   const chooseFile = (next: File | null) => {
+    if (saving.current) return
     setError(null)
     setCapability(null)
     setProgress(0)
@@ -71,50 +72,65 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     saving.current = true
     setError(null)
     const selected = file
-    if (!selected) {
+    const pendingFinalize: Capability | null = capability?.sessionId && capability.uploadToken
+      ? capability
+      : null
+    if (!selected && !pendingFinalize) {
       setError('Выберите видео.')
       setStatus('error')
       saving.current = false
       return
     }
-    if (!caption.trim()) {
+    if (!pendingFinalize && !caption.trim()) {
       setError('Добавьте подпись.')
       setStatus('error')
       saving.current = false
       return
     }
-    const validation = validateVideoFile(selected)
-    if (!validation.ok) {
-      setError(validation.code === 'too_large' ? 'Видео больше 250 МБ.' : 'Поддерживаются MP4, MOV, MKV и WebM.')
-      setStatus('error')
-      saving.current = false
-      return
+    if (selected) {
+      const validation = validateVideoFile(selected)
+      if (!validation.ok) {
+        setError(validation.code === 'too_large' ? 'Видео больше 250 МБ.' : 'Поддерживаются MP4, MOV, MKV и WebM.')
+        setStatus('error')
+        saving.current = false
+        return
+      }
     }
 
     setIsSaving(true)
     const controller = new AbortController()
     abortController.current = controller
+    let finalizeCapability = pendingFinalize
+    let uploadCompleted = Boolean(pendingFinalize)
     try {
-      // Every explicit save/retry obtains a fresh provider capability; an old URL/token is
-      // never reused after a retryable finalize response.
-      if (capability) setCapability(null)
-      setStatus('reserving')
-      const reservation = await reserveMaxVideo(transport, familyId, {
-        childId,
-        body: caption,
-        occurredAt: new Date(`${occurredAt}T12:00:00.000Z`).toISOString(),
-        file: selected,
-      }, controller.signal)
-      if (!reservation.uploadUrl || !reservation.uploadToken) throw new Error('Не удалось подготовить загрузку видео')
-      setCapability({ sessionId: reservation.sessionId, uploadUrl: reservation.uploadUrl, uploadToken: reservation.uploadToken })
-      setStatus('uploading')
-      await uploadVideoToMax(reservation.uploadUrl, selected, controller.signal, (loaded, total) => {
-        setProgress(total > 0 ? Math.round((loaded / total) * 100) : 0)
-      })
+      if (!finalizeCapability) {
+        // A fresh save starts a new durable operation. A retry after provider processing keeps
+        // the existing session below and never sends the same video to MAX twice.
+        if (!selected) throw new Error('Выберите видео.')
+        setStatus('reserving')
+        const reservation = await reserveMaxVideo(transport, familyId, {
+          childId,
+          body: caption,
+          occurredAt: new Date(`${occurredAt}T12:00:00.000Z`).toISOString(),
+          file: selected,
+        }, controller.signal)
+        if (!reservation.uploadUrl || !reservation.uploadToken) throw new Error('Не удалось подготовить загрузку видео')
+        finalizeCapability = { sessionId: reservation.sessionId, uploadUrl: reservation.uploadUrl, uploadToken: reservation.uploadToken }
+        setCapability(finalizeCapability)
+        setStatus('uploading')
+        await uploadVideoToMax(reservation.uploadUrl, selected, controller.signal, (loaded, total) => {
+          setProgress(total > 0 ? Math.round((loaded / total) * 100) : 0)
+        })
+        uploadCompleted = true
+        // The provider URL is no longer needed after the direct upload. Keep only the opaque
+        // token required by the authenticated finalize endpoint for safe retry recovery.
+        setCapability({ sessionId: reservation.sessionId, uploadToken: reservation.uploadToken })
+      }
+      if (!finalizeCapability?.uploadToken) throw new Error('Не удалось подготовить загрузку видео')
       setStatus('saving')
-      const result = await finalizeMaxVideo(transport, familyId, reservation.sessionId, reservation.uploadToken, controller.signal)
+      const result = await finalizeMaxVideo(transport, familyId, finalizeCapability.sessionId, finalizeCapability.uploadToken, controller.signal)
       if (result.state !== 'finalized') {
-        setCapability(null)
+        if (result.state === 'expired' || result.state === 'failed') setCapability(null)
         clearSelectedFile()
         setProgress(0)
         setStatus('error')
@@ -130,7 +146,14 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       try { await onSuccess() } catch { /* the next normal feed refresh can recover */ }
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
-      setCapability(null)
+      const expired = reason instanceof ApiRequestError && reason.code === 'UPLOAD_EXPIRED'
+      if (uploadCompleted && finalizeCapability && !expired) {
+        // The request may have reached the backend after the browser lost its response. Keep
+        // only the session/token needed to recover the same durable finalize operation.
+        setCapability({ sessionId: finalizeCapability.sessionId, uploadToken: finalizeCapability.uploadToken })
+      } else {
+        setCapability(null)
+      }
       clearSelectedFile()
       setProgress(0)
       setStatus('error')
@@ -148,7 +171,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         <Typography id="max-video-title" variant="memoryScreen">Загрузить видео</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">Видео будет сохранено в семейную ленту.</Typography>
         <label className="mt-6 block" htmlFor="max-video-file"><Typography variant="memoryButton">Видео</Typography></label>
-        <input accept=".mp4,.mov,.mkv,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm" className="mt-2 block w-full" id="max-video-file" onChange={(event) => chooseFile(event.currentTarget.files?.[0] ?? null)} ref={fileInput} type="file" />
+        <input accept=".mp4,.mov,.mkv,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm" className="mt-2 block w-full" disabled={isSaving} id="max-video-file" onChange={(event) => chooseFile(event.currentTarget.files?.[0] ?? null)} ref={fileInput} type="file" />
         <label className="mt-5 block" htmlFor="max-video-caption"><Typography variant="memoryButton">Подпись</Typography></label>
         <textarea aria-label="Подпись к видео" className="mt-2 min-h-24 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
         <label className="mt-5 block" htmlFor="max-video-date"><Typography variant="memoryButton">Дата</Typography></label>
