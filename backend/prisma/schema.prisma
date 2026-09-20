@@ -131,6 +131,7 @@ model MaxVideoUploadSession {
   state                 MaxVideoUploadSessionState  @default(reserved)
   providerUploadToken   String?                     @map("provider_upload_token")
   providerMessageId     String?                     @map("provider_message_id")
+  providerSendIntentId  String?                     @map("provider_send_intent_id")
   retryCount            Int                         @default(0) @map("retry_count")
   lastRetryAt           DateTime?                   @map("last_retry_at") @db.Timestamptz(6)
   lastErrorCode         String?                     @map("last_error_code")

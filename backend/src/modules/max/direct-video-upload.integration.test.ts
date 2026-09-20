@@ -7,7 +7,8 @@ import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import type { BackendRuntime } from '../../runtime'
 
-import type { FamilyAccess, FamilyScope } from '../families'
+import { createPrismaFamilyAccess, type FamilyAccess, type FamilyScope } from '../families'
+import { createSourceMemoryPublisher } from '../memories'
 import type { MaxApiPort, MaxDirectUploadRepository, MaxVideoUploadSession } from './application/ports'
 import { createMaxDirectVideoUploadService } from './application/direct-video-upload'
 import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
@@ -27,7 +28,7 @@ function session(overrides: Partial<MaxVideoUploadSession> = {}): MaxVideoUpload
     plannedMemoryId: '44444444-4444-4444-8444-444444444444', body: 'caption',
     occurredAt: now, idempotencyFingerprint: 'fingerprint', idempotencyKey: 'request-1',
     expiresAt: new Date('2026-09-20T10:15:00.000Z'), state: 'reserved',
-    providerUploadToken: 'provider-token', providerMessageId: null, retryCount: 0,
+    providerUploadToken: 'provider-token', providerMessageId: null, providerSendIntentId: null, retryCount: 0,
     lastRetryAt: null, lastErrorCode: null, createdAt: now, updatedAt: now, ...overrides,
   }
 }
@@ -70,7 +71,7 @@ function repository(initial = session()) {
     claimUploadCapability: async () => {
       if (current.providerUploadToken || capabilityClaimed || current.state === 'processing') return { session: current, claimed: false }
       capabilityClaimed = true
-      current = { ...current, state: 'processing', retryCount: current.retryCount + 1, lastRetryAt: new Date() }
+      current = { ...current, state: 'processing', providerSendIntentId: current.providerSendIntentId ?? 'send-intent-1', retryCount: current.retryCount + 1, lastRetryAt: new Date() }
       return { session: current, claimed: true }
     },
     persistUploadCapability: async (claimed, token) => {
@@ -91,7 +92,10 @@ function repository(initial = session()) {
       return { id: '77777777-7777-4777-8777-777777777777', ...input, createdAt: new Date(), updatedAt: new Date() }
     },
     find: async () => current,
-    claim: async () => ({ session: current, claimed: true }),
+    claim: async () => {
+      current = { ...current, state: 'processing', providerSendIntentId: current.providerSendIntentId ?? 'send-intent-1' }
+      return { session: current, claimed: true }
+    },
     update: async (_session, patch) => { current = { ...current, ...patch }; return current },
     findRecipientId: async () => '123',
   }
@@ -160,6 +164,40 @@ describe('MAX direct video upload application service', () => {
     expect(state.getSession().providerUploadToken).toBe('recovered-token')
   })
 
+  test('includes the caller idempotency key in the reservation fingerprint', async () => {
+    const state = repository()
+    const fingerprints: string[] = []
+    const service = createMaxDirectVideoUploadService({ access: access(), api: api(), repository: {
+      ...state.repository,
+      reserve: async (input) => {
+        fingerprints.push(input.idempotencyFingerprint)
+        return state.repository.reserve(input)
+      },
+    }, publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    const input = { childId, body: 'same metadata', occurredAt: '2026-09-20T10:00:00.000Z',
+      fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4' }
+    await service.reserve(scope, { ...input, idempotencyKey: 'operation-a' })
+    await service.reserve(scope, { ...input, idempotencyKey: 'operation-b' })
+
+    expect(fingerprints).toHaveLength(2)
+    expect(fingerprints[0]).not.toBe(fingerprints[1])
+  })
+
+  test('rejects captions above 4000 Unicode code points while accepting the boundary', async () => {
+    const state = repository()
+    const service = createMaxDirectVideoUploadService({ access: access(), api: api(), repository: state.repository,
+      publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+    const input = { childId, occurredAt: '2026-09-20T10:00:00.000Z', fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4' }
+
+    await expect(service.reserve(scope, { ...input, body: '🙂'.repeat(4_001), idempotencyKey: 'too-long' }))
+      .rejects.toMatchObject({ kind: 'invalid_input' })
+    await expect(service.reserve(scope, { ...input, body: '🙂'.repeat(4_000), idempotencyKey: 'at-boundary' }))
+      .resolves.toMatchObject({ sessionId: session().id })
+  })
+
   test('publishes a fixed memory once and bounds attachment-not-ready retries', async () => {
     const state = repository()
     let sends = 0
@@ -181,6 +219,59 @@ describe('MAX direct video upload application service', () => {
     const service = createMaxDirectVideoUploadService({ access: access({ requireFull: async () => { throw Object.assign(new Error('revoked'), { kind: 'forbidden' }) } }),
       api: api(), repository: state.repository, publisher: { publish: async () => state.getSession().plannedMemoryId } as never })
     await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'forbidden' })
+  })
+
+  test('rechecks current FULL membership after claiming and before sending', async () => {
+    const state = repository()
+    let checks = 0
+    let sends = 0
+    const service = createMaxDirectVideoUploadService({
+      access: access({ requireFull: async () => {
+        checks += 1
+        if (checks === 2) throw Object.assign(new Error('revoked'), { kind: 'forbidden' })
+      } }),
+      api: api({ sendVideoMessage: async () => { sends += 1; return { messageId: 'message-1' } } }),
+      repository: state.repository,
+      publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z'),
+    })
+
+    await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'forbidden' })
+    expect(checks).toBe(2)
+    expect(sends).toBe(0)
+    expect(state.getSession()).toMatchObject({ state: 'uploaded' })
+  })
+
+  test('recovers a sent provider message by durable intent after the post-send write is lost', async () => {
+    const state = repository()
+    let providerMessageWriteAttempts = 0
+    let sends = 0
+    const failingRepository: MaxDirectUploadRepository = {
+      ...state.repository,
+      update: async (current, patch) => {
+        if (patch.providerMessageId && providerMessageWriteAttempts++ === 0) throw new Error('lost database write')
+        return state.repository.update(current, patch)
+      },
+    }
+    const firstService = createMaxDirectVideoUploadService({ access: access(), api: api({
+      sendVideoMessage: async () => { sends += 1; return { messageId: 'message-1' } },
+    }), repository: failingRepository, publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    await expect(firstService.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'provider_unavailable' })
+
+    const recoveryApi = Object.assign(api({
+      sendVideoMessage: async () => { sends += 1; return { messageId: 'message-2' } },
+      getMessage: async (messageId: string) => ({ ...(await api().getMessage!(messageId)), messageId }),
+    }), {
+      findVideoMessageByIntent: async () => ({ messageId: 'message-1' }),
+    }) as MaxApiPort
+    const secondService = createMaxDirectVideoUploadService({ access: access(), api: recoveryApi,
+      repository: state.repository, publisher: { publish: async () => state.getSession().plannedMemoryId } as never,
+      now: () => new Date('2026-09-20T10:01:00.000Z') })
+
+    await expect(secondService.finalize(scope, session().id)).resolves.toMatchObject({ state: 'finalized' })
+    expect(sends).toBe(1)
   })
 
   test('a leaked provider capability cannot publish a Memory for another authorized family member', async () => {
@@ -356,6 +447,154 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
     }
   })
 
+  test('different operation keys for identical metadata create separate durable reservations', async () => {
+    const user = await prisma.user.create({ data: { displayName: `direct-upload-${randomUUID()}` } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `direct-upload-${randomUUID()}`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Distinct upload child' } })
+
+    try {
+      const repository = new PrismaMaxDirectUploadRepository(prisma)
+      const service = createMaxDirectVideoUploadService({
+        access: createPrismaFamilyAccess(prisma), api: api(), repository,
+        publisher: { publish: async () => randomUUID() } as never,
+        now: () => new Date('2026-09-20T10:00:00.000Z'),
+      })
+      const uploadScope: FamilyScope = { familyId: family.id, principal: { userId: user.id, sessionId: 'distinct-operation-session' } }
+      const input = { childId: child.id, body: 'same metadata', occurredAt: '2026-09-20T10:00:00.000Z',
+        fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4' }
+
+      const first = await service.reserve(uploadScope, { ...input, idempotencyKey: 'operation-a' })
+      const second = await service.reserve(uploadScope, { ...input, idempotencyKey: 'operation-b' })
+
+      expect(first.sessionId).not.toBe(second.sessionId)
+      expect(await prisma.maxVideoUploadSession.count({ where: { familyId: family.id } })).toBe(2)
+    } finally {
+      await prisma.memory.deleteMany({ where: { familyId: family.id } })
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: user.id } })
+      await prisma.user.delete({ where: { id: user.id } })
+    }
+  })
+
+  test('concurrent finalize sends once and publishes one fixed Memory in the real database', async () => {
+    const user = await prisma.user.create({ data: { displayName: `direct-upload-${randomUUID()}` } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `direct-upload-${randomUUID()}`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Concurrent finalize child' } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: '9001' } })
+
+    try {
+      const repository = new PrismaMaxDirectUploadRepository(prisma)
+      const familyAccess = createPrismaFamilyAccess(prisma)
+      const publisher = createSourceMemoryPublisher(prisma, familyAccess)
+      let sends = 0
+      const providerApi = api({
+        sendVideoMessage: async () => {
+          sends += 1
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          return { messageId: 'concurrent-message-1' }
+        },
+        getMessage: async () => ({ messageId: 'concurrent-message-1', senderId: '1', recipientId: '9001',
+          attachments: [{ kind: 'video', providerAttachmentId: 'concurrent-attachment-1', currentToken: 'opaque', inboundDurationSeconds: 1, width: 640, height: 360 }] }),
+      })
+      const serviceOptions = { access: familyAccess, api: providerApi, repository, publisher,
+        now: () => new Date('2026-09-20T10:00:00.000Z') }
+      const firstService = createMaxDirectVideoUploadService(serviceOptions)
+      const secondService = createMaxDirectVideoUploadService(serviceOptions)
+      const uploadScope: FamilyScope = { familyId: family.id, principal: { userId: user.id, sessionId: 'concurrent-finalize-session' } }
+      const reservation = await firstService.reserve(uploadScope, { childId: child.id, body: 'concurrent finalize',
+        occurredAt: '2026-09-20T10:00:00.000Z', fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `concurrent-finalize-${randomUUID()}` })
+
+      const results = await Promise.all([
+        firstService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken),
+        secondService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken),
+      ])
+
+      expect(results.some((result) => result.state === 'finalized')).toBe(true)
+      expect(sends).toBe(1)
+      expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(1)
+      expect(await prisma.maxOutboundSource.count({ where: { familyId: family.id } })).toBe(1)
+    } finally {
+      await prisma.memory.deleteMany({ where: { familyId: family.id } })
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: user.id } })
+      await prisma.user.delete({ where: { id: user.id } })
+    }
+  })
+
+  test('restart recovers a provider message after the post-send database write is lost without a second send', async () => {
+    const user = await prisma.user.create({ data: { displayName: `direct-upload-${randomUUID()}` } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: { ownerUserId: user.id, name: `direct-upload-${randomUUID()}`, timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Recovery child' } })
+    await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: '9002' } })
+
+    try {
+      const repository = new PrismaMaxDirectUploadRepository(prisma)
+      const familyAccess = createPrismaFamilyAccess(prisma)
+      const publisher = createSourceMemoryPublisher(prisma, familyAccess)
+      let sends = 0
+      const baseApi = api({
+        sendVideoMessage: async () => { sends += 1; return { messageId: 'recovery-message-1' } },
+        getMessage: async () => ({ messageId: 'recovery-message-1', senderId: '1', recipientId: '9002',
+          attachments: [{ kind: 'video', providerAttachmentId: 'recovery-attachment-1', currentToken: 'opaque', inboundDurationSeconds: 1, width: 640, height: 360 }] }),
+      })
+      const initialService = createMaxDirectVideoUploadService({ access: familyAccess, api: baseApi, repository,
+        publisher, now: () => new Date('2026-09-20T10:00:00.000Z') })
+      const uploadScope: FamilyScope = { familyId: family.id, principal: { userId: user.id, sessionId: 'recovery-session' } }
+      const reservation = await initialService.reserve(uploadScope, { childId: child.id, body: 'recovery',
+        occurredAt: '2026-09-20T10:00:00.000Z', fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `recovery-${randomUUID()}` })
+      let lost = true
+      const failingRepository: MaxDirectUploadRepository = {
+        reserve: repository.reserve.bind(repository), claimUploadCapability: repository.claimUploadCapability.bind(repository),
+        persistUploadCapability: repository.persistUploadCapability.bind(repository), releaseUploadCapability: repository.releaseUploadCapability.bind(repository),
+        createOutboundSource: repository.createOutboundSource.bind(repository), find: repository.find.bind(repository), claim: repository.claim.bind(repository),
+        findOutboundSource: repository.findOutboundSource?.bind(repository), findRecipientId: repository.findRecipientId?.bind(repository), assertChild: repository.assertChild?.bind(repository),
+        update: async (session, patch) => {
+        if (lost && patch.providerMessageId) { lost = false; throw new Error('lost post-send write') }
+        return repository.update(session, patch)
+        },
+      }
+
+      const firstAttempt = createMaxDirectVideoUploadService({ access: familyAccess, api: baseApi, repository: failingRepository,
+        publisher, now: () => new Date('2026-09-20T10:00:00.000Z') })
+      await expect(firstAttempt.finalize(uploadScope, reservation.sessionId, reservation.uploadToken)).rejects.toMatchObject({ code: 'provider_unavailable' })
+
+      const recoveryApi = Object.assign(api({
+        sendVideoMessage: async () => { sends += 1; return { messageId: 'recovery-message-2' } },
+        getMessage: baseApi.getMessage,
+      }), { findVideoMessageByIntent: async () => ({ messageId: 'recovery-message-1' }) }) as MaxApiPort
+      const restartedService = createMaxDirectVideoUploadService({ access: familyAccess, api: recoveryApi, repository,
+        publisher, now: () => new Date('2026-09-20T10:01:00.000Z') })
+
+      await expect(restartedService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken)).resolves.toMatchObject({ state: 'finalized' })
+      expect(sends).toBe(1)
+      expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(1)
+      expect((await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { id_familyId: { id: reservation.sessionId, familyId: family.id } } })).providerMessageId).toBe('recovery-message-1')
+    } finally {
+      await prisma.memory.deleteMany({ where: { familyId: family.id } })
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
+      await prisma.child.delete({ where: { id: child.id } })
+      await prisma.family.delete({ where: { id: family.id } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: user.id } })
+      await prisma.user.delete({ where: { id: user.id } })
+    }
+  })
+
   test('a leaked capability cannot finalize through the authenticated route for another member, family, or session', async () => {
     const env = loadEnv({
       DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
@@ -394,6 +633,14 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
     const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Synthetic child' } })
 
     try {
+      const oversizedCaption = await app.request(`/api/v1/families/${family.id}/max-video-uploads/reserve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ownerBody.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ childId: child.id, body: '🙂'.repeat(4_001), occurredAt: '2026-09-20T10:00:00.000Z',
+          fileName: 'synthetic.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `route-long-${randomUUID()}` }),
+      })
+      expect(oversizedCaption.status).toBe(422)
+
       const reserve = await app.request(`/api/v1/families/${family.id}/max-video-uploads/reserve`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${ownerBody.accessToken}`, 'Content-Type': 'application/json' },

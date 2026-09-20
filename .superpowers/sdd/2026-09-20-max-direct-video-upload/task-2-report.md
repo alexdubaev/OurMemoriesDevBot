@@ -94,5 +94,31 @@
       "summary": "TypeScript check passed."
     },
     "decision": "A durable processing-state lease claims capability creation; conditional persistence requires the claim version and never overwrites an existing provider token. Failed provider or persistence attempts release the claim, while expired claims become terminal. Losing instances return existing-session state without capability data."
+  },
+  "round_4_fix": {
+    "base_sha": "007c40968e1c07431875855ae6766155a47bd17b",
+    "review_findings": [
+      "Reservation fingerprints must distinguish caller operation keys even when file metadata is identical.",
+      "Send recovery must be durable across process restart and must not rely on a process-local provider message map.",
+      "Finalize must re-check current FULL membership immediately before provider send.",
+      "MAX direct-video captions must be capped at 4000 Unicode code points at every boundary.",
+      "Real database coverage was required for concurrent finalize and lost post-send writes."
+    ],
+    "red": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts",
+      "result": "fail",
+      "summary": "New regressions failed before implementation: identical metadata produced equal fingerprints, 4001 Unicode captions were accepted, revoke-after-claim still sent, and restart recovery sent twice."
+    },
+    "green": {
+      "command": "bun --cwd backend test src/modules/max/direct-video-upload.integration.test.ts src/modules/max/capture.integration.test.ts",
+      "result": "pass",
+      "summary": "Unit suite 471/471; direct-upload integration 19/19; capture integration 38/38. Real PostgreSQL tests covered distinct operation keys, concurrent finalize with one send/Memory, route 422 Unicode boundary, and restart recovery after a lost provider-message write."
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "result": "pass",
+      "summary": "Prisma generation and TypeScript check passed after adding the durable provider send-intent field and port."
+    },
+    "decision": "The provider send intent is assigned by the durable claim transaction and persisted before any provider send. Recovery uses an optional provider identity lookup when available; otherwise the session records send_recovery_unavailable and the orphan risk remains explicit. The process-local message map was removed. Claims for message_sent sessions wait for the processing lease, preventing immediate concurrent republishing while preserving crash recovery."
   }
 }

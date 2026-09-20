@@ -42,6 +42,7 @@ export type MaxApiPort = {
   sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
   createVideoUpload(signal?: AbortSignal): Promise<MaxVideoUploadCapability>
   sendVideoMessage(input: MaxSendVideoMessageInput, signal?: AbortSignal): Promise<{ messageId: string }>
+  findVideoMessageByIntent?(intentId: string, userId: string, signal?: AbortSignal): Promise<{ messageId: string } | null>
   getMessage(messageId: string, signal?: AbortSignal): Promise<MaxResolvedMessage>
   getVideo?(videoToken: string, signal?: AbortSignal): Promise<MaxVideoResolution>
 }
@@ -136,6 +137,7 @@ export type MaxVideoUploadSession = {
   state: 'reserved' | 'uploaded' | 'processing' | 'message_sent' | 'finalized' | 'failed' | 'expired'
   providerUploadToken: string | null
   providerMessageId: string | null
+  providerSendIntentId: string | null
   retryCount: number
   lastRetryAt: Date | null
   lastErrorCode: string | null
@@ -154,7 +156,7 @@ export type MaxOutboundSource = {
   updatedAt: Date
 }
 
-export type MaxVideoUploadReserveInput = Omit<MaxVideoUploadSession, 'id' | 'state' | 'providerUploadToken' | 'providerMessageId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode' | 'createdAt' | 'updatedAt'> & {
+export type MaxVideoUploadReserveInput = Omit<MaxVideoUploadSession, 'id' | 'state' | 'providerUploadToken' | 'providerMessageId' | 'providerSendIntentId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode' | 'createdAt' | 'updatedAt'> & {
   now: Date
 }
 

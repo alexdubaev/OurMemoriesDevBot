@@ -77,7 +77,6 @@ export function createMaxDirectVideoUploadService(options: {
 }) {
   const now = options.now ?? (() => new Date())
   const ttl = options.reservationTtlMs ?? reservationTtlMs
-  const sentProviderMessageIds = new Map<string, string>()
   const pendingCapabilities = new Map<string, Promise<MaxVideoUploadCapability>>()
 
   const createOrReuseCapability = (sessionId: string) => {
@@ -228,7 +227,7 @@ export function createMaxDirectVideoUploadService(options: {
       }
 
       try {
-        let providerMessageId = session.providerMessageId ?? sentProviderMessageIds.get(session.id) ?? null
+        let providerMessageId = session.providerMessageId ?? null
         const existingOutbound = options.repository.findOutboundSource
           ? await options.repository.findOutboundSource(session.id, scope.familyId)
           : null
@@ -236,14 +235,36 @@ export function createMaxDirectVideoUploadService(options: {
         if (!providerMessageId) {
           const token = session.providerUploadToken
           if (!token) throw new MaxDirectUploadFailure('retryable', 'Загрузка ещё не готова к публикации', 'upload_not_ready')
-          const sent = await sendVideoMessageWithRetry(options.api, {
-            userId: await recipientId(options.repository, scope),
-            text: session.body,
-            uploadToken: token,
-          })
-          providerMessageId = sent.messageId
-          sentProviderMessageIds.set(session.id, providerMessageId)
-          await options.repository.update(session, { providerMessageId, state: 'message_sent' })
+          const targetUserId = await recipientId(options.repository, scope)
+          if (session.providerSendIntentId && options.api.findVideoMessageByIntent) {
+            let recovered: { messageId: string } | null = null
+            try {
+              recovered = await options.api.findVideoMessageByIntent(session.providerSendIntentId, targetUserId)
+            } catch {
+              await options.repository.update(session, { lastErrorCode: 'send_recovery_unavailable' })
+            }
+            if (recovered) {
+              providerMessageId = recovered.messageId
+              await options.repository.update(session, { providerMessageId, state: 'message_sent' })
+            }
+          } else {
+            await options.repository.update(session, { lastErrorCode: 'send_recovery_unavailable' })
+          }
+          if (!providerMessageId) {
+            try {
+              await options.access.requireFull(scope)
+            } catch (error) {
+              await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'membership_revoked' })
+              throw error
+            }
+            const sent = await sendVideoMessageWithRetry(options.api, {
+              userId: targetUserId,
+              text: session.body,
+              uploadToken: token,
+            })
+            providerMessageId = sent.messageId
+            await options.repository.update(session, { providerMessageId, state: 'message_sent' })
+          }
         }
 
         const providerMessage = await resolveMessage(options.api, providerMessageId)
@@ -295,6 +316,10 @@ export function createMaxDirectVideoUploadService(options: {
           await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'attachment_not_ready' })
           return { state: 'processing', sessionId: session.id, retryable: true, code: 'attachment_not_ready' }
         }
+        if (isForbidden(error)) {
+          await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'membership_revoked' })
+          throw error
+        }
         await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'provider_unavailable' })
         throw new MaxDirectUploadFailure('retryable', 'Публикация видео временно недоступна', 'provider_unavailable')
       }
@@ -343,7 +368,7 @@ function validateReservation(input: DirectVideoUploadReserveInput, current: Date
   if (!extension || accepted.get(extension) !== input.mimeType || !Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > maxFileBytes) {
     throw new MaxDirectUploadFailure('invalid_input', 'Поддерживаются видео MP4, MOV, MKV и WebM размером до 250 МБ')
   }
-  if (!input.body.trim() || [...input.body].length > 8_000 || !input.idempotencyKey || input.idempotencyKey.length > 128) {
+  if (!input.body.trim() || [...input.body].length > 4_000 || !input.idempotencyKey || input.idempotencyKey.length > 128) {
     throw new MaxDirectUploadFailure('invalid_input', 'Некорректные данные видео')
   }
   if (/[\\/\u0000-\u001f]/.test(input.fileName)) {
@@ -357,7 +382,7 @@ function validateReservation(input: DirectVideoUploadReserveInput, current: Date
 
 function fingerprint(input: DirectVideoUploadReserveInput) {
   return createHash('sha256').update(JSON.stringify({
-    childId: input.childId, body: input.body.trim(), occurredAt: input.occurredAt,
+    idempotencyKey: input.idempotencyKey, childId: input.childId, body: input.body.trim(), occurredAt: input.occurredAt,
     fileName: input.fileName, fileSize: input.fileSize, mimeType: input.mimeType,
   })).digest('hex')
 }
@@ -365,6 +390,10 @@ function fingerprint(input: DirectVideoUploadReserveInput) {
 function isAttachmentNotReady(error: unknown) {
   return typeof error === 'object' && error !== null &&
     ((error as { code?: unknown }).code === 'attachment.not.ready' || (error as { code?: unknown }).code === 'attachment_not_ready')
+}
+
+function isForbidden(error: unknown) {
+  return typeof error === 'object' && error !== null && (error as { kind?: unknown }).kind === 'forbidden'
 }
 
 async function sendVideoMessageWithRetry(api: MaxApiPort, input: Parameters<MaxApiPort['sendVideoMessage']>[0]) {

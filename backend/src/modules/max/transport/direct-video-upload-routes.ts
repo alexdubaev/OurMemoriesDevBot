@@ -10,8 +10,9 @@ const bearerSecurity = [{ BearerAuth: [] }]
 const json = <Schema extends z.ZodType>(schema: Schema) => ({ 'application/json': { schema } })
 const familyParams = z.object({ familyId: z.uuid() }).strict()
 const sessionParams = z.object({ familyId: z.uuid(), sessionId: z.uuid() }).strict()
+const caption = z.string().min(1).refine((value) => [...value].length <= 4_000, 'Caption must be at most 4000 Unicode code points')
 const reserveBody = z.object({
-  childId: z.uuid(), body: z.string().min(1).max(8_000), occurredAt: z.string().datetime({ offset: true }),
+  childId: z.uuid(), body: caption, occurredAt: z.string().datetime({ offset: true }),
   fileName: z.string().min(1).max(255), fileSize: z.number().int().positive().max(250 * 1024 * 1024),
   mimeType: z.enum(['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm']),
   idempotencyKey: z.string().min(1).max(128),

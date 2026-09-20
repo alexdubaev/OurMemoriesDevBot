@@ -17,7 +17,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
 
   async reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation> {
     const body = input.body.trim()
-    if (!body || body.length > 4_000 || !input.idempotencyKey || !input.idempotencyFingerprint) {
+    if (!body || [...body].length > 4_000 || !input.idempotencyKey || !input.idempotencyFingerprint) {
       throw new Error('Invalid MAX video upload reservation')
     }
 
@@ -88,7 +88,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
             { state: 'processing', lastRetryAt: { lt: leaseCutoff } },
           ],
         },
-        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
+        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 }, providerSendIntentId: current.providerSendIntentId ?? randomUUID() },
       })
       const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
       if (!fresh) return null
@@ -158,14 +158,15 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
           id: sessionId,
           familyId,
           OR: [
-            { state: { in: ['reserved', 'uploaded', 'message_sent'] } },
+            { state: { in: ['reserved', 'uploaded'] } },
+            { state: 'message_sent', lastRetryAt: { lt: new Date(now.getTime() - processingLeaseMs) } },
             // A crashed process can leave a durable claim behind. Only reclaim it
             // after the provider request deadline has elapsed; a live concurrent
             // finalize must observe claimed=false and never send again.
             { state: 'processing', lastRetryAt: { lt: new Date(now.getTime() - processingLeaseMs) } },
           ],
         },
-        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
+        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 }, providerSendIntentId: current.providerSendIntentId ?? randomUUID() },
       })
       const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
       if (!fresh) return null
@@ -215,6 +216,7 @@ function normalizeSession(value: Record<string, unknown>): MaxVideoUploadSession
     state: value.state as MaxVideoUploadSession['state'],
     providerUploadToken: nullableString(value.providerUploadToken),
     providerMessageId: nullableString(value.providerMessageId),
+    providerSendIntentId: nullableString(value.providerSendIntentId),
     retryCount: typeof value.retryCount === 'number' ? value.retryCount : 0,
     lastRetryAt: value.lastRetryAt == null ? null : asDate(value.lastRetryAt),
     lastErrorCode: nullableString(value.lastErrorCode),
