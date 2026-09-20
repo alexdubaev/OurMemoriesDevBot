@@ -4,7 +4,7 @@ import type { MemoryDto } from '@web-app-demo/contracts'
 
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
-import type { SourceMemoryInput } from '../../memories/infrastructure/source-memory-publisher'
+import type { SourceMemoryInput } from '../../memories'
 import type {
   MaxApiPort,
   MaxDirectUploadRepository,

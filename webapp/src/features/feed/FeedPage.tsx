@@ -33,7 +33,7 @@ import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-wavefo
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
 import { AddSheetPresentation } from '@/features/memoly-ui/AddSheetPresentation'
-import { VideoComposer } from '@/features/max-video-upload/VideoComposer'
+import { VideoComposer } from '@/features/max-video-upload'
 
 type Props = {
   childId?: string

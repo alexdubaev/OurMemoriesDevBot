@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 
 import { checkArchitectureSources } from './architecture-check.mjs'
 
@@ -75,6 +76,22 @@ describe('public module and feature indexes', () => {
     expect(compositionViolation?.message).toContain(
       'code outside module auth must import it through its public index',
     )
+  })
+
+  test('keeps MAX direct video upload on public module and feature APIs', async () => {
+    const paths = [
+      'backend/src/modules/max/application/direct-video-upload.ts',
+      'backend/src/modules/max/index.ts',
+      'backend/src/modules/max/transport/direct-video-upload-routes.ts',
+      'webapp/src/features/feed/FeedPage.tsx',
+    ]
+    const sources = await Promise.all(paths.map(async (path) => file(path, await readFile(new URL(`../${path}`, import.meta.url), 'utf8'))))
+
+    const maxViolations = check(sources).filter((violation) =>
+      !(violation.path.endsWith('FeedPage.tsx') && violation.message.includes('memoly-ui')),
+    )
+
+    expect(maxViolations).toEqual([])
   })
 })
 

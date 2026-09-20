@@ -11,6 +11,8 @@ import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-cat
 export { createMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
 import { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 export { createSourceMemoryPublisher } from './infrastructure/source-memory-publisher'
+export type { SourceMemoryInput } from './infrastructure/source-memory-publisher'
+export { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 import { createMemoryRoutes } from './transport/routes'
 
 export function createMemoriesModule({

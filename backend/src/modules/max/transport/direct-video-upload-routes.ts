@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { AppError, validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
-import { toFamilyAppError } from '../../families/transport/errors'
+import { toFamilyAppError } from '../../families'
 import { MaxDirectUploadFailure, type DirectVideoUploadReserveInput } from '../application/direct-video-upload'
 
 const bearerSecurity = [{ BearerAuth: [] }]
