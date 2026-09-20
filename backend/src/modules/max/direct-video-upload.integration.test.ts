@@ -179,6 +179,34 @@ describe('MAX direct video upload application service', () => {
     await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'forbidden' })
   })
 
+  test('a leaked provider capability cannot publish a Memory for another authorized family member', async () => {
+    const state = repository()
+    let sends = 0
+    let published = 0
+    const service = createMaxDirectVideoUploadService({
+      access: access(),
+      api: api({ sendVideoMessage: async () => { sends += 1; return { messageId: 'message-1' } } }),
+      repository: state.repository,
+      publisher: { publish: async () => { published += 1; return state.getSession().plannedMemoryId } } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z'),
+    })
+    const reservation = await service.reserve(scope, {
+      childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
+      fileName: 'synthetic.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: 'leak-1',
+    })
+    const leakedCapability = reservation.uploadToken
+    expect(leakedCapability).toBeTruthy()
+
+    const otherFullMember: FamilyScope = {
+      familyId: scope.familyId,
+      principal: { userId: '99999999-9999-4999-8999-999999999999', sessionId: 'other-session' },
+    }
+    await expect(service.finalize(otherFullMember, reservation.sessionId, leakedCapability)).rejects.toMatchObject({ kind: 'forbidden' })
+    expect(sends).toBe(0)
+    expect(published).toBe(0)
+    expect(state.getSession().state).toBe('reserved')
+  })
+
   test('does not send while another finalize owns the durable processing claim', async () => {
     const state = repository()
     let sends = 0
