@@ -1206,6 +1206,87 @@
       "alpha": true,
       "bytes": 2078,
       "sha256": "b39815d254522b38aaa69b66f0f9e7b9792bb640b46793002afdb3e5040ef2e7"
+    },
+    {
+      "path": "assets/brand/memoly-cloud-stars.webp",
+      "usage": "runtime-brand",
+      "width": 176,
+      "height": 185,
+      "alpha": true,
+      "bytes": 5790,
+      "sha256": "3ca50c216a59fcb9614c0a13a595dbf4d71ccb3d91c0a286f3d244e1034952a1"
+    },
+    {
+      "path": "assets/icons/gear-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 736,
+      "sha256": "4097d1d20555c4b835ece66af33db640c941a3d284b390d2fac0aa72cd861e20"
+    },
+    {
+      "path": "assets/icons/gear-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1026,
+      "sha256": "67c8c2b31d2d6c1a6a894f4f9021ca1cef45fc9116da13cb60562ee9fd30be69"
+    },
+    {
+      "path": "assets/icons/gear-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 774,
+      "sha256": "5a29561b42e03526bc24bdda2c58388bd06737610a2adfa47ed7837d56178a07"
+    },
+    {
+      "path": "assets/icons/gear-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1080,
+      "sha256": "537a1f502658c83269080ae03aeb287468ce67f9c24e5b970cee7e3b3d50cacb"
+    },
+    {
+      "path": "assets/icons/star-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 782,
+      "sha256": "2d3c4d545f1ea66b02758fb6009873fc40d9b7788ec3ea344df80346bcb7e662"
+    },
+    {
+      "path": "assets/icons/star-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1046,
+      "sha256": "fa8bed14877620671cac65aacee542aacd10a2635a4a358c6b5f8f3faf5b11ed"
+    },
+    {
+      "path": "assets/icons/star-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 798,
+      "sha256": "63b5aa4fda5a8004f177f3cce157b26110c6153066a37ecdb385b7b23a61ecff"
+    },
+    {
+      "path": "assets/icons/star-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1068,
+      "sha256": "36490e6ba0856a1d2e55361effd06f0039b4d9d8b26fa9f318a9faa6be8afcfd"
     }
   ]
 }

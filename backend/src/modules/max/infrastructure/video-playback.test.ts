@@ -231,4 +231,42 @@ describe('MAX guarded video transport', () => {
     await expect(playback.content({ familyId: 'family-id', principal: { userId: 'user-id', sessionId: 'session-id' } }, 'reference-id', undefined, 'GET')).rejects.toMatchObject({ kind: 'not_found' })
     expect(providerCalls).toBe(0)
   })
+
+  test('plays an authorized outbound MAX video through its separate source projection', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new Uint8Array([1, 2]), { status: 200, headers: {
+      'content-type': 'video/mp4', 'content-length': '2',
+    } })) as unknown as typeof fetch
+    try {
+      const playback = createMaxVideoPlayback({
+        runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
+          familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
+          maxVideoReference: { findFirst: async () => ({
+            id: 'reference-id', familyId: 'family-id', attachmentPosition: 0, providerAttachmentId: 'attachment-id',
+            source: null,
+            outboundSource: { familyId: 'family-id', recipientId: 123n, messageId: 'outbound-message-id' },
+            memory: { id: 'memory-id', familyId: 'family-id', status: 'published', deletedAt: null },
+          }) },
+        } } as never,
+        api: {
+          getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
+          getMessage: async () => ({ messageId: 'outbound-message-id', senderId: '900', recipientId: '123', attachments: [
+            { kind: 'video', providerAttachmentId: 'attachment-id', currentToken: 'rotating-token', inboundDurationSeconds: null, width: 1280, height: 720 },
+          ] }),
+          getVideo: async () => ({ width: 1280, height: 720, durationMs: null, renditions: [
+            { url: 'https://maxvd1.okcdn.ru/outbound-video?sig=opaque', width: 1280, height: 720, contentLength: 2 },
+          ] }),
+        } as never,
+      })
+
+      const result = await playback.content(
+        { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } },
+        'reference-id', undefined, 'GET',
+      )
+
+      expect(result.contentType).toBe('video/mp4')
+      expect(result.bodyLength).toBe(2)
+      expect(await new Response(result.body).arrayBuffer()).toHaveLength(2)
+    } finally { globalThis.fetch = originalFetch }
+  })
 })

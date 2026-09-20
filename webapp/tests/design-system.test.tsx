@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
@@ -16,6 +18,7 @@ import {
   InlineError,
   MemoryCardFrame,
 } from '../src/features/feed/components'
+import { FeedPresentation } from '../src/features/feed/presentation'
 import { AvatarLetter } from '../src/features/session/components/AvatarLetter'
 
 function render(component: Parameters<typeof renderToStaticMarkup>[0]) {
@@ -99,6 +102,68 @@ test('viewer navigation replaces add with a non-focusable viewing label', () => 
   expect(markup).toContain('data-nav-viewer="true"')
   expect(markup).toContain('Просмотр')
   expect(markup).not.toContain('tabindex="0"')
+})
+
+test('memoLy feed presentation composes the child hero, filters, and scoped navigation', () => {
+  const markup = render(
+    createElement(
+      FeedPresentation,
+      {
+        activeFilter: 'all',
+        childName: 'Саша',
+        childSubtitle: '2 года 8 месяцев',
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        onFamily: () => undefined,
+        onFeed: () => undefined,
+        onFilterChange: () => undefined,
+        role: 'full',
+      },
+      createElement('article', { 'data-memory-id': 'm1' }),
+    ),
+  )
+
+  expect(markup).toContain('data-memoly-feed="true"')
+  expect(markup).toContain('data-slot="memoly-child-hero"')
+  expect(markup).toContain('data-slot="memoly-filter-rail"')
+  expect(markup).toContain('data-bottom-navigation-appearance="memoly"')
+  expect(markup).toContain('aria-pressed="true"')
+})
+
+test('memoLy content rail keeps date groups and cards separated', async () => {
+  const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+
+  expect(css).toContain('[data-memoly-feed] .memoly-feed-content { display: flex; flex-direction: column; gap: 12px;')
+})
+
+test('memoLy shell keeps horizontal host insets at the narrow breakpoint and consumes them once in navigation', async () => {
+  const markup = render(
+    createElement(
+      FeedPresentation,
+      {
+        activeFilter: 'all',
+        childName: 'Саша',
+        childSubtitle: '2 года 8 месяцев',
+        insets: { top: 4, right: 13, bottom: 8, left: 11 },
+        onFamily: () => undefined,
+        onFeed: () => undefined,
+        onFilterChange: () => undefined,
+        role: 'full',
+      },
+      createElement('article', { 'data-memory-id': 'm1' }),
+    ),
+  )
+  const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+
+  expect(markup).toContain('--host-inset-left:11px')
+  expect(markup).toContain('--host-inset-right:13px')
+  expect(css).toContain('padding-left: calc(16px + var(--host-inset-left))')
+  expect(css).toContain('padding-right: calc(16px + var(--host-inset-right))')
+  expect(css).toContain('padding-left: calc(21px + var(--host-inset-left))')
+  expect(css).toContain('padding-right: calc(21px + var(--host-inset-right))')
+  expect(css).toContain('margin-left: calc(16px + var(--host-inset-left))')
+  expect(css).toContain('margin-right: calc(16px + var(--host-inset-right))')
+  expect(css).toContain('width: min(460px, 100%)')
+  expect(css).not.toContain('width: min(460px, calc(100% - 36px - var(--host-inset-left) - var(--host-inset-right)))')
 })
 
 test('FeedShell applies normalized host insets once and lets long names grow safely', () => {

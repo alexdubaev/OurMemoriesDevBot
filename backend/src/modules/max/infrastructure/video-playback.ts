@@ -17,21 +17,26 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
         id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
         source: { select: { messageId: true, senderSubject: true, recipientId: true, familyId: true, memoryId: true } },
+        outboundSource: { select: { messageId: true, recipientId: true, familyId: true } },
         memory: { select: { id: true, familyId: true, status: true, deletedAt: true } },
       } })
-      if (!reference || reference.source.familyId !== scope.familyId || reference.source.memoryId !== reference.memory.id || reference.memory.familyId !== scope.familyId ||
+      const source = reference?.source ?? reference?.outboundSource
+      if (!reference || !source || source.familyId !== scope.familyId ||
+        (reference.source && reference.source.memoryId !== reference.memory.id) || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
+
+      const expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
 
       let resolved
       try {
-        resolved = await options.api.getMessage(reference.source.messageId, signal)
+        resolved = await options.api.getMessage(source.messageId, signal)
       } catch (error) {
         if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
         throw error
       }
       const current = resolved.attachments[reference.attachmentPosition]
-      if (resolved.attachments.length !== 1 || reference.attachmentPosition !== 0 || !current || current.kind !== 'video' || resolved.messageId !== reference.source.messageId ||
-        resolved.senderId !== reference.source.senderSubject || resolved.recipientId !== String(reference.source.recipientId) ||
+      if (resolved.attachments.length !== 1 || reference.attachmentPosition !== 0 || !current || current.kind !== 'video' || resolved.messageId !== source.messageId ||
+        resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId) ||
         current.providerAttachmentId !== reference.providerAttachmentId) throw new MediaFailure('not_found', 'Медиа не найдено')
 
       if (typeof options.api.getVideo !== 'function') throw new MediaFailure('unsupported_media', 'Медиа недоступно')
@@ -47,6 +52,20 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       return fetchCdnVideo(rendition.url, rangeHeader, method, maxBytes, signal)
     },
   }
+}
+
+async function resolveOutboundSender(api: MaxApiPort, signal?: AbortSignal) {
+  let identity
+  try {
+    identity = await api.getMe(signal)
+  } catch (error) {
+    if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+    throw error
+  }
+  if (!identity.isBot || !Number.isSafeInteger(identity.userId) || identity.userId <= 0) {
+    throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  }
+  return String(identity.userId)
 }
 
 export function selectRendition(renditions: MaxVideoRendition[]) {

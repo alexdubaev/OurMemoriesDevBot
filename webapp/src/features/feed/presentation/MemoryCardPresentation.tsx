@@ -1,0 +1,84 @@
+import type { ReactNode } from 'react'
+import type { MemoryDto } from '@web-app-demo/contracts'
+
+import { WebpIcon } from '@/components/WebpIcon'
+import { Typography } from '@/components/typography'
+
+export type MemoryCardPresentationProps = {
+  actions: ReactNode
+  authorInitials: string
+  authorName: string
+  body: string
+  kind: MemoryDto['kind']
+  liked: boolean
+  likeCount: number
+  media: ReactNode
+  memoryId: string
+  occurredTime: string
+  onLike: () => void
+  onOpen: () => void
+}
+
+export function MemoryCardPresentation({
+  actions,
+  authorInitials,
+  authorName,
+  body,
+  kind,
+  liked,
+  likeCount,
+  media,
+  memoryId,
+  occurredTime,
+  onLike,
+  onOpen,
+}: MemoryCardPresentationProps) {
+  const hasCaption = body.trim().length > 0
+  const captionAndLike = (
+    <div className="memoly-memory-copy">
+      {kind === 'video'
+        ? hasCaption ? <Typography className="memoly-video-caption" variant="memoryCaption">{body}</Typography> : null
+        : <MemoryOpenButton body={body} className={body ? undefined : 'memoly-memory-open-empty'} kind={kind} onOpen={onOpen} />}
+      <LikeButton liked={liked} likeCount={likeCount} onLike={onLike} />
+    </div>
+  )
+
+  return (
+    <article className={`memoly-memory memoly-memory-${kind}`} data-memory-id={memoryId} data-memory-kind={kind}>
+      <div className="memoly-author" data-slot="memoly-author-row">
+        <Typography as="span" aria-hidden="true" className="memoly-author-initials" variant="memoryMeta">{authorInitials}</Typography>
+        <div className="memoly-author-copy"><Typography as="strong" variant="memoryMeta">{authorName}</Typography><Typography as="small" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
+        <MemoryActions>{actions}</MemoryActions>
+      </div>
+      {kind === 'photo' ? <MemorySlot slot="memoly-photo-layout">{media}{captionAndLike}</MemorySlot> : null}
+      {kind === 'video' ? <MemorySlot className={`memoly-video-row${hasCaption ? ' has-caption' : ''}`} slot="memoly-video-layout">{media}{captionAndLike}</MemorySlot> : null}
+      {kind === 'voice' ? <MemorySlot slot="memoly-voice-layout">{media}{captionAndLike}</MemorySlot> : null}
+      {kind === 'note' ? <MemorySlot slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="memoly-note-body" kind={kind} onOpen={onOpen} /> : null}<LikeButton liked={liked} likeCount={likeCount} onLike={onLike} /></MemorySlot> : null}
+    </article>
+  )
+}
+
+function MemoryActions({ children }: { children: ReactNode }) { return <>{children}</> }
+
+function MemorySlot({ children, className, slot }: { children: ReactNode; className?: string; slot: string }) {
+  return <div className={className} data-slot={slot}>{children}</div>
+}
+
+function MemoryOpenButton({ body, className, kind, onOpen }: { body: string; className?: string; kind: MemoryDto['kind']; onOpen: () => void }) {
+  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`memoly-memory-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{className === 'memoly-note-body' ? <><WebpIcon decorative name="note" size={27} /><Typography as="span" variant="memoryCaption">{body}</Typography></> : body || <Typography as="span" variant="memoryCaption">Открыть</Typography>}</button></Typography>
+}
+
+function LikeButton({ liked, likeCount, onLike }: { liked: boolean; likeCount: number; onLike: () => void }) {
+  return (
+    <button
+      aria-label={liked ? 'Убрать сердечко' : 'Поставить сердечко'}
+      aria-pressed={liked}
+      className={`memoly-like-button${liked ? ' is-liked' : ''}`}
+      onClick={onLike}
+      type="button"
+    >
+      <WebpIcon decorative name={liked ? 'heart-filled' : 'heart'} size={20} state={liked ? 'active' : 'default'} />
+      {likeCount > 0 ? <Typography as="span" variant="memoryMeta">{likeCount}</Typography> : null}
+    </button>
+  )
+}

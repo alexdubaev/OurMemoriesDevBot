@@ -78,6 +78,18 @@ describe('public module and feature indexes', () => {
     )
   })
 
+  test('keeps MAX direct video upload on public module and feature APIs', async () => {
+    const paths = [
+      'backend/src/modules/max/application/direct-video-upload.ts',
+      'backend/src/modules/max/index.ts',
+      'backend/src/modules/max/transport/direct-video-upload-routes.ts',
+      'webapp/src/features/feed/FeedPage.tsx',
+    ]
+    const sources = await Promise.all(paths.map(async (path) => file(path, await readFile(new URL(`../${path}`, import.meta.url), 'utf8'))))
+
+    expect(check(sources)).toEqual([])
+  })
+
   test('accepts the current family, feed, and memoly UI feature boundaries', async () => {
     const files = await Promise.all([
       'webapp/src/features/family/FamilyScreen.tsx',
