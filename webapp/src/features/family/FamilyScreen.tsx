@@ -2,7 +2,7 @@ import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-
 import { useEffect, useState } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
-import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui/FamilyPresentation'
+import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
 import { useChildAvatar } from './useChildAvatar'

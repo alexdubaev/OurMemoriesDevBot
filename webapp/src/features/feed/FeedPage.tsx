@@ -30,8 +30,7 @@ import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
-import { FeedMemoryList } from '@/features/memoly-ui/FeedPresentation'
-import { AddSheetPresentation } from '@/features/memoly-ui/AddSheetPresentation'
+import { AddSheetPresentation, FeedMemoryList } from '@/features/memoly-ui'
 
 type Props = {
   childName: string

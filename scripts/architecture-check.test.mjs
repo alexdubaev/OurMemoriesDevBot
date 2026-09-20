@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 
 import { checkArchitectureSources } from './architecture-check.mjs'
 
@@ -75,6 +76,17 @@ describe('public module and feature indexes', () => {
     expect(compositionViolation?.message).toContain(
       'code outside module auth must import it through its public index',
     )
+  })
+
+  test('accepts the current family, feed, and memoly UI feature boundaries', async () => {
+    const files = await Promise.all([
+      'webapp/src/features/family/FamilyScreen.tsx',
+      'webapp/src/features/feed/FeedPage.tsx',
+      'webapp/src/features/memoly-ui/adapters.ts',
+      'webapp/src/features/memoly-ui/FamilyPresentation.tsx',
+    ].map(async (path) => ({ path, source: await readFile(new URL(`../${path}`, import.meta.url), 'utf8') })))
+
+    expect(check(files)).toEqual([])
   })
 })
 
