@@ -27,6 +27,7 @@ import {
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
+import { isMaxVideoUploadAcceptanceLaunch } from '@/platform/max/host-bridge'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -75,10 +76,12 @@ export default function App({ hostBridge }: AppProps) {
       </main>
     )
   }
-  return <FamilyController currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} transport={auth.transport} />
+  const maxVideoUploadAcceptance = hostBridge.kind === 'max'
+    && isMaxVideoUploadAcceptanceLaunch(typeof window === 'undefined' ? undefined : window)
+  return <FamilyController currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
 }
 
-function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; transport: AuthenticatedTransport }) {
+function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
   const [familyResponse, setFamilyResponse] = useState<FamilyResponse | null>(null)
   const [members, setMembers] = useState<FamilyMemberDto[]>([])
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
@@ -176,7 +179,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { await refresh({ bootstrap: true }); setEditingChild(false) }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
-    return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
+    return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
   }
   return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }

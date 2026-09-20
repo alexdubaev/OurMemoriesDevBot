@@ -89,6 +89,19 @@ export function isMeaningfulMaxWebApp(host: unknown): boolean {
     || typeof webApp.colorScheme === 'string'
 }
 
+/** The direct video composer is intentionally reachable only from the acceptance launch. */
+export function isMaxVideoUploadAcceptanceLaunch(host: unknown): boolean {
+  if (!isMeaningfulMaxWebApp(host)) return false
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  const raw = rawInitData(webApp)
+  const signed = raw ? new URLSearchParams(raw).getAll('start_param') : []
+  if (signed.length > 0) return signed.length === 1 && signed[0] === 'max-video-upload-acceptance'
+  if (typeof browserHost?.location?.search !== 'string') return false
+  const startapp = new URLSearchParams(browserHost.location.search).getAll('startapp')
+  return startapp.length === 1 && startapp[0] === 'max-video-upload-acceptance'
+}
+
 function rawInitData(webApp: MaxWebApp | null) {
   return typeof webApp?.initData === 'string' && webApp.initData.length > 0
     ? webApp.initData

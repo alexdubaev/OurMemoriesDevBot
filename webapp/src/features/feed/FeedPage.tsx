@@ -33,8 +33,10 @@ import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-wavefo
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
 import { AddSheetPresentation } from '@/features/memoly-ui/AddSheetPresentation'
+import { VideoComposer } from '@/features/max-video-upload/VideoComposer'
 
 type Props = {
+  childId?: string
   childName: string
   childSubtitle: string
   childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
@@ -45,6 +47,7 @@ type Props = {
   hostBridge: HostBridge
   insets: TelegramInsets
   isAppBootstrapped?: boolean
+  maxVideoUploadAcceptance?: boolean
   onFamily: () => void
   onFilterChange: (filter: FeedFilter) => void
   onAccessLost: () => void
@@ -53,8 +56,8 @@ type Props = {
 }
 
 export function FeedPage({
-  childAvatarCrop = null, childAvatarMediaId = null, childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
-  isAppBootstrapped = true, onAccessLost, onFilterChange, role, transport,
+  childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
+  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onAccessLost, onFilterChange, role, transport,
 }: Props) {
   const queryClient = useQueryClient()
   const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
@@ -125,6 +128,10 @@ export function FeedPage({
     observer.observe(target)
     return () => observer.disconnect()
   }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
+
+  if (maxVideoUploadAcceptance && childId) {
+    return <VideoComposer childId={childId} familyId={familyId} onCancel={onFamily} onSuccess={async () => { await refetch() }} transport={transport} />
+  }
 
   return (
     <MediaPlaybackCoordinator>

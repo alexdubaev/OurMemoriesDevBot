@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   createMaxHostBridge,
+  isMaxVideoUploadAcceptanceLaunch,
   type HostBridge,
 } from '../src/platform/max/host-bridge'
 
@@ -151,5 +152,25 @@ describe('MAX HostBridge', () => {
       WebApp: { initData: `query_id=signed&start_param=invite_${token}&start_param=invite_${token}` },
     })
     expect(bridge.inviteToken()).toBeNull()
+  })
+
+  test('gates the video composer to the exact MAX acceptance launch parameter', () => {
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      WebApp: { initData: 'query_id=signed&start_param=max-video-upload-acceptance', ready: () => undefined },
+    })).toBe(true)
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?startapp=max-video-upload-acceptance' },
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    })).toBe(true)
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      WebApp: { initData: 'query_id=signed&start_param=other', ready: () => undefined },
+    })).toBe(false)
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?startapp=max-video-upload-acceptance' },
+      WebApp: { initData: 'query_id=signed&start_param=other', ready: () => undefined },
+    })).toBe(false)
+    expect(isMaxVideoUploadAcceptanceLaunch({
+      location: { search: '?startapp=max-video-upload-acceptance' },
+    })).toBe(false)
   })
 })
