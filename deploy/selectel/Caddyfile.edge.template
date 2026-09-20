@@ -1,0 +1,43 @@
+${MEMOLY_PUBLIC_HOST:?set MEMOLY_PUBLIC_HOST} {
+	encode gzip zstd
+
+	# These scoped MAX routes are intentionally explicit; never replace them with
+	# a broad reverse proxy that would bypass the static frontend boundary.
+	handle /api/spikes/max-video/* {
+		reverse_proxy max-video-spike-backend:3000
+	}
+
+	@max_direct_video_upload_spike path /__spikes/max-direct-video-upload /__spikes/max-direct-video-upload/*
+	handle @max_direct_video_upload_spike {
+		reverse_proxy max-video-spike-frontend:80
+	}
+
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	handle /storage/* {
+		reverse_proxy backend:3000
+	}
+
+	handle /webhooks/telegram {
+		reverse_proxy backend:3000
+	}
+
+	handle /webhooks/max {
+		reverse_proxy backend:3000
+	}
+
+	handle /health/live {
+		reverse_proxy backend:3000
+	}
+
+	handle /health/ready {
+		reverse_proxy backend:3000
+	}
+
+	# Host ports stay on the stable gateway; normal traffic goes to internal static:80.
+	handle {
+		reverse_proxy static:80
+	}
+}
