@@ -6,6 +6,8 @@ import type {
   MaxSubscriptionResult,
   MaxResolvedMessage,
   MaxVideoResolution,
+  MaxVideoUploadCapability,
+  MaxSendVideoMessageInput,
 } from '../application/ports'
 
 const MAX_API_BASE = 'https://platform-api2.max.ru'
@@ -14,12 +16,16 @@ const REQUEST_TIMEOUT_MS = 10_000
 export class MaxProviderError extends Error {
   readonly retryAfterSeconds?: number
   readonly retryable: boolean
+  readonly status?: number
+  readonly code?: string
 
-  constructor(retryAfterSeconds?: number, retryable = false) {
+  constructor(retryAfterSeconds?: number, retryable = false, status?: number, code?: string) {
     super('MAX provider request failed')
     this.name = 'MaxProviderError'
     this.retryAfterSeconds = retryAfterSeconds
     this.retryable = retryable
+    this.status = status
+    this.code = code
   }
 }
 
@@ -38,7 +44,14 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         headers: { ...(init.headers ?? {}), Authorization: token },
         signal: controller.signal,
       })
-      if (!response.ok) throw new MaxProviderError(retryAfterSeconds(response), true)
+      if (!response.ok) {
+        throw new MaxProviderError(
+          retryAfterSeconds(response),
+          response.status === 429 || response.status >= 500,
+          response.status,
+          await providerErrorCode(response),
+        )
+      }
       try {
         return await response.json()
       } catch {
@@ -83,6 +96,18 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         body: JSON.stringify({ text: input.text }),
       }, signal)
       if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
+    },
+    async createVideoUpload(signal) {
+      return normalizeVideoUploadCapability(await request('/uploads?type=video', { method: 'POST' }, signal))
+    },
+    async sendVideoMessage(input: MaxSendVideoMessageInput, signal) {
+      validateSendVideoMessageInput(input)
+      const value = await request(`/messages?${new URLSearchParams({ user_id: input.userId }).toString()}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: input.text, attachments: [{ type: 'video', payload: { token: input.uploadToken } }] }),
+      }, signal)
+      return normalizeSentVideoMessage(value)
     },
     async getMessage(messageId, signal) {
       if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
@@ -232,6 +257,39 @@ function validateSendMessageInput(input: { userId: string; text: string }) {
   if (typeof input.userId !== 'string' || !/^[1-9][0-9]*$/.test(input.userId) ||
       typeof input.text !== 'string' || input.text.length === 0 || [...input.text].length > 4_000) {
     throw new MaxProviderError()
+  }
+}
+
+function validateSendVideoMessageInput(input: MaxSendVideoMessageInput) {
+  validateSendMessageInput(input)
+  if (typeof input.uploadToken !== 'string' || input.uploadToken.length === 0 || input.uploadToken.length > 4_096) {
+    throw new MaxProviderError()
+  }
+}
+
+function normalizeVideoUploadCapability(value: unknown): MaxVideoUploadCapability {
+  if (!isRecord(value) || !isHttpsUrl(value.url) ||
+      (value.token !== undefined && (typeof value.token !== 'string' || value.token.length === 0 || value.token.length > 4_096))) {
+    throw new MaxProviderError()
+  }
+  return { url: value.url, ...(value.token === undefined ? {} : { token: value.token }) }
+}
+
+function normalizeSentVideoMessage(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
+  const rawId = value.message.mid ?? value.message.id
+  if (typeof rawId !== 'string' || rawId.length === 0 || rawId.length > 512) throw new MaxProviderError()
+  return { messageId: rawId }
+}
+
+async function providerErrorCode(response: Response) {
+  try {
+    const value: unknown = await response.clone().json()
+    if (!isRecord(value)) return undefined
+    const raw = value.code ?? (isRecord(value.error) ? value.error.code : undefined) ?? (isRecord(value.message) ? value.message.code : undefined)
+    return typeof raw === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(raw) ? raw : undefined
+  } catch {
+    return undefined
   }
 }
 

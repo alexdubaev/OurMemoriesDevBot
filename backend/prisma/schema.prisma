@@ -28,6 +28,7 @@ model User {
   uploadedMedia       MediaAsset[]         @relation("MediaUploader")
   mediaReservations   UploadReservation[]
   telegramVideoDeliveryTargets TelegramVideoDeliveryTarget[]
+  maxVideoUploadSessions      MaxVideoUploadSession[]        @relation("MaxVideoUploadAuthor")
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -116,6 +117,56 @@ model MaxSource {
   @@map("max_sources")
 }
 
+model MaxVideoUploadSession {
+  id                    String                      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId              String                      @map("family_id") @db.Uuid
+  authorId              String                      @map("author_id") @db.Uuid
+  childId               String                      @map("child_id") @db.Uuid
+  plannedMemoryId       String                      @map("planned_memory_id") @db.Uuid
+  body                  String
+  occurredAt            DateTime                    @map("occurred_at") @db.Timestamptz(6)
+  idempotencyFingerprint String                     @map("idempotency_fingerprint")
+  idempotencyKey        String                      @map("idempotency_key")
+  expiresAt             DateTime                    @map("expires_at") @db.Timestamptz(6)
+  state                 MaxVideoUploadSessionState  @default(reserved)
+  providerUploadToken   String?                     @map("provider_upload_token")
+  providerMessageId     String?                     @map("provider_message_id")
+  retryCount            Int                         @default(0) @map("retry_count")
+  lastRetryAt           DateTime?                   @map("last_retry_at") @db.Timestamptz(6)
+  lastErrorCode         String?                     @map("last_error_code")
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family                Family                      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_video_upload_sessions_family_id_fkey")
+  author                User                        @relation("MaxVideoUploadAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "max_video_upload_sessions_author_id_fkey")
+  child                 Child                       @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_video_upload_sessions_child_id_family_id_fkey")
+  outboundSource        MaxOutboundSource?
+
+  @@unique([familyId, idempotencyKey], map: "max_video_upload_sessions_family_idempotency_key")
+  @@unique([familyId, idempotencyFingerprint], map: "max_video_upload_sessions_family_fingerprint_key")
+  @@unique([familyId, plannedMemoryId], map: "max_video_upload_sessions_family_planned_memory_key")
+  @@index([state, expiresAt], map: "max_video_upload_sessions_state_expires_idx")
+  @@map("max_video_upload_sessions")
+}
+
+model MaxOutboundSource {
+  id                    String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  uploadSessionId       String                 @unique(map: "max_outbound_sources_upload_session_id_key") @map("upload_session_id") @db.Uuid
+  familyId              String                 @map("family_id") @db.Uuid
+  recipientId           BigInt                 @map("recipient_id")
+  messageId             String                 @map("message_id")
+  providerAttachmentId  String                 @map("provider_attachment_id")
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  uploadSession         MaxVideoUploadSession  @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade, map: "max_outbound_sources_upload_session_id_fkey")
+  family                Family                 @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_outbound_sources_family_id_fkey")
+  videoReference        MaxVideoReference?
+
+  @@unique([familyId, recipientId, messageId, providerAttachmentId], map: "max_outbound_sources_provider_identity_key")
+  @@unique([id, familyId], map: "max_outbound_sources_id_family_id_key")
+  @@index([familyId, messageId], map: "max_outbound_sources_family_message_idx")
+  @@map("max_outbound_sources")
+}
+
 model MaxSourceAttachment {
   id                    String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sourceId              String                    @map("source_id") @db.Uuid
@@ -138,7 +189,8 @@ model MaxSourceAttachment {
 
 model MaxVideoReference {
   id                   String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  sourceId             String     @unique(map: "max_video_references_source_id_key") @map("source_id") @db.Uuid
+  sourceId             String?    @unique(map: "max_video_references_source_id_key") @map("source_id") @db.Uuid
+  outboundSourceId     String?    @unique(map: "max_video_references_outbound_source_id_key") @map("outbound_source_id") @db.Uuid
   memoryId             String     @unique(map: "max_video_references_memory_id_key") @map("memory_id") @db.Uuid
   familyId             String     @map("family_id") @db.Uuid
   attachmentPosition   Int        @map("attachment_position")
@@ -147,11 +199,13 @@ model MaxVideoReference {
   height               Int?
   durationMs           Int?       @map("duration_ms")
   createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  source               MaxSource  @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_source_id_family_id_fkey")
+  source               MaxSource? @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_source_id_family_id_fkey")
+  outboundSource       MaxOutboundSource? @relation(fields: [outboundSourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_outbound_source_id_family_id_fkey")
   memory               Memory     @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_memory_id_family_id_fkey")
 
   @@index([familyId], map: "max_video_references_family_id_idx")
   @@unique([sourceId, familyId], map: "max_video_references_source_id_family_id_key")
+  @@unique([outboundSourceId, familyId], map: "max_video_references_outbound_source_id_family_id_key")
   @@unique([memoryId, familyId], map: "max_video_references_memory_id_family_id_key")
   @@map("max_video_references")
 }
@@ -301,6 +355,8 @@ model Family {
   mediaAssets          MediaAsset[]
   mediaReservations    UploadReservation[]
   captionRequests      CaptionRequest[]
+  maxVideoUploadSessions MaxVideoUploadSession[]
+  maxOutboundSources   MaxOutboundSource[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -342,6 +398,7 @@ model Child {
   updatedAt     DateTime    @updatedAt @map("updated_at")
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
   memories      Memory[]
+  maxVideoUploadSessions MaxVideoUploadSession[]
   avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
 
   @@unique([id, familyId], map: "children_id_family_id_key")
@@ -854,6 +911,16 @@ enum MaxSourceStatus {
   unsupported_media
 
   @@map("max_source_status")
+}
+
+enum MaxVideoUploadSessionState {
+  reserved
+  uploaded
+  processing
+  message_sent
+  finalized
+  failed
+  expired
 }
 
 enum MaxOutgoingResponseKind {

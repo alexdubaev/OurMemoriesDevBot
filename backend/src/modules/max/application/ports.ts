@@ -23,12 +23,25 @@ export type MaxSendMessageInput = {
   text: string
 }
 
+export type MaxVideoUploadCapability = {
+  url: string
+  token?: string
+}
+
+export type MaxSendVideoMessageInput = {
+  userId: string
+  text: string
+  uploadToken: string
+}
+
 export type MaxApiPort = {
   getMe(signal?: AbortSignal): Promise<MaxBotIdentity>
   getSubscriptions(signal?: AbortSignal): Promise<MaxSubscription[]>
   createSubscription(input: MaxSubscriptionInput, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   deleteSubscription(url: string, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
+  createVideoUpload(signal?: AbortSignal): Promise<MaxVideoUploadCapability>
+  sendVideoMessage(input: MaxSendVideoMessageInput, signal?: AbortSignal): Promise<{ messageId: string }>
   getMessage(messageId: string, signal?: AbortSignal): Promise<MaxResolvedMessage>
   getVideo?(videoToken: string, signal?: AbortSignal): Promise<MaxVideoResolution>
 }
@@ -107,4 +120,52 @@ export type EncryptedMaxPayload = {
   ciphertext: Uint8Array
   iv: Uint8Array
   authTag: Uint8Array
+}
+
+export type MaxVideoUploadSession = {
+  id: string
+  familyId: string
+  authorId: string
+  childId: string
+  plannedMemoryId: string
+  body: string
+  occurredAt: Date
+  idempotencyFingerprint: string
+  idempotencyKey: string
+  expiresAt: Date
+  state: 'reserved' | 'uploaded' | 'processing' | 'message_sent' | 'finalized' | 'failed' | 'expired'
+  providerUploadToken: string | null
+  providerMessageId: string | null
+  retryCount: number
+  lastRetryAt: Date | null
+  lastErrorCode: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type MaxOutboundSource = {
+  id: string
+  uploadSessionId: string
+  familyId: string
+  recipientId: string
+  messageId: string
+  providerAttachmentId: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type MaxVideoUploadReserveInput = Omit<MaxVideoUploadSession, 'id' | 'state' | 'providerUploadToken' | 'providerMessageId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode' | 'createdAt' | 'updatedAt'> & {
+  now: Date
+}
+
+export type MaxVideoUploadReservation = {
+  session: MaxVideoUploadSession
+  created: boolean
+}
+
+export type MaxOutboundSourceInput = Omit<MaxOutboundSource, 'id' | 'createdAt' | 'updatedAt'>
+
+export type MaxDirectUploadRepository = {
+  reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation>
+  createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource>
 }

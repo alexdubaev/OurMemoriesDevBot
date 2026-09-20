@@ -204,6 +204,56 @@ describe('MAX API client', () => {
     })
   })
 
+  test('creates a video upload capability with a normalized HTTPS URL and opaque token', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, {
+      fetch: async (input, init) => {
+        request = new Request(input, init)
+        return response({ url: 'https://upload.max.example/video', token: 'upload-token-1' })
+      },
+    })
+
+    await expect(api.createVideoUpload!()).resolves.toEqual({
+      url: 'https://upload.max.example/video', token: 'upload-token-1',
+    })
+    expect(request!.method).toBe('POST')
+    expect(request!.url).toBe('https://platform-api2.max.ru/uploads?type=video')
+    expect(request!.headers.get('authorization')).toBe(token)
+    expect(request!.url).not.toContain(token)
+  })
+
+  test('sends a bot-authenticated video attachment message and returns its provider identity', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, {
+      fetch: async (input, init) => {
+        request = new Request(input, init)
+        return response({ message: { mid: 'outbound-message-1' } })
+      },
+    })
+
+    await expect(api.sendVideoMessage!({ userId: '77', text: 'Видео', uploadToken: 'upload-token-1' }))
+      .resolves.toEqual({ messageId: 'outbound-message-1' })
+    expect(request!.method).toBe('POST')
+    expect(request!.url).toBe('https://platform-api2.max.ru/messages?user_id=77')
+    expect(request!.headers.get('authorization')).toBe(token)
+    expect(await request!.json()).toEqual({
+      text: 'Видео', attachments: [{ type: 'video', payload: { token: 'upload-token-1' } }],
+    })
+  })
+
+  test('rejects malformed upload data and never exposes capability values in provider errors', async () => {
+    const capabilityToken = 'secret-upload-token'
+    const malformed = createMaxApi(token, { fetch: async () => response({ url: 'http://unsafe.example/upload', token: capabilityToken }) })
+    await expect(malformed.createVideoUpload!()).rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+    await expect(malformed.createVideoUpload!()).rejects.not.toThrow(capabilityToken)
+
+    const malformedMessage = createMaxApi(token, { fetch: async () => response({ message: { id: '' } }) })
+    await expect(malformedMessage.sendVideoMessage!({ userId: '77', text: 'ok', uploadToken: capabilityToken }))
+      .rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+    await expect(malformedMessage.sendVideoMessage!({ userId: '77', text: 'ok', uploadToken: capabilityToken }))
+      .rejects.not.toThrow(capabilityToken)
+  })
+
   test('resolves a live-shaped file image with a numeric fileId and rejects invalid numeric fileIds', async () => {
     const message = (fileId: unknown) => ({ messages: [{
       sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 }, body: {
