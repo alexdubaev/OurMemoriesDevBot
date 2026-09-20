@@ -45,10 +45,10 @@ provider orphan if MAX offers no idempotency key.
 ## API and UI
 
 `POST reserve` and `POST finalize` are authenticated, family-scoped production
-routes. Reserve returns only a short-lived, non-persistent upload capability;
-finalize returns the published Memory DTO or a retryable state. The reusable
-Video Composer owns the selected File only in memory, caption/date across
-retry, XHR progress, cancel, retry, and single-save protection. A MAX-only
+routes. Reserve returns an upload capability only for the current browser
+operation; finalize returns the published Memory DTO or a retryable state. The
+reusable Video Composer owns the selected File only in memory, caption/date
+across retry, XHR progress, cancel, retry, and single-save protection. A MAX-only
 `startapp=max-video-upload-acceptance` route opens this production composer;
 ordinary launches do not expose it. On success invalidate/refetch existing feed
 queries.
@@ -57,7 +57,23 @@ queries.
 
 Both endpoints require current OWNER/FULL access and re-check it at finalize;
 wrong family/child, viewer, outsider, and revoked users fail. Browser transport
-does not persist URL/token and sends no Authorization header. Tests cover
-idempotency, concurrent/double finalize, send and pending failures, recovery,
-family isolation/revoke race, file validation, cancellation/retry, feed refresh,
-and existing playback regression.
+does not persist the full upload URL or provider token in localStorage,
+sessionStorage, durable frontend state, logs, analytics, or third-party
+requests, and it never receives a bot Authorization header. Backend logs may
+contain only a session ID, provider stage, HTTP status, redacted host/path,
+size/type, and timing.
+
+MAX upload capability lifetime is provider-controlled and may be unlimited.
+memoLy treats the capability as sensitive ephemeral client state but cannot
+revoke it after disclosure. This is an accepted MVP residual risk. The durable
+memoLy session has its own `expiresAt`: it limits reservation/finalize lifecycle
+and retry eligibility, but does not revoke or promise to revoke the MAX upload
+URL. After expiry, a client obtains a new reservation/capability and must not
+reuse the old one. Knowledge of the capability alone cannot create a memoLy
+Memory: only an authorized server-side finalize can send the provider message
+and publish the fixed Memory ID.
+
+Tests cover idempotency, concurrent/double finalize, send and pending failures,
+recovery, family isolation/revoke race, file validation, cancellation/retry,
+capability redaction/non-persistence, feed refresh, and existing playback
+regression.
