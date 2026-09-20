@@ -220,9 +220,11 @@ maybeDescribe('MAX durable capture', () => {
       api: {
         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
-        deleteSubscription: async () => ({ success: true }),
-        sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
-        getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
+         deleteSubscription: async () => ({ success: true }),
+         sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+         createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }),
+         sendVideoMessage: async () => ({ messageId: 'unused' }),
+         getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       },
     })
     await expect(delivery({ responseId: response.id })).rejects.toThrow('synthetic provider outage')
@@ -258,6 +260,8 @@ maybeDescribe('MAX durable capture', () => {
         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
          deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+         createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }),
+         sendVideoMessage: async () => ({ messageId: 'unused' }),
          getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       } satisfies MaxApiPort,
     })
@@ -340,6 +344,8 @@ maybeDescribe('MAX durable capture', () => {
         getSubscriptions: async () => [], createSubscription: async () => ({ success: true }),
         deleteSubscription: async () => ({ success: true }),
         sendMessage: async () => { attempts += 1; if (attempts === 1) throw new Error('synthetic provider outage') },
+        createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }),
+        sendVideoMessage: async () => ({ messageId: 'unused' }),
         getMessage: async () => ({ messageId: 'unused', senderId: '77', recipientId: '900', attachments: [] }),
       },
     })
@@ -557,6 +563,7 @@ maybeDescribe('MAX durable capture', () => {
     const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
     const process = createMaxTaskProcessor({ runtime, crypto, api: {
       getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+      createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
       getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: [{ kind: 'image', providerAttachmentId: '1', url: 'https://i.oneme.ru/synthetic' }] }),
     }, media: createMediaService({ db: prisma, env, familyAccess: createPrismaFamilyAccess(prisma), storage: privateStorage.storage }), download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
     await expect(process(task.payload)).resolves.toBe('done')
@@ -976,6 +983,7 @@ maybeDescribe('MAX durable capture', () => {
     let providerCalls = 0
     await expect(createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto, api: {
       getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+      createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
       getMessage: async () => { providerCalls += 1; throw new Error('provider must not be called') },
       getVideo: async () => { providerCalls += 1; throw new Error('provider must not be called') },
     } })(task.payload)).resolves.toBe('done')
@@ -1010,7 +1018,8 @@ maybeDescribe('MAX durable capture', () => {
       const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
       const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
       await createMaxTaskProcessor({ runtime: { prisma: senderId === ambiguous.subject ? ambiguousDb : prisma } as unknown as BackendRuntime, crypto, api: {
-        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+       getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+       createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
         getMessage: async () => ({ messageId: event.messageId, senderId, recipientId: event.recipientId, attachments: [{ kind: 'image' as const, providerAttachmentId: '1', url: 'https://i.oneme.ru/1' }] }),
       }, media: {} as never, download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })(task.payload)
     }
@@ -1073,7 +1082,8 @@ maybeDescribe('MAX durable capture', () => {
       userId: user.id,
       childId: child.id,
       api: (event: Extract<MaxInboundEvent, { kind: 'message_created' }>): MaxApiPort => ({
-        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+         getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
+         createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
          getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : attachment.kind === 'file' ? { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` } : { kind: 'video' as const, providerAttachmentId: attachment.providerAttachmentId, currentToken: `token-${index}`, inboundDurationSeconds: attachment.durationSeconds, width: attachment.width, height: attachment.height }) }),
       }),
       cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); activeStorageRoots.delete(storageRoot) },

@@ -141,6 +141,7 @@ model MaxVideoUploadSession {
   child                 Child                       @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_video_upload_sessions_child_id_family_id_fkey")
   outboundSource        MaxOutboundSource?
 
+  @@unique([id, familyId], map: "max_video_upload_sessions_id_family_id_key")
   @@unique([familyId, idempotencyKey], map: "max_video_upload_sessions_family_idempotency_key")
   @@unique([familyId, idempotencyFingerprint], map: "max_video_upload_sessions_family_fingerprint_key")
   @@unique([familyId, plannedMemoryId], map: "max_video_upload_sessions_family_planned_memory_key")
@@ -157,11 +158,12 @@ model MaxOutboundSource {
   providerAttachmentId  String                 @map("provider_attachment_id")
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  uploadSession         MaxVideoUploadSession  @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade, map: "max_outbound_sources_upload_session_id_fkey")
+  uploadSession         MaxVideoUploadSession  @relation(fields: [uploadSessionId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_outbound_sources_upload_session_id_family_id_fkey")
   family                Family                 @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_outbound_sources_family_id_fkey")
   videoReference        MaxVideoReference?
 
   @@unique([familyId, recipientId, messageId, providerAttachmentId], map: "max_outbound_sources_provider_identity_key")
+  @@unique([uploadSessionId, familyId], map: "max_outbound_sources_upload_session_id_family_id_key")
   @@unique([id, familyId], map: "max_outbound_sources_id_family_id_key")
   @@index([familyId, messageId], map: "max_outbound_sources_family_message_idx")
   @@map("max_outbound_sources")
@@ -921,6 +923,8 @@ enum MaxVideoUploadSessionState {
   finalized
   failed
   expired
+
+  @@map("max_video_upload_session_state")
 }
 
 enum MaxOutgoingResponseKind {

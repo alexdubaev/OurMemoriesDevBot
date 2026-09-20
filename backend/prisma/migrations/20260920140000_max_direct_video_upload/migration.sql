@@ -35,6 +35,8 @@ CREATE UNIQUE INDEX "max_video_upload_sessions_family_fingerprint_key"
   ON "max_video_upload_sessions"("family_id", "idempotency_fingerprint");
 CREATE UNIQUE INDEX "max_video_upload_sessions_family_planned_memory_key"
   ON "max_video_upload_sessions"("family_id", "planned_memory_id");
+CREATE UNIQUE INDEX "max_video_upload_sessions_id_family_id_key"
+  ON "max_video_upload_sessions"("id", "family_id");
 CREATE INDEX "max_video_upload_sessions_state_expires_idx"
   ON "max_video_upload_sessions"("state", "expires_at");
 
@@ -48,14 +50,16 @@ CREATE TABLE "max_outbound_sources" (
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "max_outbound_sources_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "max_outbound_sources_upload_session_id_fkey"
-      FOREIGN KEY ("upload_session_id") REFERENCES "max_video_upload_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "max_outbound_sources_upload_session_id_family_id_fkey"
+      FOREIGN KEY ("upload_session_id", "family_id") REFERENCES "max_video_upload_sessions"("id", "family_id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "max_outbound_sources_family_id_fkey"
       FOREIGN KEY ("family_id") REFERENCES "families"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE UNIQUE INDEX "max_outbound_sources_upload_session_id_key"
   ON "max_outbound_sources"("upload_session_id");
+CREATE UNIQUE INDEX "max_outbound_sources_upload_session_id_family_id_key"
+  ON "max_outbound_sources"("upload_session_id", "family_id");
 CREATE UNIQUE INDEX "max_outbound_sources_provider_identity_key"
   ON "max_outbound_sources"("family_id", "recipient_id", "message_id", "provider_attachment_id");
 CREATE UNIQUE INDEX "max_outbound_sources_id_family_id_key"

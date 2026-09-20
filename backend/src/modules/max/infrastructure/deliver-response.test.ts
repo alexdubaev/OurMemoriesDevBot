@@ -24,6 +24,8 @@ function api(overrides: Partial<MaxApiPort> = {}): MaxApiPort {
     createSubscription: async () => ({ success: true }),
     deleteSubscription: async () => ({ success: true }),
     sendMessage: async () => undefined,
+    createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }),
+    sendVideoMessage: async () => ({ messageId: 'unused' }),
     getMessage: async () => ({ messageId: 'unused', senderId: '1', recipientId: '1', attachments: [] }),
     ...overrides,
   }

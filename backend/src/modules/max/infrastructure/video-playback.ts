@@ -19,7 +19,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         source: { select: { messageId: true, senderSubject: true, recipientId: true, familyId: true, memoryId: true } },
         memory: { select: { id: true, familyId: true, status: true, deletedAt: true } },
       } })
-      if (!reference || reference.source.familyId !== scope.familyId || reference.source.memoryId !== reference.memory.id || reference.memory.familyId !== scope.familyId ||
+      if (!reference || !reference.source || reference.source.familyId !== scope.familyId || reference.source.memoryId !== reference.memory.id || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
       let resolved

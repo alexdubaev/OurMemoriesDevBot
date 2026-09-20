@@ -10,12 +10,24 @@ const plannedMemoryId = '44444444-4444-4444-8444-444444444444'
 function fakeDb() {
   const sessions = new Map<string, Record<string, unknown>>()
   const outboundSources: Record<string, unknown>[] = []
-  const db = {
-    $transaction: async <T>(callback: (tx: typeof db) => Promise<T>) => callback(db),
+  type FakeDb = {
+    $transaction: <T>(callback: (tx: FakeDb) => Promise<T>) => Promise<T>
     maxVideoUploadSession: {
-      findUnique: async ({ where }: { where: { familyId_idempotencyKey?: { familyId: string; idempotencyKey: string } } }) => {
+      findUnique: (input: { where: { familyId_idempotencyKey?: { familyId: string; idempotencyKey: string }; familyId_idempotencyFingerprint?: { familyId: string; idempotencyFingerprint: string } } }) => Promise<Record<string, unknown> | null>
+      create: (input: { data: Record<string, unknown> }) => Promise<Record<string, unknown>>
+    }
+    maxOutboundSource: {
+      create: (input: { data: Record<string, unknown> }) => Promise<Record<string, unknown>>
+    }
+  }
+  const db: FakeDb = {
+    $transaction: async <T>(callback: (tx: FakeDb) => Promise<T>) => callback(db),
+    maxVideoUploadSession: {
+      findUnique: async ({ where }: { where: { familyId_idempotencyKey?: { familyId: string; idempotencyKey: string }; familyId_idempotencyFingerprint?: { familyId: string; idempotencyFingerprint: string } } }) => {
         const key = where.familyId_idempotencyKey
-        return key ? sessions.get(`${key.familyId}:${key.idempotencyKey}`) ?? null : null
+        if (key) return sessions.get(`${key.familyId}:${key.idempotencyKey}`) ?? null
+        const fingerprint = where.familyId_idempotencyFingerprint
+        return fingerprint ? [...sessions.values()].find((session) => session.familyId === fingerprint.familyId && session.idempotencyFingerprint === fingerprint.idempotencyFingerprint) ?? null : null
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { ...data }
@@ -58,7 +70,7 @@ describe('MAX direct upload repository', () => {
     const { db, outboundSources } = fakeDb()
     const repository = new PrismaMaxDirectUploadRepository(db as never)
     const source = await repository.createOutboundSource({
-      familyId, sessionId: '66666666-6666-4666-8666-666666666666',
+      familyId, uploadSessionId: '66666666-6666-4666-8666-666666666666',
       recipientId: '77', messageId: 'message-1', providerAttachmentId: 'attachment-1',
     })
     expect(source.familyId).toBe(familyId)
