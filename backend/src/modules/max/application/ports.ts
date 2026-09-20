@@ -168,4 +168,10 @@ export type MaxOutboundSourceInput = Omit<MaxOutboundSource, 'id' | 'createdAt' 
 export type MaxDirectUploadRepository = {
   reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation>
   createOutboundSource(input: MaxOutboundSourceInput): Promise<MaxOutboundSource>
+  find(familyId: string, sessionId: string): Promise<MaxVideoUploadSession | null>
+  claim(familyId: string, sessionId: string, now: Date): Promise<{ session: MaxVideoUploadSession; claimed: boolean } | null>
+  update(session: MaxVideoUploadSession, patch: Partial<Pick<MaxVideoUploadSession, 'state' | 'providerUploadToken' | 'providerMessageId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode'>>): Promise<MaxVideoUploadSession>
+  findOutboundSource?(uploadSessionId: string, familyId: string): Promise<MaxOutboundSource | null>
+  findRecipientId?(familyId: string, userId: string): Promise<string | null>
+  assertChild?(familyId: string, childId: string): Promise<boolean>
 }

@@ -12,6 +12,7 @@ export type SourceMemoryInput = {
   body: string
   occurredAt: Date
   mediaIds: string[]
+  externalAttachment?: 'max-video'
 }
 
 type AfterMemoryWrite = (tx: PrismaTransactionClient, memoryId: string) => Promise<void>
@@ -42,7 +43,7 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
         if (input.kind === 'note' && input.mediaIds.length !== 0) throw new MemoryFailure('invalid_input', 'У заметки не бывает вложений')
         if (input.kind !== 'note') await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
-        if (input.kind !== 'note' && !(await readyMediaCount(tx, scope.familyId, input.mediaIds))) {
+        if (input.kind !== 'note' && input.externalAttachment !== 'max-video' && !(await readyMediaCount(tx, scope.familyId, input.mediaIds))) {
           throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
         }
         await tx.memory.create({ data: {

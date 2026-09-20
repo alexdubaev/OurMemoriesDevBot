@@ -20,9 +20,13 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
     }
 
     return this.db.$transaction(async (tx) => {
-      const existing = await tx.maxVideoUploadSession.findUnique({
+      const existingByKey = await tx.maxVideoUploadSession.findUnique({
         where: { familyId_idempotencyKey: { familyId: input.familyId, idempotencyKey: input.idempotencyKey } },
-      }) ?? await tx.maxVideoUploadSession.findUnique({
+      })
+      if (existingByKey && existingByKey.idempotencyFingerprint !== input.idempotencyFingerprint) {
+        throw new Error('MAX direct upload idempotency key was reused with different metadata')
+      }
+      const existing = existingByKey ?? await tx.maxVideoUploadSession.findUnique({
         where: { familyId_idempotencyFingerprint: { familyId: input.familyId, idempotencyFingerprint: input.idempotencyFingerprint } },
       })
       if (existing) return { session: normalizeSession(existing), created: false }
@@ -69,6 +73,55 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
       providerAttachmentId: input.providerAttachmentId,
     } })
     return normalizeOutboundSource(created)
+  }
+
+  async find(familyId: string, sessionId: string): Promise<MaxVideoUploadSession | null> {
+    const row = await this.db.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
+    return row ? normalizeSession(row) : null
+  }
+
+  async claim(familyId: string, sessionId: string, now: Date) {
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
+      if (!row) return null
+      const current = normalizeSession(row)
+      if (current.state === 'finalized' || current.state === 'failed' || current.state === 'expired') {
+        return { session: current, claimed: false }
+      }
+      const claimed = await tx.maxVideoUploadSession.updateMany({
+        where: { id: sessionId, familyId, state: { in: ['reserved', 'uploaded', 'processing', 'message_sent'] } },
+        data: { state: 'processing', lastRetryAt: now, retryCount: { increment: 1 } },
+      })
+      const fresh = await tx.maxVideoUploadSession.findUnique({ where: { id_familyId: { id: sessionId, familyId } } })
+      if (!fresh) return null
+      return { session: normalizeSession(fresh), claimed: claimed.count === 1 }
+    })
+  }
+
+  async update(session: MaxVideoUploadSession, patch: Partial<Pick<MaxVideoUploadSession, 'state' | 'providerUploadToken' | 'providerMessageId' | 'retryCount' | 'lastRetryAt' | 'lastErrorCode'>>) {
+    const updated = await this.db.maxVideoUploadSession.update({
+      where: { id_familyId: { id: session.id, familyId: session.familyId } },
+      data: patch,
+    })
+    return normalizeSession(updated)
+  }
+
+  async findOutboundSource(uploadSessionId: string, familyId: string) {
+    const row = await this.db.maxOutboundSource.findFirst({ where: { uploadSessionId, familyId } })
+    return row ? normalizeOutboundSource(row) : null
+  }
+
+  async findRecipientId(familyId: string, userId: string) {
+    const identity = await this.db.externalIdentity.findFirst({
+      where: { userId, provider: 'max', user: { familyMemberships: { some: { familyId, revokedAt: null } } } },
+      select: { subject: true },
+    })
+    return identity?.subject ?? null
+  }
+
+  async assertChild(familyId: string, childId: string) {
+    const child = await this.db.child.findFirst({ where: { id: childId, familyId }, select: { id: true } })
+    return child !== null
   }
 }
 

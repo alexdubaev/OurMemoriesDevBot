@@ -11,6 +11,14 @@ import { createMaxWebhook } from './transport/webhook'
 import { createMediaService } from '../media'
 import { createMaxMediaDownload } from './infrastructure/media-download'
 import { createMaxVideoPlayback } from './infrastructure/video-playback'
+import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
+import { createMaxDirectVideoUploadService } from './application/direct-video-upload'
+import { createSourceMemoryPublisher } from '../memories'
+import { PrismaMemoryRepository } from '../memories/infrastructure/prisma-memory-repository'
+import { createPrismaIdempotencyExecutor } from '../../idempotency'
+import { createAuthModule } from '../auth'
+import { createMaxDirectVideoUploadRoutes } from './transport/direct-video-upload-routes'
+import { disabledEmailDelivery } from '../../email'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
@@ -21,6 +29,18 @@ export function createMaxModule(options: {
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
   const api = options.api ?? createMaxApi(env.MAX_BOT_TOKEN)
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
+  const access = createPrismaFamilyAccess(options.runtime.prisma)
+  const directVideoUploadService = createMaxDirectVideoUploadService({
+    access,
+    api,
+    repository: new PrismaMaxDirectUploadRepository(options.runtime.prisma),
+    publisher: createSourceMemoryPublisher(options.runtime.prisma, access),
+    memoryReader: new PrismaMemoryRepository(options.runtime.prisma, createPrismaIdempotencyExecutor(options.runtime.prisma)),
+  })
+  const directVideoUploadRoutes = createMaxDirectVideoUploadRoutes({
+    requireAuth: createAuthModule({ db: options.runtime.prisma, emailDelivery: options.runtime.emailDelivery ?? disabledEmailDelivery, env }).requireAuth,
+    service: directVideoUploadService,
+  })
   const storage = options.runtime.privateStorage?.storage
   const media = storage ? createMediaService({ db: options.runtime.prisma, env, familyAccess: createPrismaFamilyAccess(options.runtime.prisma), storage }) : undefined
   const acceptUpdate = createMaxAcceptUpdate({
@@ -38,12 +58,13 @@ export function createMaxModule(options: {
   return {
     api,
     processTask,
+    directVideoUploadService,
     videoPlayback: createMaxVideoPlayback({ runtime: options.runtime, api }),
     routes: createMaxWebhook({
       secret: env.MAX_WEBHOOK_SECRET,
       bodyLimitBytes: env.MAX_WEBHOOK_BODY_LIMIT_BYTES,
       acceptUpdate,
-    }),
+    }).route('/api/v1', directVideoUploadRoutes),
   }
 }
 
