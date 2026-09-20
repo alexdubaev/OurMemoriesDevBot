@@ -171,8 +171,8 @@ export function createMaxDirectVideoUploadService(options: {
         }
 
         const providerMessage = await resolveMessage(options.api, providerMessageId)
-        const video = providerMessage.attachments.find((attachment) => attachment.kind === 'video')
-        if (!video || providerMessage.messageId !== providerMessageId) {
+        const video = providerMessage.attachments[0]
+        if (providerMessage.attachments.length !== 1 || !video || video.kind !== 'video' || providerMessage.messageId !== providerMessageId) {
           throw new MaxDirectUploadFailure('retryable', 'Видео в MAX ещё не готово', 'attachment_not_ready')
         }
         if (session.expiresAt <= now()) {

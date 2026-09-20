@@ -149,4 +149,19 @@ describe('MAX direct video upload application service', () => {
     await expect(service.finalize(scope, session().id)).resolves.toMatchObject({ state: 'expired', retryable: false })
     expect(published).toBe(0)
   })
+
+  test('does not finalize a provider message with multiple attachments', async () => {
+    const state = repository()
+    let published = 0
+    const service = createMaxDirectVideoUploadService({ access: access(), repository: state.repository,
+      api: api({ getMessage: async () => ({ ...(await api().getMessage!('message-1')), attachments: [
+        { kind: 'video' as const, providerAttachmentId: 'attachment-1', currentToken: 'opaque', inboundDurationSeconds: 1, width: 640, height: 360 },
+        { kind: 'image' as const, providerAttachmentId: 'attachment-2', url: 'https://max.example/image' },
+      ] }) }),
+      publisher: { publish: async () => { published += 1; return state.getSession().plannedMemoryId } } as never,
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+
+    await expect(service.finalize(scope, session().id)).rejects.toMatchObject({ kind: 'retryable', code: 'attachment_not_ready' })
+    expect(published).toBe(0)
+  })
 })
