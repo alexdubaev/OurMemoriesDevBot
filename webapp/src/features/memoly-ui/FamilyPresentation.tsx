@@ -5,8 +5,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import { Button } from '@/components/ui/button'
 import { InlineError } from '@/features/feed'
-import { ChildAvatar } from '@/features/family/ChildAvatar'
-import { familyMemberName, roleLabel } from '@/features/family/model'
+import { ChildAvatar, familyMemberName, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
 
 export type FamilyMemberActions = {

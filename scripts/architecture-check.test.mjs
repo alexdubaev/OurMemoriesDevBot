@@ -87,11 +87,18 @@ describe('public module and feature indexes', () => {
     ]
     const sources = await Promise.all(paths.map(async (path) => file(path, await readFile(new URL(`../${path}`, import.meta.url), 'utf8'))))
 
-    const maxViolations = check(sources).filter((violation) =>
-      !(violation.path.endsWith('FeedPage.tsx') && violation.message.includes('memoly-ui')),
-    )
+    expect(check(sources)).toEqual([])
+  })
 
-    expect(maxViolations).toEqual([])
+  test('accepts the current family, feed, and memoly UI feature boundaries', async () => {
+    const files = await Promise.all([
+      'webapp/src/features/family/FamilyScreen.tsx',
+      'webapp/src/features/feed/FeedPage.tsx',
+      'webapp/src/features/memoly-ui/adapters.ts',
+      'webapp/src/features/memoly-ui/FamilyPresentation.tsx',
+    ].map(async (path) => ({ path, source: await readFile(new URL(`../${path}`, import.meta.url), 'utf8') })))
+
+    expect(check(files)).toEqual([])
   })
 })
 

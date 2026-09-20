@@ -32,7 +32,7 @@ import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
-import { AddSheetPresentation } from '@/features/memoly-ui/AddSheetPresentation'
+import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 
 type Props = {

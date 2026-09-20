@@ -6,7 +6,7 @@ import type {
   MemoryDto,
 } from '@web-app-demo/contracts'
 
-import { feedChildSubtitle, familyMemberName } from '@/features/family/model'
+import { feedChildSubtitle, familyMemberName } from '@/features/family'
 
 import type {
   Capabilities,
