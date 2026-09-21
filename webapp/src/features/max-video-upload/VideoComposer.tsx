@@ -15,6 +15,7 @@ export type VideoComposerProps = {
 }
 
 type Capability = Pick<MaxVideoReservation, 'sessionId' | 'uploadUrl' | 'uploadToken'>
+type SaveStage = 'reserve' | 'upload' | 'finalize'
 
 export function VideoComposer({ childId, familyId, onCancel, onSuccess, transport }: VideoComposerProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -24,6 +25,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<'idle' | 'reserving' | 'uploading' | 'saving' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const saving = useRef(false)
@@ -50,6 +52,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
   const chooseFile = (next: File | null) => {
     if (saving.current) return
     setError(null)
+    setErrorStage(null)
     setCapability(null)
     setProgress(0)
     if (!next) {
@@ -71,6 +74,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     if (saving.current) return
     saving.current = true
     setError(null)
+    setErrorStage(null)
     const selected = file
     const pendingFinalize: Capability | null = capability?.sessionId && capability.uploadToken
       ? capability
@@ -131,9 +135,9 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       const result = await finalizeMaxVideo(transport, familyId, finalizeCapability.sessionId, finalizeCapability.uploadToken, controller.signal)
       if (result.state !== 'finalized') {
         if (result.state === 'expired' || result.state === 'failed') setCapability(null)
-        clearSelectedFile()
         setProgress(0)
         setStatus('error')
+        setErrorStage('finalize')
         setError(result.state === 'processing' ? 'Видео ещё обрабатывается. Повторите попытку.' : 'Не удалось сохранить видео. Попробуйте ещё раз.')
         return
       }
@@ -145,7 +149,10 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       // into a misleading upload error or trigger a second provider send.
       try { await onSuccess() } catch { /* the next normal feed refresh can recover */ }
     } catch (reason) {
-      if (reason instanceof DOMException && reason.name === 'AbortError') return
+      // An abort caused by Cancel/unmount is intentional. A provider-side XHR abort is
+      // not: treating every AbortError as intentional would leave the composer stuck in
+      // `uploading` with the Save button disabled and no retryable error.
+      if (reason instanceof DOMException && reason.name === 'AbortError' && controller.signal.aborted) return
       const expired = reason instanceof ApiRequestError && reason.code === 'UPLOAD_EXPIRED'
       if (uploadCompleted && finalizeCapability && !expired) {
         // The request may have reached the backend after the browser lost its response. Keep
@@ -154,10 +161,15 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       } else {
         setCapability(null)
       }
-      clearSelectedFile()
       setProgress(0)
       setStatus('error')
-      setError('Не удалось сохранить видео. Попробуйте ещё раз.')
+      const stage: SaveStage = uploadCompleted ? 'finalize' : finalizeCapability ? 'upload' : 'reserve'
+      setErrorStage(stage)
+      setError(stage === 'reserve'
+        ? 'Не удалось подготовить сохранение видео. Попробуйте ещё раз.'
+        : stage === 'upload'
+          ? 'Не удалось загрузить видео. Попробуйте ещё раз.'
+          : 'Не удалось завершить сохранение видео. Попробуйте ещё раз.')
     } finally {
       if (abortController.current === controller) abortController.current = null
       saving.current = false
@@ -179,7 +191,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         {status === 'uploading' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Загружаем файл… {progress}%</Typography> : null}
         {status === 'saving' || status === 'reserving' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохраняем файл…</Typography> : null}
         {status === 'success' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
-        {error ? <Typography className="mt-4 text-destructive" role="alert" variant="memoryMeta">{error}</Typography> : null}
+        {error ? <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography> : null}
         <div className="mt-6 flex gap-3">
           <Button className="min-h-12 flex-1" disabled={isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
           <Button className="min-h-12" disabled={isSaving && status !== 'uploading'} onClick={() => { clearEphemeral(); onCancel() }} type="button" variant="outline">Отмена</Button>
