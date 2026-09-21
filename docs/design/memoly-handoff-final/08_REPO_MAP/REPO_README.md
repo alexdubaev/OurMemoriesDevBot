@@ -35,4 +35,4 @@ bun run build:webapp
 
 `bun run verify:plan -- <changed-path>` только печатает план проверок. Он не исполняет команды и возвращает fail-safe результат для неизвестных путей.
 
-Подробные границы MVP, архитектура и порядок задач находятся в `docs/mvp/`. Происхождение шаблона зафиксировано в [UPSTREAM.md](UPSTREAM.md); правила GitHub — в [GIT_SETTINGS.md](GIT_SETTINGS.md).
+Подробные границы MVP, архитектура и порядок задач находятся в `docs/mvp/`. Происхождение шаблона зафиксировано в [UPSTREAM.md](../../../../UPSTREAM.md); правила GitHub — в [GIT_SETTINGS.md](../../../../GIT_SETTINGS.md).
