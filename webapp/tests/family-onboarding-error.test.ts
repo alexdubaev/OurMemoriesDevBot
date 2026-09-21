@@ -5,7 +5,7 @@ import type { FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
 
 import { FamilyOnboarding } from '../src/features/family/FamilyOnboarding'
 import { onboardingSaveErrorMessage } from '../src/features/family/model'
-import { FamilyPresentation } from '../src/features/memoly-ui/FamilyPresentation'
+import { FamilyPresentation, InviteFlow } from '../src/features/memoly-ui/FamilyPresentation'
 import type { AuthenticatedTransport } from '../src/platform/api'
 
 test('onboarding save failures use onboarding-specific copy instead of feed refresh copy', () => {
@@ -57,6 +57,21 @@ test('viewer family presentation keeps leave access while hiding owner actions',
   expect(markup).not.toContain('Пригласить близкого')
   expect(markup).not.toContain('Удалить участника')
   expect(markup).toContain('Выйти из семьи')
+})
+
+test('invite flow defaults to least privilege and exposes actionable create errors', () => {
+  const markup = renderToStaticMarkup(createElement(InviteFlow, {
+    busy: false,
+    hasError: true,
+    onBack: () => undefined,
+    onCreate: async () => undefined,
+    onRefresh: () => undefined,
+  }))
+
+  expect(markup).toMatch(/id="simpleRoleView"[^>]*checked=""/)
+  expect(markup).not.toMatch(/id="simpleRoleFull"[^>]*checked=""/)
+  expect(markup).toContain('data-slot="inline-error"')
+  expect(markup).toContain('Повторить')
 })
 
 const viewerFamily: FamilyResponse = {

@@ -75,8 +75,7 @@ export function FamilyScreen({
 
   return (
     <div className="ml-page">
-      <div className="ml-shell mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-[calc(var(--layout-gutter)+var(--host-inset-left))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))] pb-[calc(var(--layout-bottom-nav)+var(--host-inset-bottom)+var(--layout-gutter))]">
-        <FamilyPresentation
+      <FamilyPresentation
           busy={busy}
           canEditChild={isOwner}
           canInvite={canInvite}
@@ -133,8 +132,7 @@ export function FamilyScreen({
           ))}
           usage={usage}
           usageFailed={usageFailed}
-        />
-      </div>
+      />
       <BottomNavigation appearance="memoly" active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'viewer' ? 'viewer' : 'full'} />
     </div>
   )

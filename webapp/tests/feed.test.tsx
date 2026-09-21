@@ -13,7 +13,7 @@ import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
 import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
-import { MemoryCardPresentation } from '../src/features/feed/presentation'
+import { FeedPresentation, MemoryCardPresentation } from '../src/features/feed/presentation'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
 
@@ -151,7 +151,7 @@ test('video cards remove the standalone open action and collapse when the captio
 
   const markup = renderToStaticMarkup(card)
   expect(markup).toContain('data-memory-kind="video"')
-  expect(markup).toContain('class="memoly-video-row"')
+  expect(markup).toMatch(/class="media-well surface-inset video-wrap(?: |")/)
   expect(markup).not.toContain('Открыть')
   expect(markup).toContain('aria-label="Поставить сердечко"')
 })
@@ -172,9 +172,9 @@ test('video cards treat whitespace-only captions as empty', () => {
     onOpen: () => undefined,
   }))
 
-  expect(markup).toContain('class="memoly-video-row"')
-  expect(markup).not.toContain('memoly-video-row has-caption')
-  expect(markup).not.toContain('memoly-video-caption')
+  expect(markup).toMatch(/class="media-well surface-inset video-wrap(?: |")/)
+  expect(markup).not.toContain('has-caption')
+  expect(markup).not.toContain('class="caption"')
 })
 
 test('delete preview cards preserve the selected memory while removing interactive actions', () => {
@@ -218,7 +218,7 @@ test('video captions remain visible without becoming a separate detail button', 
   }))
 
   expect(markup).toContain('Первые шаги')
-  expect(markup).toContain('memoly-video-caption')
+  expect(markup).toContain(' caption"')
   expect(markup).not.toContain('Открыть воспоминание')
   expect(markup).not.toContain('>Открыть<')
 })
@@ -246,7 +246,7 @@ test('photo and voice cards keep their caption detail action when the body is em
     expect(markup).toContain(`data-memory-kind="${kind}"`)
     expect(markup).toContain('Открыть')
     expect(markup).toContain(`aria-label="Открыть воспоминание ${kind}"`)
-    expect(markup).toContain('memoly-memory-open-empty')
+    expect(markup).toContain('caption-open-empty')
     expect(openAction).not.toBeNull()
     openAction?.props.onOpen?.()
   }
@@ -703,6 +703,47 @@ test('the feed header renders the memoLy logo above the child profile instead of
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
   expect(markup.indexOf('data-slot="app-brand"')).toBeLessThan(markup.indexOf('data-slot="child-profile"'))
+})
+
+test('the feed presentation keeps the approved filter and memory composition', () => {
+  const markup = renderToStaticMarkup(createElement(FeedPresentation, {
+    activeFilter: 'all',
+    childName: 'Лиза',
+    childSubtitle: '2 года',
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    onFamily: () => undefined,
+    onFeed: () => undefined,
+    onFilterChange: () => undefined,
+    role: 'full',
+  }, createElement('section', { className: 'feed-section', 'data-kind': 'photo' },
+    createElement('h2', { className: 'date-heading' }, 'Сегодня', createElement('span', { 'aria-hidden': 'true', className: 'date-dot' })),
+    createElement(MemoryCardPresentation, {
+      actions: createElement('button', { 'aria-label': 'Действия с воспоминанием', type: 'button' }),
+      authorInitials: 'М',
+      authorName: 'Мама',
+      body: 'Первое слово',
+      kind: 'photo',
+      liked: false,
+      likeCount: 0,
+      media: createElement('img', { alt: 'Воспоминание', src: '/photo.webp' }),
+      memoryId,
+      occurredTime: 'Сегодня, 10:24',
+      onLike: () => undefined,
+      onOpen: () => undefined,
+    }),
+  )))
+
+  expect(markup).toContain('class="filters-wrap surface-inset"')
+  expect(markup).toContain('class="filters"')
+  expect(markup.match(/class="filter(?: |")/g)).toHaveLength(5)
+  expect(markup).toContain('class="feed-section"')
+  expect(markup).toContain('class="date-heading"')
+  expect(markup).toContain('class="date-dot"')
+  expect(markup).toContain('class="memory-card surface-raised')
+  expect(markup).toContain('class="memory-header"')
+  expect(markup).toContain('class="media-well surface-inset"')
+  expect(markup).toContain('class="actions"')
+  expect(markup).toMatch(/class="caption(?: |")/)
 })
 
 const telegramAttachment: Extract<MemoryDto['attachments'][number], { source: 'telegram' }> = {

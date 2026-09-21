@@ -47,9 +47,12 @@ test('ChildHeader keeps Feed controls-free while Family adds overlay settings', 
   }))
 
   expect(feedMarkup).toContain('data-child-header-mode="feed"')
-  expect(feedMarkup).toContain('src="/assets/theme-header/rose.webp"')
+  expect(feedMarkup).toContain('--theme-header-art:url(/assets/theme-header/rose.webp)')
+  expect(feedMarkup).toContain('data-theme="rose"')
   expect(feedMarkup).not.toContain('aria-label="Настройки"')
   expect(familyMarkup).toContain('data-child-header-mode="family"')
+  expect(familyMarkup).toContain('--theme-header-art:url(/assets/theme-header/rose.webp)')
+  expect(familyMarkup).toContain('data-theme="rose"')
   expect(familyMarkup).toContain('aria-label="Настройки"')
   expect(familyMarkup).toContain('data-slot="avatar-letter"')
 })

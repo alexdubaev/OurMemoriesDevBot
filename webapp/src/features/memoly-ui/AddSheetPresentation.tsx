@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useState, type ReactNode, type RefObject } from 'react'
 
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { WebpIcon } from '@/components/WebpIcon'
@@ -92,86 +92,73 @@ export function AddSheetPanel({
   onVoiceOrVideo: () => void
 }) {
   return (
-    <div className="memoly-sheet-content" data-slot="memoly-add-sheet-panel">
-      <div className="flex min-h-11 items-center gap-3">
-        <DrawerTitle className="min-w-0 flex-1 text-left">
-          <Typography as="span" variant="memoryEmptyTitle">Что добавить?</Typography>
-        </DrawerTitle>
-        <Button aria-label="Закрыть" className="size-11" onClick={onClose} size="icon" type="button" variant="ghost">
-          <WebpIcon decorative name="close" size={24} />
-        </Button>
+    <div className="memoly-sheet-content memoly-add-sheet-panel" data-slot="memoly-add-sheet-panel" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
+      <DrawerTitle className="sheet-title" id="memoly-add-sheet-title">Добавить воспоминание</DrawerTitle>
+      <DrawerDescription className="sheet-subtitle" id="memoly-add-sheet-description">Сохраняйте моменты, которые важны</DrawerDescription>
+      <div className="add-options">
+        <AddAction icon="photo" label="Добавить фото" name="photo" onClick={onPhoto} copy={<>Снимок<br />из жизни</>} />
+        <AddAction icon="note" label="Добавить заметку" name="note" onClick={onNote} copy={<>Мысли<br />и события</>} />
+        <AddAction icon="voice" label="Добавить голос или видео" name="voice-or-video" onClick={onVoiceOrVideo} copy={<>Файл<br />с устройства</>} />
       </div>
-      <div className="mt-4 flex flex-col gap-2">
-        <AddAction icon="photo" label="Фото" name="photo" onClick={onPhoto} />
-        <AddAction icon="note" label="Заметка" name="note" onClick={onNote} />
-        <VoiceOrVideoAction onClick={onVoiceOrVideo} />
-      </div>
-      <DrawerDescription className="mt-4 text-left" id="memoly-add-sheet-description">
-        <Typography as="span" variant="memoryMeta">Материалы увидят участники вашей семьи</Typography>
-      </DrawerDescription>
     </div>
   )
 }
 
-function AddAction({ icon, label, name, onClick }: { icon: 'note' | 'photo' | 'video'; label: string; name: 'note' | 'photo' | 'video'; onClick: () => void }) {
-  return <button
-    aria-label={label}
-    className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]"
-    data-add-action={name}
-    onClick={onClick}
-    type="button"
-  >
-    <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full"><WebpIcon decorative name={icon} size={22} state="active" /></span>
-    <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">{label}</Typography>
-    <WebpIcon decorative name="chevron" size={22} />
+function AddAction({ icon, label, name, onClick, copy }: { icon: 'note' | 'photo' | 'voice' | 'video'; label: string; name: 'note' | 'photo' | 'video' | 'voice-or-video'; onClick: () => void; copy: ReactNode }) {
+  const kind = name === 'photo' ? 'kind-photo' : name === 'note' ? 'kind-note' : 'kind-media'
+  return <button aria-label={label} className={`add-option ${kind}`} data-add-action={name} onClick={onClick} type="button">
+    <span className="add-option-icon"><WebpIcon decorative name={icon} size={38} state="active" /></span>
+    <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? 'Фото' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
+    <Typography as="span" className="add-option-copy" tone="muted" variant="memoryMeta">{copy}</Typography>
   </button>
 }
 
 export function VoiceOrVideoAction({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      aria-label="Голос или видео"
-      className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]"
-      data-add-action="voice-or-video"
-      onClick={onClick}
-      type="button"
-    >
-      <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full">
-        <WebpIcon decorative name="voice" size={22} state="active" />
-      </span>
-      <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">Голос или видео</Typography>
-      <WebpIcon decorative name="chevron" size={22} />
-    </button>
-  )
+  return AddAction({ copy: <>Файл<br />с устройства</>, icon: 'voice', label: 'Голос или видео', name: 'voice-or-video', onClick })
 }
 
-function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; onClose: () => void; onVideo: () => void }) {
+export function MediaChoiceAction({ icon, label, name, onClick, title, copy }: {
+  icon: 'voice' | 'video'
+  label: string
+  name: 'audio' | 'video'
+  onClick: () => void
+  title: string
+  copy: ReactNode
+}) {
+  return <button aria-label={label} className="media-choice-card" data-add-action={name} onClick={onClick} type="button">
+    <span className="media-choice-icon"><WebpIcon decorative name={icon} size={34} state="active" /></span>
+    <span className="media-choice-copy">
+      <Typography as="strong" variant="memoryBodyMedium">{title}</Typography>
+      <Typography as="span" tone="muted" variant="memoryMeta">{copy}</Typography>
+    </span>
+    <WebpIcon decorative name="chevron" size={22} />
+  </button>
+}
+
+export function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; onClose: () => void; onVideo: () => void }) {
   const [voiceNotice, setVoiceNotice] = useState(false)
   return <div aria-describedby="memoly-voice-video-description" className="memoly-sheet-content" data-slot="memoly-voice-video-sheet">
     <div className="flex min-h-11 items-center gap-3">
       <Button aria-label="Назад" className="size-11" onClick={onBack} size="icon" type="button" variant="ghost"><WebpIcon decorative name="chevron" size={24} /></Button>
-      <DrawerTitle className="min-w-0 flex-1 text-left"><Typography as="span" variant="memoryEmptyTitle">Голос или видео</Typography></DrawerTitle>
+      <DrawerTitle className="min-w-0 flex-1 text-left"><Typography as="span" variant="memoryEmptyTitle">Добавить голос или видео</Typography></DrawerTitle>
       <Button aria-label="Закрыть" className="size-11" onClick={onClose} size="icon" type="button" variant="ghost"><WebpIcon decorative name="close" size={24} /></Button>
     </div>
-    <div className="mt-4 flex flex-col gap-2">
-      <AddAction icon="video" label="Видео" name="video" onClick={onVideo} />
-      <button aria-label="Голос" className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]" data-add-action="voice" onClick={() => setVoiceNotice(true)} type="button">
-        <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full"><WebpIcon decorative name="voice" size={22} state="active" /></span>
-        <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">Голос</Typography>
-      </button>
+    <div className="media-choice-body">
+      <MediaChoiceAction copy={<>Готовый видеофайл<br />с устройства</>} icon="video" label="Выбрать видео" name="video" onClick={onVideo} title="Выбрать видео" />
+      <MediaChoiceAction copy={<>Добавление аудио появится позже<br />Голосовые — через бот</>} icon="voice" label="Аудио пока недоступно" name="audio" onClick={() => setVoiceNotice(true)} title="Аудио пока недоступно" />
     </div>
-    {voiceNotice ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Запись голоса появится позже. Пока можно отправить голосовое в бот.</Typography> : null}
+    {voiceNotice ? <Typography aria-live="polite" className="media-choice-notice" variant="memoryMeta">Запись голоса появится позже. Пока можно отправить голосовое в бот.</Typography> : null}
     <DrawerDescription className="mt-4 text-left" id="memoly-voice-video-description"><Typography as="span" variant="memoryMeta">Материалы увидят участники вашей семьи</Typography></DrawerDescription>
   </div>
 }
 
 // These presentation boundaries are intentionally kept isolated until T09 supplies real create flows.
 export function PhotoAddPresentation({ onSelect }: { onSelect?: () => void } = {}) {
-  return <AddAction icon="photo" label="Фото" name="photo" onClick={onSelect ?? noop} />
+  return <AddAction copy={<>Снимок<br />из жизни</>} icon="photo" label="Фото" name="photo" onClick={onSelect ?? noop} />
 }
 
 export function NoteAddPresentation({ onSelect }: { onSelect?: () => void } = {}) {
-  return <AddAction icon="note" label="Заметка" name="note" onClick={onSelect ?? noop} />
+  return <AddAction copy={<>Мысли<br />и события</>} icon="note" label="Заметка" name="note" onClick={onSelect ?? noop} />
 }
 
 function noop() {}
