@@ -3,6 +3,7 @@ import { ZodError } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
+import { familyCalendarDate } from '@/features/family'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { finalizeMaxVideo, reserveMaxVideo, validateVideoFile, type MaxVideoReservation } from './api'
 import { uploadVideoToMax } from './xhr-upload'
@@ -10,6 +11,7 @@ import { uploadVideoToMax } from './xhr-upload'
 export type VideoComposerProps = {
   childId: string
   familyId: string
+  familyTimezone: string
   onCancel: () => void
   onSuccess: () => void | Promise<void>
   transport: AuthenticatedTransport
@@ -18,6 +20,14 @@ export type VideoComposerProps = {
 type Capability = Pick<MaxVideoReservation, 'sessionId' | 'uploadUrl' | 'uploadToken'>
 type SaveStage = 'reserve' | 'upload' | 'finalize'
 type ReserveErrorCode = 'reserve_not_sent' | 'reserve_network_error' | `reserve_http_${number}` | 'reserve_parse_error'
+
+export function reservationOccurredAt(selectedDate: string, familyTimezone: string, now = new Date()) {
+  const today = familyCalendarDate(familyTimezone, now)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate) || selectedDate > today) return null
+  if (selectedDate === today) return now.toISOString()
+  const pastDate = new Date(`${selectedDate}T12:00:00.000Z`)
+  return Number.isNaN(pastDate.getTime()) ? null : pastDate.toISOString()
+}
 
 function classifyReserveError(reason: unknown): ReserveErrorCode {
   if (reason instanceof ApiRequestError) return `reserve_http_${reason.status}`
@@ -30,10 +40,11 @@ function safeReserveApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function VideoComposer({ childId, familyId, onCancel, onSuccess, transport }: VideoComposerProps) {
+export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onSuccess, transport }: VideoComposerProps) {
   const [file, setFile] = useState<File | null>(null)
   const [caption, setCaption] = useState('')
-  const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
+  const [occurredAt, setOccurredAt] = useState(() => familyCalendarDate(familyTimezone))
+  const maximumOccurredAt = familyCalendarDate(familyTimezone)
   const [capability, setCapability] = useState<Capability | null>(null)
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<'idle' | 'reserving' | 'uploading' | 'saving' | 'error' | 'success'>('idle')
@@ -120,6 +131,14 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       }
     }
 
+    const occurredAtValue = reservationOccurredAt(occurredAt, familyTimezone)
+    if (!occurredAtValue) {
+      setError('Дата видео не может быть в будущем.')
+      setStatus('error')
+      saving.current = false
+      return
+    }
+
     setIsSaving(true)
     const controller = new AbortController()
     abortController.current = controller
@@ -134,7 +153,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         const reservation = await reserveMaxVideo(transport, familyId, {
           childId,
           body: caption,
-          occurredAt: new Date(`${occurredAt}T12:00:00.000Z`).toISOString(),
+          occurredAt: occurredAtValue,
           file: selected,
         }, controller.signal)
         if (!reservation.uploadUrl || !reservation.uploadToken) throw new Error('Не удалось подготовить загрузку видео')
@@ -210,7 +229,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         <label className="mt-5 block" htmlFor="max-video-caption"><Typography variant="memoryButton">Подпись</Typography></label>
         <textarea aria-label="Подпись к видео" className="mt-2 min-h-24 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
         <label className="mt-5 block" htmlFor="max-video-date"><Typography variant="memoryButton">Дата</Typography></label>
-        <input aria-label="Дата видео" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-date" onChange={(event) => setOccurredAt(event.currentTarget.value)} type="date" value={occurredAt} />
+        <input aria-label="Дата видео" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-date" max={maximumOccurredAt} onChange={(event) => setOccurredAt(event.currentTarget.value)} type="date" value={occurredAt} />
         {status === 'uploading' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Загружаем файл… {progress}%</Typography> : null}
         {status === 'saving' || status === 'reserving' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохраняем файл…</Typography> : null}
         {status === 'success' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}

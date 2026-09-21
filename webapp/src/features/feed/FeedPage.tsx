@@ -130,7 +130,7 @@ export function FeedPage({
   }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
 
   if (maxVideoUploadAcceptance && childId) {
-    return <VideoComposer childId={childId} familyId={familyId} onCancel={onFamily} onSuccess={async () => { await refetch() }} transport={transport} />
+    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={onFamily} onSuccess={async () => { await refetch() }} transport={transport} />
   }
 
   return (

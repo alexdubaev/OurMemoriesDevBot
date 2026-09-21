@@ -10,7 +10,7 @@ import {
   reserveMaxVideo,
   validateVideoFile,
 } from '../src/features/max-video-upload/api'
-import { VideoComposer } from '../src/features/max-video-upload/VideoComposer'
+import { reservationOccurredAt, VideoComposer } from '../src/features/max-video-upload/VideoComposer'
 import { uploadVideoToMax } from '../src/features/max-video-upload/xhr-upload'
 import { ApiRequestError, type AuthenticatedTransport } from '../src/platform/api'
 
@@ -106,6 +106,7 @@ test('composer has no durable storage path and renders the acceptance form', () 
   const markup = renderToStaticMarkup(createElement(VideoComposer, {
     childId: 'child-id',
     familyId: 'family-id',
+    familyTimezone: 'UTC',
     onCancel: () => undefined,
     onSuccess: () => undefined,
     transport,
@@ -114,6 +115,96 @@ test('composer has no durable storage path and renders the acceptance form', () 
   expect(markup).toContain('Добавьте подпись')
   expect(markup).not.toContain('localStorage')
   expect(markup).not.toContain('sessionStorage')
+})
+
+test('interactive family today reserves at now instead of future noon UTC', async () => {
+  const OriginalDate = globalThis.Date
+  const fixedNowIso = '2026-09-21T08:00:00.000Z'
+  const fixedNowMs = OriginalDate.parse(fixedNowIso)
+  class FixedDate extends OriginalDate {
+    constructor(value?: string | number) { super(value === undefined ? fixedNowIso : value) }
+    static now() { return fixedNowMs }
+  }
+  globalThis.Date = FixedDate as unknown as DateConstructor
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown> }> = []
+  const transport = interactiveTransport((path, body) => {
+    requests.push({ path, body })
+    return Promise.resolve({ state: 'reserved', sessionId: 'session-1', expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: 'https://upload.max.test/opaque', uploadToken: 'token-1' })
+  })
+  const xhrs: FakeUploadXHR[] = []
+  installUploadXHR(xhrs)
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
+      onSuccess: () => undefined, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    expect(date.value).toBe('2026-09-21')
+    fileInput.files = [file('today.mp4', 24)]
+    await act(async () => invoke(fileInput, 'onChange'))
+    caption.value = 'Сегодня'
+    await act(async () => invoke(caption, 'onChange'))
+
+    await act(async () => {
+      await invoke(save(), 'onClick')
+      await flushInteractive()
+    })
+
+    const reserve = requests.find(({ path }) => path.endsWith('/reserve'))
+    expect(reserve).toBeDefined()
+    expect(reserve?.body.occurredAt).toBe(fixedNowIso)
+    expect(new OriginalDate(String(reserve?.body.occurredAt)).getTime()).toBeLessThanOrEqual(fixedNowMs)
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    restoreUploadXHR()
+    globalThis.Date = OriginalDate
+  }
+  expect(reservationOccurredAt('2026-09-22', 'UTC', new OriginalDate(fixedNowIso))).toBeNull()
+})
+
+test('interactive future date is rejected before reserve', async () => {
+  const browser = installInteractiveDom()
+  const requests: string[] = []
+  const transport = interactiveTransport((path) => {
+    requests.push(path)
+    return Promise.resolve({ state: 'reserved', sessionId: 'session-1', expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: 'https://upload.max.test/opaque', uploadToken: 'token-1' })
+  })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
+      onSuccess: () => undefined, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    fileInput.files = [file('future-date.mp4', 24)]
+    await act(async () => invoke(fileInput, 'onChange'))
+    caption.value = 'Будущая дата'
+    await act(async () => invoke(caption, 'onChange'))
+    date.value = '2999-01-01'
+    await act(async () => invoke(date, 'onChange'))
+
+    await act(async () => {
+      await invoke(save(), 'onClick')
+      await flushInteractive()
+    })
+
+    expect(requests).toHaveLength(0)
+    expect(textOf(browser.container)).toContain('Дата видео не может быть в будущем.')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+  }
 })
 
 test('idempotency keys are opaque and fresh for retries', () => {
@@ -150,7 +241,7 @@ test('interactive processing retry reuses the uploaded session and disables the 
   try {
     await act(async () => {
       root.render(createElement(VideoComposer, {
-        childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+        childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
         onSuccess: () => { successCount += 1 }, transport,
       }))
     })
@@ -210,7 +301,7 @@ test('interactive reserve failure keeps the selected file and form values for re
 
   try {
     await act(async () => root.render(createElement(VideoComposer, {
-      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
       onSuccess: () => undefined, transport,
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
@@ -258,7 +349,7 @@ test('interactive reserve HTTP errors show only the safe application code', asyn
 
   try {
     await act(async () => root.render(createElement(VideoComposer, {
-      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
       onSuccess: () => undefined, transport,
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
@@ -302,7 +393,7 @@ test('provider-side XHR abort is an upload error and leaves the composer retryab
 
   try {
     await act(async () => root.render(createElement(VideoComposer, {
-      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
       onSuccess: () => undefined, transport,
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
@@ -352,7 +443,7 @@ test('interactive expired finalize clears stale capability and retries with the 
 
   try {
     await act(async () => root.render(createElement(VideoComposer, {
-      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      childId: 'child-1', familyId: 'family-1', familyTimezone: 'UTC', onCancel: () => undefined,
       onSuccess: () => { successCount += 1 }, transport,
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
