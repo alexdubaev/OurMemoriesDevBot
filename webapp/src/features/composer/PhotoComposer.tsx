@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { familyCalendarDate } from '@/features/family'
+import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
 import {
   createPhotoIdempotencyKey,
@@ -26,6 +27,11 @@ export type PhotoComposerProps = {
 }
 
 type SaveStage = 'reserve' | 'upload' | 'finalize' | 'create'
+
+function safeFinalizeApplicationCode(reason: unknown): string | null {
+  if (!(reason instanceof ApiRequestError) || !/^PHOTO_FINALIZE_[A-Z_]+$/.test(reason.code)) return null
+  return reason.code.toLowerCase()
+}
 type PendingPhoto = {
   reservation: Awaited<ReturnType<typeof reservePhotoUpload>>
   uploaded: boolean
@@ -40,6 +46,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const [status, setStatus] = useState<'idle' | 'saving' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
+  const [finalizeApplicationCode, setFinalizeApplicationCode] = useState<string | null>(null)
   const pending = useRef<Array<PendingPhoto | null>>([])
   const idempotencyKey = useRef<string | null>(null)
   const saving = useRef(false)
@@ -63,6 +70,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     setProgress(0)
     setError(null)
     setErrorStage(null)
+    setFinalizeApplicationCode(null)
     setStatus('idle')
   }
 
@@ -143,11 +151,12 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       setStatus('success')
       setProgress(100)
       try { await onSuccess() } catch { /* the memory is already durable */ }
-    } catch {
+    } catch (reason) {
       if (controller.signal.aborted) return
       setErrorStage(stage)
       setProgress(0)
       setStatus('error')
+      if (stage === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
       setError(stage === 'reserve'
         ? 'Не удалось подготовить сохранение фотографий. Попробуйте ещё раз.'
         : stage === 'upload'
@@ -185,7 +194,10 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
         <input aria-label="Дата фотографий" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="photo-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
         {status === 'saving' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохраняем фотографии… {progress}%</Typography> : null}
         {status === 'success' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
-        {error ? <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography> : null}
+        {error ? <>
+          <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
+          {finalizeApplicationCode ? <Typography className="mt-1 text-destructive" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}
+        </> : null}
         <div className="mt-6 flex gap-3">
           <Button className="min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
           <Button className="min-h-12" onClick={cancel} type="button" variant="outline">Отмена</Button>

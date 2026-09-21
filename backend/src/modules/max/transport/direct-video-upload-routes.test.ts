@@ -44,17 +44,17 @@ async function reserve(app: ReturnType<typeof appFor>) {
   })
 }
 
-test('logs only safe markers for the two Reserve pre-session not-found branches', async () => {
+test('returns distinct safe codes for the two Reserve pre-session not-found branches', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => {})
 
   try {
     const membership = await reserve(appFor(failingService('reserve_not_found_membership', 'Семья не найдена')))
     expect(membership.status).toBe(404)
-    expect(await membership.json()).toMatchObject({ error: { code: 'NOT_FOUND', message: 'Семья не найдена' } })
+    expect(await membership.json()).toMatchObject({ error: { code: 'MAX_VIDEO_MEMBERSHIP_NOT_FOUND', message: 'Семья не найдена' } })
 
     const child = await reserve(appFor(failingService('reserve_not_found_child', 'Профиль ребёнка не найден')))
     expect(child.status).toBe(404)
-    expect(await child.json()).toMatchObject({ error: { code: 'NOT_FOUND', message: 'Сессия загрузки не найдена' } })
+    expect(await child.json()).toMatchObject({ error: { code: 'MAX_VIDEO_CHILD_NOT_FOUND', message: 'Профиль ребёнка не найден' } })
 
     expect(warn.mock.calls).toEqual([
       ['max_video_reserve_not_found_membership'],

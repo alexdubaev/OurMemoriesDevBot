@@ -223,12 +223,15 @@ export class MediaService {
   async finalize(scope: FamilyScope, uploadId: string) {
     const preparation = await this.repository.prepareFinalize(scope, uploadId, this.now())
     if (preparation.kind === 'ready') return { asset: preparation.asset }
-    if (preparation.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
-    if (preparation.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+    if (preparation.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван', 'PHOTO_FINALIZE_ACCESS_REVOKED')
+    if (preparation.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк', 'PHOTO_FINALIZE_RESERVATION_EXPIRED')
     const upload = preparation.upload
     const head = await this.storage.headObject(upload.objectKey).catch((error) => { throw storageFailure(error) })
     if (!head || head.contentLength !== upload.byteSize || head.contentType !== upload.declaredMime) {
-      if (head) await this.repository.rejectUpload(scope, uploadId, this.now())
+      if (head) {
+        await this.repository.rejectUpload(scope, uploadId, this.now())
+        throw new MediaFailure('upload_incomplete', 'Файл загружен не полностью', 'PHOTO_FINALIZE_OBJECT_METADATA_MISMATCH')
+      }
       throw new MediaFailure('upload_incomplete', 'Файл загружен не полностью')
     }
     const magic = await this.storage.readRange(upload.objectKey, { start: 0, end: Math.min(31, upload.byteSize - 1) })
@@ -238,6 +241,9 @@ export class MediaService {
       detectDeclaredMedia(magic, upload.kind, upload.declaredMime)
     } catch (error) {
       await this.repository.rejectUpload(scope, uploadId, this.now())
+      if (error instanceof MediaFailure) {
+        throw new MediaFailure(error.kind, error.message, 'PHOTO_FINALIZE_MEDIA_VERIFICATION_FAILED', error.details)
+      }
       throw error
     }
 
@@ -284,14 +290,17 @@ export class MediaService {
       }
       const finalization = await this.repository.commitFinalization({ scope, uploadId, verifiedMime,
         sha256, width, height, durationMs, renditionStatus, variants, now: this.now() })
-      if (finalization.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
-      if (finalization.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+      if (finalization.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван', 'PHOTO_FINALIZE_ACCESS_REVOKED')
+      if (finalization.kind === 'expired') throw new MediaFailure('upload_expired', 'Срок загрузки истёк', 'PHOTO_FINALIZE_RESERVATION_EXPIRED')
       finalizationCommitted = true
       return { asset: finalization.asset }
     } catch (error) {
       operationError = error
       if (error instanceof MediaFailure && ['invalid_file', 'unsupported_media'].includes(error.kind)) {
         await this.repository.rejectUpload(scope, uploadId, this.now())
+        if (upload.kind === 'photo') {
+          throw new MediaFailure(error.kind, error.message, 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED', error.details)
+        }
       }
       if (error instanceof StorageError) throw storageFailure(error)
       throw error

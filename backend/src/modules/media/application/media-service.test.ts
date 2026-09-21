@@ -5,6 +5,7 @@ import type { MediaAssetDto } from '@web-app-demo/contracts'
 import type { PrivateStorage } from '../../../storage'
 import type { FamilyScope } from '../../families'
 import { MediaService } from './media-service'
+import { MediaFailure } from '../domain/errors'
 import type { MediaRepository, PhotoProcessor } from './ports'
 
 const scope: FamilyScope = {
@@ -44,6 +45,16 @@ test('finalize still rejects a processing error before commit', async () => {
 
   await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004')).rejects.toThrow('photo processing failed')
   expect(committed).toBe(false)
+})
+
+test('labels a rejected photo-processing failure with a safe finalize code', async () => {
+  const service = createService({
+    processPhoto: async () => { throw new MediaFailure('invalid_file', 'Изображение не удалось безопасно декодировать') },
+    commit: async () => ({ kind: 'ready', asset }),
+  })
+
+  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004'))
+    .rejects.toMatchObject({ code: 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED' })
 })
 
 test('finalize keeps its normal ready result when cleanup succeeds', async () => {

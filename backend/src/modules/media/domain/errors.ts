@@ -11,8 +11,20 @@ export type MediaFailureKind =
   | 'storage_unavailable'
   | 'idempotency_conflict'
 
+export type MediaFailureCode =
+  | 'PHOTO_FINALIZE_ACCESS_REVOKED'
+  | 'PHOTO_FINALIZE_RESERVATION_EXPIRED'
+  | 'PHOTO_FINALIZE_OBJECT_METADATA_MISMATCH'
+  | 'PHOTO_FINALIZE_MEDIA_VERIFICATION_FAILED'
+  | 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED'
+
 export class MediaFailure extends Error {
-  constructor(readonly kind: MediaFailureKind, message: string, readonly details?: { total?: number }) {
+  constructor(
+    readonly kind: MediaFailureKind,
+    message: string,
+    readonly code?: MediaFailureCode,
+    readonly details?: { total?: number },
+  ) {
     super(message)
     this.name = 'MediaFailure'
   }
