@@ -12,7 +12,7 @@ COMPOSE_PROJECT=${COMPOSE_PROJECT:-memoly}
 GATEWAY_CONTAINER=${GATEWAY_CONTAINER:-memoly-webapp-1}
 EDGE_NETWORK=${MEMOLY_EDGE_NETWORK:-memoly_default}
 PUBLIC_URL=${PUBLIC_URL:-https://app.memoly.ru}
-SERVER_EDGE_CADDYFILE=${SERVER_EDGE_CADDYFILE:-"$SERVER_ROOT/Caddyfile"}
+SERVER_EDGE_CADDYFILE=${SERVER_EDGE_CADDYFILE:-"$SERVER_ROOT/gateway/Caddyfile"}
 SERVER_STATIC_CADDYFILE=${SERVER_STATIC_CADDYFILE:-"$SERVER_ROOT/Caddyfile.static"}
 GATEWAY_CADDYFILE=${GATEWAY_CADDYFILE:-/etc/caddy/Caddyfile}
 GATEWAY_CADDY_CONFIG=${GATEWAY_CADDY_CONFIG:-/tmp/memoly-edge-candidate.Caddyfile}
@@ -213,9 +213,11 @@ gateway_activation_failure() {
 }
 
 gateway_preflight() {
-	local status labels networks
+	local status labels networks gateway_mount
 	status=$(docker inspect --format '{{.State.Status}}' "$GATEWAY_CONTAINER" 2>/dev/null) || die "configured gateway is missing: $GATEWAY_CONTAINER"
 	[ "$status" = running ] || die "configured gateway is not running: $GATEWAY_CONTAINER ($status)"
+	[ -f "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile is missing: $SERVER_EDGE_CADDYFILE"
+	[ ! -L "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile must be a regular file: $SERVER_EDGE_CADDYFILE"
 
 	labels=$(docker inspect --format '{{json .Config.Labels}}' "$GATEWAY_CONTAINER")
 	case "$labels" in
@@ -230,6 +232,8 @@ gateway_preflight() {
 		*"\"$EDGE_NETWORK\""*) ;;
 		*) die "gateway is not attached to edge network: $EDGE_NETWORK" ;;
 	esac
+	gateway_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy"}}{{.Type}}|{{.Source}}|{{.RW}}{{end}}{{end}}' "$GATEWAY_CONTAINER")
+	[ "$gateway_mount" = "bind|$SERVER_ROOT/gateway|false" ] || die "gateway must use the read-only directory bind $SERVER_ROOT/gateway:/etc/caddy:ro"
 }
 
 validate_inputs() {
