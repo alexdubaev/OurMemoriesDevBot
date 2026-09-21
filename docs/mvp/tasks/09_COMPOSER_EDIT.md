@@ -1,5 +1,7 @@
 # Блок 09 — Добавление из Mini App, редактирование и удаление
 
+**Статус T09: ACCEPTED.** Ручная приёмка владельцем на реальном iPhone внутри MAX пройдена.
+
 **Исполнитель:** Terra; отдельные локальные формы при необходимости можно поручить Luna.
 **Назначенное независимое ревью:** Sol — permissions, idempotency/finalize/retry, дубли, destructive actions и отсутствие регрессии уже принятого production video flow.
 **Зависимости:** 07 и 08 приняты и слиты в `main`; production MAX Direct Video Upload принят на реальном устройстве, слит в `main` и считается готовой инфраструктурой, которую этот блок обязан переиспользовать.
@@ -271,9 +273,7 @@ Body обязателен после trim.
 
 Специальный `startapp=max-video-upload-acceptance` был нужен для отдельной production-приёмки uploader-а.
 
-До успешной ручной приёмки normal T09 Add-flow не удалять этот entry.
-
-После T09 manual acceptance:
+После пройденной T09 manual acceptance:
 
 - если entry больше не нужен — удалить отдельным маленьким cleanup change;
 - если нужен как internal diagnostic — оставить только internal/debug semantics, не как пользовательский путь.
@@ -744,12 +744,28 @@ STOP только если:
 - CI.
 
 ### Manual acceptance
-- точные оставшиеся шаги владельца.
+- результаты ручной проверки владельца.
 
-Финальный статус до ручной приёмки:
-
-`READY_FOR_T09_MANUAL_ACCEPTANCE`
+Принятый статус блока: `ACCEPTED`. Факты ручной приёмки записаны ниже.
 
 После этого STOP.
 
 Не начинать T09.5 Web Access самостоятельно.
+
+## Manual acceptance
+
+21 сентября 2026 владелец принял normal Add flow на реальном iPhone внутри MAX. Add Sheet содержит `Фото`, `Заметка`, `Голос или видео`.
+
+- **Note: PASS.** Создание заметки через рабочий production flow.
+- **Video: PASS.** `Добавить → Голос или видео → Видео` открывает существующий Video Composer; direct browser → MAX upload и Finalize создают Memory в Feed, playback работает.
+- **Photo: PASS.** JPEG через normal Photo Composer проходит upload → finalize → Memory → Feed. Последний production fix — [PR #42](https://github.com/alexdubaev/OurMemoriesDevBot/pull/42), merge/deployed SHA `27b2ad4f6a0fe22f72e152796875ea77cfb4c89e`: Caddy направляет обычные API/storage-запросы в единственный backend с нужным filesystem storage root. Общий Docker alias ранее мог разделить одну операцию между контейнерами с разными storage roots.
+
+T09 принят владельцем. VIEWER остаётся read-only; create/edit/delete доступны только согласно capabilities. In-app voice recording deferred until post-MVP.
+
+## Accepted flows and next steps
+
+Без отдельной продуктовой причины или исправления дефекта считаются frozen: Photo create/upload/finalize, Note create, Video Reserve/direct upload/Finalize, существующий media playback, permissions и idempotency. Для Photo source of truth — существующий flow в `webapp/src/features/family/api.ts`; параллельный Photo uploader не создавать. Video Composer переиспользовать, не копировать. Presentation changes не должны создавать новую media orchestration.
+
+Future design migration must preserve the accepted Photo, Note and Video business flows and integrate through their existing controllers/contracts rather than creating parallel upload/create implementations.
+
+Порядок следующей работы: 1) full UI migration по `docs/design/memoly-handoff-final/` — только presentation/skin; 2) T09.5 Web Access для приглашённых родственников в режиме VIEWER; 3) member avatars/display names; 4) актуализация scope T10/T11. Это порядок roadmap, а не начало следующего блока.
