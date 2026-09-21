@@ -32,8 +32,11 @@ import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
+import { MemoryEditor, NoteComposer, PhotoComposer } from '@/features/composer'
 import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
+import { composerModeForAdd, memoryActionNames, type ComposerMode } from './composer-routing'
+import { loadMaxVideoSourceOnce } from './max-video-source'
 
 type Props = {
   childId?: string
@@ -70,6 +73,8 @@ export function FeedPage({
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(false)
+  const [composer, setComposer] = useState<ComposerMode | null>(null)
+  const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const [newAvailable, setNewAvailable] = useState(false)
   const knownFirstId = useRef<string | null>(null)
@@ -129,8 +134,24 @@ export function FeedPage({
     return () => observer.disconnect()
   }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
 
-  if (maxVideoUploadAcceptance && childId) {
-    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={onFamily} onSuccess={async () => { await refetch() }} transport={transport} />
+  const closeComposerAfterRefresh = async () => {
+    try { await refetch() } finally { setComposer(null); setEditingMemory(null) }
+  }
+
+  if ((maxVideoUploadAcceptance || composer === 'video') && childId) {
+    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+  }
+
+  if (composer === 'photo' && childId) {
+    return <PhotoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+  }
+
+  if (composer === 'note' && childId) {
+    return <NoteComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+  }
+
+  if (editingMemory) {
+    return <MemoryEditor familyTimezone={familyTimezone} memory={editingMemory} onCancel={() => setEditingMemory(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
   return (
@@ -148,7 +169,7 @@ export function FeedPage({
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
           attachment.source === 'private_storage' && attachment.kind === 'photo')
         return <MemoryCardPresentation
-          actions={<MemoryActions memory={memory} onDelete={memory.capabilities.delete ? (target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) } : undefined} onOpen={() => setDetail(memory)} />}
+          actions={<MemoryActions memory={memory} onDelete={memory.capabilities.delete ? (target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) } : undefined} onEdit={memory.capabilities.edit ? setEditingMemory : undefined} onOpen={() => setDetail(memory)} />}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
           body={memory.body}
@@ -169,7 +190,10 @@ export function FeedPage({
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
+      onNote={() => { const next = composerModeForAdd('note', childId); if (next) setComposer(next) }}
       onOpenChange={setAddSheetOpen}
+      onPhoto={() => { const next = composerModeForAdd('photo', childId); if (next) setComposer(next) }}
+      onVideo={() => { const next = composerModeForAdd('video', childId); if (next) setComposer(next) }}
       open={addSheetOpen}
       returnFocusRef={addButtonRef}
       role={role}
@@ -238,9 +262,10 @@ function MemoryList({ familyTimezone, items, renderCard }: {
   })}</>
 }
 
-function MemoryActions({ memory, onDelete, onOpen }: { memory: MemoryDto; onDelete?: (memory: MemoryDto) => Promise<unknown>; onOpen: () => void }) {
+function MemoryActions({ memory, onDelete, onEdit, onOpen }: { memory: MemoryDto; onDelete?: (memory: MemoryDto) => Promise<unknown>; onEdit?: (memory: MemoryDto) => void; onOpen: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const actionNames = memoryActionNames(memory.capabilities)
   const confirm = async () => {
     if (submitting || !onDelete) return
     setSubmitting(true)
@@ -258,7 +283,8 @@ function MemoryActions({ memory, onDelete, onOpen }: { memory: MemoryDto; onDele
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem className="min-h-11 px-3" onSelect={onOpen}>Подробнее</DropdownMenuItem>
-        {onDelete ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => setConfirming(true)} variant="destructive">Удалить воспоминание</DropdownMenuItem> : null}
+        {onEdit && actionNames.includes('edit') ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => onEdit(memory)}>Изменить воспоминание</DropdownMenuItem> : null}
+        {onDelete && actionNames.includes('delete') ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => setConfirming(true)} variant="destructive">Удалить воспоминание</DropdownMenuItem> : null}
       </DropdownMenuContent>
     </DropdownMenu>
     <AlertDialogContent className="mx-4 max-w-[calc(100%-2rem)] rounded-[var(--radius-sheet)]">
@@ -297,14 +323,20 @@ function MaxVideo({ attachment, hostBridge }: {
   return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} sourceStatus={source.status} src={source.url} width={attachment.width} />
 }
 
-export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src, width }: {
+type MaxVideoPreviewProps = {
   durationMs: number | null
   height: number | null
   onOpen: () => void
   sourceStatus?: 'loading' | 'ready' | 'error'
   src: string | null
   width: number | null
-}) {
+}
+
+export function MaxVideoPreview(props: MaxVideoPreviewProps) {
+  return <MaxVideoPreviewContent key={props.src ?? 'missing'} {...props} />
+}
+
+function MaxVideoPreviewContent({ durationMs, height, onOpen, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
@@ -316,10 +348,6 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
   const frameDimensions = intrinsicDimensions ?? { width, height }
   const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
   useEffect(() => {
-    setIntrinsicDimensions(null)
-    setStarted(false)
-    setFailed(false)
-    setMediaErrorCode(0)
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
@@ -348,18 +376,6 @@ export function MaxVideoPreview({ durationMs, height, onOpen, sourceStatus, src,
     </div>
     <Button className="mt-2" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
   </div>
-}
-
-export function loadMaxVideoSourceOnce(video: Pick<HTMLMediaElement, 'src' | 'load' | 'removeAttribute'>, src: string | null, loadedSource: string | null) {
-  if (loadedSource === src) return loadedSource
-  if (src === null) {
-    video.removeAttribute('src')
-    video.load()
-    return null
-  }
-  video.src = src
-  video.load()
-  return src
 }
 
 function useMaxVideoSource(path: string | null) {

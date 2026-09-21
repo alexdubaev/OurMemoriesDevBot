@@ -10,7 +10,7 @@ test('shows the memoLy brand outside Telegram without pretending that a family i
     createElement(App, { hostBridge: createBrowserDevHostBridge() }),
   )
 
-  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo-correct.webp"')
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
   expect(markup).toContain('Откройте приложение в Telegram')

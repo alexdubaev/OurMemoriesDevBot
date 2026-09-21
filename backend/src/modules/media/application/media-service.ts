@@ -12,7 +12,7 @@ import { createStorageObjectKey, StorageError, type PrivateStorage } from '../..
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MediaFailure } from '../domain/errors'
 import { detectDeclaredMedia, detectPhotoMime, parseSingleRange } from '../domain/media-policy'
-import type { MediaProbe, MediaRepository, PhotoProcessor, StoredVariant } from './ports'
+import type { MediaProbe, MediaRepository, PendingMediaUpload, PhotoProcessor, StoredVariant } from './ports'
 
 export class MediaService {
   constructor(
@@ -27,20 +27,34 @@ export class MediaService {
     private readonly warnCleanupFailure: (errorName: string) => void = warnTemporaryCleanupFailure,
   ) {}
 
-  async reserve(scope: FamilyScope, input: ReserveMediaUploadRequest) {
+  async reserve(scope: FamilyScope, input: ReserveMediaUploadRequest, idempotencyKey?: string) {
     if (input.purpose === 'child_avatar') await this.access.requireOwner(scope)
     else await this.access.requireFull(scope)
     const now = this.now()
-    const uploadId = randomUUID()
-    const assetId = randomUUID()
+    const operationKey = idempotencyKey ?? randomUUID()
+    const uploadId = deterministicUuid('media-upload', scope, operationKey)
+    const assetId = deterministicUuid('media-asset', scope, operationKey)
     const objectKey = createStorageObjectKey({ namespace: 'media-originals', id: assetId, now })
     const expiresAt = new Date(now.getTime() + this.config.reservationTtlSeconds * 1_000)
-    await this.repository.reserve({
-      uploadId, assetId, familyId: scope.familyId, userId: scope.principal.userId,
-      purpose: input.purpose, kind: input.kind, objectKey, declaredMime: input.contentType,
-      byteSize: input.byteSize, expiresAt, quotaBytes: this.config.familyQuotaBytes,
-      maxPendingUploads: this.config.maxPendingUploads, now,
-    })
+    try {
+      await this.repository.reserve({
+        uploadId, assetId, familyId: scope.familyId, userId: scope.principal.userId,
+        purpose: input.purpose, kind: input.kind, objectKey, declaredMime: input.contentType,
+        byteSize: input.byteSize, expiresAt, quotaBytes: this.config.familyQuotaBytes,
+        maxPendingUploads: this.config.maxPendingUploads, now,
+      })
+    } catch (error) {
+      if (!isUniqueConstraint(error) || !idempotencyKey || !this.repository.findUpload) throw error
+      const existing = await this.repository.findUpload(scope, uploadId)
+      if (!existing || existing.assetId !== assetId || existing.purpose !== input.purpose || existing.kind !== input.kind || existing.declaredMime !== input.contentType || existing.byteSize !== input.byteSize) {
+        throw new MediaFailure('idempotency_conflict', 'Этот ключ уже использован для другой загрузки')
+      }
+      try {
+        return await this.createUploadResponse(existing, input.contentType)
+      } catch (error) {
+        throw storageFailure(error)
+      }
+    }
     try {
       const ticket = await this.storage.createUploadUrl({
         key: objectKey, contentType: input.contentType, byteSize: input.byteSize,
@@ -56,6 +70,18 @@ export class MediaService {
       await this.repository.rejectUpload(scope, uploadId, now)
       throw storageFailure(error)
     }
+  }
+
+  private createUploadResponse(upload: PendingMediaUpload, contentType: ReserveMediaUploadRequest['contentType']) {
+    return this.storage.createUploadUrl({
+      key: upload.objectKey, contentType, byteSize: upload.byteSize,
+      expiresInSeconds: this.config.uploadUrlTtlSeconds,
+    }).then((ticket) => ({
+      assetId: upload.assetId,
+      upload: { uploadId: upload.uploadId, method: ticket.method, url: ticket.url, headers: ticket.headers,
+        contentLength: ticket.contentLength, expiresAt: ticket.expiresAt },
+      reservationExpiresAt: upload.expiresAt.toISOString(),
+    }))
   }
 
   /** Server-side ingestion for trusted adapters. It deliberately follows the same reservation,
@@ -323,6 +349,11 @@ function storageFailure(error: unknown) {
 
 function isUniqueConstraint(error: unknown) {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002'
+}
+
+function deterministicUuid(namespace: string, scope: FamilyScope, key: string) {
+  const digest = createHash('sha256').update([namespace, scope.principal.userId, scope.familyId, key].join('\0')).digest('hex')
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`
 }
 
 async function storageObjectMatches(storage: PrivateStorage, key: string, expectedLength: number, expectedSha256: string) {

@@ -32,7 +32,7 @@ test('renders the local memoLy logo in the preloader instead of the former text 
 
   expect(markup).toContain('data-slot="app-loading"')
   expect(markup).toContain('data-slot="app-brand"')
-  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo-correct.webp"')
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
   expect(markup).toContain('aria-busy="true"')

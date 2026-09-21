@@ -124,7 +124,7 @@ test('reserves the normalized bottom host inset for the namespaced navigation', 
 })
 
 test('memoLy presentation CSS keeps captions readable and outer gutters single at 320px', () => {
-  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8').replaceAll('\r\n', '\n')
 
   expect(css).toContain('overflow-wrap: anywhere')
   expect(css).toContain('-webkit-line-clamp: 4')

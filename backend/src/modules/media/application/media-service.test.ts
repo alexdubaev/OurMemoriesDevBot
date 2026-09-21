@@ -57,6 +57,53 @@ test('finalize keeps its normal ready result when cleanup succeeds', async () =>
   expect(cleanupCalls).toBe(1)
 })
 
+test('replays the same reservation when an idempotent reserve response was lost', async () => {
+  let reserveCalls = 0
+  const pendingUpload = {
+    uploadId: '0196f6f8-6600-7000-8000-000000000004',
+    assetId: '0196f6f8-6600-7000-8000-000000000003',
+    familyId: scope.familyId,
+    userId: scope.principal.userId,
+    purpose: 'memory' as const,
+    kind: 'photo' as const,
+    objectKey: 'media-originals/retry-photo',
+    declaredMime: 'image/png' as const,
+    byteSize: 80,
+    expiresAt: new Date('2026-09-12T00:10:00.000Z'),
+  }
+  const service = createReserveService({
+    reserve: async (input) => {
+      reserveCalls += 1
+      if (reserveCalls === 1) Object.assign(pendingUpload, input)
+      if (reserveCalls > 1) throw { code: 'P2002' }
+    },
+    findUpload: async () => pendingUpload,
+  })
+  const input = { purpose: 'memory' as const, kind: 'photo' as const, contentType: 'image/png' as const, byteSize: 80 }
+
+  const first = await service.reserve(scope, input, '0196f6f8-6600-7000-8000-000000000005')
+  const replay = await service.reserve(scope, input, '0196f6f8-6600-7000-8000-000000000005')
+
+  expect(replay).toEqual(first)
+  expect(reserveCalls).toBe(2)
+})
+
+test('does not replay an idempotency key for changed photo metadata', async () => {
+  let stored: any = null
+  const service = createReserveService({
+    reserve: async (input) => {
+      if (stored) throw { code: 'P2002' }
+      stored = input
+    },
+    findUpload: async () => stored,
+  })
+  const key = '0196f6f8-6600-7000-8000-000000000006'
+  await service.reserve(scope, { purpose: 'memory', kind: 'photo', contentType: 'image/png', byteSize: 80 }, key)
+
+  await expect(service.reserve(scope, { purpose: 'memory', kind: 'photo', contentType: 'image/png', byteSize: 81 }, key))
+    .rejects.toMatchObject({ kind: 'idempotency_conflict' })
+})
+
 function createService(options: {
   commit: MediaRepository['commitFinalization']
   cleanup?: (directory: string) => Promise<void>
@@ -92,5 +139,32 @@ function createService(options: {
     {} as never, repository, storage, { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
     processPhoto, async () => ({ width: null, height: null, durationMs: 1 }), () => new Date('2026-09-11T00:00:00.000Z'),
     options.cleanup, options.warn,
+  ) as MediaService
+}
+
+function createReserveService(options: {
+  reserve: MediaRepository['reserve']
+  findUpload: NonNullable<MediaRepository['findUpload']>
+}) {
+  const storage = {
+    createUploadUrl: async ({ key, contentType, byteSize }: { key: string; contentType: string; byteSize: number }) => ({
+      method: 'PUT' as const,
+      url: `https://storage.test/${key}`,
+      headers: { 'Content-Type': contentType },
+      contentLength: byteSize,
+      expiresAt: '2026-09-12T00:05:00.000Z',
+    }),
+  }
+  const repository = {
+    reserve: options.reserve,
+    findUpload: options.findUpload,
+  } as MediaRepository
+  return new (MediaService as any)(
+    { requireFull: async () => undefined }, repository, storage,
+    { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
+    async () => ({ verifiedMime: 'image/jpeg', originalSha256: 'hash', width: 1, height: 1,
+      display: { bytes: new Uint8Array([1]), sha256: 'display', width: 1, height: 1 },
+      preview: { bytes: new Uint8Array([2]), sha256: 'preview', width: 1, height: 1 } }),
+    async () => ({ width: null, height: null, durationMs: 1 }), () => new Date('2026-09-11T00:00:00.000Z'),
   ) as MediaService
 }

@@ -10,7 +10,8 @@ import {
   reserveMaxVideo,
   validateVideoFile,
 } from '../src/features/max-video-upload/api'
-import { reservationOccurredAt, VideoComposer } from '../src/features/max-video-upload/VideoComposer'
+import { VideoComposer } from '../src/features/max-video-upload/VideoComposer'
+import { reservationOccurredAt } from '../src/features/max-video-upload/date'
 import { uploadVideoToMax } from '../src/features/max-video-upload/xhr-upload'
 import { ApiRequestError, type AuthenticatedTransport } from '../src/platform/api'
 
