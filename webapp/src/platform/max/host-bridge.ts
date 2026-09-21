@@ -21,10 +21,27 @@ type MaxWebApp = {
 type BrowserHost = {
   WebApp?: unknown
   history?: { back?: unknown }
-  location?: { search?: unknown }
+  location?: { pathname?: unknown; search?: unknown }
 }
 
 export type MaxHostBridgeOptions = { maxBotUsername?: string }
+
+export type MaxRuntimeDiagnostic = {
+  hostDetected: boolean
+  webAppPresent: boolean
+  initDataPresent: boolean
+  signedStartParamPresent: boolean
+  signedStartParamValue: string | null
+  initDataUnsafePresent: boolean
+  unsafeStartParamPresent: boolean
+  unsafeStartParamValue: string | null
+  webAppStartParamPresent: boolean
+  webAppStartParamValue: string | null
+  locationPathname: string
+  locationQueryKeys: string[]
+  resolvedStartParam: string | null
+  isMaxVideoUploadAcceptanceLaunch: boolean
+}
 
 const zeroInsets: TelegramInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
@@ -105,6 +122,48 @@ export function isMaxVideoUploadAcceptanceLaunch(host: unknown): boolean {
   return documented.present && documented.value === 'max-video-upload-acceptance'
 }
 
+/** Returns an on-screen-only snapshot of safe MAX launch diagnostics. */
+export function readMaxRuntimeDiagnostic(host: unknown): MaxRuntimeDiagnostic {
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const webAppPresent = isRecord(browserHost?.WebApp)
+  const webApp = webAppPresent ? browserHost?.WebApp as MaxWebApp : null
+  const raw = rawInitData(webApp)
+  const signed = startParamResult(raw)
+  const unsafe = unsafeStartParamResult(webApp)
+  const documented = queryStartParamResult(browserHost?.location?.search, 'WebAppStartParam')
+  const resolved = resolveStartParam(signed, unsafe, documented)
+
+  return {
+    hostDetected: isMeaningfulMaxWebApp(host),
+    webAppPresent,
+    initDataPresent: raw !== null,
+    signedStartParamPresent: signed.present,
+    signedStartParamValue: signed.value,
+    initDataUnsafePresent: isRecord(webApp?.initDataUnsafe),
+    unsafeStartParamPresent: unsafe.present,
+    unsafeStartParamValue: unsafe.value,
+    webAppStartParamPresent: documented.present,
+    webAppStartParamValue: documented.value,
+    locationPathname: stringValue(browserHost?.location?.pathname),
+    locationQueryKeys: queryKeys(browserHost?.location?.search),
+    resolvedStartParam: resolved,
+    isMaxVideoUploadAcceptanceLaunch: isMaxVideoUploadAcceptanceLaunch(host),
+  }
+}
+
+export function isMaxRuntimeDiagnosticLaunch(host: unknown): boolean {
+  if (!isMeaningfulMaxWebApp(host)) return false
+  const diagnostic = readMaxRuntimeDiagnostic(host)
+  if (diagnostic.resolvedStartParam === 'max-start-param-debug') return true
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const internalDebug = queryStartParamResult(browserHost?.location?.search, 'startapp')
+  return internalDebug.present && internalDebug.value === 'max-start-param-debug'
+}
+
+export function shouldShowMaxRuntimeDiagnostic(hostKind: HostBridge['kind'], host: unknown): boolean {
+  return hostKind === 'max' && isMaxRuntimeDiagnosticLaunch(host)
+}
+
 function rawInitData(webApp: MaxWebApp | null) {
   return typeof webApp?.initData === 'string' && webApp.initData.length > 0
     ? webApp.initData
@@ -157,6 +216,22 @@ function queryStartParamResult(search: unknown, name: string) {
   if (typeof search !== 'string') return { present: false, value: null as string | null }
   const values = new URLSearchParams(search).getAll(name)
   return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null }
+}
+
+function resolveStartParam(
+  signed: { present: boolean; value: string | null },
+  unsafe: { present: boolean; value: string | null },
+  documented: { present: boolean; value: string | null },
+) {
+  if (signed.present) return signed.value
+  if (unsafe.present) return unsafe.value
+  if (documented.present) return documented.value
+  return null
+}
+
+function queryKeys(search: unknown) {
+  if (typeof search !== 'string') return []
+  return [...new Set([...new URLSearchParams(search).keys()])]
 }
 
 function inviteTokenFromSearch(search: unknown) {
