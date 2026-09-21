@@ -89,27 +89,44 @@ export async function uploadChildAvatar(
   file: File,
   contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif',
 ) {
+  return uploadFamilyPhoto(transport, familyId, file, contentType, 'child_avatar')
+}
+
+export async function uploadFamilyPhoto(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  file: File,
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif',
+  purpose: 'child_avatar' | 'memory',
+  signal?: AbortSignal,
+  onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+) {
+  onStage?.('reserve')
   const reservation = await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads`, reserveMediaUploadResponseSchema,
     {
       method: 'POST',
       body: reserveMediaUploadRequestSchema.parse({
-        purpose: 'child_avatar', kind: 'photo', contentType, byteSize: file.size,
+        purpose, kind: 'photo', contentType, byteSize: file.size,
       }),
+      signal,
     },
   )
+  onStage?.('upload')
   const response = await fetch(reservation.upload.url, {
     method: reservation.upload.method,
     headers: reservation.upload.headers,
     body: file,
     credentials: 'omit',
     mode: 'cors',
+    signal,
   })
   if (!response.ok && response.status !== 412) throw new Error('Не удалось загрузить фотографию')
+  onStage?.('finalize')
   await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(reservation.upload.uploadId)}/finalize`,
     finalizeMediaUploadResponseSchema,
-    { method: 'POST' },
+    { method: 'POST', signal },
   )
   return reservation.assetId
 }

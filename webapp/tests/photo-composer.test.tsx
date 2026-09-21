@@ -70,6 +70,7 @@ test('finalizes every selected photo before creating exactly one idempotent memo
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
 
     expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(2)
+    expect(requests.filter(({ path }) => path.endsWith('/uploads')).every(({ headers }) => !headers || !('Idempotency-Key' in headers))).toBe(true)
     expect(requests.filter(({ path }) => path.includes('/finalize'))).toHaveLength(2)
     const memoryRequests = requests.filter(({ path }) => path.endsWith('/memories'))
     expect(memoryRequests).toHaveLength(1)
@@ -86,12 +87,11 @@ test('finalizes every selected photo before creating exactly one idempotent memo
 test('recoverable reserve failure keeps selected files, caption, and date for retry', async () => {
   const browser = installInteractiveDom()
   let reserveCount = 0
-  const reserveKeys: string[] = []
   const transport: AuthenticatedTransport = {
     request: async (path, _schema, options) => {
       if (path.endsWith('/uploads')) {
         reserveCount += 1
-        reserveKeys.push(String((options?.headers as Record<string, string> | undefined)?.['Idempotency-Key']))
+        expect(options?.headers).toBeUndefined()
         if (reserveCount === 1) throw new Error('offline')
         return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/asset-1', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
       }
@@ -128,8 +128,6 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
 
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
     expect(reserveCount).toBe(2)
-    expect(reserveKeys[0]).toBeTruthy()
-    expect(reserveKeys[1]).toBe(reserveKeys[0])
   } finally {
     await act(async () => root.unmount())
     browser.restore()
@@ -174,7 +172,7 @@ test('shows the safe photo-finalize code without storage details', async () => {
   }
 })
 
-test('replays one idempotent photo upload when finalize reports the missing object', async () => {
+test('manual retry starts a fresh reservation after a missing object', async () => {
   const browser = installInteractiveDom()
   let reserves = 0
   let finalizes = 0
@@ -207,7 +205,12 @@ test('replays one idempotent photo upload when finalize reports the missing obje
     const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
     input.files = [file('retry-after-missing.jpg')]
     await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive(); await flushInteractive() })
+    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
+
+    expect(reserves).toBe(1)
+    expect(finalizes).toBe(1)
+    expect(successCount).toBe(0)
+    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
 
     expect(reserves).toBe(2)
     expect(finalizes).toBe(2)
