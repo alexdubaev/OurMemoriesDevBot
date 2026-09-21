@@ -141,7 +141,14 @@ export function createMaxDirectVideoUploadService(options: {
 
   return {
     async reserve(scope: FamilyScope, input: DirectVideoUploadReserveInput): Promise<DirectVideoUploadReserveResult> {
-      await options.access.requireFull(scope)
+      try {
+        await options.access.requireFull(scope)
+      } catch (error) {
+        if (isNotFoundFailure(error)) {
+          throw new MaxDirectUploadFailure('not_found', 'Семья не найдена', 'reserve_not_found_membership')
+        }
+        throw error
+      }
       validateReservation(input, now())
       await assertChild(options.repository, scope, input.childId)
       const occurredAt = new Date(input.occurredAt)
@@ -364,8 +371,12 @@ async function recipientId(repository: MaxDirectUploadRepository, scope: FamilyS
 async function assertChild(repository: MaxDirectUploadRepository, scope: FamilyScope, childId: string) {
   if (repository.assertChild) {
     const valid = await repository.assertChild(scope.familyId, childId)
-    if (!valid) throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден')
+    if (!valid) throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'reserve_not_found_child')
   }
+}
+
+function isNotFoundFailure(error: unknown) {
+  return typeof error === 'object' && error !== null && (error as { kind?: unknown }).kind === 'not_found'
 }
 
 function validateReservation(input: DirectVideoUploadReserveInput, current: Date) {
