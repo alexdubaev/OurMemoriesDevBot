@@ -95,7 +95,7 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
   if (range && response.status !== 206) {
     const total = response.status === 416 ? parseUnsatisfiedContentRange(response.headers.get('content-range')) : null
     await cancelBody(response.body, signal)
-    throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', total === null ? undefined : { total })
+    throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', undefined, total === null ? undefined : { total })
   }
   if (!range && response.status !== 200) { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
   if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }

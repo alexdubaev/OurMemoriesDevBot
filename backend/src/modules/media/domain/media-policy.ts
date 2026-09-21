@@ -81,5 +81,5 @@ function asciiAt(bytes: Uint8Array, offset: number, length: number) {
 }
 
 function rangeFailure(total?: number) {
-  return new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', { total })
+  return new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', undefined, { total })
 }

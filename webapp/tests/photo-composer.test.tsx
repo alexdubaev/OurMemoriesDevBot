@@ -9,6 +9,7 @@ import {
 } from '../src/features/composer'
 import { PhotoComposer } from '../src/features/composer/PhotoComposer'
 import type { AuthenticatedTransport } from '../src/platform/api'
+import { ApiRequestError } from '../src/platform/api'
 
 function file(name: string, size = 128, type = 'image/jpeg') {
   return new File([new Uint8Array(size)], name, { type })
@@ -129,6 +130,43 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
     expect(reserveCount).toBe(2)
     expect(reserveKeys[0]).toBeTruthy()
     expect(reserveKeys[1]).toBe(reserveKeys[0])
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('shows the safe photo-finalize code without storage details', async () => {
+  const browser = installInteractiveDom()
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/uploads')) {
+        return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/private-object', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) throw new ApiRequestError(415, 'PHOTO_FINALIZE_MEDIA_VERIFICATION_FAILED', 'Файл не соответствует заявленному формату')
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, {
+      childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport,
+      onCancel: () => undefined, onSuccess: () => undefined,
+    })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    input.files = [file('failed.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
+
+    expect(textOf(browser.container)).toContain('Не удалось подтвердить фотографию')
+    expect(textOf(browser.container)).toContain('Код: photo_finalize_media_verification_failed')
+    expect(textOf(browser.container)).not.toContain('storage.test')
   } finally {
     await act(async () => root.unmount())
     browser.restore()
