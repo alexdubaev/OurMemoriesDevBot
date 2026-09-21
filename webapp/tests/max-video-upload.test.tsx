@@ -229,6 +229,9 @@ test('interactive reserve failure keeps the selected file and form values for re
       await flushInteractive()
     })
     expect(textOf(browser.container)).toContain('Не удалось подготовить сохранение видео')
+    expect(textOf(browser.container)).toContain('Код: reserve_network_error')
+    const reserveError = findOne(browser.container, (node) => node.attributes['data-save-stage'] === 'reserve')
+    expect(reserveError.attributes['data-save-error-code']).toBe('reserve_network_error')
     expect(caption.value).toBe('Сохранить после сети')
     expect(date.value).toBe('2026-09-19')
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ZodError } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
@@ -16,6 +17,13 @@ export type VideoComposerProps = {
 
 type Capability = Pick<MaxVideoReservation, 'sessionId' | 'uploadUrl' | 'uploadToken'>
 type SaveStage = 'reserve' | 'upload' | 'finalize'
+type ReserveErrorCode = 'reserve_not_sent' | 'reserve_network_error' | `reserve_http_${number}` | 'reserve_parse_error'
+
+function classifyReserveError(reason: unknown): ReserveErrorCode {
+  if (reason instanceof ApiRequestError) return `reserve_http_${reason.status}`
+  if (reason instanceof ZodError || reason instanceof SyntaxError) return 'reserve_parse_error'
+  return 'reserve_network_error'
+}
 
 export function VideoComposer({ childId, familyId, onCancel, onSuccess, transport }: VideoComposerProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -26,6 +34,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
   const [status, setStatus] = useState<'idle' | 'reserving' | 'uploading' | 'saving' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
+  const [reserveErrorCode, setReserveErrorCode] = useState<ReserveErrorCode | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const saving = useRef(false)
@@ -53,6 +62,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     if (saving.current) return
     setError(null)
     setErrorStage(null)
+    setReserveErrorCode(null)
     setCapability(null)
     setProgress(0)
     if (!next) {
@@ -75,6 +85,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     saving.current = true
     setError(null)
     setErrorStage(null)
+    setReserveErrorCode(null)
     const selected = file
     const pendingFinalize: Capability | null = capability?.sessionId && capability.uploadToken
       ? capability
@@ -165,6 +176,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       setStatus('error')
       const stage: SaveStage = uploadCompleted ? 'finalize' : finalizeCapability ? 'upload' : 'reserve'
       setErrorStage(stage)
+      if (stage === 'reserve') setReserveErrorCode(classifyReserveError(reason))
       setError(stage === 'reserve'
         ? 'Не удалось подготовить сохранение видео. Попробуйте ещё раз.'
         : stage === 'upload'
@@ -191,7 +203,10 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         {status === 'uploading' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Загружаем файл… {progress}%</Typography> : null}
         {status === 'saving' || status === 'reserving' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохраняем файл…</Typography> : null}
         {status === 'success' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
-        {error ? <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography> : null}
+        {error ? <>
+          <Typography className="mt-4 text-destructive" data-save-error-code={reserveErrorCode ?? undefined} data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
+          {reserveErrorCode ? <Typography className="mt-1 text-destructive" data-save-error-code={reserveErrorCode} variant="memoryMeta">Код: {reserveErrorCode}</Typography> : null}
+        </> : null}
         <div className="mt-6 flex gap-3">
           <Button className="min-h-12 flex-1" disabled={isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
           <Button className="min-h-12" disabled={isSaving && status !== 'uploading'} onClick={() => { clearEphemeral(); onCancel() }} type="button" variant="outline">Отмена</Button>
