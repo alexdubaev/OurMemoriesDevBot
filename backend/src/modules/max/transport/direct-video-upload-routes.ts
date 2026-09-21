@@ -55,6 +55,12 @@ export function createMaxDirectVideoUploadRoutes(options: {
     try {
       return c.json(await options.service.reserve(scope(c.var.user, params.familyId), input), 201)
     } catch (error) {
+      if (error instanceof MaxDirectUploadFailure && error.code === 'reserve_not_found_membership') {
+        console.warn('max_video_reserve_not_found_membership')
+      }
+      if (error instanceof MaxDirectUploadFailure && error.code === 'reserve_not_found_child') {
+        console.warn('max_video_reserve_not_found_child')
+      }
       throw toAppError(toFamilyAppError(error))
     }
   })
@@ -77,6 +83,7 @@ function toAppError(error: unknown): Error {
   if (!(error instanceof MaxDirectUploadFailure)) return error instanceof Error ? error : new Error('MAX upload failed')
   if (error.kind === 'invalid_input') return new AppError(422, 'INVALID_INPUT', 'Проверьте правильность заполнения полей')
   if (error.kind === 'forbidden') return new AppError(403, 'FORBIDDEN', 'Действие недоступно')
+  if (error.code === 'reserve_not_found_membership') return new AppError(404, 'NOT_FOUND', 'Семья не найдена')
   if (error.kind === 'not_found') return new AppError(404, 'NOT_FOUND', 'Сессия загрузки не найдена')
   if (error.kind === 'retryable') return new AppError(503, 'UPLOAD_NOT_COMPLETED', 'Видео ещё обрабатывается, повторите попытку')
   return new AppError(409, error.code === 'upload_expired' ? 'UPLOAD_EXPIRED' : 'CONFLICT', 'Сессия загрузки больше недоступна')
