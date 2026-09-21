@@ -5,6 +5,7 @@ import { Typography } from '@/components/typography'
 import { familyCalendarDate } from '@/features/family'
 import { ApiRequestError } from '@/platform/api'
 import { composerOccurredAt } from './date'
+import '@/styles/composer-skin.css'
 
 type ComposerFormProps = {
   title: string
@@ -65,20 +66,20 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
   }
 
   return (
-    <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-4 py-6">
-      <section aria-labelledby="composer-form-title" className="rounded-[var(--radius-card)] bg-card p-5 shadow-[var(--shadow-card)]">
+    <main className="memoly-composer-page mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)]">
+      <section aria-labelledby="composer-form-title" className="memoly-composer-card rounded-[var(--radius-card)] p-5">
         <Typography id="composer-form-title" variant="memoryScreen">{title}</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">{description}</Typography>
-        <label className="mt-6 block" htmlFor="memory-composer-body"><Typography variant="memoryButton">Текст</Typography></label>
-        <textarea aria-label="Текст заметки" className="mt-2 min-h-32 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="memory-composer-body" onChange={(event) => setBody(event.currentTarget.value)} value={body} />
-        <label className="mt-5 block" htmlFor="memory-composer-date"><Typography variant="memoryButton">Дата</Typography></label>
-        <input aria-label="Дата воспоминания" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="memory-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
-        {status === 'saving' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохраняем…</Typography> : null}
-        {status === 'success' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
+        <label className="memoly-composer-label mt-6 block" htmlFor="memory-composer-body"><Typography variant="memoryButton">Текст</Typography></label>
+        <textarea aria-label="Текст заметки" className="memoly-composer-field memoly-composer-textarea mt-2 w-full rounded-[var(--radius-field)] p-3" id="memory-composer-body" onChange={(event) => setBody(event.currentTarget.value)} value={body} />
+        <label className="memoly-composer-label mt-5 block" htmlFor="memory-composer-date"><Typography variant="memoryButton">Дата</Typography></label>
+        <input aria-label="Дата воспоминания" className="memoly-composer-field memoly-composer-date mt-2 w-full rounded-[var(--radius-field)] p-3" id="memory-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
+        {status === 'saving' ? <div className="memoly-composer-status mt-4" role="status"><Typography aria-live="polite" variant="memoryMeta">Сохраняем…</Typography><span className="memoly-composer-progress-indeterminate" /></div> : null}
+        {status === 'success' ? <Typography aria-live="polite" className="memoly-composer-status mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
         {error ? <Typography aria-live="assertive" className="mt-4 text-destructive" role="alert" variant="memoryMeta">{error}</Typography> : null}
-        <div className="mt-6 flex gap-3">
-          <Button className="min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void submit()} type="button">Сохранить</Button>
-          <Button className="min-h-12" disabled={status === 'saving'} onClick={() => {
+        <div className="memoly-composer-actions mt-6 flex gap-3">
+          <Button className="memoly-composer-primary min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void submit()} type="button">Сохранить</Button>
+          <Button className="memoly-composer-secondary min-h-12" disabled={status === 'saving'} onClick={() => {
             const dirty = body !== initialBody || occurredDate !== initialDate
             if (dirty && !window.confirm('Отменить изменения? Введённый текст и дата будут удалены.')) return
             onCancel()

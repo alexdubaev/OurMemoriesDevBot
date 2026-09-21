@@ -12,6 +12,7 @@ import {
   validatePhotoFiles,
 } from './api'
 import { composerOccurredAt } from './date'
+import '@/styles/composer-skin.css'
 
 export type PhotoComposerProps = {
   childId: string
@@ -162,30 +163,34 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   }
 
   return (
-    <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-4 py-6">
-      <section aria-labelledby="photo-composer-title" className="rounded-[var(--radius-card)] bg-card p-5 shadow-[var(--shadow-card)]">
+    <main className="memoly-composer-page mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)]">
+      <section aria-labelledby="photo-composer-title" className="memoly-composer-card rounded-[var(--radius-card)] p-5">
         <Typography id="photo-composer-title" variant="memoryScreen">Добавить фотографии</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">Выберите от 1 до 10 фотографий для одного воспоминания.</Typography>
-        <label className="mt-6 block" htmlFor="photo-composer-files"><Typography variant="memoryButton">Фотографии</Typography></label>
-        <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="mt-2 block w-full" disabled={status === 'saving'} id="photo-composer-files" multiple onChange={(event) => chooseFiles(Array.from(event.currentTarget.files ?? []))} ref={fileInput} type="file" />
+        <label className="memoly-composer-label mt-6 block" htmlFor="photo-composer-files"><Typography variant="memoryButton">Фотографии</Typography></label>
+        <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="memoly-composer-file-input mt-2 block w-full" disabled={status === 'saving'} id="photo-composer-files" multiple onChange={(event) => chooseFiles(Array.from(event.currentTarget.files ?? []))} ref={fileInput} type="file" />
         {files.length ? <div aria-label="Предпросмотр фотографий" className="mt-4 grid grid-cols-3 gap-2">{files.map((file, index) => <PhotoPreview file={file} index={index} key={`${file.name}-${index}`} onRemove={removeFile} />)}</div> : null}
-        <label className="mt-5 block" htmlFor="photo-composer-caption"><Typography variant="memoryButton">Подпись</Typography></label>
-        <textarea aria-label="Подпись к фотографиям" className="mt-2 min-h-24 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="photo-composer-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
-        <label className="mt-5 block" htmlFor="photo-composer-date"><Typography variant="memoryButton">Дата</Typography></label>
-        <input aria-label="Дата фотографий" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="photo-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
-        {status === 'saving' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохраняем фотографии… {progress}%</Typography> : null}
-        {status === 'success' ? <Typography aria-live="polite" className="mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
+        <label className="memoly-composer-label mt-5 block" htmlFor="photo-composer-caption"><Typography variant="memoryButton">Подпись</Typography></label>
+        <textarea aria-label="Подпись к фотографиям" className="memoly-composer-field memoly-composer-textarea mt-2 w-full rounded-[var(--radius-field)] p-3" id="photo-composer-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
+        <label className="memoly-composer-label mt-5 block" htmlFor="photo-composer-date"><Typography variant="memoryButton">Дата</Typography></label>
+        <input aria-label="Дата фотографий" className="memoly-composer-field memoly-composer-date mt-2 w-full rounded-[var(--radius-field)] p-3" id="photo-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
+        {status === 'saving' ? <div className="memoly-composer-status mt-4" role="status"><Typography aria-live="polite" variant="memoryMeta">Сохраняем фотографии… {progress}%</Typography><ProgressBar value={progress} label="Загрузка фотографий" /></div> : null}
+        {status === 'success' ? <><Typography aria-live="polite" className="memoly-composer-status mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography><ProgressBar value={100} label="Фотографии сохранены" /></> : null}
         {error ? <>
           <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
           {finalizeApplicationCode ? <Typography className="mt-1 text-destructive" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}
         </> : null}
-        <div className="mt-6 flex gap-3">
-          <Button className="min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
-          <Button className="min-h-12" onClick={cancel} type="button" variant="outline">Отмена</Button>
+        <div className="memoly-composer-actions mt-6 flex gap-3">
+          <Button className="memoly-composer-primary min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
+          <Button className="memoly-composer-secondary min-h-12" onClick={cancel} type="button" variant="outline">Отмена</Button>
         </div>
       </section>
     </main>
   )
+}
+
+function ProgressBar({ label, value }: { label: string; value: number }) {
+  return <div aria-label={label} aria-valuemax={100} aria-valuemin={0} aria-valuenow={value} className="memoly-composer-progress" role="progressbar"><span style={{ width: value + '%' }} /></div>
 }
 
 function PhotoPreview({ file, index, onRemove }: { file: File; index: number; onRemove: (index: number) => void }) {

@@ -24,6 +24,15 @@ describe('family presentation model', () => {
     expect(markup).not.toContain('Создать приглашение')
   })
 
+  test('uses the shared child header and real family identity', () => {
+    const markup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps()))
+
+    expect(markup).toContain('data-child-header-mode="family"')
+    expect(markup).toContain('aria-label="Настройки"')
+    expect(markup).toContain('Варя')
+    expect(markup).toContain('Наша семья')
+  })
+
   test('renders pending invite values without exposing a raw token', () => {
     const rawToken = 'invite_raw_token_must_not_be_rendered'
     const markup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps({

@@ -17,7 +17,7 @@ export type BottomNavigationProps = {
 export function BottomNavigation({
   active,
   addButtonRef,
-  appearance,
+  appearance = 'default',
   onAdd,
   onFamily,
   onFeed,
@@ -27,7 +27,8 @@ export function BottomNavigation({
     <nav
       aria-label="Основная навигация"
       className={cn(
-        'fixed inset-x-0 bottom-0 z-30 border-t bg-card pb-[var(--host-inset-bottom)]',
+        'fixed inset-x-0 bottom-0 z-30 pb-[var(--host-inset-bottom)]',
+        appearance === 'memoly' ? 'border-0 bg-transparent shadow-none' : 'border-t bg-card',
         appearance === 'memoly' && 'memoly-bottom-nav',
       )}
       data-bottom-navigation-appearance={appearance}

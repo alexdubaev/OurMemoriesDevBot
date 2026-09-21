@@ -7,6 +7,7 @@ import { Typography } from '@/components/typography'
 import { subscribeAddSheetBack } from './add-sheet-back'
 import type { HostBridge } from '@/platform/host-bridge'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
+import '@/styles/composer-skin.css'
 
 const historyMarker = 'our-memories:add-sheet'
 
@@ -91,7 +92,7 @@ export function AddSheetPanel({
   onVoiceOrVideo: () => void
 }) {
   return (
-    <div className="px-5 pb-[calc(1.25rem+var(--host-inset-bottom))] pt-3" data-slot="memoly-add-sheet-panel">
+    <div className="memoly-sheet-content" data-slot="memoly-add-sheet-panel">
       <div className="flex min-h-11 items-center gap-3">
         <DrawerTitle className="min-w-0 flex-1 text-left">
           <Typography as="span" variant="memoryEmptyTitle">Что добавить?</Typography>
@@ -115,12 +116,12 @@ export function AddSheetPanel({
 function AddAction({ icon, label, name, onClick }: { icon: 'note' | 'photo' | 'video'; label: string; name: 'note' | 'photo' | 'video'; onClick: () => void }) {
   return <button
     aria-label={label}
-    className="flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] bg-muted px-3 text-left transition-colors duration-[var(--duration-standard)] hover:bg-accent"
+    className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]"
     data-add-action={name}
     onClick={onClick}
     type="button"
   >
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-card"><WebpIcon decorative name={icon} size={22} state="active" /></span>
+    <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full"><WebpIcon decorative name={icon} size={22} state="active" /></span>
     <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">{label}</Typography>
     <WebpIcon decorative name="chevron" size={22} />
   </button>
@@ -130,12 +131,12 @@ export function VoiceOrVideoAction({ onClick }: { onClick: () => void }) {
   return (
     <button
       aria-label="Голос или видео"
-      className="flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] bg-muted px-3 text-left transition-colors duration-[var(--duration-standard)] hover:bg-accent"
+      className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]"
       data-add-action="voice-or-video"
       onClick={onClick}
       type="button"
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-card">
+      <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full">
         <WebpIcon decorative name="voice" size={22} state="active" />
       </span>
       <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">Голос или видео</Typography>
@@ -146,7 +147,7 @@ export function VoiceOrVideoAction({ onClick }: { onClick: () => void }) {
 
 function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; onClose: () => void; onVideo: () => void }) {
   const [voiceNotice, setVoiceNotice] = useState(false)
-  return <div aria-describedby="memoly-voice-video-description" data-slot="memoly-voice-video-sheet">
+  return <div aria-describedby="memoly-voice-video-description" className="memoly-sheet-content" data-slot="memoly-voice-video-sheet">
     <div className="flex min-h-11 items-center gap-3">
       <Button aria-label="Назад" className="size-11" onClick={onBack} size="icon" type="button" variant="ghost"><WebpIcon decorative name="chevron" size={24} /></Button>
       <DrawerTitle className="min-w-0 flex-1 text-left"><Typography as="span" variant="memoryEmptyTitle">Голос или видео</Typography></DrawerTitle>
@@ -154,8 +155,8 @@ function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; o
     </div>
     <div className="mt-4 flex flex-col gap-2">
       <AddAction icon="video" label="Видео" name="video" onClick={onVideo} />
-      <button aria-label="Голос" className="flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] bg-muted px-3 text-left transition-colors duration-[var(--duration-standard)] hover:bg-accent" data-add-action="voice" onClick={() => setVoiceNotice(true)} type="button">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-card"><WebpIcon decorative name="voice" size={22} state="active" /></span>
+      <button aria-label="Голос" className="memoly-sheet-action flex min-h-[60px] w-full items-center gap-3 rounded-[var(--radius-field)] px-3 text-left transition-colors duration-[var(--duration-standard)]" data-add-action="voice" onClick={() => setVoiceNotice(true)} type="button">
+        <span className="memoly-sheet-action-icon flex size-9 shrink-0 items-center justify-center rounded-full"><WebpIcon decorative name="voice" size={22} state="active" /></span>
         <Typography className="min-w-0 flex-1" variant="memoryBodyMedium">Голос</Typography>
       </button>
     </div>

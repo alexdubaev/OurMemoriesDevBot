@@ -1,5 +1,6 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test'
 import { createHmac, randomUUID } from 'node:crypto'
+import { resolve } from 'node:path'
 
 import { pngImage } from '../helpers/images'
 import { expect, test } from '../helpers/test'
@@ -28,7 +29,10 @@ function signedInitData(subject: number, name: string, startParam?: string) {
 }
 
 async function installTelegramHost(page: Page, initData: string) {
+  await page.route(/telegram\.org\/js\/telegram-web-app\.js(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }))
   await page.addInitScript((value) => {
+    const backHandlers = new Set<() => void>()
+    ;(window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack = () => backHandlers.forEach((handler) => handler())
     Object.defineProperty(window, 'Telegram', {
       configurable: true,
       value: {
@@ -36,8 +40,14 @@ async function installTelegramHost(page: Page, initData: string) {
           initData: value,
           version: '8.0',
           platform: 'tdesktop',
-          safeAreaInset: {},
-          contentSafeAreaInset: {},
+          safeAreaInset: { top: 24, bottom: 18 },
+          contentSafeAreaInset: { top: 24, bottom: 18 },
+          BackButton: {
+            show() {},
+            hide() {},
+            onClick(handler: () => void) { backHandlers.add(handler) },
+            offClick(handler: () => void) { backHandlers.delete(handler) },
+          },
           ready() {},
         },
       },
@@ -71,7 +81,6 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeDisabled()
   await expect(page.locator('img[alt="Предпросмотр кадрирования"]')).toHaveJSProperty('complete', true)
   await expect(page.getByRole('button', { name: 'Использовать фото' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
@@ -88,16 +97,16 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await page.getByRole('button', { name: 'Создать семейную ленту' }).dblclick()
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await page.getByRole('button', { name: 'Семья' }).click()
-  await expect(page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Близкие' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Семейный архив' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Помощь и приватность' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Изменить' }).click()
+  await page.getByRole('button', { name: 'Изменить профиль ребёнка' }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
-  await expect(page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
 
   // The buttons become busy synchronously; the network proves retry/double-click cannot mint
   // a second bootstrap family or child record.
@@ -115,7 +124,7 @@ async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) 
   await inviteSection.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Приглашение готово' })).toBeVisible()
   const link = await page.getByLabel('Ссылка приглашения').inputValue()
-  const startParam = new URL(link).searchParams.get('start')
+  const startParam = new URL(link).searchParams.get('startapp')
   expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,57}$/)
   return startParam!
 }
@@ -148,6 +157,23 @@ async function inviteePage(
 
 test('onboards a child and accepts a viewer invite only after explicit bot-start confirmation', async ({ browser, page }) => {
   const owner = await createCompletedOwner(page, 81000011)
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  await owner.page.evaluate(() => window.scrollTo(0, 0))
+  await expect(owner.page.locator('[data-child-header-mode="family"]')).toBeVisible()
+  expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/full-ui-family-390.png'), animations: 'disabled' })
+  await owner.page.getByRole('button', { name: 'Настройки' }).click()
+  await expect(owner.page.getByRole('heading', { name: 'Настройки' })).toBeVisible()
+  expect(await owner.page.locator('[data-slot="memoly-bottom-sheet"] > div:last-child').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBeGreaterThanOrEqual(38)
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/full-ui-settings-390.png'), animations: 'disabled' })
+  await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+  await expect(owner.page.locator('[data-slot="memoly-settings-sheet"]')).toHaveCount(0)
+  await owner.page.getByRole('button', { name: 'Настройки' }).click()
+  await owner.page.getByRole('button', { name: 'Оформление' }).click()
+  await expect(owner.page.getByRole('option', { name: /^Тема:/ })).toHaveCount(6)
+  await owner.page.getByRole('option', { name: 'Тема: Небо' }).click()
+  await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'sky')
+  await owner.page.getByRole('button', { name: 'Закрыть' }).click()
   const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира')
 
   const requests: RequestLog = { accepts: [], familyCreations: [], privateFamilyRequests: [] }
@@ -174,7 +200,8 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await expect.poll(() => requests.accepts.length).toBe(1)
 
   await guest.page.reload()
-  await expect(guest.page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await guest.page.getByRole('button', { name: 'Семья' }).click()
+  await expect(guest.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
   await expect(guest.page.getByText('Это приглашение уже использовано.')).toHaveCount(0)
   await expect.poll(() => requests.accepts.length).toBe(1)
@@ -191,7 +218,8 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
     'Приглашённая E2E',
     alreadyMemberRequests,
   )
-  await expect(alreadyMember.page.getByRole('heading', { name: 'Семья' })).toBeVisible()
+  await alreadyMember.page.getByRole('button', { name: 'Семья' }).click()
+  await expect(alreadyMember.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(alreadyMember.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
   await expect(alreadyMember.page.getByText('Это приглашение уже использовано.')).toHaveCount(0)
   await expect.poll(() => alreadyMemberRequests.accepts.length).toBe(0)
@@ -232,7 +260,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('button', { name: 'Отозвать' }).first().click()
   const revoked = await inviteePage(browser, 81000023, revokedStartParam, 'Отозванный E2E')
   await expect(revoked.page.getByText('Это приглашение отозвано.')).toBeVisible()
-  await expect(revoked.page.getByRole('heading', { name: 'Семья' })).toHaveCount(0)
+  await expect(revoked.page.locator('[data-child-header-mode="family"]')).toHaveCount(0)
 
   await revoked.context.close()
   await full.context.close()

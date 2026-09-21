@@ -1,11 +1,11 @@
 import type { CSSProperties } from 'react'
 import type { ReactNode, Ref } from 'react'
 
-import { BrandLogo } from '@/components/BrandLogo'
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { Typography } from '@/components/typography'
 import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
-import { ChildAvatar } from '@/features/family'
+import { ChildHeader } from '@/components/ChildHeader'
+import { useMemolyTheme } from '@/features/theme'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 
 import './memoly-feed.css'
@@ -39,6 +39,7 @@ export type FeedPresentationProps = {
 
 export function FeedPresentation(props: FeedPresentationProps) {
   const { children } = props
+  const { theme } = useMemolyTheme()
   const style = {
     '--host-inset-top': `${props.insets.top}px`,
     '--host-inset-right': `${props.insets.right}px`,
@@ -49,23 +50,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
   return (
     <div className="memoly-feed-page" data-memoly-feed="true" style={style}>
       <div className="memoly-feed-shell" data-slot="feed-scroll">
-        <header className="memoly-topbar">
-          <button aria-label="Помощь и конфиденциальность" className="memoly-circle-button" onClick={props.onMore} type="button">
-            <WebpIcon decorative name="gear" size={22} />
-          </button>
-          <BrandLogo className="memoly-logo" />
-          <span aria-hidden="true" />
-        </header>
-        <section className="memoly-child-hero" data-slot="memoly-child-hero">
-          <ChildAvatar avatarCrop={props.childAvatarCrop ?? null} avatarUrl={props.childAvatarUrl ?? null} name={props.childName} size="feed-header" />
-          <span aria-hidden="true" className="memoly-heart-dot"><WebpIcon decorative name="heart-filled" size={14} state="active" /></span>
-          <div className="memoly-child-copy">
-            <Typography as="h1" variant="memoryHero">{props.childName}</Typography>
-            <Typography as="p" tone="muted" variant="memoryCaption">{props.childSubtitle}</Typography>
-            <span className="memoly-archive-pill"><WebpIcon decorative name="star" size={16} /><Typography as="span" variant="memoryMeta">Наши воспоминания</Typography></span>
-          </div>
-          <img alt="" aria-hidden="true" className="memoly-cloud-art" src="/assets/brand/memoly-cloud-stars.webp" />
-        </section>
+        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
         <div aria-label="Фильтр воспоминаний" className="memoly-filters" data-slot="memoly-filter-rail" role="group">
           {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
         </div>

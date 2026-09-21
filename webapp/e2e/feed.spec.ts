@@ -71,7 +71,7 @@ test.describe.serial('T07 live feed', () => {
       await installMaxHost(page, initData)
       await installMaxAuthRoute(page)
     } else {
-      await installTelegramHost(page, initData, responsiveWidth ? { bottom: 18 } : undefined)
+      await installTelegramHost(page, initData, responsiveWidth ? { bottom: 18, top: 24 } : undefined)
     }
     if (responsiveWidth) await page.setViewportSize({ width: Number(responsiveWidth), height: 844 })
     await page.goto('/')
@@ -86,12 +86,15 @@ test.describe.serial('T07 live feed', () => {
       const metrics = await page.evaluate(() => {
         const navigation = document.querySelector('[data-testid="bottom-navigation"]')
         const feedScroll = document.querySelector('[data-slot="feed-scroll"]')
-        if (!navigation || !feedScroll) return null
+        const header = document.querySelector('[data-child-header-mode="feed"]')
+        if (!navigation || !feedScroll || !header) return null
         const navStyle = getComputedStyle(navigation)
         const scrollStyle = getComputedStyle(feedScroll)
         const navRect = navigation.getBoundingClientRect()
         return {
           clientWidth: document.documentElement.clientWidth,
+          headerTop: header.getBoundingClientRect().top,
+          scrollWidth: document.documentElement.scrollWidth,
           navBottom: navRect.bottom,
           navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
           navWidth: navRect.width,
@@ -102,9 +105,11 @@ test.describe.serial('T07 live feed', () => {
 
       expect(metrics).not.toBeNull()
       expect(metrics!.clientWidth).toBe(width)
+      expect(metrics!.scrollWidth).toBeLessThanOrEqual(width)
+      expect(metrics!.headerTop).toBeGreaterThanOrEqual(24)
       expect(metrics!.navWidth).toBe(width)
-      expect(metrics!.navBottom).toBe(metrics!.viewportHeight - 18)
-      expect(metrics!.navPaddingBottom).toBe(0)
+      expect(metrics!.navBottom).toBe(metrics!.viewportHeight)
+      expect(metrics!.navPaddingBottom).toBe(18)
       expect(metrics!.scrollPaddingBottom).toBeGreaterThan(16)
       await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
     })
@@ -310,11 +315,15 @@ test.describe.serial('T07 live feed', () => {
     await like.click()
     await expect(maxVideoCard.getByRole('button', { name: 'Убрать сердечко' })).toHaveAttribute('aria-pressed', 'true')
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
+    await page.setViewportSize({ width: 390, height: 844 })
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
-    await page.getByRole('menuitem', { name: 'Подробнее' }).click()
+    await page.getByRole('button', { name: 'Подробнее' }).click()
     await expect(page.getByRole('dialog')).toContainText(maxVideos[0]!.body)
+    await expect.poll(() => page.evaluate(() => Boolean(document.querySelector('[role="dialog"]')?.contains(document.activeElement)))).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/full-ui-detail-390.png'), animations: 'disabled' })
     await page.getByRole('dialog').getByRole('button', { name: 'Закрыть' }).click()
+    await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toBeFocused()
     await maxVideoCard.getByRole('button', { name: 'Смотреть видео' }).click()
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(false)
     expect(await page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBeUndefined()
@@ -521,24 +530,36 @@ test.describe.serial('T07 live feed', () => {
     expect(deepLink).not.toContain('synthetic-file-id')
   })
 
-  test('confirms deletion, removes the card optimistically, and restores it when deletion fails', async ({ page }) => {
+  test('keeps the exact memory in delete spotlight through cancel, failure, and success', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
     await prisma.familyMember.update({
       where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
       data: { role: 'full' },
     })
     await page.reload()
     await openFeed(page)
-    const card = page.locator('[data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
+    const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
     for (let pageIndex = 0; pageIndex < 4 && await card.count() === 0; pageIndex += 1) {
       await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
       await page.waitForTimeout(250)
     }
     await card.scrollIntoViewIfNeeded()
+    const selectedId = await card.getAttribute('data-memory-id')
+    expect(selectedId).toBeTruthy()
     await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
-    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
-    await expect(page.getByRole('alertdialog')).toContainText('Удалить воспоминание?')
+    await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
+    const spotlight = page.getByRole('alertdialog')
+    await expect(spotlight).toContainText('Удалить это воспоминание?')
+    await expect(spotlight.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
+    await expect(card).toBeHidden()
+    await page.screenshot({ path: resolve('e2e/.artifacts/full-ui-delete-390.png'), animations: 'disabled' })
+    await page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+    await expect(card).toBeVisible()
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
     await page.getByRole('button', { name: 'Отмена' }).click()
     await expect(card).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Действия с воспоминанием' })).toBeFocused()
 
     await page.route('**/api/v1/families/*/memories/*', (route) => {
       if (route.request().method() !== 'DELETE') return route.continue()
@@ -549,14 +570,13 @@ test.describe.serial('T07 live feed', () => {
       })
     })
     await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
-    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
+    await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
     await page.getByRole('button', { name: 'Удалить' }).click()
-    await expect(card).toBeVisible()
-    await expect(page.getByRole('alert')).toContainText('Не удалось удалить воспоминание. Попробуйте ещё раз.')
+    await expect(card).toBeHidden()
+    await expect(spotlight.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
+    await expect(spotlight.getByRole('alert')).toContainText('Не удалось удалить воспоминание. Попробуйте ещё раз.')
     await page.unroute('**/api/v1/families/*/memories/*')
 
-    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
-    await page.getByRole('menuitem', { name: 'Удалить воспоминание' }).click()
     await page.getByRole('button', { name: 'Удалить' }).click()
     await expect(card).toHaveCount(0)
     await prisma.familyMember.update({
@@ -719,9 +739,9 @@ function signedInitData(id: number, name: string) {
   return fields.toString()
 }
 
-async function installTelegramHost(page: Page, initData: string, insets: { bottom?: number } = {}) {
+async function installTelegramHost(page: Page, initData: string, insets: { bottom?: number; top?: number } = {}) {
   await page.route(/telegram\.org\/js\/telegram-web-app\.js(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }))
-  await page.addInitScript(({ bottomInset, initData: value }) => {
+  await page.addInitScript(({ bottomInset, initData: value, topInset }) => {
     const backHandlers = new Set<() => void>()
     const testWindow = window as typeof window & {
       __openedTelegramLink?: string
@@ -734,8 +754,8 @@ async function installTelegramHost(page: Page, initData: string, insets: { botto
       initData: value,
       version: '8.0',
       platform: 'tdesktop',
-      safeAreaInset: { bottom: bottomInset },
-      contentSafeAreaInset: { bottom: bottomInset },
+      safeAreaInset: { bottom: bottomInset, top: topInset },
+      contentSafeAreaInset: { bottom: bottomInset, top: topInset },
       BackButton: {
         show() {},
         hide() {},
@@ -745,7 +765,7 @@ async function installTelegramHost(page: Page, initData: string, insets: { botto
       ready() {},
       openTelegramLink(url: string) { testWindow.__openedTelegramLink = url },
     } } })
-  }, { bottomInset: insets.bottom ?? 0, initData })
+  }, { bottomInset: insets.bottom ?? 0, initData, topInset: insets.top ?? 0 })
 }
 
 async function installMaxHost(page: Page, initData: string) {

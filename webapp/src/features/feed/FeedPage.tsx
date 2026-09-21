@@ -1,22 +1,15 @@
 import type { MemoryAttachment, MemoryDto } from '@web-app-demo/contracts'
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import 'photoswipe/style.css'
+import { Dialog as DialogPrimitive } from 'radix-ui'
 
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
+import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { toggleMediaPlayback } from '@/platform/media/playback'
@@ -35,8 +28,9 @@ import { useChildAvatar } from '@/features/family'
 import { MemoryEditor, NoteComposer, PhotoComposer } from '@/features/composer'
 import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
-import { composerModeForAdd, memoryActionNames, type ComposerMode } from './composer-routing'
+import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
+import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 
 type Props = {
   childId?: string
@@ -68,10 +62,15 @@ export function FeedPage({
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
   const like = useMemoryLike(transport, familyId, filter)
-  const [deleteError, setDeleteError] = useState(false)
-  const deletion = useMemoryDelete(transport, familyId, () => setDeleteError(true))
+  const [actionsMemory, setActionsMemory] = useState<MemoryDto | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<MemoryDto | null>(null)
+  const [deleteTargetIndex, setDeleteTargetIndex] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const deletion = useMemoryDelete(transport, familyId, () => undefined)
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
+  const detailReturnFocusRef = useRef<HTMLElement | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(false)
   const [composer, setComposer] = useState<ComposerMode | null>(null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
@@ -85,6 +84,13 @@ export function FeedPage({
     }
     return [...unique.values()]
   }, [feed.data])
+  const visibleItems = useMemo(() => {
+    if (!deleteTarget || items.some((memory) => memory.id === deleteTarget.id)) return items
+    const next = [...items]
+    const index = Math.max(0, Math.min(deleteTargetIndex ?? next.length, next.length))
+    next.splice(index, 0, deleteTarget)
+    return next
+  }, [deleteTarget, deleteTargetIndex, items])
 
   useEffect(() => {
     if (!knownFirstId.current && items[0]) knownFirstId.current = items[0].id
@@ -138,6 +144,26 @@ export function FeedPage({
     try { await refetch() } finally { setComposer(null); setEditingMemory(null) }
   }
 
+  const cancelDelete = useCallback(() => {
+    if (deletion.isPending) return
+    setDeleteTarget(null)
+    setDeleteTargetIndex(null)
+    setDeleteError(null)
+    actionTriggerRef.current?.focus({ preventScroll: true })
+  }, [deletion.isPending])
+
+  useEffect(() => {
+    if (!deleteTarget) return undefined
+    return hostBridge.onBack(() => {
+      if (!deletion.isPending) cancelDelete()
+    })
+  }, [cancelDelete, deleteTarget, deletion.isPending, hostBridge])
+
+  useEffect(() => {
+    if (!actionsMemory) return undefined
+    return hostBridge.onBack(() => setActionsMemory(null))
+  }, [actionsMemory, hostBridge])
+
   if ((maxVideoUploadAcceptance || composer === 'video') && childId) {
     return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
@@ -162,14 +188,14 @@ export function FeedPage({
       {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {isAppBootstrapped && !feed.isPending && !feed.isError && items.length === 0 ? <EmptyState mode={role} /> : null}
-      {deleteError ? <Typography role="alert" variant="memoryMeta">Не удалось удалить воспоминание. Попробуйте ещё раз.</Typography> : null}
-      {isAppBootstrapped && !feed.isPending && items.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={items} renderCard={(memory) => {
+      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState mode={role} /> : null}
+      {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
           attachment.source === 'private_storage' && attachment.kind === 'photo')
         return <MemoryCardPresentation
-          actions={<MemoryActions memory={memory} onDelete={memory.capabilities.delete ? (target) => { setDeleteError(false); return deletion.mutateAsync({ memoryId: target.id, version: target.version }) } : undefined} onEdit={memory.capabilities.edit ? setEditingMemory : undefined} onOpen={() => setDetail(memory)} />}
+          actions={<MemoryActions memory={memory} onOpen={(target, trigger) => { actionTriggerRef.current = trigger; setActionsMemory(target) }} />}
+          isDeleteSource={deleteTarget?.id === memory.id}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
           body={memory.body}
@@ -180,13 +206,13 @@ export function FeedPage({
           memoryId={memory.id}
           occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
           onLike={() => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
-          onOpen={() => setDetail(memory)}
+          onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setDetail(memory) }}
         />
       }} /> : null}
       <div aria-label="Загрузить ещё" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
       {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
-      {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} transport={transport} /> : null}
+      {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
@@ -197,6 +223,40 @@ export function FeedPage({
       open={addSheetOpen}
       returnFocusRef={addButtonRef}
       role={role}
+    />
+    <MemolyBottomSheet
+      onOpenChange={(open) => { if (!open) setActionsMemory(null) }}
+      open={actionsMemory !== null}
+      returnFocusRef={actionTriggerRef}
+    >
+      {actionsMemory ? (
+        <MemoryActionsContent
+          memory={actionsMemory}
+          onDelete={actionsMemory.capabilities.delete ? () => {
+            setActionsMemory(null)
+            setDeleteError(null)
+            setDeleteTargetIndex(items.findIndex((item) => item.id === actionsMemory.id))
+            setDeleteTarget(actionsMemory)
+          } : undefined}
+          onDetails={() => { detailReturnFocusRef.current = actionTriggerRef.current; setActionsMemory(null); setDetail(actionsMemory) }}
+          onEdit={actionsMemory.capabilities.edit ? () => { setActionsMemory(null); setEditingMemory(actionsMemory) } : undefined}
+        />
+      ) : null}
+    </MemolyBottomSheet>
+    <MemoryDeleteSpotlight
+      error={deleteError}
+      memory={deleteTarget}
+      onCancel={cancelDelete}
+      onConfirm={() => {
+        if (!deleteTarget || deletion.isPending) return
+        setDeleteError(null)
+        void deletion.mutateAsync({ memoryId: deleteTarget.id, version: deleteTarget.version })
+          .then(() => { setDeleteTarget(null); setDeleteTargetIndex(null); setDeleteError(null) })
+          .catch(() => { setDeleteError('Не удалось удалить воспоминание. Попробуйте ещё раз.') })
+      }}
+      open={deleteTarget !== null}
+      preview={deleteTarget ? <MemoryDeletePreview familyTimezone={familyTimezone} memory={deleteTarget} transport={transport} /> : null}
+      submitting={deletion.isPending}
     />
     </MediaPlaybackCoordinator>
   )
@@ -262,39 +322,64 @@ function MemoryList({ familyTimezone, items, renderCard }: {
   })}</>
 }
 
-function MemoryActions({ memory, onDelete, onEdit, onOpen }: { memory: MemoryDto; onDelete?: (memory: MemoryDto) => Promise<unknown>; onEdit?: (memory: MemoryDto) => void; onOpen: () => void }) {
-  const [confirming, setConfirming] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const actionNames = memoryActionNames(memory.capabilities)
-  const confirm = async () => {
-    if (submitting || !onDelete) return
-    setSubmitting(true)
-    try {
-      await onDelete(memory)
-      setConfirming(false)
-    } finally {
-      setSubmitting(false)
-    }
+function MemoryActions({ memory, onOpen }: { memory: MemoryDto; onOpen: (memory: MemoryDto, trigger: HTMLButtonElement) => void }) {
+  return <button aria-label="Действия с воспоминанием" className="flex size-11 items-center justify-center rounded-full text-muted-foreground" onClick={(event) => onOpen(memory, event.currentTarget)} type="button"><WebpIcon decorative name="more" size={24} /></button>
+}
+
+function MemoryActionsContent({ memory, onDelete, onDetails, onEdit }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void }) {
+  return <div className="memoly-memory-actions" data-memory-actions-for={memory.id}>
+    <DrawerTitle className="mb-2"><Typography as="span" variant="memoryEmptyTitle">Действия с воспоминанием</Typography></DrawerTitle>
+    <DrawerDescription className="sr-only">Выберите действие для этого воспоминания.</DrawerDescription>
+    <div className="memoly-memory-actions-list">
+      <button className="memoly-memory-action" onClick={onDetails} type="button"><Typography as="span" variant="memoryBody">Подробнее</Typography></button>
+      {onEdit ? <button className="memoly-memory-action" onClick={onEdit} type="button"><Typography as="span" variant="memoryBody">Изменить воспоминание</Typography></button> : null}
+      {onDelete ? <button className="memoly-memory-action is-danger" onClick={onDelete} type="button"><Typography as="span" variant="memoryBody">Удалить воспоминание</Typography></button> : null}
+    </div>
+  </div>
+}
+
+function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTimezone: string; memory: MemoryDto; transport: AuthenticatedTransport }) {
+  const primary = memory.attachments[0]
+  return <div className="memoly-delete-preview-card" data-memoly-feed>
+    <MemoryCardPresentation
+      actions={null}
+      authorInitials={initials(memory.author.name)}
+      authorName={memory.author.name}
+      body={memory.body}
+      kind={memory.kind}
+      liked={memory.likes.likedByMe}
+      likeCount={memory.likes.count}
+      media={primary ? <MemoryDeletePreviewMedia attachment={primary} transport={transport} /> : null}
+      memoryId={memory.id}
+      mode="delete-preview"
+      occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
+      onLike={() => undefined}
+      onOpen={() => undefined}
+    />
+  </div>
+}
+
+function MemoryDeletePreviewMedia({ attachment, transport }: { attachment: MemoryAttachment; transport: AuthenticatedTransport }) {
+  const path = attachment.source === 'telegram'
+    ? attachment.thumbnailPath
+    : attachment.source === 'private_storage' && attachment.kind === 'photo'
+      ? attachment.displayPath ?? attachment.previewPath
+      : null
+  const url = usePrivateObjectUrl(path, transport)
+  if (attachment.source === 'telegram') {
+    return <div className="memoly-delete-static-media memoly-delete-static-video" style={{ aspectRatio: videoPosterAspectRatio(attachment.width, attachment.height) }}>
+      {url ? <img alt="" className="size-full object-cover" src={url} /> : <Typography as="span" tone="muted" variant="memoryBody">Видео</Typography>}
+      <WebpIcon decorative name="play" size={24} state="white" />
+    </div>
   }
-  return <AlertDialog onOpenChange={(open) => { if (!submitting) setConfirming(open) }} open={confirming}>
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button aria-label="Действия с воспоминанием" className="flex size-11 items-center justify-center rounded-full text-muted-foreground" type="button"><WebpIcon decorative name="more" size={24} /></button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem className="min-h-11 px-3" onSelect={onOpen}>Подробнее</DropdownMenuItem>
-        {onEdit && actionNames.includes('edit') ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => onEdit(memory)}>Изменить воспоминание</DropdownMenuItem> : null}
-        {onDelete && actionNames.includes('delete') ? <DropdownMenuItem className="min-h-11 px-3" onSelect={() => setConfirming(true)} variant="destructive">Удалить воспоминание</DropdownMenuItem> : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-    <AlertDialogContent className="mx-4 max-w-[calc(100%-2rem)] rounded-[var(--radius-sheet)]">
-      <AlertDialogHeader><AlertDialogTitle>Удалить воспоминание?</AlertDialogTitle><AlertDialogDescription>Оно исчезнет из семейной ленты.</AlertDialogDescription></AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel disabled={submitting}>Отмена</AlertDialogCancel>
-        <Button disabled={submitting} onClick={() => void confirm()} type="button" variant="destructive">Удалить</Button>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
+  if (attachment.source === 'private_storage' && attachment.kind === 'photo') {
+    return url ? <img alt="" className="block h-auto max-h-[62dvh] w-full object-contain" src={url} /> : <div aria-hidden="true" className="memoly-delete-static-media" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '4 / 3' }} />
+  }
+  if (attachment.kind === 'voice') {
+    const peaks = attachment.waveform?.length === 48 ? attachment.waveform : Array.from({ length: 32 }, () => .35)
+    return <div className="memoly-delete-static-media memoly-delete-static-voice"><div className="memoly-delete-static-waveform">{peaks.map((peak, index) => <span key={index} style={{ height: `${Math.max(10, Math.min(100, peak * 100))}%` }} />)}</div><Typography as="span" tone="muted" variant="memoryMeta">Голосовое сообщение</Typography></div>
+  }
+  return <div aria-hidden="true" className="memoly-delete-static-media memoly-delete-static-video" style={{ aspectRatio: videoPosterAspectRatio(attachment.width, attachment.height) }}><WebpIcon decorative name="play" size={24} state="white" /></div>
 }
 
 export function TelegramVideoPoster({ durationMs, posterUrl, width, height, onOpen = () => undefined, disabled = false, busy = false }: {
@@ -487,10 +572,31 @@ function PrivateVideo({ path }: { path: string | null }) {
   </div>
 }
 
-function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, transport }: { familyTimezone: string; hostBridge: HostBridge; memory: MemoryDto; onClose: () => void; transport: AuthenticatedTransport }) {
+function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, returnFocusRef, transport }: { familyTimezone: string; hostBridge: HostBridge; memory: MemoryDto; onClose: () => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
   const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
     attachment.source === 'private_storage' && attachment.kind === 'photo')
-  return <div aria-modal="true" className="fixed inset-0 z-50 flex items-end bg-black/50 p-3" role="dialog"><section className="max-h-[90dvh] w-full overflow-y-auto rounded-[var(--radius-card)] bg-card p-5"><div className="flex justify-between gap-3"><Typography variant="memoryHero">Воспоминание</Typography><Button onClick={onClose} type="button">Закрыть</Button></div><Typography className="mt-2" tone="muted" variant="memoryMeta">{dateTimeLabel(memory.occurredAt, familyTimezone)}</Typography>{memory.attachments.map((item) => <div className="mt-4" key={item.id}><Attachment attachment={item} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={item.source === 'private_storage' && item.kind === 'photo' ? photos.findIndex((photo) => photo.id === item.id) : 0} transport={transport} /></div>)}{memory.body ? <Typography className="mt-4 whitespace-pre-wrap" variant="memoryBody">{memory.body}</Typography> : null}</section></div>
+  return <DialogPrimitive.Root onOpenChange={(open) => { if (!open) onClose() }} open>
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
+      <DialogPrimitive.Content
+        className="fixed inset-0 z-50 flex items-end p-3 outline-none"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true })
+        }}
+      >
+        <section className="memoly-detail-surface max-h-[90dvh] w-full overflow-y-auto rounded-[var(--radius-card)] bg-card p-5" data-memoly-feed>
+          <div className="flex justify-between gap-3">
+            <DialogPrimitive.Title asChild><Typography as="h2" variant="memoryHero">Воспоминание</Typography></DialogPrimitive.Title>
+            <Button onClick={onClose} type="button">Закрыть</Button>
+          </div>
+          <DialogPrimitive.Description asChild><Typography className="mt-2" tone="muted" variant="memoryMeta">{dateTimeLabel(memory.occurredAt, familyTimezone)}</Typography></DialogPrimitive.Description>
+          {memory.attachments.map((item) => <div className="mt-4" key={item.id}><Attachment attachment={item} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={item.source === 'private_storage' && item.kind === 'photo' ? photos.findIndex((photo) => photo.id === item.id) : 0} transport={transport} /></div>)}
+          {memory.body ? <Typography className="mt-4 whitespace-pre-wrap" variant="memoryBody">{memory.body}</Typography> : null}
+        </section>
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  </DialogPrimitive.Root>
 }
 
 function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport) {

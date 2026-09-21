@@ -1,0 +1,168 @@
+/* T09 presentation skin. Controllers, callbacks, and upload state stay in the
+   feature files; these classes only describe the tactile visual layer. */
+.memoly-composer-page {
+  box-sizing: border-box;
+  width: 100%;
+  padding: calc(16px + var(--host-inset-top)) calc(16px + var(--host-inset-right)) calc(28px + var(--host-inset-bottom)) calc(16px + var(--host-inset-left));
+}
+
+.memoly-composer-card {
+  background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)) !important;
+  box-shadow: var(--theme-raised-shadow, var(--shadow-card)) !important;
+}
+
+.memoly-composer-card > [data-variant='memoryScreen'] {
+  color: var(--foreground);
+}
+
+.memoly-composer-label {
+  color: var(--theme-accent-text, var(--muted-foreground));
+}
+
+.memoly-composer-field {
+  min-height: 52px;
+  border: 1px solid color-mix(in srgb, var(--theme-surface-hi) 64%, transparent) !important;
+  color: var(--foreground);
+  background: linear-gradient(145deg, var(--theme-inset-lo), var(--theme-inset-hi)) !important;
+  box-shadow: var(--theme-inset-shadow, var(--memory-inset-shadow)) !important;
+  outline: 0;
+  transition: box-shadow var(--duration-standard), border-color var(--duration-standard), background var(--duration-standard);
+}
+
+.memoly-composer-field:focus-visible {
+  border-color: var(--theme-accent) !important;
+  box-shadow: var(--theme-inset-shadow), 0 0 0 3px color-mix(in srgb, var(--theme-accent-soft) 72%, transparent) !important;
+}
+
+.memoly-composer-textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.memoly-composer-field::placeholder {
+  color: var(--theme-text-muted);
+  opacity: .8;
+}
+
+.memoly-composer-file-input {
+  min-height: 52px;
+  border: 1px solid color-mix(in srgb, var(--theme-surface-hi) 64%, transparent);
+  border-radius: var(--radius-field);
+  color: var(--theme-text-muted);
+  background: linear-gradient(145deg, var(--theme-inset-lo), var(--theme-inset-hi));
+  box-shadow: var(--theme-inset-shadow, var(--memory-inset-shadow));
+}
+
+.memoly-composer-file-input::file-selector-button {
+  min-height: 42px;
+  margin: 4px 10px 4px 4px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: calc(var(--radius-field) - 6px);
+  color: var(--theme-accent-text);
+  background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface));
+  box-shadow: var(--theme-raised-shadow, var(--shadow-card));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.memoly-composer-status {
+  display: grid;
+  gap: 8px;
+  color: var(--theme-text-muted);
+}
+
+.memoly-composer-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--theme-inset-lo);
+  box-shadow: var(--theme-inset-shadow);
+}
+
+.memoly-composer-progress > span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--theme-accent-hi), var(--theme-accent));
+  transition: width var(--duration-standard);
+}
+
+.memoly-composer-progress-indeterminate {
+  display: block;
+  width: 42%;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--theme-accent-hi), var(--theme-accent));
+  animation: memoly-composer-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes memoly-composer-progress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+}
+
+.memoly-composer-actions > button {
+  min-height: 52px;
+  border-radius: var(--radius-field);
+}
+
+.memoly-composer-actions > .memoly-composer-primary {
+  color: var(--theme-accent-text) !important;
+  border: 0 !important;
+  background: linear-gradient(145deg, var(--theme-accent-hi), var(--theme-accent)) !important;
+  box-shadow: var(--theme-raised-shadow) !important;
+}
+
+.memoly-composer-actions > .memoly-composer-secondary {
+  color: var(--theme-accent-text) !important;
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 36%, transparent) !important;
+  background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)) !important;
+  box-shadow: var(--theme-raised-shadow) !important;
+}
+
+.memoly-composer-actions > button:active,
+.memoly-sheet-action:active {
+  transform: translateY(1px) scale(.99);
+}
+
+.memoly-sheet-content {
+  display: grid;
+  gap: 0;
+}
+
+.memoly-sheet-action {
+  border: 1px solid color-mix(in srgb, var(--theme-surface-hi) 60%, transparent) !important;
+  color: var(--foreground);
+  background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)) !important;
+  box-shadow: var(--theme-raised-shadow) !important;
+}
+
+.memoly-sheet-action:hover,
+.memoly-sheet-action:focus-visible {
+  background: linear-gradient(145deg, var(--theme-accent-soft), var(--theme-surface-hi)) !important;
+}
+
+.memoly-sheet-action-icon {
+  color: var(--theme-accent-text);
+  background: var(--theme-accent-soft) !important;
+  box-shadow: var(--theme-inset-shadow);
+}
+
+@media (max-width: 355px) {
+  .memoly-composer-page {
+    padding-inline: calc(12px + var(--host-inset-left)) calc(12px + var(--host-inset-right));
+  }
+
+  .memoly-composer-card {
+    padding: 16px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memoly-composer-progress-indeterminate {
+    animation: none;
+  }
+}

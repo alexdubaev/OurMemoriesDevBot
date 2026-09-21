@@ -8,6 +8,7 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { finalizeMaxVideo, reserveMaxVideo, validateVideoFile, type MaxVideoReservation } from './api'
 import { reservationOccurredAt } from './date'
 import { uploadVideoToMax } from './xhr-upload'
+import '@/styles/composer-skin.css'
 
 export type VideoComposerProps = {
   childId: string
@@ -213,28 +214,32 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
   }
 
   return (
-    <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-4 py-6">
-      <section aria-labelledby="max-video-title" className="rounded-[var(--radius-card)] bg-card p-5 shadow-[var(--shadow-card)]">
+    <main className="memoly-composer-page mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)]">
+      <section aria-labelledby="max-video-title" className="memoly-composer-card rounded-[var(--radius-card)] p-5">
         <Typography id="max-video-title" variant="memoryScreen">Загрузить видео</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">Видео будет сохранено в семейную ленту.</Typography>
-        <label className="mt-6 block" htmlFor="max-video-file"><Typography variant="memoryButton">Видео</Typography></label>
-        <input accept=".mp4,.mov,.mkv,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm" className="mt-2 block w-full" disabled={isSaving} id="max-video-file" onChange={(event) => chooseFile(event.currentTarget.files?.[0] ?? null)} ref={fileInput} type="file" />
-        <label className="mt-5 block" htmlFor="max-video-caption"><Typography variant="memoryButton">Подпись</Typography></label>
-        <textarea aria-label="Подпись к видео" className="mt-2 min-h-24 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
-        <label className="mt-5 block" htmlFor="max-video-date"><Typography variant="memoryButton">Дата</Typography></label>
-        <input aria-label="Дата видео" className="mt-2 w-full rounded-[var(--radius-field)] border bg-muted p-3" id="max-video-date" max={maximumOccurredAt} onChange={(event) => setOccurredAt(event.currentTarget.value)} type="date" value={occurredAt} />
-        {status === 'uploading' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Загружаем файл… {progress}%</Typography> : null}
-        {status === 'saving' || status === 'reserving' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохраняем файл…</Typography> : null}
-        {status === 'success' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
+        <label className="memoly-composer-label mt-6 block" htmlFor="max-video-file"><Typography variant="memoryButton">Видео</Typography></label>
+        <input accept=".mp4,.mov,.mkv,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm" className="memoly-composer-file-input mt-2 block w-full" disabled={isSaving} id="max-video-file" onChange={(event) => chooseFile(event.currentTarget.files?.[0] ?? null)} ref={fileInput} type="file" />
+        <label className="memoly-composer-label mt-5 block" htmlFor="max-video-caption"><Typography variant="memoryButton">Подпись</Typography></label>
+        <textarea aria-label="Подпись к видео" className="memoly-composer-field memoly-composer-textarea mt-2 w-full rounded-[var(--radius-field)] p-3" id="max-video-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
+        <label className="memoly-composer-label mt-5 block" htmlFor="max-video-date"><Typography variant="memoryButton">Дата</Typography></label>
+        <input aria-label="Дата видео" className="memoly-composer-field memoly-composer-date mt-2 w-full rounded-[var(--radius-field)] p-3" id="max-video-date" max={maximumOccurredAt} onChange={(event) => setOccurredAt(event.currentTarget.value)} type="date" value={occurredAt} />
+        {status === 'uploading' ? <div className="memoly-composer-status mt-4" role="status"><Typography aria-live="polite" variant="memoryMeta">Загружаем файл… {progress}%</Typography><ProgressBar value={progress} label="Загрузка видео" /></div> : null}
+        {status === 'saving' || status === 'reserving' ? <div className="memoly-composer-status mt-4" role="status"><Typography aria-live="polite" variant="memoryMeta">Сохраняем файл…</Typography><span className="memoly-composer-progress-indeterminate" /></div> : null}
+        {status === 'success' ? <><Typography className="memoly-composer-status mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography><ProgressBar value={100} label="Видео сохранено" /></> : null}
         {error ? <>
           <Typography className="mt-4 text-destructive" data-save-error-code={reserveErrorCode ?? undefined} data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
           {reserveErrorCode ? <Typography className="mt-1 text-destructive" data-save-error-code={reserveErrorCode} variant="memoryMeta">Код: {reserveErrorCode}{reserveApplicationCode ? ` / ${reserveApplicationCode}` : ''}</Typography> : null}
         </> : null}
-        <div className="mt-6 flex gap-3">
-          <Button className="min-h-12 flex-1" disabled={isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
-          <Button className="min-h-12" disabled={isSaving && status !== 'uploading'} onClick={() => { clearEphemeral(); onCancel() }} type="button" variant="outline">Отмена</Button>
+        <div className="memoly-composer-actions mt-6 flex gap-3">
+          <Button className="memoly-composer-primary min-h-12 flex-1" disabled={isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
+          <Button className="memoly-composer-secondary min-h-12" disabled={isSaving && status !== 'uploading'} onClick={() => { clearEphemeral(); onCancel() }} type="button" variant="outline">Отмена</Button>
         </div>
       </section>
     </main>
   )
+}
+
+function ProgressBar({ label, value }: { label: string; value: number }) {
+  return <div aria-label={label} aria-valuemax={100} aria-valuemin={0} aria-valuenow={value} className="memoly-composer-progress" role="progressbar"><span style={{ width: value + '%' }} /></div>
 }

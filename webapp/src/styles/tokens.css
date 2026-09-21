@@ -85,3 +85,219 @@
     --duration-dialog: 0ms;
   }
 }
+
+/* memoLy semantic theme layer. Components consume these names instead of
+   choosing a palette themselves; the six values are the canonical handoff set. */
+:root {
+  --theme-canvas: #edf1ea;
+  --theme-canvas-top: #f0f3ee;
+  --theme-canvas-bottom: #e9eee7;
+  --theme-bg: var(--theme-canvas);
+  --theme-bg-top: var(--theme-canvas-top);
+  --theme-bg-bottom: var(--theme-canvas-bottom);
+  --theme-surface: #f5f5ef;
+  --theme-surface-hi: #f8f8f3;
+  --theme-surface-lo: #e9ede7;
+  --theme-surface-bright: var(--theme-surface-hi);
+  --theme-inset-hi: #ecefe9;
+  --theme-inset-lo: #e7ece6;
+  --theme-inset-bright: var(--theme-inset-hi);
+  --theme-sheet: #f2f4ef;
+  --theme-accent-hi: #a8c4b3;
+  --theme-accent: #82a58f;
+  --theme-accent-mid: #86a994;
+  --theme-accent-deep: #7f9f90;
+  --theme-accent-text: #698e7b;
+  --theme-accent-soft: #dce7df;
+  --theme-accent-soft-hi: color-mix(in srgb, var(--theme-accent-soft) 58%, white);
+  --theme-shadow: rgb(105 124 113 / 20%);
+  --theme-shadow-soft: rgb(105 124 113 / 12%);
+  --theme-glow: rgb(255 255 255 / 88%);
+  --theme-text-muted: #6f7f78;
+  --theme-raised-shadow: 8px 8px 20px var(--theme-shadow), -6px -6px 16px var(--theme-glow), inset 1px 1px 0 rgb(255 255 255 / 80%);
+  --theme-inset-shadow: inset 4px 4px 10px var(--theme-shadow-soft), inset -4px -4px 10px rgb(255 255 255 / 76%);
+  --memory-canvas: var(--theme-canvas);
+  --memory-surface: var(--theme-surface);
+  --memory-surface-soft: var(--theme-surface-lo);
+  --memory-surface-raised: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface));
+  --memory-surface-inset: var(--theme-inset-lo);
+  --memory-text-muted: var(--theme-text-muted);
+  --memory-accent-soft: var(--theme-accent-soft);
+  --memory-accent-strong: var(--theme-accent-deep);
+  --memory-accent-tint: var(--theme-accent-soft);
+  --shadow-card: var(--theme-raised-shadow);
+  --memory-inset-shadow: var(--theme-inset-shadow);
+}
+
+:root[data-memoly-theme='rose'],
+.memoly-app-root[data-memoly-theme='rose'] {
+  --theme-canvas: #f4efec;
+  --theme-canvas-top: #faf4f0;
+  --theme-canvas-bottom: #eee5e0;
+  --theme-surface: #f8f3ef;
+  --theme-surface-hi: #fbf7f3;
+  --theme-surface-lo: #efe6e1;
+  --theme-inset-hi: #f2e9e5;
+  --theme-inset-lo: #eadeda;
+  --theme-sheet: #f7efeb;
+  --theme-accent-hi: #ddb2b4;
+  --theme-accent: #c98f98;
+  --theme-accent-mid: #cf9ca2;
+  --theme-accent-deep: #b87580;
+  --theme-accent-text: #a96f79;
+  --theme-accent-soft: #f0dcdd;
+  --theme-shadow: rgb(139 105 105 / 18%);
+  --theme-shadow-soft: rgb(139 105 105 / 10%);
+  --theme-glow: rgb(255 252 249 / 92%);
+  --theme-text-muted: #876f72;
+}
+
+:root[data-memoly-theme='sky'],
+.memoly-app-root[data-memoly-theme='sky'] {
+  --theme-canvas: #eef4f7;
+  --theme-canvas-top: #f6fafb;
+  --theme-canvas-bottom: #e6eff3;
+  --theme-surface: #f6f8f7;
+  --theme-surface-hi: #fafcfb;
+  --theme-surface-lo: #e8eef0;
+  --theme-inset-hi: #edf3f5;
+  --theme-inset-lo: #e1ebef;
+  --theme-sheet: #f0f5f6;
+  --theme-accent-hi: #adc8d6;
+  --theme-accent: #8fafc1;
+  --theme-accent-mid: #99b8c8;
+  --theme-accent-deep: #6f91a5;
+  --theme-accent-text: #67879a;
+  --theme-accent-soft: #dbe8ee;
+  --theme-shadow: rgb(91 119 133 / 18%);
+  --theme-shadow-soft: rgb(91 119 133 / 10%);
+  --theme-glow: rgb(255 255 255 / 93%);
+  --theme-text-muted: #6b7f89;
+}
+
+:root[data-memoly-theme='lavender'],
+.memoly-app-root[data-memoly-theme='lavender'] {
+  --theme-canvas: #f2f0f5;
+  --theme-canvas-top: #faf8fb;
+  --theme-canvas-bottom: #ebe7ef;
+  --theme-surface: #f8f5f3;
+  --theme-surface-hi: #fbf9f7;
+  --theme-surface-lo: #ebe6ec;
+  --theme-inset-hi: #f0ebf2;
+  --theme-inset-lo: #e5deea;
+  --theme-sheet: #f3eef5;
+  --theme-accent-hi: #c5bdd5;
+  --theme-accent: #b2a7c7;
+  --theme-accent-mid: #b9afcd;
+  --theme-accent-deep: #8e82a7;
+  --theme-accent-text: #837798;
+  --theme-accent-soft: #e4deec;
+  --theme-shadow: rgb(111 100 128 / 16%);
+  --theme-shadow-soft: rgb(111 100 128 / 9%);
+  --theme-glow: rgb(255 255 255 / 92%);
+  --theme-text-muted: #7b7488;
+}
+
+:root[data-memoly-theme='apricot'],
+.memoly-app-root[data-memoly-theme='apricot'] {
+  --theme-canvas: #f6f0e8;
+  --theme-canvas-top: #fcf8f2;
+  --theme-canvas-bottom: #eee5da;
+  --theme-surface: #faf6f0;
+  --theme-surface-hi: #fdf9f4;
+  --theme-surface-lo: #eee4d9;
+  --theme-inset-hi: #f4eade;
+  --theme-inset-lo: #eadbce;
+  --theme-sheet: #f7efe6;
+  --theme-accent-hi: #e7bd9f;
+  --theme-accent: #dda887;
+  --theme-accent-mid: #e1b191;
+  --theme-accent-deep: #c38669;
+  --theme-accent-text: #ad745d;
+  --theme-accent-soft: #f1ddd0;
+  --theme-shadow: rgb(133 103 81 / 16%);
+  --theme-shadow-soft: rgb(133 103 81 / 9%);
+  --theme-glow: rgb(255 252 248 / 93%);
+  --theme-text-muted: #8a766a;
+}
+
+:root[data-memoly-theme='sand'],
+.memoly-app-root[data-memoly-theme='sand'] {
+  --theme-canvas: #f1efe7;
+  --theme-canvas-top: #f8f6ef;
+  --theme-canvas-bottom: #e9e6dc;
+  --theme-surface: #f8f6f0;
+  --theme-surface-hi: #fbfaf5;
+  --theme-surface-lo: #e9e6dd;
+  --theme-inset-hi: #efede5;
+  --theme-inset-lo: #e3dfd5;
+  --theme-sheet: #f3f1ea;
+  --theme-accent-hi: #bbc1a8;
+  --theme-accent: #aab294;
+  --theme-accent-mid: #b1b99e;
+  --theme-accent-deep: #858f70;
+  --theme-accent-text: #778263;
+  --theme-accent-soft: #e2e5d7;
+  --theme-shadow: rgb(106 106 87 / 16%);
+  --theme-shadow-soft: rgb(106 106 87 / 9%);
+  --theme-glow: rgb(255 255 252 / 92%);
+  --theme-text-muted: #777a69;
+}
+
+.memoly-app-root {
+  min-height: 100dvh;
+  color: var(--foreground);
+  background: linear-gradient(180deg, var(--theme-canvas-top), var(--theme-canvas-bottom));
+}
+
+/* The existing BottomNavigation keeps ownership of routing and capabilities;
+   this skin is shared by Feed and Family through the same component. */
+nav[data-bottom-navigation-appearance='memoly'] {
+  inset-inline: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  min-height: calc(var(--layout-bottom-nav) + var(--host-inset-bottom)) !important;
+  border: 1px solid color-mix(in srgb, var(--theme-surface-hi) 70%, transparent) !important;
+  border-bottom: 0 !important;
+  border-radius: 24px 24px 0 0 !important;
+  background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)) !important;
+  box-shadow: var(--theme-raised-shadow) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  padding-bottom: var(--host-inset-bottom) !important;
+}
+
+nav[data-bottom-navigation-appearance='memoly'] > div {
+  width: 100%;
+  height: var(--layout-bottom-nav);
+  max-width: none;
+  align-items: center;
+  padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left));
+}
+
+nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] {
+  min-height: var(--layout-tap-min);
+  color: var(--theme-text-muted) !important;
+}
+
+nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home'][aria-current='page'],
+nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family'][aria-current='page'] {
+  color: var(--theme-accent-text) !important;
+}
+
+nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle {
+  width: 58px;
+  height: 58px;
+  margin-top: -24px;
+  color: var(--theme-accent-text);
+  background: linear-gradient(145deg, var(--theme-accent-hi), var(--theme-accent-mid)) !important;
+  box-shadow: 7px 8px 16px var(--theme-shadow), -5px -5px 12px var(--theme-glow) !important;
+}
+
+nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-viewer {
+  color: var(--theme-text-muted) !important;
+}
+
+@media (max-width: 355px) {
+  nav[data-bottom-navigation-appearance='memoly'] > div { padding-inline: 8px; }
+}

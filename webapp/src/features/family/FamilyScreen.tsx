@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
 import type { AuthenticatedTransport } from '@/platform/api'
+import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
 import { useChildAvatar } from './useChildAvatar'
 
@@ -12,6 +13,7 @@ export function FamilyScreen({
   invites,
   members,
   transport,
+  hostBridge,
   currentUserId,
   onEditChild,
   onFeed,
@@ -22,6 +24,7 @@ export function FamilyScreen({
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
   transport: AuthenticatedTransport
+  hostBridge: Pick<HostBridge, 'onBack'>
   currentUserId: string
   onEditChild: () => void
   onFeed: () => void
@@ -81,6 +84,7 @@ export function FamilyScreen({
           childAvatarUrl={avatarUrl}
           copyState={copyState}
           familyResponse={familyResponse}
+          hostBridge={hostBridge}
           hasError={Boolean(error)}
           inviteReady={inviteReady}
           invites={invites}
@@ -131,7 +135,7 @@ export function FamilyScreen({
           usageFailed={usageFailed}
         />
       </div>
-      <BottomNavigation active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'viewer' ? 'viewer' : 'full'} />
+      <BottomNavigation appearance="memoly" active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'viewer' ? 'viewer' : 'full'} />
     </div>
   )
 }
