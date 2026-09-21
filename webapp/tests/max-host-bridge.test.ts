@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import {
   createMaxHostBridge,
   isMaxVideoUploadAcceptanceLaunch,
+  isMaxRuntimeDiagnosticLaunch,
+  readMaxRuntimeDiagnostic,
   type HostBridge,
 } from '../src/platform/max/host-bridge'
 
@@ -213,5 +215,60 @@ describe('MAX HostBridge', () => {
       location: { search: '?startapp=max-video-upload-acceptance' },
       WebApp: { initData: 'query_id=signed', ready: () => undefined },
     })).toBe(false)
+  })
+
+  test('exposes only safe MAX runtime diagnostic fields', () => {
+    const rawInitData = 'query_id=raw-secret&start_param=max-start-param-debug&hash=raw-hash&user=%7B%22id%22%3A42%7D'
+    const diagnostic = readMaxRuntimeDiagnostic({
+      location: { pathname: '/mini-app', search: '?WebAppStartParam=ignored&safe=1' },
+      WebApp: {
+        initData: rawInitData,
+        initDataUnsafe: { start_param: 'unsafe-start-param', user: { id: 42 }, token: 'raw-token' },
+        ready: () => undefined,
+      },
+    })
+    const serialized = JSON.stringify(diagnostic)
+
+    expect(diagnostic).toMatchObject({
+      hostDetected: true,
+      webAppPresent: true,
+      initDataPresent: true,
+      signedStartParamPresent: true,
+      signedStartParamValue: 'max-start-param-debug',
+      initDataUnsafePresent: true,
+      unsafeStartParamPresent: true,
+      unsafeStartParamValue: 'unsafe-start-param',
+      webAppStartParamPresent: true,
+      webAppStartParamValue: 'ignored',
+      locationPathname: '/mini-app',
+      locationQueryKeys: ['WebAppStartParam', 'safe'],
+      resolvedStartParam: 'max-start-param-debug',
+      isMaxVideoUploadAcceptanceLaunch: false,
+    })
+    expect(serialized).toContain('max-start-param-debug')
+    expect(serialized).toContain('unsafe-start-param')
+    expect(serialized).not.toContain(rawInitData)
+    expect(serialized).not.toContain('raw-secret')
+    expect(serialized).not.toContain('raw-hash')
+    expect(serialized).not.toContain('raw-token')
+    expect(serialized).not.toContain('42')
+    expect(serialized).not.toContain('?WebAppStartParam=ignored&safe=1')
+  })
+
+  test('detects only the explicit MAX runtime diagnostic launch', () => {
+    const diagnosticHost = {
+      location: { pathname: '/mini-app', search: '?WebAppStartParam=max-start-param-debug' },
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    }
+    expect(isMaxRuntimeDiagnosticLaunch(diagnosticHost)).toBe(true)
+    expect(isMaxRuntimeDiagnosticLaunch({
+      location: { pathname: '/mini-app', search: '?WebAppStartParam=max-video-upload-acceptance' },
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    })).toBe(false)
+    expect(isMaxRuntimeDiagnosticLaunch({
+      location: { pathname: '/mini-app', search: '?startapp=max-start-param-debug' },
+      WebApp: { initData: 'query_id=signed', ready: () => undefined },
+    })).toBe(true)
+    expect(isMaxRuntimeDiagnosticLaunch({ location: { search: '?WebAppStartParam=max-start-param-debug' } })).toBe(false)
   })
 })

@@ -27,7 +27,7 @@ import {
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { isMaxVideoUploadAcceptanceLaunch } from '@/platform/max/host-bridge'
+import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -76,9 +76,43 @@ export default function App({ hostBridge }: AppProps) {
       </main>
     )
   }
+  if (typeof window !== 'undefined' && shouldShowMaxRuntimeDiagnostic(hostBridge.kind, window)) {
+    return <MaxRuntimeDiagnosticPanel diagnostic={readMaxRuntimeDiagnostic(window)} style={style} />
+  }
   const maxVideoUploadAcceptance = hostBridge.kind === 'max'
     && isMaxVideoUploadAcceptanceLaunch(typeof window === 'undefined' ? undefined : window)
   return <FamilyController currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
+}
+
+function MaxRuntimeDiagnosticPanel({ diagnostic, style }: { diagnostic: MaxRuntimeDiagnostic; style: CSSProperties }) {
+  const rows: Array<[string, string]> = [
+    ['hostDetected', yesNo(diagnostic.hostDetected)],
+    ['window.WebApp present', yesNo(diagnostic.webAppPresent)],
+    ['initData present', yesNo(diagnostic.initDataPresent)],
+    ['signed start_param present', yesNo(diagnostic.signedStartParamPresent)],
+    ['signed start_param value', diagnostic.signedStartParamValue ?? '—'],
+    ['initDataUnsafe present', yesNo(diagnostic.initDataUnsafePresent)],
+    ['initDataUnsafe.start_param present', yesNo(diagnostic.unsafeStartParamPresent)],
+    ['initDataUnsafe.start_param value', diagnostic.unsafeStartParamValue ?? '—'],
+    ['WebAppStartParam present', yesNo(diagnostic.webAppStartParamPresent)],
+    ['WebAppStartParam value', diagnostic.webAppStartParamValue ?? '—'],
+    ['location pathname', diagnostic.locationPathname || '—'],
+    ['location query key names', diagnostic.locationQueryKeys.length > 0 ? diagnostic.locationQueryKeys.join(', ') : '—'],
+    ['resolved start param', diagnostic.resolvedStartParam ?? '—'],
+    ['isMaxVideoUploadAcceptanceLaunch', yesNo(diagnostic.isMaxVideoUploadAcceptanceLaunch)],
+  ]
+
+  return <main aria-labelledby="max-runtime-diagnostic-title" className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
+    <Typography as="h1" id="max-runtime-diagnostic-title" variant="memoryScreen">MAX runtime diagnostic</Typography>
+    <Typography className="mt-3" tone="muted" variant="memoryBody">Безопасный снимок параметров запуска. Секретные данные не отображаются.</Typography>
+    <dl className="mt-6 grid gap-3 rounded-[var(--radius-card)] bg-card p-5 shadow-[var(--shadow-card)]">
+      {rows.map(([label, value]) => <div className="grid gap-1" key={label}><Typography as="dt" variant="memoryMeta">{label}</Typography><Typography as="dd" className="break-words" tone="muted" variant="memoryMeta">{value}</Typography></div>)}
+    </dl>
+  </main>
+}
+
+function yesNo(value: boolean) {
+  return value ? 'yes' : 'no'
 }
 
 function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
