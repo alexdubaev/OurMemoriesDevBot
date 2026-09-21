@@ -174,6 +174,52 @@ test('shows the safe photo-finalize code without storage details', async () => {
   }
 })
 
+test('replays one idempotent photo upload when finalize reports the missing object', async () => {
+  const browser = installInteractiveDom()
+  let reserves = 0
+  let finalizes = 0
+  let successCount = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/uploads')) {
+        reserves += 1
+        return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/private-object', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) {
+        finalizes += 1
+        if (finalizes === 1) throw new ApiRequestError(409, 'PHOTO_FINALIZE_OBJECT_MISSING', 'Файл не найден в хранилище')
+        return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      }
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, {
+      childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport,
+      onCancel: () => undefined, onSuccess: () => { successCount += 1 },
+    })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    input.files = [file('retry-after-missing.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive(); await flushInteractive() })
+
+    expect(reserves).toBe(2)
+    expect(finalizes).toBe(2)
+    expect(successCount).toBe(1)
+    expect(textOf(browser.container)).toContain('Сохранено в семейную ленту')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('asks for confirmation before cancelling a dirty draft', async () => {
   const browser = installInteractiveDom()
   let cancelCount = 0

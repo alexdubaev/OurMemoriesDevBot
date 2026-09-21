@@ -232,7 +232,7 @@ export class MediaService {
         await this.repository.rejectUpload(scope, uploadId, this.now())
         throw new MediaFailure('upload_incomplete', 'Файл загружен не полностью', 'PHOTO_FINALIZE_OBJECT_METADATA_MISMATCH')
       }
-      throw new MediaFailure('upload_incomplete', 'Файл загружен не полностью')
+      throw new MediaFailure('upload_incomplete', 'Файл загружен не полностью', 'PHOTO_FINALIZE_OBJECT_MISSING')
     }
     const magic = await this.storage.readRange(upload.objectKey, { start: 0, end: Math.min(31, upload.byteSize - 1) })
       .catch((error) => { throw storageFailure(error) })

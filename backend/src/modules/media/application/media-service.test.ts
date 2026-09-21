@@ -47,6 +47,19 @@ test('finalize still rejects a processing error before commit', async () => {
   expect(committed).toBe(false)
 })
 
+test('labels a missing uploaded photo object without releasing its retryable reservation', async () => {
+  let rejected = 0
+  const service = createService({
+    headObject: async () => null,
+    reject: async () => { rejected += 1 },
+    commit: async () => ({ kind: 'ready', asset }),
+  })
+
+  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004'))
+    .rejects.toMatchObject({ code: 'PHOTO_FINALIZE_OBJECT_MISSING' })
+  expect(rejected).toBe(0)
+})
+
 test('labels a rejected photo-processing failure with a safe finalize code', async () => {
   const service = createService({
     processPhoto: async () => { throw new MediaFailure('invalid_file', 'Изображение не удалось безопасно декодировать') },
@@ -118,12 +131,14 @@ test('does not replay an idempotency key for changed photo metadata', async () =
 function createService(options: {
   commit: MediaRepository['commitFinalization']
   cleanup?: (directory: string) => Promise<void>
+  headObject?: () => Promise<Awaited<ReturnType<PrivateStorage['headObject']>>>
   processPhoto?: PhotoProcessor
+  reject?: MediaRepository['rejectUpload']
   warn?: (name: string) => void
 }) {
   const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
   const storage = {
-    headObject: async () => ({ contentLength: bytes.byteLength, contentType: 'image/jpeg' }),
+    headObject: options.headObject ?? (async () => ({ contentLength: bytes.byteLength, contentType: 'image/jpeg' })),
     readRange: async () => bytes,
     readObject: async () => ({ body: new Blob([bytes]).stream(), contentLength: bytes.byteLength, contentType: 'image/jpeg' }),
     writeObject: async () => undefined,
@@ -136,7 +151,7 @@ function createService(options: {
       userId: scope.principal.userId, purpose: 'child_avatar', kind: 'photo', objectKey: 'media-originals/test',
       declaredMime: 'image/jpeg', byteSize: bytes.byteLength, expiresAt: new Date('2026-09-12T00:00:00.000Z'),
     } }),
-    rejectUpload: async () => undefined,
+    rejectUpload: options.reject ?? (async () => undefined),
     commitFinalization: options.commit,
     readyForMemory: async () => false,
     resolveContent: async () => null,

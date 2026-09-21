@@ -32,6 +32,10 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   if (!(reason instanceof ApiRequestError) || !/^PHOTO_FINALIZE_[A-Z_]+$/.test(reason.code)) return null
   return reason.code.toLowerCase()
 }
+
+function isMissingPhotoObject(reason: unknown): boolean {
+  return reason instanceof ApiRequestError && reason.code === 'PHOTO_FINALIZE_OBJECT_MISSING'
+}
 type PendingPhoto = {
   reservation: Awaited<ReturnType<typeof reservePhotoUpload>>
   uploaded: boolean
@@ -115,28 +119,41 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index]
         if (!file) continue
-        let state = pending.current[index]
-        if (!state) {
-          stage = 'reserve'
-          setErrorStage(stage)
-          const reservation = await reservePhotoUpload(transport, familyId, file, controller.signal, createPhotoUploadIdempotencyKey(key, index))
-          state = { reservation, uploaded: false, finalized: null }
-          pending.current[index] = state
+        let missingObjectRecoveryUsed = false
+        for (;;) {
+          let state = pending.current[index]
+          if (!state) {
+            stage = 'reserve'
+            setErrorStage(stage)
+            const reservation = await reservePhotoUpload(transport, familyId, file, controller.signal, createPhotoUploadIdempotencyKey(key, index))
+            state = { reservation, uploaded: false, finalized: null }
+            pending.current[index] = state
+          }
+          if (!state.uploaded) {
+            stage = 'upload'
+            setErrorStage(stage)
+            await uploadPhotoObject(state.reservation, file, controller.signal)
+            state.uploaded = true
+          }
+          if (!state.finalized) {
+            stage = 'finalize'
+            setErrorStage(stage)
+            try {
+              const finalized = await finalizePhotoUpload(transport, familyId, state.reservation.upload.uploadId, controller.signal)
+              state.finalized = finalized.asset
+            } catch (reason) {
+              if (!missingObjectRecoveryUsed && isMissingPhotoObject(reason)) {
+                missingObjectRecoveryUsed = true
+                pending.current[index] = null
+                continue
+              }
+              throw reason
+            }
+          }
+          mediaIds.push(state.finalized.id)
+          setProgress(Math.round(((index + 1) / files.length) * 100))
+          break
         }
-        if (!state.uploaded) {
-          stage = 'upload'
-          setErrorStage(stage)
-          await uploadPhotoObject(state.reservation, file, controller.signal)
-          state.uploaded = true
-        }
-        if (!state.finalized) {
-          stage = 'finalize'
-          setErrorStage(stage)
-          const finalized = await finalizePhotoUpload(transport, familyId, state.reservation.upload.uploadId, controller.signal)
-          state.finalized = finalized.asset
-        }
-        mediaIds.push(state.finalized.id)
-        setProgress(Math.round(((index + 1) / files.length) * 100))
       }
 
       stage = 'create'

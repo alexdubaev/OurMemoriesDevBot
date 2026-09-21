@@ -9,6 +9,7 @@ test('preserves safe codes for every finalize branch that rejects an uploaded ph
     ['forbidden', 'PHOTO_FINALIZE_ACCESS_REVOKED'],
     ['upload_expired', 'PHOTO_FINALIZE_RESERVATION_EXPIRED'],
     ['upload_incomplete', 'PHOTO_FINALIZE_OBJECT_METADATA_MISMATCH'],
+    ['upload_incomplete', 'PHOTO_FINALIZE_OBJECT_MISSING'],
     ['unsupported_media', 'PHOTO_FINALIZE_MEDIA_VERIFICATION_FAILED'],
     ['invalid_file', 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED'],
   ] as const
