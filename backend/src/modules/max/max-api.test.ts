@@ -241,6 +241,19 @@ describe('MAX API client', () => {
     })
   })
 
+  test('accepts the live-shaped send response with the provider identity in message body', async () => {
+    const api = createMaxApi(token, {
+      fetch: async () => response({ message: {
+        sender: { user_id: 42 },
+        recipient: { chat_id: 900, chat_type: 'dialog', user_id: 77 },
+        body: { mid: 'live-send-message-1', attachments: [] },
+      } }),
+    })
+
+    await expect(api.sendVideoMessage!({ userId: '77', text: 'Видео', uploadToken: 'upload-token-1' }))
+      .resolves.toEqual({ messageId: 'live-send-message-1' })
+  })
+
   test('rejects malformed upload data and never exposes capability values in provider errors', async () => {
     const capabilityToken = 'secret-upload-token'
     const malformed = createMaxApi(token, { fetch: async () => response({ url: 'http://unsafe.example/upload', token: capabilityToken }) })
