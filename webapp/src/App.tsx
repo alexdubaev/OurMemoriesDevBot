@@ -28,10 +28,19 @@ import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
+import { ThemeProvider } from '@/features/theme'
 
 export type AppProps = { hostBridge: HostBridge }
 
-export default function App({ hostBridge }: AppProps) {
+export default function App(props: AppProps) {
+  return (
+    <ThemeProvider>
+      <AppContent {...props} />
+    </ThemeProvider>
+  )
+}
+
+function AppContent({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
   const hostAuthProvider: HostAuthProvider | null = hostBridge.kind === 'max' || hostBridge.kind === 'telegram'
     ? hostBridge.kind
@@ -54,9 +63,28 @@ export default function App({ hostBridge }: AppProps) {
     isHostAvailable: hostBridge.isAvailable,
   } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, startedHostAuthKey, hostBridge.isAvailable])
 
+  const insets = hostBridge.getInsets()
+  useEffect(() => {
+    // Sheets and dialogs portal to document.body, outside the page wrapper.
+    const root = document.documentElement
+    const values = {
+      '--host-inset-top': `${insets.top}px`,
+      '--host-inset-right': `${insets.right}px`,
+      '--host-inset-bottom': `${insets.bottom}px`,
+      '--host-inset-left': `${insets.left}px`,
+    }
+    const previous = Object.keys(values).map((name) => [name, root.style.getPropertyValue(name)] as const)
+    for (const [name, value] of Object.entries(values)) root.style.setProperty(name, value)
+    return () => {
+      for (const [name, value] of previous) {
+        if (value) root.style.setProperty(name, value)
+        else root.style.removeProperty(name)
+      }
+    }
+  }, [insets.top, insets.right, insets.bottom, insets.left])
+
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
-  const insets = hostBridge.getInsets()
   const style = {
     '--host-inset-bottom': `${insets.bottom}px`,
     '--host-inset-left': `${insets.left}px`,
@@ -215,7 +243,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (screen === 'feed') {
     return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
   }
-  return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
+  return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }
 
 function InvitePreview({ preview, style, onAccept }: { preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {

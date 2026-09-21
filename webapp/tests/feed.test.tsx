@@ -177,6 +177,30 @@ test('video cards treat whitespace-only captions as empty', () => {
   expect(markup).not.toContain('memoly-video-caption')
 })
 
+test('delete preview cards preserve the selected memory while removing interactive actions', () => {
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: createElement('button', { 'aria-label': 'Действия с воспоминанием' }, '...'),
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: 'Первое слово',
+    kind: 'voice',
+    liked: true,
+    likeCount: 2,
+    media: createElement('div', null, 'static waveform'),
+    memoryId: memoryId,
+    mode: 'delete-preview',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }))
+
+  expect(markup).toContain('aria-hidden="true"')
+  expect(markup).toContain('memoly-memory-delete-preview')
+  expect(markup).not.toContain('Действия с воспоминанием')
+  expect(markup).not.toContain('Открыть воспоминание')
+  expect(markup).toContain('disabled=""')
+})
+
 test('video captions remain visible without becoming a separate detail button', () => {
   const markup = renderToStaticMarkup(MemoryCardPresentation({
     actions: null,

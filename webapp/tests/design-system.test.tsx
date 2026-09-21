@@ -153,17 +153,18 @@ test('memoLy shell keeps horizontal host insets at the narrow breakpoint and con
     ),
   )
   const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const sharedTokens = await readFile(path.resolve(import.meta.dir, '../src/styles/tokens.css'), 'utf8')
 
   expect(markup).toContain('--host-inset-left:11px')
   expect(markup).toContain('--host-inset-right:13px')
   expect(css).toContain('padding-left: calc(16px + var(--host-inset-left))')
   expect(css).toContain('padding-right: calc(16px + var(--host-inset-right))')
-  expect(css).toContain('padding-left: calc(21px + var(--host-inset-left))')
-  expect(css).toContain('padding-right: calc(21px + var(--host-inset-right))')
+  expect(sharedTokens).toContain('padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left))')
+  expect(sharedTokens).toContain('padding-bottom: var(--host-inset-bottom) !important')
+  expect(sharedTokens).toContain('width: 100% !important')
   expect(css).toContain('margin-left: calc(16px + var(--host-inset-left))')
   expect(css).toContain('margin-right: calc(16px + var(--host-inset-right))')
-  expect(css).toContain('width: min(460px, 100%)')
-  expect(css).not.toContain('width: min(460px, calc(100% - 36px - var(--host-inset-left) - var(--host-inset-right)))')
+  expect(sharedTokens).toContain("nav[data-bottom-navigation-appearance='memoly']")
 })
 
 test('FeedShell applies normalized host insets once and lets long names grow safely', () => {

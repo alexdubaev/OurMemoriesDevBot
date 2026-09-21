@@ -1,0 +1,125 @@
+.memoly-child-header {
+  position: relative;
+  isolation: isolate;
+  min-height: 164px;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  color: var(--foreground);
+  background: var(--theme-surface, var(--card));
+  box-shadow: var(--theme-raised-shadow, var(--shadow-card));
+}
+
+.memoly-child-header-art {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  object-fit: cover;
+  object-position: center;
+  opacity: .88;
+}
+
+.memoly-child-header-content {
+  position: relative;
+  z-index: 1;
+  min-height: inherit;
+  padding: 14px 16px 16px;
+}
+
+.memoly-child-header-brand {
+  display: flex;
+  justify-content: center;
+  min-height: 30px;
+}
+
+.memoly-child-header-logo {
+  width: min(148px, 62vw);
+}
+
+.memoly-child-header-identity {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 76px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 0 36px 0 0;
+  border: 0;
+  color: inherit;
+  text-align: start;
+  background: transparent;
+}
+
+.memoly-child-header-identity:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.memoly-child-header-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.memoly-child-header-copy strong,
+.memoly-child-header-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoly-child-header-copy strong {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 650;
+}
+
+.memoly-child-header-copy small {
+  color: var(--theme-text-muted, var(--muted-foreground));
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.memoly-child-header-chevron {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  opacity: .75;
+}
+
+.memoly-child-header-settings {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: var(--layout-tap-min);
+  height: var(--layout-tap-min);
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--theme-accent-deep, var(--primary));
+  background: color-mix(in srgb, var(--theme-surface-hi, var(--card)) 72%, transparent);
+  box-shadow: var(--theme-inset-shadow, none);
+}
+
+@media (max-width: 355px) {
+  .memoly-child-header {
+    min-height: 156px;
+  }
+
+  .memoly-child-header-content {
+    padding-inline: 14px;
+  }
+
+  .memoly-child-header-copy strong {
+    font-size: 18px;
+  }
+}

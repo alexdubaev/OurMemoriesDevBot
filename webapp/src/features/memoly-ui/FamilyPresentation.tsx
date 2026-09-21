@@ -1,12 +1,16 @@
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { WebpIcon } from '@/components/WebpIcon'
+import { ChildHeader } from '@/components/ChildHeader'
 import { Typography } from '@/components/typography'
 import { Button } from '@/components/ui/button'
 import { InlineError } from '@/features/feed'
-import { ChildAvatar, familyMemberName, roleLabel } from '@/features/family'
+import { familyMemberName, feedChildSubtitle, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
+import { useMemolyTheme } from '@/features/theme'
+import type { HostBridge } from '@/platform/host-bridge'
+import { SettingsSheet } from './SettingsSheet'
 
 export type FamilyMemberActions = {
   canEditAlias: boolean
@@ -16,6 +20,7 @@ export type FamilyMemberActions = {
 
 export type FamilyPresentationProps = {
   familyResponse: FamilyResponse
+  hostBridge: Pick<HostBridge, 'onBack'>
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
   childAvatarUrl: string | null
@@ -44,6 +49,7 @@ export type FamilyPresentationProps = {
 
 export function FamilyPresentation({
   familyResponse,
+  hostBridge,
   invites,
   members,
   childAvatarUrl,
@@ -71,28 +77,40 @@ export function FamilyPresentation({
 }: FamilyPresentationProps) {
   const [inviteRole, setInviteRole] = useState<'viewer' | 'full'>('viewer')
   const [inviteAlias, setInviteAlias] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsTriggerRef = useRef<HTMLElement | null>(null)
+  const { theme } = useMemolyTheme()
   const child = familyResponse.child
 
   return (
     <main className="ml-family-content" data-slot="family-presentation">
-      <header className="ml-topbar ml-simple-header">
-        <Typography as="h1" variant="memoryScreen">Семья</Typography>
-      </header>
+      <ChildHeader
+        childAvatarCrop={child?.avatarCrop ?? null}
+        childAvatarUrl={childAvatarUrl}
+        childName={child?.name ?? 'Ребёнок'}
+        childSubtitle={child ? feedChildSubtitle(child.birthDate, familyResponse.family.timezone) : 'Профиль ребёнка'}
+        mode="family"
+        onOpenChild={canEditChild && child ? onEditChild : undefined}
+        onOpenSettings={() => {
+          if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) settingsTriggerRef.current = document.activeElement
+          setSettingsOpen(true)
+        }}
+        theme={theme}
+      />
 
-      <section aria-labelledby="family-title" className="ml-family-hero">
-        <ChildAvatar avatarCrop={child?.avatarCrop ?? null} avatarUrl={childAvatarUrl} name={child?.name ?? 'Ребёнок'} size="family-card" />
+      <section aria-labelledby="family-title" className="ml-family-meta">
         <div className="min-w-0 flex-1">
           <Typography as="h1" id="family-title" variant="memoryScreen">{familyResponse.family.name}</Typography>
-          {child ? <Typography className="mt-1" tone="muted" variant="memoryBody">{child.name}</Typography> : null}
+          <Typography className="mt-1" tone="muted" variant="memoryBody">Участники семьи · {members.length}</Typography>
         </div>
-        {canEditChild && child ? <Button className="min-h-11" onClick={onEditChild} type="button" variant="ghost"><Typography variant="memoryMeta">Изменить</Typography></Button> : null}
+        {canEditChild && child ? <Button aria-label="Изменить профиль ребёнка" className="ml-family-edit" onClick={onEditChild} type="button" variant="ghost"><Typography variant="memoryMeta">Изменить</Typography></Button> : null}
       </section>
 
       {hasError ? <div className="mb-4"><InlineError onRetry={onRefresh} /></div> : null}
 
-      <section aria-labelledby="members-title" className="mt-2">
+      <section aria-labelledby="members-title" className="ml-family-section">
         <Typography as="h2" id="members-title" variant="memoryDialog">Близкие</Typography>
-        <div className="mt-2">
+        <div className="ml-member-list">
           {members.map((member) => (
             <MemberRow
               actions={memberActions[member.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }}
@@ -148,7 +166,7 @@ export function FamilyPresentation({
       ) : null}
 
       {canInvite ? (
-        <section aria-labelledby="pending-title" className="mt-5">
+        <section aria-labelledby="pending-title" className="ml-family-section">
           <Typography as="h2" id="pending-title" variant="memoryDialog">Ожидают приглашение</Typography>
           {invites.length === 0 ? <Typography className="mt-2" tone="muted" variant="memoryBody">Нет активных приглашений.</Typography> : (
             <div className="mt-2 flex flex-col">
@@ -166,7 +184,7 @@ export function FamilyPresentation({
         </section>
       ) : null}
 
-      <section aria-labelledby="usage-title" className="ml-panel mt-5">
+      <section aria-labelledby="usage-title" className="ml-panel ml-family-section">
         <Typography as="h2" id="usage-title" variant="memoryDialog">Семейный архив</Typography>
         {usage ? <>
           <Typography className="mt-2" tone="muted" variant="memoryBody">Использовано {formatBytes(usage.usedBytes)}{usage.quotaBytes ? ` из ${formatBytes(usage.quotaBytes)}` : ''}</Typography>
@@ -175,7 +193,7 @@ export function FamilyPresentation({
         {usageFailed ? <Button className="mt-2" onClick={onRefreshUsage} type="button" variant="ghost"><Typography variant="memoryMeta">Повторить загрузку объёма</Typography></Button> : null}
       </section>
 
-      <section aria-labelledby="privacy-title" className="mt-2 border-b border-border py-4">
+      <section aria-labelledby="privacy-title" className="ml-family-privacy">
         <div className="flex items-center gap-3">
           <WebpIcon decorative name="info" size={24} />
           <Typography as="h2" className="min-w-0 flex-1" id="privacy-title" variant="memoryBody">Помощь и приватность</Typography>
@@ -185,6 +203,7 @@ export function FamilyPresentation({
       </section>
 
       {canLeaveFamily ? <Button className="mt-4 min-h-11 w-full" disabled={busy} onClick={() => { if (window.confirm('Выйти из семьи? Доступ к приватным материалам будет закрыт.')) void onLeaveFamily() }} type="button" variant="outline"><Typography variant="memoryButton">Выйти из семьи</Typography></Button> : null}
+      <SettingsSheet hostBridge={hostBridge} onOpenChange={setSettingsOpen} open={settingsOpen} returnFocusRef={settingsTriggerRef} />
     </main>
   )
 }
