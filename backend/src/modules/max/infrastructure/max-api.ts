@@ -277,7 +277,8 @@ function normalizeVideoUploadCapability(value: unknown): MaxVideoUploadCapabilit
 
 function normalizeSentVideoMessage(value: unknown) {
   if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
-  const rawId = value.message.mid ?? value.message.id
+  const rawId = value.message.mid ?? value.message.id ??
+    (isRecord(value.message.body) ? value.message.body.mid : undefined)
   if (typeof rawId !== 'string' || rawId.length === 0 || rawId.length > 512) throw new MaxProviderError()
   return { messageId: rawId }
 }
