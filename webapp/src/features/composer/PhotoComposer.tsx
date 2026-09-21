@@ -2,17 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
-import { familyCalendarDate } from '@/features/family'
+import { familyCalendarDate, uploadFamilyPhoto } from '@/features/family'
 import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
 import {
   createPhotoIdempotencyKey,
-  createPhotoUploadIdempotencyKey,
   createPhotoMemory,
-  finalizePhotoUpload,
-  reservePhotoUpload,
-  type FinalizedPhoto,
-  uploadPhotoObject,
+  resolvePhotoContentType,
   validatePhotoFiles,
 } from './api'
 import { composerOccurredAt } from './date'
@@ -33,15 +29,6 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-function isMissingPhotoObject(reason: unknown): boolean {
-  return reason instanceof ApiRequestError && reason.code === 'PHOTO_FINALIZE_OBJECT_MISSING'
-}
-type PendingPhoto = {
-  reservation: Awaited<ReturnType<typeof reservePhotoUpload>>
-  uploaded: boolean
-  finalized: FinalizedPhoto | null
-}
-
 export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess }: PhotoComposerProps) {
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
@@ -51,7 +38,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
   const [finalizeApplicationCode, setFinalizeApplicationCode] = useState<string | null>(null)
-  const pending = useRef<Array<PendingPhoto | null>>([])
+  const completedAssets = useRef<Array<string | null>>([])
   const idempotencyKey = useRef<string | null>(null)
   const saving = useRef(false)
   const abortController = useRef<AbortController | null>(null)
@@ -69,7 +56,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       return
     }
     setFiles(next)
-    pending.current = next.map(() => null)
+    completedAssets.current = next.map(() => null)
     idempotencyKey.current = null
     setProgress(0)
     setError(null)
@@ -82,7 +69,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     if (saving.current) return
     const next = files.filter((_, current) => current !== index)
     setFiles(next)
-    pending.current = next.map(() => null)
+    completedAssets.current = next.map(() => null)
     idempotencyKey.current = null
     setProgress(0)
     setError(null)
@@ -113,51 +100,28 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     const key = idempotencyKey.current ?? createPhotoIdempotencyKey()
     idempotencyKey.current = key
 
-    let stage: SaveStage = 'reserve'
+    const saveStage: { current: SaveStage } = { current: 'reserve' }
     try {
       const mediaIds: string[] = []
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index]
         if (!file) continue
-        let missingObjectRecoveryUsed = false
-        for (;;) {
-          let state = pending.current[index]
-          if (!state) {
-            stage = 'reserve'
-            setErrorStage(stage)
-            const reservation = await reservePhotoUpload(transport, familyId, file, controller.signal, createPhotoUploadIdempotencyKey(key, index))
-            state = { reservation, uploaded: false, finalized: null }
-            pending.current[index] = state
-          }
-          if (!state.uploaded) {
-            stage = 'upload'
-            setErrorStage(stage)
-            await uploadPhotoObject(state.reservation, file, controller.signal)
-            state.uploaded = true
-          }
-          if (!state.finalized) {
-            stage = 'finalize'
-            setErrorStage(stage)
-            try {
-              const finalized = await finalizePhotoUpload(transport, familyId, state.reservation.upload.uploadId, controller.signal)
-              state.finalized = finalized.asset
-            } catch (reason) {
-              if (!missingObjectRecoveryUsed && isMissingPhotoObject(reason)) {
-                missingObjectRecoveryUsed = true
-                pending.current[index] = null
-                continue
-              }
-              throw reason
-            }
-          }
-          mediaIds.push(state.finalized.id)
-          setProgress(Math.round(((index + 1) / files.length) * 100))
-          break
+        let assetId = completedAssets.current[index]
+        if (!assetId) {
+          const contentType = resolvePhotoContentType(file)
+          if (!contentType) throw new Error('Поддерживаются JPG, PNG, WebP и HEIC.')
+          assetId = await uploadFamilyPhoto(transport, familyId, file, contentType, 'memory', controller.signal, (nextStage) => {
+            saveStage.current = nextStage
+            setErrorStage(nextStage)
+          })
+          completedAssets.current[index] = assetId
         }
+        mediaIds.push(assetId)
+        setProgress(Math.round(((index + 1) / files.length) * 100))
       }
 
-      stage = 'create'
-      setErrorStage(stage)
+      saveStage.current = 'create'
+      setErrorStage(saveStage.current)
       await createPhotoMemory(transport, familyId, {
         childId,
         body: caption.trim(),
@@ -170,15 +134,15 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       try { await onSuccess() } catch { /* the memory is already durable */ }
     } catch (reason) {
       if (controller.signal.aborted) return
-      setErrorStage(stage)
+      setErrorStage(saveStage.current)
       setProgress(0)
       setStatus('error')
-      if (stage === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
-      setError(stage === 'reserve'
+      if (saveStage.current === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
+      setError(saveStage.current === 'reserve'
         ? 'Не удалось подготовить сохранение фотографий. Попробуйте ещё раз.'
-        : stage === 'upload'
+        : saveStage.current === 'upload'
           ? 'Не удалось загрузить фотографию. Попробуйте ещё раз.'
-          : stage === 'finalize'
+          : saveStage.current === 'finalize'
             ? 'Не удалось подтвердить фотографию. Попробуйте ещё раз.'
             : 'Не удалось сохранить воспоминание. Попробуйте ещё раз.')
     } finally {

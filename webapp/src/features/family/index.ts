@@ -20,5 +20,6 @@ export {
   loadFamilyInvites,
   loadFamilyMe,
   loadFamilyMembers,
+  uploadFamilyPhoto,
 } from './api'
 export { createFamilyErrorMessage } from './bootstrap'

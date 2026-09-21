@@ -1,12 +1,7 @@
 import {
   createMemoryRequestSchema,
-  finalizeMediaUploadResponseSchema,
-  reserveMediaUploadRequestSchema,
-  reserveMediaUploadResponseSchema,
   memoryDtoSchema,
   updateMemoryRequestSchema,
-  type MediaAssetDto,
-  type ReserveMediaUploadResponse,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -99,70 +94,6 @@ export function getMemory(
   )
 }
 
-export function reservePhotoUpload(
-  transport: AuthenticatedTransport,
-  familyId: string,
-  file: File,
-  signal?: AbortSignal,
-  idempotencyKey?: string,
-) {
-  const contentType = resolvePhotoContentType(file)
-  if (!contentType) throw new Error('Поддерживаются JPG, PNG, WebP и HEIC.')
-  return transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/uploads`,
-    reserveMediaUploadResponseSchema,
-    {
-      method: 'POST',
-      signal,
-      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
-      body: reserveMediaUploadRequestSchema.parse({
-        purpose: 'memory',
-        kind: 'photo',
-        contentType,
-        byteSize: file.size,
-      }),
-    },
-  )
-}
-
-/** Stable per-asset derivative of the one logical memory-create key. */
-export function createPhotoUploadIdempotencyKey(logicalKey: string, index: number) {
-  const normalized = logicalKey.toLowerCase().replaceAll('-', '')
-  if (!/^[0-9a-f]{32}$/.test(normalized) || !Number.isInteger(index) || index < 0 || index > 0xffffffffff) {
-    throw new Error('Invalid photo upload idempotency key')
-  }
-  return `${normalized.slice(0, 20)}-${normalized.slice(20, 24)}-${normalized.slice(24, 28)}-${normalized.slice(28, 32)}-${index.toString(16).padStart(12, '0')}`
-}
-
-export async function uploadPhotoObject(
-  reservation: ReserveMediaUploadResponse,
-  file: File,
-  signal?: AbortSignal,
-) {
-  const response = await fetch(reservation.upload.url, {
-    method: reservation.upload.method,
-    headers: reservation.upload.headers,
-    body: file,
-    credentials: 'omit',
-    mode: 'cors',
-    signal,
-  })
-  if (!response.ok && response.status !== 412) throw new Error('Не удалось загрузить фотографию.')
-}
-
-export function finalizePhotoUpload(
-  transport: AuthenticatedTransport,
-  familyId: string,
-  uploadId: string,
-  signal?: AbortSignal,
-) {
-  return transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(uploadId)}/finalize`,
-    finalizeMediaUploadResponseSchema,
-    { method: 'POST', signal },
-  )
-}
-
 export function createPhotoMemory(
   transport: AuthenticatedTransport,
   familyId: string,
@@ -198,5 +129,3 @@ export function resolvePhotoContentType(file: File) {
   if (extension === 'heif') return 'image/heif'
   return null
 }
-
-export type FinalizedPhoto = Pick<MediaAssetDto, 'id'>

@@ -75,6 +75,13 @@ maybeDescribe('Private media API', () => {
     )
     expect(memory.response.status).toBe(201)
     expect(memory.body.attachments).toHaveLength(1)
+    const feed = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, viewer.token, 'GET')
+    expect(feed.response.status).toBe(200)
+    expect(feed.body.items).toContainEqual(expect.objectContaining({
+      id: memory.body.id,
+      kind: 'photo',
+      attachments: [expect.objectContaining({ id: uploaded.reserved.body.assetId })],
+    }))
 
     const contentPath = `/api/v1/families/${family.body.family.id}/media/${uploaded.reserved.body.assetId}/content?variant=original`
     const head = await app.request(contentPath, {
