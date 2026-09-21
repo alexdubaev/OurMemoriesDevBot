@@ -57,9 +57,14 @@ deploy/selectel/redeploy.sh deploy
 available immutable images, candidate Caddy configuration, and Compose config.
 `deploy` checks migration status, promotes backend and verifies readiness from
 inside the backend container, promotes worker and scheduler, promotes internal
-static and verifies it from the backend over `http://static:80`, then atomically
-installs/reloads the stable gateway and checks public health and the root. It
-does not run `prisma db push`, pull registry images, or execute destructive SQL.
+static and verifies it from the backend over `http://static:80`, then validates
+the candidate again before backing up and overwriting the active gateway
+Caddyfile contents in place. The target inode is preserved; the host checksum
+must match the candidate and the checksum of the same file inside
+`memoly-webapp-1` before Caddy reloads. If activation or reload fails, the
+previous contents are restored in place, validated/reloaded, and public health
+is checked. It does not run `prisma db push`, pull registry images, or execute
+destructive SQL.
 
 If any critical check fails, stop promotion and use the prepared rollback:
 
@@ -77,6 +82,7 @@ Before copying files to the host, run:
 
 ```sh
 bun test tests/selectel-deployment-ownership.test.mjs
+bun test tests/selectel-caddy-activation.test.mjs
 bash -n deploy/selectel/redeploy.sh
 deploy/selectel/redeploy.sh preflight
 ```

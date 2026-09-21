@@ -21,6 +21,7 @@ MEMOLY_PRODUCT_SHA=${MEMOLY_PRODUCT_SHA:-}
 export MEMOLY_PRODUCT_SHA
 BACKUP_DIR=
 EDGE_CANDIDATE=
+GATEWAY_BACKUP_FILE=
 
 die() {
 	printf 'ERROR: %s\n' "$*" >&2
@@ -72,6 +73,7 @@ backup_server_state() {
 	for path in "$COMPOSE_FILE" "$SERVER_EDGE_CADDYFILE" "$SERVER_STATIC_CADDYFILE"; do
 		[ -f "$path" ] && cp -p "$path" "$BACKUP_DIR/$(basename "$path")"
 	done
+	[ -f "$SERVER_EDGE_CADDYFILE" ] && GATEWAY_BACKUP_FILE="$BACKUP_DIR/$(basename "$SERVER_EDGE_CADDYFILE")"
 	docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}} {{.Ports}}' > "$BACKUP_DIR/container-inventory.txt"
 	container_ids=$(docker ps -aq)
 	if [ -n "$container_ids" ]; then
@@ -80,6 +82,15 @@ backup_server_state() {
 		: > "$BACKUP_DIR/container-runtime-inventory.txt"
 	fi
 	printf 'Saved non-secret deployment backup in %s\n' "$BACKUP_DIR"
+}
+
+backup_gateway_caddyfile() {
+	[ -f "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile is missing: $SERVER_EDGE_CADDYFILE"
+	[ ! -L "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile must be a regular file: $SERVER_EDGE_CADDYFILE"
+	[ -n "$BACKUP_DIR" ] || backup_server_state
+	GATEWAY_BACKUP_FILE="$BACKUP_DIR/$(basename "$SERVER_EDGE_CADDYFILE")"
+	cp -p -- "$SERVER_EDGE_CADDYFILE" "$GATEWAY_BACKUP_FILE"
+	[ -f "$GATEWAY_BACKUP_FILE" ] || die "gateway Caddyfile backup is missing"
 }
 
 render_edge_candidate() {
@@ -114,12 +125,91 @@ install_internal_config() {
 }
 
 activate_gateway() {
-	local edge_tmp
+	local active_inode_before active_inode_after candidate_sha host_sha container_sha
 	[ -n "$EDGE_CANDIDATE" ] || die "edge candidate has not been rendered"
-	edge_tmp="$SERVER_EDGE_CADDYFILE.tmp.$$"
-	install -m 0644 "$EDGE_CANDIDATE" "$edge_tmp"
-	mv -f "$edge_tmp" "$SERVER_EDGE_CADDYFILE"
-	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
+	[ -f "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile is missing: $SERVER_EDGE_CADDYFILE"
+	[ ! -L "$SERVER_EDGE_CADDYFILE" ] || die "active gateway Caddyfile must be a regular file: $SERVER_EDGE_CADDYFILE"
+	validate_candidate_caddy
+	backup_gateway_caddyfile
+	active_inode_before=$(stat -c '%i' -- "$SERVER_EDGE_CADDYFILE")
+	candidate_sha=$(sha256sum "$EDGE_CANDIDATE" | awk '{print $1}')
+
+	if ! bash "$SCRIPT_DIR/in-place-file.sh" activate "$EDGE_CANDIDATE" "$SERVER_EDGE_CADDYFILE"; then
+		gateway_activation_failure "in-place Caddyfile activation failed"
+		return 1
+	fi
+	if ! active_inode_after=$(stat -c '%i' -- "$SERVER_EDGE_CADDYFILE"); then
+		gateway_activation_failure "cannot inspect active Caddyfile inode after activation"
+		return 1
+	fi
+	if [ "$active_inode_before" != "$active_inode_after" ]; then
+		gateway_activation_failure "active Caddyfile inode changed during activation"
+		return 1
+	fi
+	if ! host_sha=$(sha256sum "$SERVER_EDGE_CADDYFILE" | awk '{print $1}'); then
+		gateway_activation_failure "cannot checksum active Caddyfile after activation"
+		return 1
+	fi
+	if [ "$host_sha" != "$candidate_sha" ]; then
+		gateway_activation_failure "active Caddyfile checksum does not match candidate"
+		return 1
+	fi
+	if ! container_sha=$(docker exec "$GATEWAY_CONTAINER" sha256sum "$GATEWAY_CADDYFILE" | awk '{print $1}'); then
+		gateway_activation_failure "cannot checksum mounted Caddyfile inside gateway"
+		return 1
+	fi
+	if [ "$container_sha" != "$host_sha" ]; then
+		gateway_activation_failure "gateway-mounted Caddyfile checksum does not match host"
+		return 1
+	fi
+	if ! docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile; then
+		gateway_activation_failure "Caddy reload failed after activation"
+		return 1
+	fi
+	printf 'Activated gateway Caddyfile in place (inode %s; checksum %s); reload passed.\n' "$active_inode_after" "$host_sha"
+}
+
+gateway_public_health() {
+	local path
+	for path in / /health/live /health/ready; do
+		curl --fail --silent --show-error --max-time 5 "${PUBLIC_URL%/}${path}" >/dev/null || return 1
+	done
+}
+
+gateway_container_matches_host() {
+	local host_sha container_sha
+	host_sha=$(sha256sum "$SERVER_EDGE_CADDYFILE" | awk '{print $1}')
+	container_sha=$(docker exec "$GATEWAY_CONTAINER" sha256sum "$GATEWAY_CADDYFILE" | awk '{print $1}')
+	[ "$container_sha" = "$host_sha" ]
+}
+
+gateway_activation_failure() {
+	local reason=$1 rollback_ok=1
+	printf 'ERROR: %s\n' "$reason" >&2
+	if [ -z "$GATEWAY_BACKUP_FILE" ] || [ ! -f "$GATEWAY_BACKUP_FILE" ]; then
+		printf 'ERROR: gateway rollback backup is unavailable\n' >&2
+		rollback_ok=0
+	elif ! bash "$SCRIPT_DIR/in-place-file.sh" restore "$GATEWAY_BACKUP_FILE" "$SERVER_EDGE_CADDYFILE"; then
+		printf 'ERROR: in-place gateway Caddyfile rollback failed\n' >&2
+		rollback_ok=0
+	elif ! gateway_container_matches_host; then
+		printf 'ERROR: gateway-mounted Caddyfile checksum does not match restored host content\n' >&2
+		rollback_ok=0
+	elif ! docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile; then
+		printf 'ERROR: rolled-back gateway Caddyfile validation failed\n' >&2
+		rollback_ok=0
+	elif ! docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile; then
+		printf 'ERROR: rolled-back gateway Caddyfile reload failed\n' >&2
+		rollback_ok=0
+	elif ! gateway_public_health; then
+		printf 'ERROR: public health failed after gateway Caddyfile rollback\n' >&2
+		rollback_ok=0
+	fi
+	if [ "$rollback_ok" -eq 1 ]; then
+		printf 'ROLLED_BACK_AFTER_CADDY_ACTIVATION_FAILURE\n' >&2
+	else
+		printf 'CADDY_ROLLBACK_FAILED_AFTER_ACTIVATION_FAILURE\n' >&2
+	fi
 }
 
 gateway_preflight() {
@@ -182,9 +272,9 @@ preflight() {
 }
 
 prepare_configuration() {
-	backup_server_state
 	render_edge_candidate
 	validate_candidate_caddy
+	backup_server_state
 	install_internal_config
 	printf 'Installed tracked Compose and static Caddy configuration after backup; live edge Caddy remains unchanged.\n'
 }
