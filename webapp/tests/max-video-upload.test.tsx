@@ -191,7 +191,107 @@ test('interactive processing retry reuses the uploaded session and disables the 
   }
 })
 
-test('interactive expired finalize clears the operation and a new selection reserves again with caption/date preserved', async () => {
+test('interactive reserve failure keeps the selected file and form values for retry', async () => {
+  const browser = installInteractiveDom()
+  const requests: string[] = []
+  let reserveCount = 0
+  const transport = interactiveTransport((path) => {
+    requests.push(path)
+    if (path.endsWith('/reserve')) {
+      reserveCount += 1
+      if (reserveCount === 1) return Promise.reject(new Error('network unavailable'))
+      return Promise.resolve({ state: 'reserved', sessionId: 'session-retry', expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: 'https://upload.max.test/retry', uploadToken: 'token-retry' })
+    }
+    return Promise.resolve({ state: 'finalized', sessionId: 'session-retry', memoryId: 'memory-retry' })
+  })
+  const xhrs: FakeUploadXHR[] = []
+  installUploadXHR(xhrs)
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      onSuccess: () => undefined, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    fileInput.files = [file('reserve-retry.mp4', 24)]
+    await act(async () => invoke(fileInput, 'onChange'))
+    caption.value = 'Сохранить после сети'
+    await act(async () => invoke(caption, 'onChange'))
+    date.value = '2026-09-19'
+    await act(async () => invoke(date, 'onChange'))
+
+    await act(async () => {
+      await invoke(save(), 'onClick')
+      await flushInteractive()
+    })
+    expect(textOf(browser.container)).toContain('Не удалось подготовить сохранение видео')
+    expect(caption.value).toBe('Сохранить после сети')
+    expect(date.value).toBe('2026-09-19')
+
+    await act(async () => invoke(save(), 'onClick'))
+    await act(async () => { await flushInteractive() })
+    expect(reserveCount).toBe(2)
+    expect(xhrs).toHaveLength(1)
+    xhrs[0]?.complete()
+    await act(async () => { await flushInteractive() })
+    expect(requests.filter((path) => path.endsWith('/finalize'))).toHaveLength(1)
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    restoreUploadXHR()
+  }
+})
+
+test('provider-side XHR abort is an upload error and leaves the composer retryable', async () => {
+  const browser = installInteractiveDom()
+  const reserve = deferred<{
+    state: 'reserved'
+    sessionId: string
+    expiresAt: string
+    uploadUrl: string
+    uploadToken: string
+  }>()
+  const transport = interactiveTransport((path) => path.endsWith('/reserve')
+    ? reserve.promise
+    : Promise.resolve({ state: 'finalized', sessionId: 'session-1', memoryId: 'memory-1' }))
+  const xhrs: FakeUploadXHR[] = []
+  installUploadXHR(xhrs)
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      onSuccess: () => undefined, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    fileInput.files = [file('provider-abort.mp4', 24)]
+    await act(async () => invoke(fileInput, 'onChange'))
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    caption.value = 'Повторить загрузку'
+    await act(async () => invoke(caption, 'onChange'))
+    await act(async () => invoke(save(), 'onClick'))
+    await act(async () => {
+      reserve.resolve({ state: 'reserved', sessionId: 'session-1', expiresAt: '2026-09-20T12:00:00.000Z', uploadUrl: 'https://upload.max.test/provider-abort', uploadToken: 'token-1' })
+      await flushInteractive()
+    })
+    expect(xhrs).toHaveLength(1)
+    xhrs[0]?.abort()
+    await act(async () => { await flushInteractive() })
+    expect(textOf(browser.container)).toContain('Не удалось загрузить видео')
+    expect(save().disabled).toBe(false)
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    restoreUploadXHR()
+  }
+})
+
+test('interactive expired finalize clears stale capability and retries with the selected file', async () => {
   const browser = installInteractiveDom()
   const requests: Array<{ path: string; body: Record<string, unknown> }> = []
   let reserveCount = 0
@@ -226,9 +326,11 @@ test('interactive expired finalize clears the operation and a new selection rese
     date.value = '2026-09-19'
     await act(async () => invoke(date, 'onChange'))
 
-    const chooseAndSave = async (name: string) => {
-      fileInput.files = [file(name, 24)]
-      await act(async () => invoke(fileInput, 'onChange'))
+    const chooseAndSave = async (name?: string) => {
+      if (name) {
+        fileInput.files = [file(name, 24)]
+        await act(async () => invoke(fileInput, 'onChange'))
+      }
       await act(async () => invoke(save(), 'onClick'))
       await act(async () => { await flushInteractive() })
       xhrs.at(-1)?.complete()
@@ -240,7 +342,7 @@ test('interactive expired finalize clears the operation and a new selection rese
     expect(caption.value).toBe('Сохранить дату')
     expect(date.value).toBe('2026-09-19')
 
-    await chooseAndSave('fresh.mp4')
+    await chooseAndSave()
     expect(reserveCount).toBe(2)
     expect(xhrs).toHaveLength(2)
     expect(finalizeCount).toBe(2)
