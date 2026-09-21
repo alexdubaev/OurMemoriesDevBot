@@ -12,28 +12,29 @@ ${MEMOLY_PUBLIC_HOST:?set MEMOLY_PUBLIC_HOST} {
 		reverse_proxy max-video-spike-frontend:80
 	}
 
+	# The spike container also claims the "backend" network alias; use this unique name.
 	handle /api/* {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	handle /storage/* {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	handle /webhooks/telegram {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	handle /webhooks/max {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	handle /health/live {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	handle /health/ready {
-		reverse_proxy backend:3000
+		reverse_proxy memoly-backend-1:3000
 	}
 
 	# Host ports stay on the stable gateway; normal traffic goes to internal static:80.
