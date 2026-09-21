@@ -9,6 +9,7 @@ export type MediaFailureKind =
   | 'upload_incomplete'
   | 'upload_expired'
   | 'storage_unavailable'
+  | 'idempotency_conflict'
 
 export class MediaFailure extends Error {
   constructor(readonly kind: MediaFailureKind, message: string, readonly details?: { total?: number }) {

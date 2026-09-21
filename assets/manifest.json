@@ -2,13 +2,13 @@
   "version": "2.2",
   "items": [
     {
-      "path": "assets/brand/memoly-logo.webp",
+      "path": "assets/brand/memoly-logo-correct.webp",
       "usage": "runtime-brand",
-      "width": 1154,
-      "height": 325,
+      "width": 1200,
+      "height": 400,
       "alpha": true,
-      "bytes": 56802,
-      "sha256": "df168f38caaedcaa8e1939d76088521af6c130417adf3b8bd6a0cd4ace777ee6"
+      "bytes": 113698,
+      "sha256": "55638b8e2156f7b1b7c82d4362c963aa8236502c8109c5d981c51b81f62294e4"
     },
     {
       "path": "assets/demo/beach.webp",

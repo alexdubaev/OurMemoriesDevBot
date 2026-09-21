@@ -4,6 +4,8 @@
   --memory-canvas: #fbf8f5;
   --memory-surface: #ffffff;
   --memory-surface-soft: #f5efeb;
+  --memory-surface-raised: linear-gradient(145deg, #fffefb, #faf3ed);
+  --memory-surface-inset: #eee6df;
   --memory-text: #302a2e;
   --memory-text-muted: #756a71;
   --memory-line: #e8dfda;
@@ -23,13 +25,15 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
-  --radius-card: 16px;
-  --radius-field: 12px;
-  --radius-sheet: 24px;
+  --radius-card: 28px;
+  --radius-field: 20px;
+  --radius-sheet: 32px;
   --radius-pill: 999px;
   --duration-standard: 180ms;
   --duration-dialog: 220ms;
   --shadow-card: 0 2px 10px rgb(48 42 46 / 4.5%);
+  --memory-sheet-shadow: 0 -8px 32px rgb(91 71 64 / 16%), inset 0 1px 1px rgb(255 255 255 / 90%);
+  --memory-inset-shadow: inset 2px 2px 5px rgb(117 95 85 / 16%), inset -2px -2px 5px rgb(255 255 255 / 88%);
 
   /* Semantic shadcn mapping */
   --background: var(--memory-canvas);

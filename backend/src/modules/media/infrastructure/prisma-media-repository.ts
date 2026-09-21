@@ -89,6 +89,14 @@ export class PrismaMediaRepository implements MediaRepository {
     return this.findTrustedIngestion(scope, assetId, 'telegram')
   }
 
+  async findUpload(scope: FamilyScope, uploadId: string): Promise<PendingMediaUpload | null> {
+    const reservation = await this.db.uploadReservation.findFirst({
+      where: { id: uploadId, familyId: scope.familyId, userId: scope.principal.userId, releasedAt: null },
+      include: { asset: true },
+    })
+    return reservation ? pendingDto({ ...reservation, asset: { ...reservation.asset, variants: [] } }) : null
+  }
+
   async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now: Date }) {
     const unique = [...new Set(input.assetIds)]
     if (unique.length === 0) return

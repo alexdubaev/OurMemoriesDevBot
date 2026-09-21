@@ -4,7 +4,9 @@ import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster, loadMaxVideoSourceOnce } from '../src/features/feed/FeedPage'
+import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { FeedMemoryCard } from '../src/features/memoly-ui/FeedPresentation'
 import { BottomNavigation } from '../src/components/BottomNavigation'
@@ -236,6 +238,15 @@ test('viewer cards keep like enabled while omitting the delete action', () => {
   expect(markup).toContain('aria-label="Поставить сердечко"')
   expect(markup).toContain('aria-pressed="false"')
   expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
+})
+
+test('routes the three Add actions to one supported composer and exposes Edit only by capability', () => {
+  expect(composerModeForAdd('photo', childId)).toBe('photo')
+  expect(composerModeForAdd('note', childId)).toBe('note')
+  expect(composerModeForAdd('video', childId)).toBe('video')
+  expect(composerModeForAdd('photo', undefined)).toBeNull()
+  expect(memoryActionNames({ edit: true, delete: true, like: true })).toEqual(['details', 'edit', 'delete'])
+  expect(memoryActionNames({ edit: false, delete: false, like: true })).toEqual(['details'])
 })
 
 test('a prepared voice renders every measured waveform peak', () => {
@@ -664,7 +675,7 @@ test('the feed header renders the memoLy logo above the child profile instead of
   }, createElement('p', null, 'Лента')))
 
   expect(markup).toContain('data-slot="app-brand"')
-  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo-correct.webp"')
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
   expect(markup.indexOf('data-slot="app-brand"')).toBeLessThan(markup.indexOf('data-slot="child-profile"'))

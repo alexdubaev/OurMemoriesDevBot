@@ -1,5 +1,5 @@
 import {
-  apiErrorSchema, finalizeMediaUploadResponseSchema, mediaContentParamsSchema,
+  apiErrorSchema, finalizeMediaUploadResponseSchema, idempotencyKeyHeadersSchema, mediaContentParamsSchema,
   mediaContentQuerySchema, mediaFamilyParamsSchema, mediaUploadParamsSchema,
   reserveMediaUploadRequestSchema, reserveMediaUploadResponseSchema,
 } from '@web-app-demo/contracts'
@@ -29,7 +29,7 @@ const errors = { 401: { content: json(apiErrorSchema), description: 'Authenticat
   422: { content: json(apiErrorSchema), description: 'Invalid media' },
   503: { content: json(apiErrorSchema), description: 'Storage unavailable' } } as const
 const reserveRoute = createRoute({ method: 'post', path: '/families/{familyId}/uploads', security,
-  request: { params: mediaFamilyParamsSchema, body: { content: json(reserveMediaUploadRequestSchema) } },
+  request: { params: mediaFamilyParamsSchema, headers: idempotencyKeyHeadersSchema.partial(), body: { content: json(reserveMediaUploadRequestSchema) } },
   responses: { ...errors, 201: { content: json(reserveMediaUploadResponseSchema), description: 'Reserved' } } })
 const finalizeRoute = createRoute({ method: 'post', path: '/families/{familyId}/uploads/{uploadId}/finalize', security,
   request: { params: mediaUploadParamsSchema }, responses: { ...errors,
@@ -46,7 +46,7 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   const contentAuth = createMediaContentAuth(authenticateMediaAccess)
   routes.use('/families/*', (c, next) => isContentPath(c.req.path) ? contentAuth(c, next) : requireAuth(c, next))
-  routes.openapi(reserveRoute, async (c) => c.json(await executeMedia(() => service.reserve(scope(c), c.req.valid('json'))), 201))
+  routes.openapi(reserveRoute, async (c) => c.json(await executeMedia(() => service.reserve(scope(c), c.req.valid('json'), c.req.valid('header')['idempotency-key'])), 201))
   routes.openapi(finalizeRoute, async (c) => c.json(await executeMedia(() => service.finalize(scope(c), c.req.valid('param').uploadId))))
   routes.post('/families/:familyId/media/playback-session', async (c) => {
     await executeMedia(() => service.authorizePlaybackSession(scope(c)))

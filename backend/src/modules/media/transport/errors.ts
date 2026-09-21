@@ -12,6 +12,7 @@ export function toMediaAppError(error: unknown) {
       case 'unsupported_media': return new AppError(415, 'UNSUPPORTED_MEDIA', error.message)
       case 'invalid_file': return new AppError(422, 'INVALID_FILE', error.message)
       case 'storage_unavailable': return new AppError(503, 'STORAGE_UNAVAILABLE', error.message)
+      case 'idempotency_conflict': return new AppError(409, 'IDEMPOTENCY_CONFLICT', error.message)
       case 'range_not_satisfiable': return new AppError(416, 'BAD_REQUEST', error.message, error.details)
     }
   }

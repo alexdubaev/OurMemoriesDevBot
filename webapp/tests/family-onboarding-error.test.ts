@@ -21,7 +21,7 @@ test('onboarding renders the memoLy logo rather than the former visible brand te
     transport,
   }))
 
-  expect(markup).toContain('src="/assets/brand/memoly-logo.webp"')
+  expect(markup).toContain('src="/assets/brand/memoly-logo-correct.webp"')
   expect(markup).toContain('alt="memoLy"')
   expect(markup).not.toContain('Наши воспоминания')
 })

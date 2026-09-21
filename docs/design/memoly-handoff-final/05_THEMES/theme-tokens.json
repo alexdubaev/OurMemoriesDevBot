@@ -1,0 +1,56 @@
+{
+  "mint": {
+    "label": "Мята",
+    "bg": "#edf1ea",
+    "surface": "#f5f5ef",
+    "accent": "#82a58f",
+    "accentDeep": "#7f9f90",
+    "accentSoft": "#dce7df",
+    "headerArt": "06_ASSETS/theme-header/web/mint.webp"
+  },
+  "rose": {
+    "label": "Роза",
+    "bg": "#f4efec",
+    "surface": "#f8f3ef",
+    "accent": "#c98f98",
+    "accentDeep": "#b87580",
+    "accentSoft": "#f0dcdd",
+    "headerArt": "06_ASSETS/theme-header/web/rose.webp"
+  },
+  "sky": {
+    "label": "Небо",
+    "bg": "#eef4f7",
+    "surface": "#f6f8f7",
+    "accent": "#8fafc1",
+    "accentDeep": "#6f91a5",
+    "accentSoft": "#dbe8ee",
+    "headerArt": "06_ASSETS/theme-header/web/sky.webp"
+  },
+  "lavender": {
+    "label": "Лаванда",
+    "bg": "#f2f0f5",
+    "surface": "#f8f5f3",
+    "accent": "#b2a7c7",
+    "accentDeep": "#8e82a7",
+    "accentSoft": "#e4deec",
+    "headerArt": "06_ASSETS/theme-header/web/lavender.webp"
+  },
+  "apricot": {
+    "label": "Абрикос",
+    "bg": "#f6f0e8",
+    "surface": "#faf6f0",
+    "accent": "#dda887",
+    "accentDeep": "#c38669",
+    "accentSoft": "#f1ddd0",
+    "headerArt": "06_ASSETS/theme-header/web/apricot.webp"
+  },
+  "sand": {
+    "label": "Песок",
+    "bg": "#f1efe7",
+    "surface": "#f8f6f0",
+    "accent": "#aab294",
+    "accentDeep": "#858f70",
+    "accentSoft": "#e2e5d7",
+    "headerArt": "06_ASSETS/theme-header/web/sand.webp"
+  }
+}

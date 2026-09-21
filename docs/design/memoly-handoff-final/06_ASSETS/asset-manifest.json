@@ -1,0 +1,507 @@
+[
+  {
+    "path": "06_ASSETS/ASSET_RULES.md",
+    "bytes": 938,
+    "sha256": "9d9877b5ef8820eaf2868950c60f8699abde52b0aec06b94ad36706758114c9a"
+  },
+  {
+    "path": "06_ASSETS/brand/memoly-cloud-stars-legacy.webp",
+    "bytes": 5790,
+    "sha256": "3ca50c216a59fcb9614c0a13a595dbf4d71ccb3d91c0a286f3d244e1034952a1"
+  },
+  {
+    "path": "06_ASSETS/brand/memoly-logo-correct.png",
+    "bytes": 312641,
+    "sha256": "c88035c87d1005618aa40cc6e3704692663a6aea50aae1c5ea51562b06c06fd5"
+  },
+  {
+    "path": "06_ASSETS/brand/memoly-logo-correct.webp",
+    "bytes": 113698,
+    "sha256": "55638b8e2156f7b1b7c82d4362c963aa8236502c8109c5d981c51b81f62294e4"
+  },
+  {
+    "path": "06_ASSETS/brand/memoly-ly-mark.png",
+    "bytes": 751065,
+    "sha256": "cb4163713ae8d3f4b43ed27fe7e48dac55e72f604cd6b1f2873b4124f0084089"
+  },
+  {
+    "path": "06_ASSETS/brand/memoly-ly-mark.webp",
+    "bytes": 151940,
+    "sha256": "115c2c0bbb294174ad502b89b7f687a7977c59a174dee6e8fe62d99c770a22d1"
+  },
+  {
+    "path": "06_ASSETS/icons/chevron-active@2x.webp",
+    "bytes": 334,
+    "sha256": "dfe99d3615d2a13481801b507c16bd9091e9b8a9f7b5a9c8a389ee9a262e80c2"
+  },
+  {
+    "path": "06_ASSETS/icons/chevron-active@3x.webp",
+    "bytes": 456,
+    "sha256": "56c1e6c1b3924b99109651a09f5e3b1f9bad0013afd5626eccaf047e152ff045"
+  },
+  {
+    "path": "06_ASSETS/icons/chevron-default@2x.webp",
+    "bytes": 336,
+    "sha256": "de581e857c36b4d84ad5a5f7b0fd6fb6171602af8aa74ba8bf54b779e1655bb0"
+  },
+  {
+    "path": "06_ASSETS/icons/chevron-default@3x.webp",
+    "bytes": 462,
+    "sha256": "f5be384cacbb8cdb09a518331de7b3c02dcd1ff19f61790a2e00ed50babcf4e8"
+  },
+  {
+    "path": "06_ASSETS/icons/close-active@2x.webp",
+    "bytes": 508,
+    "sha256": "05590315126f8d9c59a64a55dd0b6f48c3a2b4bd1aa8d95ce95eee8502e2ff45"
+  },
+  {
+    "path": "06_ASSETS/icons/close-active@3x.webp",
+    "bytes": 710,
+    "sha256": "05900e3c588fd4ad057be4d428c2171e69ff5ca8130a2f3873b4ebe004ba36ef"
+  },
+  {
+    "path": "06_ASSETS/icons/close-default@2x.webp",
+    "bytes": 508,
+    "sha256": "303664c6c8f4a55fff3a8a33a3419708d3e23b03dd3d4715c05b8ab91b47ed8f"
+  },
+  {
+    "path": "06_ASSETS/icons/close-default@3x.webp",
+    "bytes": 698,
+    "sha256": "b7bd08f4922290d4e5d1edc46d7a770689c13419368b23329a80920f1c1e443f"
+  },
+  {
+    "path": "06_ASSETS/icons/family-active@2x.webp",
+    "bytes": 1704,
+    "sha256": "6a481a582efc0e5565d405680d95057ef52d3c121b32cc14bcc7ec2024b497b3"
+  },
+  {
+    "path": "06_ASSETS/icons/family-active@3x.webp",
+    "bytes": 2808,
+    "sha256": "6fca33573e7f3ef959132115afa9544352fab4bbcccd81e8a1aef9f3f522d9dc"
+  },
+  {
+    "path": "06_ASSETS/icons/family-default@2x.webp",
+    "bytes": 1682,
+    "sha256": "3bc2771b96abdbde8c317a66c51e9b13394eacb2185afd9f66463da27e26db23"
+  },
+  {
+    "path": "06_ASSETS/icons/family-default@3x.webp",
+    "bytes": 2704,
+    "sha256": "0cc638e2060f8793891d3940f9b52805231787442c2b99ed170e3698319fcd0d"
+  },
+  {
+    "path": "06_ASSETS/icons/gear-active@2x.webp",
+    "bytes": 736,
+    "sha256": "4097d1d20555c4b835ece66af33db640c941a3d284b390d2fac0aa72cd861e20"
+  },
+  {
+    "path": "06_ASSETS/icons/gear-active@3x.webp",
+    "bytes": 1026,
+    "sha256": "67c8c2b31d2d6c1a6a894f4f9021ca1cef45fc9116da13cb60562ee9fd30be69"
+  },
+  {
+    "path": "06_ASSETS/icons/gear-default@2x.webp",
+    "bytes": 774,
+    "sha256": "5a29561b42e03526bc24bdda2c58388bd06737610a2adfa47ed7837d56178a07"
+  },
+  {
+    "path": "06_ASSETS/icons/gear-default@3x.webp",
+    "bytes": 1080,
+    "sha256": "537a1f502658c83269080ae03aeb287468ce67f9c24e5b970cee7e3b3d50cacb"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-active@2x.webp",
+    "bytes": 1168,
+    "sha256": "58d01c446b29b77c05be36a9d2b81fd84818e7d5358602cfe3b4e7b0926af5bb"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-active@3x.webp",
+    "bytes": 2032,
+    "sha256": "69021607481531f8e223e0d2f541d04c19010e08e9267c619accbd9f624f50c5"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-default@2x.webp",
+    "bytes": 1148,
+    "sha256": "4131f6f82ac10a8222e457a155b364676e57e3825e28c372cd4402efc030d468"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-default@3x.webp",
+    "bytes": 1924,
+    "sha256": "39e1db4078de252fad053983d1780756e0bab85d8605b7c8ad0d53623400a090"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-active@2x.webp",
+    "bytes": 770,
+    "sha256": "c76783d86feb726bbbbc8b5bf7d52af78571c44f75286c2cf0f69a092088aaae"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-active@3x.webp",
+    "bytes": 1180,
+    "sha256": "c054771abc19766ec3365ac18a2188b360b0438eedffb3deb1f2e76fe2aedeba"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-default@2x.webp",
+    "bytes": 758,
+    "sha256": "62b0441007eafcddef195114878eee48d068713c87d93e6d1501c991ddafac91"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-default@3x.webp",
+    "bytes": 1148,
+    "sha256": "98aeb637d9053686c93e2dc4fb95a1ea31d9d3aeaf88c10139d30b3594b1118f"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-white@2x.webp",
+    "bytes": 508,
+    "sha256": "b8904b0f8917ed1a4b645999b1837858b0efb19297aa61e92244816bcd5d0d1c"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-filled-white@3x.webp",
+    "bytes": 780,
+    "sha256": "10efc67187166076d27fc1511b9b5e0171a2edb43d81e17ef1fbf7d66189bb25"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-white@2x.webp",
+    "bytes": 766,
+    "sha256": "c6a8eae795daff7ca3b837e7e834c8e69b64166af62df64efd66bcc09f16ca0b"
+  },
+  {
+    "path": "06_ASSETS/icons/heart-white@3x.webp",
+    "bytes": 1282,
+    "sha256": "6354df1a450c88ecb9fbe831248abd840d75652450f6a742a0b6adccb1853812"
+  },
+  {
+    "path": "06_ASSETS/icons/home-active@2x.webp",
+    "bytes": 992,
+    "sha256": "f5d9606a5c1530984e702c733896c66f9adf1f89d4d1435999d81247a942707e"
+  },
+  {
+    "path": "06_ASSETS/icons/home-active@3x.webp",
+    "bytes": 1472,
+    "sha256": "5f368a0deaae17f56fa73e146af86e2cdb690a6782ea275292757b040345adc9"
+  },
+  {
+    "path": "06_ASSETS/icons/home-default@2x.webp",
+    "bytes": 964,
+    "sha256": "fe7004a969fd18c7fcce22a9efb4292a03ebbb1d23d32e17debe1d460c04f278"
+  },
+  {
+    "path": "06_ASSETS/icons/home-default@3x.webp",
+    "bytes": 1402,
+    "sha256": "9daaa08880975e112f3dc27576161e1dde8f1b58f1a8d0d5c1737fafd4dc408e"
+  },
+  {
+    "path": "06_ASSETS/icons/info-active@2x.webp",
+    "bytes": 1664,
+    "sha256": "5deb69a8ab514e13017541d41636f526f0e9d2f5501f1e9596b11960df248363"
+  },
+  {
+    "path": "06_ASSETS/icons/info-active@3x.webp",
+    "bytes": 2588,
+    "sha256": "e318148aed6d0f15c7ad348ecb3075820fefce9ecb05b893cc1041b25f2fab22"
+  },
+  {
+    "path": "06_ASSETS/icons/info-default@2x.webp",
+    "bytes": 1618,
+    "sha256": "e6e59cb7a9a35cc87b96849ad0fa46d74942a82c20e3917ea65edb1793667768"
+  },
+  {
+    "path": "06_ASSETS/icons/info-default@3x.webp",
+    "bytes": 2544,
+    "sha256": "b1492e935cf6e16115024d15dbf323e73439659293a20b4676109541ea153f38"
+  },
+  {
+    "path": "06_ASSETS/icons/lock-active@2x.webp",
+    "bytes": 1204,
+    "sha256": "489d532e5c809b817126a2b0bd4b8e97f63f4e35019860716a027096ccf40065"
+  },
+  {
+    "path": "06_ASSETS/icons/lock-active@3x.webp",
+    "bytes": 1720,
+    "sha256": "105553084bd9af1b532f1d69ccfe5d08b2dc9137d225cbbae06c8b522553222c"
+  },
+  {
+    "path": "06_ASSETS/icons/lock-default@2x.webp",
+    "bytes": 1176,
+    "sha256": "1527948ebdb7a1b957fe7e97a4e2016e10de084a59ceb21a9b6cb08af60bc2bd"
+  },
+  {
+    "path": "06_ASSETS/icons/lock-default@3x.webp",
+    "bytes": 1692,
+    "sha256": "23fe08e17e9295e27af21aa216ce62aca5c58452923b0f17bda3b2f720374009"
+  },
+  {
+    "path": "06_ASSETS/icons/more-active@2x.webp",
+    "bytes": 166,
+    "sha256": "53d1b1a2111089104ca4c35d376ac94c7b5319097388a333e1005a2b2ffcd227"
+  },
+  {
+    "path": "06_ASSETS/icons/more-active@3x.webp",
+    "bytes": 216,
+    "sha256": "6c5e53a27c0efe6f6d863cbc584b907017334f130b9637e0c2a2763f98d5c846"
+  },
+  {
+    "path": "06_ASSETS/icons/more-default@2x.webp",
+    "bytes": 172,
+    "sha256": "e99f86cd609b90c5d28782c03721f6156e7d1567683f8ffa8588c0f8f715fe30"
+  },
+  {
+    "path": "06_ASSETS/icons/more-default@3x.webp",
+    "bytes": 228,
+    "sha256": "d2867232d5806b5225ce294f34da2f1045db5cc2289de6bc6be07d6ec9f37b04"
+  },
+  {
+    "path": "06_ASSETS/icons/note-active@2x.webp",
+    "bytes": 780,
+    "sha256": "9377757b4960b01a5bc45970dd7bb8ef865a7dc5558be44ea88531a4bb460488"
+  },
+  {
+    "path": "06_ASSETS/icons/note-active@3x.webp",
+    "bytes": 972,
+    "sha256": "17c72e7178a536aec9642342ab9254cbee792f01f8bedc77652790581bfd1c23"
+  },
+  {
+    "path": "06_ASSETS/icons/note-default@2x.webp",
+    "bytes": 744,
+    "sha256": "f514df41ef57fe30bb5795a72ab048807ab740193436d91a14c8daf1ab36bc58"
+  },
+  {
+    "path": "06_ASSETS/icons/note-default@3x.webp",
+    "bytes": 944,
+    "sha256": "8a8d08b3318826d2f8fd3412233fb043da69bf7bfa8b585f1c2d26680588404d"
+  },
+  {
+    "path": "06_ASSETS/icons/photo-active@2x.webp",
+    "bytes": 1200,
+    "sha256": "f57f792e758becb27b508659cb5ae179e735b01848799dc5251fb386bf7643a9"
+  },
+  {
+    "path": "06_ASSETS/icons/photo-active@3x.webp",
+    "bytes": 1590,
+    "sha256": "93193bed9554424f4b3df44de82c569ef8b05e6abd6613f7263caca42dd756a1"
+  },
+  {
+    "path": "06_ASSETS/icons/photo-default@2x.webp",
+    "bytes": 1186,
+    "sha256": "f2266f8d190fa5081614e4453a7ad6cc0b5e2eb931bcdb97b88b78d075d5b343"
+  },
+  {
+    "path": "06_ASSETS/icons/photo-default@3x.webp",
+    "bytes": 1506,
+    "sha256": "e6071e015b22890a1a22493ceb072935da4373ce1077c34a136e393717d1ee7c"
+  },
+  {
+    "path": "06_ASSETS/icons/play-active@2x.webp",
+    "bytes": 540,
+    "sha256": "22b697cf48233ef569098b9b41d15a709179fa382be2d45826f39646a201a85e"
+  },
+  {
+    "path": "06_ASSETS/icons/play-active@3x.webp",
+    "bytes": 852,
+    "sha256": "049c8a86f815481e9a39d333afa7d53f13d642d781a013b7b1ea944789d93fbd"
+  },
+  {
+    "path": "06_ASSETS/icons/play-default@2x.webp",
+    "bytes": 522,
+    "sha256": "e011ac555ad0c9b8505f06a7efbbbbc56c7f9c8ebb1b22632e267919ef5d0675"
+  },
+  {
+    "path": "06_ASSETS/icons/play-default@3x.webp",
+    "bytes": 826,
+    "sha256": "557ee6863c6c9383c767a972312b41c49cd6c01e870acbb31cf45eed6fa58d66"
+  },
+  {
+    "path": "06_ASSETS/icons/play-white@2x.webp",
+    "bytes": 320,
+    "sha256": "f045161d787e8d3ad68047512f98fd6b897c1a6d20508356ff90e22495883761"
+  },
+  {
+    "path": "06_ASSETS/icons/play-white@3x.webp",
+    "bytes": 500,
+    "sha256": "1f7a2713cfb303864cfc94aa15608145050b1870084e3e6f5d3b752fca51481f"
+  },
+  {
+    "path": "06_ASSETS/icons/plus-active@2x.webp",
+    "bytes": 382,
+    "sha256": "9dc7e8de98ed47982913b1a15c37c9760547c24a7c63e4c7aa779a279ba593e0"
+  },
+  {
+    "path": "06_ASSETS/icons/plus-active@3x.webp",
+    "bytes": 448,
+    "sha256": "98d0ed29878f809310a642531a78450cc2360ac61aff83150f5e938f5cac433a"
+  },
+  {
+    "path": "06_ASSETS/icons/plus-default@2x.webp",
+    "bytes": 358,
+    "sha256": "59497ceef93b35395a6eab3c17e0daf56bc3ee6f870e5f570d3b1a4a37e79c21"
+  },
+  {
+    "path": "06_ASSETS/icons/plus-default@3x.webp",
+    "bytes": 458,
+    "sha256": "7c7c19243152e9519cbff7487eea27618e8d170f1f9ada4296e188c27893d486"
+  },
+  {
+    "path": "06_ASSETS/icons/retry-active@2x.webp",
+    "bytes": 1360,
+    "sha256": "0d334ba2fb1ec7c0ea64cc9351de4d2337f64386cd031d64a275b3cce9ef8d3a"
+  },
+  {
+    "path": "06_ASSETS/icons/retry-active@3x.webp",
+    "bytes": 2102,
+    "sha256": "d0c04507a0e6daa65e97e55222e40db1d52c268e8ee3cfcef906de7e5a37ad05"
+  },
+  {
+    "path": "06_ASSETS/icons/retry-default@2x.webp",
+    "bytes": 1298,
+    "sha256": "96b7b2e42cfe4965d3565b64b3a95c776b287ef3c99521423679924da5777733"
+  },
+  {
+    "path": "06_ASSETS/icons/retry-default@3x.webp",
+    "bytes": 2054,
+    "sha256": "b6c87317c1137f63096635a69bc5f398ca3181e22f56e93b1e3f1af97baafc4e"
+  },
+  {
+    "path": "06_ASSETS/icons/star-active@2x.webp",
+    "bytes": 782,
+    "sha256": "2d3c4d545f1ea66b02758fb6009873fc40d9b7788ec3ea344df80346bcb7e662"
+  },
+  {
+    "path": "06_ASSETS/icons/star-active@3x.webp",
+    "bytes": 1046,
+    "sha256": "fa8bed14877620671cac65aacee542aacd10a2635a4a358c6b5f8f3faf5b11ed"
+  },
+  {
+    "path": "06_ASSETS/icons/star-default@2x.webp",
+    "bytes": 798,
+    "sha256": "63b5aa4fda5a8004f177f3cce157b26110c6153066a37ecdb385b7b23a61ecff"
+  },
+  {
+    "path": "06_ASSETS/icons/star-default@3x.webp",
+    "bytes": 1068,
+    "sha256": "36490e6ba0856a1d2e55361effd06f0039b4d9d8b26fa9f318a9faa6be8afcfd"
+  },
+  {
+    "path": "06_ASSETS/icons/video-active@2x.webp",
+    "bytes": 914,
+    "sha256": "73f8c9e9c9475a996d746ef671a7d6c947dec1a329d0e960d53f3e00d30f4d22"
+  },
+  {
+    "path": "06_ASSETS/icons/video-active@3x.webp",
+    "bytes": 1226,
+    "sha256": "94742591042331dc36bc5c60baeace23bd9be42dd6d60666693e5b6d35ce1e0a"
+  },
+  {
+    "path": "06_ASSETS/icons/video-default@2x.webp",
+    "bytes": 916,
+    "sha256": "4b7345f21ab077df663bb6256e870ed8bb86b55aab5dc32fbaaaf45fa57256a6"
+  },
+  {
+    "path": "06_ASSETS/icons/video-default@3x.webp",
+    "bytes": 1212,
+    "sha256": "c1d1b60df9ed3e234604ec62a4405efdd0579c84ff022a161ccc5be38ce844d7"
+  },
+  {
+    "path": "06_ASSETS/icons/voice-active@2x.webp",
+    "bytes": 1428,
+    "sha256": "e6df87ca913cae23db4bec349e3cd7764237726473f2d4365edcbc2e82705358"
+  },
+  {
+    "path": "06_ASSETS/icons/voice-active@3x.webp",
+    "bytes": 2184,
+    "sha256": "481a5061a533fcf30a28453fdcac152aea57947f51b6155b871fe5ac639541b2"
+  },
+  {
+    "path": "06_ASSETS/icons/voice-default@2x.webp",
+    "bytes": 1342,
+    "sha256": "39a5386273bd3930fae81074545e0e7fdb5d5d14abb368b279f51c5aca8f0e84"
+  },
+  {
+    "path": "06_ASSETS/icons/voice-default@3x.webp",
+    "bytes": 2162,
+    "sha256": "8020530a6f2e547880cddc2315473f488da49c57ffe57ae1fd5f8e239f1f5e53"
+  },
+  {
+    "path": "06_ASSETS/icons/warning-active@2x.webp",
+    "bytes": 1188,
+    "sha256": "9f95b85c82d6c3cbdb16222b3c16cedc0f90e52ada20ef1b2ee0e9aa3f7beab7"
+  },
+  {
+    "path": "06_ASSETS/icons/warning-active@3x.webp",
+    "bytes": 2142,
+    "sha256": "ef075ff5faaa75116596ab416466c9f54d95d5360ff5d59368bbca8bc5f56bff"
+  },
+  {
+    "path": "06_ASSETS/icons/warning-default@2x.webp",
+    "bytes": 1198,
+    "sha256": "6300dd1d11cde6ead8db3db11119ece4077ee071fe312e1139349226d9ca2091"
+  },
+  {
+    "path": "06_ASSETS/icons/warning-default@3x.webp",
+    "bytes": 2078,
+    "sha256": "b39815d254522b38aaa69b66f0f9e7b9792bb640b46793002afdb3e5040ef2e7"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/apricot.png",
+    "bytes": 1177942,
+    "sha256": "8827ff8949586a4e00f03978bffa892f93c65abff0c32ba31e87407025ab6492"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/lavender.png",
+    "bytes": 1155332,
+    "sha256": "756ded68ad5a1d2597d751457c231b31148b19f74c1f5f5373b534ab782e2500"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/mint.png",
+    "bytes": 1454644,
+    "sha256": "041be4ac1a97dffc78506ad4bf9a2dfd69ca6738349f8672e4f785d04fb4ea75"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/rose.png",
+    "bytes": 1242574,
+    "sha256": "daad19898e162603794fc12f72c593549115fe3977b43b81217966c23c3ed453"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/sand.png",
+    "bytes": 1603484,
+    "sha256": "94896ba6ad5c6b2239ba75aeea6c9f761b0dc324f53ad6f5a3a1be1281ef7184"
+  },
+  {
+    "path": "06_ASSETS/theme-header/original/sky.png",
+    "bytes": 1150590,
+    "sha256": "d955c09efc859aa9dd8b6f439d11d4dcccbebfbd21fb69599df71f804458c846"
+  },
+  {
+    "path": "06_ASSETS/theme-header/theme-contact-sheet.jpg",
+    "bytes": 62868,
+    "sha256": "2b61ac6cd6761d9fdbd67b0b1f4016c9a91eba7e1a4cbd980ef52da2fbd71bf6"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/apricot.webp",
+    "bytes": 10396,
+    "sha256": "9c962908c7835a25583f68c729edc47687b6a1d75eca9da304a08dc1e7eb8671"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/lavender.webp",
+    "bytes": 8044,
+    "sha256": "c2eb7ad36fd8922958788b59179065c044042b5523c84d9c64cc746f639000bf"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/mint.webp",
+    "bytes": 12318,
+    "sha256": "3d9e43f43b5035ff532940ca061475ed62068ebbbe810e46f9c0979405523159"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/rose.webp",
+    "bytes": 11086,
+    "sha256": "8e851c4760faaddbc3eafcdf1b916039eb1bbdf6ea01c8d1c9f934f88676677a"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/sand.webp",
+    "bytes": 16502,
+    "sha256": "88c357949ff4317d428c1604d4e7ffb89dffd2a2fd01f1228c71b15b70d035bb"
+  },
+  {
+    "path": "06_ASSETS/theme-header/web/sky.webp",
+    "bytes": 10244,
+    "sha256": "46ddfd4b7f11de4a4ee776c2ec70cee0b4231bddb6fe6e092324956238f89c56"
+  }
+]

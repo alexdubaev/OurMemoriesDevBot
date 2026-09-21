@@ -243,24 +243,24 @@ test('FeedShell provides the left spacer required by the memoLy three-column top
   expect(css).toContain('width: 44px')
 })
 
-test('production AddSheet exposes only the voice-or-video handoff and an accessible title', () => {
+test('production AddSheet exposes the T09 first-level actions and an accessible title', () => {
   const markup = render(
     createElement(
       Drawer,
       { open: true },
-      createElement(AddSheetPanel, { onClose: () => undefined, onOpenBot: () => undefined }),
+      createElement(AddSheetPanel, { onClose: () => undefined, onNote: () => undefined, onPhoto: () => undefined, onVoiceOrVideo: () => undefined }),
     ),
   )
 
   expect(markup).toContain('Что добавить?')
+  expect(markup).toContain('Фото')
+  expect(markup).toContain('Заметка')
   expect(markup).toContain('Голос или видео')
-  expect(markup).not.toContain('Фото')
-  expect(markup).not.toContain('Заметка')
   expect(markup).toContain('Материалы увидят участники вашей семьи')
   expect(markup).not.toContain('Событие')
   expect(markup).not.toContain('Календарь')
   expect(markup).not.toContain('AI')
-  expect(markup.match(/data-add-action=/g)).toHaveLength(1)
+  expect(markup.match(/data-add-action=/g)).toHaveLength(3)
   expect(markup).toContain('aria-label="Закрыть"')
 })
 

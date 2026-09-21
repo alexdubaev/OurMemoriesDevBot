@@ -6,6 +6,7 @@ import { Typography } from '@/components/typography'
 import { familyCalendarDate } from '@/features/family'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { finalizeMaxVideo, reserveMaxVideo, validateVideoFile, type MaxVideoReservation } from './api'
+import { reservationOccurredAt } from './date'
 import { uploadVideoToMax } from './xhr-upload'
 
 export type VideoComposerProps = {
@@ -20,14 +21,6 @@ export type VideoComposerProps = {
 type Capability = Pick<MaxVideoReservation, 'sessionId' | 'uploadUrl' | 'uploadToken'>
 type SaveStage = 'reserve' | 'upload' | 'finalize'
 type ReserveErrorCode = 'reserve_not_sent' | 'reserve_network_error' | `reserve_http_${number}` | 'reserve_parse_error'
-
-export function reservationOccurredAt(selectedDate: string, familyTimezone: string, now = new Date()) {
-  const today = familyCalendarDate(familyTimezone, now)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate) || selectedDate > today) return null
-  if (selectedDate === today) return now.toISOString()
-  const pastDate = new Date(`${selectedDate}T12:00:00.000Z`)
-  return Number.isNaN(pastDate.getTime()) ? null : pastDate.toISOString()
-}
 
 function classifyReserveError(reason: unknown): ReserveErrorCode {
   if (reason instanceof ApiRequestError) return `reserve_http_${reason.status}`

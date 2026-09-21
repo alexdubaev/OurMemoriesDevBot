@@ -67,6 +67,7 @@ export type MediaRepository = {
     maxPendingUploads: number
     now: Date
   }): Promise<void>
+  findUpload?(scope: FamilyScope, uploadId: string): Promise<PendingMediaUpload | null>
   findTelegramIngestion(scope: FamilyScope, assetId: string): Promise<FinalizePreparation | null>
   findTrustedIngestion?(scope: FamilyScope, assetId: string, sourceKind: 'telegram' | 'max'): Promise<FinalizePreparation | null>
   discardTrustedSourceAssets?(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now: Date }): Promise<void>
