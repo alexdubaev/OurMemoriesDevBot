@@ -2,8 +2,7 @@ import { expect, spyOn, test } from 'bun:test'
 import { OpenAPIHono } from '@hono/zod-openapi'
 
 import { handleError } from '../../../http/errors'
-import type { AuthHttpEnv } from '../../auth'
-import type { AuthenticatedPrincipal } from '../../auth/domain/user'
+import type { AuthHttpEnv, AuthenticatedPrincipal } from '../../auth'
 import { MaxDirectUploadFailure, createMaxDirectVideoUploadService } from '../application/direct-video-upload'
 import { createMaxDirectVideoUploadRoutes } from './direct-video-upload-routes'
 
