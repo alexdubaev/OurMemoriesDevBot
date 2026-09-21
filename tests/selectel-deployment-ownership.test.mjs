@@ -44,7 +44,10 @@ test('edge and static Caddy templates preserve routing ownership', () => {
   assert.match(edge, /\/storage\//)
   assert.match(edge, /\/webhooks\/telegram/)
   assert.match(edge, /\/webhooks\/max/)
-  assert.match(edge, /reverse_proxy\s+backend:3000/)
+  for (const path of ['/api/*', '/storage/*', '/webhooks/telegram', '/webhooks/max', '/health/live', '/health/ready']) {
+    assert.match(edge, new RegExp(`handle ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{\\s*reverse_proxy\\s+memoly-backend-1:3000`))
+  }
+  assert.doesNotMatch(edge, /reverse_proxy\s+backend:3000/)
   assert.match(edge, /handle\s*\{[\s\S]*reverse_proxy\s+static:80[\s\S]*\}/)
   assert.doesNotMatch(edge, /\/max-video-upload\//)
   assert.match(statik, /root\s+\*\s+\/srv/)

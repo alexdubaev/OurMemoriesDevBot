@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { SignJWT } from 'jose'
+import sharp from 'sharp'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
@@ -43,6 +44,62 @@ maybeDescribe('Private media API', () => {
     await clearFixtures()
     await prisma.$disconnect()
     await rm(storageRoot, { recursive: true, force: true })
+  })
+
+  test('real HTTP photo PUT is physically present before finalize and appears in the feed', async () => {
+    const owner = await admittedUser('Владелец', '43010')
+    const family = await createFamily(owner.token, 'Семья')
+    const jpeg = new Uint8Array(await sharp({
+      create: { width: 16, height: 16, channels: 3, background: '#aabbcc' },
+    }).jpeg().toBuffer())
+    const photoApp = createApp({ env: { ...env, MEDIA_FAMILY_QUOTA_BYTES: 1_000_000 }, prisma, privateStorage })
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request) => photoApp.fetch(request) })
+    const base = `http://127.0.0.1:${server.port}`
+    const api = async (path: string, method: string, body?: unknown, key?: string) => {
+      const response = await fetch(`${base}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${owner.token}`,
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(key ? { 'Idempotency-Key': key } : {}),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      return { response, body: await response.json() as any }
+    }
+
+    try {
+      const familyPath = `/api/v1/families/${family.body.family.id}`
+      const reserved = await api(`${familyPath}/uploads`, 'POST', {
+        purpose: 'memory', kind: 'photo', contentType: 'image/jpeg', byteSize: jpeg.byteLength,
+      })
+      expect(reserved.response.status).toBe(201)
+      const signed = new URL(reserved.body.upload.url)
+      const uploaded = await fetch(`${base}${signed.pathname}${signed.search}`, {
+        method: reserved.body.upload.method,
+        headers: reserved.body.upload.headers,
+        body: jpeg as unknown as BodyInit,
+        credentials: 'omit',
+      })
+      expect(uploaded.status).toBe(200)
+      const asset = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: reserved.body.assetId } })
+      expect(await Bun.file(resolve(storageRoot, 'objects', asset.originalKey)).exists()).toBe(true)
+      expect(await privateStorage.storage.headObject(asset.originalKey)).toMatchObject({
+        contentLength: jpeg.byteLength, contentType: 'image/jpeg',
+      })
+      const finalized = await api(`${familyPath}/uploads/${reserved.body.upload.uploadId}/finalize`, 'POST')
+      expect(finalized.response.status).toBe(200)
+      expect(finalized.body.asset.originalStatus).toBe('stored')
+      const memory = await api(`${familyPath}/memories`, 'POST', {
+        kind: 'photo', childId: family.body.child.id, body: '',
+        occurredAt: new Date(Date.now() - 30_000).toISOString(), mediaIds: [asset.id],
+      }, randomUUID())
+      expect(memory.response.status).toBe(201)
+      const feed = await api(`${familyPath}/memories`, 'GET')
+      expect(feed.body.items).toContainEqual(expect.objectContaining({ id: memory.body.id, kind: 'photo' }))
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('full uploads a photo and published members receive private HEAD and single-range bytes', async () => {
