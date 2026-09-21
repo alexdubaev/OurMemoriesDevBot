@@ -1,6 +1,12 @@
 # Приёмка закрытого пилота
 Проверить вручную в актуальных Telegram на iOS и Android на тестовых материалах. Desktop — дополнительная проверка, не замена телефонам.
 
+## T09 composer — ACCEPTED
+
+21 сентября 2026 владелец принял normal Add flow на реальном iPhone внутри MAX: Add Sheet (`Фото`, `Заметка`, `Голос или видео`), Note create — PASS, Video create/upload/Finalize → Memory в Feed и playback — PASS, Photo JPEG upload/Finalize → Memory в Feed — PASS. Последний Photo fix: [PR #42](https://github.com/alexdubaev/OurMemoriesDevBot/pull/42), merge/deployed SHA `27b2ad4f6a0fe22f72e152796875ea77cfb4c89e`.
+
+Это статус T09; отдельные пункты приёмки всего закрытого пилота ниже сохраняют собственные результаты.
+
 | ID | Действие | Ожидаемый результат |
 |---|---|---|
 | A01 | Создать допущенную семью | Одна семья, owner full, ребёнок, пустая лента |

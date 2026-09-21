@@ -13,10 +13,12 @@
 | 7 | [05](tasks/05_AUDIO_VIDEO_CAPTIONS.md) | Голос, видео и подписи | Terra | Sol | 04 | B |
 | 8 | [08](tasks/08_FAMILY_UI.md) | Семья и приглашения: интерфейс | Terra | Sol | 04, 06 | B |
 | 9 | [07](tasks/07_LIVE_FEED.md) | Живая лента и просмотр медиа | Terra | Sol | 05, 08 | — |
-| 10 | [09](tasks/09_COMPOSER_EDIT.md) | Добавление и редактирование | Terra | Sol | 07, 08 | — |
+| 10 | [09](tasks/09_COMPOSER_EDIT.md) | Добавление и редактирование — **ACCEPTED** | Terra | Sol | 07, 08 | — |
 | 11 | [10](tasks/10_PRIVACY_RELIABILITY.md) | Приватность и надёжность | Sol | Sol | 09 | — |
 | 12 | [11](tasks/11_PILOT_RELEASE.md) | Проверка и закрытый релиз | Sol | Sol | 10 | — |
 
 После A и B — отдельный контроль интегратора; детали в [PARALLEL_WORK.md](PARALLEL_WORK.md).
 Модель — рекомендованный исполнитель; назначение по риску задачи, не гарантированный рейтинг. Перед изменением модели проверить её доступность. В самом MVP моделей/AI нет.
 После 04 доступны записи из бота через API; после 07 видна реальная лента; после 09 доступно добавление из Mini App; пилот — только после 10–11.
+
+После принятого T09 порядок: full UI migration по `docs/design/memoly-handoff-final/` с сохранением принятой business logic → T09.5 Web Access для приглашённых VIEWER → member avatars/display names → актуализация scope T10/T11.
