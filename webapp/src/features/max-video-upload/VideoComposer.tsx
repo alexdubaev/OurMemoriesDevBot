@@ -25,6 +25,11 @@ function classifyReserveError(reason: unknown): ReserveErrorCode {
   return 'reserve_network_error'
 }
 
+function safeReserveApplicationCode(reason: unknown): string | null {
+  if (!(reason instanceof ApiRequestError) || !/^[A-Z0-9_]+$/.test(reason.code)) return null
+  return reason.code.toLowerCase()
+}
+
 export function VideoComposer({ childId, familyId, onCancel, onSuccess, transport }: VideoComposerProps) {
   const [file, setFile] = useState<File | null>(null)
   const [caption, setCaption] = useState('')
@@ -35,6 +40,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
   const [reserveErrorCode, setReserveErrorCode] = useState<ReserveErrorCode | null>(null)
+  const [reserveApplicationCode, setReserveApplicationCode] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const saving = useRef(false)
@@ -63,6 +69,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     setError(null)
     setErrorStage(null)
     setReserveErrorCode(null)
+    setReserveApplicationCode(null)
     setCapability(null)
     setProgress(0)
     if (!next) {
@@ -86,6 +93,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
     setError(null)
     setErrorStage(null)
     setReserveErrorCode(null)
+    setReserveApplicationCode(null)
     const selected = file
     const pendingFinalize: Capability | null = capability?.sessionId && capability.uploadToken
       ? capability
@@ -176,7 +184,10 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
       setStatus('error')
       const stage: SaveStage = uploadCompleted ? 'finalize' : finalizeCapability ? 'upload' : 'reserve'
       setErrorStage(stage)
-      if (stage === 'reserve') setReserveErrorCode(classifyReserveError(reason))
+      if (stage === 'reserve') {
+        setReserveErrorCode(classifyReserveError(reason))
+        setReserveApplicationCode(safeReserveApplicationCode(reason))
+      }
       setError(stage === 'reserve'
         ? 'Не удалось подготовить сохранение видео. Попробуйте ещё раз.'
         : stage === 'upload'
@@ -205,7 +216,7 @@ export function VideoComposer({ childId, familyId, onCancel, onSuccess, transpor
         {status === 'success' ? <Typography className="mt-4" aria-live="polite" variant="memoryMeta">Сохранено в семейную ленту</Typography> : null}
         {error ? <>
           <Typography className="mt-4 text-destructive" data-save-error-code={reserveErrorCode ?? undefined} data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
-          {reserveErrorCode ? <Typography className="mt-1 text-destructive" data-save-error-code={reserveErrorCode} variant="memoryMeta">Код: {reserveErrorCode}</Typography> : null}
+          {reserveErrorCode ? <Typography className="mt-1 text-destructive" data-save-error-code={reserveErrorCode} variant="memoryMeta">Код: {reserveErrorCode}{reserveApplicationCode ? ` / ${reserveApplicationCode}` : ''}</Typography> : null}
         </> : null}
         <div className="mt-6 flex gap-3">
           <Button className="min-h-12 flex-1" disabled={isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>

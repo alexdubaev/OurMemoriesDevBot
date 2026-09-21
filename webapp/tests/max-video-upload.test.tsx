@@ -12,7 +12,7 @@ import {
 } from '../src/features/max-video-upload/api'
 import { VideoComposer } from '../src/features/max-video-upload/VideoComposer'
 import { uploadVideoToMax } from '../src/features/max-video-upload/xhr-upload'
-import type { AuthenticatedTransport } from '../src/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '../src/platform/api'
 
 function file(name: string, size = 10, type = 'video/mp4') {
   return new File([new Uint8Array(size)], name, { type })
@@ -246,6 +246,41 @@ test('interactive reserve failure keeps the selected file and form values for re
     await act(async () => root.unmount())
     browser.restore()
     restoreUploadXHR()
+  }
+})
+
+test('interactive reserve HTTP errors show only the safe application code', async () => {
+  const browser = installInteractiveDom()
+  const transport = interactiveTransport((path) => path.endsWith('/reserve')
+    ? Promise.reject(new ApiRequestError(404, 'NOT_FOUND', 'private backend details'))
+    : Promise.resolve({ state: 'finalized', sessionId: 'session-1', memoryId: 'memory-1' }))
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(VideoComposer, {
+      childId: 'child-1', familyId: 'family-1', onCancel: () => undefined,
+      onSuccess: () => undefined, transport,
+    })))
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    fileInput.files = [file('reserve-not-found.mp4', 24)]
+    await act(async () => invoke(fileInput, 'onChange'))
+    caption.value = 'Безопасный код'
+    await act(async () => invoke(caption, 'onChange'))
+
+    await act(async () => {
+      await invoke(save(), 'onClick')
+      await flushInteractive()
+    })
+
+    expect(textOf(browser.container)).toContain('Код: reserve_http_404 / not_found')
+    expect(textOf(browser.container)).not.toContain('private backend details')
+    const reserveError = findOne(browser.container, (node) => node.attributes['data-save-stage'] === 'reserve')
+    expect(reserveError.attributes['data-save-error-code']).toBe('reserve_http_404')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
   }
 })
 
