@@ -1,6 +1,6 @@
 import { MaxProviderError } from './max-api'
 
-const MAX_MEDIA_HOSTS = new Set(['i.oneme.ru', 'fd.oneme.ru'])
+const MAX_MEDIA_HOSTS = new Set(['i.oneme.ru', 'fd.oneme.ru', 'a.oneme.ru'])
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 

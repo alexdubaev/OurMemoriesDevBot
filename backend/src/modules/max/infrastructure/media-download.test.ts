@@ -4,17 +4,23 @@ import { createMaxMediaDownload, MaxMediaDownloadError } from './media-download'
 import { MaxProviderError } from './max-api'
 
 describe('MAX credential-free media download', () => {
-  test('allows only the two observed exact HTTPS hosts and returns exact bytes', async () => {
+  test('allows only the three observed exact HTTPS hosts and returns exact bytes', async () => {
     const bytes = Uint8Array.of(1, 2, 3)
     let request: Request | undefined
     const download = createMaxMediaDownload({ fetch: async (input, init) => {
       request = new Request(input, init)
       return new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } })
     } })
-    await expect(download('https://i.oneme.ru/path', 10)).resolves.toMatchObject({ bytes, contentLength: 3 })
+    for (const url of [
+      'https://i.oneme.ru/path',
+      'https://fd.oneme.ru/path',
+      'https://a.oneme.ru/path',
+    ]) {
+      await expect(download(url, 10)).resolves.toMatchObject({ bytes, contentLength: 3 })
+    }
     expect(request!.headers.get('authorization')).toBeNull()
     expect(request!.headers.get('cookie')).toBeNull()
-    for (const url of ['http://i.oneme.ru/path', 'https://evil.i.oneme.ru/path', 'https://i.oneme.ru.evil.test/path', 'https://user:i.oneme.ru/path', 'https://example.test/path']) {
+    for (const url of ['http://a.oneme.ru/path', 'https://a.oneme.ru.evil.example/path', 'https://evil-a.oneme.ru/path', 'https://evil.i.oneme.ru/path', 'https://i.oneme.ru.evil.test/path', 'https://user:i.oneme.ru/path', 'https://example.test/path']) {
       await expect(download(url, 10)).rejects.toThrow()
     }
   })
