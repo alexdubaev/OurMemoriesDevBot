@@ -158,7 +158,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [accessLost, setAccessLost] = useState(false)
   const [isFamilyBootstrapping, setIsFamilyBootstrapping] = useState(true)
 
-  const refresh = useCallback(async ({ bootstrap = false }: { bootstrap?: boolean } = {}) => {
+  const refresh = useCallback(async ({ bootstrap = false, failureMode = 'global' }: { bootstrap?: boolean; failureMode?: 'global' | 'throw' } = {}) => {
     if (bootstrap) setIsFamilyBootstrapping(true)
     setError(null)
     setInviteIssue(null)
@@ -180,6 +180,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
           }
           setInviteHandled(true)
         } catch (reason) {
+          if (failureMode === 'throw') throw reason
           setInviteIssue(inviteIssueCode(reason))
           setFamilyResponse(null)
           return
@@ -196,7 +197,10 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       if (response.child) {
         const [nextMembers, nextInvites] = await Promise.all([
           loadFamilyMembers(transport, response.family.id),
-          loadFamilyInvites(transport, response.family.id).catch(() => ({ items: [] })),
+          loadFamilyInvites(transport, response.family.id).catch((reason) => {
+            if (failureMode === 'throw') throw reason
+            return { items: [] }
+          }),
         ])
         setMembers(nextMembers.items)
         setInvites(nextInvites.items)
@@ -208,6 +212,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         if (startRoute !== 'boot') setScreen(startRoute)
       }
     } catch (reason) {
+      if (failureMode === 'throw') throw reason
       setError(reason instanceof Error ? reason : new Error('Не удалось загрузить семью.'))
     } finally {
       if (bootstrap) setIsFamilyBootstrapping(false)

@@ -6,7 +6,10 @@ import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
+import { createInviteResult } from './invite-result'
 import { useChildAvatar } from './useChildAvatar'
+
+type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
 export function FamilyScreen({
   familyResponse,
@@ -28,10 +31,11 @@ export function FamilyScreen({
   currentUserId: string
   onEditChild: () => void
   onFeed: () => void
-  onRefresh: () => Promise<void>
+  onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
 }) {
   const [error, setError] = useState<Error | null>(null)
+  const [inviteError, setInviteError] = useState(false)
   const [busy, setBusy] = useState(false)
   const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string } | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -55,7 +59,7 @@ export function FamilyScreen({
     setError(null)
     try {
       await action()
-      await onRefresh()
+      await onRefresh({ failureMode: 'throw' })
     } catch (reason) {
       setError(reason instanceof Error ? reason : new Error('Не удалось обновить семью.'))
       if (throwOnError) throw reason
@@ -85,6 +89,7 @@ export function FamilyScreen({
           familyResponse={familyResponse}
           hostBridge={hostBridge}
           hasError={Boolean(error)}
+          inviteError={inviteError}
           inviteReady={inviteReady}
           invites={invites}
           memberActions={memberActions}
@@ -99,13 +104,25 @@ export function FamilyScreen({
               setCopyState('failed')
             }
           }}
-          onCreateInvite={async (input) => run(async () => {
-            const invitation = await createInvite(transport, familyResponse.family.id, input)
-            const url = createInviteLink(invitation.rawToken)
-            if (!url) throw new Error('Не удалось создать ссылку приглашения.')
-            setInviteReady({ url, expiresAt: invitation.expiresAt })
-            setCopyState('idle')
-          }, true)}
+          onCreateInvite={async (input) => {
+            setBusy(true)
+            setError(null)
+            setInviteError(false)
+            try {
+              const result = await createInviteResult({
+                create: () => createInvite(transport, familyResponse.family.id, input),
+                refresh: () => onRefresh({ failureMode: 'throw' }),
+                toUrl: createInviteLink,
+              })
+              setInviteReady(result)
+              setCopyState('idle')
+            } catch (reason) {
+              setInviteError(true)
+              throw reason
+            } finally {
+              setBusy(false)
+            }
+          }}
           onEditChild={onEditChild}
           onLeaveFamily={async () => {
             if (!current) return
