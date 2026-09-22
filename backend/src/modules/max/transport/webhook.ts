@@ -114,9 +114,8 @@ function isSafeTimestamp(value: unknown): value is number {
 }
 
 function safeAttachmentType(value: unknown) {
-  if (typeof value !== 'string') return null
-  const normalized = value.toLowerCase()
-  return ['audio', 'voice'].includes(normalized) ? normalized : null
+  if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value)) return null
+  return /token|secret|bearer|authorization/i.test(value) ? null : value
 }
 
 function sourceValue(attachment: Record<string, unknown> | null, payload: Record<string, unknown> | null, field: string) {

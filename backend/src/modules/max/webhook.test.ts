@@ -125,6 +125,40 @@ test('captures only sanitized shape metadata for an unsupported MAX media attach
   })
 })
 
+test('preserves the exact unknown voice attachment type without raw transport values', async () => {
+  const diagnostics: Array<{ marker: string; record: unknown }> = []
+  const privateToken = 'voice-bearer-token'
+  const temporaryUrl = 'https://media.example.test/private/voice?signature=private'
+  const app = route(
+    async () => undefined,
+    8_192,
+    (marker, record) => diagnostics.push({ marker, record }),
+  )
+  const response = await app.request('/webhooks/max', {
+    method: 'POST',
+    headers: { 'X-Max-Bot-Api-Secret': secret, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      update_type: 'message_created',
+      timestamp: 1,
+      message: {
+        sender: { user_id: 1 },
+        recipient: { chat_id: null, chat_type: 'dialog', user_id: 2 },
+        body: {
+          mid: 'provider-message-id',
+          attachments: [{ type: 'voice_message', payload: { token: privateToken, url: temporaryUrl } }],
+        },
+      },
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(diagnostics[0]?.record).toMatchObject({ attachments: [{ type: 'voice_message' }] })
+  const serialized = JSON.stringify(diagnostics[0]?.record)
+  expect(serialized).not.toContain(privateToken)
+  expect(serialized).not.toContain(temporaryUrl)
+  expect(serialized).not.toContain('payload":{"token"')
+})
+
 test('does not log attacker-controlled attachment type or MIME strings', async () => {
   const diagnostics: Array<{ marker: string; record: unknown }> = []
   const privateType = 'voice private family note'
