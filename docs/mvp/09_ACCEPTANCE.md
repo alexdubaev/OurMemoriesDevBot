@@ -7,6 +7,14 @@
 
 Это статус T09; отдельные пункты приёмки всего закрытого пилота ниже сохраняют собственные результаты.
 
+## MAX native voice — ACCEPTED
+
+Владелец принял на реальном iPhone/MAX production capability `MAX native voice ingestion = ACCEPTED`: обычное voice message отправляется memoLy-боту, проходит `message_created` с `attachment.type = audio`, provider media и существующий private Voice pipeline, после чего Voice Memory появляется в Feed. Manual acceptance: voice отправляется боту — PASS; ответа `Медиа пока не поддерживается` нет — PASS; Voice Memory в Feed — PASS; Play — PASS; Pause — PASS; Seek — PASS.
+
+PR [#49](https://github.com/alexdubaev/OurMemoriesDevBot/pull/49), merged/deployed SHA `04cf58fa94825972aee0b4e7a5aef28f4c9a5540`. Подтверждённый inbound contract: event `message_created`, attachment type `audio`, payload `id`, `token`, `url`; production media hostname `a.oneme.ru` входит в strict allowlist exact hostname, без wildcard.
+
+Канонический путь: MAX adapter → provider media acquisition → private `MediaAsset` → `SourceMemoryPublisher` → `Memory(type=voice)` → существующие Feed / Voice playback. Сохраняются family isolation, author mapping, provider/source idempotency, private media и Range/206; один provider message создаёт максимум одну Memory. Принято: native voice, отправленный memoLy-боту в MAX. Отложено post-MVP: in-app voice recording через Web `MediaRecorder`.
+
 | ID | Действие | Ожидаемый результат |
 |---|---|---|
 | A01 | Создать допущенную семью | Одна семья, owner full, ребёнок, пустая лента |
