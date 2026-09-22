@@ -5,7 +5,7 @@
 **Исполнитель:** Terra; отдельные локальные формы при необходимости можно поручить Luna.
 **Назначенное независимое ревью:** Sol — permissions, idempotency/finalize/retry, дубли, destructive actions и отсутствие регрессии уже принятого production video flow.
 **Зависимости:** 07 и 08 приняты и слиты в `main`; production MAX Direct Video Upload принят на реальном устройстве, слит в `main` и считается готовой инфраструктурой, которую этот блок обязан переиспользовать.
-**Цель:** Обеспечить обычный пользовательский сценарий добавления фото, заметок и видео через Mini App, а также безопасное редактирование и удаление воспоминаний. Голос остаётся форматом продукта, но запись голоса непосредственно внутри Mini App через `MediaRecorder` переносится на post-MVP.
+**Цель:** Обеспечить обычный пользовательский сценарий добавления фото, заметок и видео через Mini App, а также безопасное редактирование и удаление воспоминаний. Голос остаётся форматом продукта: native voice, отправленный memoLy-боту в MAX, принят production flow; запись голоса непосредственно внутри Mini App через `MediaRecorder` переносится на post-MVP.
 **Правила работы:** корневой `AGENTS.md`; `../PARALLEL_WORK.md`; для UI также `../ASSET_GUIDE.md`.
 **Спецификация:** `../00_START_HERE.md`; дополнительно прочитать: `../01_PRODUCT.md` §§6,8–9, `../design.md` §§D11–D12, `../03_DATA_API.md` §5, `../05_STORAGE_SECURITY.md` §§3–5,8, актуальный project HANDOFF, а также актуальную документацию/код уже принятого production MAX Direct Video Upload. При противоречии старых документов с решениями этого файла приоритет имеет этот файл и более поздние явно принятые решения владельца.
 **Design handoff:** [`../../design/memoly-handoff-final/00_START_HERE/README_FIRST.md`](../../design/memoly-handoff-final/00_START_HERE/README_FIRST.md) и его обязательные ссылки; дизайн остаётся источником visual/presentation решений, а реальные contracts и production media flows — источником поведения.
@@ -21,8 +21,8 @@ MVP этого блока:
 - VIEWER: read-only, без create/edit/delete;
 - редактирование текста/подписи и даты;
 - удаление с подтверждением;
-- существующий voice format и playback сохраняются;
-- новая запись голоса внутри Mini App не реализуется в этом блоке;
+- существующий voice format и playback сохраняются; MAX native voice ingestion через memoLy-бота принят;
+- новая запись голоса внутри Mini App не реализуется в этом блоке и остаётся post-MVP (`MediaRecorder`);
 - direct video upload не разрабатывается заново: используется уже принятый production Video Composer и существующая MAX upload/finalize infrastructure.
 
 Вне scope:
@@ -631,7 +631,7 @@ T09 готов, когда:
 4. OWNER/FULL могут создать Note.
 5. Video открывается через normal Add flow и ПЕРЕИСПОЛЬЗУЕТ уже готовый production Video Composer.
 6. Direct video upload не реализован второй раз и существующий MAX transport не сломан.
-7. Voice остаётся продуктовым форматом, но in-app recording явно deferred post-MVP.
+7. MAX native voice ingestion через memoLy-бота принято; in-app recording явно deferred post-MVP.
 8. MediaRecorder отсутствует в T09.
 9. Edit body/caption/date работает.
 10. expectedVersion/409 работает без silent overwrite.
@@ -642,7 +642,7 @@ T09 готов, когда:
 15. Existing photo/video/voice playback не сломан.
 16. Family isolation сохранена.
 17. Today/future date logic не повторяет уже исправленный video bug.
-18. Manual iPhone/MAX acceptance пройдена владельцем.
+18. Manual iPhone/MAX acceptance пройдена владельцем, включая MAX native voice: отправка боту, Voice Memory в Feed, Play/Pause/Seek — PASS.
 19. T09-related docs больше не требуют отказаться от уже принятого direct video upload и не возвращают старый 100 MB video limit.
 20. Голосовая запись внутри приложения явно записана в post-MVP backlog, а не удалена из планов.
 
@@ -759,13 +759,14 @@ STOP только если:
 - **Note: PASS.** Создание заметки через рабочий production flow.
 - **Video: PASS.** `Добавить → Голос или видео → Видео` открывает существующий Video Composer; direct browser → MAX upload и Finalize создают Memory в Feed, playback работает.
 - **Photo: PASS.** JPEG через normal Photo Composer проходит upload → finalize → Memory → Feed. Последний production fix — [PR #42](https://github.com/alexdubaev/OurMemoriesDevBot/pull/42), merge/deployed SHA `27b2ad4f6a0fe22f72e152796875ea77cfb4c89e`: Caddy направляет обычные API/storage-запросы в единственный backend с нужным filesystem storage root. Общий Docker alias ранее мог разделить одну операцию между контейнерами с разными storage roots.
+- **MAX native voice: PASS.** Обычное voice message, отправленное memoLy-боту в MAX, проходит `message_created` / `audio` → provider media → private Voice pipeline → Voice Memory в Feed; Play, Pause и Seek работают. Production capability принята в [PR #49](https://github.com/alexdubaev/OurMemoriesDevBot/pull/49), merged/deployed SHA `04cf58fa94825972aee0b4e7a5aef28f4c9a5540`.
 
-T09 принят владельцем. VIEWER остаётся read-only; create/edit/delete доступны только согласно capabilities. In-app voice recording deferred until post-MVP.
+T09 принят владельцем. VIEWER остаётся read-only; create/edit/delete доступны только согласно capabilities. MAX native voice ingestion через memoLy-бота — ACCEPTED; in-app voice recording через Web `MediaRecorder` deferred until post-MVP.
 
 ## Accepted flows and next steps
 
-Без отдельной продуктовой причины или исправления дефекта считаются frozen: Photo create/upload/finalize, Note create, Video Reserve/direct upload/Finalize, существующий media playback, permissions и idempotency. Для Photo source of truth — существующий flow в `webapp/src/features/family/api.ts`; параллельный Photo uploader не создавать. Video Composer переиспользовать, не копировать. Presentation changes не должны создавать новую media orchestration.
+Без отдельной доказанной bug/product причины считаются frozen: Photo create/upload/finalize, Note create, Video Reserve/direct upload/Finalize, MAX audio classification, provider download/resolver, private Voice media pipeline, `SourceMemoryPublisher`, существующий media playback, permissions и idempotency. Для Photo source of truth — существующий flow в `webapp/src/features/family/api.ts`; параллельный Photo uploader не создавать. Video Composer переиспользовать, не копировать. Presentation changes не должны создавать новую media orchestration. Будущие UI/design задачи не должны переписывать MAX audio classification, provider download/resolver, private Voice media pipeline, `SourceMemoryPublisher`, idempotency или Voice playback без отдельной доказанной bug/product причины.
 
 Future design migration must preserve the accepted Photo, Note and Video business flows and integrate through their existing controllers/contracts rather than creating parallel upload/create implementations.
 
-Порядок следующей работы: 1) full UI migration по `docs/design/memoly-handoff-final/` — только presentation/skin; 2) T09.5 Web Access для приглашённых родственников в режиме VIEWER; 3) member avatars/display names; 4) актуализация scope T10/T11. Это порядок roadmap, а не начало следующего блока.
+Порядок следующей работы: 1) дочистить остатки старого UI и добиться faithful HTML parity; 2) зафиксировать чистый UI baseline; 3) добавить новые Profile / Family Member screens в canonical HTML; 4) реализовать profile/avatar/name logic; 5) затем T09.5 Web Access. Это порядок roadmap, а не начало следующего блока.
