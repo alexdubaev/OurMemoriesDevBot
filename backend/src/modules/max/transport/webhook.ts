@@ -28,9 +28,15 @@ export function createMaxWebhook(options: {
     if (Buffer.byteLength(body, 'utf8') > options.bodyLimitBytes) return c.json({ ok: false }, 413)
     let update: unknown
     try { update = JSON.parse(body) } catch { return c.json({ ok: false }, 400) }
-    const diagnostic = describeUnsupportedMaxMediaUpdate(update)
-    if (diagnostic) {
-      try { (options.diagnosticLogger ?? console.info)('MAX_VOICE_DIAGNOSTIC_CAPTURE', diagnostic) } catch { /* diagnostics must not affect webhook handling */ }
+    const audioDiagnostic = describeAudioMaxMediaUpdate(update)
+    if (audioDiagnostic) {
+      try { (options.diagnosticLogger ?? console.info)('MAX_AUDIO_DIAGNOSTIC_CAPTURE', audioDiagnostic) } catch { /* diagnostics must not affect webhook handling */ }
+    }
+    if (!audioDiagnostic) {
+      const diagnostic = describeUnsupportedMaxMediaUpdate(update)
+      if (diagnostic) {
+        try { (options.diagnosticLogger ?? console.info)('MAX_VOICE_DIAGNOSTIC_CAPTURE', diagnostic) } catch { /* diagnostics must not affect webhook handling */ }
+      }
     }
     let event: ReturnType<typeof normalizeMaxUpdate>
     try { event = normalizeMaxUpdate(update) } catch { return c.json({ ok: false }, 400) }
@@ -45,12 +51,30 @@ export function createMaxWebhook(options: {
   return routes
 }
 
+function describeAudioMaxMediaUpdate(input: unknown) {
+  if (!isRecord(input) || input.update_type !== 'message_created' || !isRecord(input.message)) return null
+  const body = isRecord(input.message.body) ? input.message.body : null
+  const attachments = Array.isArray(body?.attachments) ? body.attachments : null
+  const attachment = attachments?.find(isAudioAttachment)
+  if (!attachment) return null
+  const payload = isRecord(attachment.payload) ? attachment.payload : null
+  let hostname: string | null = null
+  if (typeof payload?.url === 'string') {
+    try { hostname = new URL(payload.url).hostname } catch { /* diagnostics must not affect webhook handling */ }
+  }
+  return {
+    timestamp: isSafeTimestamp(input.timestamp) ? input.timestamp : null,
+    hostname,
+  }
+}
+
 function describeUnsupportedMaxMediaUpdate(input: unknown) {
   if (!isRecord(input) || input.update_type !== 'message_created' || !isRecord(input.message)) return null
   const message = input.message
   const body = isRecord(message.body) ? message.body : null
   const attachments = Array.isArray(body?.attachments) ? body.attachments : null
-  if (!attachments || !attachments.some(isUnsupportedAttachment)) return null
+  const nonAudioAttachments = attachments?.filter((attachment) => !isAudioAttachment(attachment)) ?? null
+  if (!nonAudioAttachments || !nonAudioAttachments.some(isUnsupportedAttachment)) return null
   return {
     updateType: 'message_created',
     timestamp: isSafeTimestamp(input.timestamp) ? input.timestamp : null,
@@ -61,7 +85,7 @@ function describeUnsupportedMaxMediaUpdate(input: unknown) {
     messageIdSha256: typeof body?.mid === 'string' ? sha256(body.mid) : null,
     messageFields: keysOf(message),
     bodyFields: body ? keysOf(body) : [],
-    attachments: attachments.map(describeAttachment),
+    attachments: nonAudioAttachments.map(describeAttachment),
   }
 }
 
@@ -98,7 +122,11 @@ function describeAttachment(input: unknown, index: number) {
 }
 
 function isUnsupportedAttachment(input: unknown) {
-  return !isRecord(input) || !['image', 'file', 'video'].includes(input.type as string)
+  return !isRecord(input) || !['image', 'file', 'video', 'audio'].includes(input.type as string)
+}
+
+function isAudioAttachment(input: unknown) {
+  return isRecord(input) && input.type === 'audio'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

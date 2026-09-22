@@ -46,6 +46,89 @@ test('accepts valid events before acknowledging and returns retryable failure wh
   expect((await failed.request('/webhooks/max', { method: 'POST', headers: { 'X-Max-Bot-Api-Secret': secret }, body: valid })).status).toBe(503)
 })
 
+test('logs only the audio URL hostname while preserving webhook acceptance', async () => {
+  const diagnostics: Array<{ marker: string; record: unknown }> = []
+  let accepts = 0
+  const privateText = 'private family note'
+  const privateToken = 'audio-bearer-token'
+  const privatePath = '/private/audio.ogg'
+  const privateQuery = 'signature=private'
+  const temporaryUrl = `https://media.example.test${privatePath}?${privateQuery}`
+  const app = route(
+    async () => { accepts += 1 },
+    8_192,
+    (marker, record) => diagnostics.push({ marker, record }),
+  )
+  const response = await app.request('/webhooks/max', {
+    method: 'POST',
+    headers: { 'X-Max-Bot-Api-Secret': secret, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      update_type: 'message_created',
+      timestamp: 1,
+      message: {
+        sender: { user_id: 1 },
+        recipient: { chat_id: null, chat_type: 'dialog', user_id: 2 },
+        body: {
+          mid: 'provider-message-id',
+          text: privateText,
+          attachments: [{ type: 'audio', payload: { token: privateToken, url: temporaryUrl } }],
+        },
+      },
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(accepts).toBe(1)
+  expect(diagnostics).toEqual([{
+    marker: 'MAX_AUDIO_DIAGNOSTIC_CAPTURE',
+    record: { timestamp: 1, hostname: 'media.example.test' },
+  }])
+  const serialized = JSON.stringify(diagnostics)
+  expect(serialized).toContain('media.example.test')
+  expect(serialized).not.toContain(temporaryUrl)
+  expect(serialized).not.toContain(privateToken)
+  expect(serialized).not.toContain(privatePath)
+  expect(serialized).not.toContain(privateQuery)
+  expect(serialized).not.toContain(privateText)
+})
+
+test('does not emit the legacy diagnostic alongside an audio diagnostic for mixed attachments', async () => {
+  const diagnostics: Array<{ marker: string; record: unknown }> = []
+  let accepts = 0
+  const app = route(
+    async () => { accepts += 1 },
+    8_192,
+    (marker, record) => diagnostics.push({ marker, record }),
+  )
+  const response = await app.request('/webhooks/max', {
+    method: 'POST',
+    headers: { 'X-Max-Bot-Api-Secret': secret, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      update_type: 'message_created',
+      timestamp: 1,
+      message: {
+        sender: { user_id: 1 },
+        recipient: { chat_id: null, chat_type: 'dialog', user_id: 2 },
+        body: {
+          mid: 'provider-message-id',
+          text: 'private family note',
+          attachments: [
+            { type: 'voice', payload: { token: 'private-token', url: 'https://voice.example.test/private' } },
+            { type: 'audio', payload: { token: 'private-audio-token', url: 'https://audio.example.test/private?signature=private' } },
+          ],
+        },
+      },
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(accepts).toBe(1)
+  expect(diagnostics).toEqual([{
+    marker: 'MAX_AUDIO_DIAGNOSTIC_CAPTURE',
+    record: { timestamp: 1, hostname: 'audio.example.test' },
+  }])
+})
+
 test('captures only sanitized shape metadata for an unsupported MAX media attachment', async () => {
   const diagnostics: Array<{ marker: string; record: unknown }> = []
   const app = route(
