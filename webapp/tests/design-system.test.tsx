@@ -8,7 +8,7 @@ import { resolve } from 'node:path'
 
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { WebpIcon } from '../src/components/WebpIcon'
-import { AddSheetPanel, VoiceOrVideoAction } from '../src/features/memoly-ui/AddSheetPresentation'
+import { AddSheetPanel, MediaChoiceAction, VoiceOrVideoAction, VoiceOrVideoPanel } from '../src/features/memoly-ui/AddSheetPresentation'
 import { subscribeAddSheetBack } from '../src/features/memoly-ui/add-sheet-back'
 import { Drawer } from '../src/components/ui/drawer'
 import {
@@ -132,7 +132,9 @@ test('memoLy feed presentation composes the child hero, filters, and scoped navi
 test('memoLy content rail keeps date groups and cards separated', async () => {
   const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
 
-  expect(css).toContain('[data-memoly-feed] .memoly-feed-content { display: flex; flex-direction: column; gap: 12px;')
+  expect(css).toContain('[data-memoly-feed] .feed-content { display: flex; min-width: 0; flex-direction: column; gap: 0; }')
+  expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
+  expect(css).toContain('[data-memoly-feed] .feed-section { min-width: 0; }')
 })
 
 test('memoLy shell keeps horizontal host insets at the narrow breakpoint and consumes them once in navigation', async () => {
@@ -157,13 +159,13 @@ test('memoLy shell keeps horizontal host insets at the narrow breakpoint and con
 
   expect(markup).toContain('--host-inset-left:11px')
   expect(markup).toContain('--host-inset-right:13px')
-  expect(css).toContain('padding-left: calc(16px + var(--host-inset-left))')
-  expect(css).toContain('padding-right: calc(16px + var(--host-inset-right))')
+  expect(markup).toContain('class="app"')
+  expect(markup).toContain('class="filters-wrap surface-inset"')
+  expect(css).toContain('padding: max(12px, var(--host-inset-top)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);')
   expect(sharedTokens).toContain('padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left))')
   expect(sharedTokens).toContain('padding-bottom: var(--host-inset-bottom) !important')
   expect(sharedTokens).toContain('width: 100% !important')
-  expect(css).toContain('margin-left: calc(16px + var(--host-inset-left))')
-  expect(css).toContain('margin-right: calc(16px + var(--host-inset-right))')
+  expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
   expect(sharedTokens).toContain("nav[data-bottom-navigation-appearance='memoly']")
 })
 
@@ -253,16 +255,51 @@ test('production AddSheet exposes the T09 first-level actions and an accessible 
     ),
   )
 
-  expect(markup).toContain('Что добавить?')
+  expect(markup).toContain('Добавить воспоминание')
+  expect(markup).toContain('Сохраняйте моменты, которые важны')
   expect(markup).toContain('Фото')
   expect(markup).toContain('Заметка')
   expect(markup).toContain('Голос или видео')
-  expect(markup).toContain('Материалы увидят участники вашей семьи')
   expect(markup).not.toContain('Событие')
   expect(markup).not.toContain('Календарь')
   expect(markup).not.toContain('AI')
   expect(markup.match(/data-add-action=/g)).toHaveLength(3)
-  expect(markup).toContain('aria-label="Закрыть"')
+  expect(markup).toContain('class="add-options"')
+})
+
+test('media choice preserves canonical order and routes video to the supplied callback', () => {
+  const markup = render(
+    createElement(
+      Drawer,
+      { open: true },
+      createElement(VoiceOrVideoPanel, {
+        onBack: () => undefined,
+        onClose: () => undefined,
+        onVideo: () => undefined,
+      }),
+    ),
+  )
+
+  expect(markup.match(/class="media-choice-card"/g)).toHaveLength(2)
+  expect(markup).toContain('Добавить голос или видео')
+  expect(markup.indexOf('data-add-action="video"')).toBeLessThan(markup.indexOf('data-add-action="audio"'))
+  expect(markup).toContain('Выбрать видео')
+  expect(markup).toContain('Готовый видеофайл')
+  expect(markup).toContain('Аудио пока недоступно')
+  expect(markup).toContain('Добавление аудио появится позже')
+
+  let opened = false
+  const action = MediaChoiceAction({
+    copy: <>Готовый видеофайл<br />с устройства</>,
+    icon: 'video',
+    label: 'Выбрать видео',
+    name: 'video',
+    onClick: () => { opened = true },
+    title: 'Выбрать видео',
+  })
+  if (action.type !== 'button') throw new Error('expected a button action')
+  action.props.onClick()
+  expect(opened).toBe(true)
 })
 
 test('voice-or-video action invokes the supplied bot handoff', () => {

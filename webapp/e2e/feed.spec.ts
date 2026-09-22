@@ -102,6 +102,17 @@ test.describe.serial('T07 live feed', () => {
           viewportHeight: window.innerHeight,
         }
       })
+      const filterMetrics = await page.locator('[data-slot="memoly-filter-rail"] .filter').evaluateAll((buttons) => buttons.map((button) => {
+        const label = button.querySelector<HTMLElement>(':scope > span')
+        if (!label) return { clipped: true, inBounds: false, text: '' }
+        const buttonRect = button.getBoundingClientRect()
+        const labelRect = label.getBoundingClientRect()
+        return {
+          clipped: label.scrollWidth > label.clientWidth + 1,
+          inBounds: labelRect.left >= buttonRect.left && labelRect.right <= buttonRect.right,
+          text: label.textContent ?? '',
+        }
+      }))
 
       expect(metrics).not.toBeNull()
       expect(metrics!.clientWidth).toBe(width)
@@ -111,6 +122,9 @@ test.describe.serial('T07 live feed', () => {
       expect(metrics!.navBottom).toBe(metrics!.viewportHeight)
       expect(metrics!.navPaddingBottom).toBe(18)
       expect(metrics!.scrollPaddingBottom).toBeGreaterThan(16)
+      expect(filterMetrics).toHaveLength(5)
+      expect(filterMetrics.map((filter) => filter.text)).toEqual(['Все', 'Фото', 'Видео', 'Голос', 'Заметки'])
+      expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds)).toBe(true)
       await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
     })
   }
@@ -384,6 +398,165 @@ test.describe.serial('T07 live feed', () => {
     await expect(albumCard).toContainText('Фотоальбом E2E')
   })
 
+  test('opens the approved Add sheet with three horizontal options across mobile viewports', async ({ page }) => {
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'full' },
+    })
+
+    try {
+      for (const width of [320, 390, 430, 480]) {
+        await page.setViewportSize({ width, height: 844 })
+        await page.goto('/')
+        await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+        await openFeed(page)
+        await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+
+        const panel = page.locator('[data-slot="memoly-add-sheet-panel"]')
+        await expect(panel).toBeVisible()
+        await expect(panel.getByRole('heading', { name: 'Добавить воспоминание', exact: true })).toBeVisible()
+        await expect(panel.getByText('Сохраняйте моменты, которые важны', { exact: true })).toBeVisible()
+
+        const options = panel.locator('[data-add-action]')
+        await expect(options).toHaveCount(3)
+        await expect(options.nth(0)).toHaveAttribute('data-add-action', 'photo')
+        await expect(options.nth(0)).toHaveAccessibleName('Добавить фото')
+        await expect(options.nth(1)).toHaveAttribute('data-add-action', 'note')
+        await expect(options.nth(1)).toHaveAccessibleName('Добавить заметку')
+        await expect(options.nth(2)).toHaveAttribute('data-add-action', 'voice-or-video')
+        await expect(options.nth(2)).toHaveAccessibleName('Добавить голос или видео')
+        for (let index = 0; index < 3; index += 1) await expect(options.nth(index)).toBeVisible()
+        await page.waitForTimeout(500)
+
+        const geometry = await options.evaluateAll((entries) => {
+          const rects = entries.map((entry) => entry.getBoundingClientRect())
+          const navigation = document.querySelector('[data-testid="bottom-navigation"]')
+          const sheet = document.querySelector('[data-slot="memoly-bottom-sheet"]')
+          if (!navigation || !sheet) return null
+          const navRect = navigation.getBoundingClientRect()
+          const sheetRect = sheet.getBoundingClientRect()
+          const navStyle = getComputedStyle(navigation)
+          return {
+            maxRight: Math.max(...rects.map((rect) => rect.right)),
+            minLeft: Math.min(...rects.map((rect) => rect.left)),
+            minTop: Math.min(...rects.map((rect) => rect.top)),
+            maxTop: Math.max(...rects.map((rect) => rect.top)),
+            maxBottom: Math.max(...rects.map((rect) => rect.bottom)),
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+            navTop: navRect.top,
+            navBottom: navRect.bottom,
+            navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
+            sheetBottom: sheetRect.bottom,
+          }
+        })
+        expect(geometry).not.toBeNull()
+        expect(geometry!.minLeft).toBeGreaterThanOrEqual(0)
+        expect(geometry!.maxRight).toBeLessThanOrEqual(geometry!.viewportWidth)
+        expect(geometry!.maxBottom).toBeLessThanOrEqual(geometry!.navTop + 1)
+        expect(geometry!.documentWidth).toBeLessThanOrEqual(geometry!.viewportWidth)
+        expect(geometry!.maxTop - geometry!.minTop).toBeLessThanOrEqual(1)
+        expect(geometry!.navBottom).toBe(geometry!.viewportHeight)
+        expect(geometry!.navTop).toBeLessThan(geometry!.navBottom)
+        expect(geometry!.navPaddingBottom).toBeGreaterThanOrEqual(0)
+
+        await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-add-${width}.png`), animations: 'disabled' })
+        await page.keyboard.press('Escape')
+        await expect(panel).toHaveCount(0)
+      }
+    } finally {
+      await prisma.familyMember.update({
+        where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+        data: { role: 'viewer' },
+      })
+    }
+  })
+
+  test('keeps delete spotlight and navigation within required mobile viewports', async ({ page }) => {
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'full' },
+    })
+
+    try {
+      await page.reload()
+      await openFeed(page)
+      const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
+      for (let pageIndex = 0; pageIndex < 4 && await card.count() === 0; pageIndex += 1) {
+        await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
+        await page.waitForTimeout(250)
+      }
+      await expect(card).toHaveCount(1)
+      const selectedId = await card.getAttribute('data-memory-id')
+      expect(selectedId).toBeTruthy()
+
+      for (const width of [320, 390, 430, 480]) {
+        await page.setViewportSize({ width, height: 844 })
+        await card.scrollIntoViewIfNeeded()
+        await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+        await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
+
+        const spotlight = page.getByRole('alertdialog')
+        await expect(spotlight).toContainText('Удалить воспоминание?')
+        const selectedCard = page.locator(`[data-memory-id="${selectedId}"]`)
+        await expect(selectedCard).toHaveCount(1)
+        await expect(selectedCard).toBeVisible()
+
+        const geometry = await spotlight.evaluate((dialog, id) => {
+          const dialogRect = dialog.getBoundingClientRect()
+          const source = document.querySelector<HTMLElement>(`[data-memory-id="${id}"]`)
+          const navigation = document.querySelector('[data-testid="bottom-navigation"]')
+          const overlay = document.querySelector<HTMLElement>('.memoly-delete-overlay')
+          if (!source || !navigation || !overlay) return null
+          const sourceRect = source.getBoundingClientRect()
+          const navRect = navigation.getBoundingClientRect()
+          const navStyle = getComputedStyle(navigation)
+          return {
+            dialogLeft: dialogRect.left,
+            dialogRight: dialogRect.right,
+            dialogTop: dialogRect.top,
+            dialogBottom: dialogRect.bottom,
+            sourceLeft: sourceRect.left,
+            sourceRight: sourceRect.right,
+            sourceTop: sourceRect.top,
+            sourceBottom: sourceRect.bottom,
+            navTop: navRect.top,
+            navBottom: navRect.bottom,
+            navZIndex: Number.parseInt(navStyle.zIndex, 10),
+            overlayZIndex: Number.parseInt(getComputedStyle(overlay).zIndex, 10),
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+          }
+        }, selectedId)
+        expect(geometry).not.toBeNull()
+        expect(geometry!.dialogLeft).toBeGreaterThanOrEqual(0)
+        expect(geometry!.dialogRight).toBeLessThanOrEqual(geometry!.viewportWidth)
+        expect(geometry!.dialogTop).toBeGreaterThanOrEqual(0)
+        expect(geometry!.dialogBottom).toBeLessThanOrEqual(geometry!.viewportHeight)
+        expect(geometry!.sourceLeft).toBeGreaterThanOrEqual(0)
+        expect(geometry!.sourceRight).toBeLessThanOrEqual(geometry!.viewportWidth)
+        expect(geometry!.sourceBottom).toBeGreaterThan(0)
+        expect(geometry!.sourceTop).toBeLessThan(geometry!.viewportHeight)
+        expect(geometry!.navBottom).toBe(geometry!.viewportHeight)
+        expect(geometry!.navTop).toBeLessThan(geometry!.navBottom)
+        expect(geometry!.navZIndex).toBeGreaterThan(geometry!.overlayZIndex)
+        expect(geometry!.documentWidth).toBeLessThanOrEqual(geometry!.viewportWidth)
+
+        await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-delete-${width}.png`), animations: 'disabled' })
+        await page.getByRole('button', { name: 'Отмена' }).click()
+        await expect(spotlight).toHaveCount(0)
+        await expect(selectedCard).toBeVisible()
+      }
+    } finally {
+      await prisma.familyMember.update({
+        where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+        data: { role: 'viewer' },
+      })
+    }
+  })
+
   test('offers only truly newer memories and preserves the visible anchor when applying them', async ({ page }) => {
     await openFeed(page)
     const target = page.locator('[data-memory-id]').filter({ hasText: 'Заметка E2E 10' })
@@ -549,9 +722,9 @@ test.describe.serial('T07 live feed', () => {
     await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
     await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
     const spotlight = page.getByRole('alertdialog')
-    await expect(spotlight).toContainText('Удалить это воспоминание?')
-    await expect(spotlight.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
-    await expect(card).toBeHidden()
+    await expect(spotlight).toContainText('Удалить воспоминание?')
+    await expect(page.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
+    await expect(card).toBeVisible()
     await page.screenshot({ path: resolve('e2e/.artifacts/full-ui-delete-390.png'), animations: 'disabled' })
     await page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
     await expect(card).toBeVisible()
@@ -572,8 +745,8 @@ test.describe.serial('T07 live feed', () => {
     await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
     await page.getByRole('button', { name: 'Удалить воспоминание' }).click()
     await page.getByRole('button', { name: 'Удалить' }).click()
-    await expect(card).toBeHidden()
-    await expect(spotlight.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
+    await expect(card).toBeVisible()
+    await expect(page.locator(`[data-memory-id="${selectedId}"]`)).toHaveCount(1)
     await expect(spotlight.getByRole('alert')).toContainText('Не удалось удалить воспоминание. Попробуйте ещё раз.')
     await page.unroute('**/api/v1/families/*/memories/*')
 

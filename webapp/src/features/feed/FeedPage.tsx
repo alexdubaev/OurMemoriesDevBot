@@ -315,10 +315,10 @@ function MemoryList({ familyTimezone, items, renderCard }: {
   return <>{items.map((memory, index) => {
     const date = dayLabel(memory.occurredAt, familyTimezone)
     const previousDate = index > 0 ? dayLabel(items[index - 1]!.occurredAt, familyTimezone) : null
-    return <div className="flex flex-col gap-3" key={memory.id}>
-      {date !== previousDate ? <Typography data-slot="date-heading" variant="memoryDate">{date}</Typography> : null}
+    return <section className="feed-section" data-kind={memory.kind} key={memory.id}>
+      {date !== previousDate ? <Typography as="h2" className="date-heading" data-slot="date-heading" variant="memoryDate">{date}<span aria-hidden="true" className="date-dot" /></Typography> : null}
       {renderCard(memory)}
-    </div>
+    </section>
   })}</>
 }
 

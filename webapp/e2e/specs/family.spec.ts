@@ -99,11 +99,12 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await page.getByRole('button', { name: 'Семья' }).click()
   await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Близкие' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Семейный архив' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Помощь и приватность' })).toBeVisible()
+  await expect(page.locator('[data-slot="family-presentation"] .family-section-head')).toContainText('Наша семья')
+  await expect(page.locator('[data-slot="family-presentation"] .family-list')).toBeVisible()
+  await expect(page.getByText('Семейный архив', { exact: true })).toBeVisible()
+  await expect(page.getByText('Делитесь моментами с самыми близкими', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Изменить профиль ребёнка' }).click()
+  await page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
   await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
@@ -116,13 +117,14 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
 }
 
 async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) {
+  await page.getByRole('button', { name: 'Пригласить родственника' }).click()
   const inviteSection = page.locator('section').filter({
     has: page.getByRole('heading', { name: 'Пригласить в семью' }),
   })
   await inviteSection.getByLabel('Имя в семье (необязательно)').fill(alias)
-  await inviteSection.getByRole('button', { name: role === 'full' ? 'Полный доступ' : 'Просмотр' }).click()
-  await inviteSection.getByRole('button', { name: 'Создать приглашение' }).click()
-  await expect(page.getByRole('heading', { name: 'Приглашение готово' })).toBeVisible()
+  await inviteSection.locator(`label[for="${role === 'full' ? 'simpleRoleFull' : 'simpleRoleView'}"]`).click()
+  await inviteSection.getByRole('button', { name: 'Создать ссылку' }).click()
+  await expect(page.getByRole('heading', { name: 'Приглашение готово!' })).toBeVisible()
   const link = await page.getByLabel('Ссылка приглашения').inputValue()
   const startParam = new URL(link).searchParams.get('startapp')
   expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,57}$/)
@@ -194,7 +196,7 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await expect(guest.page.getByRole('button', { name: 'Семья' })).toBeVisible()
   await guest.page.getByRole('button', { name: 'Семья' }).click()
   await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
-  await expect(guest.page.getByRole('button', { name: 'Создать приглашение' })).toHaveCount(0)
+  await expect(guest.page.getByRole('button', { name: 'Пригласить родственника' })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(0)
   await expect(guest.page.getByRole('img', { name: 'Режим просмотра' })).toBeVisible()
   await expect.poll(() => requests.accepts.length).toBe(1)
@@ -244,7 +246,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await expect(full.page.getByText('Дедушка Павел', { exact: true })).toBeVisible()
   await expect(full.page.locator('[data-slot="family-presentation"]')).toBeVisible()
-  await expect(full.page.getByRole('button', { name: 'Создать приглашение' })).toBeVisible()
+  await expect(full.page.getByRole('button', { name: 'Пригласить родственника' })).toBeVisible()
   await expect(full.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(0)
   await expect(full.page.getByRole('button', { name: 'Владелец' })).toHaveCount(0)
   await createInvite(full.page, 'viewer', 'Внучка Нина')
@@ -252,7 +254,9 @@ test('a full member can invite but cannot gain owner management rights, and revo
   // The owner never gets self-demotion/removal controls, even after a full member joins.
   await owner.page.reload()
   await owner.page.getByRole('button', { name: 'Семья' }).click()
+  await owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Павел' }).click()
   await expect(owner.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(1)
+  await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
   await expect(owner.page.getByRole('button', { name: 'Владелец' })).toHaveCount(0)
 
   const revokedStartParam = await createInvite(owner.page, 'viewer', 'Отозванный гость')
@@ -264,5 +268,62 @@ test('a full member can invite but cannot gain owner management rights, and revo
 
   await revoked.context.close()
   await full.context.close()
+  await owner.context.close()
+})
+
+test('keeps Family and Settings within the viewport at supported mobile widths', async ({ page }) => {
+  const owner = await createCompletedOwner(page, 81000031)
+  const widths = [320, 390, 430, 480] as const
+
+  for (const width of widths) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    await owner.page.evaluate(() => window.scrollTo(0, 0))
+
+    const family = owner.page.locator('[data-slot="family-presentation"]')
+    await expect(family).toBeVisible()
+    await expect(family.locator('.family-section-head')).toBeVisible()
+    await expect(family.getByRole('button', { name: 'Пригласить родственника' })).toBeVisible()
+    await expect(owner.page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
+
+    const familyLayout = await owner.page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }))
+    expect(familyLayout.viewportWidth).toBe(width)
+    expect(familyLayout.scrollWidth).toBeLessThanOrEqual(width)
+    await owner.page.screenshot({
+      path: resolve(`e2e/.artifacts/full-ui-family-${width}.png`),
+      animations: 'disabled',
+    })
+
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    const settings = owner.page.locator('[data-slot="memoly-settings-sheet"]')
+    const sheet = owner.page.locator('[data-slot="memoly-bottom-sheet"]')
+    await expect(settings).toBeVisible()
+    await expect(settings.locator('.ml-sheet-row')).toHaveCount(3)
+    await expect(settings.getByText('Оформление', { exact: true })).toBeVisible()
+    await expect(settings.getByText('Помощь и приватность', { exact: true })).toBeVisible()
+    await expect(settings.getByText('О memoLy', { exact: true })).toBeVisible()
+
+    const sheetBounds = await sheet.boundingBox()
+    expect(sheetBounds).not.toBeNull()
+    expect(sheetBounds!.x).toBeGreaterThanOrEqual(-1)
+    expect(sheetBounds!.width).toBeLessThanOrEqual(width + 1)
+    expect(sheetBounds!.y).toBeGreaterThanOrEqual(0)
+    const settingsLayout = await owner.page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }))
+    expect(settingsLayout.viewportWidth).toBe(width)
+    expect(settingsLayout.scrollWidth).toBeLessThanOrEqual(width)
+    await owner.page.screenshot({
+      path: resolve(`e2e/.artifacts/full-ui-settings-${width}.png`),
+      animations: 'disabled',
+    })
+
+    await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+    await expect(settings).toHaveCount(0)
+  }
+
   await owner.context.close()
 })

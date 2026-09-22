@@ -69,7 +69,7 @@
   --layout-max-width: 480px;
   --layout-card-padding: 14px;
   --layout-card-gap: 12px;
-  --layout-bottom-nav: 68px;
+  --layout-bottom-nav: 76px;
   --layout-tap-min: 44px;
   --layout-primary-height: 48px;
   --layout-photo-ratio: 4 / 3;
@@ -257,9 +257,9 @@ nav[data-bottom-navigation-appearance='memoly'] {
   bottom: 0 !important;
   width: 100% !important;
   min-height: calc(var(--layout-bottom-nav) + var(--host-inset-bottom)) !important;
-  border: 1px solid color-mix(in srgb, var(--theme-surface-hi) 70%, transparent) !important;
-  border-bottom: 0 !important;
-  border-radius: 24px 24px 0 0 !important;
+  height: calc(76px + var(--host-inset-bottom)) !important;
+  border: 0 !important;
+  border-radius: 29px 29px 0 0 !important;
   background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)) !important;
   box-shadow: var(--theme-raised-shadow) !important;
   -webkit-backdrop-filter: blur(16px);
@@ -269,7 +269,7 @@ nav[data-bottom-navigation-appearance='memoly'] {
 
 nav[data-bottom-navigation-appearance='memoly'] > div {
   width: 100%;
-  height: var(--layout-bottom-nav);
+  height: 76px;
   max-width: none;
   align-items: center;
   padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left));

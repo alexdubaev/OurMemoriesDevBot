@@ -123,6 +123,18 @@ test('reserves the normalized bottom host inset for the namespaced navigation', 
   expect(css).toContain('padding-bottom: var(--host-inset-bottom, 0px)')
 })
 
+test('family shell preserves host edge insets without restoring the legacy shell wrapper', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+  const familyShellRule = css.match(/\.family-shell\s*\{([^}]*)\}/)?.[1]
+
+  expect(familyShellRule).toBeDefined()
+  expect(familyShellRule).toContain('var(--host-inset-top, 0px)')
+  expect(familyShellRule).toContain('var(--host-inset-right, 0px)')
+  expect(familyShellRule).toContain('var(--host-inset-left, 0px)')
+  expect(css).toContain('padding-inline: max(12px, var(--host-inset-left, 0px)) max(12px, var(--host-inset-right, 0px))')
+  expect(readFileSync(resolve(import.meta.dir, '../src/features/family/FamilyScreen.tsx'), 'utf8')).not.toContain('ml-shell')
+})
+
 test('memoLy presentation CSS keeps captions readable and outer gutters single at 320px', () => {
   const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8').replaceAll('\r\n', '\n')
 

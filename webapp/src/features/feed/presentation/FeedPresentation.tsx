@@ -48,15 +48,17 @@ export function FeedPresentation(props: FeedPresentationProps) {
   } as CSSProperties
 
   return (
-    <div className="memoly-feed-page" data-memoly-feed="true" style={style}>
-      <div className="memoly-feed-shell" data-slot="feed-scroll">
+    <div data-memoly-feed="true" style={style}>
+      <main className="app" data-slot="feed-scroll">
         <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
-        <div aria-label="Фильтр воспоминаний" className="memoly-filters" data-slot="memoly-filter-rail" role="group">
-          {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
+        <div aria-label="Фильтры ленты" className="filters-wrap surface-inset" data-slot="memoly-filter-rail" role="group">
+          <div className="filters">
+            {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} className={`filter${item.value === props.activeFilter ? ' active' : ''}`} data-filter={item.value} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
+          </div>
         </div>
-        <main className="memoly-feed-content">{children}</main>
-        <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />
-      </div>
+        <div className="feed-content">{children}</div>
+      </main>
+      <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />
     </div>
   )
 }

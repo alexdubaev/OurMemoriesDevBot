@@ -39,26 +39,23 @@ export function MemoryCardPresentation({
 }: MemoryCardPresentationProps) {
   const hasCaption = body.trim().length > 0
   const interactive = mode === 'feed'
-  const captionAndLike = (
-    <div className="memoly-memory-copy">
-      {kind === 'video'
-        ? hasCaption ? <Typography className="memoly-video-caption" variant="memoryCaption">{body}</Typography> : null
-        : <MemoryOpenButton body={body} className={body ? undefined : 'memoly-memory-open-empty'} interactive={interactive} kind={kind} onOpen={onOpen} />}
-      <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
-    </div>
-  )
 
   return (
-    <article aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memoly-memory memoly-memory-${kind}${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind}>
-      <div className="memoly-author" data-slot="memoly-author-row">
-        <Typography as="span" aria-hidden="true" className="memoly-author-initials" variant="memoryMeta">{authorInitials}</Typography>
-        <div className="memoly-author-copy"><Typography as="strong" variant="memoryMeta">{authorName}</Typography><Typography as="small" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
+    <article aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind}>
+      <header className="memory-header" data-slot="memoly-author-row">
+        <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>
+        <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
+      </header>
+      {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'media-well surface-inset video-wrap' : 'media-well surface-inset'} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
+      <div className="actions">
+        <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
       </div>
-      {kind === 'photo' ? <MemorySlot slot="memoly-photo-layout">{media}{captionAndLike}</MemorySlot> : null}
-      {kind === 'video' ? <MemorySlot className={`memoly-video-row${hasCaption ? ' has-caption' : ''}`} slot="memoly-video-layout">{media}{captionAndLike}</MemorySlot> : null}
-      {kind === 'voice' ? <MemorySlot slot="memoly-voice-layout">{media}{captionAndLike}</MemorySlot> : null}
-      {kind === 'note' ? <MemorySlot slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="memoly-note-body" interactive={interactive} kind={kind} onOpen={onOpen} /> : null}<LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} /></MemorySlot> : null}
+      {kind === 'video'
+        ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
+        : kind === 'note'
+          ? <MemorySlot className="caption" slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="note-body" interactive={interactive} kind={kind} onOpen={onOpen} /> : null}</MemorySlot>
+          : <div className="caption"><MemoryOpenButton body={body} className={body ? undefined : 'caption-open-empty'} interactive={interactive} kind={kind} onOpen={onOpen} /></div>}
     </article>
   )
 }
@@ -70,9 +67,9 @@ function MemorySlot({ children, className, slot }: { children: ReactNode; classN
 }
 
 function MemoryOpenButton({ body, className, interactive, kind, onOpen }: { body: string; className?: string; interactive: boolean; kind: MemoryDto['kind']; onOpen: () => void }) {
-  const content = className === 'memoly-note-body' ? <><WebpIcon decorative name="note" size={27} /><Typography as="span" variant="memoryCaption">{body}</Typography></> : body || <Typography as="span" variant="memoryCaption">Открыть</Typography>
-  if (!interactive) return <Typography as="div" className={`memoly-memory-open${className ? ` ${className}` : ''}`} variant="memoryCaption">{content}</Typography>
-  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`memoly-memory-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{content}</button></Typography>
+  const content = className === 'note-body' ? <><WebpIcon decorative name="note" size={27} /><Typography as="span" variant="memoryCaption">{body}</Typography></> : body || <Typography as="span" variant="memoryCaption">Открыть</Typography>
+  if (!interactive) return <Typography as="div" className={`caption-open${className ? ` ${className}` : ''}`} variant="memoryCaption">{content}</Typography>
+  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`caption-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{content}</button></Typography>
 }
 
 function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: boolean; liked: boolean; likeCount: number; onLike: () => void }) {
@@ -80,7 +77,7 @@ function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: bo
     <button
       aria-label={liked ? 'Убрать сердечко' : 'Поставить сердечко'}
       aria-pressed={liked}
-      className={`memoly-like-button${liked ? ' is-liked' : ''}`}
+      className={`action like${liked ? ' is-liked on' : ''}`}
       disabled={!interactive}
       onClick={onLike}
       type="button"
