@@ -121,6 +121,9 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
 }
 
 function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxResolvedMessage {
+  if (isRecord(value) && Array.isArray(value.messages) && value.messages.length === 0) {
+    throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+  }
   const candidate = isRecord(value) && Array.isArray(value.messages) ? value.messages[0] :
     isRecord(value) && isRecord(value.message) ? value.message : value
   if (!isRecord(candidate) || !isRecord(candidate.sender) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
@@ -133,10 +136,10 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
 }
 
 function normalizeResolvedAttachment(value: unknown) {
-  if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file' && value.type !== 'video') || !isRecord(value.payload)) throw new MaxProviderError()
+  if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file' && value.type !== 'video' && value.type !== 'audio') || !isRecord(value.payload)) throw new MaxProviderError()
   const payload = value.payload
-  const rawId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
-  const id = value.type === 'file'
+  const rawId = value.type === 'image' ? payload.photo_id : value.type === 'file' ? payload.fileId : payload.id
+  const id = value.type === 'file' || value.type === 'audio'
     ? normalizeFileAttachmentId(rawId)
     : normalizeProviderAttachmentId(rawId, true)
   if (!id || typeof payload.token !== 'string' || payload.token.length === 0 ||
@@ -151,6 +154,7 @@ function normalizeResolvedAttachment(value: unknown) {
     if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new MaxProviderError()
     return { kind: 'video' as const, providerAttachmentId: id, currentToken: payload.token, inboundDurationSeconds: duration ?? null, width: width ?? null, height: height ?? null }
   }
+  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId: id, url: payload.url }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   const declaredSize = value.size === undefined || value.size === null ? null : value.size
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new MaxProviderError()

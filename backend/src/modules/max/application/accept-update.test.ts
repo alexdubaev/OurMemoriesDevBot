@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createMaxAcceptUpdate, isPublishableMaxText, selectMaxImmediateResponse } from './accept-update'
+import { createMaxAcceptUpdate, isMaxCaptionWithinLimit, isPublishableMaxText, selectMaxImmediateResponse } from './accept-update'
 import type { MaxInboundEvent, MaxAcceptRepository } from './ports'
 
 describe('MAX durable acceptance policy', () => {
@@ -9,6 +9,12 @@ describe('MAX durable acceptance policy', () => {
     expect(isPublishableMaxText({ text: '💛'.repeat(8_001), hasAttachments: false })).toBe(false)
     expect(isPublishableMaxText({ text: '   ', hasAttachments: false })).toBe(false)
     expect(isPublishableMaxText({ text: 'caption', hasAttachments: true })).toBe(false)
+  })
+
+  test('bounds captions for supported media, including native audio', () => {
+    expect(isMaxCaptionWithinLimit(null)).toBe(true)
+    expect(isMaxCaptionWithinLimit('💛'.repeat(8_000))).toBe(true)
+    expect(isMaxCaptionWithinLimit('💛'.repeat(8_001))).toBe(false)
   })
 
   test('selects only the exact immediate responses approved for accepted events', () => {
@@ -22,6 +28,15 @@ describe('MAX durable acceptance policy', () => {
     })
     expect(selectMaxImmediateResponse({ ...plain, text: ' ' })).toBeNull()
     expect(selectMaxImmediateResponse({ kind: 'bot_started', chatId: '7', userId: '11', occurredAt: plain.occurredAt, payload: null })).toBeNull()
+  })
+
+  test('accepts one confirmed native audio attachment without the unsupported response', () => {
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '11', recipientId: '99', messageId: 'audio-1',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: null,
+      attachments: [{ kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-987' }],
+    }
+    expect(selectMaxImmediateResponse(event)).toEqual({ kind: 'accepted', text: 'Получено. Сохраняем…', destinationUserId: '11' })
   })
 
   test('passes normalized event, stable key, encrypted payload, identity and response to repository', async () => {

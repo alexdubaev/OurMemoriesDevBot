@@ -14,7 +14,11 @@ const maxTextCodePoints = 8_000
 
 export function isPublishableMaxText(input: { text: string | null; attachments?: MaxInboundAttachment[]; hasAttachments?: boolean }) {
   if ((input.attachments?.length ?? (input.hasAttachments ? 1 : 0)) > 0 || input.text === null || input.text.trim().length === 0) return false
-  return [...input.text].length <= maxTextCodePoints
+  return isMaxCaptionWithinLimit(input.text)
+}
+
+export function isMaxCaptionWithinLimit(text: string | null) {
+  return text === null || [...text].length <= maxTextCodePoints
 }
 
 function attachmentsOf(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
@@ -27,9 +31,11 @@ export function selectMaxImmediateResponse(event: MaxInboundEvent): MaxImmediate
   if (attachments.length > 0) {
     const images = attachments.filter((attachment) => attachment.kind === 'image')
     const files = attachments.filter((attachment) => attachment.kind === 'file' && !attachment.providerAttachmentId.startsWith('unsupported:'))
+    const voices = attachments.filter((attachment) => attachment.kind === 'voice')
     const videos = attachments.filter((attachment) => attachment.kind === 'video')
     const supported = (images.length === attachments.length && images.length >= 1 && images.length <= 10) ||
       (files.length === 1 && attachments.length === 1) ||
+      (voices.length === 1 && attachments.length === 1) ||
       (videos.length === 1 && attachments.length === 1)
     return supported
       ? { kind: 'accepted', text: acceptedText, destinationUserId: event.senderId }

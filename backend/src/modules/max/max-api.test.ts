@@ -204,6 +204,35 @@ describe('MAX API client', () => {
     })
   })
 
+  test('re-fetches the confirmed audio shape and returns only its transient source URL', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'audio/1', attachments: [{ type: 'audio', payload: { id: 987, token: 'rotating-audio-token', url: 'https://i.oneme.ru/audio-987' } }],
+      },
+    }] }) })
+    await expect(api.getMessage('audio/1')).resolves.toEqual({
+      messageId: 'audio/1', senderId: '42', recipientId: '99', attachments: [{
+        kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-987',
+      }],
+    })
+  })
+
+  test('accepts an opaque provider id for resolved native audio', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 }, body: {
+        mid: 'audio/opaque', attachments: [{ type: 'audio', payload: { id: 'opaque-audio-id', token: 'rotating-audio-token', url: 'https://i.oneme.ru/audio-opaque' } }],
+      },
+    }] }) })
+    await expect(api.getMessage('audio/opaque')).resolves.toMatchObject({ attachments: [{
+      kind: 'voice', providerAttachmentId: 'opaque-audio-id', url: 'https://i.oneme.ru/audio-opaque',
+    }] })
+  })
+
+  test('marks an empty message lookup as a safe missing-message result for native audio fallback', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [] }) })
+    await expect(api.getMessage('audio/empty')).rejects.toMatchObject({ name: 'MaxProviderError', code: 'message_not_found', status: 404, retryable: false })
+  })
+
   test('creates a video upload capability with a normalized HTTPS URL and opaque token', async () => {
     let request: Request | undefined
     const api = createMaxApi(token, {

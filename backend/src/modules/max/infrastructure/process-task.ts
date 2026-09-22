@@ -8,6 +8,7 @@ import { createSourceMemoryPublisher } from '../../memories'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { createMaxImageProcessor } from './process-image'
 import { createMaxVideoProcessor } from './process-video'
+import { createMaxVoiceProcessor } from './process-voice'
 import type { MaxDownloadedMedia } from './media-download'
 
 type PayloadCrypto = {
@@ -36,6 +37,9 @@ export function createMaxTaskProcessor(options: {
     ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download })
     : null
   const videoProcessor = options.api ? createMaxVideoProcessor({ runtime: options.runtime, api: options.api }) : null
+  const voiceProcessor = options.api && options.media && options.download
+    ? createMaxVoiceProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download })
+    : null
 
   return async (payload, signal) => {
     const inboxId = taskPayload(payload)
@@ -71,6 +75,9 @@ export function createMaxTaskProcessor(options: {
     if (hasAttachments) {
       if (videoProcessor && event.attachments?.length === 1 && event.attachments[0]?.kind === 'video') {
         return videoProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
+      }
+      if (voiceProcessor && event.attachments?.length === 1 && event.attachments[0]?.kind === 'voice') {
+        return voiceProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
       }
       if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
       return await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText) ? 'done' : 'skipped'

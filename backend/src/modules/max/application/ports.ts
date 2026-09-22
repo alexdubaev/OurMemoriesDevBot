@@ -50,11 +50,13 @@ export type MaxApiPort = {
 export type MaxInboundAttachment =
   | { kind: 'image'; providerAttachmentId: string }
   | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null }
+  | { kind: 'voice'; providerAttachmentId: string; url: string }
   | { kind: 'video'; providerAttachmentId: string; durationSeconds: number | null; width: number | null; height: number | null }
 
 export type MaxResolvedAttachment =
   | { kind: 'image'; providerAttachmentId: string; url: string }
   | { kind: 'file'; providerAttachmentId: string; filename: string | null; declaredSize: number | null; url: string }
+  | { kind: 'voice'; providerAttachmentId: string; url: string }
   | { kind: 'video'; providerAttachmentId: string; currentToken: string; inboundDurationSeconds: number | null; width: number | null; height: number | null }
 
 export type MaxResolvedMessage = {
