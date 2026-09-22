@@ -144,4 +144,49 @@ describe('MAX update mapping', () => {
     expect(JSON.stringify(result)).not.toContain('rotating-token-shape')
     expect(JSON.stringify(result)).not.toContain('v.oneme.ru')
   })
+
+  test('maps only the confirmed native audio attachment contract to voice', () => {
+    const result = normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, body: {
+        mid: 'audio-mid', text: null, attachments: [{ type: 'audio', payload: {
+          id: 987, token: 'audio-token', url: 'https://i.oneme.ru/audio-987',
+        } }],
+      } },
+    })
+    expect(result).toEqual(expect.objectContaining({
+      kind: 'message_created',
+      attachments: [{ kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-987' }],
+    }))
+    expect(JSON.stringify(result)).not.toContain('audio-token')
+    expect(JSON.stringify(result)).toContain('https://i.oneme.ru/audio-987')
+  })
+
+  test('accepts an opaque native audio attachment id without widening numeric image/video ids', () => {
+    const result = normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, body: {
+        mid: 'audio-opaque-mid', text: null, attachments: [{ type: 'audio', payload: {
+          id: 'opaque-audio-id', token: 'audio-token', url: 'https://i.oneme.ru/audio-opaque',
+        } }],
+      } },
+    })
+    expect(result).toEqual(expect.objectContaining({
+      kind: 'message_created',
+      attachments: [{ kind: 'voice', providerAttachmentId: 'opaque-audio-id', url: 'https://i.oneme.ru/audio-opaque' }],
+    }))
+  })
+
+  test('rejects a native audio attachment without the exact transport fields', () => {
+    for (const payload of [
+      { id: 987, token: 'audio-token' },
+      { id: 987, url: 'https://i.oneme.ru/audio-987' },
+      { token: 'audio-token', url: 'https://i.oneme.ru/audio-987' },
+    ]) {
+      expect(() => normalizeMaxUpdate({
+        ...messageFixture,
+        message: { ...messageFixture.message, body: { mid: 'audio-mid', text: null, attachments: [{ type: 'audio', payload }] } },
+      })).toThrow()
+    }
+  })
 })

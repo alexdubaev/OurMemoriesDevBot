@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
@@ -20,7 +21,8 @@ import { MaxProviderError } from './infrastructure/max-api'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
-import { createSourceMemoryPublisher } from '../memories'
+import { MemoryService, PrismaMemoryRepository, createSourceMemoryPublisher } from '../memories'
+import { createPrismaIdempotencyExecutor } from '../../idempotency'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -575,6 +577,100 @@ maybeDescribe('MAX durable capture', () => {
     await rm(storageRoot, { recursive: true, force: true })
   })
 
+  test('captures a native audio webhook once and exposes one voice Memory/feed attachment', async () => {
+    const fixture = await imageFixture('77130', 'native-audio')
+    let audio: Awaited<ReturnType<typeof oggVoiceFixture>> | undefined
+    const raw = {
+      update_type: 'message_created', timestamp: 1_757_844_000_010, message: {
+        sender: { user_id: 77130 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+        body: { mid: 'max-native-audio-one', text: 'native audio caption', attachments: [{ type: 'audio', payload: { id: '987', token: 'transient-token', url: 'https://i.oneme.ru/audio-987' } }] },
+      },
+    }
+    const body = JSON.stringify(raw)
+    try {
+      const generatedAudio = await oggVoiceFixture()
+      audio = generatedAudio
+      const first = await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const duplicate = await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      expect(first.status).toBe(200)
+      expect(duplicate.status).toBe(200)
+      expect(await prisma.maxInbox.count()).toBe(1)
+      expect(await prisma.maxSource.count()).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count()).toBe(1)
+      expect(await prisma.maxSourceAttachment.count()).toBe(1)
+      const inbox = await prisma.maxInbox.findFirstOrThrow()
+      expect(JSON.stringify(crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))).not.toContain('transient-token')
+
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'max-native-audio-one' }, include: { attachments: true } })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
+      const event = normalizeMaxUpdate(raw)
+      if (event.kind !== 'message_created') throw new Error('audio fixture did not normalize to a message')
+      const process = createMaxTaskProcessor({
+        runtime: fixture.runtime, crypto,
+        api: fixture.api(event), media: fixture.media,
+        download: async () => ({ bytes: generatedAudio.bytes, contentType: 'audio/ogg', contentLength: generatedAudio.bytes.byteLength }),
+      })
+      await expect(process(task.payload)).resolves.toBe('done')
+
+      const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { include: { asset: true } } } })
+      expect(memory).toMatchObject({ familyId: fixture.familyId, childId: fixture.childId, kind: 'voice', body: 'native audio caption' })
+      expect(memory.media).toHaveLength(1)
+      const asset = memory.media[0]!.asset
+      expect(asset).toMatchObject({ sourceKind: 'max', mediaKind: 'voice', originalStatus: 'stored', verifiedMime: 'audio/ogg' })
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:prepare' } })).toBe(1)
+      const prepareTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'media:prepare', dedupeKey: `media-prepare:${asset.id}` } } })
+      await createMediaTasks({ prisma, privateStorage: { storage: fixture.storage }, env: fixture.env }).prepareAsset(prepareTask.payload as { mediaId: string })
+
+      const feed = await new MemoryService(
+        createPrismaFamilyAccess(prisma),
+        new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma)),
+        { assertReadyForPublication: async () => undefined },
+        'max-native-audio-feed-test-secret',
+      ).list({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max-feed-test' } }, { limit: 20 })
+      expect(feed.items).toContainEqual(expect.objectContaining({ id: memory.id, kind: 'voice', attachments: [expect.objectContaining({ id: asset.id, kind: 'voice' })] }))
+
+      const mediaScope = { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } }
+      const original = await fixture.media.content(mediaScope, asset.id, 'original')
+      expect(original).toMatchObject({ contentType: 'audio/ogg', contentLength: generatedAudio.bytes.byteLength })
+      expect(new Uint8Array(await new Response(original.body).arrayBuffer())).toEqual(generatedAudio.bytes)
+      const playback = await fixture.media.content(mediaScope, asset.id, 'playback')
+      expect(playback.contentType).toBe('audio/mp4')
+      expect(playback.contentLength).toBeGreaterThan(0)
+    } finally {
+      await audio?.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  test('keeps recognized audio failure neutral instead of unsupported media', async () => {
+    const fixture = await imageFixture('77131', 'native-audio-failure')
+    const raw = {
+      update_type: 'message_created', timestamp: 1_757_844_000_011, message: {
+        sender: { user_id: 77131 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+        body: { mid: 'max-native-audio-failure', text: 'broken audio', attachments: [{ type: 'audio', payload: { id: '988', token: 'transient-token', url: 'https://i.oneme.ru/audio-988' } }] },
+      },
+    }
+    try {
+      const accepted = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(raw) })
+      expect(accepted.status).toBe(200)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'max-native-audio-failure' } })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } } })
+      const event = normalizeMaxUpdate(raw)
+      if (event.kind !== 'message_created') throw new Error('audio fixture did not normalize to a message')
+      await expect(createMaxTaskProcessor({
+        runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media,
+        download: async () => { throw new MaxMediaDownloadError() },
+      })(task.payload)).resolves.toBe('done')
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'denied' } })).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'unsupported_media' } })).toBe(0)
+      expect((await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: source.inboxId, kind: 'denied' } })).text).toBe('Не удалось сохранить это сообщение в memoLy.')
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   test('publishes three quick images as one ordered photo Memory', async () => {
     const fixture = await imageFixture('77124', 'three-images')
     const attachments = ['1', '2', '3'].map((providerAttachmentId) => ({ kind: 'image' as const, providerAttachmentId }))
@@ -1084,7 +1180,7 @@ maybeDescribe('MAX durable capture', () => {
       api: (event: Extract<MaxInboundEvent, { kind: 'message_created' }>): MaxApiPort => ({
          getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
          createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
-         getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : attachment.kind === 'file' ? { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` } : { kind: 'video' as const, providerAttachmentId: attachment.providerAttachmentId, currentToken: `token-${index}`, inboundDurationSeconds: attachment.durationSeconds, width: attachment.width, height: attachment.height }) }),
+         getMessage: async () => ({ messageId: event.messageId, senderId: event.senderId, recipientId: event.recipientId, attachments: (event.attachments ?? []).map((attachment, index) => attachment.kind === 'image' ? { kind: 'image' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : attachment.kind === 'file' ? { kind: 'file' as const, providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize, url: `https://fd.oneme.ru/${index + 1}` } : attachment.kind === 'voice' ? { kind: 'voice' as const, providerAttachmentId: attachment.providerAttachmentId, url: `https://i.oneme.ru/${index + 1}` } : { kind: 'video' as const, providerAttachmentId: attachment.providerAttachmentId, currentToken: `token-${index}`, inboundDurationSeconds: attachment.durationSeconds, width: attachment.width, height: attachment.height }) }),
       }),
       cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); activeStorageRoots.delete(storageRoot) },
     }
@@ -1182,6 +1278,23 @@ function token(label: string) {
 
 function hash(rawToken: string) {
   return createHash('sha256').update(rawToken).digest('hex')
+}
+
+async function oggVoiceFixture() {
+  const root = await mkdtemp(join(process.env.TEMP ?? process.env.TMP ?? '.', 'max-native-audio-'))
+  const output = join(root, 'voice.ogg')
+  try {
+    const ffmpeg = Bun.spawn([process.env.FFMPEG_PATH ?? 'ffmpeg',
+      '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+      '-c:a', 'libopus', '-y', output,
+    ], { stdout: 'ignore', stderr: 'ignore' })
+    if (await ffmpeg.exited !== 0) throw new Error('Could not create the synthetic OGG voice fixture')
+    const bytes = new Uint8Array(await Bun.file(output).arrayBuffer())
+    return { bytes, cleanup: () => rm(root, { recursive: true, force: true }) }
+  } catch (error) {
+    await rm(root, { recursive: true, force: true })
+    throw error
+  }
 }
 
 function invite(

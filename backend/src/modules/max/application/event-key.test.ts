@@ -34,6 +34,13 @@ describe('MAX event keys', () => {
       .toBe(maxEventKey(botId, event))
   })
 
+  test('native audio transport URL rotation cannot change message idempotency', () => {
+    const event = message({ attachments: [{ kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-a' }] })
+    expect(maxEventKey(botId, event)).toBe(maxEventKey(botId, {
+      ...event, attachments: [{ kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-b' }],
+    }))
+  })
+
   test('bot_started with no payload is stable and changes with every canonical field', () => {
     const event = started()
     expect(maxEventKey(botId, event)).toBe(maxEventKey(botId, started({ payload: null })))

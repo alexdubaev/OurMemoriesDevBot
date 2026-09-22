@@ -191,10 +191,10 @@ export class MediaService {
     })
   }
 
-  /** Resume a deterministic trusted-photo reservation when a prior worker wrote the object but
+  /** Resume a deterministic trusted-media reservation when a prior worker wrote the object but
    * crashed before its adapter bookkeeping. Returns null only when the provider body is still
    * required; it never performs provider I/O. */
-  async resumeTrustedPhoto(scope: FamilyScope, input: { assetId: string; sourceKind: 'telegram' | 'max' }) {
+  async resumeTrustedMedia(scope: FamilyScope, input: { assetId: string; sourceKind: 'telegram' | 'max' }) {
     await this.access.requireFull(scope)
     const preparation = this.repository.findTrustedIngestion
       ? await this.repository.findTrustedIngestion(scope, input.assetId, input.sourceKind)
@@ -212,6 +212,11 @@ export class MediaService {
     if (preparation.kind === 'ready') return preparation.asset
     if (preparation.kind === 'forbidden') throw new MediaFailure('forbidden', 'Доступ к загрузке отозван')
     throw new MediaFailure('upload_expired', 'Срок загрузки истёк')
+  }
+
+  /** @deprecated Use resumeTrustedMedia; retained for the existing Telegram image adapter. */
+  async resumeTrustedPhoto(scope: FamilyScope, input: { assetId: string; sourceKind: 'telegram' | 'max' }) {
+    return this.resumeTrustedMedia(scope, input)
   }
 
   async discardTrustedSourceAssets(input: { sourceKind: 'telegram' | 'max'; assetIds: string[]; now?: Date }) {

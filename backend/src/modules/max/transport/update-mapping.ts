@@ -60,13 +60,14 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
 
 function normalizeAttachment(value: unknown) {
   if (!isRecord(value) || typeof value.type !== 'string') throw new Error('Invalid MAX attachment')
-  // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file/video
-  // shapes are validated strictly so no transient URL/token can enter the encrypted event.
-  if (value.type !== 'image' && value.type !== 'file' && value.type !== 'video') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
+  // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file/video/audio
+  // shapes are validated strictly; only the confirmed audio URL is retained transiently in the encrypted event
+  // because MAX can omit native audio from its later message lookup.
+  if (value.type !== 'image' && value.type !== 'file' && value.type !== 'video' && value.type !== 'audio') return { kind: 'file' as const, providerAttachmentId: `unsupported:${value.type}`, filename: null, declaredSize: null }
   if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
   const payload = value.payload
-  const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : value.type === 'video' ? payload.id : payload.fileId
-  const providerAttachmentId = value.type === 'file'
+  const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : value.type === 'file' ? payload.fileId : payload.id
+  const providerAttachmentId = value.type === 'file' || value.type === 'audio'
     ? normalizeFileAttachmentId(rawProviderAttachmentId)
     : normalizeProviderAttachmentId(rawProviderAttachmentId, true)
   if (!providerAttachmentId) {
@@ -85,6 +86,7 @@ function normalizeAttachment(value: unknown) {
     if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new Error('Invalid MAX video height')
     return { kind: 'video' as const, providerAttachmentId, durationSeconds: durationSeconds ?? null, width: width ?? null, height: height ?? null }
   }
+  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId, url: payload.url }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new Error('Invalid MAX filename')
   const declaredSize = value.size === undefined || value.size === null ? null : value.size

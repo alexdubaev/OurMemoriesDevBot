@@ -22,6 +22,12 @@ export function detectPhotoMime(bytes: Uint8Array): 'image/jpeg' | 'image/png' |
   return detected as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic'
 }
 
+export function detectVoiceMime(bytes: Uint8Array): 'audio/ogg' | 'audio/opus' | 'audio/webm' | 'audio/mp4' {
+  const detected = detectMedia(bytes, 'voice')
+  if (!detected || !detected.startsWith('audio/')) throw new MediaFailure('unsupported_media', 'Файл не является поддерживаемым голосовым сообщением')
+  return detected as 'audio/ogg' | 'audio/opus' | 'audio/webm' | 'audio/mp4'
+}
+
 export function parseSingleRange(header: string, total: number) {
   if (!Number.isSafeInteger(total) || total <= 0 || !header.startsWith('bytes=') || header.includes(',')) {
     throw rangeFailure(total)
