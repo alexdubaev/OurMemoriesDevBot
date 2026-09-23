@@ -11,6 +11,7 @@ export type AuthFailureKind =
   | 'telegram_init_data_replayed'
   | 'max_init_data_invalid'
   | 'max_init_data_replayed'
+  | 'browser_link_invalid'
 
 export class AuthFailure extends Error {
   constructor(

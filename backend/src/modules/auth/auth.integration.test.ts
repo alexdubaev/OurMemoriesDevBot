@@ -570,6 +570,7 @@ maybeDescribe('auth API integration', () => {
     expect(registerBody.refreshToken).toBeUndefined()
     expect(setCookie).toContain('web_app_demo_refresh=')
     expect(setCookie).toContain('HttpOnly')
+    expect(setCookie).toContain('Path=/api')
     expect(setCookie).toContain('SameSite=Lax')
 
     const refresh = await app.request('/api/auth/refresh', {

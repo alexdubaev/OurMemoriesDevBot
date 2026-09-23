@@ -47,10 +47,10 @@ test('registers, restores the session, opens protected UI, and logs out', async 
 
   const refreshAfterReload = page.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/auth/refresh') && response.request().method() === 'POST',
+      response.url().endsWith('/api/v1/auth/refresh') && response.request().method() === 'POST',
   )
   const meAfterReload = page.waitForResponse(
-    (response) => response.url().endsWith('/api/auth/me') && response.request().method() === 'GET',
+    (response) => response.url().endsWith('/api/v1/auth/me') && response.request().method() === 'GET',
   )
 
   await page.reload()
@@ -119,7 +119,7 @@ test('keeps one logical browser session active across concurrent tabs', async ({
   await expect(page.getByRole('heading', { name: `Welcome, ${email}` })).toBeVisible()
   await expect(secondPage.getByRole('heading', { name: `Welcome, ${email}` })).toBeVisible()
 
-  await page.route('**/api/auth/logout', async (route) => {
+  await page.route('**/api/v1/auth/logout', async (route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -148,7 +148,7 @@ test('remote logout recovers a tab from a transient bootstrap error', async ({ p
   await healthyPage.goto('/')
   await expect(healthyPage).toHaveURL(/\/app$/)
 
-  await page.route('**/api/auth/refresh', async (route) => {
+  await page.route('**/api/v1/auth/refresh', async (route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -176,7 +176,7 @@ test('unknown routes wait for session recovery before choosing their return dest
   await expect(page).toHaveURL(/\/app$/)
 
   let failRefresh = true
-  await page.route('**/api/auth/refresh', async (route) => {
+  await page.route('**/api/v1/auth/refresh', async (route) => {
     if (!failRefresh) {
       await route.continue()
       return

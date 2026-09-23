@@ -116,7 +116,7 @@ function setRefresh(c: Context, token: string, env: AppEnv) {
   setCookie(c, refreshCookieName, token, {
     httpOnly: true,
     maxAge: env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
-    path: '/api/auth',
+    path: '/api',
     secure: env.COOKIE_SECURE,
     sameSite: env.COOKIE_SECURE ? 'None' : 'Lax',
   })
@@ -124,7 +124,7 @@ function setRefresh(c: Context, token: string, env: AppEnv) {
 
 function deleteRefresh(c: Context, env: AppEnv) {
   deleteCookie(c, refreshCookieName, {
-    path: '/api/auth', secure: env.COOKIE_SECURE, sameSite: env.COOKIE_SECURE ? 'None' : 'Lax',
+    path: '/api', secure: env.COOKIE_SECURE, sameSite: env.COOKIE_SECURE ? 'None' : 'Lax',
   })
 }
 

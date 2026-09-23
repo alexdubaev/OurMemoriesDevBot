@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import type { BrowserLinkStartResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -28,6 +28,7 @@ import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
+import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
 
 export type AppProps = { hostBridge: HostBridge }
@@ -42,6 +43,9 @@ export default function App(props: AppProps) {
 
 function AppContent({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
+  const maxBrowserChallengeId = hostBridge.kind === 'max'
+    ? maxBrowserLinkChallengeId(typeof window === 'undefined' ? undefined : window)
+    : null
   const hostAuthProvider: HostAuthProvider | null = hostBridge.kind === 'max' || hostBridge.kind === 'telegram'
     ? hostBridge.kind
     : null
@@ -50,6 +54,7 @@ function AppContent({ hostBridge }: AppProps) {
     auth,
     initData,
     isHostAvailable: hostBridge.isAvailable,
+    forceAuth: Boolean(maxBrowserChallengeId),
     provider: hostAuthProvider,
   })
   const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
@@ -61,7 +66,8 @@ function AppContent({ hostBridge }: AppProps) {
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
-  } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, startedHostAuthKey, hostBridge.isAvailable])
+    forceAuth: Boolean(maxBrowserChallengeId),
+  } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable])
 
   const insets = hostBridge.getInsets()
   useEffect(() => {
@@ -93,6 +99,10 @@ function AppContent({ hostBridge }: AppProps) {
   } as CSSProperties
   if (!auth || auth.isBootstrapping || (hostAuthState && shouldKeepHostAuthPreloader(hostAuthState))) return <BootPreloader style={style} />
   if (!auth.user) {
+    if (hostBridge.kind === 'browser') {
+      if (auth.sessionError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><BrandLogo className="w-[148px]" /><div className="mt-8"><InlineError onRetry={() => void auth.retrySession()} /></div></main>
+      return <BrowserLinkLogin style={style} />
+    }
     return (
       <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
         <BrandLogo className="w-[148px]" />
@@ -103,6 +113,15 @@ function AppContent({ hostBridge }: AppProps) {
         {hostAuthError ? <Typography className="mt-3" tone="muted" variant="memoryMeta">Проверьте соединение и повторите попытку.</Typography> : null}
       </main>
     )
+  }
+  if (hostBridge.kind === 'browser' && (auth.externalIdentityProvider !== 'max' || auth.sessionError)) {
+    return <BrowserLinkLogin style={style} />
+  }
+  if (hostBridge.kind === 'max' && maxBrowserChallengeId && initData && hostAuthError) {
+    return <MaxBrowserLinkAuthFailure onRetry={resetHostAuth} style={style} />
+  }
+  if (hostBridge.kind === 'max' && maxBrowserChallengeId && initData) {
+    return <MaxBrowserLinkApproval challengeId={maxBrowserChallengeId} initData={initData} style={style} />
   }
   if (typeof window !== 'undefined' && shouldShowMaxRuntimeDiagnostic(hostBridge.kind, window)) {
     return <MaxRuntimeDiagnosticPanel diagnostic={readMaxRuntimeDiagnostic(window)} style={style} />
@@ -157,6 +176,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [noFamily, setNoFamily] = useState(false)
   const [accessLost, setAccessLost] = useState(false)
   const [isFamilyBootstrapping, setIsFamilyBootstrapping] = useState(true)
+  const autoAcceptingInvite = useRef(false)
 
   const refresh = useCallback(async ({ bootstrap = false, failureMode = 'global' }: { bootstrap?: boolean; failureMode?: 'global' | 'throw' } = {}) => {
     if (bootstrap) setIsFamilyBootstrapping(true)
@@ -164,7 +184,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setInviteIssue(null)
     setNoFamily(false)
     try {
-      const me = await loadFamilyMe(transport)
+      let me = await loadFamilyMe(transport)
       if (inviteToken && !inviteHandled) {
         try {
           const preview = await previewInvite(transport, inviteToken)
@@ -172,6 +192,24 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
             setInviteIssue('OTHER_FAMILY')
             setFamilyResponse(null)
             return
+          }
+          if (!me.activeFamily) {
+            if (hostBridge.kind === 'browser') {
+              if (!autoAcceptingInvite.current) {
+                autoAcceptingInvite.current = true
+                try {
+                  await acceptInvite(transport, inviteToken)
+                } finally {
+                  autoAcceptingInvite.current = false
+                }
+              }
+              setInviteHandled(true)
+              me = await loadFamilyMe(transport)
+            } else {
+              setInvitePreview(preview)
+              setFamilyResponse(null)
+              return
+            }
           }
           if (!me.activeFamily) {
             setInvitePreview(preview)
@@ -217,7 +255,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     } finally {
       if (bootstrap) setIsFamilyBootstrapping(false)
     }
-  }, [inviteHandled, inviteToken, transport])
+  }, [hostBridge.kind, inviteHandled, inviteToken, transport])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void refresh({ bootstrap: true }) }, 0)
@@ -246,7 +284,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { await refresh({ bootstrap: true }); setEditingChild(false) }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
-    return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'viewer' ? 'viewer' : 'full'} transport={transport} /></div>
+    return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
   }
   return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
 }
@@ -275,6 +313,134 @@ function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => P
   const [busy, setBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><BrandLogo className="w-[148px]" /><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); setCreateError(null); try { await onCreate() } catch (error) { setCreateError(createFamilyErrorMessage(error)) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button>{createError ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">{createError}</Typography> : null}</main>
+}
+
+function BrowserLinkLogin({ style }: { style: CSSProperties }) {
+  const auth = useContext(AuthContext)
+  const [challenge, setChallenge] = useState<BrowserLinkStartResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isStarting, setIsStarting] = useState(false)
+  const [isRedeeming, setIsRedeeming] = useState(false)
+  const [status, setStatus] = useState<'pending' | 'approved' | 'expired'>('pending')
+  const didStart = useRef(false)
+
+  const start = useCallback(async () => {
+    if (!auth) return
+    setIsStarting(true)
+    setError(null)
+    setChallenge(null)
+    setStatus('pending')
+    try {
+      const next = await auth.startBrowserLink()
+      setChallenge(next)
+    } catch {
+      setError('Не удалось создать запрос входа. Проверьте соединение и повторите.')
+    } finally {
+      setIsStarting(false)
+    }
+  }, [auth])
+
+  useEffect(() => {
+    if (didStart.current) return
+    didStart.current = true
+    void start()
+  }, [start])
+
+  useEffect(() => {
+    if (!auth || !challenge) return
+    let stopped = false
+    let redeeming = false
+    const poll = async () => {
+      try {
+        const next = await auth.browserLinkStatus(challenge.challengeId)
+        if (stopped) return
+        setStatus(next.status)
+        if (next.status === 'expired' || next.status !== 'approved' || redeeming) return
+        redeeming = true
+        setIsRedeeming(true)
+        setError(null)
+        try {
+          await auth.redeemBrowserLink(challenge.challengeId)
+        } catch {
+          if (!stopped) setError('Не удалось завершить вход. Запрос истёк, создайте новый.')
+        } finally {
+          redeeming = false
+          if (!stopped) setIsRedeeming(false)
+        }
+      } catch {
+        if (!stopped) setError('Не удалось проверить подтверждение. Проверьте соединение.')
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => { void poll() }, 1500)
+    return () => { stopped = true; window.clearInterval(timer) }
+  }, [auth, challenge])
+
+  const maxLink = challenge
+    ? createMaxBrowserLink(challenge.startParam, import.meta.env.VITE_MAX_BOT_USERNAME)
+    : null
+  const expired = status === 'expired'
+
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
+      <Typography variant="memoryScreen">Вход через MAX</Typography>
+      <Typography className="mt-4" tone="muted" variant="memoryBody">Откройте MAX, подтвердите этот код и вернитесь сюда. После подтверждения вход сохранится в браузере.</Typography>
+      {challenge && !expired ? <>
+        <Typography align="center" className="mt-8" style={{ letterSpacing: '0.35em' }} variant="h1">{challenge.displayCode}</Typography>
+        {maxLink ? <Button asChild className="mt-8 min-h-12 w-full"><a href={maxLink} rel="noreferrer" target="_blank"><Typography variant="memoryButton">Открыть MAX</Typography></a></Button> : <Typography className="mt-6 text-destructive" role="alert" variant="memoryMeta">Не настроена ссылка на MAX-бота.</Typography>}
+        <Typography className="mt-4 text-center" tone="muted" variant="memoryMeta">{isRedeeming ? 'Завершаем вход…' : 'Ожидаем подтверждение…'}</Typography>
+      </> : null}
+      {expired ? <Typography className="mt-6 text-destructive" role="alert" variant="memoryBody">Запрос истёк.</Typography> : null}
+      {error ? <Typography className="mt-6 text-destructive" role="alert" variant="memoryMeta">{error}</Typography> : null}
+      {(expired || error) ? <Button className="mt-6 min-h-12 w-full" disabled={isStarting} onClick={() => void start()} type="button"><Typography variant="memoryButton">Создать новый код</Typography></Button> : null}
+      {isStarting ? <Typography className="mt-6 text-center" tone="muted" variant="memoryMeta">Создаём код…</Typography> : null}
+    </section>
+  </main>
+}
+
+function MaxBrowserLinkAuthFailure({ onRetry, style }: { onRetry: () => void; style: CSSProperties }) {
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
+      <Typography variant="memoryScreen">Не удалось подтвердить MAX</Typography>
+      <Typography className="mt-4" tone="muted" variant="memoryBody">Откройте ссылку из браузера ещё раз, чтобы получить новый код.</Typography>
+      <Button className="mt-8 min-h-12 w-full" onClick={onRetry} type="button"><Typography variant="memoryButton">Повторить</Typography></Button>
+    </section>
+  </main>
+}
+
+function MaxBrowserLinkApproval({ challengeId, initData, style }: { challengeId: string; initData: string; style: CSSProperties }) {
+  const auth = useContext(AuthContext)
+  const [approved, setApproved] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const displayCode = challengeId.slice(0, 6)
+
+  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
+      <Typography variant="memoryScreen">Подтвердить вход</Typography>
+      {approved ? <Typography className="mt-5" variant="memoryBody">Вход в браузере подтверждён. Можно вернуться в браузер и закрыть это окно.</Typography> : <>
+        <Typography className="mt-4" tone="muted" variant="memoryBody">Подтверждайте только если вы сами начали вход в браузере и этот код совпадает с кодом на экране браузера:</Typography>
+        <Typography align="center" className="mt-8" style={{ letterSpacing: '0.35em' }} variant="h1">{displayCode}</Typography>
+        {error ? <Typography className="mt-6 text-destructive" role="alert" variant="memoryMeta">{error}</Typography> : null}
+        <Button className="mt-8 min-h-12 w-full" disabled={busy || !auth} onClick={() => void (async () => {
+          if (!auth) return
+          setBusy(true)
+          setError(null)
+          try {
+            await auth.approveBrowserLink(challengeId, initData)
+            setApproved(true)
+          } catch {
+            setError('Не удалось подтвердить вход. Код мог истечь, создайте новый из браузера.')
+          } finally {
+            setBusy(false)
+          }
+        })()} type="button"><Typography variant="memoryButton">Подтвердить вход</Typography></Button>
+      </>}
+    </section>
+  </main>
 }
 
 function OpenInTelegram() {

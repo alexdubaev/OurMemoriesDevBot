@@ -35,6 +35,7 @@ export type HostBridge = {
 export type BrowserDevHostOptions = {
   colorScheme?: 'light' | 'dark'
   insets?: Partial<TelegramInsets>
+  maxBotUsername?: string
 }
 
 export type HostBridgeOptions = {
@@ -48,12 +49,17 @@ export function createHostBridge(
 ): HostBridge {
   if (isMeaningfulMaxWebApp(host)) return createMaxHostBridge(host, options)
   if (hasTelegramWebApp(host)) return createTelegramHostBridge(host)
-  return createBrowserDevHostBridge()
+  return createBrowserDevHostBridge({ maxBotUsername: options.maxBotUsername }, host)
 }
 
 function hasTelegramWebApp(host: unknown) {
   if (!isRecord(host) || !isRecord(host.Telegram)) return false
-  return isRecord(host.Telegram.WebApp)
+  const webApp = host.Telegram.WebApp
+  if (!isRecord(webApp)) return false
+
+  // The Telegram SDK also exposes an empty WebApp object when it is loaded in an
+  // ordinary browser. Only a real Telegram Mini App launch has signed initData.
+  return typeof webApp.initData === 'string' && webApp.initData.trim().length > 0
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

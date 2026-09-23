@@ -150,11 +150,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
     options.signal?.throwIfAborted()
     if (options.isCurrent?.() === false) return
     setAccessToken(result.data.accessToken)
-    queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
+    queryClient.setQueryData(authQueryKeys.me(), {
+      user: result.data.user,
+      externalIdentityProvider: provider,
+    })
   }, [api, queryClient, setAccessToken])
 
   const authenticateTelegram = useCallback((initData: string) => authenticateHost('telegram', initData), [authenticateHost])
   const authenticateMax = useCallback((initData: string) => authenticateHost('max', initData), [authenticateHost])
+
+  const startBrowserLink = useCallback(() => api.startBrowserLink(), [api])
+  const browserLinkStatus = useCallback((id: string) => api.browserLinkStatus(id), [api])
+  const approveBrowserLink = useCallback((id: string, initData: string) => api.approveBrowserLink(id, initData).then(() => undefined), [api])
+  const redeemBrowserLink = useCallback(async (id: string) => {
+    const data = await api.redeemBrowserLink(id)
+    queryClient.setQueryData(authQueryKeys.me(), { user: data.user, externalIdentityProvider: 'max' })
+  }, [api, queryClient])
 
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {
@@ -187,7 +198,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [accessToken, meQuery])
 
   // The session is unknown until the cookie refresh has answered and, when it restored an access
-  // token, until the first `/api/auth/me` load has settled. Reporting "signed out" in between would
+  // token, until the first `/api/v1/auth/me` load has settled. Reporting "signed out" in between would
   // send a signed-in user through the login redirect on every reload.
   const isBootstrapping = isRestoringSession || (Boolean(accessToken) && meQuery.isPending)
   const sessionError = bootstrapError ?? (accessToken ? toOptionalError(meQuery.error) : null)
@@ -202,6 +213,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user: meQuery.data?.user ?? null,
+      externalIdentityProvider: meQuery.data?.externalIdentityProvider,
       isBootstrapping,
       isAuthenticated: Boolean(meQuery.data?.user),
       sessionError,
@@ -210,13 +222,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       authenticateHost,
       authenticateTelegram,
       authenticateMax,
+      startBrowserLink,
+      browserLinkStatus,
+      approveBrowserLink,
+      redeemBrowserLink,
       register,
       login,
       logout,
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [authenticateHost, authenticateMax, authenticateTelegram, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
+    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

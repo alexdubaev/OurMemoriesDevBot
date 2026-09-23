@@ -29,6 +29,7 @@ model User {
   mediaReservations   UploadReservation[]
   telegramVideoDeliveryTargets TelegramVideoDeliveryTarget[]
   maxVideoUploadSessions      MaxVideoUploadSession[]        @relation("MaxVideoUploadAuthor")
+  browserLoginChallenges      BrowserLoginChallenge[]        @relation("BrowserLoginApprovedUser")
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -43,6 +44,7 @@ model ExternalIdentity {
   updatedAt DateTime                 @updatedAt @map("updated_at")
   user      User                     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "external_identities_user_id_fkey")
   authSessions AuthSession[]
+  browserLoginChallenges BrowserLoginChallenge[] @relation("BrowserLoginApprovedIdentity")
 
   @@unique([provider, subject], map: "external_identities_provider_subject_key")
   @@index([userId], map: "external_identities_user_id_idx")
@@ -69,6 +71,24 @@ model MaxAuthReplay {
 
   @@index([expiresAt], map: "max_auth_replays_expires_at_idx")
   @@map("max_auth_replays")
+}
+
+model BrowserLoginChallenge {
+  id                       String                    @id
+  verifierHash             String                    @unique(map: "browser_login_challenges_verifier_hash_key") @map("verifier_hash")
+  displayCodeHash          String                    @map("display_code_hash")
+  state                    BrowserLoginChallengeState @default(pending)
+  expiresAt                DateTime                  @map("expires_at") @db.Timestamptz(6)
+  approvedAt               DateTime?                 @map("approved_at") @db.Timestamptz(6)
+  approvedUserId           String?                   @map("approved_user_id") @db.Uuid
+  approvedExternalIdentityId String?                 @map("approved_external_identity_id") @db.Uuid
+  redeemedAt               DateTime?                 @map("redeemed_at") @db.Timestamptz(6)
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  approvedUser             User?                     @relation("BrowserLoginApprovedUser", fields: [approvedUserId], references: [id], onDelete: Cascade, map: "browser_login_challenges_approved_user_id_fkey")
+  approvedExternalIdentity ExternalIdentity?         @relation("BrowserLoginApprovedIdentity", fields: [approvedExternalIdentityId], references: [id], onDelete: Cascade, map: "browser_login_challenges_approved_identity_id_fkey")
+
+  @@index([state, expiresAt], map: "browser_login_challenges_state_expires_idx")
+  @@map("browser_login_challenges")
 }
 
 /// Encrypted, durable MAX ingress. Only the normalized event is stored in the temporary payload;
@@ -679,6 +699,14 @@ enum ExternalIdentityProvider {
   max
 
   @@map("external_identity_provider")
+}
+
+enum BrowserLoginChallengeState {
+  pending
+  approved
+  redeemed
+
+  @@map("browser_login_challenge_state")
 }
 
 enum FamilyRole {

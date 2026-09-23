@@ -41,9 +41,9 @@ test('the session stays unknown while the restored access token is still being v
     me: () => me.promise,
   })
   const { session, snapshots } = await mountAuthProvider()
-  await flushUntil(() => requests.includes('GET /api/auth/me'))
+  await flushUntil(() => requests.includes('GET /api/v1/auth/me'))
 
-  expect(requests).toContain('GET /api/auth/me')
+  expect(requests).toContain('GET /api/v1/auth/me')
   expect(session()).toEqual({ isBootstrapping: true, sessionError: null, user: null })
 
   me.resolve(json({ user }, 200))
@@ -71,7 +71,7 @@ test('a browser without a session cookie resolves to signed out without loading 
   await flushUntil(() => !session().isBootstrapping)
 
   expect(session()).toEqual({ isBootstrapping: false, sessionError: null, user: null })
-  expect(requests).not.toContain('GET /api/auth/me')
+  expect(requests).not.toContain('GET /api/v1/auth/me')
 })
 
 test('a failed session restore surfaces the error instead of an unknown session', async () => {
@@ -91,7 +91,7 @@ test('a failed session restore surfaces the error instead of an unknown session'
   expect(session().isBootstrapping).toBe(false)
   expect(session().user).toBeNull()
   expect(session().sessionError?.message).toBe('Refresh failed')
-  expect(requests).not.toContain('GET /api/auth/me')
+  expect(requests).not.toContain('GET /api/v1/auth/me')
 })
 
 async function mountAuthProvider() {
@@ -148,8 +148,8 @@ function installFakeBackend(backend: {
   globalThis.fetch = async (input, init) => {
     const path = new URL(String(input), 'https://webapp.test').pathname
     requests.push(`${init?.method ?? 'GET'} ${path}`)
-    if (path === '/api/auth/refresh') return backend.refresh()
-    if (path === '/api/auth/me') return backend.me()
+    if (path === '/api/v1/auth/refresh') return backend.refresh()
+    if (path === '/api/v1/auth/me') return backend.me()
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
   }
   return requests

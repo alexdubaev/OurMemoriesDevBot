@@ -112,6 +112,7 @@ export type VerifiedMaxInitData = {
   identity: MaxIdentity
   replayFingerprintHash: string
   authDateSeconds: number
+  startParam?: string
 }
 
 export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {
@@ -150,6 +151,38 @@ export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'>
     | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
     | { state: 'replayed' }
   >
+}
+
+export type BrowserLoginChallengeState = 'pending' | 'approved' | 'expired'
+
+export type BrowserLinkRepository = {
+  createBrowserLoginChallenge(input: {
+    id: string
+    verifierHash: string
+    displayCodeHash: string
+    expiresAt: Date
+    now: Date
+  }): Promise<void>
+  getBrowserLoginChallenge(input: {
+    id: string
+    verifierHash: string
+    now: Date
+  }): Promise<{ state: BrowserLoginChallengeState; expiresAt: Date } | null>
+  approveBrowserLoginChallenge(input: {
+    id: string
+    userId: string
+    externalIdentityId: string
+    now: Date
+  }): Promise<'approved' | 'already_approved' | 'expired' | 'missing'>
+  redeemBrowserLoginChallenge(input: {
+    id: string
+    verifierHash: string
+    now: Date
+    refreshTokenHash: string
+    refreshTokenFamilyHash: string
+    expiresAt: Date
+    metadata: SessionMetadata
+  }): Promise<{ user: AuthUserRecord; session: { id: string } } | null>
 }
 
 export type AccessTokens = {

@@ -66,6 +66,7 @@ export function verifyMaxInitData(
     identity: parseMaxUser(userRaw),
     replayFingerprintHash: createHash('sha256').update(suppliedHash.toLowerCase()).digest('hex'),
     authDateSeconds: authDate,
+    ...(fields.get('start_param') ? { startParam: fields.get('start_param') } : {}),
   }
 }
 
