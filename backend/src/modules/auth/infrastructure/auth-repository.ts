@@ -602,6 +602,8 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
           !challenge.approvedExternalIdentityId
         ) return null
 
+        await acquireUserAuthenticationAuthorityLock(tx, challenge.approvedUserId)
+
         const identity = await tx.externalIdentity.findFirst({
           where: {
             id: challenge.approvedExternalIdentityId,
