@@ -387,7 +387,7 @@ function BrowserLinkLogin({ style }: { style: CSSProperties }) {
       <Typography variant="memoryScreen">Вход через MAX</Typography>
       <Typography className="mt-4" tone="muted" variant="memoryBody">Откройте MAX, подтвердите этот код и вернитесь сюда. После подтверждения вход сохранится в браузере.</Typography>
       {challenge && !expired ? <>
-        <Typography className="mt-8 text-center text-4xl tracking-[0.35em]" variant="memoryHero">{challenge.displayCode}</Typography>
+        <Typography align="center" className="mt-8" style={{ letterSpacing: '0.35em' }} variant="h1">{challenge.displayCode}</Typography>
         {maxLink ? <Button asChild className="mt-8 min-h-12 w-full"><a href={maxLink} rel="noreferrer" target="_blank"><Typography variant="memoryButton">Открыть MAX</Typography></a></Button> : <Typography className="mt-6 text-destructive" role="alert" variant="memoryMeta">Не настроена ссылка на MAX-бота.</Typography>}
         <Typography className="mt-4 text-center" tone="muted" variant="memoryMeta">{isRedeeming ? 'Завершаем вход…' : 'Ожидаем подтверждение…'}</Typography>
       </> : null}
@@ -423,7 +423,7 @@ function MaxBrowserLinkApproval({ challengeId, initData, style }: { challengeId:
       <Typography variant="memoryScreen">Подтвердить вход</Typography>
       {approved ? <Typography className="mt-5" variant="memoryBody">Вход в браузере подтверждён. Можно вернуться в браузер и закрыть это окно.</Typography> : <>
         <Typography className="mt-4" tone="muted" variant="memoryBody">Подтверждайте только если вы сами начали вход в браузере и этот код совпадает с кодом на экране браузера:</Typography>
-        <Typography className="mt-8 text-center text-4xl tracking-[0.35em]" variant="memoryHero">{displayCode}</Typography>
+        <Typography align="center" className="mt-8" style={{ letterSpacing: '0.35em' }} variant="h1">{displayCode}</Typography>
         {error ? <Typography className="mt-6 text-destructive" role="alert" variant="memoryMeta">{error}</Typography> : null}
         <Button className="mt-8 min-h-12 w-full" disabled={busy || !auth} onClick={() => void (async () => {
           if (!auth) return
