@@ -344,7 +344,7 @@ function BrowserLinkLogin({ style }: { style: CSSProperties }) {
   }, [start])
 
   useEffect(() => {
-    if (!auth || !challenge || status !== 'pending') return
+    if (!auth || !challenge) return
     let stopped = false
     let redeeming = false
     const poll = async () => {
@@ -352,14 +352,16 @@ function BrowserLinkLogin({ style }: { style: CSSProperties }) {
         const next = await auth.browserLinkStatus(challenge.challengeId)
         if (stopped) return
         setStatus(next.status)
-        if (next.status !== 'approved' || redeeming) return
+        if (next.status === 'expired' || next.status !== 'approved' || redeeming) return
         redeeming = true
         setIsRedeeming(true)
+        setError(null)
         try {
           await auth.redeemBrowserLink(challenge.challengeId)
         } catch {
           if (!stopped) setError('Не удалось завершить вход. Запрос истёк, создайте новый.')
         } finally {
+          redeeming = false
           if (!stopped) setIsRedeeming(false)
         }
       } catch {
@@ -369,7 +371,7 @@ function BrowserLinkLogin({ style }: { style: CSSProperties }) {
     void poll()
     const timer = window.setInterval(() => { void poll() }, 1500)
     return () => { stopped = true; window.clearInterval(timer) }
-  }, [auth, challenge, status])
+  }, [auth, challenge])
 
   const maxLink = challenge
     ? createMaxBrowserLink(challenge.startParam, import.meta.env.VITE_MAX_BOT_USERNAME)

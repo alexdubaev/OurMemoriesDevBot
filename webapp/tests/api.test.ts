@@ -22,9 +22,9 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
     const headers = new Headers(init?.headers)
     calls.push({ path, authorization: headers.get('Authorization') })
 
-    const meCallCount = calls.filter((call) => call.path === '/api/auth/me').length
+    const meCallCount = calls.filter((call) => call.path === '/api/v1/auth/me').length
 
-    if (path === '/api/auth/me' && meCallCount === 1) {
+    if (path === '/api/v1/auth/me' && meCallCount === 1) {
       return json({
         error: {
           code: 'UNAUTHORIZED',
@@ -34,11 +34,11 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
       }, 401)
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       return json({ accessToken: freshAccessToken }, 200)
     }
 
-    if (path === '/api/auth/me') {
+    if (path === '/api/v1/auth/me') {
       return json(
         {
           user: {
@@ -64,7 +64,7 @@ test('AuthApi refreshes and retries authenticated requests with the new access t
   })
 
   const response = await client.me()
-  const meCalls = calls.filter((call) => call.path === '/api/auth/me')
+  const meCalls = calls.filter((call) => call.path === '/api/v1/auth/me')
 
   expect(response.user.email).toBe('user@example.com')
   expect(meCalls).toHaveLength(2)
@@ -82,7 +82,7 @@ test('AuthApi refreshes a private raw request before retrying it', async () => {
     const path = requestPath(input)
     const authorization = new Headers(init?.headers).get('Authorization')
     calls.push({ path, authorization })
-    if (path === '/api/auth/refresh') return json({ accessToken: freshAccessToken }, 200)
+    if (path === '/api/v1/auth/refresh') return json({ accessToken: freshAccessToken }, 200)
     if (authorization === `Bearer ${freshAccessToken}`) return new Response('avatar', { status: 200 })
     return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
   }
@@ -95,7 +95,7 @@ test('AuthApi refreshes a private raw request before retrying it', async () => {
   await expect(client.rawAuthenticated('/api/v1/families/family/media/avatar/content')).resolves.toMatchObject({ status: 200 })
   expect(calls).toEqual([
     { path: '/api/v1/families/family/media/avatar/content', authorization: `Bearer ${expiredAccessToken}` },
-    { path: '/api/auth/refresh', authorization: null },
+    { path: '/api/v1/auth/refresh', authorization: null },
     { path: '/api/v1/families/family/media/avatar/content', authorization: `Bearer ${freshAccessToken}` },
   ])
 })
@@ -153,12 +153,12 @@ test('AuthApi shares one refresh across concurrent unauthorized requests', async
     const authorization = headers.get('Authorization')
     calls.push({ path, authorization, credentials: init?.credentials })
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       await new Promise((resolve) => setTimeout(resolve, 0))
       return json({ accessToken: freshAccessToken }, 200)
     }
 
-    if (path === '/api/auth/me' && authorization === `Bearer ${freshAccessToken}`) {
+    if (path === '/api/v1/auth/me' && authorization === `Bearer ${freshAccessToken}`) {
       return json(
         {
           user: {
@@ -173,7 +173,7 @@ test('AuthApi shares one refresh across concurrent unauthorized requests', async
       )
     }
 
-    if (path === '/api/auth/me') {
+    if (path === '/api/v1/auth/me') {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
     }
 
@@ -188,8 +188,8 @@ test('AuthApi shares one refresh across concurrent unauthorized requests', async
   })
 
   const [first, second] = await Promise.all([client.me(), client.me()])
-  const refreshCalls = calls.filter((call) => call.path === '/api/auth/refresh')
-  const meCalls = calls.filter((call) => call.path === '/api/auth/me')
+  const refreshCalls = calls.filter((call) => call.path === '/api/v1/auth/refresh')
+  const meCalls = calls.filter((call) => call.path === '/api/v1/auth/me')
 
   expect(first.user.email).toBe('user@example.com')
   expect(second.user.email).toBe('user@example.com')
@@ -210,11 +210,11 @@ test('AuthApi clears only local session state when refresh is unauthorized', asy
     const headers = new Headers(init?.headers)
     calls.push({ path, authorization: headers.get('Authorization') })
 
-    if (path === '/api/auth/me') {
+    if (path === '/api/v1/auth/me') {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       return json({
         error: {
           code: 'UNAUTHORIZED',
@@ -245,8 +245,8 @@ test('AuthApi clears only local session state when refresh is unauthorized', asy
   expect(accessToken).toBeNull()
   expect(authExpiredCalls).toBe(1)
   expect(calls.map((call) => call.path)).toEqual([
-    '/api/auth/me',
-    '/api/auth/refresh',
+    '/api/v1/auth/me',
+    '/api/v1/auth/refresh',
   ])
 })
 
@@ -257,11 +257,11 @@ test('AuthApi preserves the session when refresh fails transiently', async () =>
   globalThis.fetch = async (input) => {
     const path = requestPath(input)
 
-    if (path === '/api/auth/me') {
+    if (path === '/api/v1/auth/me') {
       return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
     }
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       return json({ error: { code: 'UNAVAILABLE', message: 'Try again later' } }, 503)
     }
 
@@ -307,7 +307,7 @@ test('AuthApi never refreshes an old request after another session epoch wins', 
   }
 
   await expect(client.me()).rejects.toMatchObject({ status: 401 })
-  expect(calls).toEqual(['/api/auth/me'])
+  expect(calls).toEqual(['/api/v1/auth/me'])
   expect(accessToken).toBe('account-a-access-token')
   expect(authExpiredCalls).toBe(0)
 })
@@ -325,7 +325,7 @@ test('a late refresh 401 cannot clear a newer browser session epoch', async () =
   globalThis.fetch = async (input) => {
     const path = requestPath(input)
     calls.push(path)
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       await refreshCanFinish
       return json({ error: { code: 'UNAUTHORIZED', message: 'Old refresh failed' } }, 401)
     }
@@ -342,7 +342,7 @@ test('a late refresh 401 cannot clear a newer browser session epoch', async () =
     },
   })
   const request = client.me()
-  await waitForEvent(calls, '/api/auth/refresh')
+  await waitForEvent(calls, '/api/v1/auth/refresh')
   publishBrowserSessionState('authenticated')
   releaseRefresh()
 
@@ -383,7 +383,7 @@ test('AuthApi discards a successful response from an older browser session epoch
     setAccessToken: () => undefined,
   })
   const request = client.me()
-  await waitForEvent(calls, '/api/auth/me')
+  await waitForEvent(calls, '/api/v1/auth/me')
   publishBrowserSessionState('authenticated')
   releaseRequest()
 
@@ -401,7 +401,7 @@ test('AuthApi never retries an authenticated request as a different principal', 
   globalThis.fetch = async (input) => {
     const path = requestPath(input)
     calls.push(path)
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       return json({ accessToken: accountBAccessToken }, 200)
     }
     return json({ error: { code: 'UNAUTHORIZED', message: 'Expired access token' } }, 401)
@@ -418,7 +418,7 @@ test('AuthApi never retries an authenticated request as a different principal', 
   })
 
   await expect(client.me()).rejects.toMatchObject({ status: 401 })
-  expect(calls).toEqual(['/api/auth/me', '/api/auth/refresh'])
+  expect(calls).toEqual(['/api/v1/auth/me', '/api/v1/auth/refresh'])
   expect(accessToken).toBeNull()
   expect(authExpiredCalls).toBe(1)
 })
@@ -608,7 +608,7 @@ test('AuthApi surfaces an aborted request as its AbortError, never as an expired
   globalThis.fetch = async (input, init) => {
     const path = requestPath(input)
     calls.push(path)
-    if (path === '/api/auth/me') {
+    if (path === '/api/v1/auth/me') {
       // A 401 whose error body is still streaming when the caller aborts: the browser errors the
       // body with the abort reason, so the JSON payload never fully arrives.
       return new Response(bodyThatErrorsOnAbort(init?.signal), { status: 401 })
@@ -626,13 +626,13 @@ test('AuthApi surfaces an aborted request as its AbortError, never as an expired
     },
   })
   const request = client.me({ signal: controller.signal })
-  await waitForEvent(calls, '/api/auth/me')
+  await waitForEvent(calls, '/api/v1/auth/me')
   controller.abort()
 
   const error = await rejectionOf(request)
   expect(error).toBeInstanceOf(DOMException)
   expect((error as DOMException).name).toBe('AbortError')
-  expect(calls).toEqual(['/api/auth/me'])
+  expect(calls).toEqual(['/api/v1/auth/me'])
   expect(accessToken).toBe('active-access-token')
   expect(authExpiredCalls).toBe(0)
 })
@@ -655,7 +655,7 @@ test('one caller aborting its request does not cancel the refresh other callers 
     const path = requestPath(input)
     calls.push(path)
 
-    if (path === '/api/auth/refresh') {
+    if (path === '/api/v1/auth/refresh') {
       // Also like the browser: had the caller's signal leaked into this request, the abort below
       // would fail the refresh for everyone waiting on it.
       await Promise.race([refreshCanFinish, untilAborted(init?.signal)])
@@ -689,7 +689,7 @@ test('one caller aborting its request does not cancel the refresh other callers 
   })
   const abortedRequest = client.me({ signal: controller.signal })
   const keptRequest = client.me()
-  await waitForEvent(calls, '/api/auth/refresh')
+  await waitForEvent(calls, '/api/v1/auth/refresh')
   controller.abort()
   releaseRefresh()
 
@@ -697,7 +697,7 @@ test('one caller aborting its request does not cancel the refresh other callers 
   expect(error).toBeInstanceOf(DOMException)
   expect((error as DOMException).name).toBe('AbortError')
   await expect(keptRequest).resolves.toMatchObject({ user: { email: 'user@example.com' } })
-  expect(calls.filter((call) => call === '/api/auth/refresh')).toHaveLength(1)
+  expect(calls.filter((call) => call === '/api/v1/auth/refresh')).toHaveLength(1)
   expect(accessToken).toBe(freshAccessToken)
   expect(authExpiredCalls).toBe(0)
 })

@@ -21,7 +21,7 @@ export type AuthContextValue = {
   user: UserDto | null
   /**
    * True while the session is still unknown: the cookie refresh has not answered yet, or it
-   * restored an access token whose `/api/auth/me` load is still pending. Guards render the
+   * restored an access token whose `/api/v1/auth/me` load is still pending. Guards render the
    * loading state while this is set; `user === null` means signed out only once it is false.
    */
   isBootstrapping: boolean

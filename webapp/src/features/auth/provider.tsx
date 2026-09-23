@@ -195,7 +195,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [accessToken, meQuery])
 
   // The session is unknown until the cookie refresh has answered and, when it restored an access
-  // token, until the first `/api/auth/me` load has settled. Reporting "signed out" in between would
+  // token, until the first `/api/v1/auth/me` load has settled. Reporting "signed out" in between would
   // send a signed-in user through the login redirect on every reload.
   const isBootstrapping = isRestoringSession || (Boolean(accessToken) && meQuery.isPending)
   const sessionError = bootstrapError ?? (accessToken ? toOptionalError(meQuery.error) : null)

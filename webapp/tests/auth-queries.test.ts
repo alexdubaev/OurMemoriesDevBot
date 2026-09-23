@@ -193,7 +193,7 @@ test('every session-scoped query hands the abort signal TanStack gives it to the
   }
   const api = {
     me: async (options?: { signal?: AbortSignal }) => {
-      received.push({ path: '/api/auth/me', signal: options?.signal })
+      received.push({ path: '/api/v1/auth/me', signal: options?.signal })
       return { user: { ...user, role: 'user' as const } }
     },
   }
@@ -204,7 +204,7 @@ test('every session-scoped query hands the abort signal TanStack gives it to the
   await queryClient.fetchQuery(avatarQueryOptions(transport))
 
   expect(received.map((request) => request.path)).toEqual([
-    '/api/auth/me',
+    '/api/v1/auth/me',
     '/api/admin/dashboard',
     '/api/admin/users?page=1&pageSize=20',
     '/api/uploads/avatar',
