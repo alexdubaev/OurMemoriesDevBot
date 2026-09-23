@@ -1222,8 +1222,8 @@
       "width": 192,
       "height": 192,
       "alpha": true,
-      "bytes": 18338,
-      "sha256": "0f3839b5671026a8800fc53564e29233a07091fb41e14f6443a1425da6ffe015"
+      "bytes": 6738,
+      "sha256": "dd85a332d540ddfeb1b9b4bd62422261d9f3145b8335ca9bbbd06ff6589eddbf"
     },
     {
       "path": "assets/brand/pwa-memoly-512.webp",
@@ -1231,8 +1231,8 @@
       "width": 512,
       "height": 512,
       "alpha": true,
-      "bytes": 85614,
-      "sha256": "b0b0683d61192ce9d05ed29a328995425f61f8db825947a576c06e1959ed5e95"
+      "bytes": 20688,
+      "sha256": "c170ecfcc09276e0c94589bc2c3d365dee0fd46801117fa475890e0424e049eb"
     },
     {
       "path": "assets/icons/gear-active@2x.webp",
