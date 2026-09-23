@@ -1217,6 +1217,24 @@
       "sha256": "3ca50c216a59fcb9614c0a13a595dbf4d71ccb3d91c0a286f3d244e1034952a1"
     },
     {
+      "path": "assets/brand/pwa-memoly-192.webp",
+      "usage": "runtime-brand",
+      "width": 192,
+      "height": 192,
+      "alpha": true,
+      "bytes": 18338,
+      "sha256": "0f3839b5671026a8800fc53564e29233a07091fb41e14f6443a1425da6ffe015"
+    },
+    {
+      "path": "assets/brand/pwa-memoly-512.webp",
+      "usage": "runtime-brand",
+      "width": 512,
+      "height": 512,
+      "alpha": true,
+      "bytes": 85614,
+      "sha256": "b0b0683d61192ce9d05ed29a328995425f61f8db825947a576c06e1959ed5e95"
+    },
+    {
       "path": "assets/icons/gear-active@2x.webp",
       "usage": "runtime-icon",
       "width": 48,

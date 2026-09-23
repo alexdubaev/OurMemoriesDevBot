@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "memoLy",
+  "short_name": "memoLy",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#FBF8F5",
+  "background_color": "#FBF8F5",
+  "icons": [
+    {
+      "src": "/assets/brand/pwa-memoly-192.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/pwa-memoly-512.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}
