@@ -25,17 +25,21 @@ type MaxAuthServiceDependencies = {
 export class MaxAuthService {
   constructor(private readonly dependencies: MaxAuthServiceDependencies) {}
 
+  verifyInitData(rawInitData: string): VerifiedMaxInitData {
+    try {
+      return this.dependencies.verifyInitData(rawInitData)
+    } catch {
+      throw new AuthFailure('max_init_data_invalid', 'MAX authorization data is invalid or expired')
+    }
+  }
+
   async exchange(
     rawInitData: string,
     presentedRefreshToken: string | undefined,
     metadata: SessionMetadata,
   ) {
     let verified: VerifiedMaxInitData
-    try {
-      verified = this.dependencies.verifyInitData(rawInitData)
-    } catch {
-      throw new AuthFailure('max_init_data_invalid', 'MAX authorization data is invalid or expired')
-    }
+    verified = this.verifyInitData(rawInitData)
 
     const now = this.dependencies.clock.now()
     const existingSessionId = await this.currentSessionId(presentedRefreshToken, now)

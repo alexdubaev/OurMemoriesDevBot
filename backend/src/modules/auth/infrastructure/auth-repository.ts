@@ -5,7 +5,12 @@ import {
 } from '../../../db'
 import { Prisma } from '../../../generated/prisma/client'
 import { enqueueTask } from '../../../outbox'
-import type { AuthRepository, MaxAuthRepository, TelegramAuthRepository } from '../application/ports'
+import type {
+  AuthRepository,
+  BrowserLinkRepository,
+  MaxAuthRepository,
+  TelegramAuthRepository,
+} from '../application/ports'
 import { AuthFailure } from '../domain/errors'
 
 export function createPrismaAuthRepository(db: DbClient): AuthRepository {
@@ -479,6 +484,154 @@ export function createPrismaMaxAuthRepository(
         if (isUniqueConstraintError(error) && replay) return { state: 'replayed' as const }
         throw error
       }
+    },
+  }
+}
+
+export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepository {
+  return {
+    createBrowserLoginChallenge(input) {
+      return db.$transaction(async (tx) => {
+        const stale = await tx.browserLoginChallenge.findMany({
+          where: { expiresAt: { lte: input.now } },
+          select: { id: true },
+          orderBy: { expiresAt: 'asc' },
+          take: 100,
+        })
+        if (stale.length > 0) {
+          await tx.browserLoginChallenge.deleteMany({
+            where: { id: { in: stale.map(({ id }) => id) } },
+          })
+        }
+        await tx.browserLoginChallenge.create({
+          data: {
+            id: input.id,
+            verifierHash: input.verifierHash,
+            displayCodeHash: input.displayCodeHash,
+            expiresAt: input.expiresAt,
+          },
+          select: { id: true },
+        })
+      }).then(() => undefined)
+    },
+
+    async getBrowserLoginChallenge(input) {
+      const challenge = await db.browserLoginChallenge.findUnique({
+        where: { id: input.id, verifierHash: input.verifierHash },
+        select: { state: true, expiresAt: true },
+      })
+      if (!challenge) return null
+      if (challenge.state === 'redeemed' || challenge.expiresAt <= input.now) {
+        return { state: 'expired' as const, expiresAt: challenge.expiresAt }
+      }
+      return {
+        state: challenge.state === 'approved' ? ('approved' as const) : ('pending' as const),
+        expiresAt: challenge.expiresAt,
+      }
+    },
+
+    async approveBrowserLoginChallenge(input) {
+      return db.$transaction(async (tx) => {
+        const challenge = await tx.browserLoginChallenge.findUnique({
+          where: { id: input.id },
+          select: {
+            state: true,
+            expiresAt: true,
+            approvedUserId: true,
+            approvedExternalIdentityId: true,
+          },
+        })
+        if (!challenge) return 'missing' as const
+        if (challenge.expiresAt <= input.now) return 'expired' as const
+        if (challenge.state === 'approved') {
+          return challenge.approvedUserId === input.userId &&
+            challenge.approvedExternalIdentityId === input.externalIdentityId
+            ? ('already_approved' as const)
+            : ('missing' as const)
+        }
+        if (challenge.state !== 'pending') {
+          return 'expired' as const
+        }
+
+        const identity = await tx.externalIdentity.findFirst({
+          where: {
+            id: input.externalIdentityId,
+            userId: input.userId,
+            provider: 'max',
+          },
+          select: { id: true },
+        })
+        if (!identity) return 'missing' as const
+
+        const updated = await tx.browserLoginChallenge.updateMany({
+          where: {
+            id: input.id,
+            state: 'pending',
+            expiresAt: { gt: input.now },
+          },
+          data: {
+            state: 'approved',
+            approvedAt: input.now,
+            approvedUserId: input.userId,
+            approvedExternalIdentityId: input.externalIdentityId,
+          },
+        })
+        return updated.count === 1 ? ('approved' as const) : ('missing' as const)
+      }, userAuthenticationSessionTransactionOptions)
+    },
+
+    async redeemBrowserLoginChallenge(input) {
+      return db.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM browser_login_challenges WHERE id = ${input.id} FOR UPDATE
+        `)
+        const challenge = await tx.browserLoginChallenge.findUnique({
+          where: { id: input.id, verifierHash: input.verifierHash },
+          select: {
+            state: true,
+            expiresAt: true,
+            approvedUserId: true,
+            approvedExternalIdentityId: true,
+          },
+        })
+        if (
+          !challenge ||
+          challenge.state !== 'approved' ||
+          challenge.expiresAt <= input.now ||
+          !challenge.approvedUserId ||
+          !challenge.approvedExternalIdentityId
+        ) return null
+
+        const identity = await tx.externalIdentity.findFirst({
+          where: {
+            id: challenge.approvedExternalIdentityId,
+            userId: challenge.approvedUserId,
+            provider: 'max',
+          },
+          include: { user: true },
+        })
+        if (!identity) return null
+
+        const consumed = await tx.browserLoginChallenge.updateMany({
+          where: { id: input.id, state: 'approved' },
+          data: { state: 'redeemed', redeemedAt: input.now },
+        })
+        if (consumed.count !== 1) throw new Error('Browser login challenge consume race')
+
+        const session = await tx.authSession.create({
+          data: {
+            userId: identity.userId,
+            externalIdentityId: identity.id,
+            refreshTokenHash: input.refreshTokenHash,
+            refreshTokenFamilyHash: input.refreshTokenFamilyHash,
+            expiresAt: input.expiresAt,
+            userAgent: input.metadata.userAgent,
+            ipAddress: input.metadata.ipAddress,
+          },
+          select: { id: true },
+        })
+        return { user: identity.user, session }
+      }, userAuthenticationSessionTransactionOptions)
     },
   }
 }

@@ -37,6 +37,31 @@ export const maxAuthRequestSchema = z
   })
   .strict()
 
+export const browserLinkStartResponseSchema = z.object({
+  challengeId: z.string().min(1),
+  displayCode: z.string().regex(/^\d{6}$/),
+  expiresAt: z.string().datetime(),
+  startParam: z.string().min(1),
+}).strict()
+
+export const browserLinkStatusResponseSchema = z.object({
+  status: z.enum(['pending', 'approved', 'expired']),
+  expiresAt: z.string().datetime(),
+}).strict()
+
+export const browserLinkApproveResponseSchema = z.object({
+  approved: z.literal(true),
+}).strict()
+
+export const browserLinkApproveRequestSchema = z.object({
+  initData: z.string().min(1).max(16_384),
+  approved: z.literal(true),
+}).strict()
+
+export const browserLinkChallengeParamsSchema = z.object({
+  id: z.string().regex(/^\d{24}$/),
+}).strict()
+
 export const registerRequestSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
@@ -94,6 +119,11 @@ export const meResponseSchema = z.object({
 export type UserDto = z.infer<typeof userSchema>
 export type TelegramAuthRequest = z.infer<typeof telegramAuthRequestSchema>
 export type MaxAuthRequest = z.infer<typeof maxAuthRequestSchema>
+export type BrowserLinkStartResponse = z.infer<typeof browserLinkStartResponseSchema>
+export type BrowserLinkStatusResponse = z.infer<typeof browserLinkStatusResponseSchema>
+export type BrowserLinkApproveResponse = z.infer<typeof browserLinkApproveResponseSchema>
+export type BrowserLinkApproveRequest = z.infer<typeof browserLinkApproveRequestSchema>
+export type BrowserLinkChallengeParams = z.infer<typeof browserLinkChallengeParamsSchema>
 export type UserRole = z.infer<typeof userRoleSchema>
 export type RegisterRequest = z.input<typeof registerRequestSchema>
 export type RegisterPayload = z.output<typeof registerRequestSchema>

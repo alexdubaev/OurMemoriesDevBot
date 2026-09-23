@@ -4,12 +4,14 @@ import type { AppEnv } from '../../env'
 import { drainPassCapacity } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
+import { BrowserLinkService } from './application/browser-link-service'
 import { TelegramAuthService } from './application/telegram-auth-service'
 import { MaxAuthService } from './application/max-auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
 import { toBaseUserDto } from './domain/user'
 import {
   createPrismaAuthRepository,
+  createPrismaBrowserLinkRepository,
   createPrismaTelegramAuthRepository,
   createPrismaMaxAuthRepository,
 } from './infrastructure/auth-repository'
@@ -63,6 +65,7 @@ export function createAuthModule({
   const service = buildAuthService({ clock, db, emailDelivery, env, logoutCleanup, projectUser })
   const telegramService = buildTelegramAuthService({ clock, db, env, projectUser })
   const maxService = buildMaxAuthService({ clock, db, env, projectUser })
+  const browserLinkService = buildBrowserLinkService({ clock, db, env, maxService, projectUser })
   const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
 
   return {
@@ -75,8 +78,36 @@ export function createAuthModule({
     legacyTestRoutes: legacyPasswordAuthForTests
       ? createLegacyAuthTestRoutes({ env, requireAuth, service })
       : undefined,
-    routes: createAuthRoutes({ env, service, telegramService, maxService }),
+    routes: createAuthRoutes({ env, service, telegramService, maxService, browserLinkService, requireAuth }),
   }
+}
+
+function buildBrowserLinkService({
+  clock,
+  db,
+  env,
+  maxService,
+  projectUser,
+}: Pick<Required<CreateAuthModuleOptions>, 'clock' | 'db' | 'env' | 'projectUser'> & {
+  maxService: MaxAuthService
+}) {
+  return new BrowserLinkService({
+    accessTokens: {
+      sign: (payload) => signAccessToken(payload, env),
+      verify: (token) => verifyAccessToken(token, env),
+    },
+    clock,
+    projectUser,
+    refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    refreshTokens: {
+      create: () => createRefreshToken(env.JWT_SECRET),
+      hash: hashRefreshToken,
+      familyHash: (token) => hashRefreshTokenFamily(token, env.JWT_SECRET),
+      rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
+    },
+    repository: createPrismaBrowserLinkRepository(db),
+    verifyInitData: (rawInitData) => maxService.verifyInitData(rawInitData),
+  })
 }
 
 function buildMaxAuthService({
