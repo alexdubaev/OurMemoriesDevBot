@@ -150,7 +150,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     options.signal?.throwIfAborted()
     if (options.isCurrent?.() === false) return
     setAccessToken(result.data.accessToken)
-    queryClient.setQueryData(authQueryKeys.me(), { user: result.data.user })
+    queryClient.setQueryData(authQueryKeys.me(), {
+      user: result.data.user,
+      externalIdentityProvider: provider,
+    })
   }, [api, queryClient, setAccessToken])
 
   const authenticateTelegram = useCallback((initData: string) => authenticateHost('telegram', initData), [authenticateHost])
@@ -161,7 +164,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const approveBrowserLink = useCallback((id: string, initData: string) => api.approveBrowserLink(id, initData).then(() => undefined), [api])
   const redeemBrowserLink = useCallback(async (id: string) => {
     const data = await api.redeemBrowserLink(id)
-    queryClient.setQueryData(authQueryKeys.me(), { user: data.user })
+    queryClient.setQueryData(authQueryKeys.me(), { user: data.user, externalIdentityProvider: 'max' })
   }, [api, queryClient])
 
   const requestPasswordReset = useCallback(
@@ -210,6 +213,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user: meQuery.data?.user ?? null,
+      externalIdentityProvider: meQuery.data?.externalIdentityProvider,
       isBootstrapping,
       isAuthenticated: Boolean(meQuery.data?.user),
       sessionError,
@@ -228,7 +232,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport],
+    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

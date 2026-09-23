@@ -211,20 +211,24 @@ export function createAuthRoutes({ env, service, telegramService, maxService, br
     return c.body(null, 204)
   })
 
-  routes.openapi(meRoute, (c) => c.json({ user: userDtoFromPrincipal(c.var.user) }, 200))
+  routes.openapi(meRoute, (c) => c.json({
+    user: userDtoFromPrincipal(c.var.user),
+    externalIdentityProvider: c.var.user.externalIdentity?.provider ?? null,
+  }, 200))
 
   routes.openapi(browserLinkStartRoute, async (c) => {
     assertTrustedCookieOrigin(c, env)
     const result = await browserLinkService.start()
-    setBrowserLinkCookie(c, result.verifier, env)
+    setBrowserLinkCookie(c, result.challengeId, result.verifier, env)
     const { verifier: _verifier, ...response } = result
     noStore(c)
     return c.json(response, 200)
   })
 
   routes.openapi(browserLinkStatusRoute, async (c) => {
+    const challengeId = c.req.valid('param').id
     const result = await browserLinkService.getStatus(
-      c.req.valid('param').id,
+      challengeId,
       getBrowserLinkCookie(c),
     )
     if (!result) throw new AppError(401, 'UNAUTHORIZED', 'Challenge verifier is required')
@@ -246,13 +250,14 @@ export function createAuthRoutes({ env, service, telegramService, maxService, br
 
   routes.openapi(browserLinkRedeemRoute, async (c) => {
     assertTrustedCookieOrigin(c, env)
+    const challengeId = c.req.valid('param').id
     const result = await executeAuth(() => browserLinkService.redeem(
-      c.req.valid('param').id,
+      challengeId,
       getBrowserLinkCookie(c),
       requestMetadata(c, env),
     ))
     setRefreshCookie(c, result.refreshTokenToSet, env)
-    deleteBrowserLinkCookie(c, env)
+    deleteBrowserLinkCookie(c, challengeId, env)
     const { refreshTokenToSet: _refreshTokenToSet, ...response } = result
     noStore(c)
     return c.json(response, 200)
@@ -311,20 +316,25 @@ function deleteRefreshCookie(c: Context, env: AppEnv) {
   })
 }
 
-function setBrowserLinkCookie(c: Context, verifier: string, env: AppEnv) {
+function setBrowserLinkCookie(c: Context, challengeId: string, verifier: string, env: AppEnv) {
   setCookie(c, browserLinkCookieName, verifier, {
     httpOnly: true,
     maxAge: 5 * 60,
-    path: '/api/v1/auth/browser-link',
+    path: browserLinkCookiePath(challengeId),
     secure: env.COOKIE_SECURE,
     sameSite: env.COOKIE_SECURE ? 'None' : 'Lax',
   })
 }
 
-function deleteBrowserLinkCookie(c: Context, env: AppEnv) {
+function deleteBrowserLinkCookie(c: Context, challengeId: string, env: AppEnv) {
   deleteCookie(c, browserLinkCookieName, {
-    path: '/api/v1/auth/browser-link',
+    path: browserLinkCookiePath(challengeId),
     secure: env.COOKIE_SECURE,
     sameSite: env.COOKIE_SECURE ? 'None' : 'Lax',
   })
+}
+
+function browserLinkCookiePath(challengeId: string) {
+  const validChallengeId = browserLinkChallengeParamsSchema.parse({ id: challengeId }).id
+  return `/api/v1/auth/browser-link/${validChallengeId}`
 }

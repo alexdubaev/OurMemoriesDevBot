@@ -114,6 +114,9 @@ function AppContent({ hostBridge }: AppProps) {
       </main>
     )
   }
+  if (hostBridge.kind === 'browser' && (auth.externalIdentityProvider !== 'max' || auth.sessionError)) {
+    return <BrowserLinkLogin style={style} />
+  }
   if (hostBridge.kind === 'max' && maxBrowserChallengeId && initData && hostAuthError) {
     return <MaxBrowserLinkAuthFailure onRetry={resetHostAuth} style={style} />
   }

@@ -6,11 +6,13 @@ import type {
   UserDto,
   BrowserLinkStartResponse,
   BrowserLinkStatusResponse,
+  MeResponse,
 } from '@web-app-demo/contracts'
 import { createContext } from 'react'
 import type { AuthenticatedTransport } from '@/platform/api'
 
 export type HostAuthProvider = 'max' | 'telegram'
+export type ExternalIdentityProvider = NonNullable<MeResponse['externalIdentityProvider']>
 
 export type HostAuthAttemptOptions = {
   signal?: AbortSignal
@@ -19,6 +21,7 @@ export type HostAuthAttemptOptions = {
 
 export type AuthContextValue = {
   user: UserDto | null
+  externalIdentityProvider: MeResponse['externalIdentityProvider']
   /**
    * True while the session is still unknown: the cookie refresh has not answered yet, or it
    * restored an access token whose `/api/v1/auth/me` load is still pending. Guards render the

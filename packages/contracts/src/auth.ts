@@ -114,6 +114,7 @@ export const tokenRefreshResponseSchema = cookieRefreshResponseSchema.extend({
 
 export const meResponseSchema = z.object({
   user: userSchema,
+  externalIdentityProvider: z.enum(['max', 'telegram']).nullable().optional(),
 })
 
 export type UserDto = z.infer<typeof userSchema>
