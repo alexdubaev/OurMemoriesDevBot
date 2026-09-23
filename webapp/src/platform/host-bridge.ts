@@ -54,7 +54,12 @@ export function createHostBridge(
 
 function hasTelegramWebApp(host: unknown) {
   if (!isRecord(host) || !isRecord(host.Telegram)) return false
-  return isRecord(host.Telegram.WebApp)
+  const webApp = host.Telegram.WebApp
+  if (!isRecord(webApp)) return false
+
+  // The Telegram SDK also exposes an empty WebApp object when it is loaded in an
+  // ordinary browser. Only a real Telegram Mini App launch has signed initData.
+  return typeof webApp.initData === 'string' && webApp.initData.trim().length > 0
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
