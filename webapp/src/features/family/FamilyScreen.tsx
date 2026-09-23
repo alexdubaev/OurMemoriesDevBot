@@ -150,7 +150,7 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'viewer' ? 'viewer' : 'full'} />
+      <BottomNavigation appearance="memoly" active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }

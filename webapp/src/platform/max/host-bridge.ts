@@ -164,6 +164,21 @@ export function shouldShowMaxRuntimeDiagnostic(hostKind: HostBridge['kind'], hos
   return hostKind === 'max' && isMaxRuntimeDiagnosticLaunch(host)
 }
 
+/** Returns only the validated browser pairing challenge carried by signed MAX launch data. */
+export function maxBrowserLinkChallengeId(host: unknown): string | null {
+  if (!isMeaningfulMaxWebApp(host)) return null
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  const signed = startParamResult(rawInitData(webApp))
+  const match = signed.value?.match(/^browser_(\d{24})$/)
+  return signed.present && match ? match[1] ?? null : null
+}
+
+export function createMaxBrowserLink(startParam: string, username: string | undefined) {
+  if (!/^browser_\d{24}$/.test(startParam) || !isValidMaxBotUsername(username)) return null
+  return `https://max.ru/${username}?startapp=${encodeURIComponent(startParam)}`
+}
+
 function rawInitData(webApp: MaxWebApp | null) {
   return typeof webApp?.initData === 'string' && webApp.initData.length > 0
     ? webApp.initData

@@ -156,6 +156,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const authenticateTelegram = useCallback((initData: string) => authenticateHost('telegram', initData), [authenticateHost])
   const authenticateMax = useCallback((initData: string) => authenticateHost('max', initData), [authenticateHost])
 
+  const startBrowserLink = useCallback(() => api.startBrowserLink(), [api])
+  const browserLinkStatus = useCallback((id: string) => api.browserLinkStatus(id), [api])
+  const approveBrowserLink = useCallback((id: string, initData: string) => api.approveBrowserLink(id, initData).then(() => undefined), [api])
+  const redeemBrowserLink = useCallback(async (id: string) => {
+    const data = await api.redeemBrowserLink(id)
+    queryClient.setQueryData(authQueryKeys.me(), { user: data.user })
+  }, [api, queryClient])
+
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {
       await api.requestPasswordReset(input)
@@ -210,13 +218,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       authenticateHost,
       authenticateTelegram,
       authenticateMax,
+      startBrowserLink,
+      browserLinkStatus,
+      approveBrowserLink,
+      redeemBrowserLink,
       register,
       login,
       logout,
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [authenticateHost, authenticateMax, authenticateTelegram, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, register, requestPasswordReset, retrySession, sessionError, transport],
+    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

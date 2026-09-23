@@ -11,13 +11,14 @@ export type HostAuthHandoffState = {
   isAuthBootstrapping: boolean
   isAuthPending: boolean
   isHostAvailable: boolean
+  forceAuth?: boolean
 }
 
 export function shouldStartHostAuth(state: Omit<HostAuthHandoffState, 'isAuthPending'>) {
   return state.isHostAvailable
     && state.hasInitData
     && !state.isAuthBootstrapping
-    && (!state.isAuthenticated || state.hasPreviousAuthAttempt === true)
+    && (state.forceAuth === true || !state.isAuthenticated || state.hasPreviousAuthAttempt === true)
     && !state.hasStartedAuth
 }
 
@@ -34,9 +35,10 @@ type HostAuthHandoffOptions = {
   provider: HostAuthProvider | null
   initData: string | null
   isHostAvailable: boolean
+  forceAuth?: boolean
 }
 
-export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }: HostAuthHandoffOptions) {
+export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable, forceAuth = false }: HostAuthHandoffOptions) {
   const attemptedKey = useRef<string | null>(null)
   const activeAttempt = useRef<{ key: string; controller: AbortController } | null>(null)
   const committedAttemptKey = useRef<string | null>(null)
@@ -54,7 +56,8 @@ export function useHostAuthHandoff({ auth, provider, initData, isHostAvailable }
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: isHostAuthPending,
     isHostAvailable,
-  } : null, [auth, authAttemptKey, hasStartedHostAuth, initData, isHostAuthPending, isHostAvailable, provider, startedHostAuthKey])
+    forceAuth,
+  } : null, [auth, authAttemptKey, forceAuth, hasStartedHostAuth, initData, isHostAuthPending, isHostAvailable, provider, startedHostAuthKey])
 
   const invalidateAttempt = () => {
     activeAttempt.current?.controller.abort()

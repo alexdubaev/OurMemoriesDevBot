@@ -4,6 +4,8 @@ import type {
   PasswordResetRequest,
   RegisterRequest,
   UserDto,
+  BrowserLinkStartResponse,
+  BrowserLinkStatusResponse,
 } from '@web-app-demo/contracts'
 import { createContext } from 'react'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -30,6 +32,10 @@ export type AuthContextValue = {
   authenticateHost: (provider: HostAuthProvider, initData: string, options?: HostAuthAttemptOptions) => Promise<void>
   authenticateTelegram: (initData: string) => Promise<void>
   authenticateMax: (initData: string) => Promise<void>
+  startBrowserLink: () => Promise<BrowserLinkStartResponse>
+  browserLinkStatus: (id: string) => Promise<BrowserLinkStatusResponse>
+  approveBrowserLink: (id: string, initData: string) => Promise<void>
+  redeemBrowserLink: (id: string) => Promise<void>
   register: (input: RegisterRequest) => Promise<void>
   login: (input: LoginRequest) => Promise<void>
   logout: () => Promise<void>

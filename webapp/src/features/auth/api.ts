@@ -3,6 +3,11 @@ import {
   cookieLogoutRequestSchema,
   cookieRefreshRequestSchema,
   cookieRefreshResponseSchema,
+  browserLinkApproveRequestSchema,
+  browserLinkApproveResponseSchema,
+  browserLinkChallengeParamsSchema,
+  browserLinkStartResponseSchema,
+  browserLinkStatusResponseSchema,
   loginRequestSchema,
   maxAuthRequestSchema,
   meResponseSchema,
@@ -13,6 +18,8 @@ import {
   telegramAuthRequestSchema,
   type CookieAuthResponse,
   type CookieRefreshResponse,
+  type BrowserLinkStartResponse,
+  type BrowserLinkStatusResponse,
   type LoginRequest,
   type MeResponse,
   type PasswordResetConfirmRequest,
@@ -158,7 +165,7 @@ export class AuthApi {
       try {
         // Every caller that hit a 401 waits on this one refresh, so it deliberately runs without
         // any caller's abort signal: one cancelled query must not fail the others' retry.
-        return await this.http.request('/api/auth/refresh', cookieRefreshResponseSchema, {
+        return await this.http.request('/api/v1/auth/refresh', cookieRefreshResponseSchema, {
           method: 'POST',
           body: payload,
         })
@@ -178,7 +185,7 @@ export class AuthApi {
   }
 
   me(options: { signal?: AbortSignal } = {}): Promise<MeResponse> {
-    return this.requestAuthenticated('/api/auth/me', meResponseSchema, options)
+    return this.requestAuthenticated('/api/v1/auth/me', meResponseSchema, options)
   }
 
   logout(): Promise<BrowserSessionTransition<undefined> | null> {
@@ -186,13 +193,46 @@ export class AuthApi {
       if (!this.isSessionEpochCurrent(this.sessionEpoch)) return null
 
       const payload = cookieLogoutRequestSchema.parse({})
-      await this.http.raw('/api/auth/logout', {
+      await this.http.raw('/api/v1/auth/logout', {
         method: 'POST',
         body: payload,
       })
       const sessionEvent = publishBrowserSessionState('cleared')
       this.options.setAccessToken(null)
       return { data: undefined, sessionEpoch: sessionEvent.epoch }
+    })
+  }
+
+  startBrowserLink(): Promise<BrowserLinkStartResponse> {
+    return this.http.request('/api/v1/auth/browser-link/start', browserLinkStartResponseSchema, {
+      method: 'POST',
+      body: {},
+    })
+  }
+
+  browserLinkStatus(id: string): Promise<BrowserLinkStatusResponse> {
+    const challengeId = browserLinkChallengeParamsSchema.parse({ id }).id
+    return this.http.request(`/api/v1/auth/browser-link/${challengeId}/status`, browserLinkStatusResponseSchema)
+  }
+
+  approveBrowserLink(id: string, initData: string) {
+    const challengeId = browserLinkChallengeParamsSchema.parse({ id }).id
+    const payload = browserLinkApproveRequestSchema.parse({ initData, approved: true })
+    return this.requestAuthenticated(`/api/v1/auth/browser-link/${challengeId}/approve`, browserLinkApproveResponseSchema, {
+      method: 'POST',
+      body: payload,
+    })
+  }
+
+  redeemBrowserLink(id: string): Promise<CookieAuthResponse> {
+    const challengeId = browserLinkChallengeParamsSchema.parse({ id }).id
+    return this.authCoordinator(async () => {
+      const data = await this.http.request(`/api/v1/auth/browser-link/${challengeId}/redeem`, cookieAuthResponseSchema, {
+        method: 'POST',
+      })
+      this.options.setAccessToken(data.accessToken)
+      publishBrowserSessionState('authenticated')
+      return data
     })
   }
 

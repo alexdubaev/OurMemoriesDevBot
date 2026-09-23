@@ -17,7 +17,8 @@ type TelegramWebApp = {
 type BrowserHost = {
   Telegram?: unknown
   history?: { back?: unknown }
-  location?: { search?: unknown }
+  location?: { href?: unknown; origin?: unknown; search?: unknown }
+  open?: unknown
 }
 
 const botUrl = 'https://t.me/OurMemoriesDevBot'
@@ -101,7 +102,9 @@ export function createTelegramHostBridge(host: unknown): HostBridge {
 
 export function createBrowserDevHostBridge(
   options: BrowserDevHostOptions = {},
+  host: unknown = typeof window === 'undefined' ? undefined : window,
 ): HostBridge {
+  const browserHost = isRecord(host) ? host as BrowserHost : null
   const safeInsets = insets(options.insets)
   const metadata: TelegramHostMetadata = {
     version: 'browser-dev',
@@ -112,17 +115,22 @@ export function createBrowserDevHostBridge(
   }
   return {
     kind: 'browser',
-    isAvailable: false,
+    isAvailable: true,
     initData: () => null,
     rawAuthData: () => null,
-    inviteToken: () => null,
-    inviteLink: () => null,
+    inviteToken: () => inviteTokenFromBrowserSearch(browserHost?.location?.search),
+    inviteLink: (rawToken) => createBrowserInviteLink(rawToken, browserHost?.location?.origin),
     metadata: () => metadata,
     ready: () => undefined,
     close: () => undefined,
     back: () => undefined,
     onBack: () => () => undefined,
-    openBot: () => undefined,
+    openBot: () => {
+      if (!isValidMaxBotUsername(options.maxBotUsername)) return
+      const url = `https://max.ru/${options.maxBotUsername}`
+      if (typeof browserHost?.open === 'function') browserHost.open(url, '_blank', 'noopener,noreferrer')
+      else if (browserHost?.location && typeof browserHost.location.href === 'string') browserHost.location.href = url
+    },
     openTelegramVideo: () => false,
     openInvite: () => undefined,
     getInsets: () => safeInsets,
@@ -175,6 +183,12 @@ function inviteTokenFromSearch(search: unknown) {
   return inviteTokenFromStartParam(new URLSearchParams(search).get('tgWebAppStartParam'))
 }
 
+function inviteTokenFromBrowserSearch(search: unknown) {
+  if (typeof search !== 'string') return null
+  const token = new URLSearchParams(search).get('invite')
+  return /^[A-Za-z0-9_-]{32,128}$/.test(token ?? '') ? token : null
+}
+
 function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
@@ -186,6 +200,21 @@ function createTelegramInviteLink(rawToken: string) {
   const payload = `invite_${rawToken}`
   if (payload.length > 512) return null
   return `${botUrl}?startapp=${payload}`
+}
+
+function createBrowserInviteLink(rawToken: string, origin: unknown) {
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(rawToken) || typeof origin !== 'string') return null
+  try {
+    const url = new URL('/', origin)
+    url.searchParams.set('invite', rawToken)
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+function isValidMaxBotUsername(username: string | undefined) {
+  return typeof username === 'string' && /^[A-Za-z0-9_]{5,32}$/.test(username)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
