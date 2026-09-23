@@ -144,7 +144,7 @@ describe('Telegram HostBridge', () => {
       colorScheme: 'dark',
       insets: { top: 20, right: 1, bottom: 12, left: 1 },
     })
-    expect(bridge.isAvailable).toBe(false)
+    expect(bridge.isAvailable).toBe(true)
     expect(bridge.initData()).toBeNull()
     expect(bridge.metadata()).toEqual({
       version: 'browser-dev',
