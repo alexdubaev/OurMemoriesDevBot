@@ -110,7 +110,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
   await page.getByRole('button', { name: 'Редактировать профиль' }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
-  await page.getByRole('button', { name: 'Отмена' }).click()
+  await page.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
   await page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await page.getByRole('button', { name: 'Сменить фото' }).click()
@@ -389,7 +389,7 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
   await owner.context.close()
 })
 
-test('child profile editor preserves horizontal host insets at the mobile viewport', async ({ page }) => {
+test('child profile editor preserves horizontal host insets at the mobile viewport', async ({ page }, testInfo) => {
   const owner = await createCompletedOwner(page, 81000024)
   await owner.page.setViewportSize({ width: 390, height: 844 })
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
@@ -397,7 +397,7 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
   await expect(profile).toBeVisible()
   await profile.getByRole('button', { name: 'Редактировать профиль' }).click()
 
-  const editor = owner.page.locator('main.family-screen.child-screen.child-edit-screen')
+  const editor = owner.page.locator('main.family-screen.child-screen.child-edit-v2-screen')
   await expect(editor).toBeVisible()
   const previousInsets = await editor.evaluate((element) => ({
     left: element.style.getPropertyValue('--host-inset-left'),
@@ -411,15 +411,16 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
 
     const layout = await editor.evaluate((element) => {
       const computed = getComputedStyle(element)
+      const shell = getComputedStyle(element.querySelector('.child-edit-v2-shell')!)
       return {
-        paddingLeft: computed.paddingLeft,
-        paddingRight: computed.paddingRight,
+        paddingLeft: `${parseFloat(computed.paddingLeft) + parseFloat(shell.paddingLeft)}px`,
+        paddingRight: `${parseFloat(computed.paddingRight) + parseFloat(shell.paddingRight)}px`,
         scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         viewportWidth: window.innerWidth,
       }
     })
-    expect(layout.paddingLeft).toBe('26px')
-    expect(layout.paddingRight).toBe('34px')
+    expect(layout.paddingLeft).toBe('40px')
+    expect(layout.paddingRight).toBe('48px')
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth)
     await owner.page.screenshot({ path: resolve('e2e/.artifacts/child-editor-390.png'), animations: 'disabled' })
   } finally {
@@ -431,7 +432,20 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
     }, previousInsets)
   }
 
-  await owner.page.getByRole('button', { name: 'Отмена' }).click()
+  await editor.evaluate((element) => element.style.setProperty('--host-inset-top', '0px'))
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-editor-${width}.png`), animations: 'disabled' })
+  }
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.evaluate((value) => document.documentElement.setAttribute('data-memoly-theme', value), theme)
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-editor-${theme}.png`), animations: 'disabled' })
+  }
+
+  await owner.page.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
   await expect(profile).toBeVisible()
   await owner.context.close()
 })

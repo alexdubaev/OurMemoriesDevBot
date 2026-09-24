@@ -8,6 +8,7 @@ import assetManifest from '../../assets/manifest.json'
 import { resolveWebpIconSource } from '../src/components/webp-icon-manifest'
 
 const requiredNames = [
+  'calendar',
   'chevron',
   'clock',
   'close',
@@ -29,6 +30,7 @@ const requiredNames = [
   'video',
   'voice',
   'warning',
+  'user',
 ] as const
 
 const publicIcons = path.resolve(import.meta.dir, '../public/assets/icons')
