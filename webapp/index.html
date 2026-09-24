@@ -22,9 +22,18 @@
           return markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=`).test(hash))
         }
 
-        const hasPersistedMarker = (markers) => {
+        const hasPersistedMarker = (markers, serializedKey = null) => {
           try {
             const storage = window.sessionStorage
+            if (serializedKey) {
+              const serialized = storage.getItem(serializedKey)
+              if (serialized === null) return false
+              const persisted = JSON.parse(serialized)
+              return persisted !== null
+                && typeof persisted === 'object'
+                && !Array.isArray(persisted)
+                && markers.some((marker) => Object.prototype.hasOwnProperty.call(persisted, marker))
+            }
             return markers.some((marker) => storage.getItem(marker) !== null)
           } catch {
             return false
@@ -51,7 +60,8 @@
           && telegramWebApp.initData.trim().length > 0
 
         const maxLaunch = hasFragmentMarker(maxMarkers) || hasPersistedMarker(maxMarkers)
-        const telegramLaunch = hasFragmentMarker(telegramMarkers) || hasPersistedMarker(telegramMarkers)
+        const telegramLaunch = hasFragmentMarker(telegramMarkers)
+          || hasPersistedMarker(telegramMarkers, '__telegram__initParams')
         const sdk = maxLaunch || meaningfulMax
           ? maxSdk
           : telegramLaunch || meaningfulTelegram
