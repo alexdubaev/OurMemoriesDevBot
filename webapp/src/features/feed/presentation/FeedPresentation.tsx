@@ -53,7 +53,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
         <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
         <div aria-label="Фильтры ленты" className="filters-wrap surface-inset" data-slot="memoly-filter-rail" role="group">
           <div className="filters">
-            {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} className={`filter${item.value === props.activeFilter ? ' active' : ''}`} data-filter={item.value} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
+            {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} className={`filter ds-chip${item.value === props.activeFilter ? ' active' : ''}`} data-filter={item.value} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
           </div>
         </div>
         <div className="feed-content">{children}</div>

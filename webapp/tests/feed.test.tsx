@@ -6,8 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
+import { EmptyState, InlineError } from '../src/features/feed/components'
 import { FeedMemoryCard } from '../src/features/memoly-ui/FeedPresentation'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory } from '../src/features/feed/api'
@@ -118,6 +120,47 @@ test('a next-page error keeps already displayed memories on screen', () => {
   })
 
   expect(renderFeed(queryClient)).toContain('Первое слово')
+})
+
+test('new-memory refresh keeps its notice and first id until refetch succeeds', async () => {
+  const first = { current: memoryId }
+  let cleared = 0
+  const clear = () => { cleared += 1 }
+  const failed = await refreshFromTop(async () => ({ isError: true, data: { pages: [{ items: [photoMemory] }] } }), first, () => true, clear)
+  expect(failed).toBe(false)
+  expect(first.current).toBe(memoryId)
+  expect(cleared).toBe(0)
+  const stale = await refreshFromTop(async () => ({ data: { pages: [{ items: [photoMemory] }] } }), first, () => false, clear)
+  expect(stale).toBe(false)
+  expect(first.current).toBe(memoryId)
+  const succeeded = await refreshFromTop(async () => ({ isError: false, data: { pages: [{ items: [photoMemory] }] } }), first, () => true, clear)
+  expect(succeeded).toBe(true)
+  expect(first.current).toBe(photoMemory.id)
+  expect(cleared).toBe(1)
+})
+
+test('an empty filtered feed offers a reset without presenting a nonfunctional bot action', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient.setQueryData(feedQueryKeys.list(familyId, 'photo'), {
+    pages: [{ items: [], nextCursor: null }], pageParams: [null],
+  })
+  const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(FeedPage, {
+    childName: 'Лиза', childSubtitle: '2 года', familyId, familyTimezone: 'Europe/Moscow', filter: 'photo',
+    hostBridge, insets: { top: 0, right: 0, bottom: 0, left: 0 }, onFamily: () => undefined,
+    onFilterChange: () => undefined, onAccessLost: () => undefined, role: 'full', transport,
+  })))
+  expect(markup).toContain('data-slot="feed-filter-empty"')
+  expect(markup).toContain('Показать все')
+  expect(markup).not.toContain('Открыть бота')
+})
+
+test('feed empty and page-error states expose only real actions and distinct retry copy', () => {
+  const empty = renderToStaticMarkup(createElement(EmptyState, { mode: 'full' }))
+  expect(empty).not.toContain('Открыть бота')
+  const first = renderToStaticMarkup(createElement(InlineError, { onRetry: () => undefined }))
+  const next = renderToStaticMarkup(createElement(InlineError, { nextPage: true, onRetry: () => undefined }))
+  expect(first).toContain('Не удалось обновить ленту')
+  expect(next).toContain('Не удалось загрузить ещё')
 })
 
 test('real memory DTOs map to explicit memoLy card layouts without demo media', () => {
@@ -429,7 +472,7 @@ test('a Telegram video without a poster preserves the safe fallback', () => {
   expect(markup).toContain('Длительность уточняется')
 })
 
-test('a private photo uses its intrinsic dimensions without a fixed crop', () => {
+test('a private feed photo presents portrait, landscape, and square sources in the canonical frame', () => {
   for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
     const markup = renderToStaticMarkup(createElement(PhotoImage, {
       alt: 'Воспоминание',
@@ -440,10 +483,8 @@ test('a private photo uses its intrinsic dimensions without a fixed crop', () =>
 
     expect(markup).toContain(`width="${width}"`)
     expect(markup).toContain(`height="${height}"`)
-    expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
-    expect(markup).toContain('object-contain')
-    expect(markup).not.toContain('object-cover')
-    expect(markup).not.toContain('aspect-[4/3]')
+    expect(markup).toContain('aspect-video')
+    expect(markup).toContain('object-cover')
   }
 })
 
@@ -736,6 +777,7 @@ test('the feed presentation keeps the approved filter and memory composition', (
   expect(markup).toContain('class="filters-wrap surface-inset"')
   expect(markup).toContain('class="filters"')
   expect(markup.match(/class="filter(?: |")/g)).toHaveLength(5)
+  expect(markup.match(/class="filter ds-chip/g)).toHaveLength(5)
   expect(markup).toContain('class="feed-section"')
   expect(markup).toContain('class="date-heading"')
   expect(markup).toContain('class="date-dot"')
