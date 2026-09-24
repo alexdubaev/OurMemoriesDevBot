@@ -10,9 +10,43 @@
     <meta name="theme-color" content="#FBF8F5" />
     <meta name="application-name" content="memoLy" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <script src="https://st.max.ru/js/max-web-app.js"></script>
+    <title>memoLy</title>
+  </head>
+  <body>
+    <div id="root">
+      <p role="status" aria-live="polite" style="margin: 0; min-height: 100vh; padding: 24px; box-sizing: border-box; color: #1f1f1f; background: #fff; font: 16px/1.5 system-ui, sans-serif;">
+        Загрузка memoLy…
+      </p>
+    </div>
     <script>
       (() => {
+        const maxSdk = 'https://st.max.ru/js/max-web-app.js'
+        const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
+        const maxMarkers = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
+        const telegramMarkers = ['tgWebAppData', 'tgWebAppPlatform', 'tgWebAppVersion']
+
+        const hasMarker = (value, markers) => {
+          if (typeof value !== 'string') return false
+          return markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=[^&#]+`).test(value))
+        }
+
+        const navigationHash = (() => {
+          try {
+            const entries = window.performance?.getEntriesByType?.('navigation')
+            const name = entries?.[0]?.name
+            if (typeof name !== 'string') return ''
+            const hashStart = name.indexOf('#')
+            return hashStart >= 0 ? name.slice(hashStart) : ''
+          } catch {
+            return ''
+          }
+        })()
+        const currentHash = typeof window.location?.hash === 'string' ? window.location.hash : ''
+        const currentMaxLaunch = hasMarker(currentHash, maxMarkers)
+        const currentTelegramLaunch = hasMarker(currentHash, telegramMarkers)
+        const navigationMaxLaunch = hasMarker(navigationHash, maxMarkers)
+        const navigationTelegramLaunch = hasMarker(navigationHash, telegramMarkers)
+
         const webApp = window.WebApp
         const meaningfulMax = webApp !== null
           && typeof webApp === 'object'
@@ -25,15 +59,35 @@
             || typeof webApp.platform === 'string'
             || typeof webApp.colorScheme === 'string')
 
-        if (!meaningfulMax) {
-          document.write('<script src="https://telegram.org/js/telegram-web-app.js?63"><\/script>')
-        }
+        const telegramWebApp = window.Telegram?.WebApp
+        const meaningfulTelegram = telegramWebApp !== null
+          && typeof telegramWebApp === 'object'
+          && !Array.isArray(telegramWebApp)
+          && typeof telegramWebApp.initData === 'string'
+          && telegramWebApp.initData.trim().length > 0
+
+        const host = currentMaxLaunch
+          ? 'max'
+          : currentTelegramLaunch
+            ? 'telegram'
+            : meaningfulMax
+              ? 'max'
+              : meaningfulTelegram
+                ? 'telegram'
+                : navigationMaxLaunch
+                  ? 'max'
+                  : navigationTelegramLaunch
+                    ? 'telegram'
+                    : null
+        const sdk = host === 'max' && !meaningfulMax
+          ? maxSdk
+          : host === 'telegram' && !meaningfulTelegram
+            ? telegramSdk
+            : null
+
+        if (sdk) document.write(`<script src="${sdk}"><\/script>`)
       })()
     </script>
-    <title>memoLy</title>
-  </head>
-  <body>
-    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
