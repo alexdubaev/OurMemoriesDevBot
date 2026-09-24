@@ -287,6 +287,55 @@ migration_status() {
 	compose run --rm --no-deps backend bunx prisma migrate status
 }
 
+validate_database_target() {
+	local backend_target postgres_database postgres_user
+	backend_target=$(compose run --rm --no-deps backend bun -e 'const raw = process.env.DATABASE_URL ?? ""; let url; try { url = new URL(raw) } catch { process.exit(2) }; const fail = () => process.exit(2); if (!(["postgres:", "postgresql:"].includes(url.protocol) && url.hostname === "postgres" && (url.port || "5432") === "5432" && url.hash === "")) fail(); const params = [...url.searchParams.entries()]; if (params.length > 1 || (params.length === 1 && (params[0][0] !== "schema" || params[0][1] !== "public"))) fail(); let database; let username; try { database = decodeURIComponent(url.pathname.replace(/^\//, "")); username = decodeURIComponent(url.username) } catch { fail() }; if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(database) || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(username)) fail(); process.stdout.write(`${url.hostname}|${url.port || "5432"}|${database}|${username}`)' 2>/dev/null) || die "cannot inspect backend database target"
+	postgres_database=$(compose exec -T postgres sh -c 'printf "%s" "$POSTGRES_DB"' 2>/dev/null) || die "cannot inspect Compose PostgreSQL target"
+	postgres_user=$(compose exec -T postgres sh -c 'printf "%s" "$POSTGRES_USER"' 2>/dev/null) || die "cannot inspect Compose PostgreSQL user"
+	[ "$backend_target" = "postgres|5432|$postgres_database|$postgres_user" ] || die "backend DATABASE_URL does not target the Compose postgres database; migration was not attempted"
+}
+
+backup_database() {
+	local timestamp dump_file temp_file
+	install -d -m 0700 "$SERVER_ROOT/backups" || die "cannot create database backup directory"
+	chmod 0700 "$SERVER_ROOT/backups" || die "cannot secure database backup directory"
+	timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+	dump_file="$SERVER_ROOT/backups/postgres-${MEMOLY_PRODUCT_SHA}-${timestamp}.dump"
+	temp_file="${dump_file}.tmp.$$"
+	[ ! -e "$dump_file" ] && [ ! -L "$dump_file" ] || die "database backup already exists: $(basename "$dump_file")"
+	install -m 0600 /dev/null "$temp_file" || die "cannot create database backup file"
+	if ! compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --host=127.0.0.1 --username="$POSTGRES_USER" --format=custom --file=- --dbname="$POSTGRES_DB"' >"$temp_file" 2>/dev/null; then
+		rm -f -- "$temp_file"
+		die "database backup failed; migration was not attempted"
+	fi
+	chmod 0600 "$temp_file" || {
+		rm -f -- "$temp_file"
+		die "cannot secure database backup file"
+	}
+	if ! compose exec -T postgres pg_restore --list - <"$temp_file" >/dev/null 2>&1; then
+		rm -f -- "$temp_file"
+		die "database backup validation failed; migration was not attempted"
+	fi
+	mv -- "$temp_file" "$dump_file" || {
+		rm -f -- "$temp_file"
+		die "cannot finalize database backup file; migration was not attempted"
+	}
+	printf 'Database backup created and validated: %s\n' "$(basename "$dump_file")"
+}
+
+migrate() {
+	preflight
+	validate_database_target
+	backup_database
+	if ! compose run --rm --no-deps backend bun run db:deploy >/dev/null 2>&1; then
+		die "database migration failed; application services were not promoted"
+	fi
+	if ! migration_status >/dev/null 2>&1; then
+		die "database migration status failed; application services were not promoted"
+	fi
+	printf 'Database migration complete. Application services were not promoted.\n'
+}
+
 promote_backend() {
 	compose up -d --no-deps --force-recreate backend
 }
@@ -390,7 +439,7 @@ deploy() {
 
 usage() {
 	cat <<'EOF'
-Usage: redeploy.sh {preflight|deploy|rollback|migration-status}
+Usage: redeploy.sh {preflight|migrate|deploy|rollback|migration-status}
 
 Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
 GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
@@ -407,6 +456,7 @@ main() {
 		deploy) deploy ;;
 		rollback) rollback ;;
 		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
+		migrate) require_command docker; migrate ;;
 		reload-gateway) die "reload-gateway is disabled; use deploy so static readiness gates edge activation" ;;
 		*) usage; exit 2 ;;
 	esac

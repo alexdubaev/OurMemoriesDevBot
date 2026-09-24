@@ -134,6 +134,44 @@ If any critical check fails, stop promotion and use the prepared rollback:
 deploy/selectel/redeploy.sh rollback
 ```
 
+## One-shot database migration
+
+When a release contains a new Prisma migration, run the guarded migration step
+before promotion. It takes the same deployment lock, runs the full preflight,
+and requires both immutable image tags to equal `MEMOLY_PRODUCT_SHA`:
+
+```sh
+cd /opt/memoly/app
+export MEMOLY_PRODUCT_SHA='0123456789abcdef0123456789abcdef01234567'
+export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_PUBLIC_HOST='app.memoly.ru'
+deploy/selectel/redeploy.sh migrate
+```
+
+`migrate` first runs `preflight` and verifies that the backend's `DATABASE_URL`
+uses protocol `postgres` or `postgresql`, host `postgres`, effective port
+`5432`, and the same database and user named by `POSTGRES_DB` and
+`POSTGRES_USER`. It permits at most one `schema=public` query parameter and
+rejects fragments or query overrides such as `host` or `port`. A mismatched
+target stops before the backup. Before opening a migration job it creates a
+fresh PostgreSQL custom-format dump at
+`/opt/memoly/backups/postgres-<SHA>-<UTC timestamp>.dump`, sets the directory
+to mode `0700` and the dump to mode `0600`, then validates the archive with
+`pg_restore --list`. A backup or validation failure stops the command and the
+database migration is not attempted. The dump is produced through the
+running Compose `postgres` service; database contents and connection secrets
+are never printed.
+
+After a validated backup, the script runs the repository's guarded
+`bun run db:deploy` in a one-shot `docker compose run --rm --no-deps backend`
+container using the target immutable backend image. It then verifies
+`prisma migrate status` with that image. It never recreates backend, worker,
+scheduler or static and never reloads Caddy. Do not substitute `prisma db
+push`, direct SQL, or an ad-hoc migration command. Application promotion is a
+separate explicit `deploy` invocation after the migration result has been
+reviewed.
+
 Rollback promotes the configured previous backend/webapp tags through the same
 Compose project and readiness checks. It leaves both additive MAX migrations in
 place; database rollback is not part of application rollback.
