@@ -45,7 +45,7 @@ export function FamilyScreen({
   const [error, setError] = useState<Error | null>(null)
   const [inviteError, setInviteError] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string; inviteeDisplayName?: string } | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [usage, setUsage] = useState<{ usedBytes: number; quotaBytes: number | null } | null>(null)
   const [usageFailed, setUsageFailed] = useState(false)
@@ -123,7 +123,7 @@ export function FamilyScreen({
                 refresh: () => onRefresh({ failureMode: 'throw' }),
                 toUrl: createInviteLink,
               })
-              setInviteReady(result)
+              setInviteReady({ ...result, inviteeDisplayName: input.inviteeDisplayName })
               setCopyState('idle')
             } catch (reason) {
               setInviteError(true)
