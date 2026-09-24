@@ -66,19 +66,24 @@
           && typeof telegramWebApp.initData === 'string'
           && telegramWebApp.initData.trim().length > 0
 
-        const sdk = currentMaxLaunch
-          ? maxSdk
+        const host = currentMaxLaunch
+          ? 'max'
           : currentTelegramLaunch
-            ? telegramSdk
+            ? 'telegram'
             : meaningfulMax
-              ? maxSdk
+              ? 'max'
               : meaningfulTelegram
-                ? telegramSdk
+                ? 'telegram'
                 : navigationMaxLaunch
-                  ? maxSdk
+                  ? 'max'
                   : navigationTelegramLaunch
-                    ? telegramSdk
+                    ? 'telegram'
                     : null
+        const sdk = host === 'max' && !meaningfulMax
+          ? maxSdk
+          : host === 'telegram' && !meaningfulTelegram
+            ? telegramSdk
+            : null
 
         if (sdk) document.write(`<script src="${sdk}"><\/script>`)
       })()
