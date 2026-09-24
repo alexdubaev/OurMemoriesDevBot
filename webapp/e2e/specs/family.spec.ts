@@ -80,13 +80,13 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByText('Выберите вариант.')).toBeVisible()
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
-  await expect(page.getByText('Выберите фото', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Фотография ребёнка' })).toBeVisible()
   await expect(page.locator('[data-slot="child-photo-crop"]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Использовать это фото' })).toBeVisible()
   await expect(page.locator('img[alt="Предпросмотр кадрирования"]')).toHaveJSProperty('complete', true)
   await expect(page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
-  await page.getByRole('button', { name: 'Отмена' }).click()
+  await expect(page.getByRole('button', { name: 'Отменить кадрирование' })).toBeVisible()
+  await page.getByRole('button', { name: 'Отменить кадрирование' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).click()
   await expect(page.getByText('Добавьте фотографию ребёнка.')).toBeVisible()
   await page.locator('#child-avatar').setInputFiles(pngImage)
@@ -110,7 +110,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
   await page.getByRole('button', { name: 'Редактировать профиль' }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
-  await page.getByRole('button', { name: 'Отмена' }).click()
+  await page.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
   await page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await page.getByRole('button', { name: 'Сменить фото' }).click()
@@ -389,7 +389,7 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
   await owner.context.close()
 })
 
-test('child profile editor preserves horizontal host insets at the mobile viewport', async ({ page }) => {
+test('child profile editor preserves horizontal host insets at the mobile viewport', async ({ page }, testInfo) => {
   const owner = await createCompletedOwner(page, 81000024)
   await owner.page.setViewportSize({ width: 390, height: 844 })
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
@@ -397,7 +397,7 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
   await expect(profile).toBeVisible()
   await profile.getByRole('button', { name: 'Редактировать профиль' }).click()
 
-  const editor = owner.page.locator('main.family-screen.child-screen.child-edit-screen')
+  const editor = owner.page.locator('main.family-screen.child-screen.child-edit-v2-screen')
   await expect(editor).toBeVisible()
   const previousInsets = await editor.evaluate((element) => ({
     left: element.style.getPropertyValue('--host-inset-left'),
@@ -411,15 +411,16 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
 
     const layout = await editor.evaluate((element) => {
       const computed = getComputedStyle(element)
+      const shell = getComputedStyle(element.querySelector('.child-edit-v2-shell')!)
       return {
-        paddingLeft: computed.paddingLeft,
-        paddingRight: computed.paddingRight,
+        paddingLeft: `${parseFloat(computed.paddingLeft) + parseFloat(shell.paddingLeft)}px`,
+        paddingRight: `${parseFloat(computed.paddingRight) + parseFloat(shell.paddingRight)}px`,
         scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         viewportWidth: window.innerWidth,
       }
     })
-    expect(layout.paddingLeft).toBe('26px')
-    expect(layout.paddingRight).toBe('34px')
+    expect(layout.paddingLeft).toBe('40px')
+    expect(layout.paddingRight).toBe('48px')
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth)
     await owner.page.screenshot({ path: resolve('e2e/.artifacts/child-editor-390.png'), animations: 'disabled' })
   } finally {
@@ -431,7 +432,20 @@ test('child profile editor preserves horizontal host insets at the mobile viewpo
     }, previousInsets)
   }
 
-  await owner.page.getByRole('button', { name: 'Отмена' }).click()
+  await editor.evaluate((element) => element.style.setProperty('--host-inset-top', '0px'))
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-editor-${width}.png`), animations: 'disabled' })
+  }
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.evaluate((value) => document.documentElement.setAttribute('data-memoly-theme', value), theme)
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-editor-${theme}.png`), animations: 'disabled' })
+  }
+
+  await owner.page.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
   await expect(profile).toBeVisible()
   await owner.context.close()
 })
@@ -484,7 +498,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
   await owner.context.close()
 })
 
-test('changing the child photo uses a focused confirmation flow and preserves profile details', async ({ page }) => {
+test('changing the child photo uses a focused confirmation flow and preserves profile details', async ({ page }, testInfo) => {
   const childUpdates: Array<{ method: string; body: Record<string, unknown> }> = []
   page.on('request', (request) => {
     const path = new URL(request.url()).pathname
@@ -513,11 +527,34 @@ test('changing the child photo uses a focused confirmation flow and preserves pr
   await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange)
   await owner.page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(owner.page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
+  const cropScreen = owner.page.locator('main.child-photo-v2-screen')
+  await expect(cropScreen.locator('.child-crop-v2-ring')).toBeVisible()
+  await expect(cropScreen.getByText('Выбрать другое фото')).toBeVisible()
+  await cropScreen.evaluate((element) => element.style.setProperty('--host-inset-top', '0px'))
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expect(cropScreen.getByRole('button', { name: 'Использовать это фото' })).toBeInViewport()
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-photo-crop-${width}.png`), animations: 'disabled' })
+  }
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.evaluate((value) => document.documentElement.setAttribute('data-memoly-theme', value), theme)
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-photo-crop-${theme}.png`), animations: 'disabled' })
+  }
+  await owner.page.evaluate(() => document.documentElement.setAttribute('data-memoly-theme', 'mint'))
+  const preview = cropScreen.getByRole('img', { name: 'Предпросмотр кадрирования' })
+  const originalTransform = await preview.evaluate((image) => image.style.transform)
+  await cropScreen.getByRole('slider', { name: 'Масштаб' }).fill('1.2')
+  expect(await preview.evaluate((image) => image.style.transform)).not.toBe(originalTransform)
+  await cropScreen.getByRole('slider', { name: 'Масштаб' }).fill('1')
   await owner.page.getByRole('button', { name: 'Использовать это фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeEnabled()
   await owner.page.getByRole('button', { name: 'Сохранить фото' }).click()
 
   await expect(owner.page.getByText('Фото обновлено!', { exact: true })).toBeVisible()
+  await owner.page.screenshot({ path: testInfo.outputPath('child-photo-saved-390.png'), animations: 'disabled' })
   await owner.page.getByRole('button', { name: 'Перейти в профиль' }).click()
   await expect(owner.page.locator('[data-slot="child-profile"]')).toBeVisible()
   await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange + 1)

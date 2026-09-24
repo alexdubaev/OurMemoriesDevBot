@@ -191,36 +191,37 @@ export function FamilyOnboarding({
   }
 
   return (
-    <main className={`${cropPreviewUrl || photoSaved ? 'family-screen child-screen child-photo-flow-screen' : isChildEdit ? 'family-screen child-screen child-edit-screen' : ''} ${cropPreviewUrl ? 'child-photo-crop-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
-      {cropPreviewUrl ? <div className="child-titlebar child-photo-titlebar">
-        <button aria-label="Отменить кадрирование" className="family-round-btn child-back-btn" onClick={cancelCrop} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-        <Typography aria-level={1} className="child-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Выберите фото</Typography>
-        <span aria-hidden="true" className="child-title-action" />
-      </div> : photoSaved ? <div className="child-titlebar child-photo-titlebar">
-        <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn child-back-btn" onClick={onCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-        <Typography className="child-page-title" id="child-onboarding-title" variant="memoryScreen" />
-        <span aria-hidden="true" className="child-title-action" />
-      </div> : isChildEdit ? <div className="child-titlebar child-edit-titlebar">
-        <button aria-label="Назад к профилю ребёнка" className="family-round-btn child-back-btn" disabled={submitting} onClick={() => onCancel?.()} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-        <Typography className="child-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
+    <main className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
+      {cropPreviewUrl || photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
+        <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={() => onCancel?.()} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+        <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
-      <section aria-labelledby={cropPreviewUrl || photoSaved ? 'child-onboarding-title' : undefined} className={`mx-auto ${cropPreviewUrl || photoSaved ? 'w-full max-w-[452px]' : 'mt-6 w-full max-w-md'} pb-10${isChildEdit && !cropPreviewUrl && !photoSaved ? ' child-edit-shell' : ''}`} data-slot={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-profile-editor' : undefined}>
-        {photoSaved ? <div className="child-photo-success">
-          <div aria-hidden="true" className="child-photo-success-icon"><Typography variant="memoryScreen">✓</Typography></div>
-          <Typography className="child-photo-success-title" role="status" variant="memoryScreen">Фото обновлено!</Typography>
-          <Typography className="child-photo-success-copy" tone="muted" variant="memoryBody">Новое фото профиля сохранено.</Typography>
-          <Button className="child-photo-success-action" onClick={onCancel} type="button"><Typography variant="memoryButton">Перейти в профиль</Typography></Button>
+      <section aria-labelledby={cropPreviewUrl || photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={cropPreviewUrl ? 'child-edit-v2-shell' : photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-profile-editor' : undefined}>
+        {cropPreviewUrl ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
+          <button aria-label="Отменить кадрирование" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={cancelCrop} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+          <Typography aria-level={1} className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Фотография ребёнка</Typography>
+          <span aria-hidden="true" className="child-title-action" />
+        </div> : photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
+          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={onCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+          <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen" />
+          <span aria-hidden="true" className="child-title-action" />
+        </div> : null}
+        {photoSaved ? <div className="child-success">
+          <div aria-hidden="true" className="child-success-icon ui-success-mark"><span className="child-photo-v2-check">✓</span></div>
+          <h2 className="ds-entity-title" role="status">Фото обновлено!</h2>
+          <p>Новое фото профиля сохранено.</p>
+          <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={onCancel} type="button">Перейти в профиль</Button>
         </div> : <>
         {!isChildEdit && !cropPreviewUrl ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
         {!isChildEdit && !cropPreviewUrl ? <Typography className="mt-2" tone="muted" variant="memoryBody">
           {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : 'Это поможет сделать семейную ленту вашей.'}
         </Typography> : null}
 
-        {cropPreviewUrl ? null : isChildEdit ? <div className="child-edit-avatar">
-          <label className="child-edit-avatar-control" htmlFor="child-avatar">
-            <span className="child-avatar-wrap child-edit-avatar-wrap">
-            <span className="child-profile-avatar">
+        {cropPreviewUrl ? null : isChildEdit ? <div className="child-edit-v2-intro">
+          <label className="child-edit-v2-avatar-control" htmlFor="child-avatar">
+            <span className="child-edit-v2-avatar">
+            <span className="child-edit-v2-avatar-image">
               {displayAvatarUrl ? (
                 <img
                   alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
@@ -230,9 +231,9 @@ export function FamilyOnboarding({
                 />
               ) : <Typography variant="memoryChild">Фото</Typography>}
             </span>
-            <span aria-hidden="true" className="child-camera-btn"><WebpIcon decorative name="photo" size={20} /></span>
+            <span aria-hidden="true" className="child-edit-v2-camera"><WebpIcon decorative name="photo" size={19} /></span>
             </span>
-            <Typography className="child-edit-avatar-copy" tone="primary" variant="memoryButton">Заменить фотографию</Typography>
+            <Typography className="child-edit-v2-photo-link" tone="primary" variant="memoryButton">Заменить фотографию</Typography>
             <input
               aria-label="Заменить фотографию ребёнка"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
@@ -242,7 +243,7 @@ export function FamilyOnboarding({
               type="file"
             />
           </label>
-          <Typography className="child-helper centered" tone="muted" variant="memoryMeta">Изменения увидят только участники вашей семьи.</Typography>
+          <p className="ds-meta">Изменения увидят только участники вашей семьи.</p>
         </div> : <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
           <span className="relative grid size-36 place-items-center overflow-hidden rounded-full bg-accent">
             {displayAvatarUrl ? (
@@ -266,11 +267,11 @@ export function FamilyOnboarding({
           />
         </label>}
         {cropPreviewUrl ? (
-          <section aria-label="Кадрирование фотографии" className="child-photo-crop-stage" data-slot="child-photo-crop">
-            <div className="child-photo-crop-frame">
+          <section aria-label="Кадрирование фотографии" className="child-crop-v2" data-slot="child-photo-crop">
+            <p>Переместите фото и настройте масштаб.</p>
+            <div className="child-crop-v2-frame surface-inset">
               <img
                 alt="Предпросмотр кадрирования"
-                className="child-photo-crop-image"
                 onLoad={(event) => {
                   setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)
                   setCropImageLoaded(true)
@@ -278,81 +279,92 @@ export function FamilyOnboarding({
                 src={cropPreviewUrl}
                 style={cropStyle(crop)}
               />
-              <span aria-hidden="true" className="crop-corner tl" />
-              <span aria-hidden="true" className="crop-corner tr" />
-              <span aria-hidden="true" className="crop-corner bl" />
-              <span aria-hidden="true" className="crop-corner br" />
+              <span aria-hidden="true" className="child-crop-v2-ring" />
             </div>
-            <label className="child-photo-zoom-control" htmlFor="avatar-crop">
-              <span className="child-photo-zoom-row">
-                <Typography aria-hidden="true" className="child-photo-zoom-symbol" variant="memoryMeta">−</Typography>
-                <input aria-label="Масштаб кадрирования" id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
-                <Typography aria-hidden="true" className="child-photo-zoom-symbol" variant="memoryMeta">+</Typography>
-              </span>
+            <div className="child-crop-v2-zoom">
+              <span aria-hidden="true">−</span>
+              <input aria-label="Масштаб" id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
+              <span aria-hidden="true">＋</span>
+            </div>
+            <div aria-label="Положение фотографии" className="child-crop-v2-pan" role="group">
+              <button aria-label="Сдвинуть влево" className="ds-icon-tile" onClick={() => moveCrop(-0.05, 0)} type="button">←</button>
+              <button aria-label="Сдвинуть вверх" className="ds-icon-tile" onClick={() => moveCrop(0, -0.05)} type="button">↑</button>
+              <button aria-label="Сдвинуть вниз" className="ds-icon-tile" onClick={() => moveCrop(0, 0.05)} type="button">↓</button>
+              <button aria-label="Сдвинуть вправо" className="ds-icon-tile" onClick={() => moveCrop(0.05, 0)} type="button">→</button>
+            </div>
+            <Button className="ui-btn ui-btn-primary ds-btn ds-btn--primary" disabled={!cropImageLoaded} onClick={useCrop} type="button">Использовать это фото</Button>
+            <label className="ui-btn ui-btn-secondary child-crop-v2-file ds-btn ds-btn--secondary">
+              Выбрать другое фото
+              <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="sr-only" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} type="file" />
             </label>
-            <div aria-label="Положение фотографии" className="child-photo-position-controls" role="group">
-              <Button aria-label="Сдвинуть влево" onClick={() => moveCrop(-0.05, 0)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">←</Typography></Button>
-              <Button aria-label="Сдвинуть вправо" onClick={() => moveCrop(0.05, 0)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">→</Typography></Button>
-              <Button aria-label="Сдвинуть вверх" onClick={() => moveCrop(0, -0.05)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">↑</Typography></Button>
-              <Button aria-label="Сдвинуть вниз" onClick={() => moveCrop(0, 0.05)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">↓</Typography></Button>
-            </div>
-            <div className="child-photo-crop-actions">
-              <Button className="child-photo-crop-primary" disabled={!cropImageLoaded} onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать это фото</Typography></Button>
-              <Button className="child-photo-crop-secondary" onClick={cancelCrop} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button>
-            </div>
+            <p className="child-crop-v2-limit">JPEG, PNG, WebP или HEIC · до 20 МБ</p>
           </section>
         ) : null}
         <FieldError message={formErrors.avatar} />
 
-        {!photoOnly ? <div className={isChildEdit ? 'child-form' : undefined}>
-          <div className={isChildEdit ? 'child-edit-field' : 'mt-6'}>
-            <label className={isChildEdit ? 'child-field-label' : 'flex flex-col gap-2'} htmlFor="child-name">
-              <Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Имя ребёнка</Typography>
-              {isChildEdit ? <div className="child-field raised"><input
-                id="child-name"
-                maxLength={60}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Введите имя ребёнка"
-                value={name}
-              /></div> : <input
+        {isChildEdit && !cropPreviewUrl ? <div className="child-edit-v2-form">
+          <section className="child-edit-v2-card surface-raised ds-card ds-card--standard">
+            <label className="child-edit-v2-label ds-label" htmlFor="child-name">Имя ребёнка</label>
+            <div className="child-edit-v2-field surface-inset">
+              <WebpIcon decorative name="user" size={19} />
+              <input id="child-name" maxLength={60} onChange={(event) => setName(event.target.value)} value={name} />
+            </div>
+            <FieldError message={formErrors.name} />
+            <label className="child-edit-v2-label child-edit-v2-label--spaced ds-label" htmlFor="child-birth-date">Дата рождения</label>
+            <div className="child-edit-v2-field surface-inset">
+              <WebpIcon decorative name="calendar" size={19} />
+              <input id="child-birth-date" max={maximumBirthDate} onChange={(event) => setBirthDate(event.target.value)} type="date" value={birthDate} />
+            </div>
+            {age !== null ? <div className="child-edit-v2-helper ds-meta">Сейчас {age}</div> : null}
+            <FieldError message={formErrors.birthDate} />
+          </section>
+          <fieldset className="child-edit-v2-sex-field">
+            <legend className="child-edit-v2-section-title ds-section-title">Пол ребёнка</legend>
+            <div className="child-edit-v2-card surface-raised ds-card ds-card--standard">
+              <div className="child-edit-v2-sex">
+                <label><input checked={sex === 'girl'} name="childEditSex" onChange={() => setSex('girl')} type="radio" value="girl" /><span aria-hidden="true" className="child-edit-v2-radio" /><span className="child-edit-v2-sex-copy"><strong>Девочка</strong><small>Используется только в профиле ребёнка</small></span></label>
+                <label><input checked={sex === 'boy'} name="childEditSex" onChange={() => setSex('boy')} type="radio" value="boy" /><span aria-hidden="true" className="child-edit-v2-radio" /><span className="child-edit-v2-sex-copy"><strong>Мальчик</strong><small>Используется только в профиле ребёнка</small></span></label>
+              </div>
+              <FieldError message={formErrors.sex} />
+            </div>
+          </fieldset>
+        </div> : !photoOnly && !cropPreviewUrl ? <div>
+          <div className="mt-6">
+            <label className="flex flex-col gap-2" htmlFor="child-name">
+              <Typography variant="memoryBody">Имя ребёнка</Typography>
+              <input
                 className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 id="child-name"
                 maxLength={60}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Например, Маша"
                 value={name}
-              />}
+              />
             </label>
             <FieldError message={formErrors.name} />
           </div>
 
-          <div className={isChildEdit ? 'child-edit-field' : 'mt-5'}>
-            <label className={isChildEdit ? 'child-field-label' : 'flex flex-col gap-2'} htmlFor="child-birth-date">
-              <Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Дата рождения</Typography>
-              {isChildEdit ? <div className="child-field raised"><input
-                id="child-birth-date"
-                max={maximumBirthDate}
-                onChange={(event) => setBirthDate(event.target.value)}
-                type="date"
-                value={birthDate}
-              /></div> : <input
+          <div className="mt-5">
+            <label className="flex flex-col gap-2" htmlFor="child-birth-date">
+              <Typography variant="memoryBody">Дата рождения</Typography>
+              <input
                 className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 id="child-birth-date"
                 max={maximumBirthDate}
                 onChange={(event) => setBirthDate(event.target.value)}
                 type="date"
                 value={birthDate}
-              />}
+              />
               {age !== null ? <Typography tone="muted" variant="memoryMeta">Сейчас {age}</Typography> : null}
             </label>
             <FieldError message={formErrors.birthDate} />
           </div>
 
-          <fieldset className={isChildEdit ? 'child-edit-field child-sex-field' : 'mt-5'}>
-            <legend className={isChildEdit ? 'child-field-label' : undefined}><Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Пол</Typography></legend>
-            <div className={isChildEdit ? 'child-gender' : 'mt-2 grid grid-cols-2 gap-2'} role="group">
-              <Segment active={sex === 'boy'} editStyle={isChildEdit} label="Мальчик" onClick={() => setSex('boy')} />
-              <Segment active={sex === 'girl'} editStyle={isChildEdit} label="Девочка" onClick={() => setSex('girl')} />
+          <fieldset className="mt-5">
+            <legend><Typography variant="memoryBody">Пол</Typography></legend>
+            <div className="mt-2 grid grid-cols-2 gap-2" role="group">
+              <Segment active={sex === 'boy'} label="Мальчик" onClick={() => setSex('boy')} />
+              <Segment active={sex === 'girl'} label="Девочка" onClick={() => setSex('girl')} />
             </div>
             <FieldError message={formErrors.sex} />
           </fieldset>
@@ -366,19 +378,19 @@ export function FamilyOnboarding({
           </Typography>
           {!photoVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
         </section> : null}
-        {!cropPreviewUrl ? <Button className={isChildEdit ? 'child-primary child-edit-save' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
+        {!cropPreviewUrl ? <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button> : null}
-        {onCancel && !cropPreviewUrl ? <Button className={isChildEdit ? 'child-secondary child-edit-cancel' : 'mt-3 min-h-11 w-full'} disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
+        {onCancel && !cropPreviewUrl && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
         </>}
       </section>
     </main>
   )
 }
 
-function Segment({ active, editStyle, label, onClick }: { active: boolean; editStyle?: boolean; label: string; onClick: () => void }) {
+function Segment({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <button aria-pressed={active} className={editStyle ? `child-gender-option${active ? ' active' : ''}` : active
+    <button aria-pressed={active} className={active
       ? 'min-h-12 rounded-[var(--radius-field)] bg-accent text-accent-foreground'
       : 'min-h-12 rounded-[var(--radius-field)] bg-card text-muted-foreground'} onClick={onClick} type="button">
       <Typography variant="memoryButton">{label}</Typography>
