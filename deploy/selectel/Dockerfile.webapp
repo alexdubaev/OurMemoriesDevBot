@@ -1,0 +1,17 @@
+FROM oven/bun:1.4.0 AS build
+
+WORKDIR /app
+COPY . .
+
+RUN bun install --frozen-lockfile
+
+ARG VITE_API_URL=
+ARG VITE_MAX_BOT_USERNAME
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_MAX_BOT_USERNAME=${VITE_MAX_BOT_USERNAME}
+
+RUN bun run --cwd webapp build
+
+FROM caddy:2.10-alpine
+
+COPY --from=build /app/webapp/dist /srv

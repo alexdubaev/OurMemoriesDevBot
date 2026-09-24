@@ -9,6 +9,33 @@ Provider runbooks:
 
 - [DigitalOcean](DIGITALOCEAN.md)
 - [Yandex Cloud](YANDEX_CLOUD.md)
+- [Existing Selectel host](../deploy/selectel/README.md)
+
+## Existing Selectel host
+
+The current memoLy production host is `app.memoly.ru`; its application checkout is
+`/opt/memoly/app`. The complete host release procedure, including image preparation,
+the guarded database migration, promotion, smoke checks, and rollback, lives in the
+[Selectel runbook](../deploy/selectel/README.md). Do not reconstruct that procedure
+from chat history or run an invented migration command.
+
+Access is provisioned by the owner outside Git, using the owner’s secure store or an
+SSH agent. A GitHub Environment named `selectel-production` contains the nonsecret
+`SELECTEL_HOST`, `SELECTEL_SSH_USER`, and `SELECTEL_MAX_BOT_USERNAME` variables and
+the pinned `SELECTEL_KNOWN_HOSTS` secret. The owner decided to keep the deploy SSH
+key outside GitHub. `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` is therefore absent and the
+manual workflow stops before connecting to production. The current release route
+uses owner-provisioned SSH access and the Selectel runbook. No private
+key path, key value, database password, MAX token, webhook secret, or encryption key
+belongs in the repository. The manual workflow
+[`.github/workflows/selectel-release.yml`](../.github/workflows/selectel-release.yml)
+accepts only the current `main` SHA, requires the explicit `DEPLOY` confirmation,
+and serializes production releases. It transfers the reviewed
+`deploy/selectel/ci-release.sh` over strict-host-key SSH; that script builds the
+immutable images on the host, prepares rollback, applies the guarded migration only
+when explicitly selected, promotes services, and writes a protected nonsecret
+release manifest. It never runs an invented SQL command or removes old images,
+gateway containers, or persistent data.
 
 ## Supported production shape
 

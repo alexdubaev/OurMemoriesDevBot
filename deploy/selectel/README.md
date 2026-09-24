@@ -5,6 +5,138 @@ This runbook is the reproducible source for the existing Selectel host at
 the already-running host-port Caddy gateway unmanaged and giving Docker Compose
 ownership only of internal services.
 
+## Release entry point
+
+Use this file as the single procedure for the existing host. It is safe for an agent
+with no previous chat context because it names the host and server checkout, the
+access boundary, the build inputs, the migration gate, and the rollback contract.
+
+### Access and build inputs
+
+- Production is `app.memoly.ru`; run host commands from `/opt/memoly/app`.
+- SSH is supplied by the owner through a secure store or an already configured SSH
+  agent. Check access without exposing credentials:
+
+  ```sh
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru true
+  ```
+
+  If this fails, stop and ask the owner to provision the server access. Never look
+  for, print, commit, or request a private key in Git or chat.
+- A GitHub Environment named `selectel-production` is configured for `main` and
+  contains pinned known-hosts, but the owner chose to keep the deploy SSH private
+  key outside GitHub. The manual workflow therefore stops before SSH. For the
+  current release route, use owner-provisioned SSH access and this runbook. A
+  future decision to enable the workflow would use
+  the names `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` and `SELECTEL_KNOWN_HOSTS` for those
+  environment secrets, and `SELECTEL_HOST`, `SELECTEL_SSH_USER` plus
+  `SELECTEL_MAX_BOT_USERNAME` for the environment variables. The current verified
+  values are `app.memoly.ru`, `root` and `id911018762027_bot`; the owner must
+  recheck them in the Selectel panel. The nonsecret variables are configured in
+  GitHub; the key value and its filesystem path never appear in this repository.
+- The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
+  and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
+  they are never copied into an image or committed.
+- The server checkout must also have a read-only credential for its canonical GitHub
+  origin so the release entry point can run `git fetch origin main` as `memoly`.
+  Provision that credential on the host through the owner’s secure access process;
+  the GitHub Actions SSH key used to reach Selectel is not forwarded to GitHub.
+  Verify it without printing credentials:
+
+  ```sh
+  sudo -n -u memoly git -C /opt/memoly/app ls-remote origin refs/heads/main
+  ```
+
+- The release preflight requires at least 4 GiB free on the filesystem containing
+  `/opt/memoly`. The current host has roughly 2 GiB free, so releases stop at the
+  disk check until the owner completes approved host maintenance.
+- The current verified public MAX bot username is `id911018762027_bot`. It is a
+  build-time frontend value and is not a secret. Pass it as
+  `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
+  changes. Production uses same-origin API requests, so `VITE_API_URL` is empty.
+
+The reviewed manual workflow `.github/workflows/selectel-release.yml` runs from
+`main` with concurrency protection. It sends `deploy/selectel/ci-release.sh` over
+strict-host-key SSH; that host entry point fetches the current `origin/main`, checks
+out the exact SHA, builds both immutable images with `build-images.sh`, prepares a
+server-only rollback backup, and invokes the reviewed `redeploy.sh` actions. It
+never receives database or MAX secrets from GitHub and never runs ad-hoc SQL. The
+host release lock is held across checkout, image build, migration, promotion, and
+smoke; direct `redeploy.sh` actions cannot interleave with that release. If
+promotion or public smoke fails after the release starts changing services, the
+entry point attempts the prepared application rollback and keeps the original
+failure status if rollback also fails.
+Dispatch it with the exact current `main` SHA, type `DEPLOY`, and enable the
+migration input only when that release contains a pending migration. The workflow
+fails closed when the environment variables or secrets are missing. GitHub's
+environment branch restriction is `main`; a human required-reviewer rule is not
+configured because the private-repository plan rejected that setting.
+
+For a local release, prepare both immutable images from the accepted commit with
+the tracked script:
+
+```sh
+git status --short
+git rev-parse HEAD
+git fetch origin main
+export SELECTEL_MAX_BOT_USERNAME='id911018762027_bot'
+deploy/selectel/build-images.sh '<40-character accepted SHA>'
+```
+
+The script requires a clean checkout at the requested SHA, verifies that it is
+reachable from the current canonical `origin/main`, and builds from a tracked
+archive so ignored files cannot enter the Docker context. The canonical
+`alexdubaev/OurMemoriesDevBot` origin. It builds `memoly-backend:<SHA>` from
+`backend/Dockerfile` and `memoly-webapp:<SHA>` from
+`deploy/selectel/Dockerfile.webapp`, tags both with the full SHA, and verifies their
+OCI revision labels. Transfer those two images to the host through the owner’s
+approved secure channel. The build script does not connect to production, change
+the server, run migrations, or alter rollback state.
+
+The running service SHA may intentionally lag the checkout SHA after documentation
+only changes. Promote images only when their exact SHA has been accepted for a
+release; do not use `latest`.
+
+With owner-provisioned SSH access, run the same reviewed host entry point manually
+from a Bash shell after the target commit is accepted on `main`:
+
+```sh
+set -euo pipefail
+git fetch origin main
+SHA=$(git rev-parse refs/remotes/origin/main)
+test "$(git rev-parse HEAD)" = "$SHA"
+test -z "$(git status --porcelain)"
+git show "$SHA:deploy/selectel/ci-release.sh" |
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+    bash -s -- "$SHA" DEPLOY false id911018762027_bot
+```
+
+Set the third server argument to `true` only for a reviewed release that needs the
+guarded migration. This command builds both images on Selectel; no image transfer
+is needed. Do not run it until the host GitHub credential, 4 GiB disk gate, and
+rollback prerequisites above are satisfied. The local build and image-transfer
+sequence below is an alternative when server-side building is unavailable.
+
+### Release sequence and stop conditions
+
+1. Confirm owner-provisioned SSH access and the accepted full SHA.
+2. In a clean checkout at that SHA, run `build-images.sh` and deliver both images.
+3. On the host, verify the images are present and run `preflight`.
+4. Run `migration-status`. If it reports no pending migrations, continue to
+   `deploy`. If it reports a pending release migration, run the guarded `migrate`
+   action documented below, then check `migration-status` again before `deploy`.
+5. Run `deploy`, then perform the public smoke checks.
+6. Record the SHA, image IDs/digests, migration result, UTC time, smoke results, and
+   rollback tags in a release manifest. Keep the manifest server-side or in the
+   approved release system; never include secrets.
+
+Stop before mutation when SSH, canonical origin, clean SHA, either image, Compose,
+Caddy ownership, or migration preflight fails. Do not substitute `prisma db push`,
+direct SQL, `docker compose up` against the gateway, or an ad-hoc migration command.
+If promotion fails after a compatible migration, use the configured immutable
+rollback tags and follow the rollback section below. Database rollback is not part
+of application rollback.
+
 ## Ownership model
 
 - The configured gateway (`GATEWAY_CONTAINER`, normally `memoly-webapp-1`) is a
@@ -173,8 +305,11 @@ separate explicit `deploy` invocation after the migration result has been
 reviewed.
 
 Rollback promotes the configured previous backend/webapp tags through the same
-Compose project and readiness checks. It leaves both additive MAX migrations in
-place; database rollback is not part of application rollback.
+Compose project and readiness checks. It also restores the release-owned Compose
+and Caddy files from the protected backup marker created before promotion; a
+missing marker stops rollback rather than mixing old images with new configuration.
+It leaves both additive MAX migrations in place; database rollback is not part of
+application rollback.
 
 ## Config validation
 
