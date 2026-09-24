@@ -296,7 +296,7 @@ validate_database_target() {
 }
 
 backup_database() {
-	local timestamp dump_file temp_file
+	local timestamp dump_file temp_file toc_file magic
 	install -d -m 0700 "$SERVER_ROOT/backups" || die "cannot create database backup directory"
 	chmod 0700 "$SERVER_ROOT/backups" || die "cannot secure database backup directory"
 	timestamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -304,7 +304,7 @@ backup_database() {
 	temp_file="${dump_file}.tmp.$$"
 	[ ! -e "$dump_file" ] && [ ! -L "$dump_file" ] || die "database backup already exists: $(basename "$dump_file")"
 	install -m 0600 /dev/null "$temp_file" || die "cannot create database backup file"
-	if ! compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --host=127.0.0.1 --username="$POSTGRES_USER" --format=custom --file=- --dbname="$POSTGRES_DB"' >"$temp_file" 2>/dev/null; then
+	if ! compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --host=127.0.0.1 --username="$POSTGRES_USER" --format=custom --dbname="$POSTGRES_DB"' >"$temp_file" 2>/dev/null; then
 		rm -f -- "$temp_file"
 		die "database backup failed; migration was not attempted"
 	fi
@@ -312,10 +312,26 @@ backup_database() {
 		rm -f -- "$temp_file"
 		die "cannot secure database backup file"
 	}
-	if ! compose exec -T postgres pg_restore --list - <"$temp_file" >/dev/null 2>&1; then
+	if [ ! -s "$temp_file" ]; then
 		rm -f -- "$temp_file"
 		die "database backup validation failed; migration was not attempted"
 	fi
+	magic=$(dd if="$temp_file" bs=1 count=5 2>/dev/null) || {
+		rm -f -- "$temp_file"
+		die "database backup validation failed; migration was not attempted"
+	}
+	if [ "$magic" != PGDMP ]; then
+		rm -f -- "$temp_file"
+		die "database backup validation failed; migration was not attempted"
+	fi
+	toc_file="${temp_file}.toc"
+	install -m 0600 /dev/null "$toc_file"
+	if ! compose exec -T postgres pg_restore --list >"$toc_file" <"$temp_file" 2>/dev/null || [ ! -s "$toc_file" ]; then
+		rm -f -- "$temp_file"
+		rm -f -- "$toc_file"
+		die "database backup validation failed; migration was not attempted"
+	fi
+	rm -f -- "$toc_file"
 	mv -- "$temp_file" "$dump_file" || {
 		rm -f -- "$temp_file"
 		die "cannot finalize database backup file; migration was not attempted"
