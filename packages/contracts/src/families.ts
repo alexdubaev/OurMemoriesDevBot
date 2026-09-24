@@ -69,10 +69,14 @@ const updateChildRequestSchema = z
   .object({
     displayName: trimmedName(1, 60).optional(),
     birthDate: birthDateSchema.nullable().optional(),
+    avatarMediaId: z.uuid().optional(),
+    avatarCrop: childAvatarCropSchema.optional(),
     expectedVersion: z.int().positive(),
   })
   .strict()
-  .refine((input) => input.displayName !== undefined || input.birthDate !== undefined,
+  .refine((input) => (input.avatarMediaId === undefined) === (input.avatarCrop === undefined),
+    'Avatar media ID and crop must be provided together')
+  .refine((input) => input.displayName !== undefined || input.birthDate !== undefined || input.avatarMediaId !== undefined,
     'At least one child field is required')
 
 export const updateFamilyRequestSchema = z

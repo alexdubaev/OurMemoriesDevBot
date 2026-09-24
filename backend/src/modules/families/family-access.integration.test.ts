@@ -262,6 +262,184 @@ maybeDescribe('Family access and invitations', () => {
     expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
   })
 
+  test('changes an avatar without requiring optional metadata and rejects media outside its family', async () => {
+    const ownerA = await admittedUser('Avatar owner A', '10091')
+    const ownerB = await admittedUser('Avatar owner B', '10092')
+    const familyA = await jsonRequest('/api/v1/families', ownerA.token, 'POST', {
+      name: 'Аватар семьи A', timezone: 'Europe/Moscow',
+    })
+    const familyB = await jsonRequest('/api/v1/families', ownerB.token, 'POST', {
+      name: 'Аватар семьи B', timezone: 'Europe/Moscow',
+    })
+
+    async function createAsset(familyId: string, uploaderId: string, purpose: 'child_avatar' | 'memory') {
+      return prisma.mediaAsset.create({ data: {
+        familyId, uploaderId, sourceKind: 'upload', purpose, mediaKind: 'photo',
+        originalKey: `media-originals/${randomUUID()}`, declaredMime: 'image/png', verifiedMime: 'image/png',
+        sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: 1n, width: 1, height: 1,
+        originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+    }
+
+    const currentAvatar = await createAsset(familyA.body.family.id, ownerA.userId, 'child_avatar')
+    const replacement = await createAsset(familyA.body.family.id, ownerA.userId, 'child_avatar')
+    const wrongPurpose = await createAsset(familyA.body.family.id, ownerA.userId, 'memory')
+    const otherFamilyAvatar = await createAsset(familyB.body.family.id, ownerB.userId, 'child_avatar')
+    const child = await prisma.child.create({ data: {
+      familyId: familyA.body.family.id, displayName: 'Имя сохранено', birthDate: null, sex: null,
+      avatarMediaId: currentAvatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    } })
+    const patchPath = `/api/v1/families/${familyA.body.family.id}`
+    const patchChild = (avatarMediaId: string) => jsonRequest(patchPath, ownerA.token, 'PATCH', {
+      child: {
+        avatarMediaId, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: child.version,
+      },
+    })
+
+    const crossFamily = await patchChild(otherFamilyAvatar.id)
+    expect(crossFamily.response.status).toBe(409)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: currentAvatar.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+
+    const wrongPurposeResult = await patchChild(wrongPurpose.id)
+    expect(wrongPurposeResult.response.status).toBe(409)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: currentAvatar.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+
+    const invalidCrop = await jsonRequest(patchPath, ownerA.token, 'PATCH', {
+      child: {
+        avatarMediaId: replacement.id, avatarCrop: { x: 0, y: 0, width: 0.5, height: 1 },
+        expectedVersion: child.version,
+      },
+    })
+    expect(invalidCrop.response.status).toBe(409)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: currentAvatar.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+
+    const changed = await patchChild(replacement.id)
+    expect(changed.response.status).toBe(200)
+    expect(changed.body.child).toMatchObject({
+      name: 'Имя сохранено', birthDate: null, sex: null, avatarMediaId: replacement.id, version: child.version + 1,
+    })
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: currentAvatar.id } })).deletedAt).not.toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(1)
+  })
+
+  test('retires only an unreferenced avatar from a stale photo-only update after a two-session conflict', async () => {
+    const owner = await admittedUser('Photo conflict owner', '10093')
+    const secondSessionRecord = await prisma.authSession.create({ data: {
+      userId: owner.userId,
+      refreshTokenHash: 'hash-photo-conflict-second-session',
+      refreshTokenFamilyHash: 'family-photo-conflict-second-session',
+      expiresAt: new Date(Date.now() + 60_000),
+    } })
+    await prisma.$executeRaw`
+      UPDATE auth_sessions
+         SET external_identity_id = ${owner.identityId}::uuid
+       WHERE id = ${secondSessionRecord.id}::uuid
+    `
+    const secondSession = {
+      userId: owner.userId,
+      token: await signAccessToken({ sub: owner.userId, sessionId: secondSessionRecord.id }, env),
+    }
+    const otherMember = await admittedUser('Photo conflict other member', '10094')
+    const family = await jsonRequest('/api/v1/families', owner.token, 'POST', {
+      name: 'Семья конфликта фото', timezone: 'Europe/Moscow',
+    })
+    await prisma.familyMember.create({
+      data: { familyId: family.body.family.id, userId: otherMember.userId, role: 'full' },
+    })
+    async function createAvatar(uploaderId: string) {
+      return prisma.mediaAsset.create({ data: {
+        familyId: family.body.family.id, uploaderId, sourceKind: 'upload', purpose: 'child_avatar',
+        mediaKind: 'photo', originalKey: `media-originals/${randomUUID()}`,
+        declaredMime: 'image/png', verifiedMime: 'image/png',
+        sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: 13n, width: 1, height: 1,
+        originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+    }
+
+    const initialAvatar = await createAvatar(owner.userId)
+    const unreferencedUpload = await createAvatar(owner.userId)
+    const otherUsersUpload = await createAvatar(otherMember.userId)
+    const referencedUpload = await createAvatar(owner.userId)
+    const child = await prisma.child.create({ data: {
+      familyId: family.body.family.id, displayName: 'До конфликта', birthDate: null, sex: null,
+      avatarMediaId: initialAvatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    } })
+    const patchPath = `/api/v1/families/${family.body.family.id}`
+    const replaceAvatar = (token: string, avatarMediaId: string, expectedVersion: number) =>
+      jsonRequest(patchPath, token, 'PATCH', {
+        child: { avatarMediaId, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion },
+      })
+
+    const updatedBySecondSession = await jsonRequest(patchPath, secondSession.token, 'PATCH', {
+      child: { displayName: 'Обновлено во второй сессии', expectedVersion: child.version },
+    })
+    expect(updatedBySecondSession.response.status).toBe(200)
+
+    const failedCombinedUpdate = await jsonRequest(patchPath, owner.token, 'PATCH', {
+      name: 'Название не должно сохраниться',
+      child: {
+        avatarMediaId: unreferencedUpload.id,
+        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+        expectedVersion: child.version,
+      },
+    })
+    expect(failedCombinedUpdate.response.status).toBe(409)
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: family.body.family.id } })).name)
+      .toBe('Семья конфликта фото')
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: unreferencedUpload.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+
+    const stalePhoto = await replaceAvatar(owner.token, unreferencedUpload.id, child.version)
+    expect(stalePhoto.response.status).toBe(409)
+    expect(stalePhoto.body.error.code).toBe('VERSION_CONFLICT')
+    expect(await prisma.child.findUniqueOrThrow({ where: { id: child.id } })).toMatchObject({
+      displayName: 'Обновлено во второй сессии', avatarMediaId: initialAvatar.id, version: child.version + 1,
+    })
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: unreferencedUpload.id } })).deletedAt).not.toBeNull()
+    expect(await prisma.taskOutbox.count({
+      where: { type: 'media:delete', dedupeKey: `media-delete:${unreferencedUpload.id}` },
+    })).toBe(1)
+
+    const otherUsersStalePhoto = await replaceAvatar(owner.token, otherUsersUpload.id, child.version)
+    expect(otherUsersStalePhoto.response.status).toBe(409)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: otherUsersUpload.id } })).deletedAt).toBeNull()
+
+    const attachedBySecondSession = await replaceAvatar(secondSession.token, referencedUpload.id, child.version + 1)
+    expect(attachedBySecondSession.response.status).toBe(200)
+    const staleReferencedPhoto = await replaceAvatar(owner.token, referencedUpload.id, child.version)
+    expect(staleReferencedPhoto.response.status).toBe(409)
+    expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: referencedUpload.id } })).deletedAt).toBeNull()
+    expect(await prisma.taskOutbox.count({
+      where: { type: 'media:delete', dedupeKey: `media-delete:${referencedUpload.id}` },
+    })).toBe(0)
+
+    const racingUpload = await createAvatar(owner.userId)
+    const racingExpectedVersion = child.version + 2
+    const concurrentUpdates = await Promise.all([
+      jsonRequest(patchPath, secondSession.token, 'PATCH', {
+        child: { displayName: 'Конкурирующее изменение', expectedVersion: racingExpectedVersion },
+      }),
+      replaceAvatar(owner.token, racingUpload.id, racingExpectedVersion),
+    ])
+    expect(concurrentUpdates.map(({ response }) => response.status).sort()).toEqual([200, 409])
+    const finalChild = await prisma.child.findUniqueOrThrow({ where: { id: child.id } })
+    const finalRacingUpload = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: racingUpload.id } })
+    if (finalChild.avatarMediaId === racingUpload.id) {
+      expect(finalRacingUpload.deletedAt).toBeNull()
+      expect(await prisma.taskOutbox.count({
+        where: { type: 'media:delete', dedupeKey: `media-delete:${racingUpload.id}` },
+      })).toBe(0)
+    } else {
+      expect(finalRacingUpload.deletedAt).not.toBeNull()
+      expect(await prisma.taskOutbox.count({
+        where: { type: 'media:delete', dedupeKey: `media-delete:${racingUpload.id}` },
+      })).toBe(1)
+    }
+  })
+
   test('rejects a future child birth date using the family calendar day', async () => {
     const owner = await admittedUser('Timezone owner', '12101')
     const timezone = 'Pacific/Kiritimati'

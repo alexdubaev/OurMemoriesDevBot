@@ -59,7 +59,7 @@ const invite: FamilyInviteDto = { id: '44444444-4444-4444-8444-444444444444', ro
 function familyProps(overrides: Partial<ComponentProps<typeof FamilyPresentation>> = {}) {
   return {
     familyResponse, members: [member], invites: [], childAvatarUrl: null, usage: null, usageFailed: false, inviteReady: null, copyState: 'idle' as const, busy: false, canInvite: true, canEditChild: true, canLeaveFamily: false,
-    memberActions: { [member.userId]: { canEditAlias: false, canManageRole: false, canRemove: false } }, hostBridge: { onBack: () => () => undefined }, onRefresh: () => undefined, onRefreshUsage: () => undefined, onEditChild: () => undefined, onCreateInvite: async () => undefined, onCopyInvite: async () => undefined, onShareInvite: async () => undefined, onCloseInvite: () => undefined, onRevokeInvite: async () => undefined, onUpdateMember: async () => undefined, onRemoveMember: async () => undefined, onLeaveFamily: async () => undefined,
+    memberActions: { [member.userId]: { canEditAlias: false, canManageRole: false, canRemove: false } }, hostBridge: { onBack: () => () => undefined }, onRefresh: () => undefined, onRefreshUsage: () => undefined, onEditChild: () => undefined, onOpenChild: () => undefined, onCloseChild: () => undefined, childProfileOpen: false, onCreateInvite: async () => undefined, onCopyInvite: async () => undefined, onShareInvite: async () => undefined, onCloseInvite: () => undefined, onRevokeInvite: async () => undefined, onUpdateMember: async () => undefined, onRemoveMember: async () => undefined, onLeaveFamily: async () => undefined,
     ...overrides,
   }
 }

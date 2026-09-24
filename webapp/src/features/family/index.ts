@@ -1,5 +1,6 @@
 export { FamilyOnboarding } from './FamilyOnboarding'
 export { FamilyScreen } from './FamilyScreen'
+export { ChildProfile } from './ChildProfile'
 export { ChildAvatar } from './ChildAvatar'
 export { useChildAvatar } from './useChildAvatar'
 export {

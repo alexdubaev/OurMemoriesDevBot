@@ -168,6 +168,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
   const [error, setError] = useState<Error | null>(null)
   const [editingChild, setEditingChild] = useState(false)
+  const [editingChildPhoto, setEditingChildPhoto] = useState(false)
+  const [viewingChild, setViewingChild] = useState(false)
   const [screen, setScreen] = useState<'family' | 'feed'>('family')
   const [filter, setFilter] = useState<FeedFilter>('all')
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
@@ -281,12 +283,12 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   }} />
   if (accessLost) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><Typography variant="memoryScreen">Доступ закрыт</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Доступ к семейной ленте закрыт.</Typography></main>
   if (!familyResponse) return <BootPreloader style={insetsStyle} />
-  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} onCancel={familyResponse.child ? () => setEditingChild(false) : undefined} onCompleted={async () => { await refresh({ bootstrap: true }); setEditingChild(false) }} transport={transport} /></div>
+  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={editingChildPhoto} onCancel={familyResponse.child ? () => { setEditingChild(false); setEditingChildPhoto(false) } : undefined} onCompleted={async () => { await refresh({ bootstrap: !familyResponse.child }); setEditingChild(false); setEditingChildPhoto(false) }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') {
     return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} onAccessLost={() => setAccessLost(true)} onFamily={() => setScreen('family')} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
   }
-  return <div style={insetsStyle}><FamilyScreen createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onEditChild={() => setEditingChild(true)} onFeed={() => setScreen('feed')} onRefresh={refresh} transport={transport} /></div>
+  return <div style={insetsStyle}><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refresh} transport={transport} /></div>
 }
 
 function InvitePreview({ preview, style, onAccept }: { preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {

@@ -12,6 +12,7 @@ import {
   type CompleteChildProfileRequest,
   type CreateInviteRequest,
   type UpdateMemberRoleRequest,
+  type UpdateFamilyRequest,
   createInviteRequestSchema,
   createInviteResponseSchema,
   createFamilyRequestSchema,
@@ -20,6 +21,7 @@ import {
   invitePreviewRequestSchema,
   invitePreviewResponseSchema,
   removeMemberRequestSchema,
+  updateFamilyRequestSchema,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -54,6 +56,13 @@ export function previewInvite(transport: AuthenticatedTransport, token: string) 
 
 export function loadFamily(transport: AuthenticatedTransport, familyId: string) {
   return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema)
+}
+
+export function updateFamily(transport: AuthenticatedTransport, familyId: string, input: UpdateFamilyRequest) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema,
+    { method: 'PATCH', body: updateFamilyRequestSchema.parse(input) },
+  )
 }
 
 export function loadFamilyMembers(transport: AuthenticatedTransport, familyId: string) {

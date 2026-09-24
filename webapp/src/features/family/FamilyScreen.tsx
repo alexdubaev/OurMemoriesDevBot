@@ -12,6 +12,7 @@ import { useChildAvatar } from './useChildAvatar'
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
 export function FamilyScreen({
+  childProfileOpen,
   familyResponse,
   invites,
   members,
@@ -19,10 +20,14 @@ export function FamilyScreen({
   hostBridge,
   currentUserId,
   onEditChild,
+  onChangeChildPhoto,
+  onOpenChild,
+  onCloseChild,
   onFeed,
   onRefresh,
   createInviteLink,
 }: {
+  childProfileOpen: boolean
   familyResponse: FamilyResponse
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
@@ -30,6 +35,9 @@ export function FamilyScreen({
   hostBridge: Pick<HostBridge, 'onBack'>
   currentUserId: string
   onEditChild: () => void
+  onChangeChildPhoto: () => void
+  onOpenChild: () => void
+  onCloseChild: () => void
   onFeed: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
@@ -84,6 +92,7 @@ export function FamilyScreen({
           canEditChild={isOwner}
           canInvite={canInvite}
           canLeaveFamily={Boolean(current && !isOwner)}
+          childProfileOpen={childProfileOpen}
           childAvatarUrl={avatarUrl}
           copyState={copyState}
           familyResponse={familyResponse}
@@ -124,6 +133,9 @@ export function FamilyScreen({
             }
           }}
           onEditChild={onEditChild}
+          onChangeChildPhoto={onChangeChildPhoto}
+          onOpenChild={onOpenChild}
+          onCloseChild={onCloseChild}
           onLeaveFamily={async () => {
             if (!current) return
             await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version))
@@ -150,7 +162,7 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onFamily={onCloseChild} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }
