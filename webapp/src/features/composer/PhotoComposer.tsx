@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import { familyCalendarDate, uploadFamilyPhoto } from '@/features/family'
 import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -12,6 +13,7 @@ import {
   validatePhotoFiles,
 } from './api'
 import { composerOccurredAt } from './date'
+import { AddDateField } from './AddDateField'
 import '@/styles/composer-skin.css'
 
 export type PhotoComposerProps = {
@@ -34,13 +36,14 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
   const [occurredDate, setOccurredDate] = useState(() => familyCalendarDate(familyTimezone))
-  const [progress, setProgress] = useState(0)
+  const [completedCount, setCompletedCount] = useState(0)
   const [status, setStatus] = useState<'idle' | 'saving' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
   const [finalizeApplicationCode, setFinalizeApplicationCode] = useState<string | null>(null)
   const completedAssets = useRef<Array<string | null>>([])
   const idempotencyKey = useRef<string | null>(null)
+  const submission = useRef<{ caption: string; date: string; occurredAt: string } | null>(null)
   const saving = useRef(false)
   const abortController = useRef<AbortController | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -49,17 +52,20 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
 
   function chooseFiles(next: File[]) {
     if (saving.current) return
-    const validation = validatePhotoFiles(next)
+    if (next.length === 0) return
+    const selection = [...files, ...next]
+    const validation = validatePhotoFiles(selection)
     if (!validation.ok) {
       setError(validation.code === 'too_many' ? 'Выберите от 1 до 10 фотографий.' : 'Поддерживаются JPG, PNG, WebP и HEIC.')
       setErrorStage(null)
       setStatus('error')
       return
     }
-    setFiles(next)
-    completedAssets.current = next.map(() => null)
+    setFiles(selection)
+    completedAssets.current = selection.map(() => null)
     idempotencyKey.current = null
-    setProgress(0)
+    submission.current = null
+    setCompletedCount(0)
     setError(null)
     setErrorStage(null)
     setFinalizeApplicationCode(null)
@@ -72,7 +78,8 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     setFiles(next)
     completedAssets.current = next.map(() => null)
     idempotencyKey.current = null
-    setProgress(0)
+    submission.current = null
+    setCompletedCount(0)
     setError(null)
     setStatus(next.length ? 'idle' : 'idle')
     if (fileInput.current) fileInput.current.value = ''
@@ -85,7 +92,15 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       setStatus('error')
       return
     }
-    const occurredAt = composerOccurredAt(occurredDate, familyTimezone)
+    if ([...caption].length > 8000) {
+      setError('Подпись не может быть длиннее 8 000 символов.')
+      setStatus('error')
+      return
+    }
+    const previous = submission.current
+    const occurredAt = previous?.caption === caption.trim() && previous.date === occurredDate
+      ? previous.occurredAt
+      : composerOccurredAt(occurredDate, familyTimezone)
     if (!occurredAt) {
       setError('Дата воспоминания не может быть в будущем.')
       setStatus('error')
@@ -95,11 +110,12 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     saving.current = true
     setStatus('saving')
     setError(null)
-    setErrorStage(null)
+    setErrorStage('reserve')
     const controller = new AbortController()
     abortController.current = controller
     const key = idempotencyKey.current ?? createPhotoIdempotencyKey()
     idempotencyKey.current = key
+    submission.current = { caption: caption.trim(), date: occurredDate, occurredAt }
 
     const saveStage: { current: SaveStage } = { current: 'reserve' }
     try {
@@ -118,7 +134,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
           completedAssets.current[index] = assetId
         }
         mediaIds.push(assetId)
-        setProgress(Math.round(((index + 1) / files.length) * 100))
+        setCompletedCount(index + 1)
       }
 
       saveStage.current = 'create'
@@ -131,12 +147,10 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
         idempotencyKey: key,
       }, controller.signal)
       setStatus('success')
-      setProgress(100)
-      try { await onSuccess() } catch { /* the memory is already durable */ }
     } catch (reason) {
       if (controller.signal.aborted) return
       setErrorStage(saveStage.current)
-      setProgress(0)
+      setCompletedCount(0)
       setStatus('error')
       if (saveStage.current === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
       setError(saveStage.current === 'reserve'
@@ -162,35 +176,38 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     onCancel()
   }
 
-  return (
-    <main className="memoly-composer-page mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)]">
-      <section aria-labelledby="photo-composer-title" className="memoly-composer-card rounded-[var(--radius-card)] p-5">
-        <Typography id="photo-composer-title" variant="memoryScreen">Добавить фотографии</Typography>
-        <Typography className="mt-2" tone="muted" variant="memoryBody">Выберите от 1 до 10 фотографий для одного воспоминания.</Typography>
-        <label className="memoly-composer-label mt-6 block" htmlFor="photo-composer-files"><Typography variant="memoryButton">Фотографии</Typography></label>
-        <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="memoly-composer-file-input mt-2 block w-full" disabled={status === 'saving'} id="photo-composer-files" multiple onChange={(event) => chooseFiles(Array.from(event.currentTarget.files ?? []))} ref={fileInput} type="file" />
-        {files.length ? <div aria-label="Предпросмотр фотографий" className="mt-4 grid grid-cols-3 gap-2">{files.map((file, index) => <PhotoPreview file={file} index={index} key={`${file.name}-${index}`} onRemove={removeFile} />)}</div> : null}
-        <label className="memoly-composer-label mt-5 block" htmlFor="photo-composer-caption"><Typography variant="memoryButton">Подпись</Typography></label>
-        <textarea aria-label="Подпись к фотографиям" className="memoly-composer-field memoly-composer-textarea mt-2 w-full rounded-[var(--radius-field)] p-3" id="photo-composer-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
-        <label className="memoly-composer-label mt-5 block" htmlFor="photo-composer-date"><Typography variant="memoryButton">Дата</Typography></label>
-        <input aria-label="Дата фотографий" className="memoly-composer-field memoly-composer-date mt-2 w-full rounded-[var(--radius-field)] p-3" id="photo-composer-date" max={familyCalendarDate(familyTimezone)} onChange={(event) => setOccurredDate(event.currentTarget.value)} type="date" value={occurredDate} />
-        {status === 'saving' ? <div className="memoly-composer-status mt-4" role="status"><Typography aria-live="polite" variant="memoryMeta">Сохраняем фотографии… {progress}%</Typography><ProgressBar value={progress} label="Загрузка фотографий" /></div> : null}
-        {status === 'success' ? <><Typography aria-live="polite" className="memoly-composer-status mt-4" variant="memoryMeta">Сохранено в семейную ленту</Typography><ProgressBar value={100} label="Фотографии сохранены" /></> : null}
-        {error ? <>
-          <Typography className="mt-4 text-destructive" data-save-stage={errorStage ?? undefined} role="alert" variant="memoryMeta">{error}</Typography>
-          {finalizeApplicationCode ? <Typography className="mt-1 text-destructive" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}
-        </> : null}
-        <div className="memoly-composer-actions mt-6 flex gap-3">
-          <Button className="memoly-composer-primary min-h-12 flex-1" disabled={status === 'saving'} onClick={() => void save()} type="button">Сохранить</Button>
-          <Button className="memoly-composer-secondary min-h-12" onClick={cancel} type="button" variant="outline">Отмена</Button>
-        </div>
+  function addAnother() {
+    setFiles([])
+    setCaption('')
+    setOccurredDate(familyCalendarDate(familyTimezone))
+    setCompletedCount(0)
+    setStatus('idle')
+    setError(null)
+    setErrorStage(null)
+    setFinalizeApplicationCode(null)
+    completedAssets.current = []
+    idempotencyKey.current = null
+    submission.current = null
+  }
+
+  return <main className="memoly-add-page" data-add-screen="photo">
+    {status === 'success' ? <section aria-label="Фото опубликованы" className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">Фото опубликованы!</Typography><Typography as="p" variant="memoryBody">Теперь они в ленте воспоминаний</Typography><div className="memoly-add-success-actions"><Button onClick={() => void onSuccess()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></div></section> : status === 'error' && errorStage ? <section aria-label="Не удалось загрузить фото" className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">Не удалось загрузить фото</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions"><Button onClick={() => void save()} type="button">Попробовать снова</Button><Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">Вернуться к фото</Button></div></section> : <>
+      <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving'} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">Добавить фото</Typography><span /></header>
+      <section aria-labelledby="photo-composer-title" className="memoly-add-body">
+        <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="memoly-add-native-file" disabled={status === 'saving' || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
+        {files.length ? <div aria-label="Предпросмотр фотографий" className="memoly-add-photo-grid">{files.map((file, index) => <PhotoPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} onRemove={removeFile} />)}{files.length < 10 ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />до 10 фото</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">Выберите фотографии</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 фото</Typography></label>}
+        <div className="memoly-add-caption"><textarea aria-label="Подпись к фотографиям" disabled={status === 'saving'} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { idempotencyKey.current = null; submission.current = null }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
+        <AddDateField id="photo-composer-date" label="Дата фотографий" onChange={(value) => { if (value !== occurredDate) { idempotencyKey.current = null; submission.current = null }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} />
+        <Button className="memoly-add-publish" disabled={status === 'saving' || !files.length || [...caption].length > 8000} onClick={() => void save()} type="button">Опубликовать{files.length ? ` (${files.length})` : ''}</Button>
+        {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><ProgressBar label="Сохранение фотографий" /><Typography as="p" variant="memoryBody">{errorStage === 'reserve' ? 'Подготавливаем фотографии…' : errorStage === 'upload' ? 'Загружаем фотографии…' : errorStage === 'finalize' ? 'Обрабатываем фотографии…' : 'Публикуем воспоминание…'}</Typography><Typography as="p" variant="memoryMeta">Обработано фото: {completedCount} из {files.length}</Typography><Button onClick={cancel} type="button" variant="outline">Отменить</Button></div> : null}
+        {error ? <div className="memoly-add-error" data-save-stage={errorStage ?? undefined} role="alert"><WebpIcon decorative name="warning" size={28} /><Typography as="p" variant="memoryBody">{error}</Typography>{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}{files.length ? <Button onClick={() => void save()} type="button">Повторить</Button> : null}</div> : null}
       </section>
-    </main>
-  )
+    </>}
+  </main>
 }
 
-function ProgressBar({ label, value }: { label: string; value: number }) {
-  return <div aria-label={label} aria-valuemax={100} aria-valuemin={0} aria-valuenow={value} className="memoly-composer-progress" role="progressbar"><span style={{ width: value + '%' }} /></div>
+function ProgressBar({ label }: { label: string }) {
+  return <div aria-label={label} className="memoly-composer-progress" role="progressbar"><span className="memoly-composer-progress-indeterminate" /></div>
 }
 
 function PhotoPreview({ file, index, onRemove }: { file: File; index: number; onRemove: (index: number) => void }) {
@@ -198,5 +215,5 @@ function PhotoPreview({ file, index, onRemove }: { file: File; index: number; on
   useEffect(() => {
     return () => { if (src) URL.revokeObjectURL(src) }
   }, [src])
-  return <figure className="relative overflow-hidden rounded-[var(--radius-field)] border"><div className="aspect-square bg-muted">{src ? <img alt="" className="h-full w-full object-cover" src={src} /> : null}</div><Typography className="truncate p-1" variant="memoryMeta">{file.name}</Typography><button aria-label={`Удалить ${file.name}`} className="absolute right-1 top-1 rounded-full bg-background px-2 py-1" onClick={() => onRemove(index)} type="button"><Typography aria-hidden variant="memoryMeta">×</Typography></button></figure>
+  return <figure className="memoly-add-photo-thumb">{src ? <img alt={`Выбранное фото ${index + 1}`} src={src} /> : <Typography as="span" variant="memoryMeta">{file.name}</Typography>}<button aria-label={`Удалить ${file.name}`} onClick={() => onRemove(index)} type="button"><Typography aria-hidden as="span" variant="memoryBody">×</Typography></button></figure>
 }

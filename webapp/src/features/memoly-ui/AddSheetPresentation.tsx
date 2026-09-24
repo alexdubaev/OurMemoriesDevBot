@@ -136,7 +136,6 @@ export function MediaChoiceAction({ icon, label, name, onClick, title, copy }: {
 }
 
 export function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; onClose: () => void; onVideo: () => void }) {
-  const [voiceNotice, setVoiceNotice] = useState(false)
   return <div aria-describedby="memoly-voice-video-description" className="memoly-sheet-content" data-slot="memoly-voice-video-sheet">
     <div className="flex min-h-11 items-center gap-3">
       <Button aria-label="Назад" className="size-11" onClick={onBack} size="icon" type="button" variant="ghost"><WebpIcon decorative name="chevron" size={24} /></Button>
@@ -145,9 +144,8 @@ export function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => 
     </div>
     <div className="media-choice-body">
       <MediaChoiceAction copy={<>Готовый видеофайл<br />с устройства</>} icon="video" label="Выбрать видео" name="video" onClick={onVideo} title="Выбрать видео" />
-      <MediaChoiceAction copy={<>Добавление аудио появится позже<br />Голосовые — через бот</>} icon="voice" label="Аудио пока недоступно" name="audio" onClick={() => setVoiceNotice(true)} title="Аудио пока недоступно" />
+      <div className="media-choice-card memoly-voice-handoff" data-add-action="audio"><span className="media-choice-icon"><WebpIcon decorative name="voice" size={34} state="active" /></span><span className="media-choice-copy"><Typography as="strong" variant="memoryBodyMedium">Голосовые — через бот</Typography><Typography as="span" tone="muted" variant="memoryMeta">Добавление аудио в приложении пока недоступно</Typography><a href="https://t.me/OurMemoriesDevBot"><Typography as="span" variant="memoryButton">Открыть бота</Typography></a></span></div>
     </div>
-    {voiceNotice ? <Typography aria-live="polite" className="media-choice-notice" variant="memoryMeta">Запись голоса появится позже. Пока можно отправить голосовое в бот.</Typography> : null}
     <DrawerDescription className="mt-4 text-left" id="memoly-voice-video-description"><Typography as="span" variant="memoryMeta">Материалы увидят участники вашей семьи</Typography></DrawerDescription>
   </div>
 }
