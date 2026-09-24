@@ -210,6 +210,9 @@ export function FeedPage({
           isDeleteSource={deleteTarget?.id === memory.id}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
+          childName={memory.childId === childId ? childName : undefined}
+          childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
+          childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
           body={memory.body}
           kind={memory.kind}
           liked={memory.likes.likedByMe}
@@ -512,7 +515,7 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   const url = usePrivateObjectUrl(path, transport)
   const viewerSession = useRef<AbortController | null>(null)
   useEffect(() => () => { viewerSession.current?.abort() }, [])
-  if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) }} />
+  if (!url) return <div aria-label="Загрузка фотографии" className="aspect-video w-full bg-muted" />
   return <button aria-label="Открыть фото" className="ml-media-button block w-full" onClick={(event) => {
     viewerSession.current?.abort()
     const session = new AbortController()
@@ -528,9 +531,7 @@ export function PhotoImage({ alt, height, src, width }: {
   src: string
   width: number | null
 }) {
-  const aspectRatio = mediaAspectRatio(width, height)
-  if (!aspectRatio) return <img alt={alt} className="block w-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} />
-  return <span className="relative block w-full overflow-hidden" style={{ aspectRatio }}><img alt={alt} className="absolute inset-0 size-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
+  return <span className="relative block aspect-video w-full overflow-hidden"><img alt={alt} className="absolute inset-0 size-full object-cover" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {

@@ -289,8 +289,8 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const ratios = [
-      ['Фотоальбом E2E', 'img', 360 / 640],
-      ['Одиночное фото E2E', 'img', 1],
+      ['Фотоальбом E2E', 'img', 16 / 9],
+      ['Одиночное фото E2E', 'img', 16 / 9],
       ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
@@ -305,7 +305,7 @@ test.describe.serial('T07 live feed', () => {
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
       })
       expect(actual.ratio).toBeCloseTo(expected, 2)
-      expect(actual.objectFit).toBe('contain')
+      expect(actual.objectFit).toBe(element === 'img' ? 'cover' : 'contain')
     }
 
     await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux.png'), fullPage: true })
@@ -837,6 +837,7 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await page.getByRole('button', { name: 'Лента' }).click()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
+    await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toContainText('София')
 
     const geometry: Record<string, unknown> = {}
     const capture = async (name: string) => {
