@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import { resolveAvatarContentType } from '@/features/avatar'
 import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -90,6 +91,7 @@ export function FamilyOnboarding({
   const maximumBirthDate = familyCalendarDate(familyTimezone)
   const displayAvatarUrl = previewUrl ?? currentAvatarUrl
   const photoVersionConflict = photoOnly && childVersionConflict
+  const isChildEdit = Boolean(initialChild && !photoOnly)
 
   function chooseFile(next: File | null) {
     setRequestError(null)
@@ -187,15 +189,45 @@ export function FamilyOnboarding({
   }
 
   return (
-    <main className="mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]">
-      <BrandLogo className="w-[148px]" />
-      <section aria-labelledby="child-onboarding-title" className="mx-auto mt-6 w-full max-w-md pb-10">
-        <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : initialChild ? 'Профиль ребёнка' : 'Расскажите о ребёнке'}</Typography>
-        <Typography className="mt-2" tone="muted" variant="memoryBody">
-          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : initialChild ? 'Изменения увидят только участники вашей семьи.' : 'Это поможет сделать семейную ленту вашей.'}
-        </Typography>
+    <main className={`${isChildEdit ? 'family-screen child-screen child-edit-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
+      {isChildEdit ? <div className="child-titlebar child-edit-titlebar">
+        <button aria-label="Назад к профилю ребёнка" className="family-round-btn child-back-btn" disabled={submitting} onClick={() => onCancel?.()} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+        <Typography className="child-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
+        <span aria-hidden="true" className="child-title-action" />
+      </div> : <BrandLogo className="w-[148px]" />}
+      <section aria-labelledby="child-onboarding-title" className={`mx-auto mt-6 w-full max-w-md pb-10${isChildEdit ? ' child-edit-shell' : ''}`} data-slot={isChildEdit ? 'child-profile-editor' : undefined}>
+        {!isChildEdit ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
+        {!isChildEdit ? <Typography className="mt-2" tone="muted" variant="memoryBody">
+          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : 'Это поможет сделать семейную ленту вашей.'}
+        </Typography> : null}
 
-        <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
+        {isChildEdit ? <div className="child-edit-avatar">
+          <label className="child-edit-avatar-control" htmlFor="child-avatar">
+            <span className="child-avatar-wrap child-edit-avatar-wrap">
+            <span className="child-profile-avatar">
+              {displayAvatarUrl ? (
+                <img
+                  alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
+                  className="size-full object-cover"
+                  src={displayAvatarUrl}
+                  style={cropStyle(confirmedCrop)}
+                />
+              ) : <Typography variant="memoryChild">Фото</Typography>}
+            </span>
+            <span aria-hidden="true" className="child-camera-btn"><WebpIcon decorative name="photo" size={20} /></span>
+            </span>
+            <Typography className="child-edit-avatar-copy" tone="primary" variant="memoryButton">Заменить фотографию</Typography>
+            <input
+              aria-label="Заменить фотографию ребёнка"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              className="sr-only"
+              id="child-avatar"
+              onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+              type="file"
+            />
+          </label>
+          <Typography className="child-helper centered" tone="muted" variant="memoryMeta">Изменения увидят только участники вашей семьи.</Typography>
+        </div> : <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
           <span className="relative grid size-36 place-items-center overflow-hidden rounded-full bg-accent">
             {displayAvatarUrl ? (
               <img
@@ -216,7 +248,7 @@ export function FamilyOnboarding({
             onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
             type="file"
           />
-        </label>
+        </label>}
         {cropPreviewUrl ? (
           <section aria-label="Кадрирование фотографии" className="mt-4 rounded-[var(--radius-card)] bg-card p-4 shadow-[var(--shadow-card)]">
             <Typography variant="memoryDialog">Кадрирование</Typography>
@@ -250,43 +282,59 @@ export function FamilyOnboarding({
         ) : null}
         <FieldError message={formErrors.avatar} />
 
-        {!photoOnly ? <>
-        <label className="mt-6 flex flex-col gap-2" htmlFor="child-name">
-          <Typography variant="memoryBody">Имя</Typography>
-          <input
-            className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            id="child-name"
-            maxLength={60}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Например, Маша"
-            value={name}
-          />
-        </label>
-        <FieldError message={formErrors.name} />
-
-        <label className="mt-5 flex flex-col gap-2" htmlFor="child-birth-date">
-          <Typography variant="memoryBody">Дата рождения</Typography>
-          <input
-            className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            id="child-birth-date"
-            max={maximumBirthDate}
-            onChange={(event) => setBirthDate(event.target.value)}
-            type="date"
-            value={birthDate}
-          />
-          {age !== null ? <Typography tone="muted" variant="memoryMeta">Сейчас {age}</Typography> : null}
-        </label>
-        <FieldError message={formErrors.birthDate} />
-
-        <fieldset className="mt-5">
-          <legend><Typography variant="memoryBody">Пол</Typography></legend>
-          <div className="mt-2 grid grid-cols-2 gap-2" role="group">
-            <Segment active={sex === 'boy'} label="Мальчик" onClick={() => setSex('boy')} />
-            <Segment active={sex === 'girl'} label="Девочка" onClick={() => setSex('girl')} />
+        {!photoOnly ? <div className={isChildEdit ? 'child-form' : undefined}>
+          <div className={isChildEdit ? 'child-edit-field' : 'mt-6'}>
+            <label className={isChildEdit ? 'child-field-label' : 'flex flex-col gap-2'} htmlFor="child-name">
+              <Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Имя ребёнка</Typography>
+              {isChildEdit ? <div className="child-field raised"><input
+                id="child-name"
+                maxLength={60}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Введите имя ребёнка"
+                value={name}
+              /></div> : <input
+                className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                id="child-name"
+                maxLength={60}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Например, Маша"
+                value={name}
+              />}
+            </label>
+            <FieldError message={formErrors.name} />
           </div>
-        </fieldset>
-        <FieldError message={formErrors.sex} />
-        </> : null}
+
+          <div className={isChildEdit ? 'child-edit-field' : 'mt-5'}>
+            <label className={isChildEdit ? 'child-field-label' : 'flex flex-col gap-2'} htmlFor="child-birth-date">
+              <Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Дата рождения</Typography>
+              {isChildEdit ? <div className="child-field raised"><input
+                id="child-birth-date"
+                max={maximumBirthDate}
+                onChange={(event) => setBirthDate(event.target.value)}
+                type="date"
+                value={birthDate}
+              /></div> : <input
+                className="min-h-12 rounded-[var(--radius-field)] border bg-card px-4 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                id="child-birth-date"
+                max={maximumBirthDate}
+                onChange={(event) => setBirthDate(event.target.value)}
+                type="date"
+                value={birthDate}
+              />}
+              {age !== null ? <Typography tone="muted" variant="memoryMeta">Сейчас {age}</Typography> : null}
+            </label>
+            <FieldError message={formErrors.birthDate} />
+          </div>
+
+          <fieldset className={isChildEdit ? 'child-edit-field child-sex-field' : 'mt-5'}>
+            <legend className={isChildEdit ? 'child-field-label' : undefined}><Typography variant={isChildEdit ? 'memoryMeta' : 'memoryBody'}>Пол</Typography></legend>
+            <div className={isChildEdit ? 'child-gender' : 'mt-2 grid grid-cols-2 gap-2'} role="group">
+              <Segment active={sex === 'boy'} editStyle={isChildEdit} label="Мальчик" onClick={() => setSex('boy')} />
+              <Segment active={sex === 'girl'} editStyle={isChildEdit} label="Девочка" onClick={() => setSex('girl')} />
+            </div>
+            <FieldError message={formErrors.sex} />
+          </fieldset>
+        </div> : null}
 
         {requestError || photoVersionConflict ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
           <Typography variant="memoryBody">
@@ -296,18 +344,18 @@ export function FamilyOnboarding({
           </Typography>
           {!photoVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
         </section> : null}
-        <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
+        <Button className={isChildEdit ? 'child-primary child-edit-save' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>
-        {onCancel ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
+        {onCancel ? <Button className={isChildEdit ? 'child-secondary child-edit-cancel' : 'mt-3 min-h-11 w-full'} disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
       </section>
     </main>
   )
 }
 
-function Segment({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function Segment({ active, editStyle, label, onClick }: { active: boolean; editStyle?: boolean; label: string; onClick: () => void }) {
   return (
-    <button aria-pressed={active} className={active
+    <button aria-pressed={active} className={editStyle ? `child-gender-option${active ? ' active' : ''}` : active
       ? 'min-h-12 rounded-[var(--radius-field)] bg-accent text-accent-foreground'
       : 'min-h-12 rounded-[var(--radius-field)] bg-card text-muted-foreground'} onClick={onClick} type="button">
       <Typography variant="memoryButton">{label}</Typography>

@@ -337,6 +337,53 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
   await owner.context.close()
 })
 
+test('child profile editor preserves horizontal host insets at the mobile viewport', async ({ page }) => {
+  const owner = await createCompletedOwner(page, 81000024)
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  const profile = owner.page.locator('[data-slot="child-profile"]')
+  await expect(profile).toBeVisible()
+  await profile.getByRole('button', { name: 'Редактировать профиль' }).click()
+
+  const editor = owner.page.locator('main.family-screen.child-screen.child-edit-screen')
+  await expect(editor).toBeVisible()
+  const previousInsets = await editor.evaluate((element) => ({
+    left: element.style.getPropertyValue('--host-inset-left'),
+    right: element.style.getPropertyValue('--host-inset-right'),
+  }))
+  try {
+    await editor.evaluate((element) => {
+      element.style.setProperty('--host-inset-left', '12px')
+      element.style.setProperty('--host-inset-right', '20px')
+    })
+
+    const layout = await editor.evaluate((element) => {
+      const computed = getComputedStyle(element)
+      return {
+        paddingLeft: computed.paddingLeft,
+        paddingRight: computed.paddingRight,
+        scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+        viewportWidth: window.innerWidth,
+      }
+    })
+    expect(layout.paddingLeft).toBe('26px')
+    expect(layout.paddingRight).toBe('34px')
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth)
+    await owner.page.screenshot({ path: resolve('e2e/.artifacts/child-editor-390.png'), animations: 'disabled' })
+  } finally {
+    await editor.evaluate((element, values) => {
+      if (values.left) element.style.setProperty('--host-inset-left', values.left)
+      else element.style.removeProperty('--host-inset-left')
+      if (values.right) element.style.setProperty('--host-inset-right', values.right)
+      else element.style.removeProperty('--host-inset-right')
+    }, previousInsets)
+  }
+
+  await owner.page.getByRole('button', { name: 'Отмена' }).click()
+  await expect(profile).toBeVisible()
+  await owner.context.close()
+})
+
 test('child profile keeps protected avatar, actions, and geometry at mobile widths', async ({ page }, testInfo) => {
   const owner = await createCompletedOwner(page, 81000041)
   const childUpdates: string[] = []

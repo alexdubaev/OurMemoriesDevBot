@@ -95,6 +95,114 @@ test('missing optional birth date and photo remain readable without a dead age a
   expect(markup).not.toContain('Возраст и дата рождения')
 })
 
+test('child profile editor uses the approved visual structure and keeps save/cancel actions wired', async () => {
+  const markup = renderToStaticMarkup(createElement(FamilyOnboarding, {
+    familyId: '11111111-1111-4111-8111-111111111111',
+    familyTimezone: 'Europe/Moscow',
+    initialChild: child,
+    transport: {
+      request: async () => undefined as never,
+      raw: async () => new Response(null, { status: 404 }),
+    },
+    onCancel: () => undefined,
+    onCompleted: async () => undefined,
+  }))
+
+  expect(markup).toContain('data-slot="child-profile-editor"')
+  expect(markup).toContain('Редактировать профиль')
+  expect(markup).toContain('child-edit-avatar')
+  expect(markup).toContain('child-field raised')
+  expect(markup).toContain('child-primary')
+  expect(markup).toContain('Изменения увидят только участники вашей семьи.')
+  expect(markup).toContain('Девочка')
+  expect(markup).toContain('Мальчик')
+  expect(markup).not.toContain('Не указывать')
+  expect(markup).toMatch(/<label[^>]+for="child-avatar"[^>]*>[\s\S]*Заменить фотографию[\s\S]*aria-label="Заменить фотографию ребёнка"/)
+
+  const browser = installInteractiveDom()
+  let cancelCount = 0
+  const requests: Array<{ path: string; input: unknown }> = []
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(FamilyOnboarding, {
+      familyId: '11111111-1111-4111-8111-111111111111',
+      familyTimezone: 'Europe/Moscow',
+      initialChild: child,
+      transport: {
+        request: async (path, _schema, input) => {
+          requests.push({ path, input })
+          return undefined as never
+        },
+        raw: async () => new Response(null, { status: 404 }),
+      },
+      onCancel: () => { cancelCount += 1 },
+      onCompleted: async () => undefined,
+    })))
+
+    const titleBack = findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад к профилю ребёнка')
+    await act(async () => invoke(titleBack, 'onClick'))
+    expect(cancelCount).toBe(1)
+    await act(async () => invoke(findButton(browser.container, 'Отмена'), 'onClick'))
+    expect(cancelCount).toBe(2)
+    const nameInput = findOne(browser.container, (node) => node.attributes.id === 'child-name')
+    nameInput.value = 'София после редактирования'
+    await act(async () => invoke(nameInput, 'onChange'))
+    await act(async () => { await invoke(findButton(browser.container, 'Сохранить профиль'), 'onClick'); await flushInteractive() })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.path).toContain('/families/11111111-1111-4111-8111-111111111111/child')
+    expect(requests[0]?.input).toMatchObject({
+      body: {
+        name: 'София после редактирования',
+        birthDate: child.birthDate,
+        sex: child.sex,
+        avatarMediaId: child.avatarMediaId,
+        avatarCrop: child.avatarCrop,
+        expectedVersion: child.version,
+      },
+    })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+  }
+})
+
+test('child profile editor disables the title back action while saving', async () => {
+  const browser = installInteractiveDom()
+  let resolveRequest!: () => void
+  const requestPending = new Promise<never>((resolve) => { resolveRequest = () => resolve(undefined as never) })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(FamilyOnboarding, {
+      familyId: '11111111-1111-4111-8111-111111111111',
+      familyTimezone: 'Europe/Moscow',
+      initialChild: child,
+      transport: {
+        request: async () => requestPending,
+        raw: async () => new Response(null, { status: 404 }),
+      },
+      onCancel: () => undefined,
+      onCompleted: async () => undefined,
+    })))
+
+    await act(async () => {
+      invoke(findButton(browser.container, 'Сохранить профиль'), 'onClick')
+      await flushInteractive()
+    })
+
+    const titleBack = findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад к профилю ребёнка')
+    expect(titleBack.disabled).toBe(true)
+
+    resolveRequest()
+    await act(async () => { await flushInteractive() })
+    expect(titleBack.disabled).toBe(false)
+  } finally {
+    resolveRequest?.()
+    await act(async () => root.unmount())
+    browser.restore()
+  }
+})
+
 test('photo version conflict notice stays visible after another photo is chosen and cancel stays available', async () => {
   const browser = installInteractiveDom()
   const familyId = '11111111-1111-4111-8111-111111111111'
@@ -179,7 +287,7 @@ type InteractiveNode = {
   tagName: string
   parentNode: InteractiveNode | null
   childNodes: InteractiveNode[]
-  style: Record<string, string>
+  style: InteractiveStyle
   attributes: Record<string, string>
   listeners: Map<string, Set<(...args: unknown[]) => void>>
   files: File[]
@@ -197,6 +305,12 @@ type InteractiveNode = {
   removeEventListener(name: string, listener: (...args: unknown[]) => void): void
   focus(): void
   [key: string]: unknown
+}
+
+type InteractiveStyle = Record<string, string> & {
+  setProperty: (name: string, value: string) => void
+  removeProperty: (name: string) => void
+  getPropertyValue: (name: string) => string
 }
 
 type InteractiveDocument = {
@@ -228,9 +342,13 @@ function installInteractiveDom() {
 function createInteractiveDocument(): InteractiveDocument {
   const document = {} as InteractiveDocument
   const make = (name: string): InteractiveNode => {
+    const style = {} as InteractiveStyle
+    style.setProperty = (property, value) => { style[property] = value }
+    style.removeProperty = (property) => { delete style[property] }
+    style.getPropertyValue = (property) => style[property] ?? ''
     const node: InteractiveNode = {
       nodeType: 1, nodeName: name.toUpperCase(), tagName: name.toUpperCase(), ownerDocument: document,
-      parentNode: null, childNodes: [], style: {}, attributes: {}, listeners: new Map(), files: [], value: '', type: '', disabled: false, textContent: '',
+      parentNode: null, childNodes: [], style, attributes: {}, listeners: new Map(), files: [], value: '', type: '', disabled: false, textContent: '',
       appendChild(child) { child.parentNode = node; node.childNodes.push(child); return child },
       insertBefore(child, before) { child.parentNode = node; const index = before ? node.childNodes.indexOf(before) : -1; if (index < 0) node.childNodes.push(child); else node.childNodes.splice(index, 0, child); return child },
       removeChild(child) { const index = node.childNodes.indexOf(child); if (index >= 0) node.childNodes.splice(index, 1); child.parentNode = null; return child },
