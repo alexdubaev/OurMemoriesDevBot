@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
-import { createHmac, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { createPrisma } from '../../backend/src/db'
@@ -125,7 +126,29 @@ test.describe.serial('T07 live feed', () => {
       expect(filterMetrics).toHaveLength(5)
       expect(filterMetrics.map((filter) => filter.text)).toEqual(['Все', 'Фото', 'Видео', 'Голос', 'Заметки'])
       expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds)).toBe(true)
+      if (width === 320) {
+        const rail = page.locator('[data-slot="memoly-filter-rail"]')
+        const scrollable = await rail.evaluate((element) => element.scrollWidth > element.clientWidth)
+        expect(scrollable).toBe(false)
+        const railRight = await rail.evaluate((element) => element.getBoundingClientRect().right)
+        const lastFilterRight = await page.getByRole('button', { name: 'Заметки' }).evaluate((element) => element.getBoundingClientRect().right)
+        expect(lastFilterRight).toBeLessThanOrEqual(railRight)
+        await page.getByRole('button', { name: 'Заметки' }).focus()
+        await expect(page.getByRole('button', { name: 'Заметки' })).toBeFocused()
+      }
       await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
+    })
+  }
+
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    test(`feed renders the ${theme} theme at 390px`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.evaluate((value) => window.localStorage.setItem('memoly-theme', value), theme)
+      await page.reload()
+      await openFeed(page)
+      await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
+      await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
+      await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-feed-${theme}-390.png`), animations: 'disabled' })
     })
   }
 
@@ -266,8 +289,8 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const ratios = [
-      ['Фотоальбом E2E', 'img', 360 / 640],
-      ['Одиночное фото E2E', 'img', 1],
+      ['Фотоальбом E2E', 'img', 16 / 9],
+      ['Одиночное фото E2E', 'img', 16 / 9],
       ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
@@ -282,7 +305,7 @@ test.describe.serial('T07 live feed', () => {
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
       })
       expect(actual.ratio).toBeCloseTo(expected, 2)
-      expect(actual.objectFit).toBe('contain')
+      expect(actual.objectFit).toBe(element === 'img' ? 'cover' : 'contain')
     }
 
     await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux.png'), fullPage: true })
@@ -366,7 +389,7 @@ test.describe.serial('T07 live feed', () => {
     await page.getByLabel('Загрузить ещё').scrollIntoViewIfNeeded()
     await expect.poll(() => failedOnce).toBe(true)
     await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
-    await expect(page.getByRole('alert').filter({ hasText: 'Не удалось обновить ленту' })).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: 'Не удалось загрузить ещё' })).toBeVisible()
     blockCursor = false
     await page.getByRole('button', { name: 'Повторить' }).click()
     await expect(page.getByText('Заметка E2E 20')).toBeVisible()
@@ -758,6 +781,97 @@ test.describe.serial('T07 live feed', () => {
     })
   })
 
+  test('captures loading, empty, error, and retry states at 390px', async ({ page }) => {
+    let mode: 'empty' | 'error' = 'empty'
+    let releaseLoading!: () => void
+    const loading = new Promise<void>((resolveLoading) => { releaseLoading = resolveLoading })
+    let loadingReleased = false
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      if (!loadingReleased) await loading
+      if (mode === 'error') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic visual failure' } }) })
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], nextCursor: null }) })
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.reload()
+    await page.getByRole('button', { name: 'Лента' }).click()
+    await expect(page.locator('[data-slot="feed-skeleton"]')).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-loading-390.png'), animations: 'disabled' })
+    loadingReleased = true
+    releaseLoading()
+    await expect(page.locator('[data-slot="feed-empty"]')).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-empty-390.png'), animations: 'disabled' })
+    mode = 'error'
+    await page.reload()
+    await page.getByRole('button', { name: 'Лента' }).click()
+    await expect(page.locator('[data-slot="inline-error"]')).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-error-390.png'), animations: 'disabled' })
+    mode = 'empty'
+    await page.getByRole('button', { name: 'Повторить' }).click()
+    await expect(page.locator('[data-slot="feed-empty"]')).toBeVisible()
+  })
+
+  test('compares the canonical photo card and filter geometry with deterministic visual data', async ({ page }) => {
+    const canonical = readFileSync(resolve('../docs/memoly-final-functional-state-pack.html'))
+    expect(createHash('sha256').update(canonical).digest('hex')).toBe('180f8c9b6e60369513cffd5eb9dbb3cb3397649407df996dcf907ab0fa38c5b4')
+    const imageBase64 = canonical.toString('utf8').match(/class="media photo" src="data:image\/jpeg;base64,([^"]+)"/)?.[1]
+    expect(imageBase64).toBeTruthy()
+    const image = Buffer.from(imageBase64!, 'base64')
+    const key = `media-display/${randomUUID()}-canonical.jpg`
+    fixture.objectKeys.push(key)
+    await store(key, image, 'image/jpeg')
+    const asset = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key, bytes: image, mime: 'image/jpeg', width: 790, height: 450 })
+    await prisma.user.update({ where: { id: fixture.ownerUserId }, data: { displayName: 'Мама' } })
+    await prisma.child.update({ where: { id: fixture.childId }, data: { displayName: 'София', birthDate: new Date('2024-05-25T00:00:00.000Z') } })
+    const body = 'Моё солнышко утром ☀️\nКак же ты любишь своего зайку 🤍'
+    const memory = await createMemoryWithMedia({ familyId: fixture.familyId, childId: fixture.childId, userId: fixture.ownerUserId, kind: 'photo', body, occurredAt: new Date(Date.now() + 30_000), assets: [asset] })
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      payload.items = payload.items.filter((item) => item.id === memory.id).map((item) => ({ ...item, occurredAt: '2026-09-25T07:24:00.000Z' }))
+      payload.nextCursor = null
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await page.clock.setFixedTime(new Date('2026-09-25T07:30:00.000Z'))
+    await page.reload()
+    await page.getByRole('button', { name: 'Лента' }).click()
+    await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
+    await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toContainText('София')
+
+    const geometry: Record<string, unknown> = {}
+    const capture = async (name: string) => {
+      await page.evaluate(() => document.fonts.ready)
+      await page.locator(`[data-memory-id="${memory.id}"] img`).first().evaluate((image: HTMLImageElement) => image.decode())
+      await expect(page.locator('.filters-wrap .filter')).toHaveCount(5)
+      const metrics = await page.evaluate(() => {
+        const measure = (selector: string) => {
+          const element = document.querySelector<HTMLElement>(selector)!
+          const rect = element.getBoundingClientRect()
+          const css = getComputedStyle(element)
+          return { x: rect.x, y: rect.y, w: rect.width, h: rect.height, marginTop: css.marginTop, marginBottom: css.marginBottom, padding: css.padding, gap: css.gap, overflowX: css.overflowX, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }
+        }
+        return { header: measure('[data-child-header-mode="feed"]'), app: measure('[data-slot="feed-scroll"]'), filtersWrap: measure('.filters-wrap'), filters: measure('.filters'), chips: [...document.querySelectorAll<HTMLElement>('.filters .filter')].map((item) => ({ text: item.textContent?.trim(), x: item.getBoundingClientRect().x, w: item.getBoundingClientRect().width, h: item.getBoundingClientRect().height })), date: measure('.date-heading'), card: measure('.memory-card'), cardHeader: measure('.memory-card .memory-header'), media: measure('.memory-card .media-well'), caption: measure('.memory-card .caption') }
+      })
+      geometry[name] = metrics
+      await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-comparable-${name}.png`), fullPage: true, animations: 'disabled' })
+      await page.locator(`[data-memory-id="${memory.id}"]`).screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-card-${name}.png`), animations: 'disabled' })
+    }
+    for (const width of [320, 390, 430, 480]) {
+      await page.setViewportSize({ width, height: 844 })
+      await capture(String(width))
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+      await page.evaluate((value) => localStorage.setItem('memoly-theme', value), theme)
+      await page.reload()
+      await page.getByRole('button', { name: 'Лента' }).click()
+      await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
+      await capture(`${theme}-390`)
+    }
+    writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
+  })
+
   test('closes access and pauses playback after membership revoke', async ({ page }) => {
     await openFeed(page)
     const voiceCard = page.locator('[data-memory-id]').filter({ hasText: 'Голос E2E' })
@@ -864,8 +978,8 @@ async function createAsset(input: { familyId: string; userId: string; kind: 'pho
     purpose: 'memory',
     mediaKind: input.kind,
     originalKey: `media-originals/${randomUUID()}`,
-    declaredMime: input.kind === 'photo' ? 'image/png' : input.kind === 'video' ? 'video/mp4' : 'audio/ogg',
-    verifiedMime: input.kind === 'photo' ? 'image/png' : input.kind === 'video' ? 'video/mp4' : 'audio/ogg',
+    declaredMime: input.kind === 'photo' ? input.mime : input.kind === 'video' ? 'video/mp4' : 'audio/ogg',
+    verifiedMime: input.kind === 'photo' ? input.mime : input.kind === 'video' ? 'video/mp4' : 'audio/ogg',
     sha256: randomUUID().replaceAll('-', '').repeat(2),
     byteSize: BigInt(input.bytes.byteLength),
     width: input.width,
