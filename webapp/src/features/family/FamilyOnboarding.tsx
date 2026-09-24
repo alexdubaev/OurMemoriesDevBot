@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
 import { resolveAvatarContentType } from '@/features/avatar'
+import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { completeChildProfile, uploadChildAvatar } from './api'
+import { completeChildProfile, updateFamily, uploadChildAvatar } from './api'
 import {
   familyCalendarDate,
   formatChildAge,
@@ -20,6 +21,7 @@ export function FamilyOnboarding({
   familyId,
   familyTimezone,
   initialChild,
+  photoOnly = false,
   transport,
   onCancel,
   onCompleted,
@@ -27,6 +29,7 @@ export function FamilyOnboarding({
   familyId: string
   familyTimezone: string
   initialChild?: NonNullable<FamilyResponse['child']>
+  photoOnly?: boolean
   transport: AuthenticatedTransport
   onCancel?: () => void
   onCompleted: () => Promise<void>
@@ -50,6 +53,7 @@ export function FamilyOnboarding({
   const [submitting, setSubmitting] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [requestError, setRequestError] = useState<Error | null>(null)
+  const [childVersionConflict, setChildVersionConflict] = useState(false)
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -85,6 +89,7 @@ export function FamilyOnboarding({
   const age = formatChildAge(birthDate, familyTimezone)
   const maximumBirthDate = familyCalendarDate(familyTimezone)
   const displayAvatarUrl = previewUrl ?? currentAvatarUrl
+  const photoVersionConflict = photoOnly && childVersionConflict
 
   function chooseFile(next: File | null) {
     setRequestError(null)
@@ -132,15 +137,21 @@ export function FamilyOnboarding({
 
   async function submit() {
     const errors: Record<string, string> = {}
-    if (!file && !initialChild?.avatarMediaId) errors.avatar = 'Добавьте фотографию ребёнка.'
-    if (!name.trim()) errors.name = 'Укажите имя ребёнка.'
-    if (!birthDate || age === null || !isBirthDateOnOrBeforeFamilyToday(birthDate, familyTimezone)) {
-      errors.birthDate = 'Укажите корректную дату рождения.'
+    if (photoOnly) {
+      if (!initialChild) errors.avatar = 'Не удалось загрузить профиль ребёнка.'
+      else if (!file) errors.avatar = 'Выберите и подтвердите новую фотографию.'
+    } else {
+      if (!file && !initialChild?.avatarMediaId) errors.avatar = 'Добавьте фотографию ребёнка.'
+      if (!name.trim()) errors.name = 'Укажите имя ребёнка.'
+      if (!birthDate || age === null || !isBirthDateOnOrBeforeFamilyToday(birthDate, familyTimezone)) {
+        errors.birthDate = 'Укажите корректную дату рождения.'
+      }
+      if (!sex) errors.sex = 'Выберите вариант.'
     }
-    if (!sex) errors.sex = 'Выберите вариант.'
     setFormErrors(errors)
     setRequestError(null)
-    if (Object.keys(errors).length > 0 || (!file && !initialChild?.avatarMediaId) || !sex || age === null) return
+    if (Object.keys(errors).length > 0
+      || (!photoOnly && ((!file && !initialChild?.avatarMediaId) || !sex || age === null))) return
 
     setSubmitting(true)
     try {
@@ -152,11 +163,23 @@ export function FamilyOnboarding({
         finalizedAvatar.current = avatarMediaId
       }
       if (!avatarMediaId) throw new Error('Не удалось подготовить фотографию ребёнка.')
-      await completeChildProfile(transport, familyId, {
-        name: name.trim(), birthDate, sex, avatarMediaId, avatarCrop: confirmedCrop, expectedVersion: initialChild?.version ?? null,
-      })
+      if (photoOnly) {
+        if (!initialChild) throw new Error('Не удалось загрузить профиль ребёнка.')
+        await updateFamily(transport, familyId, { child: {
+          avatarMediaId, avatarCrop: confirmedCrop, expectedVersion: initialChild.version,
+        } })
+      } else {
+        await completeChildProfile(transport, familyId, {
+          name: name.trim(), birthDate, sex: sex!, avatarMediaId, avatarCrop: confirmedCrop,
+          expectedVersion: initialChild?.version ?? null,
+        })
+      }
       await onCompleted()
     } catch (error) {
+      if (photoOnly && error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT') {
+        finalizedAvatar.current = null
+        setChildVersionConflict(true)
+      }
       setRequestError(error instanceof Error ? error : new Error('Не удалось сохранить профиль ребёнка.'))
     } finally {
       setSubmitting(false)
@@ -167,9 +190,9 @@ export function FamilyOnboarding({
     <main className="mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]">
       <BrandLogo className="w-[148px]" />
       <section aria-labelledby="child-onboarding-title" className="mx-auto mt-6 w-full max-w-md pb-10">
-        <Typography id="child-onboarding-title" variant="memoryHero">{initialChild ? 'Профиль ребёнка' : 'Расскажите о ребёнке'}</Typography>
+        <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : initialChild ? 'Профиль ребёнка' : 'Расскажите о ребёнке'}</Typography>
         <Typography className="mt-2" tone="muted" variant="memoryBody">
-          {initialChild ? 'Изменения увидят только участники вашей семьи.' : 'Это поможет сделать семейную ленту вашей.'}
+          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : initialChild ? 'Изменения увидят только участники вашей семьи.' : 'Это поможет сделать семейную ленту вашей.'}
         </Typography>
 
         <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
@@ -227,6 +250,7 @@ export function FamilyOnboarding({
         ) : null}
         <FieldError message={formErrors.avatar} />
 
+        {!photoOnly ? <>
         <label className="mt-6 flex flex-col gap-2" htmlFor="child-name">
           <Typography variant="memoryBody">Имя</Typography>
           <input
@@ -262,13 +286,18 @@ export function FamilyOnboarding({
           </div>
         </fieldset>
         <FieldError message={formErrors.sex} />
+        </> : null}
 
-        {requestError ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
-          <Typography variant="memoryBody">{onboardingSaveErrorMessage}</Typography>
-          <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button>
+        {requestError || photoVersionConflict ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
+          <Typography variant="memoryBody">
+            {photoVersionConflict
+              ? 'Профиль ребёнка уже изменился. Отмените смену фото, вернитесь в профиль и откройте её снова.'
+              : onboardingSaveErrorMessage}
+          </Typography>
+          {!photoVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
         </section> : null}
-        <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting} onClick={() => void submit()} type="button">
-          <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
+        <Button className="mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]" disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
+          <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>
         {onCancel ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
       </section>

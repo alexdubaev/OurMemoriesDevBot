@@ -5,8 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ChildHeader } from '@/components/ChildHeader'
 import { WebpIcon } from '@/components/WebpIcon'
 import { InlineError } from '@/features/feed'
-import { familyMemberName, feedChildSubtitle, roleLabel } from '@/features/family'
-import { ChildProfile } from '@/features/family/ChildProfile'
+import { ChildProfile, familyMemberName, feedChildSubtitle, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
 import { useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'
@@ -17,14 +16,14 @@ export type FamilyPresentationProps = {
   familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null
   usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { url: string; expiresAt: string } | null
   copyState: 'idle' | 'copied' | 'failed'; busy: boolean; hasError?: boolean; inviteError?: boolean; canInvite: boolean; canEditChild: boolean; canLeaveFamily: boolean; childProfileOpen: boolean
-  memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: () => void; onOpenChild: () => void; onCloseChild: () => void
+  memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: () => void; onChangeChildPhoto: () => void; onOpenChild: () => void; onCloseChild: () => void
   onCreateInvite: (input: { role: 'viewer' | 'full'; inviteeDisplayName?: string }) => Promise<void>; onCopyInvite: () => Promise<void>; onShareInvite: () => Promise<void>
   onCloseInvite: () => void; onRevokeInvite: (invite: FamilyInviteDto) => Promise<void>; onUpdateMember: (member: FamilyMemberDto, input: { familyDisplayName?: string | null; role?: 'full' | 'viewer' }) => Promise<void>
   onRemoveMember: (member: FamilyMemberDto) => Promise<void>; onLeaveFamily: () => Promise<void>
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'invite-details'
 
-export function FamilyPresentation({ familyResponse, hostBridge, invites, members, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, childProfileOpen, memberActions, onRefresh, onRefreshUsage, onEditChild, onOpenChild, onCloseChild, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily }: FamilyPresentationProps) {
+export function FamilyPresentation({ familyResponse, hostBridge, invites, members, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, childProfileOpen, memberActions, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [selectedInvite, setSelectedInvite] = useState<FamilyInviteDto | null>(null)
@@ -50,8 +49,8 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
   }, [ageDetailsOpen, childProfileOpen, hostBridge, onCloseChild, onCloseInvite, view])
   return <main className={`ml-family-content family-screen${childProfileOpen ? ' child-screen' : ''}`} data-slot="family-presentation">
     <div className={childProfileOpen ? 'child-shell' : 'family-shell'}>
-      {childProfileOpen && child ? <ChildProfile avatarUrl={childAvatarUrl} canEdit={canEditChild} child={child} familyTimezone={familyResponse.family.timezone} onBack={() => { if (ageDetailsOpen) setAgeDetailsOpen(false); else onCloseChild() }} onEdit={onEditChild} onOpenAge={() => setAgeDetailsOpen(true)} showAgeDetails={ageDetailsOpen} /> : null}
-      {!childProfileOpen && view === 'overview' ? <FamilyOverview canInvite={canInvite} child={child} childAvatarUrl={childAvatarUrl} family={familyResponse.family} hasError={hasError} invites={invites} members={members} onOpenChild={onOpenChild} onInvite={() => setView('invite')} onOpenInvite={(invite) => { setSelectedInvite(invite); setView('invite-details') }} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} onRevokeInvite={onRevokeInvite} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
+      {childProfileOpen && child ? <ChildProfile avatarUrl={childAvatarUrl} canEdit={canEditChild} child={child} familyTimezone={familyResponse.family.timezone} onBack={() => { if (ageDetailsOpen) setAgeDetailsOpen(false); else onCloseChild() }} onEdit={onEditChild} onChangePhoto={onChangeChildPhoto} onOpenAge={() => setAgeDetailsOpen(true)} showAgeDetails={ageDetailsOpen} /> : null}
+      {!childProfileOpen && view === 'overview' ? <FamilyOverview canInvite={canInvite} child={child} childAvatarUrl={childAvatarUrl} family={familyResponse.family} hasError={hasError} invites={invites} members={members} onOpenChild={() => { setAgeDetailsOpen(false); onOpenChild() }} onInvite={() => setView('invite')} onOpenInvite={(invite) => { setSelectedInvite(invite); setView('invite-details') }} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} onRevokeInvite={onRevokeInvite} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
       {!childProfileOpen && view === 'member' && currentSelectedMember ? <MemberDetail key={`${currentSelectedMember.userId}:${currentSelectedMember.role}:${currentSelectedMember.familyDisplayName ?? ''}`} actions={memberActions[currentSelectedMember.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }} busy={busy} member={currentSelectedMember} onBack={goOverview} onRemove={onRemoveMember} onSave={onUpdateMember} /> : null}
       {!childProfileOpen && view === 'invite-details' && selectedInvite ? <PendingInviteDetails busy={busy} invite={selectedInvite} onBack={goOverview} onRevoke={async (invite) => { await onRevokeInvite(invite); goOverview() }} /> : null}
       {!childProfileOpen && view === 'invite' ? <InviteFlow busy={busy} errorMessage={inviteError ? 'Не удалось создать приглашение. Попробуйте ещё раз.' : null} hasError={hasError} onBack={goOverview} onCreate={async (role, inviteeDisplayName) => { try { await onCreateInvite({ role, inviteeDisplayName }); setView('invite-ready') } catch { /* FamilyScreen exposes the actionable error state. */ } }} onRefresh={onRefresh} /> : null}

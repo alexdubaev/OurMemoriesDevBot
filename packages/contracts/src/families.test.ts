@@ -131,6 +131,27 @@ describe('family contracts', () => {
     expect(() => updateFamilyRequestSchema.parse({ timezone: 'not-a-timezone' })).toThrow()
   })
 
+  test('accepts an avatar and crop together without requiring optional child metadata', () => {
+    const avatarMediaId = '019c0000-0000-7000-8000-000000000005'
+    expect(updateFamilyRequestSchema.parse({ child: {
+      avatarMediaId,
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+      expectedVersion: 5,
+    } })).toEqual({ child: {
+      avatarMediaId,
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+      expectedVersion: 5,
+    } })
+    expect(() => updateFamilyRequestSchema.parse({ child: {
+      avatarMediaId,
+      expectedVersion: 5,
+    } })).toThrow()
+    expect(() => updateFamilyRequestSchema.parse({ child: {
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+      expectedVersion: 5,
+    } })).toThrow()
+  })
+
   test('requires a UUID Idempotency-Key for Block 01 creation requests', () => {
     expect(idempotencyKeyHeadersSchema.parse({
       'idempotency-key': '01993b24-7e7d-7000-8000-000000000003',

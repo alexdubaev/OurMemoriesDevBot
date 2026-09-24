@@ -7,13 +7,14 @@ import { familyCalendarDate, formatChildAge } from './model'
 
 type Child = NonNullable<FamilyResponse['child']>
 
-export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack, onEdit, onOpenAge, showAgeDetails }: {
+export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack, onEdit, onChangePhoto, onOpenAge, showAgeDetails }: {
   avatarUrl: string | null
   canEdit: boolean
   child: Child
   familyTimezone: string
   onBack: () => void
   onEdit: () => void
+  onChangePhoto: () => void
   onOpenAge: () => void
   showAgeDetails: boolean
 }) {
@@ -47,7 +48,7 @@ export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack
       {canEdit || birthDate ? <div className="child-action-list">
         {canEdit ? <>
           <ActionRow icon="edit" label="Редактировать профиль" onClick={onEdit} />
-          <ActionRow icon="photo" label="Сменить фото" onClick={onEdit} />
+          <ActionRow icon="photo" label="Сменить фото" onClick={onChangePhoto} />
         </> : null}
         {birthDate ? <ActionRow icon="clock" label="Возраст и дата рождения" onClick={onOpenAge} /> : null}
       </div> : null}

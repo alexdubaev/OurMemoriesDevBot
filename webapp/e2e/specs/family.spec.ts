@@ -339,14 +339,34 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
 
 test('child profile keeps protected avatar, actions, and geometry at mobile widths', async ({ page }, testInfo) => {
   const owner = await createCompletedOwner(page, 81000041)
+  const childUpdates: string[] = []
+  owner.page.on('request', (request) => {
+    if (request.method() === 'PUT' && /\/api\/v1\/families\/[^/]+\/child$/.test(new URL(request.url()).pathname)) {
+      childUpdates.push(request.url())
+    }
+  })
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   const profile = owner.page.locator('[data-slot="child-profile"]')
   await expect(profile).toBeVisible()
   await expect(profile.locator('[data-slot="child-avatar-image"]')).toHaveAttribute('src', /^blob:/)
   await expect(profile).toContainText('Лиза')
+
+  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  await expect(owner.page.locator('[data-child-header-mode="family"]')).toBeVisible()
+  await expect(profile).toHaveCount(0)
+
+  await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  await expect(profile).toHaveAttribute('aria-label', 'Профиль ребёнка')
   await profile.getByRole('button', { name: 'Возраст и дата рождения' }).click()
   await expect(profile).toContainText('Полных месяцев')
-  await profile.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
+
+  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  await expect(owner.page.locator('[data-child-header-mode="family"]')).toBeVisible()
+  await expect(profile).toHaveCount(0)
+
+  await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  await expect(profile).toHaveAttribute('aria-label', 'Профиль ребёнка')
+  await expect(profile).not.toContainText('Полных месяцев')
 
   for (const width of [320, 390, 430, 480]) {
     await owner.page.setViewportSize({ width, height: 844 })
@@ -359,5 +379,50 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
   await expect(owner.page.getByRole('button', { name: 'Заменить фотографию' })).toBeVisible()
   await owner.page.getByRole('button', { name: 'Отмена' }).click()
   await expect(profile).toBeVisible()
+  expect(childUpdates).toHaveLength(0)
+  await owner.context.close()
+})
+
+test('changing the child photo uses a focused confirmation flow and preserves profile details', async ({ page }) => {
+  const childUpdates: Array<{ method: string; body: Record<string, unknown> }> = []
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if ((request.method() === 'PUT' && /\/api\/v1\/families\/[^/]+\/child$/.test(path))
+      || (request.method() === 'PATCH' && /\/api\/v1\/families\/[^/]+$/.test(path))) {
+      childUpdates.push({ method: request.method(), body: request.postDataJSON() as Record<string, unknown> })
+    }
+  })
+  const owner = await createCompletedOwner(page, 81000014)
+  expect(childUpdates).toHaveLength(1)
+
+  await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  const originalAvatarUrl = await owner.page.locator('[data-slot="child-avatar-image"]').getAttribute('src')
+  await owner.page.getByRole('button', { name: 'Сменить фото' }).click()
+  await expect(owner.page.getByRole('heading', { name: 'Сменить фото ребёнка' })).toBeVisible()
+  await expect(owner.page.locator('#child-name')).toHaveCount(0)
+  await expect(owner.page.locator('#child-birth-date')).toHaveCount(0)
+  await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
+
+  await expect.poll(() => childUpdates.length).toBe(1)
+  await owner.page.locator('#child-avatar').setInputFiles(pngImage)
+  await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
+  await owner.page.getByRole('button', { name: 'Использовать фото' }).click()
+  await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeEnabled()
+  await owner.page.getByRole('button', { name: 'Сохранить фото' }).click()
+
+  await expect(owner.page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await expect.poll(() => childUpdates.length).toBe(2)
+  expect(childUpdates[0].method).toBe('PUT')
+  expect(childUpdates[1].method).toBe('PATCH')
+  const patchChild = childUpdates[1].body.child as Record<string, unknown>
+  expect(Object.keys(patchChild).sort()).toEqual(['avatarCrop', 'avatarMediaId', 'expectedVersion'])
+  expect(patchChild.avatarMediaId).toEqual(expect.any(String))
+  expect(patchChild.avatarMediaId).not.toBe((childUpdates[0].body as Record<string, unknown>).avatarMediaId)
+  expect(patchChild.avatarCrop).toEqual({ x: 0, y: 0, width: 1, height: 1 })
+  expect(patchChild.expectedVersion).toBe(1)
+  await expect(owner.page.locator('[data-slot="child-profile"]')).toContainText('Лиза')
+  const updatedAvatar = owner.page.locator('[data-slot="child-avatar-image"]')
+  await expect(updatedAvatar).toHaveAttribute('src', /^blob:/)
+  expect(await updatedAvatar.getAttribute('src')).not.toBe(originalAvatarUrl)
   await owner.context.close()
 })

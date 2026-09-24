@@ -132,7 +132,13 @@ export class FamilyService {
 
   async updateFamily(scope: FamilyScope, input: UpdateFamilyRequest): Promise<FamilyResponse> {
     await this.access.requireOwner(scope)
-    return this.db.$transaction(async (tx) => {
+    const transactionResult = await this.db.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM families
+         WHERE id = ${scope.familyId}::uuid AND status = 'active'
+         FOR UPDATE
+      `
+      if (!locked[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
       const family = await tx.family.findFirst({
         where: { id: scope.familyId, status: 'active' },
         include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
@@ -151,13 +157,30 @@ export class FamilyService {
         throw new FamilyFailure('conflict', 'Дата рождения не может быть в будущем')
       }
 
-      const updatedFamily = await tx.family.update({
-        where: { id: family.id },
-        data: {
-          ...(input.name === undefined ? {} : { name: input.name }),
-          ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+      const avatarMediaId = input.child?.avatarMediaId
+      const avatarCrop = input.child?.avatarCrop
+      if ((avatarMediaId === undefined) !== (avatarCrop === undefined)) {
+        throw new FamilyFailure('conflict', 'Для смены аватара нужны фотография и кадрирование')
+      }
+      const replacementAvatar = avatarMediaId === undefined ? null : await tx.mediaAsset.findFirst({
+        where: {
+          id: avatarMediaId,
+          familyId: scope.familyId,
+          purpose: 'child_avatar',
+          mediaKind: 'photo',
+          originalStatus: 'stored',
+          renditionStatus: 'ready',
+          deletedAt: null,
         },
+        select: { id: true, width: true, height: true },
       })
+      if (avatarMediaId !== undefined && !replacementAvatar) {
+        throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
+      }
+      if (replacementAvatar && avatarCrop && !isSquarePixelCrop(avatarCrop, replacementAvatar.width, replacementAvatar.height)) {
+        throw new FamilyFailure('conflict', 'Кадрирование аватара должно быть квадратным')
+      }
+
       let updatedChild = child
       if (input.child && child) {
         const updated = await tx.child.updateMany({
@@ -173,16 +196,67 @@ export class FamilyService {
                     ? null
                     : new Date(`${input.child.birthDate}T00:00:00.000Z`),
                 }),
+            ...(avatarMediaId === undefined ? {} : { avatarMediaId, avatarCrop }),
             version: { increment: 1 },
           },
         })
         if (updated.count === 0) {
+          const photoOnlyUpdate = input.name === undefined
+            && input.timezone === undefined
+            && input.child.displayName === undefined
+            && input.child.birthDate === undefined
+            && avatarMediaId !== undefined
+          if (photoOnlyUpdate) {
+            await retireUnreferencedUploadedAvatar(tx, {
+              familyId: scope.familyId,
+              mediaId: avatarMediaId,
+              uploaderId: scope.principal.userId,
+              now: this.now(),
+            })
+            return { kind: 'version_conflict' as const }
+          }
           throw new FamilyFailure('version_conflict', 'Профиль ребёнка изменён другим участником')
         }
         updatedChild = await tx.child.findUniqueOrThrow({ where: { id: child.id } })
+
+        if (avatarMediaId !== undefined && child.avatarMediaId && child.avatarMediaId !== avatarMediaId) {
+          const retired = await tx.mediaAsset.updateMany({
+            where: {
+              id: child.avatarMediaId,
+              familyId: scope.familyId,
+              purpose: 'child_avatar',
+              deletedAt: null,
+            },
+            data: { deletedAt: this.now() },
+          })
+          if (retired.count === 1) {
+            await insertTask(tx, {
+              type: 'media:delete',
+              dedupeKey: `media-delete:${child.avatarMediaId}`,
+              payload: { mediaId: child.avatarMediaId },
+              scheduledFor: this.now(),
+            })
+          }
+        }
       }
-      return { family: familyDto(updatedFamily), child: updatedChild ? childDto(updatedChild) : null }
+      const updatedFamily = input.name === undefined && input.timezone === undefined
+        ? family
+        : await tx.family.update({
+            where: { id: family.id },
+            data: {
+              ...(input.name === undefined ? {} : { name: input.name }),
+              ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+            },
+          })
+      return {
+        kind: 'ok' as const,
+        response: { family: familyDto(updatedFamily), child: updatedChild ? childDto(updatedChild) : null },
+      }
     })
+    if (transactionResult.kind === 'version_conflict') {
+      throw new FamilyFailure('version_conflict', 'Профиль ребёнка изменён другим участником')
+    }
+    return transactionResult.response
   }
 
   async completeChildProfile(
@@ -662,6 +736,40 @@ export class FamilyService {
 
 function hashInviteToken(rawToken: string) {
   return createHash('sha256').update(rawToken).digest('hex')
+}
+
+async function retireUnreferencedUploadedAvatar(
+  tx: TransactionClient,
+  input: { familyId: string; mediaId: string; uploaderId: string; now: Date },
+) {
+  const referencedChild = await tx.child.findFirst({
+    where: { familyId: input.familyId, avatarMediaId: input.mediaId },
+    select: { id: true },
+  })
+  if (referencedChild) return
+
+  const retired = await tx.mediaAsset.updateMany({
+    where: {
+      id: input.mediaId,
+      familyId: input.familyId,
+      uploaderId: input.uploaderId,
+      sourceKind: 'upload',
+      purpose: 'child_avatar',
+      mediaKind: 'photo',
+      originalStatus: 'stored',
+      deletedAt: null,
+      storageDeletedAt: null,
+    },
+    data: { deletedAt: input.now },
+  })
+  if (retired.count !== 1) return
+
+  await insertTask(tx, {
+    type: 'media:delete',
+    dedupeKey: `media-delete:${input.mediaId}`,
+    payload: { mediaId: input.mediaId },
+    scheduledFor: input.now,
+  })
 }
 
 function hashPayload(input: unknown) {
