@@ -35,6 +35,19 @@ access boundary, the build inputs, the migration gate, and the rollback contract
 - The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
   and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
   they are never copied into an image or committed.
+- The server checkout must also have a read-only credential for its canonical GitHub
+  origin so the release entry point can run `git fetch origin main` as `memoly`.
+  Provision that credential on the host through the owner’s secure access process;
+  the GitHub Actions SSH key used to reach Selectel is not forwarded to GitHub.
+  Verify it without printing credentials:
+
+  ```sh
+  sudo -n -u memoly git -C /opt/memoly/app ls-remote origin refs/heads/main
+  ```
+
+- The release preflight requires at least 4 GiB free on the filesystem containing
+  `/opt/memoly`. The current host has roughly 2 GiB free, so releases stop at the
+  disk check until the owner completes approved host maintenance.
 - The current verified public MAX bot username is `id911018762027_bot`. It is a
   build-time frontend value and is not a secret. Pass it as
   `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
