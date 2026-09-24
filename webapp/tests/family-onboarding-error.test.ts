@@ -5,7 +5,8 @@ import type { FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
 
 import { FamilyOnboarding } from '../src/features/family/FamilyOnboarding'
 import { onboardingSaveErrorMessage } from '../src/features/family/model'
-import { FamilyPresentation, InviteFlow } from '../src/features/memoly-ui/FamilyPresentation'
+import { FamilyPresentation } from '../src/features/memoly-ui/FamilyPresentation'
+import { InviteFlow } from '../src/features/family/InvitationScreens'
 import type { AuthenticatedTransport } from '../src/platform/api'
 
 test('onboarding save failures use onboarding-specific copy instead of feed refresh copy', () => {

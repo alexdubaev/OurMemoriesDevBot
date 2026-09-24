@@ -130,15 +130,25 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   return { context: page.context(), page }
 }
 
-async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) {
+async function createInvite(page: Page, role: 'viewer' | 'full', alias: string, capture = false) {
   await page.getByRole('button', { name: 'Пригласить родственника' }).click()
   const inviteSection = page.locator('section').filter({
-    has: page.getByRole('heading', { name: 'Пригласить в семью' }),
+    has: page.getByRole('heading', { name: 'Пригласить родственника' }),
   })
-  await inviteSection.getByLabel('Имя в семье (необязательно)').fill(alias)
-  await inviteSection.locator(`label[for="${role === 'full' ? 'simpleRoleFull' : 'simpleRoleView'}"]`).click()
-  await inviteSection.getByRole('button', { name: 'Создать ссылку' }).click()
+  await inviteSection.getByLabel('Имя в семье').fill(alias)
+  await inviteSection.locator(`#${role === 'full' ? 'simpleRoleFull' : 'simpleRoleView'}`).check()
+  if (capture) for (const width of [320, 390, 430, 480]) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: resolve(`e2e/.artifacts/invite-create-${width}.png`), animations: 'disabled' })
+  }
+  await inviteSection.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Приглашение готово!' })).toBeVisible()
+  if (capture) for (const width of [320, 390, 430, 480]) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: resolve(`e2e/.artifacts/invite-ready-${width}.png`), animations: 'disabled', mask: [page.getByLabel('Ссылка приглашения')] })
+  }
   const link = await page.getByLabel('Ссылка приглашения').inputValue()
   const startParam = new URL(link).searchParams.get('startapp')
   expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,57}$/)
@@ -190,15 +200,43 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await owner.page.getByRole('option', { name: 'Тема: Небо' }).click()
   await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'sky')
   await owner.page.getByRole('button', { name: 'Закрыть' }).click()
-  const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира')
+  for (const [theme, label] of [
+    ['mint', 'Мята'], ['rose', 'Роза'], ['sky', 'Небо'],
+    ['lavender', 'Лаванда'], ['apricot', 'Абрикос'], ['sand', 'Песок'],
+  ] as const) {
+    await owner.page.setViewportSize({ width: 390, height: 844 })
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: 'Оформление' }).click()
+    await owner.page.getByRole('option', { name: `Тема: ${label}` }).click()
+    await owner.page.getByRole('button', { name: 'Закрыть' }).click()
+    await owner.page.getByRole('button', { name: 'Пригласить родственника' }).click()
+    await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/invite-create-${theme}-390.png`), animations: 'disabled' })
+    await owner.page.locator('.invitation-back').click()
+  }
+  const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира', true)
+  await owner.context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await owner.page.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(owner.page.getByRole('status')).toContainText('Ссылка скопирована')
+  await owner.page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: () => Promise.reject(new Error('Synthetic clipboard denial')) },
+  }))
+  await owner.page.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(owner.page.getByRole('alert')).toContainText('Не удалось скопировать')
 
   const requests: RequestLog = { accepts: [], familyCreations: [], privateFamilyRequests: [] }
   const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E', requests)
 
-  await expect(guest.page.getByRole('heading', { name: 'Приглашение в семью' })).toBeVisible()
+  await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
   await expect(guest.page.getByText('Наша семья')).toBeVisible()
   await expect(guest.page.getByText('Лиза', { exact: true })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
+  await expect(guest.page.getByText('Можно смотреть воспоминания и ставить лайки.')).toBeVisible()
+  for (const width of [320, 390, 430, 480]) {
+    await guest.page.setViewportSize({ width, height: 844 })
+    expect(await guest.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await guest.page.screenshot({ path: resolve(`e2e/.artifacts/invite-incoming-${width}.png`), animations: 'disabled' })
+  }
   await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
   // Reloading a preview preserves invite intent and never performs an implicit accept.
@@ -261,6 +299,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   const owner = await createCompletedOwner(page, 81000021)
   const fullStartParam = await createInvite(owner.page, 'full', 'Дедушка Павел')
   const full = await inviteePage(browser, 81000022, fullStartParam, 'Полный E2E')
+  await expect(full.page.getByText('Можно добавлять, редактировать и удалять воспоминания семьи.')).toBeVisible()
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await expect(full.page.getByText('Дедушка Павел', { exact: true })).toBeVisible()
@@ -283,6 +322,8 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('button', { name: 'Отозвать' }).first().click()
   const revoked = await inviteePage(browser, 81000023, revokedStartParam, 'Отозванный E2E')
   await expect(revoked.page.getByText('Это приглашение отозвано.')).toBeVisible()
+  await revoked.page.setViewportSize({ width: 390, height: 844 })
+  await revoked.page.screenshot({ path: resolve('e2e/.artifacts/invite-revoked-390.png'), animations: 'disabled' })
   await expect(revoked.page.locator('[data-child-header-mode="family"]')).toHaveCount(0)
 
   await revoked.context.close()
