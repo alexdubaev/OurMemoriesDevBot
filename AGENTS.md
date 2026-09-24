@@ -24,16 +24,17 @@ git rev-parse HEAD
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) и связанный
 [deploy/selectel/README.md](deploy/selectel/README.md). Текущий production host —
 `app.memoly.ru`, рабочий каталог на нём — `/opt/memoly/app`. SSH-доступ должен быть
-заранее выдан владельцем через защищённое хранилище или SSH agent. Целевая модель
-для автоматизации — protected GitHub Environment `selectel-production` с
+заранее выдан владельцем через защищённое хранилище или SSH agent. Подготовленная
+модель автоматизации — GitHub Environment `selectel-production` с
 переменными `SELECTEL_HOST`, `SELECTEL_SSH_USER`, `SELECTEL_MAX_BOT_USERNAME` и
-секретами `SELECTEL_DEPLOY_SSH_PRIVATE_KEY`, `SELECTEL_KNOWN_HOSTS`, который
-владелец настраивает один раз. Ручной workflow
+секретами `SELECTEL_DEPLOY_SSH_PRIVATE_KEY`, `SELECTEL_KNOWN_HOSTS`. Владелец решил
+оставить deploy SSH-ключ вне GitHub; сейчас ключ в Environment отсутствует. Ручной workflow
 `.github/workflows/selectel-release.yml` — единственная автоматизированная точка
 входа; он отправляет проверенный `deploy/selectel/ci-release.sh`, а тот собирает и
 разворачивает immutable SHA-образы через Selectel runbook. Приватные ключи, их пути
-и значения секретов в Git и переписке не хранятся. Если Environment не настроен,
-workflow останавливается до SSH и production-изменений.
+и значения секретов в Git и переписке не хранятся. Пока ключ не настроен, workflow
+останавливается до SSH и production-изменений. Для текущего ручного выпуска следуй
+runbook через заранее выданный SSH-доступ.
 
 ## 3. Стратегия веток
 Одна долгоживущая ветка `main`. Она всегда должна собираться, но каждое попадание в main не означает production-деплой. Не создавать постоянные `dev`, `develop`, `test`, ветки по именам моделей или новую `main-final`.

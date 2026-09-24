@@ -23,14 +23,16 @@ access boundary, the build inputs, the migration gate, and the rollback contract
 
   If this fails, stop and ask the owner to provision the server access. Never look
   for, print, commit, or request a private key in Git or chat.
-- The durable automation target is the protected GitHub Environment
-  `selectel-production`, containing the deploy SSH private key and pinned
-  known-hosts. Use
+- A GitHub Environment named `selectel-production` is configured for `main` and
+  contains pinned known-hosts, but the owner chose to keep the deploy SSH private
+  key outside GitHub. The manual workflow therefore stops before SSH. For the
+  current release route, use owner-provisioned SSH access and this runbook. A
+  future decision to enable the workflow would use
   the names `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` and `SELECTEL_KNOWN_HOSTS` for those
   environment secrets, and `SELECTEL_HOST`, `SELECTEL_SSH_USER` plus
   `SELECTEL_MAX_BOT_USERNAME` for the environment variables. The current verified
   values are `app.memoly.ru`, `root` and `id911018762027_bot`; the owner must
-  recheck them in the Selectel panel. The owner provisions those values once in
+  recheck them in the Selectel panel. The nonsecret variables are configured in
   GitHub; the key value and its filesystem path never appear in this repository.
 - The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
   and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
