@@ -701,8 +701,20 @@ async function showPhoto(
 }
 
 function dateTimeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short', timeZone: timezone }).format(new Date(value)) }
-function dayLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone }).format(new Date(value)) }
-function timeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value)) }
+function dayLabel(value: string, timezone: string) {
+  const formatter = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone })
+  const calendar = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: timezone })
+  const calendarDay = (date: Date) => {
+    const parts = Object.fromEntries(calendar.formatToParts(date).map(({ type, value: part }) => [type, Number(part)]))
+    return Date.UTC(parts.year!, parts.month! - 1, parts.day!) / 86_400_000
+  }
+  const occurred = new Date(value)
+  const daysAgo = calendarDay(new Date()) - calendarDay(occurred)
+  if (daysAgo === 0) return 'Сегодня'
+  if (daysAgo === 1) return 'Вчера'
+  return formatter.format(occurred)
+}
+function timeLabel(value: string, timezone: string) { return `${dayLabel(value, timezone)}, ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value))}` }
 function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '•' }
 function seconds(value: number) { return Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00' }
 function roundedSeconds(value: number) { return Number.isFinite(value) ? seconds(Math.round(value)) : '0:00' }
