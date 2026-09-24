@@ -9,14 +9,17 @@ import {
 } from '../src/platform/telegram/host-bridge'
 
 describe('Telegram HostBridge', () => {
-  test('loads Telegram WebApp API before the React production bootstrap', () => {
+  test('keeps the Telegram WebApp API in the conditional bootstrap before React', () => {
     const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
     const html = readFileSync(indexPath, 'utf8')
     const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
     const reactBootstrap = '/src/main.tsx'
 
-    expect(html).toContain(`src="${telegramSdk}"`)
+    expect(html).toContain(telegramSdk)
+    expect(html).toContain('tgWebAppData')
+    expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf(telegramSdk))
     expect(html.indexOf(telegramSdk)).toBeLessThan(html.indexOf(reactBootstrap))
+    expect(html).not.toContain(`<script src="${telegramSdk}"></script>`)
   })
 
   test('subscribes to Telegram BackButton without leaking stale callbacks', () => {

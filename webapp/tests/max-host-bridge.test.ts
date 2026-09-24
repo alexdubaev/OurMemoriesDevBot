@@ -59,12 +59,15 @@ describe('MAX HostBridge', () => {
     expect(opened).toEqual([])
   })
 
-  test('loads the documented MAX SDK before the React production bootstrap', () => {
+  test('keeps the documented MAX SDK in the conditional bootstrap before React', () => {
     const indexPath = fileURLToPath(new URL('../index.html', import.meta.url))
     const html = readFileSync(indexPath, 'utf8')
     const maxSdk = 'https://st.max.ru/js/max-web-app.js'
-    expect(html).toContain(`src="${maxSdk}"`)
+    expect(html).toContain(maxSdk)
+    expect(html).toContain('WebAppData')
+    expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf(maxSdk))
     expect(html.indexOf(maxSdk)).toBeLessThan(html.indexOf('/src/main.tsx'))
+    expect(html).not.toContain(`<script src="${maxSdk}"></script>`)
   })
 
   test('passes raw initData through and exposes only safe metadata', () => {
