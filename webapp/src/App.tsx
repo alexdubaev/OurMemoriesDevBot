@@ -21,7 +21,8 @@ import {
   loadFamilyMe,
   loadFamilyMembers,
   inviteIssueCode,
-  inviteIssueMessage,
+  IncomingInvite,
+  IncomingInviteIssue,
   previewInvite,
 } from '@/features/family'
 import type { HostBridge } from '@/platform/telegram'
@@ -266,8 +267,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
 
   if (isFamilyBootstrapping) return <BootPreloader style={insetsStyle} />
   if (error) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><InlineError onRetry={() => void refresh()} /></main>
-  if (inviteIssue) return <InviteIssue code={inviteIssue} onRetry={refresh} style={insetsStyle} />
-  if (invitePreview && inviteToken && !inviteHandled) return <InvitePreview preview={invitePreview} style={insetsStyle} onAccept={async () => {
+  if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={refresh} style={insetsStyle} />
+  if (invitePreview && inviteToken && !inviteHandled) return <IncomingInvite preview={invitePreview} style={insetsStyle} onAccept={async () => {
     try {
       await acceptInvite(transport, inviteToken)
       setInviteHandled(true)
@@ -290,26 +291,6 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   }
   return <div style={insetsStyle}><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refresh} transport={transport} /></div>
 }
-
-function InvitePreview({ preview, style, onAccept }: { preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false)
-  const [failed, setFailed] = useState(false)
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}>
-    <Typography variant="memoryScreen">Приглашение в семью</Typography>
-    <section className="mt-8 rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
-      <Typography variant="memoryHero">{preview.family.name}</Typography>
-      <Typography className="mt-3" tone="muted" variant="memoryBody">Вам предложен доступ: {preview.role === 'full' ? 'полный' : 'просмотр'}. Ссылка одноразовая и действует до {new Date(preview.expiresAt).toLocaleString('ru-RU')}.</Typography>
-      {failed ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">Не удалось присоединиться. Проверьте приглашение и повторите.</Typography> : null}
-      <Button className="mt-6 min-h-12 w-full" disabled={busy} onClick={() => void (async () => { setBusy(true); setFailed(false); try { await onAccept() } catch { setFailed(true) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Присоединиться</Typography></Button>
-    </section>
-  </main>
-}
-
-function InviteIssue({ code, onRetry, style }: { code: string; onRetry: () => Promise<void>; style: CSSProperties }) {
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><Typography variant="memoryScreen">Приглашение</Typography><Typography className="mt-8" variant="memoryBody">{inviteIssueMessage(code)}</Typography>{!terminalInviteIssueCodes.has(code) ? <Button className="mt-6" onClick={() => void onRetry()} type="button"><Typography variant="memoryButton">Повторить</Typography></Button> : null}</main>
-}
-
-const terminalInviteIssueCodes = new Set(['OTHER_FAMILY', 'ALREADY_IN_FAMILY', 'INVITE_EXPIRED', 'INVITE_REVOKED', 'INVITE_USED', 'NOT_FOUND'])
 
 function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)

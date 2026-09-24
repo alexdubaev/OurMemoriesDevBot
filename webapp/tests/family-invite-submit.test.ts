@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { buildInvitePayload, InviteFlow, submitInvite } from '../src/features/memoly-ui/FamilyPresentation'
+import { buildInvitePayload, InviteFlow, submitInvite } from '../src/features/family/InvitationScreens'
 
 const flowProps = {
   errorMessage: 'Не удалось создать приглашение. Попробуйте ещё раз.',

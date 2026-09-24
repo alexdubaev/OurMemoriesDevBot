@@ -38,6 +38,10 @@ test('child profile shows real child data and the existing protected avatar URL'
   }))
 
   expect(markup).toContain('data-slot="child-profile"')
+  expect(markup).toContain('class="child-hero ds-card ds-card--prominent"')
+  expect(markup).toContain('class="child-action-row ds-row"')
+  expect(markup).toContain('Дополнительные действия профиля ребёнка')
+  expect(markup).not.toContain('Наше маленькое')
   expect(markup).toContain('София')
   expect(markup).toContain('Родилась 20 мая 2024')
   expect(markup).toContain('src="blob:protected-child-avatar"')

@@ -112,6 +112,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await page.getByRole('button', { name: 'Сменить фото' }).click()
   await page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(page.locator('[data-slot="child-photo-crop"]')).toBeVisible()
@@ -130,15 +131,25 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   return { context: page.context(), page }
 }
 
-async function createInvite(page: Page, role: 'viewer' | 'full', alias: string) {
+async function createInvite(page: Page, role: 'viewer' | 'full', alias: string, capture = false) {
   await page.getByRole('button', { name: 'Пригласить родственника' }).click()
   const inviteSection = page.locator('section').filter({
-    has: page.getByRole('heading', { name: 'Пригласить в семью' }),
+    has: page.getByRole('heading', { name: 'Пригласить родственника' }),
   })
-  await inviteSection.getByLabel('Имя в семье (необязательно)').fill(alias)
-  await inviteSection.locator(`label[for="${role === 'full' ? 'simpleRoleFull' : 'simpleRoleView'}"]`).click()
-  await inviteSection.getByRole('button', { name: 'Создать ссылку' }).click()
+  await inviteSection.getByLabel('Имя в семье').fill(alias)
+  await inviteSection.locator(`#${role === 'full' ? 'simpleRoleFull' : 'simpleRoleView'}`).check()
+  if (capture) for (const width of [320, 390, 430, 480]) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: resolve(`e2e/.artifacts/invite-create-${width}.png`), animations: 'disabled' })
+  }
+  await inviteSection.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Приглашение готово!' })).toBeVisible()
+  if (capture) for (const width of [320, 390, 430, 480]) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: resolve(`e2e/.artifacts/invite-ready-${width}.png`), animations: 'disabled', mask: [page.getByLabel('Ссылка приглашения')] })
+  }
   const link = await page.getByLabel('Ссылка приглашения').inputValue()
   const startParam = new URL(link).searchParams.get('startapp')
   expect(startParam).toMatch(/^invite_[A-Za-z0-9_-]{32,57}$/)
@@ -190,15 +201,43 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await owner.page.getByRole('option', { name: 'Тема: Небо' }).click()
   await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'sky')
   await owner.page.getByRole('button', { name: 'Закрыть' }).click()
-  const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира')
+  for (const [theme, label] of [
+    ['mint', 'Мята'], ['rose', 'Роза'], ['sky', 'Небо'],
+    ['lavender', 'Лаванда'], ['apricot', 'Абрикос'], ['sand', 'Песок'],
+  ] as const) {
+    await owner.page.setViewportSize({ width: 390, height: 844 })
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: 'Оформление' }).click()
+    await owner.page.getByRole('option', { name: `Тема: ${label}` }).click()
+    await owner.page.getByRole('button', { name: 'Закрыть' }).click()
+    await owner.page.getByRole('button', { name: 'Пригласить родственника' }).click()
+    await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/invite-create-${theme}-390.png`), animations: 'disabled' })
+    await owner.page.locator('.invitation-back').click()
+  }
+  const startParam = await createInvite(owner.page, 'viewer', 'Тётя Ира', true)
+  await owner.context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await owner.page.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(owner.page.getByRole('status')).toContainText('Ссылка скопирована')
+  await owner.page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: () => Promise.reject(new Error('Synthetic clipboard denial')) },
+  }))
+  await owner.page.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(owner.page.getByRole('alert')).toContainText('Не удалось скопировать')
 
   const requests: RequestLog = { accepts: [], familyCreations: [], privateFamilyRequests: [] }
   const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E', requests)
 
-  await expect(guest.page.getByRole('heading', { name: 'Приглашение в семью' })).toBeVisible()
+  await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
   await expect(guest.page.getByText('Наша семья')).toBeVisible()
   await expect(guest.page.getByText('Лиза', { exact: true })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
+  await expect(guest.page.getByText('Можно смотреть воспоминания и ставить лайки.')).toBeVisible()
+  for (const width of [320, 390, 430, 480]) {
+    await guest.page.setViewportSize({ width, height: 844 })
+    expect(await guest.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await guest.page.screenshot({ path: resolve(`e2e/.artifacts/invite-incoming-${width}.png`), animations: 'disabled' })
+  }
   await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
   // Reloading a preview preserves invite intent and never performs an implicit accept.
@@ -261,6 +300,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   const owner = await createCompletedOwner(page, 81000021)
   const fullStartParam = await createInvite(owner.page, 'full', 'Дедушка Павел')
   const full = await inviteePage(browser, 81000022, fullStartParam, 'Полный E2E')
+  await expect(full.page.getByText('Можно добавлять, редактировать и удалять воспоминания семьи.')).toBeVisible()
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await expect(full.page.getByText('Дедушка Павел', { exact: true })).toBeVisible()
@@ -283,6 +323,8 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('button', { name: 'Отозвать' }).first().click()
   const revoked = await inviteePage(browser, 81000023, revokedStartParam, 'Отозванный E2E')
   await expect(revoked.page.getByText('Это приглашение отозвано.')).toBeVisible()
+  await revoked.page.setViewportSize({ width: 390, height: 844 })
+  await revoked.page.screenshot({ path: resolve('e2e/.artifacts/invite-revoked-390.png'), animations: 'disabled' })
   await expect(revoked.page.locator('[data-child-header-mode="family"]')).toHaveCount(0)
 
   await revoked.context.close()
@@ -414,6 +456,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
 
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   await expect(profile).toHaveAttribute('aria-label', 'Профиль ребёнка')
+  await profile.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await profile.getByRole('button', { name: 'Возраст и дата рождения' }).click()
   await expect(profile).toContainText('Полных месяцев')
 
@@ -432,6 +475,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
     await owner.page.screenshot({ path: testInfo.outputPath(`child-profile-${width}.png`), animations: 'disabled' })
   }
 
+  await profile.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await profile.getByRole('button', { name: 'Сменить фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Заменить фотографию' })).toBeVisible()
   await owner.page.getByRole('button', { name: 'Отмена' }).click()
@@ -450,33 +494,40 @@ test('changing the child photo uses a focused confirmation flow and preserves pr
     }
   })
   const owner = await createCompletedOwner(page, 81000014)
-  expect(childUpdates).toHaveLength(1)
+  const previousPhotoUpdate = childUpdates.findLast((update) => update.method === 'PATCH')
+  expect(previousPhotoUpdate).toBeDefined()
+  const previousChild = previousPhotoUpdate!.body.child as Record<string, unknown>
+  const initialAvatarMediaId = previousChild.avatarMediaId
+  const expectedVersion = Number(previousChild.expectedVersion) + 1
+  const updatesBeforePhotoChange = childUpdates.length
 
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   const originalAvatarUrl = await owner.page.locator('[data-slot="child-avatar-image"]').getAttribute('src')
+  await owner.page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await owner.page.getByRole('button', { name: 'Сменить фото' }).click()
   await expect(owner.page.getByRole('heading', { name: 'Сменить фото ребёнка' })).toBeVisible()
   await expect(owner.page.locator('#child-name')).toHaveCount(0)
   await expect(owner.page.locator('#child-birth-date')).toHaveCount(0)
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
 
-  await expect.poll(() => childUpdates.length).toBe(1)
+  await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange)
   await owner.page.locator('#child-avatar').setInputFiles(pngImage)
-  await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
-  await owner.page.getByRole('button', { name: 'Использовать фото' }).click()
+  await expect(owner.page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
+  await owner.page.getByRole('button', { name: 'Использовать это фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeEnabled()
   await owner.page.getByRole('button', { name: 'Сохранить фото' }).click()
 
+  await expect(owner.page.getByText('Фото обновлено!', { exact: true })).toBeVisible()
+  await owner.page.getByRole('button', { name: 'Перейти в профиль' }).click()
   await expect(owner.page.locator('[data-slot="child-profile"]')).toBeVisible()
-  await expect.poll(() => childUpdates.length).toBe(2)
-  expect(childUpdates[0].method).toBe('PUT')
-  expect(childUpdates[1].method).toBe('PATCH')
-  const patchChild = childUpdates[1].body.child as Record<string, unknown>
+  await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange + 1)
+  expect(childUpdates.at(-1)?.method).toBe('PATCH')
+  const patchChild = childUpdates.at(-1)!.body.child as Record<string, unknown>
   expect(Object.keys(patchChild).sort()).toEqual(['avatarCrop', 'avatarMediaId', 'expectedVersion'])
   expect(patchChild.avatarMediaId).toEqual(expect.any(String))
-  expect(patchChild.avatarMediaId).not.toBe((childUpdates[0].body as Record<string, unknown>).avatarMediaId)
+  expect(patchChild.avatarMediaId).not.toBe(initialAvatarMediaId)
   expect(patchChild.avatarCrop).toEqual({ x: 0, y: 0, width: 1, height: 1 })
-  expect(patchChild.expectedVersion).toBe(1)
+  expect(patchChild.expectedVersion).toBe(expectedVersion)
   await expect(owner.page.locator('[data-slot="child-profile"]')).toContainText('Лиза')
   const updatedAvatar = owner.page.locator('[data-slot="child-avatar-image"]')
   await expect(updatedAvatar).toHaveAttribute('src', /^blob:/)
