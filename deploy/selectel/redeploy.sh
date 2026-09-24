@@ -14,6 +14,7 @@ EDGE_NETWORK=${MEMOLY_EDGE_NETWORK:-memoly_default}
 PUBLIC_URL=${PUBLIC_URL:-https://app.memoly.ru}
 SERVER_EDGE_CADDYFILE=${SERVER_EDGE_CADDYFILE:-"$SERVER_ROOT/gateway/Caddyfile"}
 SERVER_STATIC_CADDYFILE=${SERVER_STATIC_CADDYFILE:-"$SERVER_ROOT/Caddyfile.static"}
+CONFIG_BACKUP_MARKER=${CONFIG_BACKUP_MARKER:-"$SERVER_ROOT/.selectel-config-backup"}
 GATEWAY_CADDYFILE=${GATEWAY_CADDYFILE:-/etc/caddy/Caddyfile}
 GATEWAY_CADDY_CONFIG=${GATEWAY_CADDY_CONFIG:-/tmp/memoly-edge-candidate.Caddyfile}
 MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-}
@@ -34,7 +35,12 @@ require_command() {
 
 acquire_deploy_lock() {
 	if [[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+		local inherited_fd_target expected_lock
+		expected_lock=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || die "deployment lock path is unavailable"
+		inherited_fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
+		[ "$inherited_fd_target" = "$expected_lock" ] || die "inherited deployment lock does not reference the expected lock file"
 		{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || die "inherited deployment lock is not open"
+		flock -n "$SELECTEL_DEPLOY_LOCK_FD" || die "inherited deployment lock is not held"
 		return 0
 	fi
 	local lock_file="$SERVER_ROOT/.selectel-deploy.lock"
@@ -77,6 +83,13 @@ backup_server_state() {
 	for path in "$COMPOSE_FILE" "$SERVER_EDGE_CADDYFILE" "$SERVER_STATIC_CADDYFILE"; do
 		[ -f "$path" ] && cp -p "$path" "$BACKUP_DIR/$(basename "$path")"
 	done
+	for path in compose.yml Caddyfile Caddyfile.static; do
+		[ -f "$BACKUP_DIR/$path" ] || die "deployment backup is missing: $path"
+	done
+	local marker_tmp="$CONFIG_BACKUP_MARKER.tmp.$$"
+	install -m 0600 /dev/null "$marker_tmp"
+	printf '%s\n' "$BACKUP_DIR" > "$marker_tmp"
+	mv -f -- "$marker_tmp" "$CONFIG_BACKUP_MARKER"
 	[ -f "$SERVER_EDGE_CADDYFILE" ] && GATEWAY_BACKUP_FILE="$BACKUP_DIR/$(basename "$SERVER_EDGE_CADDYFILE")"
 	docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}} {{.Ports}}' > "$BACKUP_DIR/container-inventory.txt"
 	container_ids=$(docker ps -aq)
@@ -86,6 +99,34 @@ backup_server_state() {
 		: > "$BACKUP_DIR/container-runtime-inventory.txt"
 	fi
 	printf 'Saved non-secret deployment backup in %s\n' "$BACKUP_DIR"
+}
+
+validate_rollback_file() {
+	[ -f "$ROLLBACK_ENV" ] || die "rollback env is missing: $ROLLBACK_ENV"
+	[ ! -L "$ROLLBACK_ENV" ] || die "rollback env must be a regular file: $ROLLBACK_ENV"
+	[ "$(stat -c '%u' "$ROLLBACK_ENV")" = 0 ] || die 'rollback env must be owned by root'
+	[ "$(stat -c '%a' "$ROLLBACK_ENV")" = 600 ] || die 'rollback env must have mode 0600'
+}
+
+restore_configuration_backup() {
+	local backup_dir marker_mode
+	[ -f "$CONFIG_BACKUP_MARKER" ] || die "configuration backup marker is missing: $CONFIG_BACKUP_MARKER"
+	[ ! -L "$CONFIG_BACKUP_MARKER" ] || die 'configuration backup marker must be a regular file'
+	[ "$(stat -c '%u' "$CONFIG_BACKUP_MARKER")" = 0 ] || die 'configuration backup marker must be owned by root'
+	marker_mode=$(stat -c '%a' "$CONFIG_BACKUP_MARKER")
+	[ "$marker_mode" = 600 ] || die 'configuration backup marker must have mode 0600'
+	backup_dir=$(<"$CONFIG_BACKUP_MARKER")
+	case "$backup_dir" in
+		"$SERVER_ROOT/backups/compose.pre-selectel-"*) ;;
+		*) die 'configuration backup marker points outside the Selectel backup directory' ;;
+	esac
+	[ -f "$backup_dir/compose.yml" ] || die 'configuration backup is missing: compose.yml'
+	[ -f "$backup_dir/Caddyfile" ] || die 'configuration backup is missing: Caddyfile'
+	[ -f "$backup_dir/Caddyfile.static" ] || die 'configuration backup is missing: Caddyfile.static'
+	cp -p -- "$backup_dir/compose.yml" "$COMPOSE_FILE"
+	cp -p -- "$backup_dir/Caddyfile" "$SERVER_EDGE_CADDYFILE"
+	cp -p -- "$backup_dir/Caddyfile.static" "$SERVER_STATIC_CADDYFILE"
+	printf 'Restored release-owned Compose and Caddy configuration from %s.\n' "$(basename "$backup_dir")"
 }
 
 backup_gateway_caddyfile() {
@@ -415,7 +456,7 @@ readiness() {
 }
 
 rollback() {
-	[ -f "$ROLLBACK_ENV" ] || die "rollback env is missing: $ROLLBACK_ENV"
+	validate_rollback_file
 	# shellcheck disable=SC1090
 	set -a
 	. "$ROLLBACK_ENV"
@@ -431,13 +472,26 @@ rollback() {
 	load_runtime_secrets
 	validate_inputs rollback
 	gateway_preflight
+	if [ "${SELECTEL_CI_RELEASE:-false}" = true ]; then
+		restore_configuration_backup
+	else
+		if [ -f "$CONFIG_BACKUP_MARKER" ]; then
+			restore_configuration_backup
+		else
+			render_edge_candidate
+			validate_candidate_caddy
+		fi
+	fi
 	compose config >/dev/null
 	compose up -d --no-deps --force-recreate backend worker scheduler static
 	wait_backend_internal
 	verify_static_internal
-	render_edge_candidate
-	validate_candidate_caddy
-	activate_gateway
+	if [ "${SELECTEL_CI_RELEASE:-false}" = true ] || [ -f "$CONFIG_BACKUP_MARKER" ]; then
+		docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile
+		docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
+	else
+		activate_gateway
+	fi
 	cleanup_candidate
 	readiness
 	printf 'Application rollback complete; additive migrations remain applied.\n'
@@ -470,6 +524,8 @@ main() {
 	local action=${1:-}
 	require_command curl
 	require_command flock
+	require_command readlink
+	require_command stat
 	acquire_deploy_lock
 	case "$action" in
 		preflight) preflight ;;

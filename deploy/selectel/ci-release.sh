@@ -143,6 +143,8 @@ capture_running_images() {
 verify_rollback_file() {
   [ -f "$ROLLBACK_ENV" ] || die "server rollback file is missing: $ROLLBACK_ENV"
   [ ! -L "$ROLLBACK_ENV" ] || die 'server rollback file must not be a symlink'
+  [ "$(stat -c '%u' "$ROLLBACK_ENV")" = 0 ] || die 'server rollback file must be owned by root'
+  [ "$(stat -c '%a' "$ROLLBACK_ENV")" = 600 ] || die 'server rollback file must have mode 0600'
   grep -q '^MEMOLY_DB_ROLLBACK_ALLOWED=false$' "$ROLLBACK_ENV" || die 'database rollback must remain disabled'
 }
 
@@ -189,7 +191,8 @@ public_smoke() {
       die "public smoke failed: $path"
     fi
     [ "$status" = 200 ] || { rm -rf -- "$smoke_dir"; die "public smoke returned HTTP $status: $path"; }
-    grep -Eiq "^content-type:[[:space:]]*${expected_type}(;|[[:space:]]|$)" "$headers" || {
+    actual_type=$(awk -F: 'tolower($1) == "content-type" { value = $2; sub(/^[[:space:]]*/, "", value); sub(/[;].*$/, "", value); gsub(/[[:space:]]/, "", value); print tolower(value); exit }' "$headers")
+    [ "$actual_type" = "$expected_type" ] || {
       rm -rf -- "$smoke_dir"
       die "public smoke returned an unexpected content type: $path"
     }
@@ -259,11 +262,13 @@ main() {
   require_command sed
   require_command find
   require_command sha256sum
+  require_command stat
   validate_inputs
   [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
   exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
   flock -n 9 || die 'another Selectel deployment is already running'
   export SELECTEL_DEPLOY_LOCK_FD=9
+  export SELECTEL_CI_RELEASE=true
 
   release_failure() {
     local status=$?
@@ -299,8 +304,8 @@ main() {
   PROMOTION_STARTED=true
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
   public_smoke
-  PROMOTION_STARTED=false
   write_release_manifest
+  PROMOTION_STARTED=false
 }
 
 main "$@"

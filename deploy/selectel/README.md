@@ -283,8 +283,11 @@ separate explicit `deploy` invocation after the migration result has been
 reviewed.
 
 Rollback promotes the configured previous backend/webapp tags through the same
-Compose project and readiness checks. It leaves both additive MAX migrations in
-place; database rollback is not part of application rollback.
+Compose project and readiness checks. It also restores the release-owned Compose
+and Caddy files from the protected backup marker created before promotion; a
+missing marker stops rollback rather than mixing old images with new configuration.
+It leaves both additive MAX migrations in place; database rollback is not part of
+application rollback.
 
 ## Config validation
 
