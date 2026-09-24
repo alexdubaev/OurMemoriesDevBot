@@ -1,4 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- frozen child profile preserves the approved semantic hierarchy. */
+import { useRef } from 'react'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -22,17 +23,30 @@ export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack
   const birthDate = child.birthDate ? formatBirthDate(child.birthDate) : null
   const details = child.birthDate ? ageDetails(child.birthDate, familyTimezone) : null
   const backLabel = showAgeDetails ? 'Назад к профилю ребёнка' : 'Назад к семье'
+  const actionsMenu = useRef<HTMLDetailsElement>(null)
+  const runMenuAction = (action: () => void) => {
+    if (actionsMenu.current) actionsMenu.current.open = false
+    action()
+  }
 
   return <section aria-label={showAgeDetails ? 'Возраст ребёнка' : 'Профиль ребёнка'} className="child-profile" data-slot="child-profile">
-    <div className="child-titlebar">
-      <button aria-label={backLabel} className="family-round-btn child-back-btn" onClick={onBack} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-      <div className="child-page-title">{showAgeDetails ? 'Возраст' : 'Профиль ребёнка'}</div>
-      <div className="child-title-action">{showAgeDetails ? null : <WebpIcon decorative name="more" size={28} />}</div>
+    <div className="child-titlebar ui-topbar ds-topbar">
+      <button aria-label={backLabel} className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={onBack} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+      <div className="child-page-title ui-page-title ds-page-title">{showAgeDetails ? 'Возраст' : 'Профиль ребёнка'}</div>
+      <div className="child-title-action">
+        {showAgeDetails ? null : <details className="child-more-menu" ref={actionsMenu}>
+          <summary aria-label="Дополнительные действия профиля ребёнка" className="child-more-dots"><span aria-hidden="true">•••</span></summary>
+          <div className="child-more-actions">
+            {canEdit ? <button onClick={() => runMenuAction(onChangePhoto)} type="button">Сменить фото</button> : null}
+            {birthDate ? <button onClick={() => runMenuAction(onOpenAge)} type="button">Возраст и дата рождения</button> : null}
+          </div>
+        </details>}
+      </div>
     </div>
-    <div className={`child-hero${showAgeDetails ? ' compact' : ''}`}>
+    <div className={`child-hero ds-card ds-card--prominent${showAgeDetails ? ' compact' : ''}`}>
       <div className="child-avatar-wrap"><ChildAvatar avatarCrop={child.avatarCrop} avatarUrl={avatarUrl} name={child.name} size="profile" /><span aria-hidden="true" className="child-avatar-glow" /></div>
-      <h2>{child.name}</h2>
-      {age ? <div className="child-age">{age}</div> : null}
+      <h2 className="ds-entity-title">{child.name}</h2>
+      {age ? <div className="child-age ds-body">{age}</div> : null}
       {birthDate ? <div className="child-born">{child.sex === 'boy' ? 'Родился' : child.sex === 'girl' ? 'Родилась' : 'Дата рождения:'} {birthDate}</div> : <div className="child-born">Дата рождения не указана</div>}
     </div>
     {showAgeDetails ? <>
@@ -44,21 +58,16 @@ export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack
       <div className="child-helper centered">Возраст обновляется автоматически на основе даты рождения.</div>
       {canEdit ? <button className="child-secondary" onClick={onEdit} type="button">Изменить данные</button> : null}
     </> : <>
-      <div className="child-quote">«Наше маленькое<br />большое счастье» <span>☀️</span></div>
-      {canEdit || birthDate ? <div className="child-action-list">
-        {canEdit ? <>
-          <ActionRow icon="edit" label="Редактировать профиль" onClick={onEdit} />
-          <ActionRow icon="photo" label="Сменить фото" onClick={onChangePhoto} />
-        </> : null}
-        {birthDate ? <ActionRow icon="clock" label="Возраст и дата рождения" onClick={onOpenAge} /> : null}
+      {canEdit ? <div className="child-action-list">
+        <ActionRow label="Редактировать профиль" onClick={onEdit} />
       </div> : null}
       <div className="child-info-note"><span aria-hidden="true" className="child-info-mark">●</span><span>Профиль ребёнка видят участники семьи. Здесь хранится только информация, нужная для семейного архива.</span></div>
     </>}
   </section>
 }
 
-function ActionRow({ icon, label, onClick }: { icon: 'edit' | 'photo' | 'clock'; label: string; onClick: () => void }) {
-  return <button className="child-action-row" onClick={onClick} type="button"><WebpIcon decorative name={icon} size={21} /><span>{label}</span><WebpIcon className="child-action-chevron" decorative name="chevron" size={17} /></button>
+function ActionRow({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button className="child-action-row ds-row" onClick={onClick} type="button">{label}</button>
 }
 
 function formatBirthDate(value: string) {

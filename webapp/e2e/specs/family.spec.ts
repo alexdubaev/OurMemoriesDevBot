@@ -112,6 +112,7 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
   await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await page.getByRole('button', { name: 'Сменить фото' }).click()
   await page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(page.locator('[data-slot="child-photo-crop"]')).toBeVisible()
@@ -455,6 +456,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
 
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   await expect(profile).toHaveAttribute('aria-label', 'Профиль ребёнка')
+  await profile.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await profile.getByRole('button', { name: 'Возраст и дата рождения' }).click()
   await expect(profile).toContainText('Полных месяцев')
 
@@ -473,6 +475,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
     await owner.page.screenshot({ path: testInfo.outputPath(`child-profile-${width}.png`), animations: 'disabled' })
   }
 
+  await profile.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await profile.getByRole('button', { name: 'Сменить фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Заменить фотографию' })).toBeVisible()
   await owner.page.getByRole('button', { name: 'Отмена' }).click()
@@ -491,33 +494,40 @@ test('changing the child photo uses a focused confirmation flow and preserves pr
     }
   })
   const owner = await createCompletedOwner(page, 81000014)
-  expect(childUpdates).toHaveLength(1)
+  const previousPhotoUpdate = childUpdates.findLast((update) => update.method === 'PATCH')
+  expect(previousPhotoUpdate).toBeDefined()
+  const previousChild = previousPhotoUpdate!.body.child as Record<string, unknown>
+  const initialAvatarMediaId = previousChild.avatarMediaId
+  const expectedVersion = Number(previousChild.expectedVersion) + 1
+  const updatesBeforePhotoChange = childUpdates.length
 
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   const originalAvatarUrl = await owner.page.locator('[data-slot="child-avatar-image"]').getAttribute('src')
+  await owner.page.locator('summary[aria-label="Дополнительные действия профиля ребёнка"]').click()
   await owner.page.getByRole('button', { name: 'Сменить фото' }).click()
   await expect(owner.page.getByRole('heading', { name: 'Сменить фото ребёнка' })).toBeVisible()
   await expect(owner.page.locator('#child-name')).toHaveCount(0)
   await expect(owner.page.locator('#child-birth-date')).toHaveCount(0)
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
 
-  await expect.poll(() => childUpdates.length).toBe(1)
+  await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange)
   await owner.page.locator('#child-avatar').setInputFiles(pngImage)
-  await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeDisabled()
-  await owner.page.getByRole('button', { name: 'Использовать фото' }).click()
+  await expect(owner.page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
+  await owner.page.getByRole('button', { name: 'Использовать это фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeEnabled()
   await owner.page.getByRole('button', { name: 'Сохранить фото' }).click()
 
+  await expect(owner.page.getByText('Фото обновлено!', { exact: true })).toBeVisible()
+  await owner.page.getByRole('button', { name: 'Перейти в профиль' }).click()
   await expect(owner.page.locator('[data-slot="child-profile"]')).toBeVisible()
-  await expect.poll(() => childUpdates.length).toBe(2)
-  expect(childUpdates[0].method).toBe('PUT')
-  expect(childUpdates[1].method).toBe('PATCH')
-  const patchChild = childUpdates[1].body.child as Record<string, unknown>
+  await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange + 1)
+  expect(childUpdates.at(-1)?.method).toBe('PATCH')
+  const patchChild = childUpdates.at(-1)!.body.child as Record<string, unknown>
   expect(Object.keys(patchChild).sort()).toEqual(['avatarCrop', 'avatarMediaId', 'expectedVersion'])
   expect(patchChild.avatarMediaId).toEqual(expect.any(String))
-  expect(patchChild.avatarMediaId).not.toBe((childUpdates[0].body as Record<string, unknown>).avatarMediaId)
+  expect(patchChild.avatarMediaId).not.toBe(initialAvatarMediaId)
   expect(patchChild.avatarCrop).toEqual({ x: 0, y: 0, width: 1, height: 1 })
-  expect(patchChild.expectedVersion).toBe(1)
+  expect(patchChild.expectedVersion).toBe(expectedVersion)
   await expect(owner.page.locator('[data-slot="child-profile"]')).toContainText('Лиза')
   const updatedAvatar = owner.page.locator('[data-slot="child-avatar-image"]')
   await expect(updatedAvatar).toHaveAttribute('src', /^blob:/)
