@@ -4,18 +4,37 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { SettingsMenu } from '../src/features/memoly-ui/SettingsSheet'
 
-test('family settings sheet exposes only the canonical product rows', () => {
+test('owner settings sheet exposes canonical archive and family controls', () => {
   const markup = renderToStaticMarkup(createElement(SettingsMenu, {
+    canManageFamily: true,
     onAbout: () => undefined,
     onAppearance: () => undefined,
+    onArchive: () => undefined,
+    onFamilySettings: () => undefined,
     onHelp: () => undefined,
     theme: 'mint',
   }))
 
   expect(markup).toContain('Оформление')
   expect(markup).toContain('Помощь и приватность')
+  expect(markup).toContain('Семейный архив')
+  expect(markup).toContain('Настройки семьи')
   expect(markup).toContain('О memoLy')
   expect(markup).not.toContain('system')
   expect(markup).not.toContain('dark')
   expect(markup).toContain('ml-settings-list')
+})
+
+test('non-owner settings has archive information without owner mutation entry', () => {
+  const markup = renderToStaticMarkup(createElement(SettingsMenu, {
+    canManageFamily: false,
+    onAbout: () => undefined,
+    onAppearance: () => undefined,
+    onArchive: () => undefined,
+    onFamilySettings: () => undefined,
+    onHelp: () => undefined,
+    theme: 'sky',
+  }))
+  expect(markup).toContain('Семейный архив')
+  expect(markup).not.toContain('Настройки семьи')
 })

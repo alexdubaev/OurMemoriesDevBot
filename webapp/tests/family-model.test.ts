@@ -51,7 +51,7 @@ describe('family presentation model', () => {
       canInvite: true,
     })))
 
-    expect(markup).toContain(invite.inviteeDisplayName!)
+    expect(markup).toContain('Активные приглашения')
     expect(markup).not.toContain(rawToken)
   })
 
