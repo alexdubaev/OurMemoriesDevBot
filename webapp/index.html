@@ -10,9 +10,27 @@
     <meta name="theme-color" content="#FBF8F5" />
     <meta name="application-name" content="memoLy" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <script src="https://st.max.ru/js/max-web-app.js"></script>
     <script>
       (() => {
+        const maxSdk = 'https://st.max.ru/js/max-web-app.js'
+        const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
+        const maxMarkers = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
+        const telegramMarkers = ['tgWebAppData', 'tgWebAppPlatform', 'tgWebAppVersion']
+
+        const hasFragmentMarker = (markers) => {
+          const hash = typeof window.location?.hash === 'string' ? window.location.hash : ''
+          return markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=`).test(hash))
+        }
+
+        const hasPersistedMarker = (markers) => {
+          try {
+            const storage = window.sessionStorage
+            return markers.some((marker) => storage.getItem(marker) !== null)
+          } catch {
+            return false
+          }
+        }
+
         const webApp = window.WebApp
         const meaningfulMax = webApp !== null
           && typeof webApp === 'object'
@@ -25,9 +43,22 @@
             || typeof webApp.platform === 'string'
             || typeof webApp.colorScheme === 'string')
 
-        if (!meaningfulMax) {
-          document.write('<script src="https://telegram.org/js/telegram-web-app.js?63"><\/script>')
-        }
+        const telegramWebApp = window.Telegram?.WebApp
+        const meaningfulTelegram = telegramWebApp !== null
+          && typeof telegramWebApp === 'object'
+          && !Array.isArray(telegramWebApp)
+          && typeof telegramWebApp.initData === 'string'
+          && telegramWebApp.initData.trim().length > 0
+
+        const maxLaunch = hasFragmentMarker(maxMarkers) || hasPersistedMarker(maxMarkers)
+        const telegramLaunch = hasFragmentMarker(telegramMarkers) || hasPersistedMarker(telegramMarkers)
+        const sdk = maxLaunch || meaningfulMax
+          ? maxSdk
+          : telegramLaunch || meaningfulTelegram
+            ? telegramSdk
+            : null
+
+        if (sdk) document.write(`<script src="${sdk}"><\/script>`)
       })()
     </script>
     <title>memoLy</title>
