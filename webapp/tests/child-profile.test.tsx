@@ -99,7 +99,7 @@ test('missing optional birth date and photo remain readable without a dead age a
   expect(markup).not.toContain('Возраст и дата рождения')
 })
 
-test('child profile editor uses the approved visual structure and keeps save/cancel actions wired', async () => {
+test('child profile editor uses canonical groups and keeps save/back actions wired', async () => {
   const markup = renderToStaticMarkup(createElement(FamilyOnboarding, {
     familyId: '11111111-1111-4111-8111-111111111111',
     familyTimezone: 'Europe/Moscow',
@@ -114,9 +114,10 @@ test('child profile editor uses the approved visual structure and keeps save/can
 
   expect(markup).toContain('data-slot="child-profile-editor"')
   expect(markup).toContain('Редактировать профиль')
-  expect(markup).toContain('child-edit-avatar')
-  expect(markup).toContain('child-field raised')
-  expect(markup).toContain('child-primary')
+  expect(markup).toContain('child-edit-v2-avatar')
+  expect(markup).toContain('child-edit-v2-field surface-inset')
+  expect(markup).toContain('child-edit-v2-card surface-raised')
+  expect(markup).toContain('child-edit-v2-save')
   expect(markup).toContain('Изменения увидят только участники вашей семьи.')
   expect(markup).toContain('Девочка')
   expect(markup).toContain('Мальчик')
@@ -146,11 +147,12 @@ test('child profile editor uses the approved visual structure and keeps save/can
     const titleBack = findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад к профилю ребёнка')
     await act(async () => invoke(titleBack, 'onClick'))
     expect(cancelCount).toBe(1)
-    await act(async () => invoke(findButton(browser.container, 'Отмена'), 'onClick'))
-    expect(cancelCount).toBe(2)
+    expect(findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад к профилю ребёнка')).toBeDefined()
     const nameInput = findOne(browser.container, (node) => node.attributes.id === 'child-name')
     nameInput.value = 'София после редактирования'
     await act(async () => invoke(nameInput, 'onChange'))
+    const boyRadio = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.value === 'boy')
+    await act(async () => invoke(boyRadio, 'onChange'))
     await act(async () => { await invoke(findButton(browser.container, 'Сохранить профиль'), 'onClick'); await flushInteractive() })
 
     expect(requests).toHaveLength(1)
@@ -159,7 +161,7 @@ test('child profile editor uses the approved visual structure and keeps save/can
       body: {
         name: 'София после редактирования',
         birthDate: child.birthDate,
-        sex: child.sex,
+        sex: 'boy',
         avatarMediaId: child.avatarMediaId,
         avatarCrop: child.avatarCrop,
         expectedVersion: child.version,

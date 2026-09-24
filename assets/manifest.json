@@ -1305,6 +1305,78 @@
       "alpha": true,
       "bytes": 1068,
       "sha256": "36490e6ba0856a1d2e55361effd06f0039b4d9d8b26fa9f318a9faa6be8afcfd"
+    },
+    {
+      "path": "assets/icons/calendar-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 934,
+      "sha256": "87206bf3d2c7ea2f5dfd29b398b62b34adbccfc2e996c93dc2e5b82400a4751b"
+    },
+    {
+      "path": "assets/icons/calendar-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1248,
+      "sha256": "018154bae52f2f79758f88eed16a24452800c0959c25e6fdcc8e393d5f790fcf"
+    },
+    {
+      "path": "assets/icons/calendar-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 904,
+      "sha256": "0db94d9ef7b0473fabe18ada04553c3aa93c9b83b396660fb5872d69ce73ce67"
+    },
+    {
+      "path": "assets/icons/calendar-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1218,
+      "sha256": "c42916c2ce25362cc83193e1a927629881201d5552282911da7fa4d2b4a215df"
+    },
+    {
+      "path": "assets/icons/user-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 1320,
+      "sha256": "f6857642b849cba632fdce06424b61b98fe0b354722bf1bb6f429ddc6869bc94"
+    },
+    {
+      "path": "assets/icons/user-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 2016,
+      "sha256": "4afa77e0237716a06102e8b495d8805f948d9290bed9999edf0b84a0d31cd47c"
+    },
+    {
+      "path": "assets/icons/user-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 1256,
+      "sha256": "57910a230fa7c47ff48963bc1bf8c77f650f59b37933c4bd18bfd3ff35158045"
+    },
+    {
+      "path": "assets/icons/user-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1954,
+      "sha256": "72a0561e84d98fc76ec704822389079b32f0c68223db3e6f682860e14c9af011"
     }
   ]
 }

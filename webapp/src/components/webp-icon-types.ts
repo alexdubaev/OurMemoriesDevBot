@@ -1,4 +1,5 @@
 export const webpIconNames = [
+  'calendar',
   'chevron',
   'clock',
   'close',
@@ -20,6 +21,7 @@ export const webpIconNames = [
   'star',
   'video',
   'warning',
+  'user',
 ] as const
 
 export type WebpIconName = (typeof webpIconNames)[number]
