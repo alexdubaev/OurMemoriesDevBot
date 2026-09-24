@@ -257,13 +257,15 @@ test('photo crop uses a dedicated accessible screen and saves only the child pho
       return act(async () => invoke(fileInput, 'onChange'))
     }
     await choose()
-    await act(async () => invoke(findButton(browser.container, 'Отмена'), 'onClick'))
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Отменить кадрирование'), 'onClick'))
     expect(findAll(browser.container, (node) => node.attributes['data-slot'] === 'child-photo-crop')).toHaveLength(0)
     await choose()
     expect(findOne(browser.container, (node) => node.attributes['data-slot'] === 'child-photo-crop')).toBeTruthy()
     expect(textOf(browser.container)).toContain('Использовать это фото')
-    expect(textOf(browser.container)).toContain('Отмена')
-    expect(findAll(browser.container, (node) => node.attributes.class?.includes('crop-corner'))).toHaveLength(4)
+    expect(textOf(browser.container)).toContain('Выбрать другое фото')
+    expect(textOf(browser.container)).toContain('JPEG, PNG, WebP или HEIC · до 20 МБ')
+    expect(findAll(browser.container, (node) => node.attributes.class?.includes('child-crop-v2-ring'))).toHaveLength(1)
+    expect(findAll(browser.container, (node) => node.attributes.class?.includes('child-crop-v2-pan'))).toHaveLength(1)
 
     const cropImage = findOne(browser.container, (node) => node.tagName === 'IMG' && node.attributes.alt === 'Предпросмотр кадрирования') as InteractiveNode & { naturalWidth: number; naturalHeight: number }
     cropImage.naturalWidth = 1

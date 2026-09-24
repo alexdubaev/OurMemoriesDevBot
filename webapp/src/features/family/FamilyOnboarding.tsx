@@ -191,26 +191,27 @@ export function FamilyOnboarding({
   }
 
   return (
-    <main className={`${cropPreviewUrl || photoSaved ? 'family-screen child-screen child-photo-flow-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} ${cropPreviewUrl ? 'child-photo-crop-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
-      {cropPreviewUrl ? <div className="child-titlebar child-photo-titlebar">
-        <button aria-label="Отменить кадрирование" className="family-round-btn child-back-btn" onClick={cancelCrop} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-        <Typography aria-level={1} className="child-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Выберите фото</Typography>
-        <span aria-hidden="true" className="child-title-action" />
-      </div> : photoSaved ? <div className="child-titlebar child-photo-titlebar">
-        <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn child-back-btn" onClick={onCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-        <Typography className="child-page-title" id="child-onboarding-title" variant="memoryScreen" />
-        <span aria-hidden="true" className="child-title-action" />
-      </div> : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
+    <main className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
+      {cropPreviewUrl || photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
         <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={() => onCancel?.()} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
         <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
-      <section aria-labelledby={cropPreviewUrl || photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-edit-v2-shell' : `mx-auto ${cropPreviewUrl || photoSaved ? 'w-full max-w-[452px]' : 'mt-6 w-full max-w-md'} pb-10`} data-slot={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-profile-editor' : undefined}>
-        {photoSaved ? <div className="child-photo-success">
-          <div aria-hidden="true" className="child-photo-success-icon"><Typography variant="memoryScreen">✓</Typography></div>
-          <Typography className="child-photo-success-title" role="status" variant="memoryScreen">Фото обновлено!</Typography>
-          <Typography className="child-photo-success-copy" tone="muted" variant="memoryBody">Новое фото профиля сохранено.</Typography>
-          <Button className="child-photo-success-action" onClick={onCancel} type="button"><Typography variant="memoryButton">Перейти в профиль</Typography></Button>
+      <section aria-labelledby={cropPreviewUrl || photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={cropPreviewUrl ? 'child-edit-v2-shell' : photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-profile-editor' : undefined}>
+        {cropPreviewUrl ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
+          <button aria-label="Отменить кадрирование" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={cancelCrop} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+          <Typography aria-level={1} className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Фотография ребёнка</Typography>
+          <span aria-hidden="true" className="child-title-action" />
+        </div> : photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
+          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={onCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+          <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen" />
+          <span aria-hidden="true" className="child-title-action" />
+        </div> : null}
+        {photoSaved ? <div className="child-success">
+          <div aria-hidden="true" className="child-success-icon ui-success-mark"><span className="child-photo-v2-check">✓</span></div>
+          <h2 className="ds-entity-title" role="status">Фото обновлено!</h2>
+          <p>Новое фото профиля сохранено.</p>
+          <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={onCancel} type="button">Перейти в профиль</Button>
         </div> : <>
         {!isChildEdit && !cropPreviewUrl ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
         {!isChildEdit && !cropPreviewUrl ? <Typography className="mt-2" tone="muted" variant="memoryBody">
@@ -266,11 +267,11 @@ export function FamilyOnboarding({
           />
         </label>}
         {cropPreviewUrl ? (
-          <section aria-label="Кадрирование фотографии" className="child-photo-crop-stage" data-slot="child-photo-crop">
-            <div className="child-photo-crop-frame">
+          <section aria-label="Кадрирование фотографии" className="child-crop-v2" data-slot="child-photo-crop">
+            <p>Переместите фото и настройте масштаб.</p>
+            <div className="child-crop-v2-frame surface-inset">
               <img
                 alt="Предпросмотр кадрирования"
-                className="child-photo-crop-image"
                 onLoad={(event) => {
                   setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)
                   setCropImageLoaded(true)
@@ -278,28 +279,25 @@ export function FamilyOnboarding({
                 src={cropPreviewUrl}
                 style={cropStyle(crop)}
               />
-              <span aria-hidden="true" className="crop-corner tl" />
-              <span aria-hidden="true" className="crop-corner tr" />
-              <span aria-hidden="true" className="crop-corner bl" />
-              <span aria-hidden="true" className="crop-corner br" />
+              <span aria-hidden="true" className="child-crop-v2-ring" />
             </div>
-            <label className="child-photo-zoom-control" htmlFor="avatar-crop">
-              <span className="child-photo-zoom-row">
-                <Typography aria-hidden="true" className="child-photo-zoom-symbol" variant="memoryMeta">−</Typography>
-                <input aria-label="Масштаб кадрирования" id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
-                <Typography aria-hidden="true" className="child-photo-zoom-symbol" variant="memoryMeta">+</Typography>
-              </span>
+            <div className="child-crop-v2-zoom">
+              <span aria-hidden="true">−</span>
+              <input aria-label="Масштаб" id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
+              <span aria-hidden="true">＋</span>
+            </div>
+            <div aria-label="Положение фотографии" className="child-crop-v2-pan" role="group">
+              <button aria-label="Сдвинуть влево" className="ds-icon-tile" onClick={() => moveCrop(-0.05, 0)} type="button">←</button>
+              <button aria-label="Сдвинуть вверх" className="ds-icon-tile" onClick={() => moveCrop(0, -0.05)} type="button">↑</button>
+              <button aria-label="Сдвинуть вниз" className="ds-icon-tile" onClick={() => moveCrop(0, 0.05)} type="button">↓</button>
+              <button aria-label="Сдвинуть вправо" className="ds-icon-tile" onClick={() => moveCrop(0.05, 0)} type="button">→</button>
+            </div>
+            <Button className="ui-btn ui-btn-primary ds-btn ds-btn--primary" disabled={!cropImageLoaded} onClick={useCrop} type="button">Использовать это фото</Button>
+            <label className="ui-btn ui-btn-secondary child-crop-v2-file ds-btn ds-btn--secondary">
+              Выбрать другое фото
+              <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="sr-only" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} type="file" />
             </label>
-            <div aria-label="Положение фотографии" className="child-photo-position-controls" role="group">
-              <Button aria-label="Сдвинуть влево" onClick={() => moveCrop(-0.05, 0)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">←</Typography></Button>
-              <Button aria-label="Сдвинуть вправо" onClick={() => moveCrop(0.05, 0)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">→</Typography></Button>
-              <Button aria-label="Сдвинуть вверх" onClick={() => moveCrop(0, -0.05)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">↑</Typography></Button>
-              <Button aria-label="Сдвинуть вниз" onClick={() => moveCrop(0, 0.05)} type="button" variant="ghost"><Typography aria-hidden="true" variant="memoryMeta">↓</Typography></Button>
-            </div>
-            <div className="child-photo-crop-actions">
-              <Button className="child-photo-crop-primary" disabled={!cropImageLoaded} onClick={useCrop} type="button"><Typography variant="memoryButton">Использовать это фото</Typography></Button>
-              <Button className="child-photo-crop-secondary" onClick={cancelCrop} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button>
-            </div>
+            <p className="child-crop-v2-limit">JPEG, PNG, WebP или HEIC · до 20 МБ</p>
           </section>
         ) : null}
         <FieldError message={formErrors.avatar} />

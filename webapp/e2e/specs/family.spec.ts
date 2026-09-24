@@ -80,13 +80,13 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByText('Выберите вариант.')).toBeVisible()
 
   await page.locator('#child-avatar').setInputFiles(pngImage)
-  await expect(page.getByText('Выберите фото', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Фотография ребёнка' })).toBeVisible()
   await expect(page.locator('[data-slot="child-photo-crop"]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Использовать это фото' })).toBeVisible()
   await expect(page.locator('img[alt="Предпросмотр кадрирования"]')).toHaveJSProperty('complete', true)
   await expect(page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Отмена' })).toBeVisible()
-  await page.getByRole('button', { name: 'Отмена' }).click()
+  await expect(page.getByRole('button', { name: 'Отменить кадрирование' })).toBeVisible()
+  await page.getByRole('button', { name: 'Отменить кадрирование' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).click()
   await expect(page.getByText('Добавьте фотографию ребёнка.')).toBeVisible()
   await page.locator('#child-avatar').setInputFiles(pngImage)
@@ -498,7 +498,7 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
   await owner.context.close()
 })
 
-test('changing the child photo uses a focused confirmation flow and preserves profile details', async ({ page }) => {
+test('changing the child photo uses a focused confirmation flow and preserves profile details', async ({ page }, testInfo) => {
   const childUpdates: Array<{ method: string; body: Record<string, unknown> }> = []
   page.on('request', (request) => {
     const path = new URL(request.url()).pathname
@@ -527,11 +527,34 @@ test('changing the child photo uses a focused confirmation flow and preserves pr
   await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange)
   await owner.page.locator('#child-avatar').setInputFiles(pngImage)
   await expect(owner.page.getByRole('button', { name: 'Использовать это фото' })).toBeEnabled()
+  const cropScreen = owner.page.locator('main.child-photo-v2-screen')
+  await expect(cropScreen.locator('.child-crop-v2-ring')).toBeVisible()
+  await expect(cropScreen.getByText('Выбрать другое фото')).toBeVisible()
+  await cropScreen.evaluate((element) => element.style.setProperty('--host-inset-top', '0px'))
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expect(cropScreen.getByRole('button', { name: 'Использовать это фото' })).toBeInViewport()
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-photo-crop-${width}.png`), animations: 'disabled' })
+  }
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.evaluate((value) => document.documentElement.setAttribute('data-memoly-theme', value), theme)
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-photo-crop-${theme}.png`), animations: 'disabled' })
+  }
+  await owner.page.evaluate(() => document.documentElement.setAttribute('data-memoly-theme', 'mint'))
+  const preview = cropScreen.getByRole('img', { name: 'Предпросмотр кадрирования' })
+  const originalTransform = await preview.evaluate((image) => image.style.transform)
+  await cropScreen.getByRole('slider', { name: 'Масштаб' }).fill('1.2')
+  expect(await preview.evaluate((image) => image.style.transform)).not.toBe(originalTransform)
+  await cropScreen.getByRole('slider', { name: 'Масштаб' }).fill('1')
   await owner.page.getByRole('button', { name: 'Использовать это фото' }).click()
   await expect(owner.page.getByRole('button', { name: 'Сохранить фото' })).toBeEnabled()
   await owner.page.getByRole('button', { name: 'Сохранить фото' }).click()
 
   await expect(owner.page.getByText('Фото обновлено!', { exact: true })).toBeVisible()
+  await owner.page.screenshot({ path: testInfo.outputPath('child-photo-saved-390.png'), animations: 'disabled' })
   await owner.page.getByRole('button', { name: 'Перейти в профиль' }).click()
   await expect(owner.page.locator('[data-slot="child-profile"]')).toBeVisible()
   await expect.poll(() => childUpdates.length).toBe(updatesBeforePhotoChange + 1)
