@@ -19,7 +19,7 @@ export function ChildAvatar({
   size: ChildAvatarSize
 }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null)
-  const sizeClass = size === 'profile' ? 'child-profile-avatar' : size === 'feed-header' ? 'size-[60px]' : 'size-11'
+  const sizeClass = size === 'profile' ? 'child-avatar child-profile-avatar' : size === 'feed-header' ? 'size-[60px]' : 'size-11'
 
   if (!shouldShowChildAvatarImage({ avatarUrl, imageFailed: failedAvatarUrl === avatarUrl })) {
     return <AvatarLetter className={sizeClass} name={name} size={size === 'family-card' ? 'lg' : 'xl'} />
