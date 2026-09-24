@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -150,6 +151,93 @@ test('rollback template keeps additive migrations and uses configured images', (
   assert.match(rollback, /PREVIOUS_WEBAPP_IMAGE/)
   assert.match(rollback, /MEMOLY_DB_ROLLBACK_ALLOWED=false/)
   assert.match(rollback, /no database|forward-only|migrations remain/i)
+})
+
+test('one-shot migration backs up and validates before guarded db:deploy', () => {
+  const script = read('deploy/selectel/redeploy.sh')
+  const migrateBody = script.match(/migrate\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+  const backupBody = script.slice(script.indexOf('backup_database() {'), script.indexOf('\n}\n\nmigrate()'))
+
+  assert.match(script, /Usage: redeploy\.sh \{preflight\|migrate\|deploy\|rollback\|migration-status\}/)
+  assert.match(script, /migrate\) require_command docker; migrate/)
+  assert.match(backupBody, /timestamp=\$\(date -u \+%Y%m%dT%H%M%SZ\)/)
+  assert.match(backupBody, /backups\/postgres-\$\{MEMOLY_PRODUCT_SHA\}-\$\{timestamp\}\.dump/)
+  assert.match(backupBody, /install -d -m 0700 "\$SERVER_ROOT\/backups"/)
+  assert.match(backupBody, /install -m 0600 \/dev\/null "\$temp_file"/)
+  assert.match(backupBody, /pg_dump [^\n]*--format=custom/)
+  assert.match(backupBody, /pg_restore --list/)
+  assert.match(backupBody, /database backup failed; migration was not attempted/)
+  assert.match(backupBody, /database backup validation failed; migration was not attempted/)
+  assert.ok(migrateBody.indexOf('preflight') < migrateBody.indexOf('backup_database'))
+  assert.ok(migrateBody.indexOf('validate_database_target') < migrateBody.indexOf('backup_database'))
+  assert.ok(migrateBody.indexOf('backup_database') < migrateBody.indexOf('bun run db:deploy'))
+  assert.ok(migrateBody.indexOf('bun run db:deploy') < migrateBody.indexOf('migration_status'))
+  assert.match(migrateBody, /compose run --rm --no-deps backend bun run db:deploy/)
+  assert.doesNotMatch(migrateBody, /compose up|promote_backend|promote_jobs|promote_static|activate_gateway/)
+  assert.match(script, /backend DATABASE_URL does not target the Compose postgres database/)
+  assert.match(script, /postgres\|5432\|\$postgres_database/)
+  assert.match(read('deploy/selectel/README.md'), /One-shot database migration/)
+  assert.match(read('deploy/selectel/README.md'), /bun run db:deploy/)
+})
+
+test('database target validation rejects URL overrides and accepts the Compose target', () => {
+  const script = read('deploy/selectel/redeploy.sh')
+  const javascript = script.match(/bun -e '([^']+)'/)?.[1]
+  assert.ok(javascript)
+  const run = (databaseUrl) => spawnSync(process.platform === 'win32' ? 'bun.exe' : 'bun', ['-e', javascript], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+  })
+
+  const accepted = run('postgresql://superuser:secret@postgres:5432/web_app_demo?schema=public')
+  assert.equal(accepted.status, 0, `${accepted.stdout}${accepted.stderr}`)
+  assert.equal(accepted.stdout, 'postgres|5432|web_app_demo|superuser')
+  for (const databaseUrl of [
+    'postgresql://superuser:secret@postgres:5432/web_app_demo?host=evil',
+    'postgresql://superuser:secret@postgres:5432/web_app_demo?port=6543',
+    'postgresql://superuser:secret@postgres:5432/web_app_demo?schema=public&schema=public',
+    'postgresql://superuser:secret@postgres:5432/web_app_demo#fragment',
+  ]) {
+    assert.notEqual(run(databaseUrl).status, 0, databaseUrl)
+  }
+})
+
+test('backup failure exits before db:deploy in the executable migration flow', () => {
+  const script = read('deploy/selectel/redeploy.sh')
+  const backupStart = script.indexOf('backup_database() {')
+  const backupEnd = script.indexOf('\n}\n\nmigrate()', backupStart) + 2
+  const backup = script.slice(backupStart, backupEnd)
+  const migrate = script.match(/migrate\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+  const harness = `
+${backup}
+${migrate}
+preflight() { :; }
+validate_database_target() { :; }
+migration_status() { :; }
+die() { printf 'DIE:%s\\n' "$*" >&2; exit 1; }
+compose() {
+  if [[ "$*" == *pg_dump* ]]; then return 42; fi
+  if [[ "$*" == *db:deploy* ]]; then printf '%s' called > "$DB_DEPLOY_MARKER"; fi
+  return 0
+}
+SERVER_ROOT=/tmp/memoly-selectel-test
+mkdir -p "$SERVER_ROOT"
+trap 'rm -rf -- "$SERVER_ROOT"' EXIT
+DB_DEPLOY_MARKER="$SERVER_ROOT/db-deploy-called"
+MEMOLY_PRODUCT_SHA=227e2149e66e3c3ac75ac235eb201f8154d7ceb3
+migrate
+`
+  const harnessPath = resolve(root, 'tests/.selectel-backup-harness.sh')
+  const bashHarnessPath = harnessPath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+  writeFileSync(harnessPath, harness)
+  const result = spawnSync('bash', [bashHarnessPath], { encoding: 'utf8', timeout: 30_000 })
+  rmSync(harnessPath, { force: true })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /database backup failed; migration was not attempted/, `${result.stdout}${result.stderr}`)
+  assert.doesNotMatch(result.stderr, /secret|DATABASE_URL|web_app_demo/)
+  assert.doesNotMatch(result.stdout, /db-deploy-called/)
+  assert.match(harness, /DB_DEPLOY_MARKER/)
 })
 
 test('Selectel runbook documents the durable directory-mounted gateway model', () => {
