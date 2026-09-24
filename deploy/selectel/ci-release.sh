@@ -84,10 +84,10 @@ fetch_and_checkout() {
     # A root fallback is allowed only after the clean status check above.
     git_root switch --detach "$PRODUCT_SHA" >/dev/null 2>&1 || die 'cannot checkout requested release SHA'
     [ -n "$APP_GROUP" ] || APP_GROUP=$(id -gn "$APP_USER")
-    while IFS= read -r -d '' path; do
-      chown "$APP_USER:$APP_GROUP" "$APP_ROOT/$path"
-    done < <(git_root ls-files -z)
-    for path in HEAD index logs/HEAD packed-refs FETCH_HEAD; do
+    # Repair only Git metadata written by the root fallback. Deployment files
+    # may intentionally remain root-owned and are handled by this fallback on
+    # the next release as needed.
+    for path in HEAD index logs/HEAD; do
       [ -e "$APP_ROOT/.git/$path" ] && chown "$APP_USER:$APP_GROUP" "$APP_ROOT/.git/$path"
     done
   fi
