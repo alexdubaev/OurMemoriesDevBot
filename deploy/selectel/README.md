@@ -5,6 +5,83 @@ This runbook is the reproducible source for the existing Selectel host at
 the already-running host-port Caddy gateway unmanaged and giving Docker Compose
 ownership only of internal services.
 
+## Release entry point
+
+Use this file as the single procedure for the existing host. It is safe for an agent
+with no previous chat context because it names the host and server checkout, the
+access boundary, the build inputs, the migration gate, and the rollback contract.
+
+### Access and build inputs
+
+- Production is `app.memoly.ru`; run host commands from `/opt/memoly/app`.
+- SSH is supplied by the owner through a secure store or an already configured SSH
+  agent. Check access without exposing credentials:
+
+  ```sh
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru true
+  ```
+
+  If this fails, stop and ask the owner to provision the server access. Never look
+  for, print, commit, or request a private key in Git or chat.
+- The durable automation target is a protected GitHub Environment (for example
+  `production`) containing the deploy SSH private key and pinned known-hosts. Use
+  the names `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` and `SELECTEL_KNOWN_HOSTS` for those
+  environment secrets, and `SELECTEL_HOST` plus `SELECTEL_SSH_USER` for the
+  environment variables. The current verified values are `app.memoly.ru` and
+  `root`; the owner must recheck them in the Selectel panel. The owner provisions
+  those values once in GitHub; the key value and its filesystem path never appear
+  in this repository. Until image publication and deployment CI are implemented,
+  use the owner-approved local SSH agent or secure transfer path.
+- The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
+  and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
+  they are never copied into an image or committed.
+- The current verified public MAX bot username is `id911018762027_bot`. It is a
+  build-time frontend value and is not a secret. Pass it as
+  `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
+  changes. Production uses same-origin API requests, so `VITE_API_URL` is empty.
+
+CI does not yet publish Selectel images. Prepare both immutable images locally from
+the accepted commit with the tracked script:
+
+```sh
+git status --short
+git rev-parse HEAD
+export VITE_MAX_BOT_USERNAME='id911018762027_bot'
+deploy/selectel/build-images.sh '<40-character accepted SHA>'
+```
+
+The script requires a clean checkout at the exact SHA and the canonical
+`alexdubaev/OurMemoriesDevBot` origin. It builds `memoly-backend:<SHA>` from
+`backend/Dockerfile` and `memoly-webapp:<SHA>` from
+`deploy/selectel/Dockerfile.webapp`, tags both with the full SHA, and verifies their
+OCI revision labels. Transfer those two images to the host through the owner’s
+approved secure channel. The build script does not connect to production, change
+the server, run migrations, or alter rollback state.
+
+The running service SHA may intentionally lag the checkout SHA after documentation
+only changes. Promote images only when their exact SHA has been accepted for a
+release; do not use `latest`.
+
+### Release sequence and stop conditions
+
+1. Confirm owner-provisioned SSH access and the accepted full SHA.
+2. In a clean checkout at that SHA, run `build-images.sh` and deliver both images.
+3. On the host, verify the images are present and run `preflight`.
+4. Run `migration-status`. If it reports no pending migrations, continue to
+   `deploy`. If it reports a pending release migration, run the guarded `migrate`
+   action documented below, then check `migration-status` again before `deploy`.
+5. Run `deploy`, then perform the public smoke checks.
+6. Record the SHA, image IDs/digests, migration result, UTC time, smoke results, and
+   rollback tags in a release manifest. Keep the manifest server-side or in the
+   approved release system; never include secrets.
+
+Stop before mutation when SSH, canonical origin, clean SHA, either image, Compose,
+Caddy ownership, or migration preflight fails. Do not substitute `prisma db push`,
+direct SQL, `docker compose up` against the gateway, or an ad-hoc migration command.
+If promotion fails after a compatible migration, use the configured immutable
+rollback tags and follow the rollback section below. Database rollback is not part
+of application rollback.
+
 ## Ownership model
 
 - The configured gateway (`GATEWAY_CONTAINER`, normally `memoly-webapp-1`) is a

@@ -9,6 +9,25 @@ Provider runbooks:
 
 - [DigitalOcean](DIGITALOCEAN.md)
 - [Yandex Cloud](YANDEX_CLOUD.md)
+- [Existing Selectel host](../deploy/selectel/README.md)
+
+## Existing Selectel host
+
+The current memoLy production host is `app.memoly.ru`; its application checkout is
+`/opt/memoly/app`. The complete host release procedure, including image preparation,
+the guarded database migration, promotion, smoke checks, and rollback, lives in the
+[Selectel runbook](../deploy/selectel/README.md). Do not reconstruct that procedure
+from chat history or run an invented migration command.
+
+Access is provisioned by the owner outside Git, using the owner’s secure store or an
+SSH agent. The target durable automation model is a protected GitHub Environment with
+the deploy SSH key and known-hosts provisioned once by the owner. An operator checks
+access with `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes` and the host name from
+the owner’s Selectel panel. No private key path, key value,
+database password, MAX token, webhook secret, or encryption key belongs in the
+repository. CI image publication and credential provisioning are not yet automated;
+until they are, the documented local build script prepares immutable images and the
+operator transfers them using the owner’s approved secure channel.
 
 ## Supported production shape
 

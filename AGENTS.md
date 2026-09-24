@@ -20,6 +20,16 @@ git rev-parse HEAD
 Канонический продуктовый репозиторий: `alexdubaev/OurMemoriesDevBot`. Допустимые адреса `origin`: SSH `git@github.com:alexdubaev/OurMemoriesDevBot.git` (предпочтительно) либо HTTPS `https://github.com/alexdubaev/OurMemoriesDevBot.git`. Любой другой `origin` — стоп-условие до проверки владельцем. Подробности: `docs/mvp/REPOSITORY.md`.
 Если нет Git-репозитория или доступного origin владельца — допустима локальная подготовка; push блокируется. Убедись, что origin не `di-sukharev/vibe`. Сохрани upstream SHA и LICENSE/NOTICE. Инициализация пустого remote и первый push main — отдельное однократное подтверждаемое действие владельца, не обычный обход PR.
 
+Для задач сборки и production-доставки существующего Selectel-хоста сначала читай
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) и связанный
+[deploy/selectel/README.md](deploy/selectel/README.md). Текущий production host —
+`app.memoly.ru`, рабочий каталог на нём — `/opt/memoly/app`. SSH-доступ должен быть
+заранее выдан владельцем через защищённое хранилище или SSH agent. Целевая модель
+для автоматизации — protected GitHub Environment с deploy SSH key и known-hosts,
+который владелец настраивает один раз; приватные ключи, их пути и значения секретов
+в Git и переписке не хранятся. Если доступа нет, агент
+останавливается после read-only проверки и сообщает, какой доступ нужно выдать.
+
 ## 3. Стратегия веток
 Одна долгоживущая ветка `main`. Она всегда должна собираться, но каждое попадание в main не означает production-деплой. Не создавать постоянные `dev`, `develop`, `test`, ветки по именам моделей или новую `main-final`.
 Одна задача → одна короткоживущая ветка → один worktree → один PR. Примеры: `feat/t03-private-media`, `feat/t06-design-system`, `fix/t07-audio-seek`, `docs/t00-delivery-rules`. Одновременно два агента не коммитят в одну ветку. После squash-merge эта ветка не используется для следующей задачи.
