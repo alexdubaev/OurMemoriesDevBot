@@ -19,7 +19,7 @@ import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './
 import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
 import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryLike } from './queries'
-import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
+import { refreshFromTop, shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
@@ -77,7 +77,9 @@ export function FeedPage({
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const feedScope = useMemo(() => ({ familyId, filter }), [familyId, filter])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
+  const [refreshErrorFor, setRefreshErrorFor] = useState<typeof feedScope | null>(null)
   const newAvailable = newAvailableFor === feedScope
+  const refreshError = refreshErrorFor === feedScope
   const knownFirstId = useRef<string | null>(null)
   const currentScope = useRef(feedScope)
   const items = useMemo(() => {
@@ -195,7 +197,7 @@ export function FeedPage({
     <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
-      {newAvailable ? <div className="feed-new-available" role="status"><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography><Button onClick={() => void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null))} type="button">Показать новые</Button></div> : null}
+      {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState filtered={filter !== 'all'} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
@@ -270,18 +272,6 @@ export function FeedPage({
     />
     </MediaPlaybackCoordinator>
   )
-}
-
-async function refreshFromTop(
-  refetch: () => Promise<{ data?: { pages: Array<{ items: MemoryDto[] }> } }>,
-  knownFirstId: React.MutableRefObject<string | null>,
-  isCurrent: () => boolean,
-  clearNewAvailable: () => void,
-) {
-  const result = await refetch()
-  if (!isCurrent()) return
-  knownFirstId.current = result.data?.pages[0]?.items[0]?.id ?? knownFirstId.current
-  clearNewAvailable()
 }
 
 function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoIndex = 0, transport }: {

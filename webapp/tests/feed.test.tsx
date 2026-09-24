@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { EmptyState, InlineError } from '../src/features/feed/components'
@@ -119,6 +120,23 @@ test('a next-page error keeps already displayed memories on screen', () => {
   })
 
   expect(renderFeed(queryClient)).toContain('Первое слово')
+})
+
+test('new-memory refresh keeps its notice and first id until refetch succeeds', async () => {
+  const first = { current: memoryId }
+  let cleared = 0
+  const clear = () => { cleared += 1 }
+  const failed = await refreshFromTop(async () => ({ isError: true, data: { pages: [{ items: [photoMemory] }] } }), first, () => true, clear)
+  expect(failed).toBe(false)
+  expect(first.current).toBe(memoryId)
+  expect(cleared).toBe(0)
+  const stale = await refreshFromTop(async () => ({ data: { pages: [{ items: [photoMemory] }] } }), first, () => false, clear)
+  expect(stale).toBe(false)
+  expect(first.current).toBe(memoryId)
+  const succeeded = await refreshFromTop(async () => ({ isError: false, data: { pages: [{ items: [photoMemory] }] } }), first, () => true, clear)
+  expect(succeeded).toBe(true)
+  expect(first.current).toBe(photoMemory.id)
+  expect(cleared).toBe(1)
 })
 
 test('an empty filtered feed offers a reset without presenting a nonfunctional bot action', () => {
