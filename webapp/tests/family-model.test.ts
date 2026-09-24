@@ -33,6 +33,17 @@ describe('family presentation model', () => {
     expect(markup).toContain('Наша семья')
   })
 
+  test('shows the child profile from the existing family data without exposing owner actions to viewers', () => {
+    const ownerMarkup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps({ childProfileOpen: true })))
+    const viewerMarkup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps({ childProfileOpen: true, canEditChild: false })))
+
+    expect(ownerMarkup).toContain('data-slot="child-profile"')
+    expect(ownerMarkup).toContain('Редактировать профиль')
+    expect(viewerMarkup).toContain('data-slot="child-profile"')
+    expect(viewerMarkup).not.toContain('Редактировать профиль')
+    expect(viewerMarkup).not.toContain('Сменить фото')
+  })
+
   test('renders pending invite values without exposing a raw token', () => {
     const rawToken = 'invite_raw_token_must_not_be_rendered'
     const markup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps({
@@ -161,10 +172,13 @@ function familyProps(overrides: Partial<ComponentProps<typeof FamilyPresentation
     busy: false,
     canInvite: true,
     canEditChild: true,
+    childProfileOpen: false,
     canLeaveFamily: false,
     memberActions: { [member.userId]: { canEditAlias: false, canManageRole: false, canRemove: false } },
     onRefreshUsage: () => undefined,
     onEditChild: () => undefined,
+    onOpenChild: () => undefined,
+    onCloseChild: () => undefined,
     onCreateInvite: async () => undefined,
     onCopyInvite: async () => undefined,
     onShareInvite: async () => undefined,

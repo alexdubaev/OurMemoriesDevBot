@@ -5,7 +5,7 @@ import { AvatarLetter } from '@/features/session'
 import { shouldShowChildAvatarImage } from './child-avatar-state'
 
 type AvatarCrop = { x: number; y: number; width: number; height: number } | null
-type ChildAvatarSize = 'family-card' | 'feed-header'
+type ChildAvatarSize = 'family-card' | 'feed-header' | 'profile'
 
 export function ChildAvatar({
   avatarCrop,
@@ -19,10 +19,10 @@ export function ChildAvatar({
   size: ChildAvatarSize
 }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null)
-  const sizeClass = size === 'feed-header' ? 'size-[60px]' : 'size-11'
+  const sizeClass = size === 'profile' ? 'child-profile-avatar' : size === 'feed-header' ? 'size-[60px]' : 'size-11'
 
   if (!shouldShowChildAvatarImage({ avatarUrl, imageFailed: failedAvatarUrl === avatarUrl })) {
-    return <AvatarLetter className={sizeClass} name={name} size={size === 'feed-header' ? 'xl' : 'lg'} />
+    return <AvatarLetter className={sizeClass} name={name} size={size === 'family-card' ? 'lg' : 'xl'} />
   }
 
   return (

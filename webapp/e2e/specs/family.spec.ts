@@ -105,8 +105,12 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect(page.getByText('Делитесь моментами с самыми близкими', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Редактировать профиль' }).click()
   await expect(page.getByRole('img', { name: 'Текущий аватар ребёнка' })).toBeVisible()
   await page.getByRole('button', { name: 'Отмена' }).click()
+  await expect(page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Назад к семье' }).click()
   await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
 
   // The buttons become busy synchronously; the network proves retry/double-click cannot mint
@@ -199,6 +203,11 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await expect(guest.page.getByRole('button', { name: 'Пригласить родственника' })).toHaveCount(0)
   await expect(guest.page.getByRole('button', { name: 'Удалить участника' })).toHaveCount(0)
   await expect(guest.page.getByRole('img', { name: 'Режим просмотра' })).toBeVisible()
+  await guest.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  await expect(guest.page.locator('[data-slot="child-profile"]')).toBeVisible()
+  await expect(guest.page.getByRole('button', { name: 'Редактировать профиль' })).toHaveCount(0)
+  await expect(guest.page.getByRole('button', { name: 'Сменить фото' })).toHaveCount(0)
+  await guest.page.getByRole('button', { name: 'Назад к семье' }).click()
   await expect.poll(() => requests.accepts.length).toBe(1)
 
   await guest.page.reload()
@@ -325,5 +334,30 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
     await expect(settings).toHaveCount(0)
   }
 
+  await owner.context.close()
+})
+
+test('child profile keeps protected avatar, actions, and geometry at mobile widths', async ({ page }, testInfo) => {
+  const owner = await createCompletedOwner(page, 81000041)
+  await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
+  const profile = owner.page.locator('[data-slot="child-profile"]')
+  await expect(profile).toBeVisible()
+  await expect(profile.locator('[data-slot="child-avatar-image"]')).toHaveAttribute('src', /^blob:/)
+  await expect(profile).toContainText('Лиза')
+  await profile.getByRole('button', { name: 'Возраст и дата рождения' }).click()
+  await expect(profile).toContainText('Полных месяцев')
+  await profile.getByRole('button', { name: 'Назад к профилю ребёнка' }).click()
+
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    await owner.page.evaluate(() => window.scrollTo(0, 0))
+    expect(await owner.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await owner.page.screenshot({ path: testInfo.outputPath(`child-profile-${width}.png`), animations: 'disabled' })
+  }
+
+  await profile.getByRole('button', { name: 'Сменить фото' }).click()
+  await expect(owner.page.getByRole('button', { name: 'Заменить фотографию' })).toBeVisible()
+  await owner.page.getByRole('button', { name: 'Отмена' }).click()
+  await expect(profile).toBeVisible()
   await owner.context.close()
 })

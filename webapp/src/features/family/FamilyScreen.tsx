@@ -12,6 +12,7 @@ import { useChildAvatar } from './useChildAvatar'
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
 export function FamilyScreen({
+  childProfileOpen,
   familyResponse,
   invites,
   members,
@@ -19,10 +20,13 @@ export function FamilyScreen({
   hostBridge,
   currentUserId,
   onEditChild,
+  onOpenChild,
+  onCloseChild,
   onFeed,
   onRefresh,
   createInviteLink,
 }: {
+  childProfileOpen: boolean
   familyResponse: FamilyResponse
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
@@ -30,6 +34,8 @@ export function FamilyScreen({
   hostBridge: Pick<HostBridge, 'onBack'>
   currentUserId: string
   onEditChild: () => void
+  onOpenChild: () => void
+  onCloseChild: () => void
   onFeed: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
@@ -84,6 +90,7 @@ export function FamilyScreen({
           canEditChild={isOwner}
           canInvite={canInvite}
           canLeaveFamily={Boolean(current && !isOwner)}
+          childProfileOpen={childProfileOpen}
           childAvatarUrl={avatarUrl}
           copyState={copyState}
           familyResponse={familyResponse}
@@ -124,6 +131,8 @@ export function FamilyScreen({
             }
           }}
           onEditChild={onEditChild}
+          onOpenChild={onOpenChild}
+          onCloseChild={onCloseChild}
           onLeaveFamily={async () => {
             if (!current) return
             await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version))

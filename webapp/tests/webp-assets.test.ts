@@ -9,7 +9,9 @@ import { resolveWebpIconSource } from '../src/components/webp-icon-manifest'
 
 const requiredNames = [
   'chevron',
+  'clock',
   'close',
+  'edit',
   'family',
   'gear',
   'heart',
