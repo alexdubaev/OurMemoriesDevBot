@@ -97,6 +97,26 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
+With owner-provisioned SSH access, run the same reviewed host entry point manually
+from a Bash shell after the target commit is accepted on `main`:
+
+```sh
+set -euo pipefail
+git fetch origin main
+SHA=$(git rev-parse refs/remotes/origin/main)
+test "$(git rev-parse HEAD)" = "$SHA"
+test -z "$(git status --porcelain)"
+git show "$SHA:deploy/selectel/ci-release.sh" |
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+    bash -s -- "$SHA" DEPLOY false id911018762027_bot
+```
+
+Set the third server argument to `true` only for a reviewed release that needs the
+guarded migration. This command builds both images on Selectel; no image transfer
+is needed. Do not run it until the host GitHub credential, 4 GiB disk gate, and
+rollback prerequisites above are satisfied. The local build and image-transfer
+sequence below is an alternative when server-side building is unavailable.
+
 ### Release sequence and stop conditions
 
 1. Confirm owner-provisioned SSH access and the accepted full SHA.
