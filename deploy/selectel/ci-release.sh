@@ -21,6 +21,7 @@ PRODUCT_SHA=${1:-}
 DEPLOY_CONFIRMATION=${2:-}
 RUN_MIGRATION=${3:-false}
 MAX_BOT_USERNAME=${4:-}
+PROMOTION_STARTED=false
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -260,8 +261,23 @@ main() {
   require_command sha256sum
   validate_inputs
   [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
-  exec 8>"$SERVER_ROOT/.selectel-ci-release.lock" || die 'cannot open Selectel CI release lock'
-  flock -n 8 || die 'another Selectel CI release is already running'
+  exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
+  flock -n 9 || die 'another Selectel deployment is already running'
+  export SELECTEL_DEPLOY_LOCK_FD=9
+
+  release_failure() {
+    local status=$?
+    trap - EXIT
+    if [ "$PROMOTION_STARTED" = true ]; then
+      printf 'ERROR: release promotion failed; attempting application rollback.\n' >&2
+      if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback; then
+        printf 'ERROR: automatic application rollback failed; manual rollback is required.\n' >&2
+      fi
+    fi
+    exit "$status"
+  }
+  trap release_failure EXIT
+
   check_disk_space
   validate_repository
   verify_rollback_file
@@ -280,8 +296,10 @@ main() {
     bash "$APP_ROOT/deploy/selectel/redeploy.sh" migrate
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
+  PROMOTION_STARTED=true
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
   public_smoke
+  PROMOTION_STARTED=false
   write_release_manifest
 }
 

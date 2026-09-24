@@ -33,6 +33,10 @@ require_command() {
 }
 
 acquire_deploy_lock() {
+	if [[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+		{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || die "inherited deployment lock is not open"
+		return 0
+	fi
 	local lock_file="$SERVER_ROOT/.selectel-deploy.lock"
 	exec 9>"$lock_file" || die "cannot open deployment lock: $lock_file"
 	flock -n 9 || die "another Selectel deployment is already running"

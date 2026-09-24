@@ -45,7 +45,12 @@ The reviewed manual workflow `.github/workflows/selectel-release.yml` runs from
 strict-host-key SSH; that host entry point fetches the current `origin/main`, checks
 out the exact SHA, builds both immutable images with `build-images.sh`, prepares a
 server-only rollback backup, and invokes the reviewed `redeploy.sh` actions. It
-never receives database or MAX secrets from GitHub and never runs ad-hoc SQL.
+never receives database or MAX secrets from GitHub and never runs ad-hoc SQL. The
+host release lock is held across checkout, image build, migration, promotion, and
+smoke; direct `redeploy.sh` actions cannot interleave with that release. If
+promotion or public smoke fails after the release starts changing services, the
+entry point attempts the prepared application rollback and keeps the original
+failure status if rollback also fails.
 Dispatch it with the exact current `main` SHA, type `DEPLOY`, and enable the
 migration input only when that release contains a pending migration. The workflow
 fails closed when the environment variables or secrets are missing. GitHub's
