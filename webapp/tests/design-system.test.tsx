@@ -280,13 +280,14 @@ test('media choice preserves canonical order and routes video to the supplied ca
     ),
   )
 
-  expect(markup.match(/class="media-choice-card"/g)).toHaveLength(2)
+  expect(markup.match(/class="media-choice-card/g)).toHaveLength(2)
   expect(markup).toContain('Добавить голос или видео')
   expect(markup.indexOf('data-add-action="video"')).toBeLessThan(markup.indexOf('data-add-action="audio"'))
   expect(markup).toContain('Выбрать видео')
   expect(markup).toContain('Готовый видеофайл')
-  expect(markup).toContain('Аудио пока недоступно')
-  expect(markup).toContain('Добавление аудио появится позже')
+  expect(markup).toContain('Голосовые — через бот')
+  expect(markup).toContain('Добавление аудио в приложении пока недоступно')
+  expect(markup).toContain('https://t.me/OurMemoriesDevBot')
 
   let opened = false
   const action = MediaChoiceAction({

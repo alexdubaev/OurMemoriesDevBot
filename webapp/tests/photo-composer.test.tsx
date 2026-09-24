@@ -62,7 +62,7 @@ test('finalizes every selected photo before creating exactly one idempotent memo
     })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
     input.files = [file('one.jpg'), file('two.jpg')]
     await act(async () => invoke(input, 'onChange'))
     caption.value = 'На море'
@@ -76,6 +76,8 @@ test('finalizes every selected photo before creating exactly one idempotent memo
     expect(memoryRequests).toHaveLength(1)
     expect(memoryRequests[0]?.body).toMatchObject({ kind: 'photo', childId: '00000000-0000-7000-8000-000000000001', body: 'На море', mediaIds: ['00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000002'] })
     expect(memoryRequests[0]?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
+    expect(successCount).toBe(0)
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Смотреть в ленте'), 'onClick'))
     expect(successCount).toBe(1)
   } finally {
     await act(async () => root.unmount())
@@ -87,6 +89,7 @@ test('finalizes every selected photo before creating exactly one idempotent memo
 test('recoverable reserve failure keeps selected files, caption, and date for retry', async () => {
   const browser = installInteractiveDom()
   let reserveCount = 0
+  let publishedBody: Record<string, unknown> | null = null
   const transport: AuthenticatedTransport = {
     request: async (path, _schema, options) => {
       if (path.endsWith('/uploads')) {
@@ -96,6 +99,7 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
         return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/asset-1', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
       }
       if (path.includes('/finalize')) return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      if (path.endsWith('/memories')) publishedBody = options?.body as Record<string, unknown>
       return { id: 'memory-1' } as never
     },
     raw: async () => new Response(),
@@ -112,7 +116,7 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
     input.files = [file('retry.jpg')]
     await act(async () => invoke(input, 'onChange'))
     caption.value = 'Сохрани дату'
@@ -122,12 +126,12 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
 
     expect(textOf(browser.container)).toContain('Не удалось подготовить сохранение')
-    expect(input.files).toHaveLength(1)
-    expect(caption.value).toBe('Сохрани дату')
-    expect(date.value).toBe('2026-09-20')
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Вернуться к фото'), 'onClick'))
+    expect(findOne(browser.container, (node) => node.attributes['aria-label'] === 'Предпросмотр фотографий')).toBeDefined()
 
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
     expect(reserveCount).toBe(2)
+    expect(publishedBody).toMatchObject({ body: 'Сохрани дату', kind: 'photo' })
   } finally {
     await act(async () => root.unmount())
     browser.restore()
@@ -157,7 +161,7 @@ test('shows the safe photo-finalize code without storage details', async () => {
       onCancel: () => undefined, onSuccess: () => undefined,
     })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
     input.files = [file('failed.jpg')]
     await act(async () => invoke(input, 'onChange'))
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
@@ -202,7 +206,7 @@ test('manual retry starts a fresh reservation after a missing object', async () 
       onCancel: () => undefined, onSuccess: () => { successCount += 1 },
     })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
     input.files = [file('retry-after-missing.jpg')]
     await act(async () => invoke(input, 'onChange'))
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
@@ -210,12 +214,57 @@ test('manual retry starts a fresh reservation after a missing object', async () 
     expect(reserves).toBe(1)
     expect(finalizes).toBe(1)
     expect(successCount).toBe(0)
-    await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
 
     expect(reserves).toBe(2)
     expect(finalizes).toBe(2)
+    expect(successCount).toBe(0)
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Смотреть в ленте'), 'onClick'))
     expect(successCount).toBe(1)
-    expect(textOf(browser.container)).toContain('Сохранено в семейную ленту')
+    expect(textOf(browser.container)).toContain('Фото опубликованы!')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('create retry reuses finalized photo and the exact idempotent payload', async () => {
+  const browser = installInteractiveDom()
+  let uploads = 0
+  const creates: Array<{ body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        uploads += 1
+        return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/private-object', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      creates.push({ body: options?.body as Record<string, unknown>, headers: options?.headers })
+      if (creates.length === 1) throw new Error('response lost')
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, {
+      childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport,
+      onCancel: () => undefined, onSuccess: () => undefined,
+    })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('retry-create.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(textOf(browser.container)).toContain('Не удалось загрузить фото')
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(uploads).toBe(1)
+    expect(creates).toHaveLength(2)
+    expect(creates[1]).toEqual(creates[0])
+    expect(textOf(browser.container)).toContain('Фото опубликованы!')
   } finally {
     await act(async () => root.unmount())
     browser.restore()
@@ -238,7 +287,7 @@ test('asks for confirmation before cancelling a dirty draft', async () => {
     })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
-    const cancel = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Отмена')
+    const cancel = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад')
     input.files = [file('dirty.jpg')]
     await act(async () => invoke(input, 'onChange'))
     caption.value = 'Не потеряй меня'
@@ -264,7 +313,7 @@ type InteractiveNode = {
   ownerDocument: InteractiveDocument
   parentNode: InteractiveNode | null
   childNodes: InteractiveNode[]
-  style: Record<string, string>
+  style: Record<string, string> & { setProperty(name: string, value: string): void }
   attributes: Record<string, string>
   listeners: Map<string, Set<(event: Record<string, unknown>) => void>>
   value: string
@@ -307,7 +356,7 @@ function createInteractiveDocument(): InteractiveDocument {
   const make = (name: string): InteractiveNode => {
     const node: InteractiveNode = {
       nodeType: 1, nodeName: name.toUpperCase(), tagName: name.toUpperCase(), ownerDocument: document,
-      parentNode: null, childNodes: [], style: {}, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, files: [], textContent: '',
+      parentNode: null, childNodes: [], style: { setProperty(name, value) { node.style[name] = value } }, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, files: [], textContent: '',
       appendChild(child) { child.parentNode = node; node.childNodes.push(child); return child },
       insertBefore(child, before) { child.parentNode = node; const index = before ? node.childNodes.indexOf(before) : -1; if (index < 0) node.childNodes.push(child); else node.childNodes.splice(index, 0, child); return child },
       removeChild(child) { const index = node.childNodes.indexOf(child); if (index >= 0) node.childNodes.splice(index, 1); child.parentNode = null; return child },
