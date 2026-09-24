@@ -23,15 +23,15 @@ access boundary, the build inputs, the migration gate, and the rollback contract
 
   If this fails, stop and ask the owner to provision the server access. Never look
   for, print, commit, or request a private key in Git or chat.
-- The durable automation target is a protected GitHub Environment (for example
-  `production`) containing the deploy SSH private key and pinned known-hosts. Use
+- The durable automation target is the protected GitHub Environment
+  `selectel-production`, containing the deploy SSH private key and pinned
+  known-hosts. Use
   the names `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` and `SELECTEL_KNOWN_HOSTS` for those
-  environment secrets, and `SELECTEL_HOST` plus `SELECTEL_SSH_USER` for the
-  environment variables. The current verified values are `app.memoly.ru` and
-  `root`; the owner must recheck them in the Selectel panel. The owner provisions
-  those values once in GitHub; the key value and its filesystem path never appear
-  in this repository. Until image publication and deployment CI are implemented,
-  use the owner-approved local SSH agent or secure transfer path.
+  environment secrets, and `SELECTEL_HOST`, `SELECTEL_SSH_USER` plus
+  `SELECTEL_MAX_BOT_USERNAME` for the environment variables. The current verified
+  values are `app.memoly.ru`, `root` and `id911018762027_bot`; the owner must
+  recheck them in the Selectel panel. The owner provisions those values once in
+  GitHub; the key value and its filesystem path never appear in this repository.
 - The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
   and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
   they are never copied into an image or committed.
@@ -40,17 +40,32 @@ access boundary, the build inputs, the migration gate, and the rollback contract
   `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
   changes. Production uses same-origin API requests, so `VITE_API_URL` is empty.
 
-CI does not yet publish Selectel images. Prepare both immutable images locally from
-the accepted commit with the tracked script:
+The reviewed manual workflow `.github/workflows/selectel-release.yml` runs from
+`main` with concurrency protection. It sends `deploy/selectel/ci-release.sh` over
+strict-host-key SSH; that host entry point fetches the current `origin/main`, checks
+out the exact SHA, builds both immutable images with `build-images.sh`, prepares a
+server-only rollback backup, and invokes the reviewed `redeploy.sh` actions. It
+never receives database or MAX secrets from GitHub and never runs ad-hoc SQL.
+Dispatch it with the exact current `main` SHA, type `DEPLOY`, and enable the
+migration input only when that release contains a pending migration. The workflow
+fails closed when the environment variables or secrets are missing. GitHub's
+environment branch restriction is `main`; a human required-reviewer rule is not
+configured because the private-repository plan rejected that setting.
+
+For a local release, prepare both immutable images from the accepted commit with
+the tracked script:
 
 ```sh
 git status --short
 git rev-parse HEAD
-export VITE_MAX_BOT_USERNAME='id911018762027_bot'
+git fetch origin main
+export SELECTEL_MAX_BOT_USERNAME='id911018762027_bot'
 deploy/selectel/build-images.sh '<40-character accepted SHA>'
 ```
 
-The script requires a clean checkout at the exact SHA and the canonical
+The script requires a clean checkout at the requested SHA, verifies that it is
+reachable from the current canonical `origin/main`, and builds from a tracked
+archive so ignored files cannot enter the Docker context. The canonical
 `alexdubaev/OurMemoriesDevBot` origin. It builds `memoly-backend:<SHA>` from
 `backend/Dockerfile` and `memoly-webapp:<SHA>` from
 `deploy/selectel/Dockerfile.webapp`, tags both with the full SHA, and verifies their

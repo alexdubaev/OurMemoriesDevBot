@@ -20,14 +20,20 @@ the guarded database migration, promotion, smoke checks, and rollback, lives in 
 from chat history or run an invented migration command.
 
 Access is provisioned by the owner outside Git, using the owner’s secure store or an
-SSH agent. The target durable automation model is a protected GitHub Environment with
-the deploy SSH key and known-hosts provisioned once by the owner. An operator checks
-access with `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes` and the host name from
-the owner’s Selectel panel. No private key path, key value,
-database password, MAX token, webhook secret, or encryption key belongs in the
-repository. CI image publication and credential provisioning are not yet automated;
-until they are, the documented local build script prepares immutable images and the
-operator transfers them using the owner’s approved secure channel.
+SSH agent. The durable automation path is the protected GitHub Environment
+`selectel-production`. The owner provisions its `SELECTEL_DEPLOY_SSH_PRIVATE_KEY`
+and `SELECTEL_KNOWN_HOSTS` secrets plus the nonsecret `SELECTEL_HOST`,
+`SELECTEL_SSH_USER`, and `SELECTEL_MAX_BOT_USERNAME` variables once. No private
+key path, key value, database password, MAX token, webhook secret, or encryption key
+belongs in the repository. The manual workflow
+[`.github/workflows/selectel-release.yml`](../.github/workflows/selectel-release.yml)
+accepts only the current `main` SHA, requires the explicit `DEPLOY` confirmation,
+and serializes production releases. It transfers the reviewed
+`deploy/selectel/ci-release.sh` over strict-host-key SSH; that script builds the
+immutable images on the host, prepares rollback, applies the guarded migration only
+when explicitly selected, promotes services, and writes a protected nonsecret
+release manifest. It never runs an invented SQL command or removes old images,
+gateway containers, or persistent data.
 
 ## Supported production shape
 
