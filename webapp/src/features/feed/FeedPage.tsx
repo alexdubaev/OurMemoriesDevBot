@@ -75,8 +75,11 @@ export function FeedPage({
   const [composer, setComposer] = useState<ComposerMode | null>(null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const [newAvailable, setNewAvailable] = useState(false)
+  const feedScope = useMemo(() => ({ familyId, filter }), [familyId, filter])
+  const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
+  const newAvailable = newAvailableFor === feedScope
   const knownFirstId = useRef<string | null>(null)
+  const currentScope = useRef(feedScope)
   const items = useMemo(() => {
     const unique = new Map<string, MemoryDto>()
     for (const page of feed.data?.pages ?? []) {
@@ -93,6 +96,11 @@ export function FeedPage({
   }, [deleteTarget, deleteTargetIndex, items])
 
   useEffect(() => {
+    currentScope.current = feedScope
+    knownFirstId.current = null
+  }, [feedScope])
+
+  useEffect(() => {
     if (!knownFirstId.current && items[0]) knownFirstId.current = items[0].id
   }, [items])
 
@@ -107,19 +115,21 @@ export function FeedPage({
 
   useEffect(() => {
     let checking = false
+    let disposed = false
     const checkForNew = async () => {
       if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
         const latest = await loadFeed(transport, familyId, filter, null)
+        if (disposed) return
         const latestFirstId = latest.items[0]?.id ?? null
         if (shouldRefreshInitialEmptyFeed({ knownFirstId: knownFirstId.current, latestFirstId })) {
-          await refreshFromTop(refetch, knownFirstId, setNewAvailable)
+          await refreshFromTop(refetch, knownFirstId, () => !disposed && currentScope.current === feedScope, () => setNewAvailableFor(null))
         } else if (latestFirstId && latestFirstId !== knownFirstId.current) {
-          setNewAvailable(true)
+          setNewAvailableFor(feedScope)
         }
       } catch (error) {
-        if (error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLost()
+        if (!disposed && error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLost()
       } finally {
         checking = false
       }
@@ -127,8 +137,8 @@ export function FeedPage({
     const onVisibility = () => { if (!document.hidden) void checkForNew() }
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [familyId, filter, onAccessLost, refetch, transport])
+    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [familyId, feedScope, filter, onAccessLost, refetch, transport])
 
   useEffect(() => {
     const target = sentinel.current
@@ -185,10 +195,10 @@ export function FeedPage({
     <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
-      {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
+      {newAvailable ? <div className="feed-new-available" role="status"><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography><Button onClick={() => void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null))} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState mode={role} /> : null}
+      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState filtered={filter !== 'all'} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
       {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
@@ -211,7 +221,7 @@ export function FeedPage({
       }} /> : null}
       <div aria-label="Загрузить ещё" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
-      {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
+      {feed.isFetchNextPageError && items.length > 0 ? <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
@@ -265,11 +275,13 @@ export function FeedPage({
 async function refreshFromTop(
   refetch: () => Promise<{ data?: { pages: Array<{ items: MemoryDto[] }> } }>,
   knownFirstId: React.MutableRefObject<string | null>,
-  setNewAvailable: (available: boolean) => void,
+  isCurrent: () => boolean,
+  clearNewAvailable: () => void,
 ) {
   const result = await refetch()
+  if (!isCurrent()) return
   knownFirstId.current = result.data?.pages[0]?.items[0]?.id ?? knownFirstId.current
-  setNewAvailable(false)
+  clearNewAvailable()
 }
 
 function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoIndex = 0, transport }: {

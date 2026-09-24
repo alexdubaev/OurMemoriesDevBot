@@ -125,7 +125,26 @@ test.describe.serial('T07 live feed', () => {
       expect(filterMetrics).toHaveLength(5)
       expect(filterMetrics.map((filter) => filter.text)).toEqual(['Все', 'Фото', 'Видео', 'Голос', 'Заметки'])
       expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds)).toBe(true)
+      if (width === 320) {
+        const rail = page.locator('[data-slot="memoly-filter-rail"]')
+        const scrollable = await rail.evaluate((element) => element.scrollWidth > element.clientWidth)
+        expect(scrollable).toBe(true)
+        await page.getByRole('button', { name: 'Заметки' }).focus()
+        expect(await rail.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+      }
       await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
+    })
+  }
+
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    test(`feed renders the ${theme} theme at 390px`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.evaluate((value) => window.localStorage.setItem('memoly-theme', value), theme)
+      await page.reload()
+      await openFeed(page)
+      await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
+      await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
+      await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-feed-${theme}-390.png`), animations: 'disabled' })
     })
   }
 
@@ -366,7 +385,7 @@ test.describe.serial('T07 live feed', () => {
     await page.getByLabel('Загрузить ещё').scrollIntoViewIfNeeded()
     await expect.poll(() => failedOnce).toBe(true)
     await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
-    await expect(page.getByRole('alert').filter({ hasText: 'Не удалось обновить ленту' })).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: 'Не удалось загрузить ещё' })).toBeVisible()
     blockCursor = false
     await page.getByRole('button', { name: 'Повторить' }).click()
     await expect(page.getByText('Заметка E2E 20')).toBeVisible()
