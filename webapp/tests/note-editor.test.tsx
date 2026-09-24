@@ -47,7 +47,7 @@ test('creates a note with an idempotency key and trimmed body', async () => {
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
     date.value = '2026-09-20'
     await act(async () => invoke(date, 'onChange'))
-    await act(async () => { await invoke(findButton(browser.container, 'Сохранить'), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findButton(browser.container, 'Опубликовать'), 'onClick'); await flushInteractive() })
 
     expect(requests).toHaveLength(1)
     expect(requests[0]).toMatchObject({ path: `/api/v1/families/${familyId}/memories`, method: 'POST', body: { kind: 'note', childId, body: 'Первый день' } })
@@ -62,6 +62,67 @@ test('converts a past date to an instant that remains that date in Pacific/Kirit
   const occurredAt = composerOccurredAt('2026-09-20', 'Pacific/Kiritimati', new Date('2026-09-21T00:00:00.000Z'))
   expect(occurredAt).not.toBeNull()
   expect(composerDateOnly(occurredAt!, 'Pacific/Kiritimati')).toBe('2026-09-20')
+})
+
+test('note publish blocks a second submission while the first is pending', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<Record<string, unknown>> = []
+  let finishFirst: ((value: MemoryDto) => void) | undefined
+  const transport = transportWith(async (_path, _schema, options) => {
+    requests.push(options?.body as Record<string, unknown>)
+    if (requests.length === 1) return new Promise<MemoryDto>((resolve) => { finishFirst = resolve })
+    return memory
+  })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(NoteComposer, {
+      childId, familyId, familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined,
+    })))
+    const body = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    body.value = 'Не теряй мой текст'
+    await act(async () => invoke(body, 'onChange'))
+    const publish = findButton(browser.container, 'Опубликовать')
+    await act(async () => { invoke(publish, 'onClick'); invoke(publish, 'onClick') })
+    expect(requests).toHaveLength(1)
+    finishFirst?.(memory)
+    await act(async () => flushInteractive())
+    expect(textOf(browser.container)).toContain('Заметка сохранена!')
+    expect(requests[0]).toMatchObject({ kind: 'note', body: 'Не теряй мой текст' })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+  }
+})
+
+test('note retry resends the same draft only after a failed publish', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const transport = transportWith(async (_path, _schema, options) => {
+    requests.push({ body: options?.body as Record<string, unknown>, headers: options?.headers })
+    if (requests.length === 1) throw new Error('offline')
+    return memory
+  })
+  const root = createRoot(browser.container)
+
+  try {
+    await act(async () => root.render(createElement(NoteComposer, {
+      childId, familyId, familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined,
+    })))
+    const body = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    body.value = 'Текст для повтора'
+    await act(async () => invoke(body, 'onChange'))
+    await act(async () => { invoke(findButton(browser.container, 'Опубликовать'), 'onClick'); await flushInteractive() })
+    expect(textOf(browser.container)).toContain('Не удалось сохранить заметку')
+    expect(requests).toHaveLength(1)
+    await act(async () => { invoke(findButton(browser.container, 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toEqual(requests[0])
+    expect(textOf(browser.container)).toContain('Заметка сохранена!')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+  }
 })
 
 test('rejects a whitespace-only note without clearing its body or date', async () => {
@@ -80,7 +141,7 @@ test('rejects a whitespace-only note without clearing its body or date', async (
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
     date.value = '2026-09-19'
     await act(async () => invoke(date, 'onChange'))
-    await act(async () => invoke(findButton(browser.container, 'Сохранить'), 'onClick'))
+    await act(async () => invoke(findButton(browser.container, 'Опубликовать'), 'onClick'))
 
     expect(requestCount).toBe(0)
     expect(textOf(browser.container)).toContain('Введите текст заметки')
@@ -205,7 +266,7 @@ test('dirty note cancel asks for confirmation before discarding the draft', asyn
     body.value = 'Черновик'
     await act(async () => invoke(body, 'onChange'))
     browser.setConfirm(false)
-    await act(async () => invoke(findButton(browser.container, 'Отмена'), 'onClick'))
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Назад'), 'onClick'))
 
     expect(browser.confirmCalls()).toBe(1)
     expect(canceled).toBe(false)
@@ -227,7 +288,7 @@ type InteractiveNode = {
   ownerDocument: InteractiveDocument
   parentNode: InteractiveNode | null
   childNodes: InteractiveNode[]
-  style: Record<string, string>
+  style: Record<string, string> & { setProperty(name: string, value: string): void }
   attributes: Record<string, string>
   listeners: Map<string, Set<(event: Record<string, unknown>) => void>>
   value: string
@@ -271,7 +332,7 @@ function createInteractiveDocument(): InteractiveDocument {
   const make = (name: string): InteractiveNode => {
     const node: InteractiveNode = {
       nodeType: 1, nodeName: name.toUpperCase(), tagName: name.toUpperCase(), ownerDocument: document,
-      parentNode: null, childNodes: [], style: {}, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, textContent: '',
+      parentNode: null, childNodes: [], style: { setProperty(name, value) { node.style[name] = value } }, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, textContent: '',
       appendChild(child) { child.parentNode = node; node.childNodes.push(child); return child },
       insertBefore(child, before) { child.parentNode = node; const index = before ? node.childNodes.indexOf(before) : -1; if (index < 0) node.childNodes.push(child); else node.childNodes.splice(index, 0, child); return child },
       removeChild(child) { const index = node.childNodes.indexOf(child); if (index >= 0) node.childNodes.splice(index, 1); child.parentNode = null; return child },
