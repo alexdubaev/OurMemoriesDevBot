@@ -30,15 +30,15 @@ describe('family invite result hotfix', () => {
     expect(refreshCalls).toBe(0)
   })
 
-  test('renders a tappable pending row and details without a raw token or URL', () => {
+  test('renders the active invitation entry without a raw token or URL', () => {
     const rawToken = 'invite_raw_token_must_not_be_rendered'
     const markup = renderToStaticMarkup(createElement(FamilyPresentation, familyProps({
       invites: [{ ...invite, rawToken } as FamilyInviteDto & { rawToken: string }],
       canInvite: true,
     })))
 
-    expect(markup).toContain('Открыть приглашение: Бабушка Оля')
-    expect(markup).toContain('Ожидают приглашение')
+    expect(markup).toContain('Активные приглашения')
+    expect(markup).toContain('1 ссылка ожидает вступления')
     expect(markup).not.toContain(rawToken)
     expect(markup).not.toContain('Скопировать ссылку')
     expect(markup).not.toContain('Поделиться')

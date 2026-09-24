@@ -5,7 +5,7 @@ import { BottomNavigation } from '@/components/BottomNavigation'
 import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
-import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamilyMember } from './api'
+import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
 import { createInviteResult } from './invite-result'
 import { useChildAvatar } from './useChildAvatar'
 
@@ -92,6 +92,7 @@ export function FamilyScreen({
           canEditChild={isOwner}
           canInvite={canInvite}
           canLeaveFamily={Boolean(current && !isOwner)}
+          canManageFamily={isOwner}
           childProfileOpen={childProfileOpen}
           childAvatarUrl={avatarUrl}
           copyState={copyState}
@@ -138,7 +139,7 @@ export function FamilyScreen({
           onCloseChild={onCloseChild}
           onLeaveFamily={async () => {
             if (!current) return
-            await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version))
+            await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version), true)
           }}
           onRefresh={() => { void onRefresh() }}
           onRefreshUsage={refreshUsage}
@@ -147,7 +148,7 @@ export function FamilyScreen({
           ), true)}
           onRevokeInvite={async (invite) => run(() => revokeInvite(
             transport, familyResponse.family.id, invite.id,
-          ))}
+          ), true)}
           onShareInvite={async () => {
             if (!inviteReady || !navigator.share) return
             try {
@@ -159,6 +160,7 @@ export function FamilyScreen({
           onUpdateMember={async (member, input) => run(() => updateFamilyMember(
             transport, familyResponse.family.id, member.userId, { ...input, expectedVersion: member.version },
           ), true)}
+          onUpdateFamily={async (input) => run(() => updateFamily(transport, familyResponse.family.id, input), true)}
           usage={usage}
           usageFailed={usageFailed}
       />

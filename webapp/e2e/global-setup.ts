@@ -78,7 +78,7 @@ export default async function globalSetup() {
   const prisma = createPrisma(databaseUrl)
   try {
     await prisma.pilotAdmission.createMany({
-      data: [81000011, 81000012, 81000013, 81000014, 81000021, 81000022, 81000023, 81000024, 81000031, 81000041]
+      data: [81000011, 81000012, 81000013, 81000014, 81000021, 81000022, 81000023, 81000024, 81000031, 81000032, 81000041]
         .map((id) => ({ provider: 'telegram', subject: String(id) })),
       skipDuplicates: true,
     })

@@ -285,8 +285,8 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await expect.poll(() => alreadyMemberRequests.accepts.length).toBe(0)
   await alreadyMember.context.close()
 
-  guest.page.once('dialog', (dialog) => dialog.accept())
   await guest.page.getByRole('button', { name: 'Выйти из семьи' }).click()
+  await guest.page.getByRole('button', { name: 'Выйти из семьи', exact: true }).last().click()
   await expect(guest.page.getByRole('button', { name: 'Создать семью' })).toBeVisible()
   await expect(guest.page.getByText('Создайте семейную ленту, чтобы добавить профиль ребёнка.')).toBeVisible()
 
@@ -308,6 +308,10 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await expect(full.page.getByRole('button', { name: 'Пригласить родственника' })).toBeVisible()
   await expect(full.page.getByRole('button', { name: 'Удалить из семьи' })).toHaveCount(0)
   await expect(full.page.getByRole('button', { name: 'Владелец' })).toHaveCount(0)
+  await full.page.getByRole('button', { name: 'Настройки' }).click()
+  await expect(full.page.getByRole('button', { name: /Настройки семьи/ })).toHaveCount(0)
+  await expect(full.page.getByRole('button', { name: /Семейный архив/ })).toBeVisible()
+  await full.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
   await createInvite(full.page, 'viewer', 'Внучка Нина')
 
   // The owner never gets self-demotion/removal controls, even after a full member joins.
@@ -331,7 +335,11 @@ test('a full member can invite but cannot gain owner management rights, and revo
 
   const revokedStartParam = await createInvite(owner.page, 'viewer', 'Отозванный гость')
   await owner.page.getByRole('button', { name: 'Готово' }).click()
-  await owner.page.getByRole('button', { name: 'Отозвать' }).first().click()
+  await owner.page.getByRole('button', { name: 'Активные приглашения' }).click()
+  await owner.page.locator('.family-management-invite-row').filter({ hasText: 'Отозванный гость' }).getByRole('button', { name: 'Отозвать' }).click()
+  await owner.page.getByRole('button', { name: 'Отозвать', exact: true }).click()
+  await owner.page.getByRole('button', { name: 'Назад' }).click()
+  await owner.page.getByRole('button', { name: 'Назад' }).click()
   const revoked = await inviteePage(browser, 81000023, revokedStartParam, 'Отозванный E2E')
   await expect(revoked.page.getByText('Это приглашение отозвано.')).toBeVisible()
   await revoked.page.setViewportSize({ width: 390, height: 844 })
@@ -376,9 +384,11 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
     const settings = owner.page.locator('[data-slot="memoly-settings-sheet"]')
     const sheet = owner.page.locator('[data-slot="memoly-bottom-sheet"]')
     await expect(settings).toBeVisible()
-    await expect(settings.locator('.ml-sheet-row')).toHaveCount(3)
+    await expect(settings.locator('.ml-sheet-row')).toHaveCount(5)
     await expect(settings.getByText('Оформление', { exact: true })).toBeVisible()
     await expect(settings.getByText('Помощь и приватность', { exact: true })).toBeVisible()
+    await expect(settings.getByText('Семейный архив', { exact: true })).toBeVisible()
+    await expect(settings.getByText('Настройки семьи', { exact: true })).toBeVisible()
     await expect(settings.getByText('О memoLy', { exact: true })).toBeVisible()
 
     const sheetBounds = await sheet.boundingBox()
@@ -401,6 +411,55 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
     await expect(settings).toHaveCount(0)
   }
 
+  await owner.context.close()
+})
+
+test('family management uses owner permissions, saves supported fields, and fits mobile themes', async ({ page }) => {
+  const owner = await createCompletedOwner(page, 81000032)
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+    await expect(owner.page.locator('[data-slot="family-settings-page"]')).toBeVisible()
+    const dimensions = await owner.page.evaluate(() => ({ viewport: innerWidth, scroll: document.documentElement.scrollWidth }))
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/family-management-settings-${width}.png`), animations: 'disabled' })
+    await owner.page.getByRole('button', { name: 'Назад' }).click()
+    await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+  }
+
+  await owner.page.getByRole('button', { name: 'Настройки' }).click()
+  await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+  const update = owner.page.waitForRequest((request) => request.method() === 'PATCH' && /\/families\/[^/]+$/.test(new URL(request.url()).pathname))
+  await owner.page.getByRole('textbox', { name: 'Название семьи' }).fill('Семья E2E')
+  await owner.page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  expect((await update).postDataJSON()).toEqual({ name: 'Семья E2E' })
+  await expect(owner.page.getByRole('textbox', { name: 'Название семьи' })).toHaveValue('Семья E2E')
+  await owner.page.getByRole('button', { name: 'Назад' }).click()
+  await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  await owner.page.getByRole('button', { name: 'Настройки' }).click()
+  await owner.page.getByRole('button', { name: /Семейный архив/ }).click()
+  await expect(owner.page.locator('[data-slot="family-archive-page"]')).toBeVisible()
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/family-management-archive-390.png'), animations: 'disabled' })
+  await owner.page.getByRole('button', { name: 'Назад' }).click()
+  await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+  await owner.page.getByRole('button', { name: 'Активные приглашения' }).click()
+  await expect(owner.page.locator('[data-slot="family-invites-page"]')).toBeVisible()
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/family-management-invites-empty-390.png'), animations: 'disabled' })
+  await owner.page.getByRole('button', { name: 'Назад' }).click()
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: /Оформление/ }).click()
+    await owner.page.locator(`[data-theme-choice="${theme}"]`).click()
+    await owner.page.getByRole('button', { name: 'Закрыть' }).click()
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/family-management-${theme}-390.png`), animations: 'disabled' })
+    await owner.page.getByRole('button', { name: 'Назад' }).click()
+    await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+  }
   await owner.context.close()
 })
 

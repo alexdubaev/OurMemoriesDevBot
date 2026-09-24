@@ -8,10 +8,10 @@ import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme }
 import type { HostBridge } from '@/platform/host-bridge'
 
 type SettingsView = 'menu' | 'appearance' | 'help' | 'about'
-export type SettingsSheetProps = { hostBridge: Pick<HostBridge, 'onBack'>; open: boolean; onOpenChange: (open: boolean) => void; returnFocusRef?: RefObject<HTMLElement | null> }
+export type SettingsSheetProps = { hostBridge: Pick<HostBridge, 'onBack'>; open: boolean; onOpenChange: (open: boolean) => void; returnFocusRef?: RefObject<HTMLElement | null>; canManageFamily: boolean; onFamilySettings: () => void; onArchive: () => void }
 
 /** Canonical settings sheet. Controllers remain outside this presentation surface. */
-export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef }: SettingsSheetProps) {
+export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, canManageFamily, onFamilySettings, onArchive }: SettingsSheetProps) {
   const [view, setView] = useState<SettingsView>('menu')
   const { theme, setTheme } = useMemolyTheme()
   const title = view === 'appearance' ? 'Оформление' : view === 'help' ? 'Помощь и приватность' : view === 'about' ? 'О memoLy' : 'Настройки'
@@ -21,7 +21,7 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef }
     <div className="ml-settings-sheet" data-slot="memoly-settings-sheet">
       <DrawerTitle className={view === 'menu' ? 'sr-only' : 'ml-settings-title'}>{title}</DrawerTitle>
       <DrawerDescription className="sr-only">Настройки оформления и информация о приватности memoLy</DrawerDescription>
-      {view === 'menu' ? <SettingsMenu onAbout={() => setView('about')} onAppearance={() => setView('appearance')} onHelp={() => setView('help')} theme={theme} /> : <div className="ml-settings-subview">
+      {view === 'menu' ? <SettingsMenu canManageFamily={canManageFamily} onAbout={() => setView('about')} onAppearance={() => setView('appearance')} onArchive={() => { close(); onArchive() }} onFamilySettings={() => { close(); onFamilySettings() }} onHelp={() => setView('help')} theme={theme} /> : <div className="ml-settings-subview">
         <div className="ml-settings-heading"><button aria-label="Назад" className="ml-settings-back" onClick={() => setView('menu')} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button><span className="ml-settings-subview-title">{title}</span><button aria-label="Закрыть" className="ml-settings-close" onClick={close} type="button"><WebpIcon decorative name="close" size={20} /></button></div>
         {view === 'appearance' ? <AppearanceChoices selected={theme} onSelect={setTheme} /> : null}
         {view === 'help' ? <HelpPrivacy /> : null}
@@ -31,15 +31,17 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef }
   </MemolyBottomSheet>
 }
 
-export function SettingsMenu({ onAbout, onAppearance, onHelp, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; theme: MemolyTheme }) {
+export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; canManageFamily: boolean; theme: MemolyTheme }) {
   return <div className="ml-settings-list ml-sheet-panel--list">
     <SettingsRow icon="star" onClick={onAppearance} title="Оформление" subtitle={theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
     <SettingsRow icon="info" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
+    <SettingsRow icon="family" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
+    {canManageFamily ? <SettingsRow icon="edit" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
     <SettingsRow icon="gear" onClick={onAbout} title="О memoLy" subtitle="Информация о приложении" />
   </div>
 }
 
-function SettingsRow({ icon, onClick, subtitle, title }: { icon: 'gear' | 'info' | 'star'; onClick: () => void; subtitle: string; title: string }) {
+function SettingsRow({ icon, onClick, subtitle, title }: { icon: 'gear' | 'info' | 'star' | 'family' | 'edit'; onClick: () => void; subtitle: string; title: string }) {
   return <button className="ml-sheet-row" onClick={onClick} type="button"><span className="ml-sheet-row-icon"><WebpIcon decorative name={icon} size={22} /></span><span className="ml-sheet-row-copy"><strong>{title}</strong><small>{subtitle}</small></span><span className="ml-sheet-row-chevron"><WebpIcon decorative name="chevron" size={20} /></span></button>
 }
 
