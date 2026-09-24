@@ -19,7 +19,7 @@ import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './
 import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
 import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryLike } from './queries'
-import { shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
+import { refreshFromTop, shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
@@ -75,8 +75,13 @@ export function FeedPage({
   const [composer, setComposer] = useState<ComposerMode | null>(null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const [newAvailable, setNewAvailable] = useState(false)
+  const feedScope = useMemo(() => ({ familyId, filter }), [familyId, filter])
+  const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
+  const [refreshErrorFor, setRefreshErrorFor] = useState<typeof feedScope | null>(null)
+  const newAvailable = newAvailableFor === feedScope
+  const refreshError = refreshErrorFor === feedScope
   const knownFirstId = useRef<string | null>(null)
+  const currentScope = useRef(feedScope)
   const items = useMemo(() => {
     const unique = new Map<string, MemoryDto>()
     for (const page of feed.data?.pages ?? []) {
@@ -93,6 +98,11 @@ export function FeedPage({
   }, [deleteTarget, deleteTargetIndex, items])
 
   useEffect(() => {
+    currentScope.current = feedScope
+    knownFirstId.current = null
+  }, [feedScope])
+
+  useEffect(() => {
     if (!knownFirstId.current && items[0]) knownFirstId.current = items[0].id
   }, [items])
 
@@ -107,19 +117,21 @@ export function FeedPage({
 
   useEffect(() => {
     let checking = false
+    let disposed = false
     const checkForNew = async () => {
       if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
         const latest = await loadFeed(transport, familyId, filter, null)
+        if (disposed) return
         const latestFirstId = latest.items[0]?.id ?? null
         if (shouldRefreshInitialEmptyFeed({ knownFirstId: knownFirstId.current, latestFirstId })) {
-          await refreshFromTop(refetch, knownFirstId, setNewAvailable)
+          await refreshFromTop(refetch, knownFirstId, () => !disposed && currentScope.current === feedScope, () => setNewAvailableFor(null))
         } else if (latestFirstId && latestFirstId !== knownFirstId.current) {
-          setNewAvailable(true)
+          setNewAvailableFor(feedScope)
         }
       } catch (error) {
-        if (error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLost()
+        if (!disposed && error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLost()
       } finally {
         checking = false
       }
@@ -127,8 +139,8 @@ export function FeedPage({
     const onVisibility = () => { if (!document.hidden) void checkForNew() }
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [familyId, filter, onAccessLost, refetch, transport])
+    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [familyId, feedScope, filter, onAccessLost, refetch, transport])
 
   useEffect(() => {
     const target = sentinel.current
@@ -185,10 +197,10 @@ export function FeedPage({
     <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
-      {newAvailable ? <Button className="sticky top-3 z-20 self-start shadow-[var(--shadow-card)]" onClick={() => void refreshFromTop(feed.refetch, knownFirstId, setNewAvailable)} type="button">Показать новые</Button> : null}
+      {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState mode={role} /> : null}
+      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? <EmptyState filtered={filter !== 'all'} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
       {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
@@ -198,6 +210,9 @@ export function FeedPage({
           isDeleteSource={deleteTarget?.id === memory.id}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
+          childName={memory.childId === childId ? childName : undefined}
+          childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
+          childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
           body={memory.body}
           kind={memory.kind}
           liked={memory.likes.likedByMe}
@@ -211,7 +226,7 @@ export function FeedPage({
       }} /> : null}
       <div aria-label="Загрузить ещё" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
-      {feed.isFetchNextPageError && items.length > 0 ? <InlineError onRetry={() => void feed.fetchNextPage()} /> : null}
+      {feed.isFetchNextPageError && items.length > 0 ? <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
@@ -260,16 +275,6 @@ export function FeedPage({
     />
     </MediaPlaybackCoordinator>
   )
-}
-
-async function refreshFromTop(
-  refetch: () => Promise<{ data?: { pages: Array<{ items: MemoryDto[] }> } }>,
-  knownFirstId: React.MutableRefObject<string | null>,
-  setNewAvailable: (available: boolean) => void,
-) {
-  const result = await refetch()
-  knownFirstId.current = result.data?.pages[0]?.items[0]?.id ?? knownFirstId.current
-  setNewAvailable(false)
 }
 
 function Attachment({ attachment, hostBridge, memory, photoAlbum = [], photoIndex = 0, transport }: {
@@ -510,7 +515,7 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   const url = usePrivateObjectUrl(path, transport)
   const viewerSession = useRef<AbortController | null>(null)
   useEffect(() => () => { viewerSession.current?.abort() }, [])
-  if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) }} />
+  if (!url) return <div aria-label="Загрузка фотографии" className="aspect-video w-full bg-muted" />
   return <button aria-label="Открыть фото" className="ml-media-button block w-full" onClick={(event) => {
     viewerSession.current?.abort()
     const session = new AbortController()
@@ -526,9 +531,7 @@ export function PhotoImage({ alt, height, src, width }: {
   src: string
   width: number | null
 }) {
-  const aspectRatio = mediaAspectRatio(width, height)
-  if (!aspectRatio) return <img alt={alt} className="block w-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} />
-  return <span className="relative block w-full overflow-hidden" style={{ aspectRatio }}><img alt={alt} className="absolute inset-0 size-full object-contain" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
+  return <span className="relative block aspect-video w-full overflow-hidden"><img alt={alt} className="absolute inset-0 size-full object-cover" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
@@ -699,8 +702,20 @@ async function showPhoto(
 }
 
 function dateTimeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short', timeZone: timezone }).format(new Date(value)) }
-function dayLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone }).format(new Date(value)) }
-function timeLabel(value: string, timezone: string) { return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value)) }
+function dayLabel(value: string, timezone: string) {
+  const formatter = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone })
+  const calendar = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: timezone })
+  const calendarDay = (date: Date) => {
+    const parts = Object.fromEntries(calendar.formatToParts(date).map(({ type, value: part }) => [type, Number(part)]))
+    return Date.UTC(parts.year!, parts.month! - 1, parts.day!) / 86_400_000
+  }
+  const occurred = new Date(value)
+  const daysAgo = calendarDay(new Date()) - calendarDay(occurred)
+  if (daysAgo === 0) return 'Сегодня'
+  if (daysAgo === 1) return 'Вчера'
+  return formatter.format(occurred)
+}
+function timeLabel(value: string, timezone: string) { return `${dayLabel(value, timezone)}, ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value))}` }
 function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '•' }
 function seconds(value: number) { return Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00' }
 function roundedSeconds(value: number) { return Number.isFinite(value) ? seconds(Math.round(value)) : '0:00' }

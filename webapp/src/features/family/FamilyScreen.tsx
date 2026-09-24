@@ -144,7 +144,7 @@ export function FamilyScreen({
           onRefreshUsage={refreshUsage}
           onRemoveMember={async (member) => run(() => leaveFamily(
             transport, familyResponse.family.id, member.userId, member.version,
-          ))}
+          ), true)}
           onRevokeInvite={async (invite) => run(() => revokeInvite(
             transport, familyResponse.family.id, invite.id,
           ))}
@@ -158,7 +158,7 @@ export function FamilyScreen({
           }}
           onUpdateMember={async (member, input) => run(() => updateFamilyMember(
             transport, familyResponse.family.id, member.userId, { ...input, expectedVersion: member.version },
-          ))}
+          ), true)}
           usage={usage}
           usageFailed={usageFailed}
       />
