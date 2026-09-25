@@ -48,6 +48,7 @@ type Props = {
   onFamily: () => void
   onFilterChange: (filter: FeedFilter) => void
   onAccessLost: () => void
+  openAddInitially?: boolean
   role: 'full' | 'viewer'
   transport: AuthenticatedTransport
 }
@@ -55,6 +56,7 @@ type Props = {
 export function FeedPage({
   childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onAccessLost, onFilterChange, role, transport,
+  openAddInitially = false,
 }: Props) {
   const queryClient = useQueryClient()
   const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
@@ -71,7 +73,7 @@ export function FeedPage({
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
   const detailReturnFocusRef = useRef<HTMLElement | null>(null)
-  const [addSheetOpen, setAddSheetOpen] = useState(false)
+  const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
   const [composer, setComposer] = useState<ComposerMode | null>(null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const addButtonRef = useRef<HTMLButtonElement | null>(null)

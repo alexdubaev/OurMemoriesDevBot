@@ -267,6 +267,9 @@
 [data-memoly-feed] .feed-new-available { position: sticky; top: 12px; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding: 8px 10px; border-radius: 16px; background: var(--memoly-card-hi); box-shadow: var(--memoly-shadow); }
 [data-memoly-feed] .feed-new-available > button { min-height: 44px; padding: 0 12px; border-radius: 14px; background: var(--memoly-accent-soft); color: var(--memoly-ink); }
 [data-memoly-feed] .feed-error-state { margin: 10px 0 16px; }
+@media (min-width: 391px) and (max-width: 440px) {
+  [data-memoly-feed] .filter.ds-chip { gap: 3px; padding-inline: 4px; }
+}
 @media (max-width: 390px) {
   [data-memoly-feed] .filters-wrap { padding: 4px; }
   [data-memoly-feed] .filters { gap: 3px; }
