@@ -1,0 +1,212 @@
+{
+  "mint/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef",
+    ".line-clamp-2|#6f7f78|#edf1ea",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#6f7f78|#edf1ea",
+    ".mt-2|#6f7f78|#f5f5ef",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#6f7f78|#f5f5ef",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7f9f90|#f5f5ef",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef"
+  ],
+  "mint/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef",
+    ".line-clamp-2|#6f7f78|#edf1ea",
+    ".text-\\[15px\\]\\/5|#f5f5ef|#7f9f90",
+    ".text-base\\/6|#6f7f78|#edf1ea",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7f9f90|#f5f5ef",
+    ".text-xs\\/\\[18px\\]|#6f7f78|#edf1ea",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef"
+  ],
+  "mint/empty-viewer": [
+    ".line-clamp-2|#6f7f78|#edf1ea",
+    ".text-base\\/6|#6f7f78|#edf1ea",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7f9f90|#f5f5ef",
+    ".text-xs\\/\\[18px\\]|#6f7f78|#edf1ea",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef"
+  ],
+  "mint/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef",
+    ".line-clamp-2|#6f7f78|#edf1ea",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#6f7f78|#edf1ea",
+    ".mt-2|#6f7f78|#f5f5ef",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#6f7f78|#f5f5ef",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7f9f90|#f5f5ef",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6f7f78|#f5f5ef"
+  ],
+  "rose/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#857073|#f8f3ef",
+    ".line-clamp-2|#876f72|#f4efec",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#876f72|#f4efec",
+    ".mt-2|#876f72|#f8f3ef",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#876f72|#f8f3ef",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#b37981|#f8f3ef",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#857073|#f8f3ef"
+  ],
+  "rose/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#857073|#f8f3ef",
+    ".line-clamp-2|#876f72|#f4efec",
+    ".text-\\[15px\\]\\/5|#f8f3ef|#b67681",
+    ".text-base\\/6|#876f72|#f4efec",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#b37981|#f8f3ef",
+    ".text-xs\\/\\[18px\\]|#876f72|#f4efec",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#857073|#f8f3ef"
+  ],
+  "rose/empty-viewer": [
+    ".line-clamp-2|#876f72|#f4efec",
+    ".text-base\\/6|#876f72|#f4efec",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#b37981|#f8f3ef",
+    ".text-xs\\/\\[18px\\]|#876f72|#f4efec",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#857073|#f8f3ef",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#876f72|#f8f3ef"
+  ],
+  "rose/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#837273|#f8f3ef",
+    ".line-clamp-2|#876f72|#f4efec",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#876f72|#f4efec",
+    ".mt-2|#876f72|#f8f3ef",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#876f72|#f8f3ef",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#af7c83|#f8f3ef",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#837273|#f8f3ef"
+  ],
+  "sky/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6b7f87|#f6f8f7",
+    ".line-clamp-2|#6b7f89|#eef4f7",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#6b7f89|#eef4f7",
+    ".mt-2|#6b7f89|#f6f8f7",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#6b7f89|#f6f8f7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7092a3|#f6f8f7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6b7f87|#f6f8f7"
+  ],
+  "sky/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6b7f87|#f6f8f7",
+    ".line-clamp-2|#6b7f89|#eef4f7",
+    ".text-\\[15px\\]\\/5|#f6f8f7|#7091a4",
+    ".text-base\\/6|#6b7f89|#eef4f7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7092a3|#f6f8f7",
+    ".text-xs\\/\\[18px\\]|#6b7f89|#eef4f7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6b7f87|#f6f8f7"
+  ],
+  "sky/empty-viewer": [
+    ".line-clamp-2|#6b7f89|#eef4f7",
+    ".text-base\\/6|#6b7f89|#eef4f7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7293a2|#f6f8f7",
+    ".text-xs\\/\\[18px\\]|#6b7f89|#eef4f7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6c7f86|#f6f8f7",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6b7f89|#f6f8f7"
+  ],
+  "sky/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6c7f84|#f6f8f7",
+    ".line-clamp-2|#6b7f89|#eef4f7",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#6b7f89|#eef4f7",
+    ".mt-2|#6b7f89|#f6f8f7",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#6b7f89|#f6f8f7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#73959f|#f6f8f7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#6c7f84|#f6f8f7"
+  ],
+  "lavender/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7a7587|#f8f5f3",
+    ".line-clamp-2|#7b7488|#f2f0f5",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#7b7488|#f2f0f5",
+    ".mt-2|#7b7488|#f8f5f3",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#7b7488|#f8f5f3",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#8d85a5|#f8f5f3",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7a7587|#f8f5f3"
+  ],
+  "lavender/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7a7587|#f8f5f3",
+    ".line-clamp-2|#7b7488|#f2f0f5",
+    ".text-\\[15px\\]\\/5|#f8f5f3|#8e83a6",
+    ".text-base\\/6|#7b7488|#f2f0f5",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#8d85a5|#f8f5f3",
+    ".text-xs\\/\\[18px\\]|#7b7488|#f2f0f5",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7a7587|#f8f5f3"
+  ],
+  "lavender/empty-viewer": [
+    ".line-clamp-2|#7b7488|#f2f0f5",
+    ".text-base\\/6|#7b7488|#f2f0f5",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#8c87a3|#f8f5f3",
+    ".text-xs\\/\\[18px\\]|#7b7488|#f2f0f5",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#797685|#f8f5f3",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#7b7488|#f8f5f3"
+  ],
+  "lavender/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#797685|#f8f5f3",
+    ".line-clamp-2|#7b7488|#f2f0f5",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#7b7488|#f2f0f5",
+    ".mt-2|#7b7488|#f8f5f3",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#7b7488|#f8f5f3",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#8c87a3|#f8f5f3",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#797685|#f8f5f3"
+  ],
+  "apricot/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#88776b|#faf6f0",
+    ".line-clamp-2|#8a766a|#f6f0e8",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#8a766a|#f6f0e8",
+    ".mt-2|#8a766a|#faf6f0",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#8a766a|#faf6f0",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#bd886d|#faf6f0",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#88776b|#faf6f0"
+  ],
+  "apricot/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#88776b|#faf6f0",
+    ".line-clamp-2|#8a766a|#f6f0e8",
+    ".text-\\[15px\\]\\/5|#faf6f0|#c1876a",
+    ".text-base\\/6|#8a766a|#f6f0e8",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#bd886d|#faf6f0",
+    ".text-xs\\/\\[18px\\]|#8a766a|#f6f0e8",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#88776b|#faf6f0"
+  ],
+  "apricot/empty-viewer": [
+    ".line-clamp-2|#8a766a|#f6f0e8",
+    ".text-base\\/6|#8a766a|#f6f0e8",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#bd886d|#faf6f0",
+    ".text-xs\\/\\[18px\\]|#8a766a|#f6f0e8",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#88776b|#faf6f0",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#8a766a|#faf6f0"
+  ],
+  "apricot/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#83786e|#faf6f0",
+    ".line-clamp-2|#8a766a|#f6f0e8",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#8a766a|#f6f0e8",
+    ".mt-2|#8a766a|#faf6f0",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#8a766a|#faf6f0",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#b08d74|#faf6f0",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#83786e|#faf6f0"
+  ],
+  "sand/populated": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#767b6b|#f8f6f0",
+    ".line-clamp-2|#777a69|#f1efe7",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#777a69|#f1efe7",
+    ".mt-2|#777a69|#f8f6f0",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#777a69|#f8f6f0",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#849275|#f8f6f0",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#767b6b|#f8f6f0"
+  ],
+  "sand/empty-full": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#757b6d|#f8f6f0",
+    ".line-clamp-2|#777a69|#f1efe7",
+    ".text-\\[15px\\]\\/5|#f8f6f0|#849275",
+    ".text-base\\/6|#777a69|#f1efe7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#839379|#f8f6f0",
+    ".text-xs\\/\\[18px\\]|#777a69|#f1efe7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#757b6d|#f8f6f0"
+  ],
+  "sand/empty-viewer": [
+    ".line-clamp-2|#777a69|#f1efe7",
+    ".text-base\\/6|#777a69|#f1efe7",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#859071|#f8f6f0",
+    ".text-xs\\/\\[18px\\]|#777a69|#f1efe7",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#777a6a|#f8f6f0",
+    "div[aria-label=\"Режим просмотра\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#777a69|#f8f6f0"
+  ],
+  "sand/add-sheet": [
+    ".group > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#757b6d|#f8f6f0",
+    ".line-clamp-2|#777a69|#f1efe7",
+    ".ml-child-copy > .text-xs\\/\\[18px\\].font-normal[data-variant=\"memoryMeta\"]|#777a69|#f1efe7",
+    ".mt-2|#777a69|#f8f6f0",
+    ".mt-3.text-xs\\/\\[18px\\][data-variant=\"memoryMeta\"]|#777a69|#f8f6f0",
+    ".text-primary > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#839379|#f8f6f0",
+    "button[data-nav-position=\"family\"] > .text-\\[11px\\]\\/4.font-medium[data-variant=\"memoryNav\"]|#757b6d|#f8f6f0"
+  ]
+}

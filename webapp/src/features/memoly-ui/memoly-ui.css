@@ -54,8 +54,8 @@
 .ml-child-copy > p { margin: 4px 0 0; color: var(--ml-muted); font-size: 15px; line-height: 22px; }
 .ml-archive-pill { display: inline-flex; align-items: center; min-height: 32px; gap: 7px; margin-top: 7px; padding: 5px 11px; border-radius: 999px; color: var(--ml-muted); background: var(--ml-soft); font-size: 12px; line-height: 18px; }
 .ml-filters { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 14px; scrollbar-width: none; }
-.ml-filter { display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 8px 13px; border: 1px solid var(--ml-line); border-radius: 999px; color: var(--ml-muted); background: var(--ml-surface); white-space: nowrap; }
-.ml-filter.active { border-color: var(--ml-accent); color: #fff; background: var(--ml-accent); }
+.ml-filter { display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 8px 13px; border: 1px solid var(--ml-line); border-radius: 999px; color: #223f59; background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)); white-space: nowrap; }
+.ml-filter.active { border-color: var(--ml-accent); color: #24455b; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-accent-soft) 72%, white 28%), color-mix(in srgb, var(--theme-accent-hi) 62%, white 38%)); box-shadow: inset 5px 5px 12px color-mix(in srgb, var(--theme-accent-deep) 18%, rgb(86 106 92 / 18%) 82%), inset -5px -5px 12px rgb(255 255 255 / 84%), 2px 2px 6px rgb(107 131 118 / 8%), -1px -1px 2px rgb(255 255 255 / 45%); }
 .ml-content { padding: 0; }
 .ml-family-content { padding: 0; }
 .ml-date { margin: 8px 4px 12px; color: var(--ml-muted); font-size: 15px; line-height: 22px; font-weight: 600; }

@@ -50,6 +50,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
   return (
     <div data-memoly-feed="true" style={style}>
       <main className="app" data-slot="feed-scroll">
+        <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
         <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
         <div aria-label="Фильтры ленты" className="filters-wrap surface-inset" data-slot="memoly-filter-rail" role="group">
           <div className="filters">

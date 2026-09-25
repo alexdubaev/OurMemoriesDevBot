@@ -4,15 +4,15 @@ import { resolve } from 'node:path'
 
 const webappRoot = resolve(import.meta.dir, '..')
 
-test('uses one cover-safe viewport that prevents page zoom in the Mini App shell', async () => {
+test('uses one cover-safe viewport that permits page zoom in the Mini App shell', async () => {
   const html = await readFile(resolve(webappRoot, 'index.html'), 'utf8')
   const viewports = html.match(/<meta\s+name=["']viewport["'][^>]*>/gi) ?? []
 
   expect(viewports).toHaveLength(1)
   expect(viewports[0]).toContain('width=device-width')
   expect(viewports[0]).toContain('initial-scale=1')
-  expect(viewports[0]).toContain('maximum-scale=1')
-  expect(viewports[0]).toContain('user-scalable=no')
+  expect(viewports[0]).not.toMatch(/maximum-scale\s*=\s*1(?:\D|$)/i)
+  expect(viewports[0]).not.toMatch(/user-scalable\s*=\s*no/i)
   expect(viewports[0]).toContain('viewport-fit=cover')
 })
 
