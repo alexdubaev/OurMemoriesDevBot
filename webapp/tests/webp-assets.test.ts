@@ -27,6 +27,7 @@ const requiredNames = [
   'plus',
   'retry',
   'star',
+  'trash',
   'video',
   'voice',
   'warning',

@@ -400,7 +400,55 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await expect(owner.page.getByRole('heading', { name: 'Дедушка Петя' })).toBeVisible()
   await owner.page.getByRole('button', { name: 'Удалить из семьи' }).click()
   await expect(owner.page.getByRole('dialog', { name: 'Удалить участника из семьи?' })).toBeVisible()
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  await owner.page.evaluate(() => document.fonts.ready)
+  const removeRect = await owner.page.locator('.member-remove-modal').evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { top: rect.top, bottom: rect.bottom, height: rect.height, left: rect.left, width: rect.width }
+  })
+  expect(Math.abs((removeRect.top + removeRect.bottom) / 2 - 422)).toBeLessThanOrEqual(3)
+  expect(removeRect.left).toBeGreaterThanOrEqual(13)
+  expect(removeRect.left).toBeLessThanOrEqual(15)
+  expect(removeRect.width).toBeGreaterThanOrEqual(360)
+  expect(removeRect.width).toBeLessThanOrEqual(364)
+  const removeIcon = owner.page.locator('.member-remove-icon img')
+  await expect(removeIcon).toHaveAttribute('src', '/assets/icons/trash-active@2x.webp')
+  await expect(removeIcon).toHaveAttribute('srcset', '/assets/icons/trash-active@2x.webp 2x, /assets/icons/trash-active@3x.webp 3x')
+  await expect(removeIcon).toHaveJSProperty('complete', true)
+  expect(await removeIcon.evaluate((icon: HTMLImageElement) => icon.naturalWidth)).toBeGreaterThan(0)
+  for (const width of [320, 390, 430, 480]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    const layout = await owner.page.locator('.member-remove-modal').evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, centerY: (rect.top + rect.bottom) / 2, viewportWidth: window.innerWidth }
+    })
+    expect(layout.left).toBeGreaterThanOrEqual(0)
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth)
+    expect(Math.abs(layout.centerY - 422)).toBeLessThanOrEqual(3)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/member-remove-${width}.png`), animations: 'disabled' })
+  }
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    await owner.page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), theme)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/member-remove-${theme}-390.png`), animations: 'disabled' })
+  }
+  await owner.page.locator('.member-profile-hero h2').evaluate((heading) => { heading.textContent = 'Длинное имя участника семьи для проверки переноса и доступности на узком экране' })
+  const textScale = await owner.page.addStyleTag({ content: `.member-remove-modal h2 { font-size: 40px !important; } .member-remove-modal p { font-size: 26px !important; } .member-remove-actions button { font-size: 24px !important; }` })
+  const scaledModal = await owner.page.locator('.member-remove-modal').evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, viewportWidth: innerWidth, scrollWidth: document.documentElement.scrollWidth }
+  })
+  expect(scaledModal.top).toBeGreaterThanOrEqual(0)
+  expect(scaledModal.bottom).toBeLessThanOrEqual(844)
+  expect(scaledModal.left).toBeGreaterThanOrEqual(0)
+  expect(scaledModal.right).toBeLessThanOrEqual(scaledModal.viewportWidth)
+  expect(scaledModal.scrollWidth).toBeLessThanOrEqual(scaledModal.viewportWidth)
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/member-remove-long-name-text-200-390.png'), animations: 'disabled' })
+  await textScale.evaluate((element) => element.remove())
   await owner.page.getByRole('dialog').getByRole('button', { name: 'Отмена' }).click()
+  await expect(owner.page.getByRole('dialog')).toHaveCount(0)
+  await owner.page.getByRole('button', { name: 'Удалить из семьи' }).click()
+  await owner.page.keyboard.press('Escape')
   await expect(owner.page.getByRole('dialog')).toHaveCount(0)
   await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
   await expect(owner.page.getByRole('button', { name: 'Владелец' })).toHaveCount(0)
