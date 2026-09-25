@@ -401,14 +401,14 @@ test.describe.serial('T07 live feed', () => {
     })
 
     await openFeed(page)
-    await page.getByLabel('Загрузить ещё').scrollIntoViewIfNeeded()
+    await page.getByTestId('feed-load-more-sentinel').scrollIntoViewIfNeeded()
     await expect.poll(() => failedOnce).toBe(true)
     await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
     await expect(page.getByRole('alert').filter({ hasText: 'Не удалось загрузить ещё' })).toBeVisible()
     blockCursor = false
     await page.getByRole('button', { name: 'Повторить' }).click()
     await expect(page.getByText('Заметка E2E 20')).toBeVisible()
-    await page.getByLabel('Загрузить ещё').scrollIntoViewIfNeeded()
+    await page.getByTestId('feed-load-more-sentinel').scrollIntoViewIfNeeded()
     await expect(page.getByText('Заметка E2E 42')).toBeVisible()
 
     const cards = page.locator('[data-memory-id]')

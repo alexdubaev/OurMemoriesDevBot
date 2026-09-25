@@ -63,6 +63,7 @@ export function FeedShell({
         className="ml-shell mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-[calc(var(--layout-gutter)+var(--host-inset-left))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))] pb-[calc(var(--layout-bottom-nav)+var(--host-inset-bottom)+var(--layout-gutter))]"
         data-slot="feed-scroll"
       >
+        <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
         <header>
           <div className="ml-topbar flex min-h-11 min-w-0 items-center justify-between gap-2">
             <span aria-hidden="true" className="ml-topbar-spacer" data-slot="topbar-spacer" />
