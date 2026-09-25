@@ -114,6 +114,10 @@ test('composer has no durable storage path and renders the acceptance form', () 
   }))
   expect(markup).toContain('Загрузить видео')
   expect(markup).toContain('Добавьте подпись')
+  expect(markup).toContain('data-video-state="idle"')
+  expect(markup).toContain('memoly-video-v2-form-card')
+  expect(markup).toContain('MP4, MOV, MKV или WebM · до 250 МБ')
+  expect(markup).toContain('Подпись')
   expect(markup).not.toContain('localStorage')
   expect(markup).not.toContain('sessionStorage')
 })
@@ -145,7 +149,7 @@ test('interactive family today reserves at now instead of future noon UTC', asyn
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     expect(date.value).toBe('2026-09-21')
     fileInput.files = [file('today.mp4', 24)]
     await act(async () => invoke(fileInput, 'onChange'))
@@ -187,7 +191,7 @@ test('interactive future date is rejected before reserve', async () => {
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     fileInput.files = [file('future-date.mp4', 24)]
     await act(async () => invoke(fileInput, 'onChange'))
     caption.value = 'Будущая дата'
@@ -248,7 +252,7 @@ test('interactive processing retry reuses the uploaded session and disables the 
     })
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     const selected = file('retry.mp4', 24)
     fileInput.files = [selected]
     await act(async () => invoke(fileInput, 'onChange'))
@@ -275,6 +279,9 @@ test('interactive processing retry reuses the uploaded session and disables the 
     expect(requests.filter(({ path }) => path.endsWith('/reserve'))).toHaveLength(1)
     expect(xhrs).toHaveLength(1)
     expect(requests.filter(({ path }) => path.includes('/finalize')).map(({ body }) => body.uploadToken)).toEqual(['token-1', 'token-1'])
+    expect(textOf(browser.container)).toContain('Сохранено в семейную ленту')
+    expect(successCount).toBe(0)
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Перейти в ленту'), 'onClick'))
     expect(successCount).toBe(1)
   } finally {
     await act(async () => root.unmount())
@@ -308,7 +315,7 @@ test('interactive reserve failure keeps the selected file and form values for re
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     fileInput.files = [file('reserve-retry.mp4', 24)]
     await act(async () => invoke(fileInput, 'onChange'))
     caption.value = 'Сохранить после сети'
@@ -355,7 +362,7 @@ test('interactive reserve HTTP errors show only the safe application code', asyn
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     fileInput.files = [file('reserve-not-found.mp4', 24)]
     await act(async () => invoke(fileInput, 'onChange'))
     caption.value = 'Безопасный код'
@@ -398,7 +405,7 @@ test('provider-side XHR abort is an upload error and leaves the composer retryab
       onSuccess: () => undefined, transport,
     })))
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     fileInput.files = [file('provider-abort.mp4', 24)]
     await act(async () => invoke(fileInput, 'onChange'))
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
@@ -450,7 +457,7 @@ test('interactive expired finalize clears stale capability and retries with the 
     const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
-    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Сохранить')
+    const save = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && ['Сохранить', 'Повторить', 'Повторить попытку'].includes(textOf(node)))
     caption.value = 'Сохранить дату'
     await act(async () => invoke(caption, 'onChange'))
     date.value = '2026-09-19'
@@ -476,6 +483,9 @@ test('interactive expired finalize clears stale capability and retries with the 
     expect(reserveCount).toBe(2)
     expect(xhrs).toHaveLength(2)
     expect(finalizeCount).toBe(2)
+    expect(textOf(browser.container)).toContain('Сохранено в семейную ленту')
+    expect(successCount).toBe(0)
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Перейти в ленту'), 'onClick'))
     expect(successCount).toBe(1)
     const reserveBodies = requests.filter(({ path }) => path.endsWith('/reserve')).map(({ body }) => body)
     expect(reserveBodies.map((body) => body.body)).toEqual(['Сохранить дату', 'Сохранить дату'])
@@ -564,7 +574,7 @@ function createInteractiveDocument(): InteractiveDocument {
   const make = (name: string): InteractiveNode => {
     const node: InteractiveNode = {
       nodeType: 1, nodeName: name.toUpperCase(), tagName: name.toUpperCase(), ownerDocument: document,
-      parentNode: null, childNodes: [], style: {}, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, files: [], textContent: '',
+      parentNode: null, childNodes: [], style: { setProperty() {} } as unknown as Record<string, string>, attributes: {}, listeners: new Map(), value: '', type: '', disabled: false, files: [], textContent: '',
       appendChild(child) { child.parentNode = node; node.childNodes.push(child); return child },
       insertBefore(child, before) { child.parentNode = node; const index = before ? node.childNodes.indexOf(before) : -1; if (index < 0) node.childNodes.push(child); else node.childNodes.splice(index, 0, child); return child },
       removeChild(child) { const index = node.childNodes.indexOf(child); if (index >= 0) node.childNodes.splice(index, 1); child.parentNode = null; return child },

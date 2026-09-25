@@ -506,6 +506,7 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
     expect(markup).toContain('object-contain')
     expect(markup).toContain('Смотреть видео')
+    expect(markup).toContain('data-video-viewer-state="ready"')
     expect(markup).toContain('Открыть в MAX')
     expect(markup).not.toContain('Открыть видео в memoLy')
     expect(markup).not.toContain('aspect-video')
@@ -572,6 +573,7 @@ test('a MAX video without an authenticated source keeps a safe video fallback', 
   }))
 
   expect(markup).toContain('Видео')
+  expect(markup).toContain('Загружаем видео…')
   expect(markup).toContain('Открыть в MAX')
   expect(markup).toContain('aspect-ratio:16 / 9')
 })
@@ -582,11 +584,13 @@ test('a failed MAX source shows a load error while retaining the safe fallback a
     height: 720,
     onOpen: () => undefined,
     sourceStatus: 'error',
+    onRetry: () => undefined,
     src: null,
     width: 1_280,
   }))
 
   expect(markup).toContain('Не удалось загрузить видео')
+  expect(markup).toContain('Повторить')
   expect(markup).toContain('Открыть в MAX')
   expect(markup).toContain('aspect-ratio:1280 / 720')
 })
