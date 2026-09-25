@@ -164,7 +164,7 @@ test('memoLy shell keeps horizontal host insets at the narrow breakpoint and con
   expect(css).toContain('padding: max(12px, var(--host-inset-top)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);')
   expect(sharedTokens).toContain('padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left))')
   expect(sharedTokens).toContain('padding-bottom: var(--host-inset-bottom) !important')
-  expect(sharedTokens).toContain('width: 100% !important')
+  expect(sharedTokens).toContain('width: min(calc(100% - 20px - var(--host-inset-left) - var(--host-inset-right)), 460px) !important')
   expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
   expect(sharedTokens).toContain("nav[data-bottom-navigation-appearance='memoly']")
 })

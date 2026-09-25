@@ -118,9 +118,10 @@ test('maps child, member, and invite values without inventing media or tokens', 
 })
 
 test('reserves the normalized bottom host inset for the namespaced navigation', () => {
-  const css = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/memoly-ui.css'), 'utf8')
+  const css = readFileSync(resolve(import.meta.dir, '../src/styles/tokens.css'), 'utf8')
 
-  expect(css).toContain('padding-bottom: var(--host-inset-bottom, 0px)')
+  expect(css).toContain('min-height: calc(var(--layout-bottom-nav) + var(--host-inset-bottom))')
+  expect(css).toContain('padding-bottom: var(--host-inset-bottom)')
 })
 
 test('family shell preserves host edge insets without restoring the legacy shell wrapper', () => {

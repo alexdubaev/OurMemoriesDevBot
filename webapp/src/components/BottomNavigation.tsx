@@ -53,7 +53,8 @@ export function BottomNavigation({
               appearance === 'memoly' && 'memoly-nav-add',
             )}
             data-nav-position="add"
-            onClick={onAdd ?? noop}
+            disabled={!onAdd}
+            onClick={onAdd}
             ref={addButtonRef}
             type="button"
           >
@@ -61,7 +62,7 @@ export function BottomNavigation({
               'flex size-12 items-center justify-center rounded-full bg-[var(--memory-accent-soft)] transition-transform duration-[var(--duration-standard)] group-active:scale-95',
               appearance === 'memoly' && 'memoly-nav-add-circle',
             )}>
-              <WebpIcon decorative name="plus" size={24} state="active" />
+              <WebpIcon decorative monochrome name="plus" size={29} state="active" />
             </span>
             <Typography variant="memoryNav">Добавить</Typography>
           </button>
@@ -76,9 +77,7 @@ export function BottomNavigation({
             data-nav-viewer="true"
             role="img"
           >
-            <span className="flex size-12 items-center justify-center rounded-full bg-muted">
-              <WebpIcon decorative name="lock" size={20} />
-            </span>
+            <WebpIcon decorative monochrome name="lock" size={23} />
             <Typography variant="memoryNav">Просмотр</Typography>
           </div>
         )}
@@ -92,7 +91,6 @@ export function BottomNavigation({
     </nav>
   )
 }
-
 function NavButton({
   active,
   icon,
@@ -115,10 +113,8 @@ function NavButton({
       onClick={onClick}
       type="button"
     >
-      <WebpIcon decorative name={icon} size={22} state={active ? 'active' : 'default'} />
+      <WebpIcon decorative monochrome name={icon} size={23} state={active ? 'active' : 'default'} />
       <Typography variant="memoryNav">{label}</Typography>
     </button>
   )
 }
-
-function noop() {}

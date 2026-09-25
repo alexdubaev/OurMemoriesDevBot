@@ -19,6 +19,7 @@ export function FamilyScreen({
   transport,
   hostBridge,
   currentUserId,
+  onAdd,
   onEditChild,
   onChangeChildPhoto,
   onOpenChild,
@@ -34,6 +35,7 @@ export function FamilyScreen({
   transport: AuthenticatedTransport
   hostBridge: Pick<HostBridge, 'onBack'>
   currentUserId: string
+  onAdd: () => void
   onEditChild: () => void
   onChangeChildPhoto: () => void
   onOpenChild: () => void
@@ -164,7 +166,7 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onFamily={onCloseChild} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={onCloseChild} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }

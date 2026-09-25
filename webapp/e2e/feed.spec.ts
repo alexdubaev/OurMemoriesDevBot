@@ -83,6 +83,7 @@ test.describe.serial('T07 live feed', () => {
     test(`feed is usable at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })
       await openFeed(page)
+      await page.evaluate(() => document.fonts.ready)
       await expect(page.getByTestId('bottom-navigation')).toBeVisible()
       const metrics = await page.evaluate(() => {
         const navigation = document.querySelector('[data-testid="bottom-navigation"]')
@@ -98,6 +99,7 @@ test.describe.serial('T07 live feed', () => {
           scrollWidth: document.documentElement.scrollWidth,
           navBottom: navRect.bottom,
           navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
+          navLeft: navRect.left,
           navWidth: navRect.width,
           scrollPaddingBottom: Number.parseFloat(scrollStyle.paddingBottom),
           viewportHeight: window.innerHeight,
@@ -119,13 +121,14 @@ test.describe.serial('T07 live feed', () => {
       expect(metrics!.clientWidth).toBe(width)
       expect(metrics!.scrollWidth).toBeLessThanOrEqual(width)
       expect(metrics!.headerTop).toBeGreaterThanOrEqual(24)
-      expect(metrics!.navWidth).toBe(width)
+      expect(metrics!.navWidth).toBe(width - 20)
+      expect(metrics!.navLeft).toBe(10)
       expect(metrics!.navBottom).toBe(metrics!.viewportHeight)
       expect(metrics!.navPaddingBottom).toBe(18)
       expect(metrics!.scrollPaddingBottom).toBeGreaterThan(16)
       expect(filterMetrics).toHaveLength(5)
       expect(filterMetrics.map((filter) => filter.text)).toEqual(['Все', 'Фото', 'Видео', 'Голос', 'Заметки'])
-      expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds)).toBe(true)
+      expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds), JSON.stringify(filterMetrics)).toBe(true)
       if (width === 320) {
         const rail = page.locator('[data-slot="memoly-filter-rail"]')
         const scrollable = await rail.evaluate((element) => element.scrollWidth > element.clientWidth)
@@ -148,6 +151,18 @@ test.describe.serial('T07 live feed', () => {
       await openFeed(page)
       await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
       await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
+      const navColors = await page.locator('[data-testid="bottom-navigation"]').evaluate((nav) => {
+        const item = nav.querySelector('[data-nav-position="home"]')
+        const icon = item?.querySelector('[data-slot="webp-icon"]')
+        return item && icon ? {
+          foreground: getComputedStyle(item).color,
+          icon: getComputedStyle(icon).backgroundColor,
+          mask: getComputedStyle(icon).maskImage,
+        } : null
+      })
+      expect(navColors).not.toBeNull()
+      expect(navColors!.icon).toBe(navColors!.foreground)
+      expect(navColors!.mask).toContain('home-active')
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-feed-${theme}-390.png`), animations: 'disabled' })
     })
   }

@@ -35,6 +35,26 @@ test('viewer bottom navigation keeps the center position non-interactive', () =>
   expect(markup).not.toContain('aria-label="Добавить"')
   expect(markup).toContain('data-nav-viewer="true"')
   expect(markup).toContain('Просмотр')
+  expect(markup).not.toContain('data-nav-position="add"')
+})
+
+test('memoLy bottom navigation exposes active destinations and a real Add action', () => {
+  const markup = renderToStaticMarkup(createElement(BottomNavigation, {
+    active: 'family',
+    appearance: 'memoly',
+    onAdd: noop,
+    onFamily: noop,
+    onFeed: noop,
+    role: 'full',
+  }))
+
+  expect(markup).toContain('data-nav-position="family"')
+  expect(markup).toContain('aria-current="page"')
+  expect(markup).toContain('data-nav-position="add"')
+  expect(markup).not.toContain('aria-label="Добавить" disabled')
+  expect(markup).toContain('data-bottom-navigation-appearance="memoly"')
+  expect(markup).toContain('image-set(')
+  expect(markup).toContain(' 3x)')
 })
 
 test('cross-role destinations resolve to the current role home', () => {

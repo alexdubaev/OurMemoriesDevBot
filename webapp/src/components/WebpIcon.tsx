@@ -13,6 +13,7 @@ export type WebpIconProps = Omit<
   ImgHTMLAttributes<HTMLImageElement>,
   'alt' | 'height' | 'src' | 'srcSet' | 'width'
 > & IconAccessibility & {
+  monochrome?: boolean
   name: WebpIconName
   size?: number
   state?: WebpIconState
@@ -21,6 +22,7 @@ export type WebpIconProps = Omit<
 export function WebpIcon({
   decorative = false,
   label,
+  monochrome = false,
   name,
   size = 24,
   state = 'default',
@@ -30,6 +32,33 @@ export function WebpIcon({
   const source2x = resolveWebpIconSource(name, state, 2)
   const source3x = resolveWebpIconSource(name, state, 3)
   const iconStyle = { '--webp-icon-size': `${size}px`, ...style } as CSSProperties
+  const maskImage = `image-set(url("${source2x.src}") 2x, url("${source3x.src}") 3x)`
+
+  if (monochrome) {
+    return <span
+      {...props}
+      aria-hidden={decorative ? true : undefined}
+      aria-label={decorative ? undefined : label}
+      data-slot="webp-icon"
+      role={decorative ? undefined : 'img'}
+      style={{
+        ...iconStyle,
+        display: 'inline-block',
+        flexShrink: 0,
+        width: size,
+        height: size,
+        backgroundColor: 'currentColor',
+        maskImage,
+        maskPosition: 'center',
+        maskRepeat: 'no-repeat',
+        maskSize: 'contain',
+        WebkitMaskImage: `-webkit-${maskImage}`,
+        WebkitMaskPosition: 'center',
+        WebkitMaskRepeat: 'no-repeat',
+        WebkitMaskSize: 'contain',
+      }}
+    />
+  }
 
   return (
     <img
