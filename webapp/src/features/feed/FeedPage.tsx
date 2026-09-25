@@ -410,13 +410,14 @@ function MaxVideo({ attachment, hostBridge }: {
   hostBridge: HostBridge
 }) {
   const source = useMaxVideoSource(attachment.playbackPath)
-  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} sourceStatus={source.status} src={source.url} width={attachment.width} />
+  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} onRetry={attachment.playbackPath ? source.retry : undefined} sourceStatus={source.status} src={source.url} width={attachment.width} />
 }
 
 type MaxVideoPreviewProps = {
   durationMs: number | null
   height: number | null
   onOpen: () => void
+  onRetry?: () => void
   sourceStatus?: 'loading' | 'ready' | 'error'
   src: string | null
   width: number | null
@@ -426,7 +427,7 @@ export function MaxVideoPreview(props: MaxVideoPreviewProps) {
   return <MaxVideoPreviewContent key={props.src ?? 'missing'} {...props} />
 }
 
-function MaxVideoPreviewContent({ durationMs, height, onOpen, sourceStatus, src, width }: MaxVideoPreviewProps) {
+function MaxVideoPreviewContent({ durationMs, height, onOpen, onRetry, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
@@ -435,14 +436,15 @@ function MaxVideoPreviewContent({ durationMs, height, onOpen, sourceStatus, src,
   const [intrinsicDimensions, setIntrinsicDimensions] = useState<{ width: number; height: number } | null>(null)
   const loadedSource = useRef<string | null>(null)
   const sourceFailed = sourceStatus === 'error'
+  const viewerState = sourceFailed || failed ? 'error' : src ? 'ready' : 'loading'
   const frameDimensions = intrinsicDimensions ?? { width, height }
   const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
   useEffect(() => {
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
-  return <div className="ml-media-slot w-full">
-    <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
+  return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-video-started={started} data-video-viewer-state={viewerState}>
+    <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
       <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true) }} onLoadedMetadata={(event) => {
         const element = event.currentTarget
         if (Number.isFinite(element.videoWidth) && Number.isFinite(element.videoHeight) && element.videoWidth > 0 && element.videoHeight > 0) {
@@ -460,15 +462,18 @@ function MaxVideoPreviewContent({ durationMs, height, onOpen, sourceStatus, src,
       })()} type="button">
         <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
       </button> : null}
-      {!src && !failed && !sourceFailed ? <Typography as="span" className="pointer-events-none absolute inset-0 flex items-center justify-center" tone="muted" variant="memoryBody">Видео</Typography> : null}
-      {failed || sourceFailed ? <Typography as="span" className="pointer-events-none absolute inset-0 flex items-center justify-center px-5 text-center" role="alert" variant="memoryMeta">Не удалось загрузить видео</Typography> : null}
+      {viewerState !== 'ready' ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
       <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
     </div>
-    <Button className="mt-2" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
+    {viewerState === 'loading' ? <div className="memoly-video-viewer-v2-status" role="status"><span className="memoly-video-viewer-v2-spinner" aria-hidden="true" /><Typography as="span" variant="memoryMeta">Загружаем видео…</Typography></div> : null}
+    {viewerState === 'error' ? <div className="memoly-video-viewer-v2-error" role="alert"><Typography as="strong" variant="memoryBodyMedium">Не удалось загрузить видео</Typography><Typography as="span" variant="memoryMeta">Попробуйте открыть оригинал в MAX.</Typography></div> : null}
+    {viewerState === 'error' && (onRetry || src) ? <Button className="memoly-video-viewer-v2-retry" onClick={() => { if (sourceFailed) onRetry?.(); else { setFailed(false); video.current?.load() } }} type="button">Повторить</Button> : null}
+    <Button className="memoly-video-viewer-v2-open" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
   </div>
 }
 
 function useMaxVideoSource(path: string | null) {
+  const [attempt, setAttempt] = useState(0)
   const [state, setState] = useState<{ path: string | null; status: 'loading' | 'ready' | 'error'; url: string | null }>({ path: null, status: 'loading', url: null })
   useEffect(() => {
     let cancelled = false
@@ -479,8 +484,9 @@ function useMaxVideoSource(path: string | null) {
       if (!cancelled) setState({ path, status: 'error', url: null })
     })
     return () => { cancelled = true }
-  }, [path])
-  return state.path === path ? state : { path, status: 'loading' as const, url: null }
+  }, [path, attempt])
+  const current = !path ? { path, status: 'error' as const, url: null } : state.path === path ? state : { path, status: 'loading' as const, url: null }
+  return { ...current, retry: () => { setState({ path: null, status: 'loading', url: null }); setAttempt((value) => value + 1) } }
 }
 
 function videoPosterAspectRatio(width: number | null, height: number | null) {
@@ -535,7 +541,7 @@ export function PhotoImage({ alt, height, src, width }: {
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
-  const url = usePrivateMediaSource(path)
+  const { url } = usePrivateMediaSource(path)
   const audio = useRef<HTMLAudioElement | null>(null)
   const activate = usePlaybackRegistration(`audio:${path ?? 'missing'}`, audio)
   const [playing, setPlaying] = useState(false)
@@ -562,14 +568,19 @@ function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; d
 }
 
 function PrivateVideo({ path }: { path: string | null }) {
-  const url = usePrivateMediaSource(path)
+  const source = usePrivateMediaSource(path)
+  const url = source.url
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`video:${path ?? 'missing'}`, video)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [failed, setFailed] = useState(false)
   const canFullscreen = typeof HTMLVideoElement !== 'undefined' && 'requestFullscreen' in HTMLVideoElement.prototype
-  return <div className="ml-video-row bg-muted"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={activate} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="none" ref={video} src={url ?? undefined} />
+  const viewerState = failed || source.status === 'error' ? 'error' : source.status
+  return <div className="ml-video-row memoly-private-video-v2" data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => setFailed(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="none" ref={video} src={url ?? undefined} />
+    {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">Загружаем видео…</Typography> : null}
+    {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{path ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
     <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
     <input aria-label="Позиция видео" className="mb-3 w-full px-3" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
   </div>
@@ -617,14 +628,16 @@ function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTrans
 }
 
 function usePrivateMediaSource(path: string | null) {
-  const [loaded, setLoaded] = useState<{ path: string; url: string | null } | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [loaded, setLoaded] = useState<{ path: string; status: 'ready' | 'error'; url: string | null } | null>(null)
   useEffect(() => {
     let cancelled = false
     if (!path) return
-    void privateMediaSource(path).then((source) => { if (!cancelled) setLoaded({ path, url: source }) })
+    void privateMediaSource(path).then((source) => { if (!cancelled) setLoaded({ path, status: source ? 'ready' : 'error', url: source }) }).catch(() => { if (!cancelled) setLoaded({ path, status: 'error', url: null }) })
     return () => { cancelled = true }
-  }, [path])
-  return loaded?.path === path ? loaded.url : null
+  }, [path, attempt])
+  const current = !path ? { status: 'error' as const, url: null } : loaded?.path === path ? loaded : { status: 'loading' as const, url: null }
+  return { ...current, retry: () => { setLoaded(null); setAttempt((value) => value + 1) } }
 }
 
 async function showPrivatePhotoAlbum(
