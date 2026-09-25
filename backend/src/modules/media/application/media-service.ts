@@ -322,13 +322,38 @@ export class MediaService {
     }
   }
 
-  async content(scope: FamilyScope, mediaId: string, variant: 'preview' | 'display' | 'playback' | 'original', rangeHeader?: string) {
-    await this.access.requireMember(scope)
-    const object = await this.repository.resolveContent(scope, mediaId, variant)
+  async content(
+    scope: FamilyScope,
+    mediaId: string,
+    variant: 'preview' | 'display' | 'playback' | 'original',
+    rangeHeader?: string,
+    onDiagnostic?: (event: { stage: 'access' | 'asset' | 'storage'; outcome: string; purpose?: string; contentType?: string; byteSize?: number }) => void,
+  ) {
+    try {
+      await this.access.requireMember(scope)
+      onDiagnostic?.({ stage: 'access', outcome: 'allowed' })
+    } catch (error) {
+      onDiagnostic?.({ stage: 'access', outcome: 'denied' })
+      throw error
+    }
+    const object = await this.repository.resolveContent(scope, mediaId, variant, (details) => {
+      onDiagnostic?.({
+        stage: 'asset',
+        outcome: details.assetFound ? (details.variantFound ? 'variant_found' : 'variant_missing') : 'asset_missing',
+        ...(details.purpose ? { purpose: details.purpose } : {}),
+      })
+    })
     if (!object) throw new MediaFailure('not_found', 'Медиа не найдено')
     const range = rangeHeader ? parseSingleRange(rangeHeader, object.contentLength) : undefined
-    const stored = await this.storage.readObject({ key: object.objectKey, range }).catch((error) => { throw storageFailure(error) })
-    if (!stored) throw new MediaFailure('not_found', 'Медиа не найдено')
+    const stored = await this.storage.readObject({ key: object.objectKey, range }).catch((error) => {
+      onDiagnostic?.({ stage: 'storage', outcome: 'read_error' })
+      throw storageFailure(error)
+    })
+    if (!stored) {
+      onDiagnostic?.({ stage: 'storage', outcome: 'object_missing' })
+      throw new MediaFailure('not_found', 'Медиа не найдено')
+    }
+    onDiagnostic?.({ stage: 'storage', outcome: 'object_found', contentType: stored.contentType, byteSize: stored.contentLength })
     return { ...object, body: stored.body, range }
   }
 

@@ -70,6 +70,30 @@ test('labels a rejected photo-processing failure with a safe finalize code', asy
     .rejects.toMatchObject({ code: 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED' })
 })
 
+test('reports private media resolution stages only through the explicit diagnostic callback', async () => {
+  const events: unknown[] = []
+  const service = createService({
+    commit: async () => ({ kind: 'ready', asset }),
+    requireMember: async () => undefined,
+    resolveContent: async (_scope, _mediaId, _variant, onDiagnostic) => {
+      onDiagnostic?.({ assetFound: true, purpose: 'child_avatar', variantFound: true })
+      return { objectKey: 'private-object-key-never-logged', contentType: 'image/jpeg', contentLength: 4 }
+    },
+  })
+
+  const result = await service.content(scope, asset.id, 'display', undefined, (event) => events.push(event))
+
+  expect(result.contentType).toBe('image/jpeg')
+  expect(events).toEqual([
+    { stage: 'access', outcome: 'allowed' },
+    { stage: 'asset', outcome: 'variant_found', purpose: 'child_avatar' },
+    { stage: 'storage', outcome: 'object_found', contentType: 'image/jpeg', byteSize: 4 },
+  ])
+  expect(JSON.stringify(events)).not.toContain(scope.familyId)
+  expect(JSON.stringify(events)).not.toContain(asset.id)
+  expect(JSON.stringify(events)).not.toContain('private-object-key-never-logged')
+})
+
 test('finalize keeps its normal ready result when cleanup succeeds', async () => {
   let cleanupCalls = 0
   const service = createService({
@@ -132,7 +156,9 @@ function createService(options: {
   commit: MediaRepository['commitFinalization']
   cleanup?: (directory: string) => Promise<void>
   headObject?: () => Promise<Awaited<ReturnType<PrivateStorage['headObject']>>>
+  requireMember?: () => Promise<void>
   processPhoto?: PhotoProcessor
+  resolveContent?: MediaRepository['resolveContent']
   reject?: MediaRepository['rejectUpload']
   warn?: (name: string) => void
 }) {
@@ -154,7 +180,7 @@ function createService(options: {
     rejectUpload: options.reject ?? (async () => undefined),
     commitFinalization: options.commit,
     readyForMemory: async () => false,
-    resolveContent: async () => null,
+    resolveContent: options.resolveContent ?? (async () => null),
   }
   const processPhoto: PhotoProcessor = options.processPhoto ?? (async () => ({
     verifiedMime: 'image/jpeg', originalSha256: 'original', width: 1200, height: 1600,
@@ -162,7 +188,7 @@ function createService(options: {
     preview: { bytes: new Uint8Array([2]), sha256: 'preview', width: 600, height: 800 },
   }))
   return new (MediaService as any)(
-    {} as never, repository, storage, { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
+    { requireMember: options.requireMember ?? (async () => undefined) } as never, repository, storage, { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
     processPhoto, async () => ({ width: null, height: null, durationMs: 1 }), () => new Date('2026-09-11T00:00:00.000Z'),
     options.cleanup, options.warn,
   ) as MediaService

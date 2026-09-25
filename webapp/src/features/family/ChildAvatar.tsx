@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { Avatar } from '@/components/ui/avatar'
 import { AvatarLetter } from '@/features/session'
+import { reportPrivateMediaDiagnostic } from '@/platform/media/private-media-diagnostics'
 import { shouldShowChildAvatarImage } from './child-avatar-state'
 
 type AvatarCrop = { x: number; y: number; width: number; height: number } | null
@@ -31,7 +32,22 @@ export function ChildAvatar({
         alt={`Аватар ${name}`}
         className="size-full rounded-full object-cover"
         data-slot="child-avatar-image"
-        onError={() => setFailedAvatarUrl(avatarUrl)}
+        onLoad={(event) => {
+          const image = event.currentTarget
+          const rect = image.getBoundingClientRect()
+          const style = getComputedStyle(image)
+          reportPrivateMediaDiagnostic('avatar-image-loaded', {
+            naturalWidth: image.naturalWidth,
+            naturalHeight: image.naturalHeight,
+            renderedWidth: Math.round(rect.width),
+            renderedHeight: Math.round(rect.height),
+            visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0,
+          })
+        }}
+        onError={() => {
+          reportPrivateMediaDiagnostic('avatar-image-error')
+          setFailedAvatarUrl(avatarUrl)
+        }}
         src={avatarUrl ?? undefined}
         style={avatarCrop ? {
           objectPosition: `${(avatarCrop.x + avatarCrop.width / 2) * 100}% ${(avatarCrop.y + avatarCrop.height / 2) * 100}%`,

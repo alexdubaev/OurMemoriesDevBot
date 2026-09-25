@@ -9,7 +9,7 @@ import { createMiddleware } from 'hono/factory'
 import type { MiddlewareHandler } from 'hono'
 import { z, type ZodType } from 'zod'
 
-import { validationErrorHook } from '../../../http/errors'
+import { requestIdFrom, validationErrorHook } from '../../../http/errors'
 import type { AuthenticatedPrincipal, AuthHttpEnv } from '../../auth'
 import type { MediaService } from '../application/media-service'
 import type { MaxVideoPlayback } from '../application/ports'
@@ -19,6 +19,7 @@ import { executeMedia } from './errors'
 const security = [{ BearerAuth: [] }]
 const mediaAccessCookieName = 'our_memories_media_access'
 const mediaAccessCookieTtlSeconds = 5 * 60
+const privateMediaDiagnosticHeader = 'x-memoly-private-media-diagnostic'
 const json = <S extends ZodType>(schema: S) => ({ 'application/json': { schema } })
 const errors = { 401: { content: json(apiErrorSchema), description: 'Authentication required' },
   403: { content: json(apiErrorSchema), description: 'Forbidden' },
@@ -44,8 +45,15 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
     maxVideoPlayback?: MaxVideoPlayback
 }) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
-  const contentAuth = createMediaContentAuth(authenticateMediaAccess)
-  routes.use('/families/*', (c, next) => isContentPath(c.req.path) ? contentAuth(c, next) : requireAuth(c, next))
+  const contentAuth = createMediaContentAuth(authenticateMediaAccess, (c, error) => reportPrivateMediaDiagnostic(c, 'authentication-rejected', {
+    status: safeStatus(error),
+    authorizationPresent: Boolean(c.req.header('authorization')),
+  }))
+  routes.use('/families/*', async (c, next) => {
+    if (!isContentPath(c.req.path)) return requireAuth(c, next)
+    if (isPrivateMediaDiagnostic(c)) c.header('X-Memoly-Private-Media-Diagnostic-Observed', '1')
+    await contentAuth(c, next)
+  })
   routes.openapi(reserveRoute, async (c) => c.json(await executeMedia(() => service.reserve(scope(c), c.req.valid('json'), c.req.valid('header')['idempotency-key'])), 201))
   routes.openapi(finalizeRoute, async (c) => c.json(await executeMedia(() => service.finalize(scope(c), c.req.valid('param').uploadId))))
   routes.post('/families/:familyId/media/playback-session', async (c) => {
@@ -64,7 +72,21 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
     const params = mediaContentParamsSchema.parse(c.req.param())
     const query = mediaContentQuerySchema.parse(c.req.query())
     try {
-      const result = await executeMedia(() => service.content(scope(c), params.mediaId, query.variant, c.req.header('Range')))
+      const result = await executeMedia(() => service.content(
+        scope(c), params.mediaId, query.variant, c.req.header('Range'),
+        isPrivateMediaDiagnostic(c) ? (event) => reportPrivateMediaDiagnostic(c, event.stage, {
+          outcome: event.outcome,
+          ...(event.purpose ? { purpose: event.purpose } : {}),
+          ...(event.contentType ? { contentType: event.contentType } : {}),
+          ...(typeof event.byteSize === 'number' ? { byteSize: event.byteSize } : {}),
+        }) : undefined,
+      ))
+      reportPrivateMediaDiagnostic(c, 'response-ready', {
+        status: c.req.header('Range') ? 206 : 200,
+        authorizationPresent: Boolean(c.req.header('authorization')),
+        contentType: result.contentType,
+        byteSize: result.range ? result.range.end - result.range.start + 1 : result.contentLength,
+      })
       c.header('Content-Type', result.contentType)
       c.header('Accept-Ranges', 'bytes')
       c.header('Cache-Control', 'private, no-store')
@@ -78,6 +100,11 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
       c.header('Content-Length', String(result.contentLength))
       return c.body(head ? null : result.body, 200)
     } catch (error) {
+      reportPrivateMediaDiagnostic(c, 'response-error', {
+        status: safeStatus(error),
+        code: safeCode(error),
+        authorizationPresent: Boolean(c.req.header('authorization')),
+      })
       if (error instanceof Error && (error as any).status === 416) {
         const total = (error as any).diagnosticDetails?.total
         c.header('Content-Range', `bytes */${typeof total === 'number' ? total : 0}`)
@@ -117,10 +144,48 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
   return routes
 }
 
-function createMediaContentAuth(authenticate: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>) {
+function isPrivateMediaDiagnostic(c: { req: { header(name: string): string | undefined } }) {
+  return c.req.header(privateMediaDiagnosticHeader) === '1'
+}
+
+function reportPrivateMediaDiagnostic(
+  c: { req: { header(name: string): string | undefined; query(name: string): string | undefined }; var?: { requestId?: string } },
+  stage: string,
+  details: Record<string, string | number | boolean | null>,
+) {
+  if (!isPrivateMediaDiagnostic(c)) return
+  console.info('Private media diagnostic', {
+    requestId: requestIdFrom(c as any),
+    stage,
+    variant: c.req.query('variant') ?? null,
+    ...details,
+  })
+}
+
+function safeStatus(error: unknown) {
+  return typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+    ? error.status
+    : 500
+}
+
+function safeCode(error: unknown) {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : 'INTERNAL_ERROR'
+}
+
+function createMediaContentAuth(
+  authenticate: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>,
+  onRejected: (c: any, error: unknown) => void,
+) {
   return createMiddleware<AuthHttpEnv>(async (c, next) => {
     const token = bearerToken(c.req.header('authorization')) ?? getCookie(c, mediaAccessCookieName)
-    c.set('user', await authenticate(token))
+    try {
+      c.set('user', await authenticate(token))
+    } catch (error) {
+      onRejected(c, error)
+      throw error
+    }
     await next()
   })
 }

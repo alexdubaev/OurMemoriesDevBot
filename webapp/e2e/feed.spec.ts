@@ -186,6 +186,54 @@ test.describe.serial('T07 live feed', () => {
     }
   })
 
+  test('explicit private media diagnostics trace a protected same-origin photo through the Service Worker', async ({ page }) => {
+    await page.evaluate((apiOrigin) => {
+      const originalFetch = window.fetch.bind(window)
+      window.fetch = (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init)
+        const requestUrl = new URL(request.url)
+        if (requestUrl.origin !== apiOrigin || !requestUrl.pathname.startsWith('/api/')) return originalFetch(input, init)
+        return originalFetch(new Request(`${window.location.origin}${requestUrl.pathname}${requestUrl.search}`, request))
+      }
+      const url = new URL(window.location.href)
+      url.searchParams.set('memolyPrivateMediaDiagnostic', '1')
+      window.history.replaceState(window.history.state, '', url)
+    }, backendUrl)
+
+    const mediaResponses: Array<{ status: number; fromServiceWorker: boolean; authorizationPresent: boolean; diagnosticHeaderPresent: boolean; serverObservedDiagnostic: boolean }> = []
+    page.on('response', (response) => {
+      const responseUrl = new URL(response.url())
+      if (!responseUrl.pathname.includes('/media/') || !responseUrl.pathname.endsWith('/content')) return
+      const headers = response.request().headers()
+      mediaResponses.push({
+        status: response.status(),
+        fromServiceWorker: response.fromServiceWorker(),
+        authorizationPresent: Boolean(headers.authorization),
+        diagnosticHeaderPresent: headers['x-memoly-private-media-diagnostic'] === '1',
+        serverObservedDiagnostic: response.headers()['x-memoly-private-media-diagnostic-observed'] === '1',
+      })
+    })
+    const clientStages: string[] = []
+    page.on('console', (message) => {
+      if (message.text().startsWith('memoly-private-media-diagnostic ')) clientStages.push(message.text())
+    })
+
+    await page.getByRole('button', { name: 'Семья', exact: true }).click()
+    await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+    await openFeed(page)
+    const photo = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).getByRole('img', { name: 'Воспоминание' })
+    await expect.poll(() => mediaResponses.length).toBeGreaterThan(0)
+    await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    expect(mediaResponses.some((response) => response.status === 200
+      && response.fromServiceWorker
+      && response.authorizationPresent
+      && response.diagnosticHeaderPresent
+      && response.serverObservedDiagnostic)).toBe(true)
+    expect(clientStages.some((stage) => stage.includes('feed-response'))).toBe(true)
+    expect(clientStages.some((stage) => stage.includes('feed-blob-created'))).toBe(true)
+    expect(clientStages.some((stage) => stage.includes('feed-image-loaded'))).toBe(true)
+  })
+
   test('keeps card video overlays below navigation while fullscreen media covers it', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openFeed(page)
