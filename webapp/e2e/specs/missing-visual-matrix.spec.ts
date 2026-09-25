@@ -114,7 +114,7 @@ test.describe('Agent L missing visual matrix', () => {
       reactSelector: '[data-add-screen="photo"]', canonicalSelector: '#photoSelected .composer-screen',
       geometry: photoGeometry('photoSelected', '.memoly-add-photo-grid', '.selected-grid', '.memoly-add-caption', '.form-block'),
       visualOutcome: 'functional-delta',
-      visualNote: 'FUNCTIONAL DELTA: the canonical selected-photo shell includes a child picker below the date, while this real one-child React fixture has no picker. The button geometry is captured and compared for x/width/height; its absolute y is reported without assertion because the missing canonical picker shifts it by 229.875px.',
+      visualNote: 'FUNCTIONAL DELTA: the canonical selected-photo shell includes a child picker below the date, while this real one-child React fixture has no picker. The button geometry is captured and compared for x/width/height; its absolute y is reported in metrics without assertion because the missing canonical picker shifts it.',
       openReact: async (target) => {
         await openPhotoEmpty(target)
         await target.locator('#photo-composer-files').setInputFiles([1, 2, 3, 4].map((index) => ({ name: `synthetic-photo-${index}.png`, mimeType: 'image/png', buffer: generatedPhoto(index) })))
@@ -149,7 +149,7 @@ test.describe('Agent L missing visual matrix', () => {
       reactSelector: '[data-add-screen="note"]', canonicalSelector: '#noteFilled .composer-screen',
       geometry: noteGeometry('noteFilled', '.note-editor'),
       visualOutcome: 'functional-delta',
-      visualNote: 'FUNCTIONAL DELTA: the canonical filled-note shell includes a child picker below the date, while this real one-child React fixture has no picker. The button geometry is captured and compared for x/width/height; its absolute y is reported without assertion because the missing canonical picker shifts it by 172.859px.',
+      visualNote: 'FUNCTIONAL DELTA: the canonical filled-note shell includes a child picker below the date, while this real one-child React fixture has no picker. The button geometry is captured and compared for x/width/height; its absolute y is reported in metrics without assertion because the missing canonical picker shifts it.',
       openReact: async (target) => { await openNoteEmpty(target); await target.locator('#memory-composer-body').fill('Сегодня у Софии был удивительный день! Мы гуляли в парке, кормили уток и потом пили какао. Она столько смеялась и рассказывала свои истории. Такое простое, но такое счастливое время 💛'); await expect(target.locator('#memory-composer-body')).toHaveValue(/Сегодня у Софии был удивительный день/) },
       assertReact: async (target) => expect(target.locator('#memory-composer-body')).toHaveValue('Сегодня у Софии был удивительный день! Мы гуляли в парке, кормили уток и потом пили какао. Она столько смеялась и рассказывала свои истории. Такое простое, но такое счастливое время 💛'),
     }
