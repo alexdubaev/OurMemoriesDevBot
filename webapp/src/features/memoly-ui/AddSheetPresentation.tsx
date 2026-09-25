@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { WebpIcon } from '@/components/WebpIcon'
@@ -33,13 +33,18 @@ export function AddSheetPresentation({
   role,
 }: AddSheetPresentationProps) {
   const [level, setLevel] = useState<'add' | 'voice-video'>('add')
+  const closingRef = useRef(false)
   const close = useCallback(() => {
+    if (closingRef.current) return
+    closingRef.current = true
     setLevel('add')
     onOpenChange(false)
     if (typeof window !== 'undefined' && window.history.state?.memorySheet === historyMarker) {
       window.history.back()
     }
   }, [onOpenChange])
+
+  useEffect(() => { if (open) closingRef.current = false }, [open])
 
   useEffect(() => {
     if (role !== 'full' || !open || typeof window === 'undefined') return undefined
@@ -93,8 +98,8 @@ export function AddSheetPanel({
 }) {
   return (
     <div className="memoly-sheet-content memoly-add-sheet-panel" data-slot="memoly-add-sheet-panel" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
-      <DrawerTitle className="sheet-title" id="memoly-add-sheet-title">Добавить воспоминание</DrawerTitle>
-      <DrawerDescription className="sheet-subtitle" id="memoly-add-sheet-description">Сохраняйте моменты, которые важны</DrawerDescription>
+      <DrawerTitle className="sheet-title">Добавить воспоминание</DrawerTitle>
+      <DrawerDescription className="sheet-subtitle">Сохраняйте моменты, которые важны</DrawerDescription>
       <div className="add-options">
         <AddAction icon="photo" label="Добавить фото" name="photo" onClick={onPhoto} copy={<>Снимок<br />из жизни</>} />
         <AddAction icon="note" label="Добавить заметку" name="note" onClick={onNote} copy={<>Мысли<br />и события</>} />

@@ -226,7 +226,7 @@ export function FeedPage({
           onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setDetail(memory) }}
         />
       }} /> : null}
-      <div aria-label="Загрузить ещё" ref={sentinel} />
+      <div aria-hidden="true" data-testid="feed-load-more-sentinel" ref={sentinel} />
       {feed.isFetchingNextPage ? <FeedSkeleton /> : null}
       {feed.isFetchNextPageError && items.length > 0 ? <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}

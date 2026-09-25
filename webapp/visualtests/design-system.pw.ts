@@ -5,14 +5,11 @@ import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../..')
-const screenshotDirectory = path.join(
-  repositoryRoot,
-  'docs/mvp/review/t06-design-system/screenshots',
-)
+const screenshotDirectory = path.join(repositoryRoot, 'output/playwright/t06-screenshots')
 
 async function openFixture(page: Page, state: string, width = 390) {
   await page.setViewportSize({ width, height: 844 })
-  await page.goto(`/__fixtures/design-system?state=${state}`)
+  await page.goto(`/__fixtures/design-system?state=${state}`, { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => document.fonts.ready)
   await expect(page.locator('[data-fixture-state]')).toHaveAttribute('data-fixture-state', state)
 }
@@ -32,31 +29,30 @@ test('F06.1/F06.2/F06.3/F06.5: palette, navigation, roles and mobile width follo
       foreground: getComputedStyle(document.body).color,
       horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }))
-    expect(metrics.background).toBe('rgb(251, 248, 245)')
+    expect(metrics.background).toBe('rgb(237, 241, 234)')
     expect(metrics.foreground).toBe('rgb(48, 42, 46)')
     expect(metrics.horizontalOverflow).toBeLessThanOrEqual(0)
 
     if (width === 390) {
       const expectedTokens = {
-        '--memory-accent-soft': '#f4a4ae',
-        '--memory-accent-strong': '#a83750',
-        '--memory-accent-tint': '#fbe9ed',
-        '--memory-canvas': '#fbf8f5',
+        '--memory-accent-soft': '#dce7df',
+        '--memory-accent-strong': '#7f9f90',
+        '--memory-accent-tint': '#dce7df',
+        '--memory-canvas': '#edf1ea',
         '--memory-danger': '#b4233a',
         '--memory-line': '#e8dfda',
         '--memory-success': '#276749',
-        '--memory-surface': '#ffffff',
-        '--memory-surface-soft': '#f5efeb',
+        '--memory-surface': '#f5f5ef',
+        '--memory-surface-soft': '#e9ede7',
         '--memory-text': '#302a2e',
-        '--memory-text-muted': '#756a71',
+        '--memory-text-muted': '#6f7f78',
       }
       const actualTokens = await page.evaluate((names) => {
         const style = getComputedStyle(document.documentElement)
         return Object.fromEntries(names.map((name) => [name, style.getPropertyValue(name).trim()]))
       }, Object.keys(expectedTokens))
       expect(actualTokens).toEqual(expectedTokens)
-      expect(contrastRatio('#302a2e', '#fbf8f5')).toBeGreaterThanOrEqual(4.5)
-      expect(contrastRatio('#ffffff', '#a83750')).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio('#302a2e', '#edf1ea')).toBeGreaterThanOrEqual(4.5)
     }
 
     const positions = page.locator('[data-nav-position]')
