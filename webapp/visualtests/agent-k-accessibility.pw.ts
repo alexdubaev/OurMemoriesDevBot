@@ -1,8 +1,26 @@
 import axe from 'axe-core'
 import { expect, test } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 
 const themes = ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'] as const
 const states = ['populated', 'empty-full', 'empty-viewer', 'add-sheet'] as const
+const expectedContrast = JSON.parse(readFileSync(new URL('./agent-k-contrast-baseline.json', import.meta.url), 'utf8')) as Record<string, string[]>
+
+function parseSignature(value: string) {
+  const [target, foreground, background] = value.split('|')
+  return { target, foreground, background }
+}
+
+function channels(value: string) {
+  return [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16))
+}
+
+function expectMeasuredColor(actual: string, expected: string) {
+  // Gradient sampling can shift a few RGB levels between captures.
+  for (const [index, channel] of channels(actual).entries()) {
+    expect(Math.abs(channel - channels(expected)[index])).toBeLessThanOrEqual(10)
+  }
+}
 
 for (const theme of themes) {
   for (const state of states) {
@@ -26,7 +44,17 @@ for (const theme of themes) {
       })
       console.log(JSON.stringify({ theme, state, findings }))
       expect(findings.filter((finding) => finding.id === 'meta-viewport')).toHaveLength(0)
-      expect(findings.flatMap((finding) => finding.nodes).filter((node) => node.target.some((selector) => selector.includes('ml-filter')))).toHaveLength(0)
+      expect(findings.filter((finding) => finding.id !== 'color-contrast')).toHaveLength(0)
+      const contrastSignatures = findings.flatMap((finding) => finding.nodes.map((node) => {
+        const colors = node.data[0] as { fgColor: string; bgColor: string }
+        return `${node.target.join(',')}|${colors.fgColor}|${colors.bgColor}`
+      })).map(parseSignature).sort((left, right) => left.target.localeCompare(right.target))
+      const expected = expectedContrast[`${theme}/${state}`].map(parseSignature).sort((left, right) => left.target.localeCompare(right.target))
+      expect(contrastSignatures.map((entry) => entry.target)).toEqual(expected.map((entry) => entry.target))
+      for (const [index, entry] of contrastSignatures.entries()) {
+        expectMeasuredColor(entry.foreground, expected[index].foreground)
+        expectMeasuredColor(entry.background, expected[index].background)
+      }
     })
   }
 }
