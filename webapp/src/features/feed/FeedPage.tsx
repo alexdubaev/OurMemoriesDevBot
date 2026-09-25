@@ -13,6 +13,7 @@ import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
+import { privateMediaDiagnosticHeaders, reportPrivateMediaDiagnostic } from '@/platform/media/private-media-diagnostics'
 import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
@@ -540,7 +541,18 @@ export function PhotoImage({ alt, height, src, width }: {
   src: string
   width: number | null
 }) {
-  return <span className="relative block aspect-video w-full overflow-hidden"><img alt={alt} className="absolute inset-0 size-full object-cover" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
+  return <span className="relative block aspect-video w-full overflow-hidden"><img alt={alt} className="absolute inset-0 size-full object-cover" height={height ?? undefined} onLoad={(event) => {
+    const image = event.currentTarget
+    const rect = image.getBoundingClientRect()
+    const style = getComputedStyle(image)
+    reportPrivateMediaDiagnostic('feed-image-loaded', {
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      renderedWidth: Math.round(rect.width),
+      renderedHeight: Math.round(rect.height),
+      visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0,
+    })
+  }} onError={() => reportPrivateMediaDiagnostic('feed-image-error')} src={src} width={width ?? undefined} /></span>
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
@@ -619,14 +631,35 @@ function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, returnFocus
 function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport) {
   const [loaded, setLoaded] = useState<{ path: string; url: string | null } | null>(null)
   useEffect(() => {
-    if (!path || !transport) return
+    if (!path) {
+      reportPrivateMediaDiagnostic('feed-path-missing')
+      return
+    }
+    if (!transport) {
+      reportPrivateMediaDiagnostic('feed-transport-missing')
+      return
+    }
     const controller = new AbortController()
     let objectUrl: string | null = null
-    void transport.raw(path, { signal: controller.signal }).then(async (response) => {
+    void transport.raw(path, { signal: controller.signal, headers: privateMediaDiagnosticHeaders() }).then(async (response) => {
+      reportPrivateMediaDiagnostic('feed-response', {
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+        byteSize: Number(response.headers.get('content-length')) || 0,
+      })
       objectUrl = await responseToPrivateImageObjectUrl(response)
+      reportPrivateMediaDiagnostic('feed-blob-created')
       if (controller.signal.aborted) URL.revokeObjectURL(objectUrl)
       else setLoaded({ path, url: objectUrl })
-    }).catch(() => { if (!controller.signal.aborted) setLoaded({ path, url: null }) })
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        reportPrivateMediaDiagnostic('feed-fetch-error', {
+          status: typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : 0,
+          code: typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'UNKNOWN',
+        })
+        setLoaded({ path, url: null })
+      }
+    })
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [path, transport])
   return loaded?.path === path ? loaded.url : null

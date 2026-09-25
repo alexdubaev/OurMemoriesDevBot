@@ -239,7 +239,12 @@ export class PrismaMediaRepository implements MediaRepository {
     return count === unique.length
   }
 
-  async resolveContent(scope: FamilyScope, mediaId: string, variant: MediaVariant): Promise<ContentObject | null> {
+  async resolveContent(
+    scope: FamilyScope,
+    mediaId: string,
+    variant: MediaVariant,
+    onDiagnostic?: (details: { assetFound: boolean; purpose?: string; variantFound: boolean }) => void,
+  ): Promise<ContentObject | null> {
     const asset = await this.db.mediaAsset.findFirst({
       where: {
         id: mediaId,
@@ -254,11 +259,16 @@ export class PrismaMediaRepository implements MediaRepository {
       },
       include: { variants: true },
     })
-    if (!asset) return null
+    if (!asset) {
+      onDiagnostic?.({ assetFound: false, variantFound: false })
+      return null
+    }
     if (variant === 'original') {
+      onDiagnostic?.({ assetFound: true, purpose: asset.purpose, variantFound: true })
       return { objectKey: asset.originalKey, contentType: asset.verifiedMime!, contentLength: Number(asset.byteSize) }
     }
     const stored = asset.variants.find((candidate) => candidate.variant === variant)
+    onDiagnostic?.({ assetFound: true, purpose: asset.purpose, variantFound: Boolean(stored) })
     return stored
       ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize) }
       : null
