@@ -504,7 +504,7 @@ test('family management uses owner permissions, saves supported fields, and fits
   for (const width of [320, 390, 430, 480]) {
     await owner.page.setViewportSize({ width, height: 844 })
     await owner.page.getByRole('button', { name: 'Настройки' }).click()
-    await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+    await owner.page.getByRole('button', { name: /Настройки семьи/ }).press('Enter')
     await expect(owner.page.locator('[data-slot="family-settings-page"]')).toBeVisible()
     const dimensions = await owner.page.evaluate(() => ({ viewport: innerWidth, scroll: document.documentElement.scrollWidth }))
     expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
@@ -514,7 +514,7 @@ test('family management uses owner permissions, saves supported fields, and fits
   }
 
   await owner.page.getByRole('button', { name: 'Настройки' }).click()
-  await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+  await owner.page.getByRole('button', { name: /Настройки семьи/ }).press('Enter')
   const update = owner.page.waitForRequest((request) => request.method() === 'PATCH' && /\/families\/[^/]+$/.test(new URL(request.url()).pathname))
   await owner.page.getByRole('textbox', { name: 'Название семьи' }).fill('Семья E2E')
   await owner.page.getByRole('button', { name: 'Сохранить', exact: true }).click()
@@ -541,7 +541,7 @@ test('family management uses owner permissions, saves supported fields, and fits
     await owner.page.getByRole('button', { name: 'Назад' }).click()
     await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
     await owner.page.getByRole('button', { name: 'Настройки' }).click()
-    await owner.page.getByRole('button', { name: /Настройки семьи/ }).click()
+    await owner.page.getByRole('button', { name: /Настройки семьи/ }).press('Enter')
     await owner.page.screenshot({ path: resolve(`e2e/.artifacts/family-management-${theme}-390.png`), animations: 'disabled' })
     await owner.page.getByRole('button', { name: 'Назад' }).click()
     await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
