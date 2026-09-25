@@ -4,6 +4,7 @@ import type {
   PasswordResetRequest,
   RegisterRequest,
   UserDto,
+  MemolyTheme,
   BrowserLinkStartResponse,
   BrowserLinkStatusResponse,
   MeResponse,
@@ -32,6 +33,7 @@ export type AuthContextValue = {
   sessionError: Error | null
   retrySession: () => Promise<void>
   transport: AuthenticatedTransport
+  updateTheme: (theme: MemolyTheme) => Promise<void>
   authenticateHost: (provider: HostAuthProvider, initData: string, options?: HostAuthAttemptOptions) => Promise<void>
   authenticateTelegram: (initData: string) => Promise<void>
   authenticateMax: (initData: string) => Promise<void>

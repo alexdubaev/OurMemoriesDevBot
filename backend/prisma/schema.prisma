@@ -12,6 +12,7 @@ model User {
   email               String?              @unique
   passwordHash        String?              @map("password_hash")
   displayName         String?              @map("display_name")
+  uiTheme             String               @default("mint") @map("ui_theme") @db.VarChar(16)
   role                UserRole             @default(user)
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")

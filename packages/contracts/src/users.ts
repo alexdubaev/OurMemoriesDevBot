@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
-import { emailSchema, userRoleSchema, userSchema } from './auth'
+import { emailSchema, memolyThemeSchema, userRoleSchema, userSchema } from './auth'
 
 export const updateProfileRequestSchema = z
   .object({
-    displayName: z.union([z.string().trim().min(2).max(80), z.null()]),
+    displayName: z.union([z.string().trim().min(2).max(80), z.null()]).optional(),
+    theme: memolyThemeSchema.optional(),
   })
   .strict()
+  .refine((input) => input.displayName !== undefined || input.theme !== undefined)
 
 export const updateProfileResponseSchema = z
   .object({

@@ -23,9 +23,9 @@ export function isMemolyTheme(value: string | null | undefined): value is Memoly
 }
 
 export function readMemolyTheme(): MemolyTheme {
-  if (typeof window === 'undefined') return 'mint'
-  const value = window.localStorage.getItem(MEMOLY_THEME_STORAGE_KEY)
-  return isMemolyTheme(value) ? value : 'mint'
+  // Browser storage is isolated between PWA and embedded WebViews. The signed-in
+  // user's theme comes from /auth/me; legacy local values are intentionally ignored.
+  return 'mint'
 }
 
 export function getMemolyThemeConfig(theme: MemolyTheme): MemolyThemeConfig {

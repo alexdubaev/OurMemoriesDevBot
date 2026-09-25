@@ -92,6 +92,24 @@ maybeDescribe('users and admin API integration', () => {
     }
   })
 
+  test('persists a user theme in the authenticated profile shared by independent browser contexts', async () => {
+    const session = await register('theme@example.com')
+
+    const update = await app.request('/api/users/me', {
+      method: 'PATCH',
+      headers: authenticatedJsonHeaders(session.accessToken),
+      body: JSON.stringify({ theme: 'rose' }),
+    })
+
+    expect(update.status).toBe(200)
+    expect((await update.json()).user.theme).toBe('rose')
+
+    const secondContext = await app.request('/api/auth/me', {
+      headers: authenticatedHeaders(session.accessToken),
+    })
+    expect((await secondContext.json()).user.theme).toBe('rose')
+  })
+
   test('rejects regular users from every admin endpoint', async () => {
     const session = await register('regular@example.com')
 

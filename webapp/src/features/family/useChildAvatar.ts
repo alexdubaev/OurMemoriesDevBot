@@ -1,25 +1,27 @@
 import { useEffect, useState } from 'react'
 
 import type { AuthenticatedTransport } from '@/platform/api'
+import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
 
 export function useChildAvatar(transport: AuthenticatedTransport, familyId: string, mediaId: string | null) {
   const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(null)
   useEffect(() => {
     if (!mediaId) return
-    let cancelled = false
+    const controller = new AbortController()
     let objectUrl: string | null = null
     void transport.raw(
       `/api/v1/families/${encodeURIComponent(familyId)}/media/${encodeURIComponent(mediaId)}/content?variant=display`,
+      { signal: controller.signal },
     ).then(async (response) => {
-      if (!response.ok) return
-      objectUrl = URL.createObjectURL(await response.blob())
-      if (cancelled) return
-      setLoaded({ key: mediaId, url: objectUrl })
+      objectUrl = await responseToPrivateImageObjectUrl(response)
+      if (controller.signal.aborted) URL.revokeObjectURL(objectUrl)
+      else setLoaded({ key: `${familyId}:${mediaId}`, url: objectUrl })
     }).catch(() => undefined)
     return () => {
-      cancelled = true
+      controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [familyId, mediaId, transport])
-  return mediaId && loaded?.key === mediaId ? loaded.url : null
+  const key = mediaId ? `${familyId}:${mediaId}` : null
+  return key && loaded?.key === key ? loaded.url : null
 }

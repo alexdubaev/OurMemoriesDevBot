@@ -22,7 +22,7 @@ export function ProfilePanel({ user }: { user: UserDto }) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!validation.request) return
-    mutation.mutate(validation.request.displayName, {
+    mutation.mutate(validation.request.displayName ?? null, {
       onSuccess: (response) => setDisplayName(response.user.displayName ?? ''),
     })
   }

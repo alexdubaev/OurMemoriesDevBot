@@ -11,11 +11,12 @@ export type UserRecord = {
   email: string | null
   displayName: string | null
   role: UserRole
+  uiTheme?: string
   createdAt: Date
 }
 
 export type ProfileWriter = {
-  updateProfile(userId: string, displayName: string | null): Promise<UserRecord>
+  updateProfile(userId: string, input: { displayName?: string | null; theme?: import('@web-app-demo/contracts').MemolyTheme }): Promise<UserRecord>
 }
 
 export type AdminDashboardReader = {

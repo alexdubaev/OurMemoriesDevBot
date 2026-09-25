@@ -28,6 +28,7 @@ import { AuthContext, type AuthContextValue, type HostAuthAttemptOptions, type H
 import { bootstrapAuthSession } from './bootstrap'
 import { subscribeToBrowserSessionChanges } from './session-coordinator'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
+import { updateProfileResponseSchema, type MemolyTheme } from '@web-app-demo/contracts'
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
@@ -143,6 +144,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await logoutAsync()
   }, [logoutAsync])
 
+  const updateTheme = useCallback(async (theme: MemolyTheme) => {
+    const response = await api.requestAuthenticated('/api/users/me', updateProfileResponseSchema, {
+      method: 'PATCH',
+      body: { theme },
+    })
+    queryClient.setQueryData(authQueryKeys.me(), (current) => current
+      ? { ...current, user: response.user }
+      : current)
+  }, [api, queryClient])
+
   const authenticateHost = useCallback(async (provider: HostAuthProvider, initData: string, options: HostAuthAttemptOptions = {}) => {
     const result = await (provider === 'max'
       ? api.authenticateMax(initData, options)
@@ -219,6 +230,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       sessionError,
       retrySession,
       transport,
+      updateTheme,
       authenticateHost,
       authenticateTelegram,
       authenticateMax,
@@ -232,7 +244,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport],
+    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport, updateTheme],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -146,8 +146,7 @@ test.describe.serial('T07 live feed', () => {
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
     test(`feed renders the ${theme} theme at 390px`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
-      await page.evaluate((value) => window.localStorage.setItem('memoly-theme', value), theme)
-      await page.reload()
+      await selectTheme(page, theme)
       await openFeed(page)
       await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
       await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
@@ -166,6 +165,26 @@ test.describe.serial('T07 live feed', () => {
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-feed-${theme}-390.png`), animations: 'disabled' })
     })
   }
+
+  test('private feed images survive three Feed → Family → Feed remounts', async ({ page }) => {
+    await openFeed(page)
+    const photo = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).getByRole('img', { name: 'Воспоминание' })
+    const videoPoster = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' }).getByRole('img', { name: 'Кадр видео' })
+    await expect(photo).toHaveAttribute('src', /^blob:/)
+    await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await expect(videoPoster).toHaveAttribute('src', /^blob:/)
+    await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+
+    for (let transition = 0; transition < 3; transition += 1) {
+      await page.getByRole('button', { name: 'Семья', exact: true }).click()
+      await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+      await page.getByRole('button', { name: 'Лента', exact: true }).click()
+      await expect(photo).toHaveAttribute('src', /^blob:/)
+      await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      await expect(videoPoster).toHaveAttribute('src', /^blob:/)
+      await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    }
+  })
 
   test('keeps card video overlays below navigation while fullscreen media covers it', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -928,8 +947,7 @@ test.describe.serial('T07 live feed', () => {
     }
     await page.setViewportSize({ width: 390, height: 844 })
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
-      await page.evaluate((value) => localStorage.setItem('memoly-theme', value), theme)
-      await page.reload()
+      await selectTheme(page, theme)
       await page.getByRole('button', { name: 'Лента' }).click()
       await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
       await capture(`${theme}-390`)
@@ -1027,10 +1045,14 @@ async function seedFeed() {
   await createMemoryWithMedia({ familyId, childId, userId: ownerUser.id, kind: 'video', body: 'Legacy video E2E', occurredAt: new Date(baseTime - 120_000), assets: [videoAsset] })
 
   const telegramMemory = await prisma.memory.create({ data: { familyId, childId, authorId: ownerUser.id, kind: 'video', body: 'Telegram video E2E', occurredAt: new Date(baseTime - 180_000) } })
+  const thumbnailKey = `media-display/${randomUUID()}-telegram-poster.png`
+  objectKeys.push(thumbnailKey)
+  await store(thumbnailKey, pngImage.buffer, 'image/png')
+  const thumbnail = await createAsset({ familyId, userId: ownerUser.id, kind: 'photo', variant: 'display', key: thumbnailKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
   const botId = BigInt(`777${subject}`)
   const inbox = await prisma.telegramInbox.create({ data: { botId, updateId: 1n, eventKind: 'content', encryptedPayload: Buffer.from([1]), encryptionIv: Buffer.alloc(12, 2), encryptionAuthTag: Buffer.alloc(16, 3), processedAt: new Date() } })
   const source = await prisma.telegramSource.create({ data: { inboxId: inbox.id, botId, chatId: BigInt(subject), messageId: 1n, senderSubject: subject, userId: user.id, familyId, childId, kind: 'video', status: 'published', plannedMemoryId: telegramMemory.id, memoryId: telegramMemory.id } })
-  await prisma.telegramVideoReference.create({ data: { sourceId: source.id, memoryId: telegramMemory.id, familyId, fileIdCiphertext: Buffer.from('synthetic-file-id'), encryptionIv: Buffer.alloc(12, 4), encryptionAuthTag: Buffer.alloc(16, 5), fileUniqueId: 'synthetic-unique-id', width: 320, height: 180, durationMs: 8_000 } })
+  await prisma.telegramVideoReference.create({ data: { sourceId: source.id, memoryId: telegramMemory.id, familyId, thumbnailMediaId: thumbnail.id, fileIdCiphertext: Buffer.from('synthetic-file-id'), encryptionIv: Buffer.alloc(12, 4), encryptionAuthTag: Buffer.alloc(16, 5), fileUniqueId: 'synthetic-unique-id', width: 320, height: 180, durationMs: 8_000 } })
 
   return { familyId, childId, userId: user.id, ownerUserId: ownerUser.id, botId, objectKeys, memoryCount: 48 }
 }
@@ -1209,4 +1231,16 @@ async function openFeed(page: Page) {
   await expect(page.locator('[data-memory-kind="photo"]').first()).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
+}
+
+async function selectTheme(page: Page, theme: string) {
+  await page.getByRole('button', { name: 'Семья', exact: true }).click()
+  await page.getByRole('button', { name: 'Настройки' }).click()
+  await page.getByRole('button', { name: 'Оформление' }).click()
+  const saved = page.waitForResponse((response) => response.url().endsWith('/api/users/me') && response.request().method() === 'PATCH')
+  await page.locator(`[data-theme-choice="${theme}"]`).click()
+  await saved
+  await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+  await page.getByRole('button', { name: 'Назад' }).click()
+  await page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
 }

@@ -17,12 +17,12 @@ self.addEventListener('fetch', (event) => {
 })
 
 async function fetchPrivateMedia(request) {
-  if (!accessToken) {
+  const headers = new Headers(request.headers)
+  if (!headers.has('Authorization') && !accessToken) {
     return new Response(null, { status: 401, headers: { 'Cache-Control': 'no-store' } })
   }
 
-  const headers = new Headers(request.headers)
-  headers.set('Authorization', `Bearer ${accessToken}`)
+  if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${accessToken}`)
   return fetch(request.url, {
     method: request.method,
     headers,
