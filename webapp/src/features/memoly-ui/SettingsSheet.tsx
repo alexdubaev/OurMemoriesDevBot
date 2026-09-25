@@ -16,13 +16,13 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
   const { theme, setTheme } = useMemolyTheme()
   const title = view === 'appearance' ? 'Оформление' : view === 'help' ? 'Помощь и приватность' : view === 'about' ? 'О memoLy' : 'Настройки'
   const close = useCallback(() => { setView('menu'); onOpenChange(false) }, [onOpenChange])
-  useEffect(() => { if (!open) return undefined; return hostBridge.onBack(close) }, [close, hostBridge, open])
+  useEffect(() => { if (!open) return undefined; return hostBridge.onBack(() => { if (view !== 'menu') setView('menu'); else close() }) }, [close, hostBridge, open, view])
   return <MemolyBottomSheet onOpenChange={(nextOpen) => { if (!nextOpen) setView('menu'); onOpenChange(nextOpen) }} open={open} returnFocusRef={returnFocusRef}>
-    <div className="ml-settings-sheet" data-slot="memoly-settings-sheet">
-      <DrawerTitle className={view === 'menu' ? 'sr-only' : 'ml-settings-title'}>{title}</DrawerTitle>
+    <div className="ml-settings-sheet" data-slot="memoly-settings-sheet" data-view={view}>
+      <DrawerTitle className="sr-only">{title}</DrawerTitle>
       <DrawerDescription className="sr-only">Настройки оформления и информация о приватности memoLy</DrawerDescription>
       {view === 'menu' ? <SettingsMenu canManageFamily={canManageFamily} onAbout={() => setView('about')} onAppearance={() => setView('appearance')} onArchive={() => { close(); onArchive() }} onFamilySettings={() => { close(); onFamilySettings() }} onHelp={() => setView('help')} theme={theme} /> : <div className="ml-settings-subview">
-        <div className="ml-settings-heading"><button aria-label="Назад" className="ml-settings-back" onClick={() => setView('menu')} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button><span className="ml-settings-subview-title">{title}</span><button aria-label="Закрыть" className="ml-settings-close" onClick={close} type="button"><WebpIcon decorative name="close" size={20} /></button></div>
+        <div className="ml-settings-heading"><button aria-label="Назад" className="ml-settings-back" onClick={() => setView('menu')} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button><span className="ml-settings-subview-title">{title}</span><span aria-hidden="true" className="ml-settings-heading-spacer" /></div>
         {view === 'appearance' ? <AppearanceChoices selected={theme} onSelect={setTheme} /> : null}
         {view === 'help' ? <HelpPrivacy /> : null}
         {view === 'about' ? <AboutMemoLy /> : null}
@@ -45,8 +45,14 @@ function SettingsRow({ icon, onClick, subtitle, title }: { icon: 'gear' | 'info'
   return <button className="ml-sheet-row" onClick={onClick} type="button"><span className="ml-sheet-row-icon"><WebpIcon decorative name={icon} size={22} /></span><span className="ml-sheet-row-copy"><strong>{title}</strong><small>{subtitle}</small></span><span className="ml-sheet-row-chevron"><WebpIcon decorative name="chevron" size={20} /></span></button>
 }
 
-function AppearanceChoices({ onSelect, selected }: { onSelect: (theme: MemolyTheme) => void; selected: MemolyTheme }) {
-  return <div aria-label="Темы memoLy" className="ml-theme-choices" role="listbox"><p className="ml-settings-intro">Выберите палитру. Она сохранится на этом устройстве.</p><div className="ml-theme-grid">{MEMOLY_THEMES.map((theme) => { const config = getMemolyThemeConfig(theme); return <button aria-label={`Тема: ${config.label}`} aria-selected={theme === selected} className={`ml-theme-choice${theme === selected ? ' selected' : ''}`} data-theme-choice={theme} key={theme} onClick={() => onSelect(theme)} role="option" type="button"><span className="ml-theme-swatch" style={{ backgroundImage: `url(${config.headerArtUrl})` }} /><span>{config.label}</span></button> })}</div></div>
+const THEME_DESCRIPTIONS: Record<MemolyTheme, string> = {
+  mint: 'Мята · крем · мягкий шалфей', rose: 'Пыльная роза · крем · тёплый персик',
+  sky: 'Голубой · крем · лимон', lavender: 'Лаванда · крем · шалфей',
+  apricot: 'Абрикос · крем · мята', sand: 'Олива · песок · глина',
+}
+
+export function AppearanceChoices({ onSelect, selected }: { onSelect: (theme: MemolyTheme) => void; selected: MemolyTheme }) {
+  return <div className="ml-theme-choices"><div className="ml-appearance-hero"><span aria-hidden="true" className="ml-appearance-hero-icon"><span /></span><h2>Выберите настроение</h2><p>Тема меняет только акценты: хедер ребёнка, нижнее меню, активный фильтр и реакции. Основной интерфейс остаётся светлым.</p></div><div aria-label="Темы memoLy" className="ml-theme-grid" role="group">{MEMOLY_THEMES.map((theme) => { const config = getMemolyThemeConfig(theme); return <button aria-pressed={theme === selected} className={`ml-theme-choice${theme === selected ? ' selected' : ''}`} data-theme-choice={theme} key={theme} onClick={() => onSelect(theme)} type="button"><span aria-hidden="true" className={`ml-theme-swatch ml-theme-swatch--${theme}`} /><span className="ml-theme-choice-copy"><strong>{config.label}</strong><small>{THEME_DESCRIPTIONS[theme]}</small></span><span aria-hidden="true" className="ml-theme-radio-mark" /></button> })}</div><p className="ml-theme-note">Основной фон, карточки и поля одинаковы во всех темах. Оформление не зависит от пола ребёнка.</p></div>
 }
 
 function HelpPrivacy() { return <div className="ml-settings-copy"><h2>Приватные воспоминания</h2><p>Фото, видео, голосовые и заметки доступны только участникам вашей семьи.</p><p>Роль просмотра позволяет открывать материалы и ставить лайки. Создание, изменение и удаление доступны только участникам с соответствующими правами.</p></div> }
