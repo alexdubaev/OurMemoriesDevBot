@@ -211,9 +211,13 @@ function ProgressBar({ label }: { label: string }) {
 }
 
 function PhotoPreview({ file, index, onRemove }: { file: File; index: number; onRemove: (index: number) => void }) {
-  const [src] = useState<string | null>(() => typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : null)
+  const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
-    return () => { if (src) URL.revokeObjectURL(src) }
-  }, [src])
+    if (typeof URL.createObjectURL !== 'function') return
+    const nextSrc = URL.createObjectURL(file)
+    let active = true
+    queueMicrotask(() => { if (active) setSrc(nextSrc) })
+    return () => { active = false; URL.revokeObjectURL(nextSrc) }
+  }, [file])
   return <figure className="memoly-add-photo-thumb">{src ? <img alt={`Выбранное фото ${index + 1}`} src={src} /> : <Typography as="span" variant="memoryMeta">{file.name}</Typography>}<button aria-label={`Удалить ${file.name}`} onClick={() => onRemove(index)} type="button"><Typography aria-hidden as="span" variant="memoryBody">×</Typography></button></figure>
 }
