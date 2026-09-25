@@ -37,6 +37,12 @@ describe('user and admin contracts', () => {
     ).toThrow()
   })
 
+  test('accepts a supported memoLy theme as a standalone user profile preference', () => {
+    expect(updateProfileRequestSchema.parse({ theme: 'rose' })).toEqual({ theme: 'rose' })
+    expect(() => updateProfileRequestSchema.parse({ theme: 'dark' })).toThrow()
+    expect(() => updateProfileRequestSchema.parse({})).toThrow()
+  })
+
   test('normalizes bounded admin list queries', () => {
     expect(adminUsersQuerySchema.parse({})).toEqual({
       page: 1,

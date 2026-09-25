@@ -9,6 +9,7 @@ import {
   ThemeProvider,
   getMemolyThemeConfig,
   isMemolyTheme,
+  readMemolyTheme,
 } from '../src/features/theme'
 
 test('memoLy exposes exactly the six canonical themes and local header artwork', () => {
@@ -28,6 +29,19 @@ test('ThemeProvider applies the selected theme at the app root', () => {
 
   expect(markup).toContain('data-memoly-theme="mint"')
   expect(markup).toContain('data-slot="memoly-theme-root"')
+})
+
+test('legacy browser-local theme values cannot choose the application theme', () => {
+  const originalWindow = globalThis.window
+  Object.assign(globalThis, {
+    window: { localStorage: { getItem: () => 'rose' } },
+  })
+
+  try {
+    expect(readMemolyTheme()).toBe('mint')
+  } finally {
+    Object.assign(globalThis, { window: originalWindow })
+  }
 })
 
 test('ChildHeader keeps Feed controls-free while Family adds overlay settings', () => {

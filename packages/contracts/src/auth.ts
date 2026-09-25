@@ -16,12 +16,14 @@ export const passwordSchema = z
   .max(128, 'Password must be at most 128 characters')
 
 export const userRoleSchema = z.enum(['user', 'admin'])
+export const memolyThemeSchema = z.enum(['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'])
 
 export const userSchema = z.object({
   id: z.string(),
   email: emailSchema.nullable(),
   displayName: z.string().nullable(),
   role: userRoleSchema,
+  theme: memolyThemeSchema.optional(),
   createdAt: z.string().datetime(),
 })
 
@@ -126,6 +128,7 @@ export type BrowserLinkApproveResponse = z.infer<typeof browserLinkApproveRespon
 export type BrowserLinkApproveRequest = z.infer<typeof browserLinkApproveRequestSchema>
 export type BrowserLinkChallengeParams = z.infer<typeof browserLinkChallengeParamsSchema>
 export type UserRole = z.infer<typeof userRoleSchema>
+export type MemolyTheme = z.infer<typeof memolyThemeSchema>
 export type RegisterRequest = z.input<typeof registerRequestSchema>
 export type RegisterPayload = z.output<typeof registerRequestSchema>
 export type LoginRequest = z.infer<typeof loginRequestSchema>

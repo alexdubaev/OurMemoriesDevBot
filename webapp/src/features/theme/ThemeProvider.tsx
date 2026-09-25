@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react'
 
-import { MEMOLY_THEME_STORAGE_KEY, readMemolyTheme, type MemolyTheme } from './theme'
+import { AuthContext } from '@/features/auth'
+import { isMemolyTheme, type MemolyTheme } from './theme'
 
 type MemolyThemeContextValue = {
   theme: MemolyTheme
@@ -11,12 +12,35 @@ type MemolyThemeContextValue = {
 const MemolyThemeContext = createContext<MemolyThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: PropsWithChildren) {
-  const [theme, setThemeState] = useState<MemolyTheme>(readMemolyTheme)
-  const setTheme = useCallback((nextTheme: MemolyTheme) => setThemeState(nextTheme), [])
+  const auth = useContext(AuthContext)
+  const serverTheme = isMemolyTheme(auth?.user?.theme) ? auth.user.theme : 'mint'
+  const [theme, setThemeState] = useState<MemolyTheme>(serverTheme)
+  const updateQueue = useRef<Promise<void>>(Promise.resolve())
+  const latestUpdate = useRef(0)
+  const updatePending = useRef(false)
+  const setTheme = useCallback((nextTheme: MemolyTheme) => {
+    setThemeState(nextTheme)
+    if (!auth?.user) return
+    const updateId = ++latestUpdate.current
+    updatePending.current = true
+    const update = updateQueue.current.catch(() => undefined).then(() => auth.updateTheme(nextTheme))
+    updateQueue.current = update
+    void update.then(() => {
+      if (updateId === latestUpdate.current) updatePending.current = false
+    }).catch(() => {
+      if (updateId === latestUpdate.current) {
+        updatePending.current = false
+        setThemeState(auth.user?.theme ?? 'mint')
+      }
+    })
+  }, [auth])
+
+  useEffect(() => {
+    if (!updatePending.current) setThemeState(serverTheme)
+  }, [serverTheme])
 
   useEffect(() => {
     document.documentElement.dataset.memolyTheme = theme
-    window.localStorage.setItem(MEMOLY_THEME_STORAGE_KEY, theme)
   }, [theme])
 
   const value = useMemo(() => ({ theme, setTheme }), [setTheme, theme])

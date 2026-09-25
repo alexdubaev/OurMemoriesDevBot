@@ -342,7 +342,9 @@ test('app settings matches the six-theme appearance flow across mobile widths', 
   await expect(owner.page.locator('[data-theme-choice="sky"]')).toBeFocused()
   await owner.page.keyboard.press('Enter')
   await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'sky')
+  const sandSaved = owner.page.waitForResponse((response) => response.url().endsWith('/api/users/me') && response.request().method() === 'PATCH')
   await owner.page.locator('[data-theme-choice="sand"]').click()
+  await sandSaved
   await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
   await expect(owner.page.locator('[data-slot="memoly-settings-sheet"][data-view="menu"]')).toBeVisible()
   await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
@@ -474,6 +476,62 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('dialog', { name: 'Удалить участника из семьи?' }).getByRole('button', { name: 'Удалить', exact: true }).click()
   await expect(owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Петя' })).toHaveCount(0)
   await full.context.close()
+  await owner.context.close()
+})
+
+test('the account theme is shared by fresh PWA and MAX WebView contexts despite legacy local values', async ({ browser, page }) => {
+  const owner = await createCompletedOwner(page, 81000062)
+  await owner.page.getByRole('button', { name: 'Настройки' }).click()
+  await owner.page.getByRole('button', { name: 'Оформление' }).click()
+  const themeSaved = owner.page.waitForResponse((response) => response.url().endsWith('/api/users/me') && response.request().method() === 'PATCH')
+  await owner.page.locator('[data-theme-choice="rose"]').click()
+  expect((await themeSaved).status()).toBe(200)
+  await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+
+  const origin = new URL(owner.page.url()).origin
+  const storageState = await owner.context.storageState()
+  const pwaContext = await browser.newContext({ baseURL: origin, storageState, viewport: { width: 390, height: 844 } })
+  const pwaPage = await pwaContext.newPage()
+  await pwaPage.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true })
+    const originalMatchMedia = window.matchMedia.bind(window)
+    window.matchMedia = (query) => {
+      const result = originalMatchMedia(query)
+      if (query === '(display-mode: standalone)') Object.defineProperty(result, 'matches', { configurable: true, value: true })
+      return result
+    }
+  })
+  await installTelegramHost(pwaPage, signedInitData(81000062, 'Организатор E2E'))
+  await pwaPage.goto('/')
+  await expect(pwaPage.getByRole('button', { name: 'Лента' })).toBeVisible()
+  await expect(pwaPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+  await pwaPage.reload()
+  await expect(pwaPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+
+  const maxContext = await browser.newContext({
+    baseURL: origin,
+    storageState,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MAXWebView/1.0',
+    viewport: { width: 390, height: 844 },
+  })
+  const maxPage = await maxContext.newPage()
+  await maxPage.addInitScript((legacyTheme) => localStorage.setItem('memoly-theme', legacyTheme), 'sand')
+  await maxPage.addInitScript((initData) => {
+    const webApp = { initData, version: '1.0', ready() {} }
+    Object.defineProperty(window, 'WebApp', { configurable: false, get: () => webApp })
+  }, signedInitData(81000062, 'Организатор E2E'))
+  await maxPage.route('**/api/v1/auth/max', async (route) => {
+    const response = await route.fetch({ url: route.request().url().replace('/api/v1/auth/max', '/api/v1/auth/telegram') })
+    await route.fulfill({ response })
+  })
+  await maxPage.goto('/')
+  await expect(maxPage.getByRole('button', { name: 'Лента' })).toBeVisible()
+  await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+  await maxPage.reload()
+  await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+
+  await maxContext.close()
+  await pwaContext.close()
   await owner.context.close()
 })
 
@@ -675,6 +733,14 @@ test('child profile keeps protected avatar, actions, and geometry at mobile widt
   await owner.page.getByRole('button', { name: 'Семья' }).click()
   await expect(owner.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(profile).toHaveCount(0)
+
+  for (let transition = 0; transition < 3; transition += 1) {
+    await expect(owner.page.locator('[data-child-header-mode="family"] [data-slot="child-avatar-image"]')).toHaveAttribute('src', /^blob:/)
+    await owner.page.getByRole('button', { name: 'Лента' }).click()
+    await expect(owner.page.locator('[data-child-header-mode="feed"] [data-slot="child-avatar-image"]')).toHaveAttribute('src', /^blob:/)
+    await owner.page.getByRole('button', { name: 'Семья' }).click()
+    await expect(owner.page.locator('[data-slot="family-presentation"]')).toBeVisible()
+  }
 
   await owner.page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()
   await expect(profile).toHaveAttribute('aria-label', 'Профиль ребёнка')

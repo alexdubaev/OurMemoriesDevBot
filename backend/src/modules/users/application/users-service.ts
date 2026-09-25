@@ -4,6 +4,7 @@ import type {
   UpdateUserRoleRequest,
   UserDto,
 } from '@web-app-demo/contracts'
+import { memolyThemeSchema } from '@web-app-demo/contracts'
 
 import type { AuthenticatedPrincipal } from '../../auth'
 import type {
@@ -29,7 +30,7 @@ export class UsersService {
   async updateProfile(principal: AuthenticatedPrincipal, input: UpdateProfileRequest) {
     const user = await this.dependencies.profileWriter.updateProfile(
       principal.id,
-      input.displayName,
+      { displayName: input.displayName, theme: input.theme },
     )
     return {
       user: this.userDto(user),
@@ -66,6 +67,7 @@ export class UsersService {
       email: user.email,
       displayName: user.displayName,
       role: user.role,
+      theme: memolyThemeSchema.parse(user.uiTheme ?? 'mint'),
       createdAt: user.createdAt.toISOString(),
     }
   }

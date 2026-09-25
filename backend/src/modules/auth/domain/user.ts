@@ -1,4 +1,4 @@
-import type { UserDto, UserRole } from '@web-app-demo/contracts'
+import { memolyThemeSchema, type UserDto, type UserRole } from '@web-app-demo/contracts'
 
 export type AuthUserRecord = {
   id: string
@@ -6,6 +6,7 @@ export type AuthUserRecord = {
   passwordHash: string | null
   displayName: string | null
   role: UserRole
+  uiTheme?: string
   createdAt: Date
 }
 
@@ -26,6 +27,7 @@ export function toBaseUserDto(user: AuthUserRecord): UserDto {
     email: user.email,
     displayName: user.displayName,
     role: user.role,
+    theme: memolyThemeSchema.parse(user.uiTheme ?? 'mint'),
     createdAt: user.createdAt.toISOString(),
   }
 }

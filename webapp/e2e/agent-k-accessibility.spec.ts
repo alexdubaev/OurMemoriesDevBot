@@ -74,12 +74,19 @@ test('Agent K scans production Feed, Family, Member, Add, Settings and form stat
   await page.getByRole('button', { name: 'Семья' }).click()
   await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
 
-  for (const theme of themes) {
-    await page.evaluate((value) => localStorage.setItem('memoly-theme', value), theme)
-    await page.reload()
+  for (const [index, theme] of themes.entries()) {
+    if (index > 0) {
+      await page.reload()
+      await page.getByRole('button', { name: 'Семья' }).click()
+    }
+    await page.getByRole('button', { name: 'Настройки' }).click()
+    await page.getByRole('button', { name: 'Оформление' }).click()
+    const savedTheme = page.waitForResponse((response) => response.url().endsWith('/api/users/me') && response.request().method() === 'PATCH')
+    await page.locator(`[data-theme-choice="${theme}"]`).click()
+    await savedTheme
     await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
-    await page.getByRole('button', { name: 'Семья' }).click()
-    await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+    await page.getByRole('button', { name: 'Назад' }).click()
+    await page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
     await scan(theme, 'Family')
 
     await page.getByRole('button', { name: /Открыть профиль ребёнка:/ }).click()

@@ -23,6 +23,7 @@ const userSummarySelect = {
   id: true,
   email: true,
   displayName: true,
+  uiTheme: true,
   role: true,
   createdAt: true,
 } as const
@@ -35,10 +36,10 @@ type UsersRepository =
 
 export function createPrismaUsersRepository(db: DbClient): UsersRepository {
   return {
-    updateProfile(userId, displayName) {
+    updateProfile(userId, input) {
       return db.user.update({
         where: { id: userId },
-        data: { displayName },
+        data: { displayName: input.displayName === undefined ? undefined : input.displayName, uiTheme: input.theme },
         select: userSummarySelect,
       })
     },
@@ -137,6 +138,7 @@ function toAdminUserSummary(user: {
   id: string
   email: string | null
   displayName: string | null
+  uiTheme: string
   role: UserRole
   createdAt: Date
 }): AdminUserSummary {

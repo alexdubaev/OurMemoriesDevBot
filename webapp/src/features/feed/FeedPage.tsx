@@ -12,6 +12,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { privateMediaSource } from '@/platform/media/private-media-access'
+import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
 import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { loadFeed, openTelegramVideo } from './api'
@@ -619,12 +620,14 @@ function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTrans
   const [loaded, setLoaded] = useState<{ path: string; url: string | null } | null>(null)
   useEffect(() => {
     if (!path || !transport) return
-    let cancelled = false; let objectUrl: string | null = null
-    void transport.raw(path).then(async (response) => {
-      objectUrl = URL.createObjectURL(await response.blob())
-      if (cancelled) URL.revokeObjectURL(objectUrl); else setLoaded({ path, url: objectUrl })
-    }).catch(() => { if (!cancelled) setLoaded({ path, url: null }) })
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    void transport.raw(path, { signal: controller.signal }).then(async (response) => {
+      objectUrl = await responseToPrivateImageObjectUrl(response)
+      if (controller.signal.aborted) URL.revokeObjectURL(objectUrl)
+      else setLoaded({ path, url: objectUrl })
+    }).catch(() => { if (!controller.signal.aborted) setLoaded({ path, url: null }) })
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [path, transport])
   return loaded?.path === path ? loaded.url : null
 }
@@ -655,8 +658,8 @@ async function showPrivatePhotoAlbum(
   try {
     for (const attachment of attachments) {
       const path = attachment.displayPath ?? attachment.originalDownloadPath
-      const response = await transport.raw(path)
-      const src = URL.createObjectURL(await response.blob())
+      const response = await transport.raw(path, { signal })
+      const src = await responseToPrivateImageObjectUrl(response)
       slides.push({
         src,
         width: attachment.width ?? undefined,
