@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { act, createElement } from 'react'
+import { act, createElement, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import {
@@ -20,6 +20,44 @@ test('accepts one to ten supported photos and rejects video or an eleventh photo
   expect(validatePhotoFiles(Array.from({ length: 10 }, (_, index) => file(`${index}.png`, 128, 'image/png')))).toEqual({ ok: true })
   expect(validatePhotoFiles([file('clip.mp4', 128, 'video/mp4')])).toEqual({ ok: false, code: 'unsupported_format' })
   expect(validatePhotoFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`)))).toEqual({ ok: false, code: 'too_many' })
+})
+
+test('keeps the StrictMode rehearsal photo preview URL live', async () => {
+  const browser = installInteractiveDom()
+  const createObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+  const revokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+  let nextUrl = 0
+  const revoked: string[] = []
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => `blob:photo-preview-${++nextUrl}` })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: (url: string) => { revoked.push(url) } })
+  const transport: AuthenticatedTransport = { request: async () => ({}) as never, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  let didUnmount = false
+
+  try {
+    await act(async () => root.render(createElement(StrictMode, null, createElement(PhotoComposer, {
+      childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport,
+      onCancel: () => undefined, onSuccess: () => undefined,
+    }))))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('strict-mode-preview.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+
+    const image = findOne(browser.container, (node) => node.tagName === 'IMG' && node.attributes.alt?.startsWith('Выбранное фото'))
+    const liveSrc = image.attributes.src
+    expect(liveSrc).toBeDefined()
+    expect(revoked).not.toContain(liveSrc)
+    await act(async () => root.unmount())
+    didUnmount = true
+    expect(revoked).toContain(liveSrc)
+  } finally {
+    if (!didUnmount) await act(async () => root.unmount())
+    browser.restore()
+    if (createObjectUrlDescriptor) Object.defineProperty(URL, 'createObjectURL', createObjectUrlDescriptor)
+    else Reflect.deleteProperty(URL, 'createObjectURL')
+    if (revokeObjectUrlDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeObjectUrlDescriptor)
+    else Reflect.deleteProperty(URL, 'revokeObjectURL')
+  }
 })
 
 test('uses family today for the default date and sends today as now, not future noon UTC', () => {
