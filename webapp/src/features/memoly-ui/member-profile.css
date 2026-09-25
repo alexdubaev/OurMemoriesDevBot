@@ -42,12 +42,12 @@
 .member-profile-error { color: #a23540; font-size: 12px; }
 .member-profile-error button { display: block; min-height: 40px; margin-top: 5px; border: 0; color: var(--theme-accent-text); background: transparent; font: inherit; font-weight: 700; }
 .member-profile-success { color: var(--theme-accent-text); font-size: 12px; }
-.member-remove-modal { width: min(calc(100% - 40px), 350px); padding: 24px; border: 0; border-radius: 27px; text-align: center; color: var(--theme-text); background: var(--theme-surface-hi); box-shadow: var(--theme-raised-shadow); }
+.member-remove-modal { position: fixed; top: 50%; left: 50%; box-sizing: border-box; width: min(calc(100% - 28px), 390px); max-width: none; margin: 0; padding: 22px 18px 18px; transform: translate(-50%, -50%); border: 0; border-radius: 28px; text-align: center; color: var(--theme-text); background: var(--theme-sheet); box-shadow: var(--theme-raised-shadow); }
 .member-remove-modal::backdrop { background: rgba(29, 37, 34, .42); }
-.member-remove-icon { display: grid; width: 52px; height: 52px; place-items: center; margin: 0 auto 14px; border-radius: 50%; color: #c76064; background: #f8eeee; font-size: 26px; }
-.member-remove-modal h2 { margin: 0 0 9px; font-size: 19px; }
-.member-remove-modal p { margin: 0; color: var(--theme-text-muted); font-size: 13px; line-height: 1.4; }
-.member-remove-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 21px; }
+.member-remove-icon { display: grid; width: 66px; height: 66px; place-items: center; margin: 0 auto 16px; border-radius: 50%; color: #c76064; background: linear-gradient(145deg, #f8eeee, #eee3e2); font-size: 26px; }
+.member-remove-modal h2 { margin: 0; font-size: 20px; }
+.member-remove-modal p { margin: 8px 0 18px; color: var(--theme-text-muted); font-size: 13px; line-height: 1.4; }
+.member-remove-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .member-remove-actions button { min-height: 46px; border: 0; border-radius: 16px; color: var(--theme-text); background: var(--theme-inset-hi); font-weight: 700; }
 .member-remove-actions button:last-child { color: #fff; background: #bd555c; }
 @media (max-width: 390px) { .member-profile-hero { grid-template-columns: 68px minmax(0, 1fr) auto; gap: 9px; } .member-profile-avatar-wrap, .member-profile-avatar { width: 68px; height: 68px; } .member-profile-hero h2 { font-size: 18px; } .member-profile-role-badge { padding: 5px 6px; font-size: 9px; } }

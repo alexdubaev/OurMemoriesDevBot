@@ -487,22 +487,72 @@ test.describe.serial('T07 live feed', () => {
             navBottom: navRect.bottom,
             navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
             sheetBottom: sheetRect.bottom,
+            navCovered: Boolean(document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 40)?.closest('[data-slot="memoly-bottom-sheet"]')),
           }
         })
         expect(geometry).not.toBeNull()
         expect(geometry!.minLeft).toBeGreaterThanOrEqual(0)
         expect(geometry!.maxRight).toBeLessThanOrEqual(geometry!.viewportWidth)
-        expect(geometry!.maxBottom).toBeLessThanOrEqual(geometry!.navTop + 1)
+        expect(geometry!.maxBottom).toBeLessThanOrEqual(geometry!.viewportHeight - 12)
         expect(geometry!.documentWidth).toBeLessThanOrEqual(geometry!.viewportWidth)
         expect(geometry!.maxTop - geometry!.minTop).toBeLessThanOrEqual(1)
         expect(geometry!.navBottom).toBe(geometry!.viewportHeight)
         expect(geometry!.navTop).toBeLessThan(geometry!.navBottom)
         expect(geometry!.navPaddingBottom).toBeGreaterThanOrEqual(0)
+        expect(geometry!.navCovered).toBe(true)
+        if (width === 320 || width === 390) {
+          const sheetTop = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => element.getBoundingClientRect().top)
+          expect(sheetTop).toBeGreaterThanOrEqual(width === 320 ? 631 : 640)
+          expect(sheetTop).toBeLessThanOrEqual(width === 320 ? 637 : 652)
+          expect(geometry!.minTop).toBeGreaterThanOrEqual(700)
+        }
 
         await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-add-${width}.png`), animations: 'disabled' })
         await page.keyboard.press('Escape')
         await expect(panel).toHaveCount(0)
       }
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+      await page.waitForTimeout(500)
+      for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+        await page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), theme)
+        const top = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => element.getBoundingClientRect().top)
+        expect(top).toBeGreaterThanOrEqual(640)
+        expect(top).toBeLessThanOrEqual(652)
+        await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-add-${theme}-390.png`), animations: 'disabled' })
+      }
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-slot="memoly-add-sheet-panel"]')).toHaveCount(0)
+      const addButton = page.getByRole('button', { name: 'Добавить', exact: true })
+      await expect(addButton).toBeFocused()
+      await addButton.click()
+      await expect(page.locator('[data-slot="memoly-add-sheet-panel"]')).toBeVisible()
+      const textScale = await page.addStyleTag({ content: `.memoly-add-sheet-panel .sheet-title { font-size: 32px !important; } .memoly-add-sheet-panel .sheet-subtitle { font-size: 22px !important; } .memoly-add-sheet-panel .add-option-title { font-size: 26px !important; } .memoly-add-sheet-panel .add-option-copy { font-size: 20px !important; }` })
+      await page.waitForTimeout(500)
+      const scaledLayout = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { top: rect.top, right: rect.right, bottom: rect.bottom, scrollWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth }
+      })
+      expect(scaledLayout.top).toBeGreaterThanOrEqual(0)
+      expect(scaledLayout.right).toBeLessThanOrEqual(scaledLayout.viewportWidth)
+      expect(scaledLayout.bottom).toBeLessThanOrEqual(844)
+      expect(scaledLayout.scrollWidth).toBeLessThanOrEqual(scaledLayout.viewportWidth)
+      await page.screenshot({ path: resolve('e2e/.artifacts/full-ui-add-text-200-390.png'), animations: 'disabled' })
+      await textScale.evaluate((element) => element.remove())
+      await page.getByRole('button', { name: 'Добавить голос или видео' }).click()
+      await expect(page.locator('[data-slot="memoly-voice-video-sheet"]')).toBeVisible()
+      await page.getByRole('button', { name: 'Назад' }).click()
+      await expect(page.locator('[data-slot="memoly-add-sheet-panel"]')).toBeVisible()
+      await page.goBack()
+      await expect(page.locator('[data-slot="memoly-add-sheet-panel"]')).toHaveCount(0)
+      await addButton.click()
+      await page.getByRole('button', { name: 'Добавить заметку' }).click()
+      await expect(page.getByRole('heading', { name: 'Добавить заметку' })).toBeVisible()
+      await page.getByRole('button', { name: 'Назад' }).click()
+      await addButton.click()
+      await page.getByRole('button', { name: 'Добавить фото' }).click()
+      await expect(page.getByRole('heading', { name: 'Добавить фото' })).toBeVisible()
+      await page.getByRole('button', { name: 'Назад' }).click()
     } finally {
       await prisma.familyMember.update({
         where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },

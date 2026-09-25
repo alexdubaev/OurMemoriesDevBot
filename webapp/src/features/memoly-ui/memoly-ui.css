@@ -206,7 +206,6 @@
 [data-slot='memoly-bottom-sheet']:has(.ml-settings-sheet) > div:last-child { padding-bottom: calc(var(--layout-bottom-nav, 76px) + var(--host-inset-bottom, 0px)); }
 [data-slot='drawer-overlay']:has(+ [data-slot='memoly-bottom-sheet']) { backdrop-filter: blur(7px) saturate(.92); }
 body:has([data-slot='memoly-settings-sheet']) [data-slot='bottom-navigation'][data-bottom-navigation-appearance='memoly'] { z-index: 60; }
-body:has([data-slot='memoly-add-sheet-panel']) [data-slot='bottom-navigation'][data-bottom-navigation-appearance='memoly'] { z-index: 60; }
 body:has(.memoly-delete-content) [data-slot='bottom-navigation'][data-bottom-navigation-appearance='memoly'] { z-index: 82; pointer-events: none; }
 
 /* App Settings v2: keep the existing modal and theme state, with a page-sized appearance view. */
@@ -280,35 +279,23 @@ body:has(.ml-settings-sheet[data-view='menu']) [data-slot='bottom-navigation'][d
 
 [data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) { max-height: 100dvh; border-radius: 36px 36px 0 0; background: linear-gradient(155deg, rgb(252 252 248 / 99.5%), rgb(239 241 235 / 99.5%)); }
 [data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) > .hidden { display: none !important; }
-[data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) > div:last-child { padding: 24px 15px calc(var(--layout-bottom-nav, 76px) + var(--host-inset-bottom, 0px) + 17px); }
-[data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) [data-slot='memoly-bottom-sheet-handle'] { width: 52px; height: 6px; margin-top: 0; margin-bottom: 1px; background: rgb(154 164 170 / 100%); transform: translateY(12px); }
+[data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) > div:last-child { padding: 5px 12px calc(14px + var(--host-inset-bottom, 0px)); }
+[data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) [data-slot='memoly-bottom-sheet-handle'] { width: 52px; height: 6px; margin-top: 8px; margin-bottom: 0; background: rgb(154 164 170 / 100%); }
 
 /* Approved Add sheet composition: three horizontal option cards. */
 .memoly-add-sheet-panel { padding-top: 0; }
-.memoly-add-sheet-panel .sheet-title { margin: 0; color: var(--theme-text, var(--ml-ink)); font-size: clamp(25px, 6.5vw, 31px); font-weight: 780; letter-spacing: -.5px; line-height: 1.08; text-align: center; }
-.memoly-add-sheet-panel .sheet-subtitle { margin: 6px 0 17px; color: var(--theme-text-muted, var(--ml-muted)); font-size: clamp(14px, 3.8vw, 17px); line-height: 1.25; text-align: center; }
-.memoly-add-sheet-panel .add-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.memoly-add-sheet-panel .add-option { display: flex; min-width: 0; min-height: 148px; flex-direction: column; align-items: center; padding: 9px 6px; border: 0; border-radius: 22px; color: var(--theme-text, var(--ml-ink)); text-align: center; background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)); box-shadow: var(--theme-raised-shadow, var(--shadow-card)); cursor: pointer; }
+.memoly-add-sheet-panel .sheet-title { margin: 1px 0 3px; color: var(--theme-text, var(--ml-ink)); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; font-size: 16px; font-weight: 780; letter-spacing: -.01em; line-height: 1.18; text-align: center; }
+.memoly-add-sheet-panel .sheet-subtitle { margin: 0 0 12px; color: var(--theme-text-muted, var(--ml-muted)); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; font-size: 11px; line-height: 1.3; text-align: center; }
+.memoly-add-sheet-panel .add-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.memoly-add-sheet-panel .add-option { display: flex; min-width: 0; min-height: 104px; flex-direction: column; align-items: center; padding: 10px 5px 8px; border: 0; border-radius: 18px; color: var(--theme-text, var(--ml-ink)); text-align: center; background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-surface-lo)); box-shadow: var(--theme-raised-shadow, var(--shadow-card)); cursor: pointer; }
 .memoly-add-sheet-panel .add-option:active { transform: scale(.985); box-shadow: var(--theme-inset-shadow); }
-.memoly-add-sheet-panel .add-option-icon { display: grid; width: 46px; height: 46px; place-items: center; margin: 0 0 8px; border-radius: 15px; color: white; box-shadow: var(--theme-raised-shadow, var(--shadow-card)); }
-.memoly-add-sheet-panel .add-option-icon [data-slot='webp-icon'] { width: 26px; height: 26px; filter: brightness(0) invert(1); }
+.memoly-add-sheet-panel .add-option-icon { display: grid; width: 46px; height: 46px; place-items: center; margin: 0 0 7px; border-radius: 15px; color: white; box-shadow: var(--theme-raised-shadow, var(--shadow-card)); }
+.memoly-add-sheet-panel .add-option-icon [data-slot='webp-icon'] { width: 23px; height: 23px; filter: brightness(0) invert(1); }
 .memoly-add-sheet-panel .kind-photo .add-option-icon { background: linear-gradient(145deg, #aac7b6, #83aa96); }
 .memoly-add-sheet-panel .kind-note .add-option-icon { background: linear-gradient(145deg, #efd080, #dcae52); }
 .memoly-add-sheet-panel .kind-media .add-option-icon { background: linear-gradient(145deg, #df9b90, #c97572); }
-.memoly-add-sheet-panel .add-option-title { display: flex; min-height: 28px; align-items: center; justify-content: center; font-size: clamp(13px, 3.35vw, 15.5px); font-weight: 760; line-height: 1.04; }
-.memoly-add-sheet-panel .add-option-copy { margin-top: 3px; color: var(--theme-text-muted, var(--ml-muted)); font-size: clamp(9.5px, 2.6vw, 11.5px); line-height: 1.12; }
-@media (max-width: 355px) {
-  [data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) > div:last-child { padding-inline: 10px; padding-top: 13px; }
-  [data-slot='memoly-bottom-sheet']:has(.memoly-add-sheet-panel) [data-slot='memoly-bottom-sheet-handle'] { width: 42px; height: 5px; margin-bottom: 13px; }
-  .memoly-add-sheet-panel .sheet-title { font-size: 20px; }
-  .memoly-add-sheet-panel .sheet-subtitle { margin: 5px 0 14px; font-size: 12.5px; }
-  .memoly-add-sheet-panel .add-options { gap: 6px; }
-  .memoly-add-sheet-panel .add-option { min-height: 112px; padding: 7px 4px; border-radius: 19px; }
-  .memoly-add-sheet-panel .add-option-icon { width: 40px; height: 40px; border-radius: 13px; margin-bottom: 6px; }
-  .memoly-add-sheet-panel .add-option-icon [data-slot='webp-icon'] { width: 23px; height: 23px; }
-  .memoly-add-sheet-panel .add-option-title { min-height: 25px; font-size: 11.6px; }
-  .memoly-add-sheet-panel .add-option-copy { margin-top: 2px; font-size: 8.8px; line-height: 1.08; }
-}
+.memoly-add-sheet-panel .add-option-title { display: flex; min-height: 18px; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; font-size: 13px; font-weight: 760; line-height: 1.15; }
+.memoly-add-sheet-panel .add-option-copy { margin-top: 3px; color: var(--theme-text-muted, var(--ml-muted)); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; font-size: 10px; line-height: 1.18; }
 .media-choice-body { display: grid; gap: 18px; padding: 4px 3px 28px; }
 .media-choice-card { display: grid; width: 100%; min-height: 186px; grid-template-columns: 76px minmax(0, 1fr) 26px; align-items: center; gap: 18px; padding: 24px 22px; border: 0; border-radius: 30px; color: var(--theme-text, var(--ml-ink)); background: linear-gradient(145deg, var(--theme-surface-bright, var(--theme-surface-hi)), var(--theme-surface-lo)); box-shadow: 9px 10px 23px rgb(104 122 112 / 15%), -8px -8px 20px rgb(255 255 255 / 92%), inset 1px 1px 0 rgb(255 255 255 / 86%); text-align: left; }
 .media-choice-card:active { transform: translateY(1px) scale(.99); }
