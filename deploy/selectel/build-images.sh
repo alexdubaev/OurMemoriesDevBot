@@ -24,19 +24,24 @@ require_command docker
 require_command mktemp
 require_command tar
 
-origin=$(git config --get remote.origin.url || true)
+CHECKOUT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+repo_git() {
+  git -c "safe.directory=$CHECKOUT_ROOT" -C "$CHECKOUT_ROOT" "$@"
+}
+
+origin=$(repo_git config --get remote.origin.url || true)
 case "$origin" in
   https://github.com/alexdubaev/OurMemoriesDevBot.git|git@github.com:alexdubaev/OurMemoriesDevBot.git) ;;
   *) die 'remote.origin.url must be the canonical OurMemoriesDevBot repository' ;;
 esac
 
-head=$(git rev-parse HEAD 2>/dev/null || true)
+head=$(repo_git rev-parse HEAD 2>/dev/null || true)
 [ "$head" = "$PRODUCT_SHA" ] || die "checkout HEAD must equal requested SHA ($PRODUCT_SHA)"
-[ -z "$(git status --porcelain)" ] || die 'checkout must be clean before building images'
-git cat-file -e "$PRODUCT_SHA^{commit}" 2>/dev/null || die 'requested SHA is not a local commit'
-accepted_sha=$(git rev-parse refs/remotes/origin/main 2>/dev/null || true)
+[ -z "$(repo_git status --porcelain)" ] || die 'checkout must be clean before building images'
+repo_git cat-file -e "$PRODUCT_SHA^{commit}" 2>/dev/null || die 'requested SHA is not a local commit'
+accepted_sha=$(repo_git rev-parse refs/remotes/origin/main 2>/dev/null || true)
 [ -n "$accepted_sha" ] || die 'origin/main is missing; fetch the canonical remote before building'
-git merge-base --is-ancestor "$PRODUCT_SHA" "$accepted_sha" || die 'requested SHA is not accepted by origin/main'
+repo_git merge-base --is-ancestor "$PRODUCT_SHA" "$accepted_sha" || die 'requested SHA is not accepted by origin/main'
 
 : "${SELECTEL_MAX_BOT_USERNAME:?SELECTEL_MAX_BOT_USERNAME must contain the public MAX bot username}"
 [[ "$SELECTEL_MAX_BOT_USERNAME" =~ ^[A-Za-z0-9_]{5,32}$ ]] || die 'SELECTEL_MAX_BOT_USERNAME has an invalid public username format'
@@ -51,7 +56,7 @@ trap cleanup EXIT
 
 # Build from a tracked archive so ignored files on a long-lived host checkout
 # cannot enter a Docker context and change the artifact.
-git archive --format=tar "$PRODUCT_SHA" | tar -xf - -C "$BUILD_CONTEXT"
+repo_git archive --format=tar "$PRODUCT_SHA" | tar -xf - -C "$BUILD_CONTEXT"
 
 docker build \
   --label "org.opencontainers.image.revision=$PRODUCT_SHA" \
