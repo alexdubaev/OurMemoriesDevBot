@@ -1413,6 +1413,222 @@
       "alpha": true,
       "bytes": 1954,
       "sha256": "72a0561e84d98fc76ec704822389079b32f0c68223db3e6f682860e14c9af011"
+    },
+    {
+      "path": "assets/icons/palette-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 692,
+      "sha256": "306db3b82e4d78ec37e6439c49ebff747dea9e299388a53d53121f6850ea20ff"
+    },
+    {
+      "path": "assets/icons/palette-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1020,
+      "sha256": "bf2ce78c993ee0c30a76929451b6e0c89e4cd823aca054adbb6a1efaef7d318c"
+    },
+    {
+      "path": "assets/icons/palette-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 692,
+      "sha256": "306db3b82e4d78ec37e6439c49ebff747dea9e299388a53d53121f6850ea20ff"
+    },
+    {
+      "path": "assets/icons/palette-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1020,
+      "sha256": "bf2ce78c993ee0c30a76929451b6e0c89e4cd823aca054adbb6a1efaef7d318c"
+    },
+    {
+      "path": "assets/icons/help-circle-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 644,
+      "sha256": "89038dc9eec80de6b9f9ea4e2e406efb71b04b31a10c10f7bce00d285288f0dd"
+    },
+    {
+      "path": "assets/icons/help-circle-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 918,
+      "sha256": "07b3cb2c4663b367ef9ac5fdbca86e25fb39bbeac33cf838ee1f6ee0475efc3c"
+    },
+    {
+      "path": "assets/icons/help-circle-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 644,
+      "sha256": "89038dc9eec80de6b9f9ea4e2e406efb71b04b31a10c10f7bce00d285288f0dd"
+    },
+    {
+      "path": "assets/icons/help-circle-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 918,
+      "sha256": "07b3cb2c4663b367ef9ac5fdbca86e25fb39bbeac33cf838ee1f6ee0475efc3c"
+    },
+    {
+      "path": "assets/icons/archive-box-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 74,
+      "sha256": "3d5c7def199884681d1d12f0c3dfd242e474890c9ae4fbe9569e0f5e51fc4e39"
+    },
+    {
+      "path": "assets/icons/archive-box-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 80,
+      "sha256": "e8eef8691fc4f268b2073f900004ffc7828be92a8eb6d148c24c2e15f0cb238c"
+    },
+    {
+      "path": "assets/icons/archive-box-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 74,
+      "sha256": "3d5c7def199884681d1d12f0c3dfd242e474890c9ae4fbe9569e0f5e51fc4e39"
+    },
+    {
+      "path": "assets/icons/archive-box-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 80,
+      "sha256": "e8eef8691fc4f268b2073f900004ffc7828be92a8eb6d148c24c2e15f0cb238c"
+    },
+    {
+      "path": "assets/icons/circle-info-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 530,
+      "sha256": "7ee790103eb8518681ee37be970d06d3d272f2f3c148b46e9fcd3222f9e2d9f7"
+    },
+    {
+      "path": "assets/icons/circle-info-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 758,
+      "sha256": "4edc7cc5ed60b2a38f690f999fbd6043da976b36a5477710751e4bb27cdbb9f0"
+    },
+    {
+      "path": "assets/icons/circle-info-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 530,
+      "sha256": "7ee790103eb8518681ee37be970d06d3d272f2f3c148b46e9fcd3222f9e2d9f7"
+    },
+    {
+      "path": "assets/icons/circle-info-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 758,
+      "sha256": "4edc7cc5ed60b2a38f690f999fbd6043da976b36a5477710751e4bb27cdbb9f0"
+    },
+    {
+      "path": "assets/icons/pencil-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 282,
+      "sha256": "bfde26b148ca046a523520d75e87902d40ef053cafaa79b6bf6b2cca3e1e2ac8"
+    },
+    {
+      "path": "assets/icons/pencil-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 370,
+      "sha256": "412003c572093a64dedb1dbdaa2e6b1d853d481aa1d81287dc1ad9c95945ae54"
+    },
+    {
+      "path": "assets/icons/pencil-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 282,
+      "sha256": "bfde26b148ca046a523520d75e87902d40ef053cafaa79b6bf6b2cca3e1e2ac8"
+    },
+    {
+      "path": "assets/icons/pencil-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 370,
+      "sha256": "412003c572093a64dedb1dbdaa2e6b1d853d481aa1d81287dc1ad9c95945ae54"
+    },
+    {
+      "path": "assets/icons/trash-can-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 196,
+      "sha256": "febcf9bcd053d76637a43f72d0e6c2eef4251743683b4f5e76329bcbba053659"
+    },
+    {
+      "path": "assets/icons/trash-can-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 230,
+      "sha256": "dd1bc46520c5efef1316de9e35a7aadb8aa0a86ec80cc8f0cbe127efd9cd92fe"
+    },
+    {
+      "path": "assets/icons/trash-can-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 196,
+      "sha256": "febcf9bcd053d76637a43f72d0e6c2eef4251743683b4f5e76329bcbba053659"
+    },
+    {
+      "path": "assets/icons/trash-can-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 230,
+      "sha256": "dd1bc46520c5efef1316de9e35a7aadb8aa0a86ec80cc8f0cbe127efd9cd92fe"
     }
   ]
 }

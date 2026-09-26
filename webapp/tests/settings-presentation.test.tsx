@@ -23,6 +23,10 @@ test('owner settings sheet exposes canonical archive and family controls', () =>
   expect(markup).not.toContain('system')
   expect(markup).not.toContain('dark')
   expect(markup).toContain('ml-settings-list')
+  for (const icon of ['palette', 'help-circle', 'archive-box', 'pencil', 'circle-info']) {
+    expect(markup).toContain(`data-settings-row="${icon}"`)
+  }
+  expect(markup).not.toContain('data-settings-row="star"')
 })
 
 test('non-owner settings has archive information without owner mutation entry', () => {

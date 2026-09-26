@@ -13,14 +13,16 @@ test('uses one tactile, safe-area-aware shell for T09 sheet content', () => {
   }))
 
   expect(markup).toContain('data-slot="memoly-bottom-sheet-handle"')
-  expect(markup).toContain('pb-[calc(1.25rem+var(--host-inset-bottom))]')
+  expect(markup).toContain('memoly-bottom-sheet-body')
+  expect(markup).toContain('w-[38px]')
   expect(markup).toContain('Содержимое')
 })
 
 test('wraps sheet content in the shared drawer shell', () => {
   const source = readFileSync(resolve(import.meta.dir, '../src/components/MemolyBottomSheet.tsx'), 'utf8')
 
-  expect(source).toContain('data-slot="memoly-bottom-sheet"')
+  expect(source).toContain('data-memoly-bottom-sheet="true"')
+  expect(source).toContain('showHandle={false}')
   expect(source).toContain('<Drawer')
 })
 

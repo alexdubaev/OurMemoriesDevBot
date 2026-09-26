@@ -3,6 +3,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { createPrisma } from '../../backend/src/db'
 import { FilesystemPrivateStorage } from '../../backend/src/storage/filesystem-storage'
@@ -561,6 +562,8 @@ test.describe.serial('T07 live feed', () => {
 
         const panel = page.locator('[data-slot="memoly-add-sheet-panel"]')
         await expect(panel).toBeVisible()
+        await expect(page.locator('[data-slot="memoly-bottom-sheet-handle"]')).toHaveCount(1)
+        await expect(page.locator('[data-slot="drawer-handle"]')).toHaveCount(0)
         await expect(panel.getByRole('heading', { name: 'Добавить воспоминание', exact: true })).toBeVisible()
         await expect(panel.getByText('Сохраняйте моменты, которые важны', { exact: true })).toBeVisible()
 
@@ -578,7 +581,7 @@ test.describe.serial('T07 live feed', () => {
         const geometry = await options.evaluateAll((entries) => {
           const rects = entries.map((entry) => entry.getBoundingClientRect())
           const navigation = document.querySelector('[data-testid="bottom-navigation"]')
-          const sheet = document.querySelector('[data-slot="memoly-bottom-sheet"]')
+          const sheet = document.querySelector('[data-memoly-bottom-sheet="true"]')
           if (!navigation || !sheet) return null
           const navRect = navigation.getBoundingClientRect()
           const sheetRect = sheet.getBoundingClientRect()
@@ -596,7 +599,7 @@ test.describe.serial('T07 live feed', () => {
             navBottom: navRect.bottom,
             navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
             sheetBottom: sheetRect.bottom,
-            navCovered: Boolean(document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 40)?.closest('[data-slot="memoly-bottom-sheet"]')),
+            navCovered: Boolean(document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 40)?.closest('[data-memoly-bottom-sheet="true"]')),
           }
         })
         expect(geometry).not.toBeNull()
@@ -610,7 +613,7 @@ test.describe.serial('T07 live feed', () => {
         expect(geometry!.navPaddingBottom).toBeGreaterThanOrEqual(0)
         expect(geometry!.navCovered).toBe(true)
         if (width === 320 || width === 390) {
-          const sheetTop = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => element.getBoundingClientRect().top)
+          const sheetTop = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => element.getBoundingClientRect().top)
           expect(sheetTop).toBeGreaterThanOrEqual(width === 320 ? 631 : 640)
           expect(sheetTop).toBeLessThanOrEqual(width === 320 ? 637 : 652)
           expect(geometry!.minTop).toBeGreaterThanOrEqual(700)
@@ -625,7 +628,7 @@ test.describe.serial('T07 live feed', () => {
       await page.waitForTimeout(500)
       for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
         await page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), theme)
-        const top = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => element.getBoundingClientRect().top)
+        const top = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => element.getBoundingClientRect().top)
         expect(top).toBeGreaterThanOrEqual(640)
         expect(top).toBeLessThanOrEqual(652)
         await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-add-${theme}-390.png`), animations: 'disabled' })
@@ -638,7 +641,7 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.locator('[data-slot="memoly-add-sheet-panel"]')).toBeVisible()
       const textScale = await page.addStyleTag({ content: `.memoly-add-sheet-panel .sheet-title { font-size: 32px !important; } .memoly-add-sheet-panel .sheet-subtitle { font-size: 22px !important; } .memoly-add-sheet-panel .add-option-title { font-size: 26px !important; } .memoly-add-sheet-panel .add-option-copy { font-size: 20px !important; }` })
       await page.waitForTimeout(500)
-      const scaledLayout = await page.locator('[data-slot="memoly-bottom-sheet"]').evaluate((element) => {
+      const scaledLayout = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => {
         const rect = element.getBoundingClientRect()
         return { top: rect.top, right: rect.right, bottom: rect.bottom, scrollWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth }
       })
@@ -898,6 +901,62 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)).toMatch(/^https:\/\/t\.me\/OurMemoriesDevBot\?start=watch_[A-Za-z0-9_-]{32}$/)
     const deepLink = await page.evaluate(() => (window as typeof window & { __openedTelegramLink?: string }).__openedTelegramLink)
     expect(deepLink).not.toContain('synthetic-file-id')
+  })
+
+  test('captures memory actions against the canonical sheet at mobile width', async ({ browser, page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'full' },
+    })
+    await page.reload()
+    await openFeed(page)
+    const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Фотоальбом E2E' }).first()
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.locator('[data-slot="memoly-bottom-sheet-handle"]')).toHaveCount(1)
+    await expect(page.locator('[data-slot="drawer-handle"]')).toHaveCount(0)
+    await expect(page.locator('.memoly-memory-action')).toHaveCount(3)
+    for (const label of ['Подробнее', 'Открыть публикацию целиком', 'Редактировать', 'Изменить подпись или дату', 'Удалить воспоминание', 'Удалить из семейной ленты']) {
+      await expect(page.locator('.memoly-memory-actions')).toContainText(label)
+    }
+    await expect(page.locator('.memoly-memory-actions > [data-slot="drawer-title"]')).toHaveClass(/sr-only/)
+    await page.screenshot({ path: resolve('e2e/.artifacts/memory-actions-after-390.png'), animations: 'disabled' })
+
+    const canonical = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })
+    const referenceUrl = pathToFileURL(resolve('../docs/memoly-final-functional-state-pack.html')).href
+    await canonical.goto(`${referenceUrl}#memoryActions`)
+    await expect(canonical.locator('#memoryActions .ml-sheet-row')).toHaveCount(2)
+    await expect(canonical.locator('#memoryActions .state-action-row')).toHaveCount(1)
+    await canonical.screenshot({ path: resolve('e2e/.artifacts/memory-actions-canonical-390.png'), animations: 'disabled' })
+    const sheetGeometry = await Promise.all([
+      page.locator('[data-memoly-bottom-sheet="true"]'),
+      canonical.locator('#memoryActions .ml-sheet-panel'),
+    ].map((sheet) => sheet.evaluate((panel) => {
+      const rect = panel.getBoundingClientRect()
+      const row = panel.querySelector('.memoly-memory-action, .ml-sheet-row')?.getBoundingClientRect()
+      const handle = panel.querySelector('[data-slot="memoly-bottom-sheet-handle"], .ml-sheet-handle')?.getBoundingClientRect()
+      return { top: rect.top, height: rect.height, rowTop: row?.top, rowHeight: row?.height, handleTop: handle?.top, handleHeight: handle?.height }
+    })))
+    for (const key of ['top', 'height', 'rowTop', 'rowHeight', 'handleTop', 'handleHeight'] as const) {
+      expect(Math.abs((sheetGeometry[0]![key] ?? 0) - (sheetGeometry[1]![key] ?? 0))).toBeLessThanOrEqual(3)
+    }
+    const initialTheme = await page.locator('html').getAttribute('data-memoly-theme')
+    for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+      await page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), theme)
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-actions-${theme}-390.png`), animations: 'disabled' })
+      await canonical.locator(`#theme${theme[0]!.toUpperCase()}${theme.slice(1)}`).evaluate((input: HTMLInputElement) => { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })) })
+      await canonical.screenshot({ path: resolve(`e2e/.artifacts/memory-actions-canonical-${theme}-390.png`), animations: 'disabled' })
+    }
+    await canonical.close()
+    if (initialTheme) await page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), initialTheme)
+    await triggerTelegramBack(page)
+    await expect(card.getByRole('button', { name: 'Действия с воспоминанием' })).toBeFocused()
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
+      data: { role: 'viewer' },
+    })
   })
 
   test('keeps the exact memory in delete spotlight through cancel, failure, and success', async ({ page }) => {

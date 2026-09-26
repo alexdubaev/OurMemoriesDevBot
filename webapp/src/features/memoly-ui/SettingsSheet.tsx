@@ -33,16 +33,16 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
 
 export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; canManageFamily: boolean; theme: MemolyTheme }) {
   return <div className="ml-settings-list ml-sheet-panel--list">
-    <SettingsRow icon="star" onClick={onAppearance} title="Оформление" subtitle={theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
-    <SettingsRow icon="info" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
-    <SettingsRow icon="family" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
-    {canManageFamily ? <SettingsRow icon="edit" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
-    <SettingsRow icon="gear" onClick={onAbout} title="О memoLy" subtitle="Информация о приложении" />
+    <SettingsRow icon="palette" onClick={onAppearance} title="Оформление" subtitle={theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
+    <SettingsRow icon="help-circle" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
+    <SettingsRow icon="archive-box" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
+    {canManageFamily ? <SettingsRow icon="pencil" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
+    <SettingsRow icon="circle-info" onClick={onAbout} title="О memoLy" subtitle="Информация о приложении" />
   </div>
 }
 
-function SettingsRow({ icon, onClick, subtitle, title }: { icon: 'gear' | 'info' | 'star' | 'family' | 'edit'; onClick: () => void; subtitle: string; title: string }) {
-  return <button className="ml-sheet-row" onClick={onClick} type="button"><span className="ml-sheet-row-icon"><WebpIcon decorative name={icon} size={22} /></span><span className="ml-sheet-row-copy"><strong>{title}</strong><small>{subtitle}</small></span><span className="ml-sheet-row-chevron"><WebpIcon decorative name="chevron" size={20} /></span></button>
+function SettingsRow({ icon, onClick, subtitle, title }: { icon: 'palette' | 'help-circle' | 'archive-box' | 'pencil' | 'circle-info'; onClick: () => void; subtitle: string; title: string }) {
+  return <button className="ml-sheet-row" data-settings-row={icon} onClick={onClick} type="button"><span className="ml-sheet-row-icon"><WebpIcon decorative monochrome name={icon} size={18} /></span><span className="ml-sheet-row-copy"><strong>{title}</strong><small>{subtitle}</small></span><span className="ml-sheet-row-chevron"><WebpIcon decorative name="chevron" size={18} /></span></button>
 }
 
 const THEME_DESCRIPTIONS: Record<MemolyTheme, string> = {

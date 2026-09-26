@@ -19,7 +19,8 @@ export function MemolyBottomSheet({ children, onOpenChange, open, returnFocusRef
     <Drawer autoFocus dismissible onOpenChange={onOpenChange} open={open} shouldScaleBackground={false}>
       <DrawerContent
         className="mx-auto max-w-[var(--layout-max-width)] border-0 bg-[var(--memory-surface)] bg-[image:var(--memory-surface-raised)] shadow-[var(--memory-sheet-shadow)]"
-        data-slot="memoly-bottom-sheet"
+        data-memoly-bottom-sheet="true"
+        showHandle={false}
         onCloseAutoFocus={(event) => {
           if (!returnFocusRef?.current) return
           event.preventDefault()
@@ -34,7 +35,7 @@ export function MemolyBottomSheet({ children, onOpenChange, open, returnFocusRef
 
 export function MemolyBottomSheetPanel({ children }: { children: ReactNode }) {
   return <>
-    <div aria-hidden="true" className="mx-auto mt-3 h-1.5 w-12 rounded-full bg-[var(--memory-surface-inset)] shadow-[var(--memory-inset-shadow)]" data-slot="memoly-bottom-sheet-handle" />
-    <div className="px-5 pb-[calc(1.25rem+var(--host-inset-bottom))] pt-3">{children}</div>
+    <div aria-hidden="true" className="mx-auto h-1 w-[38px] shrink-0 rounded-full bg-[var(--memory-surface-inset)] shadow-[var(--memory-inset-shadow)]" data-slot="memoly-bottom-sheet-handle" />
+    <div className="memoly-bottom-sheet-body">{children}</div>
   </>
 }
