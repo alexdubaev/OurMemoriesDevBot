@@ -72,7 +72,9 @@ git diff --stat origin/main...HEAD
 
 По умолчанию одновременно работает не больше одного Luna-субагента. Большее число допустимо, только если владелец или основной исполнитель явно обосновал независимость задач. Luna не запускает субагентов.
 
-Независимое review поручать GPT-6 Luna с `reasoning_effort = high`, тариф **standard/non-Pro**. Review read-only и ограничен конкретным diff или commit; findings помечаются P0/P1/P2. Ревьюер не переписывает scope задачи и не запускает бесконечные циклы QA/review.
+Независимое review поручать GPT-6 Luna с `reasoning_effort = high`, тариф **standard/non-Pro**. Основной агент может запустить такое review самостоятельно, без отдельной команды владельца, если оно остаётся внутри уже назначенного scope, не выполняет production action, не расширяет функциональную задачу и действительно повышает независимость проверки. Для значимых docs/spec blocks, contracts, migrations, backend changes и существенного diff такое review предпочтительно по умолчанию, если явно не избыточно. Не запускать review ради формальности. Review read-only и ограничен конкретным diff или commit; findings помечаются P0/P1/P2. Ревьюер не переписывает scope задачи и не запускает бесконечные циклы QA/review.
+
+После review основной агент может сам исправить простые docs/mechanical findings, low-risk P2 и очевидный bounded P1 либо поручить узкое исправление Luna High, если оно не требует архитектурного, data model или security/ACL решения, изменения migration semantics, решения о production data либо сложного race/idempotency решения. Затем выполнить одну узкую повторную проверку закрытия findings и вернуть финальный HANDOFF. Обычный предел — один независимый review, один fix pass и одна narrow recheck; не повторять бесконечный review → fix → review → fix цикл.
 
 Не требовать бесконечной самоидентификации модели. Достаточно записанного orchestration call с `model = gpt-6-luna` и `reasoning_effort = high`; фактический уровень подтверждения модели указывать честно.
 
