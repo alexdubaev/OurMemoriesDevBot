@@ -10,6 +10,8 @@ import { createMaxImageProcessor } from './process-image'
 import { createMaxVideoProcessor } from './process-video'
 import { createMaxVoiceProcessor } from './process-voice'
 import type { MaxDownloadedMedia } from './media-download'
+import { resolveMaxTarget, chooseMaxTarget, expireMaxTarget } from './source-target'
+import { parseChoicePayload, savedFamilyText } from '../../../bot-family-target'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
@@ -63,6 +65,17 @@ export function createMaxTaskProcessor(options: {
         : welcomeText
       return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, responseText) ? 'done' : 'skipped'
     }
+    if (event.kind === 'family_choice') {
+      const parsed = parseChoicePayload(event.payload)
+      const result = parsed ? await chooseMaxTarget(prisma, parsed.sourceId, parsed.index, event.userId) : 'denied'
+      await options.api?.answerCallback?.(event.callbackId, result === 'chosen' ? 'Семья выбрана. Сохраняем…' :
+        result === 'already_chosen' ? 'Семья для этого сообщения уже выбрана.' :
+        result === 'expired' ? 'Время выбора истекло. Отправьте материал заново.' : 'Этот выбор недоступен.')
+      await prisma.maxInbox.updateMany({ where: { id: inbox.id, status: 'accepted' }, data: {
+        status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
+      } })
+      return 'done'
+    }
 
     const source = inbox.source
     if (!source) throw new TerminalTaskError('MAX message inbox has no source')
@@ -88,10 +101,12 @@ export function createMaxTaskProcessor(options: {
     }
     const text = event.text
 
-    const admission = await findAdmission(prisma, event.senderId)
-    if (!admission) {
-      return await deny(prisma, source) ? 'done' : 'skipped'
-    }
+    const targetResult = await resolveMaxTarget(prisma, source)
+    if (targetResult.kind === 'pending') return 'done'
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, source.inboxId, source.senderSubject)
+    if (targetResult.kind !== 'target') return await deny(prisma, source,
+      'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.') ? 'done' : 'skipped'
+    const admission = targetResult.target
 
     const scope: FamilyScope = {
       familyId: admission.familyId,
@@ -105,12 +120,13 @@ export function createMaxTaskProcessor(options: {
       occurredAt: new Date(event.occurredAt),
       mediaIds: [],
     }, async (tx, memoryId) => {
+        const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await tx.maxSource.update({ where: { id: source.id }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,
         } })
         await markInboxProcessed(tx, inbox.id)
         await createResponseAndTask(tx, {
-          inboxId: inbox.id, destinationUserId: source.senderSubject, kind: 'saved', text: 'Сохранено в семейную ленту.',
+          inboxId: inbox.id, destinationUserId: source.senderSubject, kind: 'saved', text: savedFamilyText(family.name),
         })
     })
     try {
@@ -180,33 +196,7 @@ function isExpectedAuthorizationFailure(error: unknown) {
   return kind === 'not_found' || kind === 'forbidden'
 }
 
-async function findAdmission(db: DbClient, senderSubject: string) {
-  const identity = await db.externalIdentity.findUnique({
-    where: { provider_subject: { provider: 'max', subject: senderSubject } },
-    select: {
-      user: {
-        select: {
-          id: true,
-          familyMemberships: {
-            where: { revokedAt: null, family: { status: 'active' } },
-            orderBy: { joinedAt: 'asc' },
-            take: 2,
-            select: {
-              familyId: true,
-              family: { select: { children: { orderBy: { createdAt: 'asc' }, take: 1, select: { id: true } } } },
-            },
-          },
-        },
-      },
-    },
-  })
-  const membership = identity?.user.familyMemberships[0]
-  const child = membership?.family.children[0]
-  if (!identity || !membership || !child || identity.user.familyMemberships.length !== 1) return null
-  return { userId: identity.user.id, familyId: membership.familyId, childId: child.id }
-}
-
-async function deny(db: DbClient, source: MaxSource) {
+async function deny(db: DbClient, source: MaxSource, text = deniedText) {
   return db.$transaction(async (tx) => {
     const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
       status: 'denied', rejectionCode: 'denied',
@@ -214,7 +204,7 @@ async function deny(db: DbClient, source: MaxSource) {
     if (changed.count !== 1) return false
     await markInboxProcessed(tx, source.inboxId)
     await createResponseAndTask(tx, {
-      inboxId: source.inboxId, destinationUserId: source.senderSubject, kind: 'denied', text: deniedText,
+      inboxId: source.inboxId, destinationUserId: source.senderSubject, kind: 'denied', text,
     })
     return true
   })

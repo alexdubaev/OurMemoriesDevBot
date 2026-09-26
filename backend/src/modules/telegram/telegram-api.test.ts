@@ -16,4 +16,14 @@ describe('Telegram provider failures', () => {
       inline_keyboard: [[{ text: 'Открыть', web_app: { url: 'https://example.test/memories/1' } }]],
     })
   })
+
+  test('puts each family callback on its own inline keyboard row', () => {
+    expect(telegramInlineKeyboard([
+      { text: 'Семья A', callbackData: 'family:source-a:0' },
+      { text: 'Семья B', callbackData: 'family:source-a:1' },
+    ])).toEqual({ inline_keyboard: [
+      [{ text: 'Семья A', callback_data: 'family:source-a:0' }],
+      [{ text: 'Семья B', callback_data: 'family:source-a:1' }],
+    ] })
+  })
 })

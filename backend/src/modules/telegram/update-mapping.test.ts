@@ -2,6 +2,14 @@ import { describe, expect, test } from 'bun:test'
 
 import { normalizeTelegramUpdate } from './transport/update-mapping'
 
+test('normalizes private family choice callback with pressing user', () => {
+  expect(normalizeTelegramUpdate({ update_id: 12, callback_query: {
+    id: 'cb-1', from: { id: 77 }, data: 'family:33333333-3333-4333-8333-333333333333:0',
+    message: { message_id: 5, date: 1_757_844_000, chat: { id: 77, type: 'private' } },
+  } })).toEqual({ kind: 'family_choice', updateId: '12', callbackId: 'cb-1', senderId: '77', chatId: '77',
+    payload: 'family:33333333-3333-4333-8333-333333333333:0' })
+})
+
 describe('Telegram update mapping', () => {
   test('maps a private non-command text to a note without changing its content', () => {
     const mapped = normalizeTelegramUpdate({

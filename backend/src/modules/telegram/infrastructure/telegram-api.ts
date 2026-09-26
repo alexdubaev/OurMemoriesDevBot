@@ -57,6 +57,10 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
         throw telegramProviderFailure(error)
       }
     },
+    async answerCallbackQuery(callbackId, text) {
+      try { await api.answerCallbackQuery(callbackId, { text }) }
+      catch (error) { throw telegramProviderFailure(error) }
+    },
     async sendVideo(chatId, fileId) {
       try {
         const result = await api.sendVideo(chatId, fileId)
@@ -75,7 +79,7 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
     },
     async getUpdates(offset, signal) {
       try {
-        return await api.getUpdates({ offset, timeout: 25, allowed_updates: ['message'] }, signal)
+        return await api.getUpdates({ offset, timeout: 25, allowed_updates: ['message', 'callback_query'] }, signal)
       } catch (error) {
         throw telegramProviderFailure(error)
       }
@@ -90,9 +94,11 @@ export function createTelegramApi(token: string, fileMaxBytes: number): Telegram
   }
 }
 
-export function telegramInlineKeyboard(buttons: Array<{ text: string; webAppUrl: string }>) {
+export function telegramInlineKeyboard(buttons: Array<{ text: string; webAppUrl?: string; callbackData?: string }>) {
   return {
-    inline_keyboard: [buttons.map((button) => ({ text: button.text, web_app: { url: button.webAppUrl } }))],
+    inline_keyboard: buttons.map((button) => [button.callbackData
+      ? { text: button.text, callback_data: button.callbackData }
+      : { text: button.text, web_app: { url: button.webAppUrl! } }]),
   }
 }
 

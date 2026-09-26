@@ -93,9 +93,18 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       const value = await request(`/messages?${new URLSearchParams({ user_id: input.userId }).toString()}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: input.text }),
+        body: JSON.stringify({ text: input.text, ...(input.buttons?.length ? { attachments: [{ type: 'inline_keyboard', payload: {
+          buttons: input.buttons.map((button) => [{ type: 'callback', text: button.text, payload: button.payload }]),
+        } }] } : {}) }),
       }, signal)
       if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
+    },
+    async answerCallback(callbackId, text, signal) {
+      if (!callbackId || callbackId.length > 512 || !text || [...text].length > 4000) throw new MaxProviderError()
+      const result = await request(`/answers?${new URLSearchParams({ callback_id: callbackId }).toString()}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: { text, attachments: [] } }),
+      }, signal)
+      if (!isRecord(result) || result.success !== true) throw new MaxProviderError()
     },
     async createVideoUpload(signal) {
       return normalizeVideoUploadCapability(await request('/uploads?type=video', { method: 'POST' }, signal))
@@ -250,18 +259,21 @@ function normalizeSubscriptionResult(value: unknown): MaxSubscriptionResult {
 
 function validateSubscriptionInput(input: MaxSubscriptionInput) {
   if (!isHttpsUrl(input.url) || !Array.isArray(input.updateTypes) || input.updateTypes.length === 0 ||
-      input.updateTypes.some((type) => type !== 'message_created' && type !== 'bot_started') ||
+      input.updateTypes.some((type) => type !== 'message_created' && type !== 'bot_started' && type !== 'message_callback') ||
       new Set(input.updateTypes).size !== input.updateTypes.length ||
       typeof input.secret !== 'string' || !/^[A-Za-z0-9_-]{5,256}$/.test(input.secret)) {
     throw new MaxProviderError()
   }
 }
 
-function validateSendMessageInput(input: { userId: string; text: string }) {
+function validateSendMessageInput(input: { userId: string; text: string; buttons?: Array<{ text: string; payload: string }> }) {
   if (typeof input.userId !== 'string' || !/^[1-9][0-9]*$/.test(input.userId) ||
       typeof input.text !== 'string' || input.text.length === 0 || [...input.text].length > 4_000) {
     throw new MaxProviderError()
   }
+  if (input.buttons && (!Array.isArray(input.buttons) || input.buttons.length > 210 || input.buttons.some((button) =>
+    typeof button.text !== 'string' || button.text.length === 0 || [...button.text].length > 80 ||
+    typeof button.payload !== 'string' || button.payload.length === 0 || button.payload.length > 512))) throw new MaxProviderError()
 }
 
 function validateSendVideoMessageInput(input: MaxSendVideoMessageInput) {

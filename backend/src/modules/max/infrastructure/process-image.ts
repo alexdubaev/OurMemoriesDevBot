@@ -12,6 +12,8 @@ import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { MaxProviderError } from './max-api'
 import type { MaxDownloadedMedia } from './media-download'
 import { MaxMediaDownloadError } from './media-download'
+import { expireMaxTarget, resolveMaxTarget } from './source-target'
+import { savedFamilyText } from '../../../bot-family-target'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
@@ -34,8 +36,12 @@ export function createMaxImageProcessor(options: {
     if (policy.kind === 'denied') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId, deniedText)
     if (policy.kind === 'unsupported') return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
     if (typeof options.api.getMessage !== 'function') throw new Error('MAX message lookup is unavailable')
-    const admission = await findAdmission(prisma, input.event.senderId)
-    if (!admission) return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId, deniedText)
+    const targetResult = await resolveMaxTarget(prisma, source)
+    if (targetResult.kind === 'pending') return 'done'
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, input.event.senderId)
+    if (targetResult.kind !== 'target') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId,
+      'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
+    const admission = targetResult.target
     let resolved
     try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) { throw error }
     const accepted = policy.kind === 'quick-images' ? policy.attachments : [policy.attachment]
@@ -56,6 +62,7 @@ export function createMaxImageProcessor(options: {
       }
       await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: 'photo', body: policy.body,
         occurredAt: new Date(input.event.occurredAt), mediaIds }, async (tx, memoryId) => {
+        const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)
         await tx.maxSource.update({ where: { id: source.id }, data: { status: 'published', memoryId,
           userId: admission.userId, familyId: admission.familyId, childId: admission.childId } })
@@ -63,8 +70,8 @@ export function createMaxImageProcessor(options: {
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(),
           encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
         const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'saved' } },
-          create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: 'Сохранено в семейную ленту.' },
-          update: { destinationUserId: BigInt(input.event.senderId), text: 'Сохранено в семейную ленту.' }, select: { id: true } })
+          create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedFamilyText(family.name) },
+          update: { destinationUserId: BigInt(input.event.senderId), text: savedFamilyText(family.name) }, select: { id: true } })
         await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
       })
       return 'done'
@@ -192,17 +199,6 @@ async function terminal(db: DbClient, sourceId: string, inboxId: string, kind: '
     await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
     return 'done'
   })
-}
-
-async function findAdmission(db: DbClient, senderSubject: string) {
-  const identity = await db.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: senderSubject } }, select: {
-    user: { select: { id: true, familyMemberships: { where: { revokedAt: null, family: { status: 'active' } }, orderBy: { joinedAt: 'asc' }, take: 2,
-      select: { familyId: true, role: true, family: { select: { children: { orderBy: { createdAt: 'asc' }, take: 1, select: { id: true } } } } } } } },
-  } })
-  const memberships = identity?.user.familyMemberships ?? []
-  const child = memberships[0]?.family.children[0]
-  if (!identity || memberships.length !== 1 || memberships[0]!.role !== 'full' || !child) return null
-  return { userId: identity.user.id, familyId: memberships[0]!.familyId, childId: child.id }
 }
 
 export function taskPayloadForImage(value: unknown) {

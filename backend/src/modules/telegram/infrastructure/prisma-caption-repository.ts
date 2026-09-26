@@ -39,16 +39,18 @@ export class PrismaCaptionRepository implements CaptionRepository {
 }
 
 async function lockCurrentFullMember(tx: PrismaTransactionClient, familyId: string, userId: string) {
+  await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`
+  const family = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM families WHERE id = ${familyId}::uuid AND status = 'active' FOR SHARE`
+  if (!family[0]) return false
   const rows = await tx.$queryRaw<Array<{ role: string }>>`
     SELECT fm.role::text AS role
       FROM family_members fm
-      JOIN families f ON f.id = fm.family_id
      WHERE fm.family_id = ${familyId}::uuid
        AND fm.user_id = ${userId}::uuid
        AND fm.role = 'full'
        AND fm.revoked_at IS NULL
-       AND f.status = 'active'
-     FOR SHARE OF fm, f
+     FOR SHARE OF fm
   `
   return rows.length === 1
 }

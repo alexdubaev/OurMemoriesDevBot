@@ -16,6 +16,8 @@ import { PrismaCaptionRepository } from './prisma-caption-repository'
 import { PrismaTelegramRepository } from './prisma-telegram-repository'
 import type { TelegramApiPort } from '../application/ports'
 import type { TelegramInboundEvent, TelegramMediaEvent } from '../domain/inbound-event'
+import { choicePayload, parseChoicePayload, readCandidates, savedFamilyText } from '../../../bot-family-target'
+import { chooseTelegramTarget, expireTelegramChoice } from './source-target'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
@@ -71,7 +73,14 @@ async function processInboxLocked(
   if (!inbox || inbox.processedAt) return 'skipped' as const
   const event = decryptEvent(crypto, inbox)
   if (event.kind === 'denied_content') {
-    await api.sendMessage(event.chatId, 'Материал не сохранён: нужен активный семейный архив и полный доступ.', openButton(env))
+    await api.sendMessage(event.chatId, 'Материал не сохранён: нужна активная семья с правом публикации и профилем ребёнка.', openButton(env))
+  } else if (event.kind === 'family_choice') {
+    const parsed = parseChoicePayload(event.payload)
+    const result = parsed ? await chooseTelegramTarget(db, { sourceId: parsed.sourceId, index: parsed.index,
+      senderSubject: event.senderId, chatId: event.chatId }) : 'denied'
+    await api.answerCallbackQuery?.(event.callbackId, result === 'chosen' ? 'Семья выбрана. Сохраняем…' :
+      result === 'already_chosen' ? 'Семья для этой отправки уже выбрана.' :
+      result === 'expired' ? 'Время выбора истекло. Отправьте материал заново.' : 'Этот выбор недоступен.')
   } else if (event.kind === 'command') {
     if (event.command === 'start') {
       const delivery = await videoDelivery.deliverFromStart(event.senderId, event.chatId, event.argument, api, crypto)
@@ -104,14 +113,18 @@ async function processInboxLocked(
 async function consumeCaptionReply(db: DbClient, api: TelegramApiPort, event: Extract<TelegramInboundEvent, { kind: 'caption_reply' }>) {
   const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
   if (!admission || admission.role !== 'full') return
-  const result = await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: admission.familyId, userId: admission.userId,
+  const request = await db.captionRequest.findUnique({ where: { chatId_promptMessageId: {
+    chatId: BigInt(event.chatId), promptMessageId: BigInt(event.replyToMessageId),
+  } }, select: { familyId: true, userId: true } })
+  if (!request || request.userId !== admission.userId) return
+  const result = await new CaptionService(new PrismaCaptionRepository(db)).consumeReply({ familyId: request.familyId, userId: admission.userId,
     chatId: event.chatId, replyToMessageId: event.replyToMessageId, text: event.text })
   if (result.kind === 'expired') {
     await api.sendMessage(event.chatId, 'Срок добавления подписи истёк. Откройте запись в семейной ленте, чтобы изменить её.')
   } else if (result.kind === 'forbidden') {
     await api.sendMessage(event.chatId, 'Подпись не сохранена: доступ к семейному архиву недоступен.')
   } else if (result.kind === 'stale') {
-    await renewCaptionRequest(db, api, admission, event)
+    await renewCaptionRequest(db, api, { familyId: request.familyId, userId: admission.userId }, event)
   }
 }
 
@@ -136,8 +149,11 @@ async function renewCaptionRequest(
 async function cancelCaption(db: DbClient, event: Extract<TelegramInboundEvent, { kind: 'command' }>) {
   const admission = await new PrismaTelegramRepository(db).findAdmission(event.senderId)
   if (!admission || admission.role !== 'full') return false
-  return new CaptionService(new PrismaCaptionRepository(db)).cancel({ familyId: admission.familyId, userId: admission.userId, chatId: event.chatId })
+  const changed = await db.captionRequest.updateMany({ where: { userId: admission.userId, chatId: BigInt(event.chatId), consumedAt: null, cancelledAt: null },
+    data: { cancelledAt: new Date() } })
+  return changed.count > 0
 }
+type TargetedSource = NonNullable<Awaited<ReturnType<typeof loadSource>>> & { familyId: string; childId: string }
 
 async function processSource(
   db: DbClient,
@@ -151,6 +167,7 @@ async function processSource(
 ) {
   const source = await loadSource(db, sourceId)
   if (!source || source.status === 'rejected') return 'skipped' as const
+  if (!hasTarget(source)) return pendingTelegramChoice(db, api, env, source, { sourceId })
   if (source.status === 'published') return sendSourceReceipt(db, api, env, source)
   if (!(await hasFullAccess(db, source))) return rejectSource(db, api, env, source, 'access_revoked')
   const event = decryptEvent(crypto, source.inbox)
@@ -193,7 +210,7 @@ async function ingestVideoThumbnail(
   api: TelegramApiPort,
   env: AppEnv,
   media: ReturnType<typeof createMediaService>,
-  source: Awaited<ReturnType<typeof loadSource>> & {},
+  source: TargetedSource,
   event: TelegramMediaEvent,
   signal?: AbortSignal,
 ) {
@@ -241,11 +258,17 @@ async function processAlbumLocked(
   const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
   if (!album || album.status === 'rejected') return 'skipped' as const
   if (album.status === 'collecting' && album.readyAt.getTime() > Date.now()) return 'skipped' as const
-  const sources = await db.telegramSource.findMany({
+  const rawSources = await db.telegramSource.findMany({
     where: { botId: album.botId, chatId: album.chatId, mediaGroupId: album.mediaGroupId },
     include: { inbox: true },
     orderBy: { messageId: 'asc' },
   })
+  const untargeted = rawSources.find((source) => !hasTarget(source))
+  if (untargeted) return pendingTelegramChoice(db, api, env, untargeted, { albumId })
+  const sources = rawSources.filter(hasTarget)
+  if (sources.length > 1 && sources.some((source) => source.familyId !== sources[0]!.familyId || source.childId !== sources[0]!.childId)) {
+    return rejectAlbum(db, api, env, rawSources, album.id, 'mixed_target')
+  }
   const pending = sources.filter((source) => source.status === 'accepted' || source.status === 'processing')
 
   if (album.status === 'published') {
@@ -327,7 +350,7 @@ async function ingestSourceMedia(
   api: TelegramApiPort,
   env: AppEnv,
   media: ReturnType<typeof createMediaService>,
-  source: Awaited<ReturnType<typeof loadSource>> & {},
+  source: TargetedSource,
   event: TelegramMediaEvent,
   signal?: AbortSignal,
 ) {
@@ -382,7 +405,7 @@ async function publishSingle(
   afterWrite?: (tx: PrismaTransactionClient, memoryId: string) => Promise<void>,
 ) {
   const source = await db.telegramSource.findUnique({ where: { id: sourceId } })
-  if (!source) return null
+  if (!source || !hasTarget(source)) return null
   if (source.status === 'published' && source.memoryId) return { memoryId: source.memoryId }
   const memoryId = await memories.publish(scopeFor(source), {
     id: source.plannedMemoryId,
@@ -415,7 +438,7 @@ function telegramVideoReferenceWrite(
       where: { id: sourceId },
       select: { familyId: true, userId: true, chatId: true, messageId: true },
     })
-    if (!source) throw new TerminalTaskError('Telegram source disappeared before video reference write')
+    if (!source?.familyId) throw new TerminalTaskError('Telegram source lost its video target')
     const reference = await tx.telegramVideoReference.upsert({
       where: { sourceId },
       create: {
@@ -458,7 +481,7 @@ async function publishPhotoAlbum(
   const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
   const sources = await db.telegramSource.findMany({ where: { id: { in: sourceIds } }, orderBy: { messageId: 'asc' } })
   const first = sources[0]
-  if (!album || !first) return null
+  if (!album || !first || !hasTarget(first)) return null
   if (album.memoryId) return album.memoryId
   const memoryId = await memories.publish(scopeFor(first), {
     id: first.plannedMemoryId,
@@ -484,7 +507,7 @@ async function publishPhotoAlbum(
 async function appendLatePhoto(db: DbClient, memories: ReturnType<typeof createSourceMemoryPublisher>, albumId: string, sourceId: string, mediaId: string) {
   const album = await db.telegramAlbum.findUnique({ where: { id: albumId } })
   const source = await db.telegramSource.findUnique({ where: { id: sourceId } })
-  if (!album?.memoryId || !source) return null
+  if (!album?.memoryId || !source || !hasTarget(source)) return null
   const ordered = await db.telegramSource.findMany({
       where: { botId: album.botId, chatId: album.chatId, mediaGroupId: album.mediaGroupId, mediaId: { not: null } },
       orderBy: { messageId: 'asc' }, select: { id: true, mediaId: true },
@@ -505,7 +528,9 @@ async function appendLatePhoto(db: DbClient, memories: ReturnType<typeof createS
 async function rejectSource(db: DbClient, api: TelegramApiPort, env: AppEnv, source: NonNullable<Awaited<ReturnType<typeof loadSource>>>, code: string) {
   await db.telegramSource.update({ where: { id: source.id }, data: { status: 'rejected', rejectionCode: code } })
   await db.telegramInbox.update({ where: { id: source.inboxId }, data: processedInboxData() })
-  await api.sendMessage(source.chatId.toString(), 'Материал не сохранён: доступ к семейному архиву недоступен.', openButton(env))
+  await api.sendMessage(source.chatId.toString(), code === 'choice_expired'
+    ? 'Время выбора семьи истекло. Отправьте материал заново.'
+    : 'Материал не сохранён: доступ к семейному архиву недоступен.', openButton(env))
 }
 
 async function rejectAlbum(db: DbClient, api: TelegramApiPort, env: AppEnv, sources: Array<NonNullable<Awaited<ReturnType<typeof loadSource>>>>, albumId: string, code: string) {
@@ -515,6 +540,34 @@ async function rejectAlbum(db: DbClient, api: TelegramApiPort, env: AppEnv, sour
 
 function loadSource(db: DbClient, id: string) {
   return db.telegramSource.findUnique({ where: { id }, include: { inbox: true } })
+}
+
+function hasTarget<T extends { familyId: string | null; childId: string | null }>(source: T): source is T & { familyId: string; childId: string } {
+  return !!source.familyId && !!source.childId
+}
+
+async function pendingTelegramChoice(
+  db: DbClient, api: TelegramApiPort, env: AppEnv,
+  source: NonNullable<Awaited<ReturnType<typeof loadSource>>>, task: { sourceId: string } | { albumId: string },
+) {
+  if (!source.choiceExpiresAt || source.choiceExpiresAt <= new Date()) {
+    const chatId = await expireTelegramChoice(db, source.id, 'albumId' in task ? task.albumId : undefined)
+    if (!chatId) return 'skipped' as const
+    await api.sendMessage(chatId, 'Время выбора семьи истекло. Отправьте материал заново.', openButton(env))
+    return 'done' as const
+  }
+  const candidates = readCandidates(source.choiceCandidates)
+  if (!candidates.length) return rejectSource(db, api, env, source, 'choice_unavailable')
+  for (let offset = 0; offset < candidates.length; offset += 100) {
+    await api.sendMessage(source.chatId.toString(), 'Выберите семью для этой отправки. Выбор доступен 15 минут.', {
+      buttons: candidates.slice(offset, offset + 100).map((candidate, pageIndex) => ({
+        text: candidate.name, callbackData: choicePayload(source.id, offset + pageIndex),
+      })),
+    })
+  }
+  await db.taskOutbox.createMany({ data: [{ type: 'telegram:process', dedupeKey: `telegram-choice-expiry:${source.id}`,
+    payload: task, scheduledFor: source.choiceExpiresAt }], skipDuplicates: true })
+  return 'done' as const
 }
 
 async function hasFullAccess(db: DbClient, source: { familyId: string; userId: string }) {
@@ -543,12 +596,12 @@ function mediaContentType(event: TelegramMediaEvent) {
   return 'audio/ogg' as const
 }
 
-async function receipt(api: TelegramApiPort, env: AppEnv, chatId: string, memoryId: string, pending: boolean) {
+async function receipt(api: TelegramApiPort, env: AppEnv, chatId: string, memoryId: string, pending: boolean, familyName: string) {
   return api.sendMessage(
     chatId,
     pending
-      ? 'Оригинал сохранён. Готовим воспроизведение. Ответьте на это сообщение в течение 10 минут, чтобы добавить подпись; /cancel отменит запрос.'
-      : 'Сохранено в семейную ленту.',
+      ? `${savedFamilyText(familyName)} Оригинал сохранён. Готовим воспроизведение. Ответьте на это сообщение в течение 10 минут, чтобы добавить подпись; /cancel отменит запрос.`
+      : savedFamilyText(familyName),
     pending ? { forceReply: true } : openButton(env, memoryId),
   )
 }
@@ -562,7 +615,8 @@ async function sendSourceReceipt(
   if (source.receiptSentAt) return 'skipped' as const
   if (!source.memoryId) throw new Error('Published Telegram source lost its memory link')
   const needsCaption = source.kind === 'video' || source.kind === 'voice'
-  const sent = await receipt(api, env, source.chatId.toString(), source.memoryId, needsCaption)
+  const family = await db.family.findUniqueOrThrow({ where: { id: source.familyId }, select: { name: true } })
+  const sent = await receipt(api, env, source.chatId.toString(), source.memoryId, needsCaption, family.name)
   if (needsCaption && sent && 'messageId' in sent) {
     const memory = await db.memory.findFirstOrThrow({ where: { id: source.memoryId, familyId: source.familyId, deletedAt: null }, select: { version: true } })
     await db.captionRequest.upsert({
@@ -596,7 +650,8 @@ async function sendAlbumReceipt(
     receiptSentAt: null,
   }
   if ((await db.telegramSource.count({ where })) === 0) return 'skipped' as const
-  await receipt(api, env, chatId, memoryId, false)
+  const memory = await db.memory.findUniqueOrThrow({ where: { id: memoryId }, select: { family: { select: { name: true } } } })
+  await receipt(api, env, chatId, memoryId, false, memory.family.name)
   await db.telegramSource.updateMany({ where, data: { receiptSentAt: new Date() } })
 }
 

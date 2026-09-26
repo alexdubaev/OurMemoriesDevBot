@@ -8,6 +8,7 @@ import type {
   TelegramAdmission,
 } from '../application/ports'
 import type { TelegramInboundEvent } from '../domain/inbound-event'
+import { choiceWindowMs, loadPublishCandidates, lockBotActor } from '../../../bot-family-target'
 
 const silenceWindowMs = 1_500
 const albumMaxWaitMs = 8_000
@@ -16,41 +17,23 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
   constructor(private readonly db: DbClient) {}
 
   async findAdmission(senderSubject: string): Promise<TelegramAdmission> {
-    const identity = await this.db.externalIdentity.findUnique({
-      where: { provider_subject: { provider: 'telegram', subject: senderSubject } },
-      select: {
-        user: {
-          select: {
-            id: true,
-            familyMemberships: {
-              where: { revokedAt: null, family: { status: 'active' } },
-              orderBy: { joinedAt: 'asc' },
-              take: 2,
-              select: {
-                familyId: true,
-                role: true,
-                family: { select: { children: { orderBy: { createdAt: 'asc' }, take: 1, select: { id: true } } } },
-              },
-            },
-          },
-        },
-      },
-    })
-    const membership = identity?.user.familyMemberships[0]
-    const child = membership?.family.children[0]
-    if (!identity || !membership || !child || identity.user.familyMemberships.length !== 1) return null
-    return { userId: identity.user.id, familyId: membership.familyId, childId: child.id, role: membership.role }
+    const found = await loadPublishCandidates(this.db, 'telegram', senderSubject)
+    if (!found || found.candidates.length === 0) return null
+    const target = found.candidates.length === 1 ? found.candidates[0]! : null
+    return { userId: found.userId, familyId: target?.familyId ?? null, childId: target?.childId ?? null,
+      role: 'full', candidates: found.candidates }
   }
 
   async accept({ botId, event, encrypted, admission, now, queueInboxTask = true }: Parameters<TelegramAcceptRepository['accept']>[0]): Promise<AcceptedTelegramUpdate> {
     return this.db.$transaction(async (tx) => {
+      if (admission) await lockBotActor(tx, admission.userId)
       const inboxId = randomUUID()
       const insertedInbox = await tx.telegramInbox.createMany({
         data: [{
           id: inboxId,
           botId,
           updateId: BigInt(event.updateId),
-          eventKind: event.kind === 'command' ? 'command' : event.kind === 'denied_content' ? 'denied' : 'content',
+          eventKind: event.kind === 'family_choice' ? 'family_choice' : event.kind === 'command' ? 'command' : event.kind === 'denied_content' ? 'denied' : 'content',
           encryptedPayload: Buffer.from(encrypted.ciphertext),
           encryptionIv: Buffer.from(encrypted.iv),
           encryptionAuthTag: Buffer.from(encrypted.authTag),
@@ -65,13 +48,24 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
         return { inboxId: existing?.id ?? null, duplicate: true }
       }
 
-      if (event.kind === 'command' || event.kind === 'denied_content' || event.kind === 'caption_reply') {
+      if (event.kind === 'command' || event.kind === 'denied_content' || event.kind === 'caption_reply' || event.kind === 'family_choice') {
         if (queueInboxTask) await queue(tx, `telegram-inbox:${inboxId}`, { inboxId }, now)
         return { inboxId, duplicate: false }
       }
       if (!isContent(event) || !admission || admission.role !== 'full') {
         throw new Error('Telegram content reached durable acceptance without full family access')
       }
+
+      const priorGroup = event.kind === 'media' && event.mediaGroupId ? await tx.telegramSource.findFirst({ where: {
+        botId, chatId: BigInt(event.chatId), mediaGroupId: event.mediaGroupId,
+      }, orderBy: { createdAt: 'asc' } }) : null
+      if (priorGroup && (priorGroup.userId !== admission.userId || priorGroup.senderSubject !== event.senderId)) {
+        throw new Error('Telegram album actor changed')
+      }
+      const targetFamilyId = priorGroup ? priorGroup.familyId : admission.familyId
+      const targetChildId = priorGroup ? priorGroup.childId : admission.childId
+      const choiceCandidates = priorGroup ? priorGroup.choiceCandidates : admission.familyId ? null : admission.candidates ?? []
+      const choiceExpiresAt = priorGroup ? priorGroup.choiceExpiresAt : admission.familyId ? null : new Date(now.getTime() + choiceWindowMs)
 
       const sourceId = randomUUID()
       const sourceCreated = await tx.telegramSource.createMany({
@@ -83,8 +77,10 @@ export class PrismaTelegramRepository implements TelegramAcceptRepository {
           messageId: BigInt(event.messageId),
           senderSubject: event.senderId,
           userId: admission.userId,
-          familyId: admission.familyId,
-          childId: admission.childId,
+          familyId: targetFamilyId,
+          childId: targetChildId,
+          choiceCandidates: choiceCandidates ?? undefined,
+          choiceExpiresAt,
           kind: event.kind === 'note' ? 'note' : event.mediaKind,
           mediaGroupId: event.kind === 'media' ? event.mediaGroupId : null,
           plannedMemoryId: randomUUID(),

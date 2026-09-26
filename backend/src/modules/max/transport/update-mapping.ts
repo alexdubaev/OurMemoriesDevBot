@@ -4,12 +4,23 @@ export type MaxMappedUpdate = MaxInboundEvent | { kind: 'ignored' }
 
 export function normalizeMaxUpdate(input: unknown): MaxMappedUpdate {
   if (!isRecord(input) || typeof input.update_type !== 'string') throw new Error('Invalid MAX update')
-  if (input.update_type !== 'message_created' && input.update_type !== 'bot_started') return { kind: 'ignored' }
+  if (input.update_type !== 'message_created' && input.update_type !== 'bot_started' && input.update_type !== 'message_callback') return { kind: 'ignored' }
   const timestamp = input.timestamp
   if (!isNonNegativeSafeInteger(timestamp)) throw new Error('Invalid MAX timestamp')
   const occurredAt = new Date(timestamp).toISOString()
   if (input.update_type === 'bot_started') return normalizeBotStarted(input, occurredAt)
+  if (input.update_type === 'message_callback') return normalizeChoiceCallback(input, occurredAt)
   return normalizeMessage(input, occurredAt)
+}
+
+function normalizeChoiceCallback(input: Record<string, unknown>, occurredAt: string): MaxMappedUpdate {
+  if (!isRecord(input.callback) || !isRecord(input.callback.user) || !isPositiveSafeInteger(input.callback.user.user_id)
+    || typeof input.callback.callback_id !== 'string' || input.callback.callback_id.length === 0
+    || typeof input.callback.payload !== 'string' || input.callback.payload.length > 512) throw new Error('Invalid MAX callback')
+  if (!isRecord(input.message) || !isRecord(input.message.recipient) || input.message.recipient.chat_type !== 'dialog'
+    || !isPositiveSafeInteger(input.message.recipient.user_id)) return { kind: 'ignored' }
+  return { kind: 'family_choice', callbackId: input.callback.callback_id, payload: input.callback.payload,
+    userId: String(input.callback.user.user_id), occurredAt }
 }
 
 function normalizeBotStarted(input: Record<string, unknown>, occurredAt: string): MaxMappedUpdate {

@@ -125,6 +125,8 @@ model MaxSource {
   userId          String?          @map("user_id") @db.Uuid
   familyId        String?          @map("family_id") @db.Uuid
   childId         String?          @map("child_id") @db.Uuid
+  choiceCandidates Json?           @map("choice_candidates")
+  choiceExpiresAt DateTime?        @map("choice_expires_at") @db.Timestamptz(6)
   rejectionCode   String?          @map("rejection_code")
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -279,8 +281,10 @@ model TelegramSource {
   messageId       BigInt               @map("message_id")
   senderSubject   String               @map("sender_subject")
   userId          String               @map("user_id") @db.Uuid
-  familyId        String               @map("family_id") @db.Uuid
-  childId         String               @map("child_id") @db.Uuid
+  familyId        String?              @map("family_id") @db.Uuid
+  childId         String?              @map("child_id") @db.Uuid
+  choiceCandidates Json?                @map("choice_candidates")
+  choiceExpiresAt DateTime?             @map("choice_expires_at") @db.Timestamptz(6)
   kind            TelegramSourceKind
   mediaGroupId    String?              @map("media_group_id")
   status          TelegramSourceStatus @default(accepted)
@@ -924,6 +928,7 @@ enum TelegramInboxKind {
   command
   content
   denied
+  family_choice
 
   @@map("telegram_inbox_kind")
 }
@@ -947,6 +952,7 @@ enum MaxSourceAttachmentStatus {
 enum MaxInboxEventKind {
   message_created
   bot_started
+  family_choice
 
   @@map("max_inbox_event_kind")
 }
@@ -985,6 +991,7 @@ enum MaxOutgoingResponseKind {
   denied
   unsupported_media
   welcome
+  family_choice
 
   @@map("max_outgoing_response_kind")
 }

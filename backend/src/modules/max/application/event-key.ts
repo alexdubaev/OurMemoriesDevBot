@@ -5,6 +5,8 @@ import type { MaxInboundEvent } from './ports'
 export function maxEventKey(botId: string, event: MaxInboundEvent): string {
   const fields = event.kind === 'message_created'
     ? [event.kind, botId, event.recipientId, event.messageId]
+    : event.kind === 'family_choice'
+    ? [event.kind, botId, event.callbackId]
     : [
         event.kind,
         botId,

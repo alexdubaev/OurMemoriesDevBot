@@ -26,7 +26,7 @@ function attachmentsOf(event: Extract<MaxInboundEvent, { kind: 'message_created'
 }
 
 export function selectMaxImmediateResponse(event: MaxInboundEvent): MaxImmediateResponse | null {
-  if (event.kind === 'bot_started') return null
+  if (event.kind === 'bot_started' || event.kind === 'family_choice') return null
   const attachments = attachmentsOf(event)
   if (attachments.length > 0) {
     const images = attachments.filter((attachment) => attachment.kind === 'image')
