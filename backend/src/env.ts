@@ -41,6 +41,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
+  MULTI_FAMILY_ACTIVATION: z.enum(['off', 'on']).default('off'),
   MAX_ENABLED: booleanStringSchema,
   MAX_BOT_TOKEN: optionalStringSchema,
   MAX_BOT_EXPECTED_USERNAME: optionalStringSchema,

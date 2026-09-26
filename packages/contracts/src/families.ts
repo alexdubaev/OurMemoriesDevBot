@@ -212,6 +212,50 @@ export const familyMeResponseSchema = z.object({
   limits: z.object({ activeFamiliesMaximum: z.literal(1) }).strict(),
 }).strict()
 
+export const familyHomeQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().min(1).max(2_048).optional(),
+}).strict()
+
+export const familyHomeCapabilitiesSchema = z.object({
+  canCreateInvite: z.boolean(),
+  canManageMembers: z.boolean(),
+  canEditChild: z.boolean(),
+  canPublishNote: z.boolean(),
+  canPublishPhoto: z.boolean(),
+  canPublishVoice: z.boolean(),
+  canPublishVideo: z.boolean(),
+  canUploadChildAvatar: z.boolean(),
+}).strict()
+
+export const familyHomeItemSchema = z.object({
+  familyId: z.uuid(),
+  name: z.string(),
+  displaySubtitle: z.string().nullable(),
+  childAvatarMediaId: z.uuid().nullable(),
+  isOwner: z.boolean(),
+  role: familyRoleSchema,
+  setupStatus: z.enum(['needs_child', 'ready']),
+  capabilities: familyHomeCapabilitiesSchema,
+  unreadCount: z.number().int().nonnegative().safe().nullable(),
+  unreadState: z.enum(['ready', 'unavailable', 'not_enabled']),
+  membershipEpoch: z.number().int().positive().safe(),
+}).strict().refine((item) => (item.unreadState === 'ready') === (item.unreadCount !== null),
+  'Only ready unread counts may be numeric')
+
+export const familyHomeResponseSchema = z.object({
+  version: z.literal(1),
+  ownFamilyId: z.uuid().nullable(),
+  ownFamilyStatus: z.enum(['active', 'deleting']).nullable(),
+  canCreateOwnFamily: z.boolean(),
+  items: z.array(familyHomeItemSchema).max(50),
+  nextCursor: z.string().nullable(),
+}).strict().refine((response) => (response.ownFamilyId === null) === (response.ownFamilyStatus === null),
+  'Own family ID and status must be present together')
+
+export type FamilyHomeQuery = z.infer<typeof familyHomeQuerySchema>
+export type FamilyHomeResponse = z.infer<typeof familyHomeResponseSchema>
+
 export type FamilyRole = z.infer<typeof familyRoleSchema>
 export type IdempotencyKeyHeaders = z.infer<typeof idempotencyKeyHeadersSchema>
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>

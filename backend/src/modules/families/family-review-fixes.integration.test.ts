@@ -322,6 +322,14 @@ maybeDescribe('Block 01 independent review boundaries', () => {
     }))).toContain('live family access requires an active family')
     expect((await acceptInvite(joiningUser.token, invite.body.rawToken)).response.status).toBe(410)
 
+    const whileDeleting = await createFamily(owner, 'Новая семья')
+    expect(whileDeleting.response.status).toBe(409)
+    expect(whileDeleting.body.error.code).toBe('ALREADY_IN_FAMILY')
+
+    await prisma.family.update({
+      where: { id: family.body.family.id },
+      data: { status: 'deleted' },
+    })
     const replacement = await createFamily(owner, 'Новая семья')
     expect(replacement.response.status).toBe(201)
   })
