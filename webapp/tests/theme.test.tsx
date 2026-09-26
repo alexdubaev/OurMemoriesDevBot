@@ -68,5 +68,7 @@ test('ChildHeader keeps Feed controls-free while Family adds overlay settings', 
   expect(familyMarkup).toContain('--theme-header-art:url(/assets/theme-header/rose.webp)')
   expect(familyMarkup).toContain('data-theme="rose"')
   expect(familyMarkup).toContain('aria-label="Настройки"')
+  expect(familyMarkup).toContain('/assets/icons/settings-sliders-default@2x.webp')
+  expect(familyMarkup).not.toContain('/assets/icons/gear-default@2x.webp')
   expect(familyMarkup).toContain('data-slot="avatar-letter"')
 })

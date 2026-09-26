@@ -1,4 +1,4 @@
-.family-management-page { min-height: 100dvh; margin: -20px clamp(11px, 3.5vw, 14px) 0; padding-bottom: calc(112px + env(safe-area-inset-bottom)); color: var(--theme-text, var(--ml-ink)); }
+.family-management-page { min-height: 100dvh; margin: 0 clamp(11px, 3.5vw, 14px); padding-bottom: calc(112px + env(safe-area-inset-bottom)); color: var(--theme-text, var(--ml-ink)); }
 .family-management-page, .family-management-page * { box-sizing: border-box; }
 .family-management-topbar { display: grid; min-height: 64px; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; padding-top: 8px; }
 .family-management-topbar .family-round-btn { width: 44px; height: 44px; }

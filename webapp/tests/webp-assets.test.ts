@@ -26,6 +26,7 @@ const requiredNames = [
   'play',
   'plus',
   'retry',
+  'settings-sliders',
   'star',
   'trash',
   'video',

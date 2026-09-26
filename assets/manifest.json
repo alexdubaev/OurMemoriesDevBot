@@ -1010,6 +1010,42 @@
       "sha256": "b6c87317c1137f63096635a69bc5f398ca3181e22f56e93b1e3f1af97baafc4e"
     },
     {
+      "path": "assets/icons/settings-sliders-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 246,
+      "sha256": "c9337712bb777892c65484e60d324b69b2bd69f55b29a9e516303e3098ccdd88"
+    },
+    {
+      "path": "assets/icons/settings-sliders-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 346,
+      "sha256": "6ee0d55c79276ea5cb58353544089f76dd1a92a08bf9ece637e177fbe064367e"
+    },
+    {
+      "path": "assets/icons/settings-sliders-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 246,
+      "sha256": "c9337712bb777892c65484e60d324b69b2bd69f55b29a9e516303e3098ccdd88"
+    },
+    {
+      "path": "assets/icons/settings-sliders-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 346,
+      "sha256": "6ee0d55c79276ea5cb58353544089f76dd1a92a08bf9ece637e177fbe064367e"
+    },
+    {
       "path": "assets/icons/share-active@2x.webp",
       "usage": "runtime-icon",
       "width": 48,

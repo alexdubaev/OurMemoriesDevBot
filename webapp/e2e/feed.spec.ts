@@ -167,11 +167,15 @@ test.describe.serial('T07 live feed', () => {
   }
 
   test('private feed images survive three Feed → Family → Feed remounts', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
     await openFeed(page)
     const photo = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).getByRole('img', { name: 'Воспоминание' })
+    const photoFrame = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).locator('.media-well .ml-media-button')
     const videoPoster = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' }).getByRole('img', { name: 'Кадр видео' })
     await expect(photo).toHaveAttribute('src', /^blob:/)
     await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await expect(photoFrame).toHaveCSS('overflow', 'hidden')
+    await expect(photoFrame).toHaveCSS('border-radius', '19px')
     await expect(videoPoster).toHaveAttribute('src', /^blob:/)
     await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
@@ -181,6 +185,7 @@ test.describe.serial('T07 live feed', () => {
       await page.getByRole('button', { name: 'Лента', exact: true }).click()
       await expect(photo).toHaveAttribute('src', /^blob:/)
       await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      await expect(photoFrame).toHaveCSS('border-radius', '19px')
       await expect(videoPoster).toHaveAttribute('src', /^blob:/)
       await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     }
