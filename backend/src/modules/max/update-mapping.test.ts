@@ -2,6 +2,15 @@ import { describe, expect, test } from 'bun:test'
 
 import { normalizeMaxUpdate } from './transport/update-mapping'
 
+test('normalizes a family choice from the callback actor', () => {
+  expect(normalizeMaxUpdate({
+    update_type: 'message_callback', timestamp: 1_757_844_000_000,
+    callback: { callback_id: 'callback-1', payload: 'family:33333333-3333-4333-8333-333333333333:0', user: { user_id: 77 } },
+    message: { recipient: { user_id: 77, chat_type: 'dialog', chat_id: null } },
+  })).toEqual({ kind: 'family_choice', callbackId: 'callback-1', payload: 'family:33333333-3333-4333-8333-333333333333:0',
+    userId: '77', occurredAt: new Date(1_757_844_000_000).toISOString() })
+})
+
 const messageFixture = {
   update_type: 'message_created', timestamp: 1700000000123,
   message: {

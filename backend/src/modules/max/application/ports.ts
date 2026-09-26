@@ -21,6 +21,7 @@ export type MaxSubscriptionResult = { success: boolean }
 export type MaxSendMessageInput = {
   userId: string
   text: string
+  buttons?: Array<{ text: string; payload: string }>
 }
 
 export type MaxVideoUploadCapability = {
@@ -40,6 +41,7 @@ export type MaxApiPort = {
   createSubscription(input: MaxSubscriptionInput, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   deleteSubscription(url: string, signal?: AbortSignal): Promise<MaxSubscriptionResult>
   sendMessage(input: MaxSendMessageInput, signal?: AbortSignal): Promise<void>
+  answerCallback?(callbackId: string, text: string, signal?: AbortSignal): Promise<void>
   createVideoUpload(signal?: AbortSignal): Promise<MaxVideoUploadCapability>
   sendVideoMessage(input: MaxSendVideoMessageInput, signal?: AbortSignal): Promise<{ messageId: string }>
   findVideoMessageByIntent?(intentId: string, userId: string, signal?: AbortSignal): Promise<{ messageId: string } | null>
@@ -99,6 +101,7 @@ export type MaxInboundEvent =
       occurredAt: string
       payload: string | null
     }
+  | { kind: 'family_choice'; callbackId: string; payload: string; userId: string; occurredAt: string }
 
 export type MaxAcceptResult = { inboxId: string; duplicate: boolean }
 

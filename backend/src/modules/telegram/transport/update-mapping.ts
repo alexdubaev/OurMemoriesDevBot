@@ -7,6 +7,15 @@ export function normalizeTelegramUpdate(input: unknown): TelegramInboundEvent {
     throw new Error('Telegram update is missing a usable update_id')
   }
   const updateId = String(input.update_id)
+  if (isRecord(input.callback_query)) {
+    const callback = input.callback_query
+    if (!isRecord(callback.from) || !isSafeInteger(callback.from.id) || !isRecord(callback.message)
+      || !isRecord(callback.message.chat) || callback.message.chat.type !== 'private'
+      || !isSafeInteger(callback.message.chat.id) || typeof callback.id !== 'string'
+      || typeof callback.data !== 'string' || callback.data.length > 64) return { kind: 'ignored', updateId }
+    return { kind: 'family_choice', updateId, callbackId: callback.id, senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id), payload: callback.data }
+  }
   const message = isRecord(input.message) ? input.message : null
   if (!message || !isRecord(message.chat)) return { kind: 'ignored', updateId }
   if (message.chat.type !== 'private') return { kind: 'ignored_group', updateId }

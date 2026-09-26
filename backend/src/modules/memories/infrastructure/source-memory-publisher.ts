@@ -119,15 +119,18 @@ async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$quer
 }
 
 async function lockFullMember(tx: PrismaTransactionClient, scope: FamilyScope) {
+  await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
+  const family = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM families WHERE id = ${scope.familyId}::uuid AND status = 'active' FOR SHARE
+  `
+  if (!family[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
   const rows = await tx.$queryRaw<Array<{ role: string }>>`
     SELECT fm.role::text AS role
       FROM family_members fm
-      JOIN families f ON f.id = fm.family_id
      WHERE fm.family_id = ${scope.familyId}::uuid
        AND fm.user_id = ${scope.principal.userId}::uuid
        AND fm.revoked_at IS NULL
-       AND f.status = 'active'
-     FOR SHARE OF fm, f
+     FOR SHARE OF fm
   `
   if (!rows[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
   if (rows[0].role !== 'full') throw new MemoryFailure('forbidden', 'Для этого действия нужен полный доступ')

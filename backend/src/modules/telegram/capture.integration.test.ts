@@ -22,6 +22,8 @@ import { createTelegramPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaTelegramRepository } from './infrastructure/prisma-telegram-repository'
 import { createTelegramImmediateInboxProcessor, createTelegramTaskProcessor } from './infrastructure/process-task'
 import { normalizeTelegramUpdate } from './transport/update-mapping'
+import { choicePayload, readCandidates } from '../../bot-family-target'
+import { expireTelegramChoice } from './infrastructure/source-target'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -283,7 +285,7 @@ maybeDescribe('Telegram durable capture', () => {
     const memory = await prisma.memory.findFirstOrThrow({ include: { media: { include: { asset: true } } } })
     expect(memory).toMatchObject({ kind: 'photo', body: 'На прогулке' })
     expect(memory.media[0]?.asset).toMatchObject({ sourceKind: 'telegram', originalStatus: 'stored', purpose: 'memory' })
-    expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту.')
+    expect(sent.at(-1)?.text).toBe('Сохранено в семейную ленту «Семья».')
   })
 
   test('publishes every supported capture type for a FULL member who joined by invite without pilot admission', async () => {
@@ -820,7 +822,7 @@ maybeDescribe('Telegram durable capture', () => {
     expect(await prisma.memory.count()).toBe(1)
     await process(task.payload)
     expect(await prisma.memory.count()).toBe(1)
-    expect(sent.filter(({ text }) => text === 'Сохранено в семейную ленту.')).toHaveLength(1)
+    expect(sent.filter(({ text }) => text === 'Сохранено в семейную ленту «Семья».')).toHaveLength(1)
   })
 
   test('persists album timing across processor restart, preserves order, and appends a late photo', async () => {
@@ -886,7 +888,7 @@ maybeDescribe('Telegram durable capture', () => {
     for (const source of sources) {
       if (source.kind === 'video') continue
       await prisma.mediaAsset.create({ data: {
-        id: source.plannedMediaId!, familyId: source.familyId, uploaderId: source.userId,
+        id: source.plannedMediaId!, familyId: source.familyId!, uploaderId: source.userId,
         sourceKind: 'telegram', purpose: 'memory', mediaKind: 'photo',
         originalKey: `media-originals/test/${source.plannedMediaId}`, declaredMime: 'image/jpeg',
         verifiedMime: 'image/jpeg', sha256: '0'.repeat(64), byteSize: 1n,
@@ -1023,6 +1025,115 @@ maybeDescribe('Telegram durable capture', () => {
 
     await process(task.payload)
     expect(sent.filter(({ text }) => text === 'Подпись не сохранена: доступ к семейному архиву недоступен.')).toHaveLength(1)
+  })
+
+  test('Telegram prompts for each ambiguous source and binds only an authorized callback', async () => {
+    const actor = await familyOwner('56001')
+    const other = await familyOwner('56002')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'full' } })
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await accept(note(5601, 61, actor.subject, 'First source'))
+    await accept(note(5602, 62, actor.subject, 'Second source'))
+    const sources = await prisma.telegramSource.findMany({ orderBy: { messageId: 'asc' } })
+    for (const source of sources) await process({ sourceId: source.id })
+    expect(await prisma.memory.count()).toBe(0)
+    expect(sent.filter(({ options }) => options?.buttons?.some((button) => button.callbackData))).toHaveLength(2)
+    const first = sources[0]!
+    const second = sources[1]!
+    const firstIndex = readCandidates(first.choiceCandidates).findIndex((candidate) => candidate.familyId === actor.familyId)
+    const secondIndex = readCandidates(second.choiceCandidates).findIndex((candidate) => candidate.familyId === other.familyId)
+    const callback = async (updateId: number, subject: string, sourceId: string, index: number) => {
+      const received = await accept(normalizeTelegramUpdate({ update_id: updateId, callback_query: {
+        id: `cb-${updateId}`, from: { id: Number(subject) }, data: choicePayload(sourceId, index),
+        message: { message_id: 9000, date: 1_788_000_000, chat: { id: Number(actor.subject), type: 'private' } },
+      } }))
+      await process({ inboxId: received.inboxId })
+    }
+    await callback(5603, other.subject, first.id, firstIndex)
+    expect((await prisma.telegramSource.findUniqueOrThrow({ where: { id: first.id } })).familyId).toBeNull()
+    await callback(5604, actor.subject, second.id, secondIndex)
+    await callback(5605, actor.subject, first.id, firstIndex)
+    await process({ sourceId: second.id })
+    await process({ sourceId: first.id })
+    expect(await prisma.memory.findMany({ orderBy: { body: 'asc' }, select: { body: true, familyId: true } })).toEqual([
+      { body: 'First source', familyId: actor.familyId }, { body: 'Second source', familyId: other.familyId },
+    ])
+    await callback(5606, actor.subject, first.id, secondIndex)
+    expect(await prisma.memory.count()).toBe(2)
+  })
+
+  test('Telegram expires an unchosen source and refuses the selected family after revoke', async () => {
+    const actor = await familyOwner('56011')
+    const other = await familyOwner('56012')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'full' } })
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    await accept(note(5611, 71, actor.subject, 'Expired'))
+    const expired = await prisma.telegramSource.findFirstOrThrow({ where: { messageId: 71n } })
+    await prisma.telegramSource.update({ where: { id: expired.id }, data: { choiceExpiresAt: new Date(0) } })
+    await process({ sourceId: expired.id })
+    expect(await prisma.telegramSource.findUniqueOrThrow({ where: { id: expired.id } })).toMatchObject({ status: 'rejected', rejectionCode: 'choice_expired' })
+    await accept(note(5612, 72, actor.subject, 'Revoked'))
+    const revoked = await prisma.telegramSource.findFirstOrThrow({ where: { messageId: 72n } })
+    const index = readCandidates(revoked.choiceCandidates).findIndex((candidate) => candidate.familyId === other.familyId)
+    const result = await accept(normalizeTelegramUpdate({ update_id: 5613, callback_query: {
+      id: 'cb-revoke', from: { id: Number(actor.subject) }, data: choicePayload(revoked.id, index),
+      message: { message_id: 9001, date: 1_788_000_000, chat: { id: Number(actor.subject), type: 'private' } },
+    } }))
+    await process({ inboxId: result.inboxId })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: other.familyId, userId: actor.userId } }, data: { revokedAt: new Date() } })
+    await process({ sourceId: revoked.id })
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.telegramSource.findUniqueOrThrow({ where: { id: revoked.id } })).toMatchObject({
+      status: 'rejected', rejectionCode: 'access_revoked', familyId: other.familyId,
+    })
+  })
+
+  test('Telegram keeps selected video, caption reply, and album in the same family', async () => {
+    const actor = await familyOwner('56021')
+    const other = await familyOwner('56022')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'full' } })
+    const process = createTelegramTaskProcessor({ runtime, api, crypto })
+    const choose = async (sourceId: string, updateId: number) => {
+      const source = await prisma.telegramSource.findUniqueOrThrow({ where: { id: sourceId } })
+      const index = readCandidates(source.choiceCandidates).findIndex((candidate) => candidate.familyId === other.familyId)
+      const result = await accept(normalizeTelegramUpdate({ update_id: updateId, callback_query: {
+        id: `cb-${updateId}`, from: { id: Number(actor.subject) }, data: choicePayload(source.id, index),
+        message: { message_id: 9000, date: 1_788_000_000, chat: { id: Number(actor.subject), type: 'private' } },
+      } }))
+      await process({ inboxId: result.inboxId })
+    }
+
+    await accept(video(5621, 81, actor.subject, 'Original video'))
+    const videoSource = await prisma.telegramSource.findFirstOrThrow({ where: { messageId: 81n } })
+    await process({ sourceId: videoSource.id })
+    expect(await prisma.memory.count()).toBe(0)
+    await choose(videoSource.id, 5622)
+    expect(await expireTelegramChoice(prisma, videoSource.id, undefined, new Date(Date.now() + 16 * 60_000))).toBeNull()
+    await expect(Promise.resolve().then(() => prisma.telegramSource.update({ where: { id: videoSource.id }, data: { familyId: actor.familyId, childId: actor.childId } }))).rejects.toThrow()
+    await process({ sourceId: videoSource.id })
+    const videoMemory = await prisma.memory.findFirstOrThrow({ where: { kind: 'video' } })
+    expect(videoMemory).toMatchObject({ familyId: other.familyId, childId: other.childId, body: 'Original video' })
+    expect(await prisma.telegramVideoReference.findFirstOrThrow({ where: { memoryId: videoMemory.id } })).toMatchObject({ familyId: other.familyId })
+    const prompt = await prisma.captionRequest.findFirstOrThrow({ where: { memoryId: videoMemory.id } })
+    await accept(reply(5623, 82, actor.subject, Number(prompt.promptMessageId), 'Updated video caption'))
+    const replyInbox = await prisma.telegramInbox.findFirstOrThrow({ where: { updateId: 5623n } })
+    await process({ inboxId: replyInbox.id })
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: videoMemory.id } })).toMatchObject({
+      familyId: other.familyId, body: 'Updated video caption',
+    })
+
+    await accept(photo(5624, 83, actor.subject, 'Album caption', 'chosen-album'))
+    await accept(photo(5625, 84, actor.subject, '', 'chosen-album'))
+    const album = await prisma.telegramAlbum.findFirstOrThrow()
+    await prisma.telegramAlbum.update({ where: { id: album.id }, data: { readyAt: new Date(0) } })
+    await process({ albumId: album.id })
+    const albumSources = await prisma.telegramSource.findMany({ where: { mediaGroupId: 'chosen-album' } })
+    expect(albumSources.every((source) => source.familyId === null)).toBe(true)
+    await choose(albumSources[0]!.id, 5626)
+    expect(await expireTelegramChoice(prisma, albumSources[0]!.id, album.id, new Date(Date.now() + 16 * 60_000))).toBeNull()
+    await process({ albumId: album.id })
+    expect(await prisma.telegramSource.count({ where: { mediaGroupId: 'chosen-album', familyId: other.familyId } })).toBe(2)
+    expect(await prisma.memory.findFirstOrThrow({ where: { kind: 'photo' } })).toMatchObject({ familyId: other.familyId, childId: other.childId, body: 'Album caption' })
   })
 
   async function clearFixtures() {
@@ -1206,7 +1317,8 @@ maybeDescribe('Telegram durable capture', () => {
     }) as typeof prisma
   }
 
-  async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string; userId: string }) {
+  async function createStoredPhoto(source: { plannedMediaId: string | null; familyId: string | null; userId: string }) {
+    if (!source.familyId) throw new Error('Test source has no selected family')
     await prisma.mediaAsset.create({ data: {
       id: source.plannedMediaId!, familyId: source.familyId, uploaderId: source.userId,
       sourceKind: 'telegram', purpose: 'memory', mediaKind: 'photo',

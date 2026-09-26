@@ -7,10 +7,11 @@ import { createSourceMemoryPublisher } from '../../memories'
 import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { classifyMaxVideoMessage, normalizeVideoDurationMs } from '../application/video-policy'
 import { MaxProviderError } from './max-api'
+import { expireMaxTarget, resolveMaxTarget } from './source-target'
+import { savedFamilyText } from '../../../bot-family-target'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
-const savedText = 'Сохранено в семейную ленту.'
 const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
 const maxHeight = 720
 
@@ -28,8 +29,12 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
     }
 
-    const admission = await findAdmission(prisma, input.event.senderId)
-    if (!admission) return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId, deniedText)
+    const targetResult = await resolveMaxTarget(prisma, source)
+    if (targetResult.kind === 'pending') return 'done'
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, source.inboxId, input.event.senderId)
+    if (targetResult.kind !== 'target') return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId,
+      'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
+    const admission = targetResult.target
 
     let resolved
     try {
@@ -68,6 +73,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         occurredAt: new Date(input.event.occurredAt),
         mediaIds: [],
       }, async (tx, memoryId) => {
+        const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,
         } })
@@ -87,8 +93,8 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
         } })
         const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'saved' } },
-          create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedText },
-          update: { destinationUserId: BigInt(input.event.senderId), text: savedText }, select: { id: true } })
+          create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedFamilyText(family.name) },
+          update: { destinationUserId: BigInt(input.event.senderId), text: savedFamilyText(family.name) }, select: { id: true } })
         await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
       })
       for (let attempt = 0; ; attempt += 1) {
@@ -133,17 +139,6 @@ export function resolveVideoDimensions(
   if (inboundWidth !== null && inboundHeight !== null) return { width: inboundWidth, height: inboundHeight }
 
   return { width: null, height: null }
-}
-
-async function findAdmission(db: DbClient, senderSubject: string) {
-  const identity = await db.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: senderSubject } }, select: {
-    user: { select: { id: true, familyMemberships: { where: { revokedAt: null, family: { status: 'active' } }, orderBy: { joinedAt: 'asc' }, take: 2,
-      select: { familyId: true, role: true, family: { select: { children: { orderBy: { createdAt: 'asc' }, take: 1, select: { id: true } } } } } } } },
-  } })
-  const memberships = identity?.user.familyMemberships ?? []
-  const child = memberships[0]?.family.children[0]
-  if (!identity || memberships.length !== 1 || memberships[0]!.role !== 'full' || !child) return null
-  return { userId: identity.user.id, familyId: memberships[0]!.familyId, childId: child.id }
 }
 
 async function terminal(db: DbClient, sourceId: string, inboxId: string, kind: 'denied' | 'unsupported_media', destinationUserId: string, text: string): Promise<'done' | 'skipped'> {

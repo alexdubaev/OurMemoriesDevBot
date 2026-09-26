@@ -23,6 +23,8 @@ import { normalizeMaxUpdate } from './transport/update-mapping'
 import { createMaxWebhook } from './transport/webhook'
 import { MemoryService, PrismaMemoryRepository, createSourceMemoryPublisher } from '../memories'
 import { createPrismaIdempotencyExecutor } from '../../idempotency'
+import { choicePayload, readCandidates } from '../../bot-family-target'
+import { expireMaxTarget } from './infrastructure/source-target'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -32,7 +34,7 @@ maybeDescribe('MAX durable capture', () => {
   const key = Buffer.alloc(32, 17).toString('base64url')
   const crypto = createMaxPayloadCrypto(key)
   const repository = new PrismaMaxRepository(prisma)
-  const accept = createMaxAcceptUpdate({ botId: '900', repository, encrypt: crypto.encrypt, now: () => new Date('2026-09-14T10:00:00.000Z') })
+  const accept = createMaxAcceptUpdate({ botId: '900', repository, encrypt: crypto.encrypt, now: () => new Date() })
   const webhookSecret = 'M'.repeat(43)
   const webhook = createMaxWebhook({
     secret: webhookSecret, bodyLimitBytes: 64 * 1024, acceptUpdate: accept,
@@ -374,7 +376,7 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.memory.count()).toBe(0)
     expect(await prisma.maxSource.findFirstOrThrow()).toMatchObject({ status: 'denied', rejectionCode: 'denied' })
     expect(await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { kind: 'denied' } })).toMatchObject({
-      text: 'Не удалось сохранить это сообщение в memoLy.', destinationUserId: 77n,
+      text: 'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.', destinationUserId: 77n,
     })
     expect((await prisma.maxInbox.findFirstOrThrow()).encryptedPayload.byteLength).toBe(0)
   })
@@ -847,7 +849,7 @@ maybeDescribe('MAX durable capture', () => {
       await accept(event)
       const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
       const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
-      const gate = transactionQueryGate(prisma, 2, true)
+      const gate = transactionQueryGate(prisma, 6, true)
       const process = createMaxTaskProcessor({
         runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime,
         crypto, api: fixture.api(event), media: fixture.media,
@@ -1102,7 +1104,7 @@ maybeDescribe('MAX durable capture', () => {
         return new Proxy(target.externalIdentity, {
           get(identityTarget, identityProperty, identityReceiver) {
             if (identityProperty !== 'findUnique') return Reflect.get(identityTarget, identityProperty, identityReceiver)
-            return async () => ({ user: { id: ambiguous.userId, familyMemberships: [{ familyId: ambiguous.familyId, role: 'full', family: { children: [{ id: ambiguous.childId }] } }, { familyId: randomUUID(), role: 'full', family: { children: [{ id: randomUUID() }] } }] } })
+            return async () => ({ user: { id: ambiguous.userId, familyMemberships: [{ familyId: ambiguous.familyId, role: 'full', family: { name: 'A', children: [{ id: ambiguous.childId }] } }, { familyId: randomUUID(), role: 'full', family: { name: 'B', children: [{ id: randomUUID() }] } }] } })
           },
         })
       },
@@ -1121,7 +1123,8 @@ maybeDescribe('MAX durable capture', () => {
     }
     expect(downloads).toBe(0)
     expect(await prisma.memory.count()).toBe(0)
-    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(5)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(4)
+    expect(await prisma.maxSource.count({ where: { choiceExpiresAt: { not: null }, familyId: null } })).toBe(1)
   })
 
   test('final membership revocation during image publication prevents Memory and cleans stored media', async () => {
@@ -1135,7 +1138,7 @@ maybeDescribe('MAX durable capture', () => {
       await accept(event)
       const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
       const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
-      gate = transactionQueryGate(prisma, 1, false)
+      gate = transactionQueryGate(prisma, 6, false)
       const process = createMaxTaskProcessor({ runtime: { ...fixture.runtime, prisma: gate.db } as unknown as BackendRuntime, crypto, api: fixture.api(event), media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }) })
       running = process(task.payload)
       await waitForGate(gate, 'final-revocation')
@@ -1228,6 +1231,77 @@ maybeDescribe('MAX durable capture', () => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label} gate did not reach its barrier`)), 5_000)),
     ])
   }
+
+  test('MAX keeps one publish family automatic when another membership is viewer-only', async () => {
+    const actor = await maxFamily('78001', 'full')
+    const other = await maxFamily('78002', 'full')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'viewer' } })
+    await processEvent({ kind: 'message_created', senderId: actor.subject, recipientId: '900', messageId: 'viewer-extra',
+      occurredAt: new Date().toISOString(), text: 'Only A', hasAttachments: false })
+    expect(await prisma.memory.findFirstOrThrow()).toMatchObject({ familyId: actor.familyId, childId: actor.childId })
+    expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'family_choice' } })).toBe(0)
+    expect(await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { kind: 'saved' } })).toMatchObject({ text: `Сохранено в семейную ленту «Family ${actor.subject}».` })
+  })
+
+  test('MAX binds two pending sources independently and ignores foreign and duplicate callbacks', async () => {
+    const actor = await maxFamily('78003', 'full')
+    const other = await maxFamily('78004', 'full')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'full' } })
+    for (const [messageId, text] of [['choice-1', 'First'], ['choice-2', 'Second']] as const) {
+      await processEvent({ kind: 'message_created', senderId: actor.subject, recipientId: '900', messageId,
+        occurredAt: new Date().toISOString(), text, hasAttachments: false })
+    }
+    expect(await prisma.memory.count()).toBe(0)
+    const first = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'choice-1' } })
+    const second = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'choice-2' } })
+    const firstIndex = readCandidates(first.choiceCandidates).findIndex((candidate) => candidate.familyId === actor.familyId)
+    const secondIndex = readCandidates(second.choiceCandidates).findIndex((candidate) => candidate.familyId === other.familyId)
+    expect(firstIndex).toBeGreaterThanOrEqual(0)
+    expect(secondIndex).toBeGreaterThanOrEqual(0)
+    const processor = createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })
+    const callback = async (sourceId: string, index: number, userId: string, callbackId: string) => {
+      const accepted = await accept({ kind: 'family_choice', callbackId, payload: choicePayload(sourceId, index), userId, occurredAt: new Date().toISOString() })
+      await processor({ inboxId: accepted.inboxId })
+    }
+    await callback(first.id, firstIndex, '999999', 'foreign-choice')
+    expect((await prisma.maxSource.findUniqueOrThrow({ where: { id: first.id } })).familyId).toBeNull()
+    await callback(second.id, secondIndex, actor.subject, 'second-choice')
+    await callback(first.id, firstIndex, actor.subject, 'first-choice')
+    await processor({ inboxId: second.inboxId })
+    await processor({ inboxId: first.inboxId })
+    expect((await prisma.memory.findMany({ orderBy: { body: 'asc' }, select: { body: true, familyId: true } }))).toEqual([
+      { body: 'First', familyId: actor.familyId }, { body: 'Second', familyId: other.familyId },
+    ])
+    await callback(first.id, secondIndex, actor.subject, 'duplicate-choice')
+    expect(await prisma.memory.count()).toBe(2)
+    expect((await prisma.maxSource.findUniqueOrThrow({ where: { id: first.id } })).familyId).toBe(actor.familyId)
+  })
+
+  test('MAX expires an unchosen source and keeps an already selected target immutable', async () => {
+    const actor = await maxFamily('78005', 'full')
+    const other = await maxFamily('78006', 'full')
+    await prisma.familyMember.create({ data: { familyId: other.familyId, userId: actor.userId, role: 'full' } })
+    await processEvent({ kind: 'message_created', senderId: actor.subject, recipientId: '900', messageId: 'expiring-choice',
+      occurredAt: new Date().toISOString(), text: 'Expired', hasAttachments: false })
+    const expired = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'expiring-choice' } })
+    await prisma.maxSource.update({ where: { id: expired.id }, data: { choiceExpiresAt: new Date(0) } })
+    const processor = createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })
+    await processor({ inboxId: expired.inboxId })
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: expired.id } })).toMatchObject({ status: 'denied' })
+
+    await processEvent({ kind: 'message_created', senderId: actor.subject, recipientId: '900', messageId: 'fixed-choice',
+      occurredAt: new Date().toISOString(), text: 'Fixed', hasAttachments: false })
+    const fixed = await prisma.maxSource.findFirstOrThrow({ where: { messageId: 'fixed-choice' } })
+    const index = readCandidates(fixed.choiceCandidates).findIndex((candidate) => candidate.familyId === other.familyId)
+    const accepted = await accept({ kind: 'family_choice', callbackId: 'fixed-callback', payload: choicePayload(fixed.id, index),
+      userId: actor.subject, occurredAt: new Date().toISOString() })
+    await processor({ inboxId: accepted.inboxId })
+    await expect(Promise.resolve().then(() => prisma.maxSource.update({ where: { id: fixed.id }, data: { familyId: actor.familyId, childId: actor.childId } }))).rejects.toThrow()
+    expect(await expireMaxTarget(prisma, fixed.id, fixed.inboxId, actor.subject, new Date(Date.now() + 16 * 60_000))).toBe('skipped')
+    await processor({ inboxId: fixed.inboxId })
+    expect(await prisma.memory.findFirstOrThrow()).toMatchObject({ familyId: other.familyId, childId: other.childId })
+  })
 
   async function processEvent(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
     await accept(event)

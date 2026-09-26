@@ -1,10 +1,12 @@
 import type { TelegramInboundEvent } from '../domain/inbound-event'
+import type { PublishCandidate } from '../../../bot-family-target'
 
 export type TelegramAdmission = {
   userId: string
-  familyId: string
-  childId: string
-  role: 'full' | 'viewer'
+  familyId: string | null
+  childId: string | null
+  role: 'full'
+  candidates?: PublishCandidate[]
 } | null
 
 export type EncryptedTelegramPayload = {
@@ -27,10 +29,11 @@ export type TelegramDownload = {
 export type TelegramApiPort = {
   download(fileId: string, expectedSize: number | null, signal?: AbortSignal): Promise<TelegramDownload>
   sendMessage(chatId: string, text: string, options?: {
-    buttons?: Array<{ text: string; webAppUrl: string }>
+    buttons?: Array<{ text: string; webAppUrl?: string; callbackData?: string }>
     forceReply?: boolean
     replyToMessageId?: string
   }): Promise<void | { messageId: string }>
+  answerCallbackQuery?(callbackId: string, text: string): Promise<void>
   /** Re-send an existing Telegram file id; never accepts arbitrary client media bytes. */
   sendVideo(chatId: string, fileId: string): Promise<{ messageId: string }>
   /** Deletes one bot-created navigation message; callers must retain the exact server-side id. */

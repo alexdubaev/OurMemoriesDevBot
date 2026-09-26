@@ -251,6 +251,24 @@ describe('MAX API client', () => {
     expect(request!.url).not.toContain(token)
   })
 
+  test('sends a source-bound choice keyboard and acknowledges its callback', async () => {
+    const requests: Request[] = []
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      return requests.length === 1 ? response({ message: {} }) : response({ success: true })
+    } })
+    await api.sendMessage({ userId: '77', text: 'Выберите семью', buttons: [
+      { text: 'Семья A', payload: 'family:source-a:0' }, { text: 'Семья B', payload: 'family:source-a:1' },
+    ] })
+    await api.answerCallback?.('callback-1', 'Выбрано')
+    expect(await requests[0]!.json()).toEqual({ text: 'Выберите семью', attachments: [{ type: 'inline_keyboard', payload: {
+      buttons: [[{ type: 'callback', text: 'Семья A', payload: 'family:source-a:0' }],
+        [{ type: 'callback', text: 'Семья B', payload: 'family:source-a:1' }]],
+    } }] })
+    expect(requests[1]!.url).toBe('https://platform-api2.max.ru/answers?callback_id=callback-1')
+    expect(await requests[1]!.json()).toEqual({ message: { text: 'Выбрано', attachments: [] } })
+  })
+
   test('sends a bot-authenticated video attachment message and returns its provider identity', async () => {
     let request: Request | undefined
     const api = createMaxApi(token, {
