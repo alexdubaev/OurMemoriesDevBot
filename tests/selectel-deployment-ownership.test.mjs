@@ -7,6 +7,51 @@ import assert from 'node:assert/strict'
 const root = resolve(import.meta.dirname, '..')
 const read = (relativePath) => readFileSync(resolve(root, relativePath), 'utf8')
 
+test('Selectel image builder uses its checkout with an explicit safe Git directory', () => {
+  const scriptPath = resolve(root, 'deploy/selectel/build-images.sh')
+    .replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`)
+    .replaceAll('\\', '/')
+  const harness = `
+set -euo pipefail
+temp="$(mktemp -d)"
+trap 'rm -rf -- "$temp"' EXIT
+repo="$temp/repo"
+mkdir -p "$repo/deploy/selectel" "$temp/bin"
+tr -d '\\r' < '${scriptPath}' > "$repo/deploy/selectel/build-images.sh"
+real_git="$(command -v git)"
+"$real_git" init -q "$repo"
+"$real_git" -C "$repo" remote add origin git@github.com:alexdubaev/OurMemoriesDevBot.git
+"$real_git" -C "$repo" add deploy/selectel/build-images.sh
+"$real_git" -C "$repo" -c user.name=Test -c user.email=test@example.com commit -qm initial
+sha="$("$real_git" -C "$repo" rev-parse HEAD)"
+"$real_git" -C "$repo" update-ref refs/remotes/origin/main "$sha"
+cat > "$temp/bin/git" <<'GIT'
+#!/usr/bin/env bash
+if [ "$1" != -c ] || [ "$2" != "safe.directory=$BUILDER_REPO" ] || [ "$3" != -C ] || [ "$4" != "$BUILDER_REPO" ]; then
+  exit 82
+fi
+shift 4
+exec "$REAL_GIT" -c "safe.directory=$BUILDER_REPO" -C "$BUILDER_REPO" "$@"
+GIT
+cat > "$temp/bin/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [ "$1" = build ]; then exit 0; fi
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  if [ "$3" = --format ]; then printf '%s\\n' "$EXPECTED_SHA"; fi
+  exit 0
+fi
+exit 83
+DOCKER
+chmod +x "$temp/bin/git" "$temp/bin/docker"
+export BUILDER_REPO="$repo" REAL_GIT="$real_git" EXPECTED_SHA="$sha"
+cd "$temp"
+PATH="$temp/bin:$PATH" SELECTEL_MAX_BOT_USERNAME=id911018762027_bot bash "$repo/deploy/selectel/build-images.sh" "$sha"
+`
+  const result = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8', timeout: 30_000 })
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.match(result.stdout, /Built and verified immutable images/)
+})
+
 test('Selectel Compose owns only an internal static service', () => {
   const compose = read('deploy/selectel/compose.yml.template')
 
