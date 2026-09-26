@@ -22,6 +22,7 @@ maybeDescribe('Family access and invitations', () => {
     AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
+  const enabledApp = createApp({ env: { ...env, MULTI_FAMILY_ACTIVATION: 'on' }, prisma })
 
   async function clearFixtures() {
     await prisma.taskOutbox.deleteMany()
@@ -43,6 +44,194 @@ maybeDescribe('Family access and invitations', () => {
   afterAll(async () => {
     await clearFixtures()
     await prisma.$disconnect()
+  })
+
+  test('gate on lets a non-pilot invitee create an owned family while preserving both memberships', async () => {
+    const owner = await admittedUser('Owner', '191001')
+    const invitee = await admittedUser('Invitee', '191002', 'user', false)
+    const first = await createFamily(owner.token, 'Семья близких')
+    const invitation = await jsonRequest(
+      `/api/v1/families/${first.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' },
+    )
+    expect((await jsonRequest('/api/v1/invites/accept', invitee.token, 'POST',
+      { token: invitation.body.rawToken })).response.status).toBe(200)
+    const blocked = await jsonRequest('/api/v1/families', invitee.token, 'POST',
+      { name: 'Моя семья', timezone: 'Europe/Moscow' })
+    expect(blocked.response.status).toBe(403)
+    const beforeCreation = await enabledApp.request('/api/v1/me/families', { headers: authHeaders(invitee.token) })
+    expect((await beforeCreation.json()).canCreateOwnFamily).toBe(true)
+
+    const created = await enabledJsonRequest('/api/v1/families', invitee.token, 'POST',
+      { name: 'Моя семья', timezone: 'Europe/Moscow' })
+    expect(created.response.status).toBe(201)
+    const listed = await enabledApp.request('/api/v1/me/families', { headers: authHeaders(invitee.token) })
+    expect(listed.status).toBe(200)
+    const body = await listed.json()
+    expect(body.items.map((item: { familyId: string }) => item.familyId))
+      .toEqual([created.body.family.id, first.body.family.id])
+    expect(body.ownFamilyId).toBe(created.body.family.id)
+    expect(body.canCreateOwnFamily).toBe(false)
+    const legacy = await enabledApp.request('/api/v1/me', { headers: authHeaders(invitee.token) })
+    expect(legacy.status).toBe(409)
+    expect((await legacy.json()).error.code).toBe('CONFLICT')
+    const unused = await jsonRequest(`/api/v1/families/${first.body.family.id}/invites`,
+      owner.token, 'POST', { role: 'full' })
+    const existing = await jsonRequest('/api/v1/invites/accept', invitee.token, 'POST',
+      { token: unused.body.rawToken })
+    expect(existing.response.status).toBe(200)
+    expect(existing.body.membership.role).toBe('viewer')
+    expect((await prisma.familyInvite.findUniqueOrThrow({ where: { id: unused.body.id } })).acceptedAt).toBeNull()
+  })
+
+  test('two own-family creates with distinct keys yield one owner even with the gate on', async () => {
+    const actor = await admittedUser('Browser actor', '191006', 'user', false, 'telegram', false)
+    const requests = await Promise.all([
+      enabledJsonRequest('/api/v1/families', actor.token, 'POST',
+        { name: 'Первая', timezone: 'Europe/Moscow' }),
+      enabledJsonRequest('/api/v1/families', actor.token, 'POST',
+        { name: 'Вторая', timezone: 'Europe/Moscow' }),
+    ])
+    expect(requests.map(({ response }) => response.status).sort()).toEqual([201, 409])
+    expect(requests.find(({ response }) => response.status === 409)?.body.error.code).toBe('ALREADY_IN_FAMILY')
+    expect(await prisma.family.count({ where: { ownerUserId: actor.userId, status: { not: 'deleted' } } })).toBe(1)
+  })
+
+  test('mutual invitations keep family roles separate and revocation affects only its target', async () => {
+    const firstOwner = await admittedUser('First owner', '191011')
+    const secondOwner = await admittedUser('Second owner', '191012')
+    const first = await createFamily(firstOwner.token, 'Альбом A')
+    const second = await createFamily(secondOwner.token, 'Альбом B')
+    const firstInvite = await jsonRequest(`/api/v1/families/${first.body.family.id}/invites`,
+      firstOwner.token, 'POST', { role: 'viewer' })
+    const secondInvite = await jsonRequest(`/api/v1/families/${second.body.family.id}/invites`,
+      secondOwner.token, 'POST', { role: 'full' })
+
+    expect((await enabledJsonRequest('/api/v1/invites/accept', secondOwner.token, 'POST',
+      { token: firstInvite.body.rawToken })).response.status).toBe(200)
+    expect((await enabledJsonRequest('/api/v1/invites/accept', firstOwner.token, 'POST',
+      { token: secondInvite.body.rawToken })).response.status).toBe(200)
+    const firstList = await enabledApp.request('/api/v1/me/families', { headers: authHeaders(firstOwner.token) })
+    expect((await firstList.json()).items.map((item: { familyId: string; role: string }) =>
+      [item.familyId, item.role])).toEqual([
+      [first.body.family.id, 'full'], [second.body.family.id, 'full'],
+    ])
+    const secondList = await enabledApp.request('/api/v1/me/families', { headers: authHeaders(secondOwner.token) })
+    expect((await secondList.json()).items.map((item: { familyId: string; role: string }) =>
+      [item.familyId, item.role])).toEqual([
+      [second.body.family.id, 'full'], [first.body.family.id, 'viewer'],
+    ])
+    expect((await getFamily(first.body.family.id, secondOwner.token)).status).toBe(200)
+    const removal = await enabledJsonRequest(`/api/v1/families/${first.body.family.id}/members/${secondOwner.userId}`,
+      firstOwner.token, 'DELETE', { expectedVersion: 1 })
+    expect(removal.response.status).toBe(204)
+    expect((await getFamily(first.body.family.id, secondOwner.token)).status).toBe(404)
+    expect((await getFamily(second.body.family.id, secondOwner.token)).status).toBe(200)
+    expect((await getFamily(second.body.family.id, firstOwner.token)).status).toBe(200)
+  })
+
+  test('two concurrent invite accepts and a concurrent own creation serialize for one actor', async () => {
+    const firstOwner = await admittedUser('First owner', '191021')
+    const secondOwner = await admittedUser('Second owner', '191022')
+    const actor = await admittedUser('Browser actor', '191023', 'user', false, 'telegram', false)
+    const first = await createFamily(firstOwner.token, 'Семья A')
+    const second = await createFamily(secondOwner.token, 'Семья B')
+    const firstInvite = await jsonRequest(`/api/v1/families/${first.body.family.id}/invites`,
+      firstOwner.token, 'POST', {})
+    const secondInvite = await jsonRequest(`/api/v1/families/${second.body.family.id}/invites`,
+      secondOwner.token, 'POST', {})
+    const attempts = await Promise.all([
+      enabledJsonRequest('/api/v1/invites/accept', actor.token, 'POST', { token: firstInvite.body.rawToken }),
+      enabledJsonRequest('/api/v1/invites/accept', actor.token, 'POST', { token: secondInvite.body.rawToken }),
+      enabledJsonRequest('/api/v1/families', actor.token, 'POST',
+        { name: 'Своя', timezone: 'Europe/Moscow' }),
+    ])
+    expect(attempts.map(({ response }) => response.status)).toEqual([200, 200, 201])
+    const listed = await enabledApp.request('/api/v1/me/families', { headers: authHeaders(actor.token) })
+    expect((await listed.json()).items).toHaveLength(3)
+    expect(await prisma.familyMember.count({ where: { userId: actor.userId, revokedAt: null } })).toBe(3)
+  })
+
+  test('family list keyset cursor stays scoped and detects changed membership order', async () => {
+    const viewer = await admittedUser('Viewer', '191031', 'user', false)
+    const names = ['Зета', 'Альфа', 'Бета']
+    const families = []
+    for (let index = 0; index < names.length; index += 1) {
+      const owner = await admittedUser(`Owner ${index}`, String(191032 + index))
+      const family = await createFamily(owner.token, names[index]!)
+      families.push(family.body.family.id as string)
+      const invite = await jsonRequest(`/api/v1/families/${family.body.family.id}/invites`,
+        owner.token, 'POST', { role: 'viewer' })
+      expect((await enabledJsonRequest('/api/v1/invites/accept', viewer.token, 'POST',
+        { token: invite.body.rawToken })).response.status).toBe(200)
+    }
+    const first = await enabledApp.request('/api/v1/me/families?limit=1', { headers: authHeaders(viewer.token) })
+    const firstBody = await first.json()
+    expect(firstBody.items.map((item: { name: string }) => item.name)).toEqual(['Альфа'])
+    expect(firstBody.nextCursor).toBeString()
+    const second = await enabledApp.request(`/api/v1/me/families?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+      { headers: authHeaders(viewer.token) })
+    const secondBody = await second.json()
+    expect(secondBody.items.map((item: { name: string }) => item.name)).toEqual(['Бета'])
+    expect(secondBody.nextCursor).toBeString()
+    const third = await enabledApp.request(`/api/v1/me/families?limit=1&cursor=${encodeURIComponent(secondBody.nextCursor)}`,
+      { headers: authHeaders(viewer.token) })
+    expect((await third.json()).items.map((item: { name: string }) => item.name)).toEqual(['Зета'])
+
+    await prisma.family.update({ where: { id: families[0] }, data: { name: 'Аарон' } })
+    const stale = await enabledApp.request(`/api/v1/me/families?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+      { headers: authHeaders(viewer.token) })
+    expect(stale.status).toBe(409)
+    expect((await stale.json()).error.code).toBe('VERSION_CONFLICT')
+  })
+
+  test('rejoining one family increments its epoch and captures the locked publication baseline', async () => {
+    const owner = await admittedUser('Owner', '191041')
+    const member = await admittedUser('Member', '191042', 'user', false)
+    const family = await createFamily(owner.token, 'Семья')
+    const firstInvite = await jsonRequest(`/api/v1/families/${family.body.family.id}/invites`,
+      owner.token, 'POST', { role: 'viewer' })
+    expect((await enabledJsonRequest('/api/v1/invites/accept', member.token, 'POST',
+      { token: firstInvite.body.rawToken })).response.status).toBe(200)
+    const before = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
+    expect(before.membershipEpoch).toBe(1)
+    expect(before.unreadBaselineOrdinal).toBeNull()
+    const removed = await enabledJsonRequest(`/api/v1/families/${family.body.family.id}/members/${member.userId}`,
+      owner.token, 'DELETE', { expectedVersion: before.version })
+    expect(removed.response.status).toBe(204)
+    await prisma.family.update({ where: { id: family.body.family.id }, data: {
+      publicationOrdinal: 7n, unreadTrackingActivatedAt: new Date(),
+    } })
+    const secondInvite = await jsonRequest(`/api/v1/families/${family.body.family.id}/invites`,
+      owner.token, 'POST', { role: 'full' })
+    const rejoined = await enabledJsonRequest('/api/v1/invites/accept', member.token, 'POST',
+      { token: secondInvite.body.rawToken })
+    expect(rejoined.response.status).toBe(200)
+    const after = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })
+    expect(after).toMatchObject({ role: 'full', membershipEpoch: 2, unreadBaselineOrdinal: 7n })
+    expect(after.version).toBeGreaterThan(before.version)
+    expect((await enabledJsonRequest('/api/v1/invites/accept', member.token, 'POST',
+      { token: secondInvite.body.rawToken })).response.status).toBe(200)
+    expect((await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: member.userId } },
+    })).membershipEpoch).toBe(2)
+  })
+
+  test('the existing rate limiter covers root family creation', async () => {
+    const owner = await admittedUser('Owner', '191051')
+    const limitedApp = createApp({ env: { ...env, AUTH_RATE_LIMIT_MAX: 1 }, prisma })
+    const send = () => limitedApp.request('/api/v1/families', {
+      method: 'POST',
+      headers: { ...authHeaders(owner.token), 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({ name: 'Семья', timezone: 'Europe/Moscow' }),
+    })
+    expect((await send()).status).toBe(201)
+    const limited = await send()
+    expect(limited.status).toBe(429)
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED')
   })
 
   test('lists only current memberships and keeps legacy /me stable with gate off', async () => {
@@ -1131,6 +1320,20 @@ maybeDescribe('Family access and invitations', () => {
         ...authHeaders(token),
         'Content-Type': 'application/json',
         ...(needsIdempotencyKey ? { 'Idempotency-Key': randomUUID() } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+    return { response, body: response.status === 204 ? null : await response.json() as any }
+  }
+
+  async function enabledJsonRequest(path: string, token: string, method: string, body: unknown) {
+    const response = await enabledApp.request(path, {
+      method,
+      headers: {
+        ...authHeaders(token),
+        'Content-Type': 'application/json',
+        ...(method === 'POST' && (path === '/api/v1/families' || path.endsWith('/invites'))
+          ? { 'Idempotency-Key': randomUUID() } : {}),
       },
       body: JSON.stringify(body),
     })

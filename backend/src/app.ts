@@ -72,6 +72,7 @@ export function createApp({
     idempotencyExecutor,
     idempotencySecret: env.JWT_SECRET,
     familyQuotaBytes: env.MEDIA_FAMILY_QUOTA_BYTES,
+    multiFamilyActivation: env.MULTI_FAMILY_ACTIVATION,
     requireAuth: auth.requireAuth,
   })
   const media = createMediaModule({ db: prisma, env, familyAccess: families.access,

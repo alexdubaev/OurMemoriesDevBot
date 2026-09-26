@@ -1,19 +1,13 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-
-import type { FamilyHomeResponse } from '@web-app-demo/contracts'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import { FamilyFailure } from '../domain/errors'
 
-type Item = FamilyHomeResponse['items'][number]
-
-export function familyHomeSnapshot(items: Item[]): string {
-  return createHash('sha256').update(JSON.stringify(items)).digest('base64url')
-}
+export type FamilyHomePosition = { rank: 0 | 1; name: string; familyId: string }
 
 export function encodeFamilyHomeCursor(
-  offset: number, userId: string, snapshot: string, secret: string, now: Date,
+  position: FamilyHomePosition, userId: string, snapshot: string, secret: string, now: Date,
 ): string {
-  const payload = Buffer.from(JSON.stringify({ v: 1, offset, userId, snapshot, expiresAt: now.getTime() + 15 * 60_000 }))
+  const payload = Buffer.from(JSON.stringify({ v: 2, position, userId, snapshot, expiresAt: now.getTime() + 15 * 60_000 }))
     .toString('base64url')
   const signature = sign(payload, secret)
   return `${payload}.${signature}`
@@ -21,7 +15,7 @@ export function encodeFamilyHomeCursor(
 
 export function decodeFamilyHomeCursor(
   cursor: string, userId: string, snapshot: string, secret: string, now: Date,
-): number {
+): FamilyHomePosition {
   const [payload, signature, extra] = cursor.split('.')
   if (!payload || !signature || extra !== undefined ||
     !/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]+$/.test(signature)) invalidCursor()
@@ -36,12 +30,17 @@ export function decodeFamilyHomeCursor(
   }
   if (!decoded || typeof decoded !== 'object') invalidCursor()
   const value = decoded as Record<string, unknown>
-  if (value.v !== 1 || value.userId !== userId || !Number.isSafeInteger(value.offset) ||
-    Number(value.offset) < 1 || !Number.isSafeInteger(value.expiresAt)) invalidCursor()
+  if (value.v !== 2 || value.userId !== userId || !Number.isSafeInteger(value.expiresAt) ||
+    !value.position || typeof value.position !== 'object') invalidCursor()
+  const position = value.position as Record<string, unknown>
+  if ((position.rank !== 0 && position.rank !== 1) ||
+    typeof position.name !== 'string' || position.name.length > 160 ||
+    typeof position.familyId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(position.familyId)) invalidCursor()
   if (value.snapshot !== snapshot || Number(value.expiresAt) < now.getTime()) {
     throw new FamilyFailure('version_conflict', 'Список семей изменился; начните просмотр заново')
   }
-  return Number(value.offset)
+  return position as FamilyHomePosition
 }
 
 function sign(payload: string, secret: string) {
