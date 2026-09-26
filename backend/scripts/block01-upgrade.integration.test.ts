@@ -106,6 +106,7 @@ test('upgrades Block 00 legacy users and sessions to Block 01 without data loss'
     const catalog = await upgraded.$queryRaw<Array<{ object_name: string | null }>>`
       SELECT to_regclass('public.idempotency_records')::text AS object_name
       UNION ALL SELECT to_regclass('public.family_members_one_active_family_per_user_key')::text
+      UNION ALL SELECT to_regclass('public.families_one_undeleted_owned_family_per_user_key')::text
       UNION ALL SELECT (
         SELECT conname FROM pg_constraint WHERE conname = 'families_owner_membership_fkey'
       )
@@ -115,7 +116,8 @@ test('upgrades Block 00 legacy users and sessions to Block 01 without data loss'
     `
     expect(catalog.map(({ object_name }) => object_name)).toEqual([
       'idempotency_records',
-      'family_members_one_active_family_per_user_key',
+      null,
+      'families_one_undeleted_owned_family_per_user_key',
       'families_owner_membership_fkey',
       'idempotency_records_actor_user_id_fkey',
     ])
