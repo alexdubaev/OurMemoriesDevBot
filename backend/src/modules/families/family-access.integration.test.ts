@@ -84,9 +84,9 @@ maybeDescribe('Family access and invitations', () => {
     const owner = await admittedUser('Owner', '190004')
     const created = await createFamily(owner.token, 'First')
     expect(created.response.status).toBe(201)
-    await expect(prisma.family.create({
+    await expect(Promise.resolve(prisma.family.create({
       data: { ownerUserId: owner.userId, name: 'Second', timezone: 'Europe/Moscow' },
-    })).rejects.toThrow()
+    }))).rejects.toThrow()
     expect(await prisma.family.count({ where: { ownerUserId: owner.userId, status: { not: 'deleted' } } })).toBe(1)
   })
 
