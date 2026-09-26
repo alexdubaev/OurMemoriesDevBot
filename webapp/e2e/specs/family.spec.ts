@@ -192,7 +192,7 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await owner.page.screenshot({ path: resolve('e2e/.artifacts/full-ui-family-390.png'), animations: 'disabled' })
   await owner.page.getByRole('button', { name: 'Настройки' }).click()
   await expect(owner.page.getByRole('heading', { name: 'Настройки' })).toBeVisible()
-  expect(await owner.page.locator('[data-slot="memoly-bottom-sheet"] > div:last-child').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBeGreaterThanOrEqual(32)
+  expect(await owner.page.locator('[data-memoly-bottom-sheet="true"] > .memoly-bottom-sheet-body').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBeGreaterThanOrEqual(32)
   await owner.page.screenshot({ path: resolve('e2e/.artifacts/full-ui-settings-390.png'), animations: 'disabled' })
   await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
   await expect(owner.page.locator('[data-slot="memoly-settings-sheet"]')).toHaveCount(0)
@@ -308,9 +308,32 @@ test('app settings matches the six-theme appearance flow across mobile widths', 
     await canonical.setViewportSize({ width, height: 844 })
     await owner.page.getByRole('button', { name: 'Настройки' }).click()
     await expect(owner.page.locator('[data-slot="memoly-settings-sheet"][data-view="menu"]')).toBeVisible()
+    await expect(owner.page.locator('.ml-settings-sheet[data-view="menu"] [data-settings-row]').first()).toHaveAttribute('data-settings-row', 'palette')
+    await expect(owner.page.locator('[data-settings-row]')).toHaveCount(5)
+    expect(await owner.page.locator('[data-settings-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-settings-row')))).toEqual(['palette', 'help-circle', 'archive-box', 'pencil', 'circle-info'])
+    await expect(owner.page.locator('[data-slot="memoly-bottom-sheet-handle"]')).toHaveCount(1)
+    await expect(owner.page.locator('[data-slot="drawer-handle"]')).toHaveCount(0)
     await owner.page.screenshot({ path: testInfo.outputPath(`settings-menu-${width}.png`), animations: 'disabled' })
     await canonical.goto(`${referenceUrl}#settingsMenu`)
+    const hostBottomInset = await owner.page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--host-inset-bottom')) || 0)
+    await canonical.locator('#settingsMenu .ml-sheet-panel').evaluate((panel, inset) => panel.setAttribute('style', `padding-bottom: calc(14px + ${inset}px) !important`), hostBottomInset)
     await canonical.screenshot({ path: testInfo.outputPath(`canonical-settings-menu-${width}.png`), animations: 'disabled' })
+    if (width === 390) {
+      const metrics = await Promise.all([
+        owner.page.locator('[data-memoly-bottom-sheet="true"]'),
+        canonical.locator('#settingsMenu .ml-sheet-panel'),
+      ].map((locator) => locator.evaluate((panel) => {
+        const row = panel.querySelector('.ml-sheet-row')
+        const rect = panel.getBoundingClientRect()
+        const rowRect = row?.getBoundingClientRect()
+        const handle = panel.querySelector('[data-slot="memoly-bottom-sheet-handle"]') ?? panel.querySelector('.ml-sheet-handle')
+        const handleRect = handle?.getBoundingClientRect()
+        return { panelTop: rect.top, panelHeight: rect.height, firstRowTop: rowRect?.top, firstRowHeight: rowRect?.height, handleTop: handleRect?.top, handleHeight: handleRect?.height }
+      })))
+      for (const key of ['panelTop', 'panelHeight', 'firstRowTop', 'firstRowHeight', 'handleTop', 'handleHeight'] as const) {
+        expect(Math.abs((metrics[0]![key] ?? 0) - (metrics[1]![key] ?? 0))).toBeLessThanOrEqual(3)
+      }
+    }
     await owner.page.getByRole('button', { name: 'Оформление' }).click()
     await expect(owner.page.locator('[data-slot="memoly-settings-sheet"][data-view="appearance"]')).toBeVisible()
     await expect(owner.page.locator('[data-theme-choice]')).toHaveCount(6)
@@ -337,6 +360,15 @@ test('app settings matches the six-theme appearance flow across mobile widths', 
     await owner.page.screenshot({ path: testInfo.outputPath(`appearance-${theme}-390.png`), animations: 'disabled' })
     await canonical.locator(`#theme${theme[0].toUpperCase()}${theme.slice(1)}`).evaluate((input: HTMLInputElement) => { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })) })
     await canonical.screenshot({ path: testInfo.outputPath(`canonical-appearance-${theme}-390.png`), animations: 'disabled' })
+    await owner.page.getByRole('button', { name: 'Назад' }).click()
+    await expect(owner.page.locator('[data-settings-row]')).toHaveCount(5)
+    await owner.page.screenshot({ path: testInfo.outputPath(`settings-menu-${theme}-390.png`), animations: 'disabled' })
+    await canonical.goto(`${referenceUrl}#settingsMenu`)
+    const hostBottomInset = await owner.page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--host-inset-bottom')) || 0)
+    await canonical.locator('#settingsMenu .ml-sheet-panel').evaluate((panel, inset) => panel.setAttribute('style', `padding-bottom: calc(14px + ${inset}px) !important`), hostBottomInset)
+    await canonical.locator(`#theme${theme[0].toUpperCase()}${theme.slice(1)}`).evaluate((input: HTMLInputElement) => { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await canonical.screenshot({ path: testInfo.outputPath(`canonical-settings-menu-${theme}-390.png`), animations: 'disabled' })
+    await owner.page.getByRole('button', { name: 'Оформление' }).click()
   }
   await owner.page.locator('[data-theme-choice="sky"]').focus()
   await expect(owner.page.locator('[data-theme-choice="sky"]')).toBeFocused()
@@ -567,7 +599,7 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
 
     await owner.page.getByRole('button', { name: 'Настройки' }).click()
     const settings = owner.page.locator('[data-slot="memoly-settings-sheet"]')
-    const sheet = owner.page.locator('[data-slot="memoly-bottom-sheet"]')
+    const sheet = owner.page.locator('[data-memoly-bottom-sheet="true"]')
     await expect(settings).toBeVisible()
     await expect(settings.locator('.ml-sheet-row')).toHaveCount(5)
     await expect(settings.getByText('Оформление', { exact: true })).toBeVisible()

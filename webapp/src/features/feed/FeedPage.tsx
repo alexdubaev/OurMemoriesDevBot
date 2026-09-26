@@ -336,12 +336,24 @@ function MemoryActions({ memory, onOpen }: { memory: MemoryDto; onOpen: (memory:
 
 function MemoryActionsContent({ memory, onDelete, onDetails, onEdit }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void }) {
   return <div className="memoly-memory-actions" data-memory-actions-for={memory.id}>
-    <DrawerTitle className="mb-2"><Typography as="span" variant="memoryEmptyTitle">Действия с воспоминанием</Typography></DrawerTitle>
+    <DrawerTitle className="sr-only">Действия с воспоминанием</DrawerTitle>
     <DrawerDescription className="sr-only">Выберите действие для этого воспоминания.</DrawerDescription>
     <div className="memoly-memory-actions-list">
-      <button className="memoly-memory-action" onClick={onDetails} type="button"><Typography as="span" variant="memoryBody">Подробнее</Typography></button>
-      {onEdit ? <button className="memoly-memory-action" onClick={onEdit} type="button"><Typography as="span" variant="memoryBody">Изменить воспоминание</Typography></button> : null}
-      {onDelete ? <button className="memoly-memory-action is-danger" onClick={onDelete} type="button"><Typography as="span" variant="memoryBody">Удалить воспоминание</Typography></button> : null}
+      <button className="memoly-memory-action" onClick={onDetails} type="button">
+        <span className="memoly-memory-action-icon"><WebpIcon decorative monochrome name="circle-info" size={18} /></span>
+        <span className="memoly-memory-action-copy"><Typography as="span" className="memoly-memory-action-title" variant="memoryBody">Подробнее</Typography><Typography as="span" className="memoly-memory-action-subtitle" variant="memoryMeta">Открыть публикацию целиком</Typography></span>
+        <span className="memoly-memory-action-chevron"><WebpIcon decorative name="chevron" size={16} /></span>
+      </button>
+      {onEdit ? <button className="memoly-memory-action state-action-row" onClick={onEdit} type="button">
+        <span className="memoly-memory-action-icon state-action-icon"><WebpIcon decorative monochrome name="pencil" size={18} /></span>
+        <span className="memoly-memory-action-copy state-action-copy"><Typography as="span" className="memoly-memory-action-title" variant="memoryBody">Редактировать</Typography><Typography as="span" className="memoly-memory-action-subtitle" variant="memoryMeta">Изменить подпись или дату</Typography></span>
+        <span className="memoly-memory-action-chevron state-chevron"><WebpIcon decorative name="chevron" size={16} /></span>
+      </button> : null}
+      {onDelete ? <button className="memoly-memory-action is-danger" onClick={onDelete} type="button">
+        <span className="memoly-memory-action-icon"><WebpIcon decorative monochrome name="trash-can" size={18} /></span>
+        <span className="memoly-memory-action-copy"><Typography as="span" className="memoly-memory-action-title" variant="memoryBody">Удалить воспоминание</Typography><Typography as="span" className="memoly-memory-action-subtitle" variant="memoryMeta">Удалить из семейной ленты</Typography></span>
+        <span className="memoly-memory-action-chevron"><WebpIcon decorative name="chevron" size={16} /></span>
+      </button> : null}
     </div>
   </div>
 }
