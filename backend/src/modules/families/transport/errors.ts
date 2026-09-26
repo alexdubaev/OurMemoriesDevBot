@@ -4,6 +4,8 @@ import { FamilyFailure } from '../domain/errors'
 export function toFamilyAppError(error: unknown) {
   if (!(error instanceof FamilyFailure)) return error
   switch (error.kind) {
+    case 'invalid_input':
+      return new AppError(422, 'INVALID_INPUT', error.message)
     case 'not_found':
       return new AppError(404, 'NOT_FOUND', error.message)
     case 'forbidden':

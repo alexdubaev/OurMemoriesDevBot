@@ -45,6 +45,51 @@ maybeDescribe('Family access and invitations', () => {
     await prisma.$disconnect()
   })
 
+  test('lists only current memberships and keeps legacy /me stable with gate off', async () => {
+    const owner = await admittedUser('Owner', 'home-1001')
+    const viewer = await admittedUser('Viewer', 'home-1002')
+    const stranger = await admittedUser('Stranger', 'home-1003')
+    const family = await createFamily(owner.token, 'Семья дома')
+    expect(family.response.status).toBe(201)
+    await prisma.familyMember.create({ data: { familyId: family.body.family.id, userId: viewer.userId, role: 'viewer' } })
+
+    const empty = await app.request('/api/v1/me/families', { headers: authHeaders(stranger.token) })
+    expect(empty.status).toBe(200)
+    expect(await empty.json()).toMatchObject({ version: 1, ownFamilyId: null, canCreateOwnFamily: true, items: [], nextCursor: null })
+
+    const owned = await app.request('/api/v1/me/families', { headers: authHeaders(owner.token) })
+    expect(owned.status).toBe(200)
+    expect(await owned.json()).toMatchObject({
+      version: 1, ownFamilyId: family.body.family.id, ownFamilyStatus: 'active', canCreateOwnFamily: false,
+      items: [{ familyId: family.body.family.id, isOwner: true, role: 'full', setupStatus: 'ready',
+        unreadCount: null, unreadState: 'not_enabled', membershipEpoch: 1 }],
+    })
+    const visible = await app.request('/api/v1/me/families', { headers: authHeaders(viewer.token) })
+    expect((await visible.json()).items[0]).toMatchObject({
+      familyId: family.body.family.id, isOwner: false, role: 'viewer',
+      capabilities: { canManageMembers: false, canPublishNote: false },
+    })
+    const unauthenticated = await app.request('/api/v1/me/families')
+    expect(unauthenticated.status).toBe(401)
+    expect((await unauthenticated.json()).error.code).toBe('SESSION_REQUIRED')
+    const invalidLimit = await app.request('/api/v1/me/families?limit=51', { headers: authHeaders(owner.token) })
+    expect(invalidLimit.status).toBe(422)
+    const invalidCursor = await app.request('/api/v1/me/families?cursor=bogus', { headers: authHeaders(owner.token) })
+    expect(invalidCursor.status).toBe(422)
+    const legacy = await app.request('/api/v1/me', { headers: authHeaders(viewer.token) })
+    expect((await legacy.json()).activeFamily.id).toBe(family.body.family.id)
+  })
+
+  test('enforces one undeleted owned family at the database boundary', async () => {
+    const owner = await admittedUser('Owner', 'home-2001')
+    const created = await createFamily(owner.token, 'First')
+    expect(created.response.status).toBe(201)
+    await expect(prisma.family.create({
+      data: { ownerUserId: owner.userId, name: 'Second', timezone: 'Europe/Moscow' },
+    })).rejects.toThrow()
+    expect(await prisma.family.count({ where: { ownerUserId: owner.userId, status: { not: 'deleted' } } })).toBe(1)
+  })
+
   test('isolates two families, ignores global admin, and applies revocation to a live session', async () => {
     const ownerA = await admittedUser('Owner A', '11001')
     const ownerB = await admittedUser('Owner B', '11002', 'admin')

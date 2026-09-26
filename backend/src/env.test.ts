@@ -3,6 +3,15 @@ import { describe, expect, test } from 'bun:test'
 import { loadEnv } from './env'
 
 describe('loadEnv', () => {
+  test('keeps multi-family activation off unless explicitly enabled and rejects invalid values', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',
+      JWT_SECRET: '12345678901234567890123456789012',
+    }
+    expect(loadEnv(base).MULTI_FAMILY_ACTIVATION).toBe('off')
+    expect(loadEnv({ ...base, MULTI_FAMILY_ACTIVATION: 'on' }).MULTI_FAMILY_ACTIVATION).toBe('on')
+    expect(() => loadEnv({ ...base, MULTI_FAMILY_ACTIVATION: 'yes' })).toThrow('MULTI_FAMILY_ACTIVATION')
+  })
   test('defaults provider enablement safely while preserving token-configured Telegram development startup', () => {
     const base = {
       DATABASE_URL: 'postgresql://superuser:superpassword@localhost:54329/web_app_demo',

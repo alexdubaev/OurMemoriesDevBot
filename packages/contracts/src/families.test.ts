@@ -4,6 +4,8 @@ import {
   acceptInviteRequestSchema,
   createFamilyRequestSchema,
   createInviteRequestSchema,
+  familyHomeQuerySchema,
+  familyHomeResponseSchema,
   familyMeResponseSchema,
   familyRoleSchema,
   idempotencyKeyHeadersSchema,
@@ -11,6 +13,7 @@ import {
   updateFamilyRequestSchema,
   updateMemberRoleRequestSchema,
 } from './index'
+import type { FamilyHomeResponse } from './index'
 
 describe('family contracts', () => {
   test('keeps full and viewer as the only family roles', () => {
@@ -180,5 +183,40 @@ describe('family contracts', () => {
       limits: { activeFamiliesMaximum: 1 },
     } as const
     expect(familyMeResponseSchema.parse(response)).toEqual(response)
+  })
+
+  test('defines a strict, bounded family home projection without client-owned state', () => {
+    const familyId = '019c0000-0000-7000-8000-000000000002'
+    expect(familyHomeQuerySchema.parse({})).toEqual({ limit: 20 })
+    expect(familyHomeQuerySchema.parse({ limit: '50', cursor: 'opaque' })).toEqual({ limit: 50, cursor: 'opaque' })
+    expect(() => familyHomeQuerySchema.parse({ limit: '51' })).toThrow()
+    expect(() => familyHomeQuerySchema.parse({ userId: familyId })).toThrow()
+    const response: FamilyHomeResponse = {
+      version: 1,
+      ownFamilyId: familyId,
+      ownFamilyStatus: 'active',
+      canCreateOwnFamily: false,
+      items: [{
+        familyId,
+        name: 'Наша семья',
+        displaySubtitle: null,
+        childAvatarMediaId: null,
+        isOwner: true,
+        role: 'full',
+        setupStatus: 'needs_child',
+        capabilities: {
+          canCreateInvite: true, canManageMembers: true, canEditChild: true,
+          canPublishNote: false, canPublishPhoto: false, canPublishVoice: false,
+          canPublishVideo: false, canUploadChildAvatar: true,
+        },
+        unreadCount: null,
+        unreadState: 'not_enabled',
+        membershipEpoch: 1,
+      }],
+      nextCursor: null,
+    }
+    expect(familyHomeResponseSchema.parse(response)).toEqual(response)
+    expect(() => familyHomeResponseSchema.parse({ ...response, userId: familyId })).toThrow()
+    expect(() => familyHomeResponseSchema.parse({ ...response, items: [{ ...response.items[0], unreadCount: 0 }] })).toThrow()
   })
 })

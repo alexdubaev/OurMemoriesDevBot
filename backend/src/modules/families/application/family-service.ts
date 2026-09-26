@@ -11,6 +11,8 @@ import type {
   CreateInviteRequest,
   CreateInviteResponse,
   FamilyDto,
+  FamilyHomeQuery,
+  FamilyHomeResponse,
   FamilyInviteDto,
   FamilyMemberDto,
   FamilyMeResponse,
@@ -26,6 +28,7 @@ import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import { FamilyFailure } from '../domain/errors'
 import { isBirthDateOnOrBeforeFamilyToday } from '../domain/family-date'
+import { decodeFamilyHomeCursor, encodeFamilyHomeCursor, familyHomeSnapshot } from './family-home-cursor'
 import type { FamilyAccess, FamilyCreatePrincipal, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
@@ -49,10 +52,15 @@ export class FamilyService {
     role: 'user' | 'admin'
     createdAt: string
   }): Promise<FamilyMeResponse> {
-    const membership = await this.db.familyMember.findFirst({
+    const memberships = await this.db.familyMember.findMany({
       where: { userId: user.id, revokedAt: null, family: { status: 'active' } },
       include: { family: true },
+      take: 2,
     })
+    if (memberships.length > 1) {
+      throw new FamilyFailure('conflict', 'Обновите приложение для работы с несколькими семьями')
+    }
+    const membership = memberships[0]
     return {
       user,
       activeFamily: membership ? {
@@ -62,6 +70,92 @@ export class FamilyService {
         isOwner: membership.family.ownerUserId === user.id,
       } : null,
       limits: { activeFamiliesMaximum: 1 },
+    }
+  }
+
+  async getFamilies(principal: FamilyCreatePrincipal, query: FamilyHomeQuery): Promise<FamilyHomeResponse> {
+    const { userId } = principal
+    const [memberships, ownedFamily, admitted] = await Promise.all([
+      this.db.familyMember.findMany({
+        where: { userId, revokedAt: null, family: { status: 'active' } },
+        // B1 retains the one-active-member DB index. B2 must replace this bounded read
+        // with its multi-family keyset query when it removes that index.
+        take: 2,
+        select: {
+          role: true, familyDisplayName: true, membershipEpoch: true,
+          family: {
+            select: {
+              id: true, name: true, ownerUserId: true,
+              children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 },
+            },
+          },
+        },
+      }),
+      this.db.family.findFirst({
+        where: { ownerUserId: userId, status: { not: 'deleted' } },
+        select: { id: true, status: true },
+      }),
+      principal.externalIdentity ? this.db.pilotAdmission.findFirst({
+        where: {
+          provider: principal.externalIdentity.provider,
+          subject: principal.externalIdentity.subject,
+          revokedAt: null,
+        },
+        select: { id: true },
+      }) : Promise.resolve(null),
+    ])
+    if (memberships.length > 1) {
+      throw new FamilyFailure('conflict', 'Список семей временно недоступен')
+    }
+    const items = memberships.map(({ family, role, familyDisplayName, membershipEpoch }) => {
+      const child = family.children[0]
+      const isOwner = family.ownerUserId === userId
+      const ready = !!child && isCompletedChild(child)
+      const full = role === 'full'
+      return {
+        familyId: family.id,
+        name: family.name,
+        displaySubtitle: familyDisplayName ?? child?.displayName ?? null,
+        childAvatarMediaId: child?.avatarMediaId ?? null,
+        isOwner,
+        role,
+        setupStatus: ready ? 'ready' as const : 'needs_child' as const,
+        capabilities: {
+          canCreateInvite: full && ready,
+          canManageMembers: isOwner,
+          canEditChild: isOwner,
+          canPublishNote: full && ready,
+          canPublishPhoto: full && ready,
+          canPublishVoice: full && ready,
+          canPublishVideo: false,
+          canUploadChildAvatar: isOwner,
+        },
+        unreadCount: null,
+        unreadState: 'not_enabled' as const,
+        membershipEpoch,
+      }
+    }).sort((a, b) => {
+      if (a.isOwner !== b.isOwner) return a.isOwner ? -1 : 1
+      const leftName = a.name.normalize('NFC')
+      const rightName = b.name.normalize('NFC')
+      if (leftName !== rightName) return leftName < rightName ? -1 : 1
+      return a.familyId < b.familyId ? -1 : a.familyId > b.familyId ? 1 : 0
+    })
+    const snapshot = familyHomeSnapshot(items)
+    const offset = query.cursor ? decodeFamilyHomeCursor(query.cursor, userId, snapshot, this.idempotencySecret, this.now()) : 0
+    const page = items.slice(offset, offset + query.limit)
+    const nextOffset = offset + page.length
+    return {
+      version: 1,
+      ownFamilyId: ownedFamily?.id ?? null,
+      ownFamilyStatus: ownedFamily?.status === 'deleting' ? 'deleting' : ownedFamily ? 'active' : null,
+      // B1 keeps the pilot admission and one-active-family writer under either gate value.
+      // B2 will replace this hint together with the gated create policy.
+      canCreateOwnFamily: !!admitted && !ownedFamily && memberships.length === 0,
+      items: page,
+      nextCursor: nextOffset < items.length
+        ? encodeFamilyHomeCursor(nextOffset, userId, snapshot, this.idempotencySecret, this.now())
+        : null,
     }
   }
 

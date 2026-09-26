@@ -368,6 +368,8 @@ model Family {
   status               FamilyStatus        @default(active)
   storageUsedBytes     BigInt              @default(0) @map("storage_used_bytes")
   storageReservedBytes BigInt              @default(0) @map("storage_reserved_bytes")
+  publicationOrdinal   BigInt              @default(0) @map("publication_ordinal")
+  unreadTrackingActivatedAt DateTime?      @map("unread_tracking_activated_at") @db.Timestamptz(6)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
   owner                User                @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")
@@ -395,10 +397,13 @@ model FamilyMember {
   joinedAt          DateTime            @default(now()) @map("joined_at")
   revokedAt         DateTime?           @map("revoked_at")
   version           Int                 @default(1)
+  membershipEpoch   Int                 @default(1) @map("membership_epoch")
+  unreadBaselineOrdinal BigInt?         @map("unread_baseline_ordinal")
   family            Family              @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: Cascade, map: "family_members_family_id_fkey")
   ownedFamily       Family?             @relation("FamilyOwnerMembership")
   user              User                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "family_members_user_id_fkey")
   memoryLikes       MemoryLike[]
+  seenMemories      MemorySeen[]
   authoredMemories  Memory[]            @relation("MemoryAuthorMembership")
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
@@ -479,6 +484,7 @@ model Memory {
   status           MemoryStatus  @default(published)
   version          Int           @default(1)
   createdSequence  BigInt        @default(autoincrement()) @map("created_sequence")
+  firstPublishedOrdinal BigInt?  @map("first_published_ordinal")
   deletedAt        DateTime?     @map("deleted_at") @db.Timestamptz(6)
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -487,15 +493,31 @@ model Memory {
   author           User          @relation("MemoryAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "memories_author_id_fkey")
   authorMembership FamilyMember  @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
   likes            MemoryLike[]
+  seenByMembers    MemorySeen[]
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
   telegramVideoReference TelegramVideoReference?
   maxVideoReference     MaxVideoReference?
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
+  @@unique([familyId, firstPublishedOrdinal], map: "memories_family_id_first_published_ordinal_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
   @@index([familyId, kind, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_kind_feed_idx")
   @@map("memories")
+}
+
+model MemorySeen {
+  familyId        String       @map("family_id") @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  membershipEpoch Int          @map("membership_epoch")
+  memoryId        String       @map("memory_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  member          FamilyMember @relation(fields: [familyId, userId], references: [familyId, userId], onDelete: Cascade, map: "memory_seen_family_id_user_id_fkey")
+  memory          Memory       @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_seen_memory_id_family_id_fkey")
+
+  @@id([familyId, userId, membershipEpoch, memoryId])
+  @@index([memoryId, familyId], map: "memory_seen_memory_id_family_id_idx")
+  @@map("memory_seen")
 }
 
 model MemoryLike {

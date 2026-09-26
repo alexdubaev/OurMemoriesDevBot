@@ -7,6 +7,8 @@ import {
   createInviteRequestSchema,
   createInviteResponseSchema,
   familyInviteParamsSchema,
+  familyHomeQuerySchema,
+  familyHomeResponseSchema,
   familyInvitesResponseSchema,
   familyMemberParamsSchema,
   familyMemberResponseSchema,
@@ -26,7 +28,7 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
 import type { ZodType } from 'zod'
 
-import { validationErrorHook } from '../../../http/errors'
+import { AppError, validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
 import type { FamilyService } from '../application/family-service'
 import { executeFamily } from './errors'
@@ -54,6 +56,11 @@ const createFamilyRoute = createRoute({
 const meRoute = createRoute({
   method: 'get', path: '/me', security: bearerSecurity,
   responses: { ...errors, 200: { content: json(familyMeResponseSchema), description: 'User and active family context' } },
+})
+const familiesHomeRoute = createRoute({
+  method: 'get', path: '/me/families', security: bearerSecurity,
+  request: { query: familyHomeQuerySchema },
+  responses: { ...errors, 200: { content: json(familyHomeResponseSchema), description: 'Visible families for the current user' } },
 })
 const getFamilyRoute = createRoute({
   method: 'get', path: '/families/{familyId}', security: bearerSecurity,
@@ -141,6 +148,12 @@ export function createFamilyRoutes({
 }) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   routes.use('/me', requireAuth)
+  routes.use('/me/families', (c, next) => {
+    if (!c.req.header('authorization')?.startsWith('Bearer ')) {
+      throw new AppError(401, 'SESSION_REQUIRED', 'Требуется сессия')
+    }
+    return requireAuth(c, next)
+  })
   routes.use('/families', requireAuth)
   routes.use('/families/*', (c, next) => (
     bypassesFamilyBearerAuth(c.req.method, c.req.path) ? next() : requireAuth(c, next)
@@ -151,6 +164,9 @@ export function createFamilyRoutes({
     const { sessionId: _sessionId, externalIdentity: _externalIdentity, ...user } = c.var.user
     return service.getMe(user)
   }), 200))
+  routes.openapi(familiesHomeRoute, async (c) => c.json(await executeFamily(() =>
+    service.getFamilies(principal(c.var.user), c.req.valid('query')),
+  ), 200))
   routes.openapi(createFamilyRoute, async (c) => c.json(await executeFamily(() =>
     service.createFamily(
       principal(c.var.user),
