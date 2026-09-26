@@ -46,9 +46,9 @@ maybeDescribe('Family access and invitations', () => {
   })
 
   test('lists only current memberships and keeps legacy /me stable with gate off', async () => {
-    const owner = await admittedUser('Owner', 'home-1001')
-    const viewer = await admittedUser('Viewer', 'home-1002')
-    const stranger = await admittedUser('Stranger', 'home-1003')
+    const owner = await admittedUser('Owner', '190001')
+    const viewer = await admittedUser('Viewer', '190002')
+    const stranger = await admittedUser('Stranger', '190003')
     const family = await createFamily(owner.token, 'Семья дома')
     expect(family.response.status).toBe(201)
     await prisma.familyMember.create({ data: { familyId: family.body.family.id, userId: viewer.userId, role: 'viewer' } })
@@ -81,7 +81,7 @@ maybeDescribe('Family access and invitations', () => {
   })
 
   test('enforces one undeleted owned family at the database boundary', async () => {
-    const owner = await admittedUser('Owner', 'home-2001')
+    const owner = await admittedUser('Owner', '190004')
     const created = await createFamily(owner.token, 'First')
     expect(created.response.status).toBe(201)
     await expect(prisma.family.create({
