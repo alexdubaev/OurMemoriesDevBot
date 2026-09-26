@@ -90,7 +90,7 @@
   width: min(100%, 480px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(12px, var(--host-inset-top)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);
+  padding: max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);
 }
 
 [data-memoly-feed] .feed-content { display: flex; min-width: 0; flex-direction: column; gap: 0; }
@@ -139,7 +139,6 @@
 [data-memoly-feed] .feed-section { min-width: 0; }
 [data-memoly-feed] .date-heading { display: flex; align-items: center; gap: 9px; margin: 9px 4px; color: #697582; font-size: 18px; font-weight: 760; line-height: 1.2; }
 [data-memoly-feed] .feed-section:first-child .date-heading { margin-top: 0; }
-[data-memoly-feed] .date-dot { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 50%; background: linear-gradient(145deg, #c7d2c7, #a9b8ad); box-shadow: inset 2px 2px 4px rgba(104,121,111,.17), inset -2px -2px 4px rgba(255,255,255,.7); }
 
 [data-memoly-feed] .memory-card {
   min-width: 0;
@@ -162,6 +161,7 @@
 [data-memoly-feed] .media-well > :first-child { width: 100%; min-width: 0; }
 [data-memoly-feed] .media-well img { display: block; max-width: 100%; }
 [data-memoly-feed] .media-well .ml-media-slot { width: 100%; overflow: hidden; border-radius: 19px; }
+[data-memoly-feed] .media-well .ml-media-button { overflow: hidden; border-radius: 19px; }
 [data-memoly-feed] .media-well .ml-audio { display: block; width: 100%; min-width: 0; }
 [data-memoly-feed] .media-well [data-slot="voice-waveform"] { width: 100%; min-width: 0; }
 [data-memoly-feed] .media-well.video-wrap { position: relative; }

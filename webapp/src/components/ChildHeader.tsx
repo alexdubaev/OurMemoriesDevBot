@@ -55,7 +55,7 @@ export function ChildHeader({
         </div>
       )}
       <div aria-hidden="true" className="header-art"><span className="sun-shape" /><span className="cloud" /><span className="leaf" /></div>
-      {mode === 'family' && onOpenSettings ? <button aria-label="Настройки" className="settings family-only-settings" onClick={onOpenSettings} type="button"><WebpIcon decorative name="gear" size={22} /></button> : null}
+      {mode === 'family' && onOpenSettings ? <button aria-label="Настройки" className="settings family-only-settings" onClick={onOpenSettings} type="button"><WebpIcon decorative monochrome name="settings-sliders" size={22} /></button> : null}
     </section>
   )
 }

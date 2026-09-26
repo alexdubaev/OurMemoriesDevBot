@@ -129,9 +129,13 @@ test('family shell preserves host edge insets without restoring the legacy shell
   const familyShellRule = css.match(/\.family-shell\s*\{([^}]*)\}/)?.[1]
 
   expect(familyShellRule).toBeDefined()
-  expect(familyShellRule).toContain('var(--host-inset-top, 0px)')
+  expect(familyShellRule).toContain('max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px))')
+  expect(familyShellRule).not.toContain('max(16px,')
   expect(familyShellRule).toContain('var(--host-inset-right, 0px)')
   expect(familyShellRule).toContain('var(--host-inset-left, 0px)')
+  const managementCss = readFileSync(resolve(import.meta.dir, '../src/features/memoly-ui/family-management.css'), 'utf8')
+  expect(managementCss).toContain('margin: 0 clamp(11px, 3.5vw, 14px);')
+  expect(managementCss).not.toContain('margin: -20px')
   expect(css).toContain('padding-inline: max(12px, var(--host-inset-left, 0px)) max(12px, var(--host-inset-right, 0px))')
   expect(readFileSync(resolve(import.meta.dir, '../src/features/family/FamilyScreen.tsx'), 'utf8')).not.toContain('ml-shell')
 })

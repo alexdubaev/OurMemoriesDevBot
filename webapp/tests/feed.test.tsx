@@ -173,6 +173,7 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
   expect(markup).toContain('data-slot="memoly-video-layout"')
   expect(markup).toContain('data-slot="memoly-voice-layout"')
   expect(markup).toContain('data-slot="memoly-note-layout"')
+  expect(markup).not.toContain('date-dot')
   expect(markup).not.toContain('/assets/photo-park.webp')
 })
 
@@ -761,7 +762,7 @@ test('the feed presentation keeps the approved filter and memory composition', (
     onFilterChange: () => undefined,
     role: 'full',
   }, createElement('section', { className: 'feed-section', 'data-kind': 'photo' },
-    createElement('h2', { className: 'date-heading' }, 'Сегодня', createElement('span', { 'aria-hidden': 'true', className: 'date-dot' })),
+    createElement('h2', { className: 'date-heading' }, 'Сегодня'),
     createElement(MemoryCardPresentation, {
       actions: createElement('button', { 'aria-label': 'Действия с воспоминанием', type: 'button' }),
       authorInitials: 'М',
@@ -784,7 +785,7 @@ test('the feed presentation keeps the approved filter and memory composition', (
   expect(markup.match(/class="filter ds-chip/g)).toHaveLength(5)
   expect(markup).toContain('class="feed-section"')
   expect(markup).toContain('class="date-heading"')
-  expect(markup).toContain('class="date-dot"')
+  expect(markup).not.toContain('class="date-dot"')
   expect(markup).toContain('class="memory-card surface-raised')
   expect(markup).toContain('class="memory-header"')
   expect(markup).toContain('class="media-well surface-inset"')

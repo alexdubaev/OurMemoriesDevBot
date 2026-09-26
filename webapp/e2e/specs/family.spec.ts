@@ -527,6 +527,7 @@ test('the account theme is shared by fresh PWA and MAX WebView contexts despite 
   await maxPage.goto('/')
   await expect(maxPage.getByRole('button', { name: 'Лента' })).toBeVisible()
   await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
+  await expect(maxPage.locator('.app')).toHaveCSS('padding-top', '0px')
   await maxPage.reload()
   await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
 
@@ -545,6 +546,10 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
 
     const family = owner.page.locator('[data-slot="family-presentation"]')
     await expect(family).toBeVisible()
+    await expect(family.locator('.family-child-quote')).toHaveCount(0)
+    await expect(family.locator('[data-child-header-mode="family"] .settings [data-slot="webp-icon"]')).toHaveCSS('mask-image', /settings-sliders/)
+    const familyHeaderTop = await family.locator('[data-child-header-mode="family"]').evaluate((element) => element.getBoundingClientRect().top)
+    expect(familyHeaderTop).toBe(24)
     await expect(family.locator('.family-section-head')).toBeVisible()
     await expect(family.getByRole('button', { name: 'Пригласить родственника' })).toBeVisible()
     await expect(owner.page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()

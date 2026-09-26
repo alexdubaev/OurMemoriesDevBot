@@ -19,6 +19,7 @@ export const webpIconNames = [
   'heart-filled',
   'voice',
   'star',
+  'settings-sliders',
   'trash',
   'video',
   'warning',

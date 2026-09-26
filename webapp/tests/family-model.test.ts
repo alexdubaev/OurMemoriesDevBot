@@ -29,6 +29,8 @@ describe('family presentation model', () => {
 
     expect(markup).toContain('data-child-header-mode="family"')
     expect(markup).toContain('aria-label="Настройки"')
+    expect(markup).toContain('Маленькие моменты')
+    expect(markup).not.toContain('Наше маленькое большое счастье')
     expect(markup).toContain('Варя')
     expect(markup).toContain('Наша семья')
   })

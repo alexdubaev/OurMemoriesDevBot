@@ -137,7 +137,6 @@ test('Agent K scans production Feed, Family, Member, Add, Settings and form stat
     })).sort()
     const known = expectedFamilyContrast[theme]
     const expectedSignatures = ['Family', 'Settings', 'Theme'].includes(state) ? [
-      `.family-child-quote|${known.muted}`,
       `.family-role|${known.role}`,
       `.family-info-card > div|${known.muted}`,
       `.family-info-card > div > strong|${known.strong}`,

@@ -324,7 +324,7 @@ function MemoryList({ familyTimezone, items, renderCard }: {
     const date = dayLabel(memory.occurredAt, familyTimezone)
     const previousDate = index > 0 ? dayLabel(items[index - 1]!.occurredAt, familyTimezone) : null
     return <section className="feed-section" data-kind={memory.kind} key={memory.id}>
-      {date !== previousDate ? <Typography as="h2" className="date-heading" data-slot="date-heading" variant="memoryDate">{date}<span aria-hidden="true" className="date-dot" /></Typography> : null}
+      {date !== previousDate ? <Typography as="h2" className="date-heading" data-slot="date-heading" variant="memoryDate">{date}</Typography> : null}
       {renderCard(memory)}
     </section>
   })}</>
