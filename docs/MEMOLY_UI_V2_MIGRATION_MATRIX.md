@@ -2,6 +2,8 @@
 
 Аудит от 2026-09-24; base `ea161cffd67b27b7118edcbd1ac9d881ef12f5bf`. Каждая из 122 строк соответствует одному screen/state из полного inventory. `BASE` обозначает исходную ленту без hash. Production route указан как React-контроллер/внутреннее состояние: hash из HTML в приложении не используется. Статус `REFERENCE ONLY` означает, что отдельное эквивалентное UI-состояние не подтверждено текущим аудитом, а не доказанное отсутствие backend-сценария. `MATCHES` в функциональной колонке означает совпадение основной функции при наличии визуального расхождения. Для системных/граничных состояний точную семантику надо подтвердить при назначении блока.
 
+Решение владельца от 2026-09-26: фото в ленте показывается целиком с исходными пропорциями и динамической высотой. Это намеренное отклонение от прежнего фиксированного кадра с `object-fit: cover`; скругление карточки и открытие fullscreen сохраняются. Видео этим решением не меняется.
+
 | Canonical id | Экран/состояние | Production route/state | React component | Источник данных | Production actions / разрыв | Права | Visual status | Functional status | Предлагаемый блок |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `#BASE` | Feed shell | FeedPage / FeedShell | FeedPresentation / MemoryEditor / FeedShell | feed/memory API | view/filter/edit/delete where supported | family member; edit rights | MAJOR VISUAL DELTA | MATCHES | feed reconciliation |

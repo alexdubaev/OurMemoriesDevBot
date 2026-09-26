@@ -191,6 +191,90 @@ test.describe.serial('T07 live feed', () => {
     }
   })
 
+  test('feed shows square, landscape, and portrait photos without cropping', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const photos = [
+      { body: 'Квадратное фото E2E', width: 360, height: 360, color: 'red' },
+      { body: 'Горизонтальное фото E2E', width: 640, height: 360, color: 'teal' },
+      { body: 'Вертикальное фото E2E', width: 360, height: 640, color: 'orange' },
+    ].map((photo) => ({
+      ...photo,
+      memoryId: randomUUID(),
+      mediaId: randomUUID(),
+      bytes: generatedMedia(['-f', 'lavfi', '-i', `color=c=${photo.color}:s=${photo.width}x${photo.height}:d=0.1`, '-frames:v', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1']),
+    }))
+    const photoByMediaId = new Map(photos.map((photo) => [photo.mediaId, photo]))
+
+    await page.route(/\/api\/v1\/families\/[^/]+\/media\/[^/]+\/content\?variant=display/, async (route) => {
+      const mediaId = new URL(route.request().url()).pathname.split('/').at(-2)
+      const photo = mediaId ? photoByMediaId.get(mediaId) : undefined
+      if (!photo) return route.continue()
+      await route.fulfill({ body: photo.bytes, contentType: 'image/png' })
+    })
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      const template = payload.items.find((item) => item.attachments.some((attachment) => attachment.kind === 'photo' && attachment.source === 'private_storage'))
+      if (!template) return route.fulfill({ response, body: JSON.stringify(payload) })
+      payload.items = [...photos.map((photo, index) => ({
+        ...template,
+        id: photo.memoryId,
+        body: photo.body,
+        occurredAt: new Date(Date.now() - index * 1_000).toISOString(),
+        attachments: [{
+          ...template.attachments[0],
+          id: photo.mediaId,
+          width: photo.width,
+          height: photo.height,
+          displayPath: `/api/v1/families/${template.familyId}/media/${photo.mediaId}/content?variant=display`,
+        }],
+      })), ...payload.items]
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+
+    await page.reload()
+    await openFeed(page)
+    for (const photo of photos) {
+      const card = page.locator('[data-memory-id]').filter({ hasText: photo.body })
+      const image = card.getByRole('img', { name: 'Воспоминание' })
+      const frame = card.getByRole('button', { name: 'Открыть фото' })
+      await frame.scrollIntoViewIfNeeded()
+      await expect(image).toBeVisible()
+      await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(photo.width)
+      await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalHeight)).toBe(photo.height)
+      await expect(frame).toHaveCSS('overflow', 'hidden')
+      await expect(frame).toHaveCSS('border-radius', '19px')
+      const geometry = await image.evaluate((element) => {
+        const imageRect = element.getBoundingClientRect()
+        const frameRect = element.closest('.ml-media-button')!.getBoundingClientRect()
+        const wellRect = element.closest('.media-well')!.getBoundingClientRect()
+        const actionsRect = element.closest('.memory-card')!.querySelector('.actions')!.getBoundingClientRect()
+        return {
+          imageWidth: imageRect.width, imageHeight: imageRect.height,
+          frameWidth: frameRect.width, frameHeight: frameRect.height,
+          imageTop: imageRect.top, imageBottom: imageRect.bottom,
+          frameTop: frameRect.top, frameBottom: frameRect.bottom,
+          wellBottom: wellRect.bottom, actionsTop: actionsRect.top,
+          pageWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth,
+          objectFit: getComputedStyle(element).objectFit,
+        }
+      })
+      expect(geometry.imageWidth / geometry.imageHeight).toBeCloseTo(photo.width / photo.height, 2)
+      expect(Math.abs(geometry.imageWidth - geometry.frameWidth)).toBeLessThan(2)
+      expect(Math.abs(geometry.imageHeight - geometry.frameHeight)).toBeLessThan(2)
+      expect(geometry.imageTop).toBeGreaterThanOrEqual(geometry.frameTop - 1)
+      expect(geometry.imageBottom).toBeLessThanOrEqual(geometry.frameBottom + 1)
+      expect(geometry.wellBottom).toBeLessThanOrEqual(geometry.actionsTop + 1)
+      expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1)
+      expect(geometry.objectFit).not.toBe('cover')
+    }
+    await page.screenshot({ path: resolve('e2e/.artifacts/feed-photo-no-crop.png'), fullPage: true })
+    await page.locator('[data-memory-id]').filter({ hasText: 'Вертикальное фото E2E' }).getByRole('button', { name: 'Открыть фото' }).click()
+    await expect(page.locator('.pswp__zoom-wrap > img')).toBeVisible()
+    await page.locator('.pswp__button--close').click()
+  })
+
   test('keeps card video overlays below navigation while fullscreen media covers it', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openFeed(page)
@@ -328,8 +412,8 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const ratios = [
-      ['Фотоальбом E2E', 'img', 16 / 9],
-      ['Одиночное фото E2E', 'img', 16 / 9],
+      ['Фотоальбом E2E', 'img', 1],
+      ['Одиночное фото E2E', 'img', 1],
       ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
@@ -344,7 +428,8 @@ test.describe.serial('T07 live feed', () => {
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
       })
       expect(actual.ratio).toBeCloseTo(expected, 2)
-      expect(actual.objectFit).toBe(element === 'img' ? 'cover' : 'contain')
+      if (element === 'img') expect(actual.objectFit).not.toBe('cover')
+      else expect(actual.objectFit).toBe('contain')
     }
 
     await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux.png'), fullPage: true })

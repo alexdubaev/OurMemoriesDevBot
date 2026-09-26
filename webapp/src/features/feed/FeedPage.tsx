@@ -524,7 +524,7 @@ function PrivateImage({ attachment, hostBridge, photoAlbum, photoIndex, transpor
   const url = usePrivateObjectUrl(path, transport)
   const viewerSession = useRef<AbortController | null>(null)
   useEffect(() => () => { viewerSession.current?.abort() }, [])
-  if (!url) return <div aria-label="Загрузка фотографии" className="aspect-video w-full bg-muted" />
+  if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }} />
   return <button aria-label="Открыть фото" className="ml-media-button block w-full" onClick={(event) => {
     viewerSession.current?.abort()
     const session = new AbortController()
@@ -540,7 +540,7 @@ export function PhotoImage({ alt, height, src, width }: {
   src: string
   width: number | null
 }) {
-  return <span className="relative block aspect-video w-full overflow-hidden"><img alt={alt} className="absolute inset-0 size-full object-cover" height={height ?? undefined} src={src} width={width ?? undefined} /></span>
+  return <img alt={alt} className="block h-auto w-full" height={height ?? undefined} src={src} width={width ?? undefined} />
 }
 
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {

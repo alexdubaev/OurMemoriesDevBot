@@ -473,7 +473,7 @@ test('a Telegram video without a poster preserves the safe fallback', () => {
   expect(markup).toContain('Длительность уточняется')
 })
 
-test('a private feed photo presents portrait, landscape, and square sources in the canonical frame', () => {
+test('a private feed photo preserves portrait, landscape, and square proportions without cropping', () => {
   for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
     const markup = renderToStaticMarkup(createElement(PhotoImage, {
       alt: 'Воспоминание',
@@ -484,8 +484,11 @@ test('a private feed photo presents portrait, landscape, and square sources in t
 
     expect(markup).toContain(`width="${width}"`)
     expect(markup).toContain(`height="${height}"`)
-    expect(markup).toContain('aspect-video')
-    expect(markup).toContain('object-cover')
+    expect(markup).toContain('h-auto')
+    expect(markup).toContain('w-full')
+    expect(markup).not.toContain('aspect-video')
+    expect(markup).not.toContain('object-cover')
+    expect(markup).not.toContain('absolute')
   }
 })
 
