@@ -16,12 +16,14 @@ export function createFamiliesModule({
   idempotencyExecutor,
   idempotencySecret,
   familyQuotaBytes,
+  multiFamilyActivation,
   requireAuth,
 }: {
   db: DbClient
   idempotencyExecutor: IdempotencyExecutor<PrismaTransactionClient>
   idempotencySecret: string
   familyQuotaBytes: number
+  multiFamilyActivation: 'off' | 'on'
   requireAuth: MiddlewareHandler<AuthHttpEnv>
 }) {
   const access = createPrismaFamilyAccess(db)
@@ -36,6 +38,8 @@ export function createFamiliesModule({
         idempotencyExecutor,
         idempotencySecret,
         familyQuotaBytes,
+        undefined,
+        multiFamilyActivation,
       ),
     }),
   }

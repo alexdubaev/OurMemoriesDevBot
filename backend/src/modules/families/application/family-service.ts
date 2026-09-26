@@ -28,7 +28,7 @@ import type { IdempotencyExecutor, JsonObject } from '../../../idempotency'
 import { insertTask } from '../../../outbox/store'
 import { FamilyFailure } from '../domain/errors'
 import { isBirthDateOnOrBeforeFamilyToday } from '../domain/family-date'
-import { decodeFamilyHomeCursor, encodeFamilyHomeCursor, familyHomeSnapshot } from './family-home-cursor'
+import { decodeFamilyHomeCursor, encodeFamilyHomeCursor } from './family-home-cursor'
 import type { FamilyAccess, FamilyCreatePrincipal, FamilyScope, PersistenceErrorClassifier } from './ports'
 
 type Principal = FamilyScope['principal']
@@ -43,6 +43,7 @@ export class FamilyService {
     private readonly idempotencySecret: string,
     private readonly familyQuotaBytes: number,
     private readonly now: () => Date = () => new Date(),
+    private readonly multiFamilyActivation: 'off' | 'on' = 'off',
   ) {}
 
   async getMe(user: {
@@ -75,12 +76,45 @@ export class FamilyService {
 
   async getFamilies(principal: FamilyCreatePrincipal, query: FamilyHomeQuery): Promise<FamilyHomeResponse> {
     const { userId } = principal
-    const [memberships, ownedFamily, admitted] = await Promise.all([
-      this.db.familyMember.findMany({
-        where: { userId, revokedAt: null, family: { status: 'active' } },
-        // B1 retains the one-active-member DB index. B2 must replace this bounded read
-        // with its multi-family keyset query when it removes that index.
-        take: 2,
+    return this.db.$transaction(async (tx) => {
+      // The aggregate is one bounded DB value; the indexed user membership scan never
+      // materializes every family card in the API process.
+      const snapshots = await tx.$queryRaw<Array<{ snapshot: string; activeCount: bigint }>>`
+        SELECT COALESCE(md5(string_agg(
+                 jsonb_build_array(f.id, normalize(f.name, NFC), f.owner_user_id,
+                   m.role::text, m.membership_epoch, m.family_display_name)::text,
+                 ',' ORDER BY (CASE WHEN f.owner_user_id = ${userId}::uuid THEN 0 ELSE 1 END),
+                   normalize(f.name, NFC) COLLATE "C", f.id
+               )), md5('')) AS snapshot,
+               COUNT(*) AS "activeCount"
+          FROM family_members m
+          JOIN families f ON f.id = m.family_id
+         WHERE m.user_id = ${userId}::uuid AND m.revoked_at IS NULL AND f.status = 'active'
+      `
+      const { snapshot, activeCount } = snapshots[0]!
+      const after = query.cursor
+        ? decodeFamilyHomeCursor(query.cursor, userId, snapshot, this.idempotencySecret, this.now())
+        : null
+      const afterRank = after?.rank ?? null
+      const afterName = after?.name ?? null
+      const afterFamilyId = after?.familyId ?? null
+      const pageKeys = await tx.$queryRaw<Array<{ familyId: string; rank: number; sortName: string }>>`
+        SELECT f.id AS "familyId",
+               CASE WHEN f.owner_user_id = ${userId}::uuid THEN 0 ELSE 1 END AS rank,
+               normalize(f.name, NFC) AS "sortName"
+          FROM family_members m
+          JOIN families f ON f.id = m.family_id
+         WHERE m.user_id = ${userId}::uuid AND m.revoked_at IS NULL AND f.status = 'active'
+           AND (${afterRank}::integer IS NULL OR
+             (CASE WHEN f.owner_user_id = ${userId}::uuid THEN 0 ELSE 1 END,
+               normalize(f.name, NFC) COLLATE "C", f.id) >
+             (${afterRank}::integer, ${afterName}::text COLLATE "C", ${afterFamilyId}::uuid))
+         ORDER BY rank, normalize(f.name, NFC) COLLATE "C", f.id
+         LIMIT ${query.limit + 1}
+      `
+      const visibleKeys = pageKeys.slice(0, query.limit)
+      const memberships = visibleKeys.length ? await tx.familyMember.findMany({
+        where: { userId, revokedAt: null, familyId: { in: visibleKeys.map((key) => key.familyId) } },
         select: {
           role: true, familyDisplayName: true, membershipEpoch: true,
           family: {
@@ -90,73 +124,64 @@ export class FamilyService {
             },
           },
         },
-      }),
-      this.db.family.findFirst({
+      }) : []
+      const byFamilyId = new Map(memberships.map((membership) => [membership.family.id, membership]))
+      const ownedFamily = await tx.family.findFirst({
         where: { ownerUserId: userId, status: { not: 'deleted' } },
         select: { id: true, status: true },
-      }),
-      principal.externalIdentity ? this.db.pilotAdmission.findFirst({
-        where: {
-          provider: principal.externalIdentity.provider,
-          subject: principal.externalIdentity.subject,
-          revokedAt: null,
-        },
-        select: { id: true },
-      }) : Promise.resolve(null),
-    ])
-    if (memberships.length > 1) {
-      throw new FamilyFailure('conflict', 'Список семей временно недоступен')
-    }
-    const items = memberships.map(({ family, role, familyDisplayName, membershipEpoch }) => {
-      const child = family.children[0]
-      const isOwner = family.ownerUserId === userId
-      const ready = !!child && isCompletedChild(child)
-      const full = role === 'full'
+      })
+      const admitted = this.multiFamilyActivation === 'off' && principal.externalIdentity
+        ? await tx.pilotAdmission.findFirst({
+          where: {
+            provider: principal.externalIdentity.provider,
+            subject: principal.externalIdentity.subject,
+            revokedAt: null,
+          },
+          select: { id: true },
+        }) : null
+      const items = visibleKeys.map((key) => {
+        const { family, role, familyDisplayName, membershipEpoch } = byFamilyId.get(key.familyId)!
+        const child = family.children[0]
+        const isOwner = family.ownerUserId === userId
+        const ready = !!child && isCompletedChild(child)
+        const full = role === 'full'
+        return {
+          familyId: family.id,
+          name: family.name,
+          displaySubtitle: familyDisplayName ?? child?.displayName ?? null,
+          childAvatarMediaId: child?.avatarMediaId ?? null,
+          isOwner,
+          role,
+          setupStatus: ready ? 'ready' as const : 'needs_child' as const,
+          capabilities: {
+            canCreateInvite: full && ready,
+            canManageMembers: isOwner,
+            canEditChild: isOwner,
+            canPublishNote: full && ready,
+            canPublishPhoto: full && ready,
+            canPublishVoice: full && ready,
+            canPublishVideo: false,
+            canUploadChildAvatar: isOwner,
+          },
+          unreadCount: null,
+          unreadState: 'not_enabled' as const,
+          membershipEpoch,
+        }
+      })
+      const last = visibleKeys.at(-1)
       return {
-        familyId: family.id,
-        name: family.name,
-        displaySubtitle: familyDisplayName ?? child?.displayName ?? null,
-        childAvatarMediaId: child?.avatarMediaId ?? null,
-        isOwner,
-        role,
-        setupStatus: ready ? 'ready' as const : 'needs_child' as const,
-        capabilities: {
-          canCreateInvite: full && ready,
-          canManageMembers: isOwner,
-          canEditChild: isOwner,
-          canPublishNote: full && ready,
-          canPublishPhoto: full && ready,
-          canPublishVoice: full && ready,
-          canPublishVideo: false,
-          canUploadChildAvatar: isOwner,
-        },
-        unreadCount: null,
-        unreadState: 'not_enabled' as const,
-        membershipEpoch,
+        version: 1,
+        ownFamilyId: ownedFamily?.id ?? null,
+        ownFamilyStatus: ownedFamily?.status === 'deleting' ? 'deleting' : ownedFamily ? 'active' : null,
+        canCreateOwnFamily: !ownedFamily && (this.multiFamilyActivation === 'on' ||
+          (!!admitted && activeCount === 0n)),
+        items,
+        nextCursor: pageKeys.length > query.limit && last
+          ? encodeFamilyHomeCursor({ rank: last.rank === 0 ? 0 : 1, name: last.sortName, familyId: last.familyId },
+            userId, snapshot, this.idempotencySecret, this.now())
+          : null,
       }
-    }).sort((a, b) => {
-      if (a.isOwner !== b.isOwner) return a.isOwner ? -1 : 1
-      const leftName = a.name.normalize('NFC')
-      const rightName = b.name.normalize('NFC')
-      if (leftName !== rightName) return leftName < rightName ? -1 : 1
-      return a.familyId < b.familyId ? -1 : a.familyId > b.familyId ? 1 : 0
-    })
-    const snapshot = familyHomeSnapshot(items)
-    const offset = query.cursor ? decodeFamilyHomeCursor(query.cursor, userId, snapshot, this.idempotencySecret, this.now()) : 0
-    const page = items.slice(offset, offset + query.limit)
-    const nextOffset = offset + page.length
-    return {
-      version: 1,
-      ownFamilyId: ownedFamily?.id ?? null,
-      ownFamilyStatus: ownedFamily?.status === 'deleting' ? 'deleting' : ownedFamily ? 'active' : null,
-      // B1 keeps the pilot admission and one-active-family writer under either gate value.
-      // B2 will replace this hint together with the gated create policy.
-      canCreateOwnFamily: !!admitted && !ownedFamily && memberships.length === 0,
-      items: page,
-      nextCursor: nextOffset < items.length
-        ? encodeFamilyHomeCursor(nextOffset, userId, snapshot, this.idempotencySecret, this.now())
-        : null,
-    }
+    }, { isolationLevel: 'RepeatableRead', timeout: 15_000 })
   }
 
   async createFamily(
@@ -173,24 +198,38 @@ export class FamilyService {
         payloadHash,
         now: this.now(),
         execute: async (tx) => {
-          const admitted = principal.externalIdentity && await tx.pilotAdmission.findFirst({
-            where: {
-              provider: principal.externalIdentity.provider,
-              subject: principal.externalIdentity.subject,
-              revokedAt: null,
-            },
-            select: { id: true },
-          })
-          if (!admitted) {
-            throw new FamilyFailure('forbidden', 'Создание семьи доступно участникам пилота')
+          await tx.$queryRaw`
+            SELECT id FROM users WHERE id = ${principal.userId}::uuid FOR UPDATE
+          `
+          if (this.multiFamilyActivation === 'off') {
+            const admitted = principal.externalIdentity && await tx.pilotAdmission.findFirst({
+              where: {
+                provider: principal.externalIdentity.provider,
+                subject: principal.externalIdentity.subject,
+                revokedAt: null,
+              },
+              select: { id: true },
+            })
+            if (!admitted) {
+              throw new FamilyFailure('forbidden', 'Создание семьи доступно участникам пилота')
+            }
           }
 
-          const existing = await tx.familyMember.findFirst({
-            where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
-            select: { familyId: true },
+          const ownedFamily = await tx.family.findFirst({
+            where: { ownerUserId: principal.userId, status: { not: 'deleted' } },
+            select: { id: true },
           })
-          if (existing) {
-            throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+          if (ownedFamily) {
+            throw new FamilyFailure('already_in_family', 'У вас уже есть своя семья')
+          }
+          if (this.multiFamilyActivation === 'off') {
+            const existing = await tx.familyMember.findFirst({
+              where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+              select: { familyId: true },
+            })
+            if (existing) {
+              throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+            }
           }
 
           const family = await tx.family.create({
@@ -218,7 +257,11 @@ export class FamilyService {
       })).response
     } catch (error) {
       if (this.persistenceErrors.isUniqueConstraint(error)) {
-        throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        const ownedFamily = await this.db.family.findFirst({
+          where: { ownerUserId: principal.userId, status: { not: 'deleted' } },
+          select: { id: true },
+        })
+        if (ownedFamily) throw new FamilyFailure('already_in_family', 'У вас уже есть своя семья')
       }
       throw error
     }
@@ -607,6 +650,27 @@ export class FamilyService {
     const tokenHash = hashInviteToken(rawToken)
     try {
       return await this.db.$transaction(async (tx) => {
+        const target = await tx.familyInvite.findUnique({
+          where: { tokenHash }, select: { id: true, familyId: true },
+        })
+        if (!target) throw new FamilyFailure('not_found', 'Приглашение не найдено')
+        await tx.$queryRaw`
+          SELECT id FROM users WHERE id = ${principal.userId}::uuid FOR UPDATE
+        `
+        const families = await tx.$queryRaw<Array<{
+          status: 'active' | 'deleting' | 'deleted'
+          publicationOrdinal: bigint
+          unreadTrackingActivatedAt: Date | null
+        }>>`
+          SELECT status::text AS status,
+                 publication_ordinal AS "publicationOrdinal",
+                 unread_tracking_activated_at AS "unreadTrackingActivatedAt"
+            FROM families WHERE id = ${target.familyId}::uuid FOR UPDATE
+        `
+        const family = families[0]
+        if (!family || family.status !== 'active') {
+          throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
+        }
         const rows = await tx.$queryRaw<Array<{
           id: string
           familyId: string
@@ -615,7 +679,6 @@ export class FamilyService {
           expiresAt: Date
           acceptedBy: string | null
           revokedAt: Date | null
-          familyStatus: 'active' | 'deleting' | 'deleted'
         }>>`
           SELECT i.id,
                  i.family_id AS "familyId",
@@ -623,18 +686,13 @@ export class FamilyService {
                  i.invitee_display_name AS "inviteeDisplayName",
                  i.expires_at AS "expiresAt",
                  i.accepted_by AS "acceptedBy",
-                 i.revoked_at AS "revokedAt",
-                 f.status::text AS "familyStatus"
+                 i.revoked_at AS "revokedAt"
             FROM family_invites i
-            JOIN families f ON f.id = i.family_id
-           WHERE i.token_hash = ${tokenHash}
-           FOR UPDATE
+           WHERE i.id = ${target.id}::uuid AND i.token_hash = ${tokenHash}
+           FOR UPDATE OF i
         `
         const invite = rows[0]
         if (!invite) throw new FamilyFailure('not_found', 'Приглашение не найдено')
-        if (invite.familyStatus !== 'active') {
-          throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
-        }
         if (invite.revokedAt) throw new FamilyFailure('invite_revoked', 'Приглашение отозвано')
         if (invite.acceptedBy) {
           if (invite.acceptedBy !== principal.userId) {
@@ -646,35 +704,42 @@ export class FamilyService {
           throw new FamilyFailure('invite_expired', 'Срок действия приглашения истёк')
         }
 
-        const activeMembership = await tx.familyMember.findFirst({
-          where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
-          select: { familyId: true },
+        const targetMembership = await tx.familyMember.findUnique({
+          where: { familyId_userId: { familyId: invite.familyId, userId: principal.userId } },
+          select: { revokedAt: true },
         })
-        if (activeMembership && activeMembership.familyId !== invite.familyId) {
-          throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
-        }
-        if (activeMembership?.familyId === invite.familyId) {
+        if (targetMembership && !targetMembership.revokedAt) {
           return inviteResponse(tx, invite.familyId, principal.userId)
         }
-
-        if (!activeMembership) {
-          await tx.familyMember.upsert({
-            where: { familyId_userId: { familyId: invite.familyId, userId: principal.userId } },
-            update: {
-              role: invite.role,
-              familyDisplayName: invite.inviteeDisplayName,
-              revokedAt: null,
-              joinedAt: this.now(),
-              version: { increment: 1 },
-            },
-            create: {
-              familyId: invite.familyId,
-              userId: principal.userId,
-              role: invite.role,
-              familyDisplayName: invite.inviteeDisplayName,
-            },
+        if (this.multiFamilyActivation === 'off') {
+          const activeMembership = await tx.familyMember.findFirst({
+            where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+            select: { familyId: true },
           })
+          if (activeMembership && activeMembership.familyId !== invite.familyId) {
+            throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+          }
         }
+
+        await tx.familyMember.upsert({
+          where: { familyId_userId: { familyId: invite.familyId, userId: principal.userId } },
+          update: {
+            role: invite.role,
+            familyDisplayName: invite.inviteeDisplayName,
+            revokedAt: null,
+            joinedAt: this.now(),
+            version: { increment: 1 },
+            membershipEpoch: { increment: 1 },
+            unreadBaselineOrdinal: family.unreadTrackingActivatedAt ? family.publicationOrdinal : null,
+          },
+          create: {
+            familyId: invite.familyId,
+            userId: principal.userId,
+            role: invite.role,
+            familyDisplayName: invite.inviteeDisplayName,
+            unreadBaselineOrdinal: family.unreadTrackingActivatedAt ? family.publicationOrdinal : null,
+          },
+        })
         await tx.familyInvite.update({
           where: { id: invite.id },
           data: { acceptedBy: principal.userId, acceptedAt: this.now() },
@@ -683,7 +748,13 @@ export class FamilyService {
       })
     } catch (error) {
       if (this.persistenceErrors.isUniqueConstraint(error)) {
-        throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        const activeMembership = await this.db.familyMember.findFirst({
+          where: { userId: principal.userId, revokedAt: null, family: { status: 'active' } },
+          select: { familyId: true },
+        })
+        if (this.multiFamilyActivation === 'off' && activeMembership) {
+          throw new FamilyFailure('already_in_family', 'Вы уже состоите в активной семье')
+        }
       }
       throw error
     }
