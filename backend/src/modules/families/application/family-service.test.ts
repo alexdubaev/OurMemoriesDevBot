@@ -14,3 +14,31 @@ test('legacy /me refuses an ambiguous two-family membership', async () => {
   const service = new FamilyService(db as never, {} as never, {} as never, {} as never, 'test', 1)
   await expect(service.getMe(user)).rejects.toMatchObject({ kind: 'conflict' })
 })
+
+test('a failed unread count leaves the family list available with an unavailable counter', async () => {
+  const userId = '00000000-0000-4000-8000-000000000001'
+  const familyId = '00000000-0000-4000-8000-000000000002'
+  let queryNumber = 0
+  const tx = {
+    $queryRaw: async () => ++queryNumber === 1
+      ? [{ snapshot: 'synthetic-snapshot', activeCount: 1n }]
+      : [{ familyId, rank: 0, sortName: 'Наша семья' }],
+    familyMember: { findMany: async () => [{
+      role: 'full', familyDisplayName: null, membershipEpoch: 1,
+      family: {
+        id: familyId, name: 'Наша семья', ownerUserId: userId,
+        unreadTrackingActivatedAt: new Date(), children: [],
+      },
+    }] },
+    family: { findFirst: async () => ({ id: familyId, status: 'active' }) },
+  }
+  const db = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    $queryRaw: async () => { throw new Error('synthetic counter failure') },
+  }
+  const service = new FamilyService(db as never, {} as never, {} as never, {} as never, 'test', 1,
+    () => new Date(), 'on')
+  const response = await service.getFamilies({ userId, sessionId: 'synthetic-session', externalIdentity: null }, { limit: 20 })
+  expect(response.items).toHaveLength(1)
+  expect(response.items[0]).toMatchObject({ familyId, unreadCount: null, unreadState: 'unavailable' })
+})

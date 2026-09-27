@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
+import { activateUnreadFamily } from '../../../scripts/activate-unread-tracking'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
@@ -23,6 +24,38 @@ maybeDescribe('personal unread memories', () => {
 
   beforeEach(clearFixtures)
   afterAll(async () => { await clearFixtures(); await prisma.$disconnect() })
+
+  test('B7 activation serializes and preserves the first family boundary on retry', async () => {
+    const owner = await user('owner', '39100')
+    const family = await createFamily(owner)
+    const archived = await note(owner, family, 'archive before activation')
+    expect(archived.response.status).toBe(201)
+    const results = await Promise.all([
+      activateUnreadFamily(prisma, family.id),
+      activateUnreadFamily(prisma, family.id),
+    ])
+    expect(results.sort()).toEqual(['activated', 'already_active'])
+    const first = await prisma.family.findUniqueOrThrow({ where: { id: family.id } })
+    expect(first.unreadTrackingActivatedAt).not.toBeNull()
+    expect(first.publicationOrdinal).toBe(0n)
+    expect(await activateUnreadFamily(prisma, family.id)).toBe('already_active')
+    const retried = await prisma.family.findUniqueOrThrow({ where: { id: family.id } })
+    expect(retried.unreadTrackingActivatedAt).toEqual(first.unreadTrackingActivatedAt)
+    expect((await prisma.memory.findUniqueOrThrow({ where: { id: archived.body.id } })).firstPublishedOrdinal).toBeNull()
+  })
+
+  test('B7 activation stops on a pre-activation ordinal inconsistency', async () => {
+    const owner = await user('owner', '39099')
+    const family = await createFamily(owner)
+    await prisma.family.update({ where: { id: family.id }, data: { publicationOrdinal: 1n } })
+    await expect(activateUnreadFamily(prisma, family.id)).rejects.toThrow('inconsistent')
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).unreadTrackingActivatedAt).toBeNull()
+    await prisma.family.update({ where: { id: family.id }, data: { publicationOrdinal: 0n } })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: family.id, userId: owner.id } },
+      data: { unreadBaselineOrdinal: 1n } })
+    await expect(activateUnreadFamily(prisma, family.id)).rejects.toThrow('member baseline is inconsistent')
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).unreadTrackingActivatedAt).toBeNull()
+  })
 
   test('activation excludes archive, counts delayed publications once, and keeps edits and retries quiet', async () => {
     const owner = await user('owner', '39101')
@@ -442,7 +475,7 @@ maybeDescribe('personal unread memories', () => {
   }
 
   async function activate(familyId: string) {
-    await prisma.family.update({ where: { id: familyId }, data: { unreadTrackingActivatedAt: new Date() } })
+    await activateUnreadFamily(prisma, familyId)
   }
 
   function note(owner: Awaited<ReturnType<typeof user>>, family: { id: string; childId: string }, body: string,

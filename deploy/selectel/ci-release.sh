@@ -8,6 +8,7 @@ set -Eeuo pipefail
 
 SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
+export SERVER_ROOT APP_ROOT
 ROLLBACK_ENV=${ROLLBACK_ENV:-$SERVER_ROOT/rollback.env}
 RELEASES_DIR=${RELEASES_DIR:-$SERVER_ROOT/releases}
 BACKUPS_DIR=${BACKUPS_DIR:-$SERVER_ROOT/backups}
@@ -22,6 +23,12 @@ DEPLOY_CONFIRMATION=${2:-}
 RUN_MIGRATION=${3:-false}
 MAX_BOT_USERNAME=${4:-}
 PROMOTION_STARTED=false
+LEGACY_MEMBERSHIP_RUNTIME=false
+QUIESCE_STARTED=false
+B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
+FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
+RESUMING_FORWARD_ONLY=false
+MARKER_TARGET_SHA=
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -138,6 +145,53 @@ capture_running_images() {
   PREVIOUS_BACKEND_IMAGE_TAG=$(immutable_tag "$backend" memoly-backend)
   PREVIOUS_WEBAPP_IMAGE_TAG=$(immutable_tag "$static" memoly-webapp)
   export PREVIOUS_BACKEND_IMAGE_TAG PREVIOUS_WEBAPP_IMAGE_TAG
+}
+
+detect_membership_rollback_boundary() {
+  if [ "$RESUMING_FORWARD_ONLY" = true ]; then
+    git_root merge-base --is-ancestor "$MARKER_TARGET_SHA" "$PRODUCT_SHA" ||
+      die 'forward-only recovery target must descend from the interrupted release'
+    LEGACY_MEMBERSHIP_RUNTIME=true
+    printf 'Resuming the recorded B2 forward-only release boundary.\n'
+    return
+  fi
+  git_root cat-file -e "$PREVIOUS_BACKEND_IMAGE_TAG^{commit}" 2>/dev/null ||
+    die 'running backend SHA is not available in the canonical checkout; cannot assess rollback compatibility'
+  git_root merge-base --is-ancestor "$PREVIOUS_BACKEND_IMAGE_TAG" "$PRODUCT_SHA" ||
+    die 'running backend SHA is not an ancestor of the requested release'
+  git_root merge-base --is-ancestor "$B2_RUNTIME_SHA" "$PRODUCT_SHA" ||
+    die 'requested release does not contain the accepted B2 runtime'
+  if ! git_root merge-base --is-ancestor "$B2_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG"; then
+    LEGACY_MEMBERSHIP_RUNTIME=true
+    printf 'Pre-B2 runtime detected; release will quiesce legacy writers before migration and use forward-only recovery.\n'
+  fi
+}
+
+load_forward_marker() {
+  [ -f "$FORWARD_MARKER" ] || die 'forward-only marker is not a regular file'
+  [ ! -L "$FORWARD_MARKER" ] || die 'forward-only marker must not be a symlink'
+  [ "$(stat -c '%u' "$FORWARD_MARKER")" = 0 ] || die 'forward-only marker must be owned by root'
+  [ "$(stat -c '%a' "$FORWARD_MARKER")" = 600 ] || die 'forward-only marker must have mode 0600'
+  local -a lines
+  mapfile -t lines < "$FORWARD_MARKER"
+  [ "${#lines[@]}" -eq 3 ] || die 'forward-only marker has an invalid format'
+  [[ "${lines[0]}" =~ ^B2_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'forward-only target is invalid'
+  MARKER_TARGET_SHA=${BASH_REMATCH[1]}
+  [[ "${lines[1]}" =~ ^PREVIOUS_BACKEND_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'forward-only backend tag is invalid'
+  PREVIOUS_BACKEND_IMAGE_TAG=${BASH_REMATCH[1]}
+  [[ "${lines[2]}" =~ ^PREVIOUS_WEBAPP_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'forward-only webapp tag is invalid'
+  PREVIOUS_WEBAPP_IMAGE_TAG=${BASH_REMATCH[1]}
+  export PREVIOUS_BACKEND_IMAGE_TAG PREVIOUS_WEBAPP_IMAGE_TAG
+  RESUMING_FORWARD_ONLY=true
+}
+
+write_forward_marker() {
+  [ ! -e "$FORWARD_MARKER" ] || die 'forward-only marker already exists'
+  local temp="$FORWARD_MARKER.tmp.$$"
+  install -m 0600 /dev/null "$temp"
+  printf 'B2_FORWARD_ONLY_TARGET=%s\nPREVIOUS_BACKEND_IMAGE_TAG=%s\nPREVIOUS_WEBAPP_IMAGE_TAG=%s\n' \
+    "$PRODUCT_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG" "$PREVIOUS_WEBAPP_IMAGE_TAG" > "$temp"
+  mv -- "$temp" "$FORWARD_MARKER"
 }
 
 verify_rollback_file() {
@@ -273,7 +327,12 @@ main() {
   release_failure() {
     local status=$?
     trap - EXIT
-    if [ "$PROMOTION_STARTED" = true ]; then
+    if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
+      printf 'ERROR: pre-B2 runtime cannot be restored after this release boundary; keeping legacy writers stopped for forward recovery.\n' >&2
+      if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
+        printf 'ERROR: could not confirm legacy writers are stopped; immediate operator inspection is required.\n' >&2
+      fi
+    elif [ "$PROMOTION_STARTED" = true ]; then
       printf 'ERROR: release promotion failed; attempting application rollback.\n' >&2
       if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback; then
         printf 'ERROR: automatic application rollback failed; manual rollback is required.\n' >&2
@@ -283,20 +342,39 @@ main() {
   }
   trap release_failure EXIT
 
-  check_disk_space
   validate_repository
+  if [ -e "$FORWARD_MARKER" ]; then
+    load_forward_marker
+    LEGACY_MEMBERSHIP_RUNTIME=true
+    QUIESCE_STARTED=true
+    export MEMOLY_PRODUCT_SHA="$MARKER_TARGET_SHA"
+    bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
+  fi
+  check_disk_space
   verify_rollback_file
-  capture_running_images
+  if [ "$RESUMING_FORWARD_ONLY" = false ]; then
+    capture_running_images
+  fi
   fetch_and_checkout
+  detect_membership_rollback_boundary
 
   SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
-  prepare_rollback
+  if [ "$RESUMING_FORWARD_ONLY" = false ]; then prepare_rollback; fi
 
   export MEMOLY_PRODUCT_SHA="$PRODUCT_SHA"
   export MEMOLY_BACKEND_IMAGE_TAG="$PRODUCT_SHA"
   export MEMOLY_WEBAPP_IMAGE_TAG="$PRODUCT_SHA"
   export MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-app.memoly.ru}
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" preflight
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ]; then
+    if [ "$RUN_MIGRATION" = false ]; then
+      bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status ||
+        die 'pending migrations require the guarded migration input before crossing the B2 runtime boundary'
+    fi
+    if [ "$RESUMING_FORWARD_ONLY" = false ]; then write_forward_marker; fi
+    QUIESCE_STARTED=true
+    bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
+  fi
   if [ "$RUN_MIGRATION" = true ]; then
     bash "$APP_ROOT/deploy/selectel/redeploy.sh" migrate
   fi
@@ -306,6 +384,7 @@ main() {
   public_smoke
   write_release_manifest
   PROMOTION_STARTED=false
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ]; then rm -- "$FORWARD_MARKER"; fi
 }
 
 main "$@"

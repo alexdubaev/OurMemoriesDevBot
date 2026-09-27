@@ -203,7 +203,7 @@ test('one-shot migration backs up and validates before guarded db:deploy', () =>
   const migrateBody = script.match(/migrate\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
   const backupBody = script.slice(script.indexOf('backup_database() {'), script.indexOf('\n}\n\nmigrate()'))
 
-  assert.match(script, /Usage: redeploy\.sh \{preflight\|migrate\|deploy\|rollback\|migration-status\}/)
+  assert.match(script, /Usage: redeploy\.sh \{preflight\|migrate\|deploy\|rollback\|migration-status\|quiesce-legacy\}/)
   assert.match(script, /migrate\) require_command docker; migrate/)
   assert.match(backupBody, /timestamp=\$\(date -u \+%Y%m%dT%H%M%SZ\)/)
   assert.match(backupBody, /backups\/postgres-\$\{MEMOLY_PRODUCT_SHA\}-\$\{timestamp\}\.dump/)
@@ -227,8 +227,112 @@ test('one-shot migration backs up and validates before guarded db:deploy', () =>
   assert.doesNotMatch(migrateBody, /compose up|promote_backend|promote_jobs|promote_static|activate_gateway/)
   assert.match(script, /backend DATABASE_URL does not target the Compose postgres database/)
   assert.match(script, /postgres\|5432\|\$postgres_database/)
-  assert.match(read('deploy/selectel/README.md'), /One-shot database migration/)
+  assert.match(read('deploy/selectel/README.md'), /one-shot database migration/i)
   assert.match(read('deploy/selectel/README.md'), /bun run db:deploy/)
+})
+
+test('B2 release quiesces only legacy writers and forbids an automatic pre-B2 rollback', () => {
+  const redeploy = read('deploy/selectel/redeploy.sh')
+  const release = read('deploy/selectel/ci-release.sh')
+  const quiesce = redeploy.match(/quiesce_legacy_runtime\(\) \{[\s\S]*?\n\}/)?.[0]
+  assert.ok(quiesce)
+  const target = 'a'.repeat(40)
+  const harness = `
+set -euo pipefail
+${quiesce}
+die() { printf 'DIE:%s\\n' "$*" >&2; exit 1; }
+validate_forward_marker() { :; }
+MEMOLY_PRODUCT_SHA=${target}
+COMPOSE_PROJECT=memoly
+LEGACY_RUNNING=true
+docker() {
+  if [ "$1" = ps ]; then
+    if [[ "$*" == *service=backend* ]]; then
+      if [ "$LEGACY_RUNNING" = true ]; then printf 'legacy-container\\n'; fi
+      printf 'target-container\\n'
+    fi
+  elif [ "$1" = inspect ]; then
+    if [ "${'${@: -1}'}" = legacy-container ]; then printf 'memoly-backend:${'b'.repeat(40)}\\n'
+    else printf 'memoly-backend:${target}\\n'; fi
+  elif [ "$1" = stop ]; then
+    [ "${'${@: -1}'}" = legacy-container ] || exit 80
+    LEGACY_RUNNING=false
+    printf 'stopped legacy\\n' >> "$STOP_MARKER"
+  else
+    exit 81
+  fi
+}
+quiesce_legacy_runtime
+`
+  const marker = resolve(root, 'tests/.selectel-b2-stop-marker')
+  const bashMarker = marker.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+  rmSync(marker, { force: true })
+  const result = spawnSync('bash', ['-s'], {
+    input: harness, encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, STOP_MARKER: bashMarker },
+  })
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  const stopped = readFileSync(marker, 'utf8')
+  rmSync(marker, { force: true })
+  assert.equal(stopped, 'stopped legacy\n')
+  const legacyBranch = release.indexOf('if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then')
+  const rollbackBranch = release.indexOf('elif [ "$PROMOTION_STARTED" = true ]; then')
+  assert.ok(legacyBranch >= 0 && legacyBranch < rollbackBranch)
+  const releaseSequence = release.slice(release.indexOf('export MEMOLY_PUBLIC_HOST'))
+  assert.ok(releaseSequence.indexOf('write_forward_marker') < releaseSequence.indexOf('bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy'))
+  assert.ok(releaseSequence.indexOf('quiesce-legacy') < releaseSequence.indexOf('redeploy.sh" migrate'))
+  assert.match(redeploy, /rollback target predates the B2 membership runtime/)
+  assert.match(redeploy, /rollback is forbidden after unread activation, multiple memberships/)
+})
+
+test('direct B2 migration and promotion reject a running pre-B2 writer', () => {
+  const script = read('deploy/selectel/redeploy.sh')
+  const guard = script.match(/guard_membership_transition\(\) \{[\s\S]*?\n\}/)?.[0]
+  assert.ok(guard)
+  const target = 'a'.repeat(40)
+  const legacy = 'b'.repeat(40)
+  const harness = `
+set -euo pipefail
+${guard}
+die() { printf '%s\\n' "$*" >&2; exit 7; }
+B2_RUNTIME_SHA=${'c'.repeat(40)}
+MEMOLY_PRODUCT_SHA=${target}
+APP_ROOT=/mock/app
+COMPOSE_PROJECT=memoly
+FORWARD_MARKER=/missing-b2-marker
+SELECTEL_CI_RELEASE=true
+SELECTEL_DEPLOY_LOCK_FD=9
+git() {
+  if [ "$5" = rev-parse ]; then printf '${target}\\n'; return 0; fi
+  if [ "$5" = cat-file ]; then return 0; fi
+  if [ "${'${@: -1}'}" = "$MEMOLY_PRODUCT_SHA" ]; then return 0; fi
+  return 1
+}
+docker() {
+  if [ "$1" = ps ]; then printf 'legacy-container\\n';
+  elif [ "$1" = inspect ]; then printf 'memoly-backend:${legacy}\\n';
+  else exit 9; fi
+}
+guard_membership_transition
+`
+  const result = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8', timeout: 30_000 })
+  assert.equal(result.status, 7, `${result.stdout}${result.stderr}`)
+  assert.match(result.stderr, /predates B2/)
+  const direct = spawnSync('bash', ['-s'], {
+    input: harness.replace('SELECTEL_CI_RELEASE=true', 'SELECTEL_CI_RELEASE=false'),
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(direct.status, 7)
+  assert.match(direct.stderr, /guarded ci-release entry point/)
+  const unmerged = spawnSync('bash', ['-s'], {
+    input: harness.replace(`printf '${target}\\n'; return 0`, `printf '${'d'.repeat(40)}\\n'; return 0`),
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(unmerged.status, 7)
+  assert.match(unmerged.stderr, /accepted origin\/main SHA/)
+  assert.match(script, /migrate\) require_command docker; guard_membership_transition; migrate/)
+  assert.match(script, /deploy\(\) \{\n\tguard_membership_transition/)
+  assert.doesNotMatch(read('deploy/selectel/README.md'), /^deploy\/selectel\/redeploy\.sh migrate$/m)
 })
 
 test('database target validation rejects URL overrides and accepts the Compose target', () => {

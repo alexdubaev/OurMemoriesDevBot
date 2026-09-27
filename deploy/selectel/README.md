@@ -66,11 +66,24 @@ smoke; direct `redeploy.sh` actions cannot interleave with that release. If
 promotion or public smoke fails after the release starts changing services, the
 entry point attempts the prepared application rollback and keeps the original
 failure status if rollback also fails.
+For the first release crossing the B2 membership boundary, the entry point
+compares the running backend SHA with the accepted B2 runtime SHA. A pre-B2
+backend relies on the one-active-membership index that B2 removes. The entry
+point stops the legacy backend, worker, and scheduler before guarded migration;
+API and bot processing pause during this monitored window. A root-owned,
+mode-0600 forward-only marker is written before the stop. If migration,
+promotion, or public smoke fails, the entry point keeps legacy writers stopped
+and does not restore the pre-B2 application. A later accepted descendant SHA
+can resume the guarded forward fix after inspecting the actual host state.
+Do not remove the marker manually; the entry point clears it after successful
+public smoke and release manifest creation. Direct rollback refuses pre-B2
+images and any rollback after unread activation or multiple memberships.
 Dispatch it with the exact current `main` SHA, type `DEPLOY`, and enable the
 migration input only when that release contains a pending migration. The workflow
 fails closed when the environment variables or secrets are missing. GitHub's
 environment branch restriction is `main`; a human required-reviewer rule is not
 configured because the private-repository plan rejected that setting.
+The B7 release has pending B1–B4 migrations and must use the migration input.
 
 For a local release, prepare both immutable images from the accepted commit with
 the tracked script:
@@ -108,7 +121,7 @@ test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
 git show "$SHA:deploy/selectel/ci-release.sh" |
   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
-    bash -s -- "$SHA" DEPLOY false id911018762027_bot
+    bash -s -- "$SHA" DEPLOY true id911018762027_bot
 ```
 
 Set the third server argument to `true` only for a reviewed release that needs the
@@ -116,25 +129,27 @@ guarded migration. This command builds both images on Selectel; no image transfe
 is needed. Do not run it until the host GitHub credential, 4 GiB disk gate, and
 rollback prerequisites above are satisfied. The local build and image-transfer
 sequence below is an alternative when server-side building is unavailable.
+It must not replace the guarded entry point for the first pre-B2 to B2
+transition: that transition needs one lock across legacy-writer quiescence,
+migration, and promotion. If server-side building is unavailable for B7,
+stop and revise the guarded entry point through review before release.
 
 ### Release sequence and stop conditions
 
-1. Confirm owner-provisioned SSH access and the accepted full SHA.
-2. In a clean checkout at that SHA, run `build-images.sh` and deliver both images.
-3. On the host, verify the images are present and run `preflight`.
-4. Run `migration-status`. If it reports no pending migrations, continue to
-   `deploy`. If it reports a pending release migration, run the guarded `migrate`
-   action documented below, then check `migration-status` again before `deploy`.
-5. Run `deploy`, then perform the public smoke checks.
-6. Record the SHA, image IDs/digests, migration result, UTC time, smoke results, and
-   rollback tags in a release manifest. Keep the manifest server-side or in the
-   approved release system; never include secrets.
+1. Confirm owner-provisioned SSH access, the accepted full SHA, clean host
+   checkout, immutable-image prerequisites, and the migration input.
+2. Invoke the guarded `ci-release.sh` entry point above with that SHA. It owns
+   image build, preflight, migration, promotion, and public smoke under one lock.
+3. Inspect its release manifest and migration status. Record the SHA, image
+   IDs/digests, UTC time, smoke result, and rollback boundary without secrets.
 
 Stop before mutation when SSH, canonical origin, clean SHA, either image, Compose,
 Caddy ownership, or migration preflight fails. Do not substitute `prisma db push`,
 direct SQL, `docker compose up` against the gateway, or an ad-hoc migration command.
-If promotion fails after a compatible migration, use the configured immutable
-rollback tags and follow the rollback section below. Database rollback is not part
+If promotion fails after a compatible migration and the prior runtime is already
+B2-compatible, use the configured immutable rollback tags only when the guarded
+rollback compatibility check passes. The first pre-B2 transition and any release
+after unread activation require forward recovery. Database rollback is not part
 of application rollback.
 
 ## Ownership model
@@ -233,55 +248,21 @@ Keep the Compose env files at `/opt/memoly/env/postgres.env` and
 `/opt/memoly/env/backend.env`, and keep the three MAX secret files under
 `/opt/memoly/secrets/`. Never commit any of these server-only files.
 
-## Promotion
+## Guarded promotion and one-shot database migration
 
-Run from `/opt/memoly/app` after a reviewed checkout has supplied these files:
+Use the `ci-release.sh` entry point above for the whole B7 release. It holds
+one host release lock across checkout, image build, legacy-writer quiescence,
+migration, promotion, and public smoke. Do not run `redeploy.sh migrate` and
+`redeploy.sh deploy` as separate operator commands for the B2 transition.
+Both internal actions require the inherited `ci-release.sh` lock and the exact
+checked-out `origin/main` SHA. They also reject a B2 target if a pre-B2 backend,
+worker, or scheduler is running without the validated forward-only marker. The
+direct `quiesce-legacy` action requires that marker. A target older than a
+running compatible service is rejected.
 
-```sh
-export MEMOLY_PRODUCT_SHA='0123456789abcdef0123456789abcdef01234567'
-export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
-export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
-export MEMOLY_PUBLIC_HOST='app.memoly.ru'
-deploy/selectel/redeploy.sh preflight
-deploy/selectel/redeploy.sh migration-status
-deploy/selectel/redeploy.sh deploy
-```
-
-`preflight` validates gateway ownership, shared-network membership, locally
-available immutable images, candidate Caddy configuration, and Compose config.
-`deploy` checks migration status, promotes backend and verifies readiness from
-inside the backend container, promotes worker and scheduler, promotes internal
-static and verifies it from the backend over `http://static:80`, then validates
-the candidate again before backing up and overwriting the active gateway
-Caddyfile contents in place. The target inode is preserved; the host checksum
-must match the candidate and the checksum of the same file inside
-`memoly-webapp-1` before Caddy reloads. If activation or reload fails, the
-previous contents are restored in place, validated/reloaded, and public health
-is checked. It does not run `prisma db push`, pull registry images, or execute
-destructive SQL.
-
-If any critical check fails, stop promotion and use the prepared rollback:
-
-```sh
-deploy/selectel/redeploy.sh rollback
-```
-
-## One-shot database migration
-
-When a release contains a new Prisma migration, run the guarded migration step
-before promotion. It takes the same deployment lock, runs the full preflight,
-and requires both immutable image tags to equal `MEMOLY_PRODUCT_SHA`:
-
-```sh
-cd /opt/memoly/app
-export MEMOLY_PRODUCT_SHA='0123456789abcdef0123456789abcdef01234567'
-export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
-export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
-export MEMOLY_PUBLIC_HOST='app.memoly.ru'
-deploy/selectel/redeploy.sh migrate
-```
-
-`migrate` first runs `preflight` and verifies that the backend's `DATABASE_URL`
+The entry point calls `preflight` to validate gateway ownership, shared-network
+membership, immutable images, candidate Caddy configuration, and Compose
+config. Its migration action verifies that the backend's `DATABASE_URL`
 uses protocol `postgres` or `postgresql`, host `postgres`, effective port
 `5432`, and the same database and user named by `POSTGRES_DB` and
 `POSTGRES_USER`. It permits at most one `schema=public` query parameter and
@@ -295,14 +276,19 @@ database migration is not attempted. The dump is produced through the
 running Compose `postgres` service; database contents and connection secrets
 are never printed.
 
-After a validated backup, the script runs the repository's guarded
+After a validated backup, the internal action runs the repository's guarded
 `bun run db:deploy` in a one-shot `docker compose run --rm --no-deps backend`
 container using the target immutable backend image. It then verifies
 `prisma migrate status` with that image. It never recreates backend, worker,
 scheduler or static and never reloads Caddy. Do not substitute `prisma db
-push`, direct SQL, or an ad-hoc migration command. Application promotion is a
-separate explicit `deploy` invocation after the migration result has been
-reviewed.
+push`, direct SQL, or an ad-hoc migration command.
+
+Promotion checks migration status, promotes backend and verifies internal
+readiness, promotes worker and scheduler, promotes internal static, then
+validates and activates the gateway Caddyfile. If activation or reload fails,
+the previous contents are restored and public health is checked. The release
+entry point attempts application rollback only when the previous runtime
+passes its compatibility guard; the first B2 transition is forward-only.
 
 Rollback promotes the configured previous backend/webapp tags through the same
 Compose project and readiness checks. It also restores the release-owned Compose
@@ -310,6 +296,59 @@ and Caddy files from the protected backup marker created before promotion; a
 missing marker stops rollback rather than mixing old images with new configuration.
 It leaves both additive MAX migrations in place; database rollback is not part of
 application rollback.
+
+## B7 unread activation after a healthy compatible release
+
+Keep `MULTI_FAMILY_ACTIVATION` off while the B1–B4 migrations and B1–B6 runtime
+are first deployed and checked. Only activate the production families in the
+owner-approved target set. Place their UUIDs, one per line, in a root-owned
+mode-0600 file outside the checkout; do not put family IDs in command arguments,
+Git, or release logs. With the accepted backend image selected by
+`MEMOLY_PRODUCT_SHA` and `MEMOLY_BACKEND_IMAGE_TAG`, feed that file to
+`bun scripts/activate-unread-tracking.ts` in a one-shot backend container.
+Run without `--apply` first to validate the input, then use `--apply` after
+reviewing the target count. The script reports counts only. Each family gets
+its own short transaction with `families FOR UPDATE`; repeat runs leave an
+existing activation timestamp and publication boundary unchanged. A failure
+stops the run, and the same approved list can resume without resetting prior
+families. Do not scan or backfill historical Memories. Turn on the multi-family
+gate only after every target family and the authenticated smoke checks pass.
+
+```sh
+(
+set +x
+set -e
+export MAX_BOT_TOKEN="$(cat /opt/memoly/secrets/max_bot_token)"
+export MAX_WEBHOOK_SECRET="$(cat /opt/memoly/secrets/max_webhook_secret)"
+export MAX_INBOX_ENCRYPTION_KEY="$(cat /opt/memoly/secrets/max_inbox_encryption_key)"
+export B7_FAMILY_IDS_FILE=/opt/memoly/activation/approved-family-ids.txt
+export MEMOLY_PRODUCT_SHA='<accepted full deployed SHA>'
+export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
+  bun scripts/activate-unread-tracking.ts < "$B7_FAMILY_IDS_FILE"
+)
+```
+
+Stop after the no-write validation. Check that its count matches the approved
+target list and that the compatible runtime, migrations, health, and gates still
+match the release record. Only then run this separate activation command:
+
+```sh
+(
+set +x
+set -e
+export MAX_BOT_TOKEN="$(cat /opt/memoly/secrets/max_bot_token)"
+export MAX_WEBHOOK_SECRET="$(cat /opt/memoly/secrets/max_webhook_secret)"
+export MAX_INBOX_ENCRYPTION_KEY="$(cat /opt/memoly/secrets/max_inbox_encryption_key)"
+export B7_FAMILY_IDS_FILE=/opt/memoly/activation/approved-family-ids.txt
+export MEMOLY_PRODUCT_SHA='<accepted full deployed SHA>'
+export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
+  bun scripts/activate-unread-tracking.ts --apply < "$B7_FAMILY_IDS_FILE"
+)
+```
 
 ## Config validation
 
