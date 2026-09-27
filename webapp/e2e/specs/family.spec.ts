@@ -69,8 +69,8 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   const telegramExchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/telegram'))
   await page.goto('/')
   expect((await telegramExchange).status()).toBe(200)
-  await expect(page.getByRole('button', { name: 'Создать семью' })).toBeVisible()
-  await page.getByRole('button', { name: 'Создать семью' }).click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await page.getByRole('button', { name: 'Создать свою семью' }).click()
   await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
 
   // A completed profile is intentionally stricter than the old optional-child bootstrap.
@@ -290,13 +290,36 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
 
   await guest.page.getByRole('button', { name: 'Выйти из семьи' }).click()
   await guest.page.getByRole('button', { name: 'Выйти из семьи', exact: true }).last().click()
-  await expect(guest.page.getByRole('button', { name: 'Создать семью' })).toBeVisible()
-  await expect(guest.page.getByText('Создайте семейную ленту, чтобы добавить профиль ребёнка.')).toBeVisible()
+  await expect(guest.page.getByRole('button', { name: 'Создать свою семью' })).toBeVisible()
+  await expect(guest.page.getByText('Пока здесь нет семей')).toBeVisible()
 
   // Leaving clears the active context.  It must not quietly bootstrap another family.
   await expect.poll(() => requests.familyCreations.length).toBe(0)
   await guest.context.close()
   await owner.context.close()
+})
+
+test('ordinary reload and list retry preserve explicit family selection', async ({ page }) => {
+  await createCompletedOwner(page, 81000013)
+  await page.getByRole('button', { name: '‹ Все семьи' }).click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+  await page.getByRole('button', { name: '‹ Все семьи' }).click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+
+  let failOnce = true
+  await page.route('**/api/v1/me/families', (route) => {
+    if (failOnce) { failOnce = false; return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }) }
+    return route.continue()
+  })
+  await page.reload()
+  await expect(page.getByText('Не удалось загрузить семьи')).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить' }).click()
+  await expect(page.locator('[data-slot="family-hub"] .family-hub-card')).toHaveCount(1)
+  await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+  await expect(page.locator('.family-context-title')).toHaveText('Наша семья')
 })
 
 test('app settings matches the six-theme appearance flow across mobile widths', async ({ browser, page }, testInfo) => {

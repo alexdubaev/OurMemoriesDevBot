@@ -1,13 +1,13 @@
 export type StartupBootstrapState =
   | { status: 'pending' }
-  | { status: 'ready'; hasActiveFamily: boolean; hasChildProfile: boolean }
+  | { status: 'ready' }
 
-export type StartupRoute = 'boot' | 'family' | 'feed'
+export type StartupRoute = 'boot' | 'hub'
 
-/** Chooses a start screen once the session and active family have been resolved. */
+/** Ordinary authorized launches start at the family selector. Explicit links are resolved before this step. */
 export function decideStartupRoute(state: StartupBootstrapState): StartupRoute {
   if (state.status === 'pending') return 'boot'
-  return state.hasActiveFamily && state.hasChildProfile ? 'feed' : 'family'
+  return 'hub'
 }
 
 export function shouldRenderInitialFeedError({

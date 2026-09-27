@@ -16,6 +16,11 @@ const root = createRoot(document.getElementById('root')!)
 const queryClient = new QueryClient()
 
 async function renderApplication() {
+  if (import.meta.env.DEV && window.location.pathname === '/__fixtures/family-hub') {
+    const { FamilyHubFixturePage } = await import('./dev/FamilyHubFixturePage')
+    root.render(<StrictMode><FamilyHubFixturePage /></StrictMode>)
+    return
+  }
   if (import.meta.env.DEV && window.location.pathname === '/__fixtures/design-system') {
     const { DesignSystemFixturePage } = await import('./dev/DesignSystemFixturePage')
     root.render(

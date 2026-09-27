@@ -222,7 +222,12 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
   }
 
   const busy = isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'
-  const returnToFeed = () => { clearEphemeral(); onCancel() }
+  const returnToFeed = () => {
+    const unsaved = status !== 'success' && (file !== null || caption.trim() !== '' || occurredAt !== maximumOccurredAt || capability !== null)
+    if (unsaved && typeof window.confirm === 'function' && !window.confirm('Удалить несохранённые изменения?')) return
+    clearEphemeral()
+    onCancel()
+  }
   return <main className="memoly-video-v2" data-video-state={invalidFile ? 'invalid' : status}>
     <div className="memoly-video-v2-shell">
       {status !== 'success' ? <header className="memoly-video-v2-topbar">

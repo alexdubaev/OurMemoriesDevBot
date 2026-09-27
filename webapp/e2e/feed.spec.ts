@@ -77,7 +77,7 @@ test.describe.serial('T07 live feed', () => {
     }
     if (responsiveWidth) await page.setViewportSize({ width: Number(responsiveWidth), height: 844 })
     await page.goto('/')
-    await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   })
 
   for (const width of [320, 390, 430, 480]) {
@@ -1374,7 +1374,7 @@ function triggerTelegramBack(page: Page) {
 }
 
 async function openFeed(page: Page) {
-  await page.getByRole('button', { name: 'Лента' }).click()
+  await page.locator('[data-slot="family-hub"] .family-hub-card').click()
   await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await expect(page.locator('[data-slot="memoly-filter-rail"]')).toBeVisible()
   await expect(page.locator('[data-memory-kind="photo"]').first()).toBeVisible()

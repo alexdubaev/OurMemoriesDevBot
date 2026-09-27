@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import type { BrowserLinkStartResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
+import type { BrowserLinkStartResponse, FamilyHomeResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -8,17 +8,18 @@ import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
 import { AuthContext, shouldKeepHostAuthPreloader, useHostAuthHandoff, type HostAuthProvider } from '@/features/auth'
-import { BootPreloader, decideStartupRoute } from '@/features/app'
+import { BootPreloader } from '@/features/app'
 import {
   acceptInvite,
   createFamilyBootstrap,
   createFamilyErrorMessage,
   feedChildSubtitle,
   FamilyOnboarding,
+  FamilyHubPage,
   FamilyScreen,
   loadFamily,
   loadFamilyInvites,
-  loadFamilyMe,
+  loadFamilyHome,
   loadFamilyMembers,
   inviteIssueCode,
   IncomingInvite,
@@ -27,7 +28,7 @@ import {
 } from '@/features/family'
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
@@ -129,7 +130,7 @@ function AppContent({ hostBridge }: AppProps) {
   }
   const maxVideoUploadAcceptance = hostBridge.kind === 'max'
     && isMaxVideoUploadAcceptanceLaunch(typeof window === 'undefined' ? undefined : window)
-  return <FamilyController currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
+  return <FamilyController key={auth.user.id} currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
 }
 
 function MaxRuntimeDiagnosticPanel({ diagnostic, style }: { diagnostic: MaxRuntimeDiagnostic; style: CSSProperties }) {
@@ -164,139 +165,245 @@ function yesNo(value: boolean) {
 }
 
 function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
+  const [home, setHome] = useState<FamilyHomeResponse | null>(null)
+  const homeRef = useRef<FamilyHomeResponse | null>(null)
+  const [homeLoading, setHomeLoading] = useState(true)
+  const [homeError, setHomeError] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const [familyResponse, setFamilyResponse] = useState<FamilyResponse | null>(null)
   const [members, setMembers] = useState<FamilyMemberDto[]>([])
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
-  const [error, setError] = useState<Error | null>(null)
   const [editingChild, setEditingChild] = useState(false)
   const [editingChildPhoto, setEditingChildPhoto] = useState(false)
   const [viewingChild, setViewingChild] = useState(false)
-  const [screen, setScreen] = useState<'family' | 'feed'>('family')
+  const [screen, setScreen] = useState<'hub' | 'family' | 'feed'>('hub')
   const [openAddFromFamily, setOpenAddFromFamily] = useState(false)
   const [filter, setFilter] = useState<FeedFilter>('all')
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
-  const [inviteHandled, setInviteHandled] = useState(false)
-  const [noFamily, setNoFamily] = useState(false)
-  const [accessLost, setAccessLost] = useState(false)
-  const [isFamilyBootstrapping, setIsFamilyBootstrapping] = useState(true)
-  const autoAcceptingInvite = useRef(false)
+  const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
+  const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
+  const selectionVersion = useRef(0)
+  const createKey = useRef<string | null>(null)
+  const autoAcceptingInvite = useRef<Promise<unknown> | null>(null)
 
-  const refresh = useCallback(async ({ bootstrap = false, failureMode = 'global' }: { bootstrap?: boolean; failureMode?: 'global' | 'throw' } = {}) => {
-    if (bootstrap) setIsFamilyBootstrapping(true)
-    setError(null)
-    setInviteIssue(null)
-    setNoFamily(false)
+  const refreshHome = useCallback(async (initial = false) => {
+    if (initial) setHomeLoading(true)
+    setHomeError(null)
     try {
-      let me = await loadFamilyMe(transport)
-      if (inviteToken && !inviteHandled) {
-        try {
-          const preview = await previewInvite(transport, inviteToken)
-          if (me.activeFamily && me.activeFamily.id !== preview.family.id) {
-            setInviteIssue('OTHER_FAMILY')
-            setFamilyResponse(null)
-            return
-          }
-          if (!me.activeFamily) {
-            if (hostBridge.kind === 'browser') {
-              if (!autoAcceptingInvite.current) {
-                autoAcceptingInvite.current = true
-                try {
-                  await acceptInvite(transport, inviteToken)
-                } finally {
-                  autoAcceptingInvite.current = false
-                }
-              }
-              setInviteHandled(true)
-              me = await loadFamilyMe(transport)
-            } else {
-              setInvitePreview(preview)
-              setFamilyResponse(null)
-              return
-            }
-          }
-          if (!me.activeFamily) {
-            setInvitePreview(preview)
-            setFamilyResponse(null)
-            return
-          }
-          setInviteHandled(true)
-        } catch (reason) {
-          if (failureMode === 'throw') throw reason
-          setInviteIssue(inviteIssueCode(reason))
-          setFamilyResponse(null)
-          return
-        }
-      }
-      const activeFamily = me.activeFamily
-      if (!activeFamily) {
-        setFamilyResponse(null)
-        setNoFamily(true)
-        return
-      }
-      const response = await loadFamily(transport, activeFamily.id)
+      const result = await loadFamilyHome(transport)
+      homeRef.current = result
+      setHome(result)
+      return result
+    } catch {
+      if (homeRef.current) setNotice('Не удалось обновить список семей. Показаны последние загруженные данные.')
+      else setHomeError('Проверьте соединение и повторите попытку.')
+      return null
+    } finally {
+      setHomeLoading(false)
+    }
+  }, [transport])
+
+  const selectFamily = useCallback(async (familyId: string) => {
+    const version = ++selectionVersion.current
+    setBusy(true)
+    setNotice(null)
+    setFamilyResponse(null)
+    setMembers([])
+    setInvites([])
+    setFilter('all')
+    setOpenAddFromFamily(false)
+    setViewingChild(false)
+    try {
+      const response = await loadFamily(transport, familyId)
+      if (version !== selectionVersion.current) return
+      const [nextMembers, nextInvites] = response.child
+        ? await Promise.all([
+          loadFamilyMembers(transport, familyId),
+          loadFamilyInvites(transport, familyId).catch(() => ({ items: [] as FamilyInviteDto[] })),
+        ])
+        : [{ items: [] as FamilyMemberDto[] }, { items: [] as FamilyInviteDto[] }]
+      if (version !== selectionVersion.current) return
+      setFamilyResponse(response)
+      setMembers(nextMembers.items)
+      setInvites(nextInvites.items)
+      setScreen(response.child ? 'feed' : 'family')
+    } catch (reason) {
+      if (version !== selectionVersion.current) return
+      setNotice(reason instanceof ApiRequestError && [403, 404].includes(reason.status)
+        ? 'Доступ к этой семье закрыт.'
+        : 'Не удалось открыть семью. Повторите попытку.')
+      setScreen('hub')
+      void refreshHome()
+    } finally {
+      if (version === selectionVersion.current) setBusy(false)
+    }
+  }, [refreshHome, transport])
+
+  const returnHome = useCallback((message?: string) => {
+    selectionVersion.current += 1
+    setFamilyResponse(null)
+    setMembers([])
+    setInvites([])
+    setScreen('hub')
+    setEditingChild(false)
+    setEditingChildPhoto(false)
+    setViewingChild(false)
+    setOpenAddFromFamily(false)
+    setFilter('all')
+    setBusy(false)
+    setNotice(message ?? null)
+    void refreshHome()
+  }, [refreshHome])
+
+  const refreshSelected = useCallback(async () => {
+    const familyId = familyResponse?.family.id
+    if (!familyId) return
+    const version = selectionVersion.current
+    try {
+      const response = await loadFamily(transport, familyId)
+      if (version !== selectionVersion.current) return
       setFamilyResponse(response)
       if (response.child) {
         const [nextMembers, nextInvites] = await Promise.all([
-          loadFamilyMembers(transport, response.family.id),
-          loadFamilyInvites(transport, response.family.id).catch((reason) => {
-            if (failureMode === 'throw') throw reason
-            return { items: [] }
-          }),
+          loadFamilyMembers(transport, familyId),
+          loadFamilyInvites(transport, familyId).catch(() => ({ items: [] as FamilyInviteDto[] })),
         ])
+        if (version !== selectionVersion.current) return
         setMembers(nextMembers.items)
         setInvites(nextInvites.items)
       }
-      if (bootstrap) {
-        const startRoute = decideStartupRoute({
-          status: 'ready', hasActiveFamily: true, hasChildProfile: Boolean(response.child),
-        })
-        if (startRoute !== 'boot') setScreen(startRoute)
-      }
     } catch (reason) {
-      if (failureMode === 'throw') throw reason
-      setError(reason instanceof Error ? reason : new Error('Не удалось загрузить семью.'))
-    } finally {
-      if (bootstrap) setIsFamilyBootstrapping(false)
+      if (version !== selectionVersion.current) return
+      if (reason instanceof ApiRequestError && [403, 404].includes(reason.status)) returnHome('Доступ к этой семье закрыт.')
+      else setNotice('Не удалось обновить семью. Повторите попытку.')
     }
-  }, [hostBridge.kind, inviteHandled, inviteToken, transport])
+  }, [familyResponse?.family.id, returnHome, transport])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void refresh({ bootstrap: true }) }, 0)
-    return () => window.clearTimeout(timer)
-  }, [refresh])
+    let cancelled = false
+    const start = async () => {
+      if (inviteToken) {
+        try {
+          const preview = await previewInvite(transport, inviteToken)
+          if (cancelled) return
+          const catalog = await refreshHome(true)
+          if (cancelled) return
+          let alreadyMember = catalog?.items.some((item) => item.familyId === preview.family.id) ?? false
+          let cursor = catalog?.nextCursor ?? null
+          while (!alreadyMember && cursor) {
+            const next = await loadFamilyHome(transport, cursor)
+            if (cancelled) return
+            alreadyMember = next.items.some((item) => item.familyId === preview.family.id)
+            cursor = next.nextCursor
+          }
+          if (alreadyMember) {
+            void selectFamily(preview.family.id)
+            return
+          }
+          if (hostBridge.kind === 'browser') {
+            autoAcceptingInvite.current ??= acceptInvite(transport, inviteToken)
+            try { await autoAcceptingInvite.current }
+            catch (reason) { autoAcceptingInvite.current = null; throw reason }
+            if (cancelled) return
+            await refreshHome(true)
+            if (!cancelled) void selectFamily(preview.family.id)
+          } else {
+            setInvitePreview(preview)
+          }
+        } catch (reason) {
+          if (!cancelled) setInviteIssue(inviteIssueCode(reason))
+        } finally {
+          if (!cancelled) setInvitePending(false)
+        }
+        return
+      }
+      const result = await refreshHome(true)
+      if (!cancelled && maxVideoUploadAcceptance && result?.items.length === 1 && !result.nextCursor) {
+        void selectFamily(result.items[0]!.familyId)
+      } else if (!cancelled && maxVideoUploadAcceptance && result?.items.length) {
+        setNotice('Выберите семью для загрузки видео.')
+      }
+    }
+    void start()
+    return () => { cancelled = true }
+  }, [currentUserId, hostBridge.kind, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport])
 
-  if (isFamilyBootstrapping) return <BootPreloader style={insetsStyle} />
-  if (error) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><InlineError onRetry={() => void refresh()} /></main>
-  if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={refresh} style={insetsStyle} />
-  if (invitePreview && inviteToken && !inviteHandled) return <IncomingInvite preview={invitePreview} style={insetsStyle} onAccept={async () => {
+  const loadMore = async () => {
+    if (!home?.nextCursor || loadingMore) return
+    const cursor = home.nextCursor
+    setLoadingMore(true)
+    try {
+      const next = await loadFamilyHome(transport, cursor)
+      setHome((current) => current?.nextCursor === cursor ? {
+        ...next,
+        items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.familyId === item.familyId))],
+      } : current)
+    } catch {
+      setNotice('Не удалось загрузить остальные семьи. Повторите попытку.')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  const createOwnFamily = async () => {
+    if (busy) return
+    setBusy(true)
+    setNotice(null)
+    createKey.current ??= crypto.randomUUID()
+    try {
+      const response = await createFamilyBootstrap(transport, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', createKey.current)
+      createKey.current = null
+      await refreshHome()
+      await selectFamily(response.family.id)
+    } catch (reason) {
+      if (reason instanceof ApiRequestError && reason.code === 'ALREADY_IN_FAMILY') {
+        createKey.current = null
+        const latest = await refreshHome(true)
+        if (latest?.ownFamilyId && latest.ownFamilyStatus === 'active') {
+          await selectFamily(latest.ownFamilyId)
+          return
+        }
+        setNotice('У вас уже есть своя семья. Обновите список и откройте её.')
+        return
+      }
+      setNotice(createFamilyErrorMessage(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (invitePending) return <BootPreloader style={insetsStyle} />
+  if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={async () => {
+    setInviteIssue(null)
+    setInvitePending(true)
+    try { setInvitePreview(await previewInvite(transport, inviteToken ?? '')) }
+    catch (reason) { setInviteIssue(inviteIssueCode(reason)) }
+    finally { setInvitePending(false) }
+  }} style={insetsStyle} />
+  if (invitePreview && inviteToken) return <IncomingInvite preview={invitePreview} style={insetsStyle} onAccept={async () => {
     try {
       await acceptInvite(transport, inviteToken)
-      setInviteHandled(true)
+      const familyId = invitePreview.family.id
       setInvitePreview(null)
+      await refreshHome(true)
+      await selectFamily(familyId)
     } catch (reason) {
       setInviteIssue(inviteIssueCode(reason))
       setInvitePreview(null)
     }
   }} />
-  if (noFamily) return <NoFamily style={insetsStyle} onCreate={async () => {
-    await createFamilyBootstrap(transport, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
-    await refresh({ bootstrap: true })
-  }} />
-  if (accessLost) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><Typography variant="memoryScreen">Доступ закрыт</Typography><Typography className="mt-8" tone="muted" variant="memoryBody">Доступ к семейной ленте закрыт.</Typography></main>
-  if (!familyResponse) return <BootPreloader style={insetsStyle} />
-  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={editingChildPhoto} onCancel={familyResponse.child ? () => { setEditingChild(false); setEditingChildPhoto(false) } : undefined} onCompleted={async () => { await refresh({ bootstrap: !familyResponse.child }); if (!editingChildPhoto) setEditingChild(false); if (!editingChildPhoto) setEditingChildPhoto(false) }} transport={transport} /></div>
+  if (screen === 'hub' || !familyResponse) return <div style={insetsStyle}><FamilyHubPage busy={busy} error={homeError} home={home} loading={homeLoading} loadingMore={loadingMore} notice={notice} onCreate={() => void createOwnFamily()} onLoadMore={() => void loadMore()} onRetry={() => void refreshHome(true)} onSelect={(id) => void selectFamily(id)} transport={transport} /></div>
+  if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={editingChildPhoto} cancelLabel={familyResponse.child ? 'Отмена' : 'Все семьи'} onCancel={familyResponse.child ? () => { setEditingChild(false); setEditingChildPhoto(false) } : () => returnHome()} onCompleted={async () => {
+    await refreshSelected()
+    if (!familyResponse.child) setScreen('feed')
+    else if (!editingChildPhoto) { setEditingChild(false); setEditingChildPhoto(false) }
+  }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
-  if (screen === 'feed') {
-    return <div style={insetsStyle}><FeedPage childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoUploadAcceptance} openAddInitially={openAddFromFamily} onAccessLost={() => setAccessLost(true)} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
-  }
-  return <div style={insetsStyle}><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refresh} transport={transport} /></div>
-}
-
-function NoFamily({ style, onCreate }: { style: CSSProperties; onCreate: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-  return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><BrandLogo className="w-[148px]" /><Typography className="mt-8" tone="muted" variant="memoryBody">Создайте семейную ленту, чтобы добавить профиль ребёнка.</Typography><Button className="mt-6" disabled={busy} onClick={() => void (async () => { setBusy(true); setCreateError(null); try { await onCreate() } catch (error) { setCreateError(createFamilyErrorMessage(error)) } finally { setBusy(false) } })()} type="button"><Typography variant="memoryButton">Создать семью</Typography></Button>{createError ? <Typography className="mt-3 text-destructive" role="alert" variant="memoryMeta">{createError}</Typography> : null}</main>
+  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} onMaxVideoLaunchHandled={() => setMaxVideoPending(false)} openAddInitially={openAddFromFamily} onAccessLost={() => returnHome('Доступ к этой семье закрыт.')} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
+  return <div style={insetsStyle}><button className="family-context-back" onClick={() => returnHome()} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refreshSelected} transport={transport} /></div>
 }
 
 function BrowserLinkLogin({ style }: { style: CSSProperties }) {
