@@ -37,6 +37,10 @@ export type FeedPresentationProps = {
   onFilterChange: (filter: FeedFilter) => void
   onMore?: () => void
   role: 'full' | 'viewer'
+  unreadCount?: number | null
+  unreadState?: 'ready' | 'unavailable' | 'not_enabled'
+  unreadOnly?: boolean
+  onUnreadChange?: (unreadOnly: boolean) => void
 }
 
 export function FeedPresentation(props: FeedPresentationProps) {
@@ -60,6 +64,12 @@ export function FeedPresentation(props: FeedPresentationProps) {
             {filters.map((item) => <button aria-pressed={item.value === props.activeFilter} className={`filter ds-chip${item.value === props.activeFilter ? ' active' : ''}`} data-filter={item.value} key={item.value} onClick={() => props.onFilterChange(item.value)} type="button">{item.icon ? <WebpIcon decorative name={item.icon} size={18} /> : null}<Typography as="span" variant="memoryFilter">{item.label}</Typography></button>)}
           </div>
         </div>
+        {(props.unreadOnly || props.unreadState === 'ready') && props.onUnreadChange ? (
+          <div className="feed-unread-control" role="group" aria-label="Режим ленты">
+            <button aria-pressed={!props.unreadOnly} className={!props.unreadOnly ? 'active' : ''} onClick={() => props.onUnreadChange?.(false)} type="button"><Typography as="span" variant="memoryFilter">Все воспоминания</Typography></button>
+            <button aria-pressed={Boolean(props.unreadOnly)} className={props.unreadOnly ? 'active' : ''} onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" variant="memoryFilter">Непросмотренные{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? ` · ${props.unreadCount}` : ''}</Typography></button>
+          </div>
+        ) : null}
         <div className="feed-content">{children}</div>
       </main>
       <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />

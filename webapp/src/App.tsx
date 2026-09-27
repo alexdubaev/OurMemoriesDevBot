@@ -6,7 +6,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
-import { FeedPage, InlineError, type FeedFilter } from '@/features/feed'
+import { FeedPage, InlineError, SeenBatchQueue, type FeedFilter } from '@/features/feed'
 import { AuthContext, shouldKeepHostAuthPreloader, useHostAuthHandoff, type HostAuthProvider } from '@/features/auth'
 import { BootPreloader } from '@/features/app'
 import {
@@ -182,31 +182,85 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [screen, setScreen] = useState<'hub' | 'family' | 'feed'>('hub')
   const [openAddFromFamily, setOpenAddFromFamily] = useState(false)
   const [filter, setFilter] = useState<FeedFilter>('all')
+  const [selectedMembershipEpoch, setSelectedMembershipEpoch] = useState<number | null>(null)
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
   const maxVideoPendingRef = useRef(maxVideoUploadAcceptance)
   const selectionVersion = useRef(0)
+  const selectedFamilyIdRef = useRef<string | null>(null)
+  const homeRefreshVersion = useRef(0)
+  const homeRefreshInFlight = useRef<Promise<FamilyHomeResponse> | null>(null)
   const createKey = useRef<string | null>(null)
   const autoAcceptingInvite = useRef<Promise<unknown> | null>(null)
+  const seenQueueRef = useRef<SeenBatchQueue | null>(null)
 
   const refreshHome = useCallback(async (initial = false) => {
+    const version = ++homeRefreshVersion.current
     if (initial) setHomeLoading(true)
     setHomeError(null)
     try {
-      const result = await loadFamilyHome(transport)
+      if (homeRefreshInFlight.current) await homeRefreshInFlight.current.catch(() => undefined)
+      if (version !== homeRefreshVersion.current) return null
+      const request = (async () => {
+        let result = await loadFamilyHome(transport)
+        const priorCount = homeRef.current?.items.length ?? 0
+        const selectedId = selectedFamilyIdRef.current
+        while (result.nextCursor && (result.items.length < priorCount || (selectedId && !result.items.some((item) => item.familyId === selectedId)))) {
+          const next = await loadFamilyHome(transport, result.nextCursor)
+          result = { ...next, items: [...result.items, ...next.items] }
+        }
+        return result
+      })()
+      homeRefreshInFlight.current = request
+      let result: FamilyHomeResponse
+      try { result = await request }
+      finally { if (homeRefreshInFlight.current === request) homeRefreshInFlight.current = null }
+      if (version !== homeRefreshVersion.current) return null
       homeRef.current = result
       setHome(result)
       return result
     } catch {
-      if (homeRef.current) setNotice('Не удалось обновить список семей. Показаны последние загруженные данные.')
+      if (version !== homeRefreshVersion.current) return null
+      if (homeRef.current) {
+        const stale = { ...homeRef.current, items: homeRef.current.items.map((item) => item.unreadState === 'ready'
+          ? { ...item, unreadCount: null, unreadState: 'unavailable' as const } : item) }
+        homeRef.current = stale
+        setHome(stale)
+        setNotice('Не удалось обновить список семей. Счётчики временно недоступны.')
+      }
       else setHomeError('Проверьте соединение и повторите попытку.')
       return null
     } finally {
-      setHomeLoading(false)
+      if (version === homeRefreshVersion.current) setHomeLoading(false)
     }
   }, [transport])
+
+  useEffect(() => {
+    const queue = new SeenBatchQueue(currentUserId, transport,
+      () => { void refreshHome() },
+      () => { void refreshHome() })
+    seenQueueRef.current = queue
+    return () => {
+      queue.dispose()
+      if (seenQueueRef.current === queue) seenQueueRef.current = null
+    }
+  }, [currentUserId, refreshHome, transport])
+
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState !== 'visible') return
+      seenQueueRef.current?.resume()
+      if ((screen === 'hub' || selectedFamilyIdRef.current) && !homeRefreshInFlight.current) void refreshHome()
+    }
+    const poll = window.setInterval(() => {
+      if ((screen === 'hub' || selectedFamilyIdRef.current) && document.visibilityState === 'visible' && !homeRefreshInFlight.current) void refreshHome()
+    }, 30_000)
+    document.addEventListener('visibilitychange', resume)
+    window.addEventListener('online', resume)
+    return () => { window.clearInterval(poll); document.removeEventListener('visibilitychange', resume); window.removeEventListener('online', resume) }
+  }, [refreshHome, screen])
 
   const selectFamily = useCallback(async (familyId: string) => {
     const version = ++selectionVersion.current
@@ -221,6 +275,22 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     try {
       const response = await loadFamily(transport, familyId)
       if (version !== selectionVersion.current) return
+      let summary = homeRef.current?.items.find((item) => item.familyId === familyId)
+      if (!summary) {
+        let page = await loadFamilyHome(transport)
+        summary = page.items.find((item) => item.familyId === familyId)
+        while (!summary && page.nextCursor) {
+          page = await loadFamilyHome(transport, page.nextCursor)
+          summary = page.items.find((item) => item.familyId === familyId)
+        }
+      }
+      if (version !== selectionVersion.current) return
+      if (!summary) throw new ApiRequestError(404, 'NOT_FOUND', 'Семья не найдена')
+      if (homeRef.current && !homeRef.current.items.some((item) => item.familyId === familyId)) {
+        const updated = { ...homeRef.current, items: [...homeRef.current.items, summary] }
+        homeRef.current = updated
+        setHome(updated)
+      }
       const [nextMembers, nextInvites] = response.child
         ? await Promise.all([
           loadFamilyMembers(transport, familyId),
@@ -238,6 +308,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         return
       }
       setFamilyResponse(response)
+      selectedFamilyIdRef.current = familyId
+      setSelectedMembershipEpoch(summary.membershipEpoch)
       setMembers(nextMembers.items)
       setInvites(nextInvites.items)
       setScreen(response.child ? 'feed' : 'family')
@@ -255,6 +327,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
 
   const returnHome = useCallback((message?: string) => {
     selectionVersion.current += 1
+    selectedFamilyIdRef.current = null
+    setSelectedMembershipEpoch(null)
     setFamilyResponse(null)
     setMembers([])
     setInvites([])
@@ -268,6 +342,15 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setNotice(message ?? null)
     void refreshHome()
   }, [refreshHome])
+
+  useEffect(() => {
+    const familyId = selectedFamilyIdRef.current
+    if (!familyId || !home || selectedMembershipEpoch === null) return
+    const item = home.items.find((entry) => entry.familyId === familyId)
+    if (item && item.membershipEpoch === selectedMembershipEpoch) return
+    seenQueueRef.current?.cancelFamily(familyId)
+    returnHome('Доступ к этой семье изменился. Выберите её снова в списке.')
+  }, [home, returnHome, selectedMembershipEpoch])
 
   const refreshSelected = useCallback(async () => {
     const familyId = familyResponse?.family.id
@@ -345,11 +428,12 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const loadMore = async () => {
     if (!home?.nextCursor || loadingMore) return
     const cursor = home.nextCursor
+    const refreshVersion = homeRefreshVersion.current
     setLoadingMore(true)
     try {
       const next = await loadFamilyHome(transport, cursor)
       const current = homeRef.current
-      if (current?.nextCursor === cursor) {
+      if (refreshVersion === homeRefreshVersion.current && current?.nextCursor === cursor) {
         const merged = { ...next, items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.familyId === item.familyId))] }
         homeRef.current = merged
         setHome(merged)
@@ -415,7 +499,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     else if (!editingChildPhoto) { setEditingChild(false); setEditingChildPhoto(false) }
   }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
-  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} openAddInitially={openAddFromFamily} onAccessLost={() => returnHome('Доступ к этой семье закрыт.')} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
+  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.') }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div>
   return <div style={insetsStyle}><button className="family-context-back" onClick={() => returnHome()} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refreshSelected} transport={transport} /></div>
 }
 
