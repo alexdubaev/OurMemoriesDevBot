@@ -231,6 +231,8 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   const requests: RequestLog = { accepts: [], familyCreations: [], privateFamilyRequests: [] }
   const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E', requests)
 
+  await expect(guest.page.locator('[data-slot="welcome-splash"]')).toBeVisible()
+  await expect(guest.page.locator('[data-slot="welcome-splash"] button')).toHaveCount(0)
   await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
   await expect(guest.page.getByText('Наша семья')).toBeVisible()
   await expect(guest.page.getByText('Лиза', { exact: true })).toHaveCount(0)
@@ -264,6 +266,7 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
 
   await guest.page.reload()
   await guest.page.getByRole('button', { name: 'Семья' }).click()
+  await expect(guest.page.locator('[data-slot="welcome-splash"]')).toHaveCount(0)
   await expect(guest.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
   await expect(guest.page.getByText('Это приглашение уже использовано.')).toHaveCount(0)

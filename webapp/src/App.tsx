@@ -33,6 +33,7 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
+import { WelcomeSplash } from '@/features/welcome'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -195,6 +196,20 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const createKey = useRef<string | null>(null)
   const autoAcceptingInvite = useRef<Promise<unknown> | null>(null)
   const seenQueueRef = useRef<SeenBatchQueue | null>(null)
+  const [welcomeVisible, setWelcomeVisible] = useState(false)
+  const [welcomeGateComplete, setWelcomeGateComplete] = useState(false)
+  const welcomeSeen = useRef(false)
+  const welcomeResolve = useRef<(() => void) | null>(null)
+
+  const finishWelcome = useCallback(() => {
+    if (!welcomeResolve.current) return
+    welcomeSeen.current = true
+    setWelcomeVisible(false)
+    setWelcomeGateComplete(true)
+    const resolve = welcomeResolve.current
+    welcomeResolve.current = null
+    resolve()
+  }, [])
 
   const refreshHome = useCallback(async (initial = false) => {
     const version = ++homeRefreshVersion.current
@@ -378,12 +393,24 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
 
   useEffect(() => {
     let cancelled = false
+    const gateWelcome = async (catalog: FamilyHomeResponse | null) => {
+      if (!catalog || catalog.items.length !== 0 || catalog.nextCursor || welcomeSeen.current) {
+        setWelcomeGateComplete(true)
+        return
+      }
+      await new Promise<void>((resolve) => {
+        welcomeResolve.current = resolve
+        setWelcomeVisible(true)
+      })
+    }
     const start = async () => {
       if (inviteToken) {
         try {
           const preview = await previewInvite(transport, inviteToken)
           if (cancelled) return
           const catalog = await refreshHome(true)
+          if (cancelled) return
+          await gateWelcome(catalog)
           if (cancelled) return
           let alreadyMember = catalog?.items.some((item) => item.familyId === preview.family.id) ?? false
           let cursor = catalog?.nextCursor ?? null
@@ -410,11 +437,14 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         } catch (reason) {
           if (!cancelled) setInviteIssue(inviteIssueCode(reason))
         } finally {
-          if (!cancelled) setInvitePending(false)
+          if (!cancelled) { setWelcomeGateComplete(true); setInvitePending(false) }
         }
         return
       }
       const result = await refreshHome(true)
+      if (cancelled) return
+      await gateWelcome(result)
+      if (cancelled) return
       if (!cancelled && maxVideoUploadAcceptance && result?.items.length === 1 && !result.nextCursor) {
         void selectFamily(result.items[0]!.familyId)
       } else if (!cancelled && maxVideoUploadAcceptance && result?.items.length) {
@@ -422,7 +452,12 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
     }
     void start()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      const resolve = welcomeResolve.current
+      welcomeResolve.current = null
+      resolve?.()
+    }
   }, [currentUserId, hostBridge.kind, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport])
 
   const loadMore = async () => {
@@ -472,7 +507,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     }
   }
 
-  if (invitePending) return <BootPreloader style={insetsStyle} />
+  if (welcomeVisible) return <WelcomeSplash onComplete={finishWelcome} />
+  if (!welcomeGateComplete || invitePending) return <BootPreloader style={insetsStyle} />
   if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={async () => {
     setInviteIssue(null)
     setInvitePending(true)
