@@ -1,4 +1,12 @@
+import type { FamilyHomeResponse, FamilyMemberDto } from '@web-app-demo/contracts'
+
 type CalendarDate = { year: number; month: number; day: number }
+
+export function canStartMaxVideoUpload(summary: FamilyHomeResponse['items'][number] | undefined, member: FamilyMemberDto | undefined, hasChild: boolean) {
+  // B4 does not project the existing MAX direct-upload policy into canPublishVideo yet.
+  // The upload endpoint remains the final authority after this membership check.
+  return hasChild && summary?.setupStatus === 'ready' && summary.role === 'full' && member?.role === 'full'
+}
 
 export const onboardingSaveErrorMessage = 'Не удалось сохранить данные. Попробуйте ещё раз.'
 
