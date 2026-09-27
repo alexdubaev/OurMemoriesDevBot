@@ -2,11 +2,12 @@ import type {
   CreateMemoryRequest,
   LikeResponse,
   MemoryDto,
+  SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
 
 import type { FamilyScope } from '../../families'
-import type { MemoryCursorFilters, MemoryCursorPosition } from '../domain/memory-cursor'
+import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 
 /**
  * Block 03 replaces the production rejection with a catalog that verifies family ownership,
@@ -34,8 +35,15 @@ export type MemoryRepository = {
     before: MemoryCursorPosition,
     limit: number,
   ): Promise<{ items: MemoryDto[]; hasNext: boolean }>
+  listUnreadFirst(scope: FamilyScope, filters: MemoryCursorFilters, limit: number): Promise<{
+    items: MemoryDto[]; hasNext: boolean; snapshotPublicationOrdinal: string
+    baselineOrdinal: string; orderVersion: string; membershipEpoch: number
+  }>
+  listUnreadAfter(scope: FamilyScope, filters: MemoryCursorFilters,
+    cursor: UnreadMemoryCursorClaims, limit: number): Promise<{ items: MemoryDto[]; hasNext: boolean }>
   get(scope: FamilyScope, memoryId: string): Promise<MemoryDto>
   update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto>
   delete(scope: FamilyScope, memoryId: string, expectedVersion: number, now: Date): Promise<void>
   setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse>
+  markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void>
 }

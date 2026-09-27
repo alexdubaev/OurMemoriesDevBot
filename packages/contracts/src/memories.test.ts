@@ -6,6 +6,7 @@ import {
   mediaDtoSchema,
   maxVideoAttachmentSchema,
   memoryDtoSchema,
+  seenMemoriesRequestSchema,
   telegramVideoAttachmentSchema,
 } from './memories'
 
@@ -46,6 +47,20 @@ describe('memory contracts', () => {
   test('defaults feed limit to 20 and caps it at 50', () => {
     expect(listMemoriesQuerySchema.parse({})).toMatchObject({ limit: 20 })
     expect(() => listMemoriesQuerySchema.parse({ limit: '51' })).toThrow()
+  })
+
+  test('accepts only explicit unread mode and a bounded seen batch with epoch', () => {
+    expect(listMemoriesQuerySchema.parse({ unreadOnly: 'true' }).unreadOnly).toBe(true)
+    expect(listMemoriesQuerySchema.parse({ unreadOnly: 'false' }).unreadOnly).toBe(false)
+    expect(() => listMemoriesQuerySchema.parse({ unreadOnly: '1' })).toThrow()
+    const body = { memoryIds: [childId, childId], expectedMembershipEpoch: 1 }
+    expect(seenMemoriesRequestSchema.parse(body)).toEqual(body)
+    for (const invalid of [
+      { ...body, memoryIds: [] },
+      { ...body, memoryIds: Array.from({ length: 51 }, () => childId) },
+      { ...body, expectedMembershipEpoch: 0 },
+      { ...body, userId: childId },
+    ]) expect(() => seenMemoriesRequestSchema.parse(invalid)).toThrow()
   })
 
   test('requires response attachments to remain typed DTOs rather than arbitrary JSON', () => {
