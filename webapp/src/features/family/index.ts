@@ -1,5 +1,6 @@
 export { FamilyOnboarding } from './FamilyOnboarding'
 export { FamilyScreen } from './FamilyScreen'
+export { FamilyHubPage, FamilySummaryCard } from './FamilyHubPage'
 export { ChildProfile } from './ChildProfile'
 export { ChildAvatar } from './ChildAvatar'
 export { useChildAvatar } from './useChildAvatar'
@@ -21,6 +22,7 @@ export {
   loadFamily,
   loadFamilyInvites,
   loadFamilyMe,
+  loadFamilyHome,
   loadFamilyMembers,
   uploadFamilyPhoto,
 } from './api'

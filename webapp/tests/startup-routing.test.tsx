@@ -16,13 +16,8 @@ test('keeps the application on its boot screen until the family bootstrap resolv
   expect(decideStartupRoute({ status: 'pending' })).toBe('boot')
 })
 
-test('routes a first launch without a completed child profile to family onboarding', () => {
-  expect(decideStartupRoute({ status: 'ready', hasActiveFamily: false, hasChildProfile: false })).toBe('family')
-  expect(decideStartupRoute({ status: 'ready', hasActiveFamily: true, hasChildProfile: false })).toBe('family')
-})
-
-test('routes a returning user with a completed family profile directly to the feed', () => {
-  expect(decideStartupRoute({ status: 'ready', hasActiveFamily: true, hasChildProfile: true })).toBe('feed')
+test('routes every ordinary authorized launch to the family selector', () => {
+  expect(decideStartupRoute({ status: 'ready' })).toBe('hub')
 })
 
 test('renders the local memoLy logo in the preloader instead of the former text brand', () => {
@@ -47,12 +42,14 @@ test('does not render a feed failure before the application bootstrap is complet
     childName: 'Лиза',
     childSubtitle: '2 года',
     familyId,
+    familyName: 'Семья Лизы',
     familyTimezone: 'Europe/Moscow',
     filter: 'all',
     hostBridge: createBrowserDevHostBridge(),
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
     isAppBootstrapped: false,
     onFamily: () => undefined,
+    onAllFamilies: () => undefined,
     onFilterChange: () => undefined,
     role: 'full',
     transport,

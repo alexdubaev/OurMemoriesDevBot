@@ -2,6 +2,15 @@
   "version": "2.2",
   "items": [
     {
+      "path": "assets/family-hub/welcome.webp",
+      "usage": "runtime-illustration",
+      "width": 768,
+      "height": 343,
+      "alpha": true,
+      "bytes": 54626,
+      "sha256": "4ee386dd9bd5a200e87fa12da2e059e3f4f5e9bdab3704f4f411db7b6fe67fae"
+    },
+    {
       "path": "assets/brand/memoly-logo-correct.webp",
       "usage": "runtime-brand",
       "width": 1200,

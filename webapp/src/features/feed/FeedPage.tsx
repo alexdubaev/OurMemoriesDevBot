@@ -40,13 +40,16 @@ type Props = {
   childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
   childAvatarMediaId?: string | null
   familyId: string
+  familyName: string
   familyTimezone: string
   filter: FeedFilter
   hostBridge: HostBridge
   insets: TelegramInsets
   isAppBootstrapped?: boolean
   maxVideoUploadAcceptance?: boolean
+  onMaxVideoLaunchHandled?: () => void
   onFamily: () => void
+  onAllFamilies: () => void
   onFilterChange: (filter: FeedFilter) => void
   onAccessLost: () => void
   openAddInitially?: boolean
@@ -55,8 +58,8 @@ type Props = {
 }
 
 export function FeedPage({
-  childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyTimezone, filter, hostBridge, insets, onFamily,
-  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onAccessLost, onFilterChange, role, transport,
+  childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, onFamily, onAllFamilies,
+  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAccessLost, onFilterChange, role, transport,
   openAddInitially = false,
 }: Props) {
   const queryClient = useQueryClient()
@@ -75,7 +78,7 @@ export function FeedPage({
   const [detail, setDetail] = useState<MemoryDto | null>(null)
   const detailReturnFocusRef = useRef<HTMLElement | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
-  const [composer, setComposer] = useState<ComposerMode | null>(null)
+  const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const feedScope = useMemo(() => ({ familyId, filter }), [familyId, filter])
@@ -179,8 +182,8 @@ export function FeedPage({
     return hostBridge.onBack(() => setActionsMemory(null))
   }, [actionsMemory, hostBridge])
 
-  if ((maxVideoUploadAcceptance || composer === 'video') && childId) {
-    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+  if (composer === 'video' && childId) {
+    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => { setComposer(null); onMaxVideoLaunchHandled?.() }} onSuccess={async () => { await closeComposerAfterRefresh(); onMaxVideoLaunchHandled?.() }} transport={transport} />
   }
 
   if (composer === 'photo' && childId) {
@@ -197,9 +200,9 @@ export function FeedPage({
 
   return (
     <MediaPlaybackCoordinator>
-    <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} insets={insets}
+    <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
-      onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
+      onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={onFilterChange} role={role}>
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}

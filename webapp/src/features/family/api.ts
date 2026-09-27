@@ -4,6 +4,7 @@ import {
   acceptInviteResponseSchema,
   familyInvitesResponseSchema,
   familyMeResponseSchema,
+  familyHomeResponseSchema,
   familyMembersResponseSchema,
   familyResponseSchema,
   finalizeMediaUploadResponseSchema,
@@ -34,11 +35,16 @@ export function loadFamilyMe(transport: AuthenticatedTransport) {
   return transport.request('/api/v1/me', familyMeResponseSchema)
 }
 
-export function createFamilyBootstrap(transport: AuthenticatedTransport, timezone: string) {
+export function loadFamilyHome(transport: AuthenticatedTransport, cursor?: string) {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+  return transport.request(`/api/v1/me/families${query}`, familyHomeResponseSchema)
+}
+
+export function createFamilyBootstrap(transport: AuthenticatedTransport, timezone: string, idempotencyKey: string = crypto.randomUUID()) {
   return transport.request('/api/v1/families', familyResponseSchema, {
     method: 'POST',
     body: createFamilyRequestSchema.parse({ name: 'Наша семья', timezone }),
-    headers: idempotencyHeaders(),
+    headers: { 'Idempotency-Key': idempotencyKey },
   })
 }
 

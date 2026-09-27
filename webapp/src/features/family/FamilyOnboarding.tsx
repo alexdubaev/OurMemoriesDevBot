@@ -25,6 +25,7 @@ export function FamilyOnboarding({
   photoOnly = false,
   transport,
   onCancel,
+  cancelLabel = 'Отмена',
   onCompleted,
 }: {
   familyId: string
@@ -33,6 +34,7 @@ export function FamilyOnboarding({
   photoOnly?: boolean
   transport: AuthenticatedTransport
   onCancel?: () => void
+  cancelLabel?: string
   onCompleted: () => Promise<void>
 }) {
   const [name, setName] = useState(initialChild?.name ?? '')
@@ -56,6 +58,12 @@ export function FamilyOnboarding({
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [requestError, setRequestError] = useState<Error | null>(null)
   const [childVersionConflict, setChildVersionConflict] = useState(false)
+
+  const requestCancel = () => {
+    const unsaved = !photoSaved && (name !== (initialChild?.name ?? '') || birthDate !== (initialChild?.birthDate ?? '') || sex !== (initialChild?.sex ?? null) || file !== null || cropFile !== null)
+    if (unsaved && typeof window.confirm === 'function' && !window.confirm('Удалить несохранённые изменения?')) return
+    onCancel?.()
+  }
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -193,7 +201,7 @@ export function FamilyOnboarding({
   return (
     <main className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
       {cropPreviewUrl || photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
-        <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={() => onCancel?.()} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+        <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
         <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
@@ -203,7 +211,7 @@ export function FamilyOnboarding({
           <Typography aria-level={1} className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Фотография ребёнка</Typography>
           <span aria-hidden="true" className="child-title-action" />
         </div> : photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
-          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={onCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
           <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen" />
           <span aria-hidden="true" className="child-title-action" />
         </div> : null}
@@ -211,7 +219,7 @@ export function FamilyOnboarding({
           <div aria-hidden="true" className="child-success-icon ui-success-mark"><Typography as="span" className="child-photo-v2-check" variant="memoryMeta">✓</Typography></div>
           <Typography as="h2" className="ds-entity-title" role="status" variant="memoryEmptyTitle">Фото обновлено!</Typography>
           <Typography as="p" variant="memoryBody">Новое фото профиля сохранено.</Typography>
-          <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={onCancel} type="button">Перейти в профиль</Button>
+          <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={requestCancel} type="button">Перейти в профиль</Button>
         </div> : <>
         {!isChildEdit && !cropPreviewUrl ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
         {!isChildEdit && !cropPreviewUrl ? <Typography className="mt-2" tone="muted" variant="memoryBody">
@@ -381,7 +389,7 @@ export function FamilyOnboarding({
         {!cropPreviewUrl ? <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button> : null}
-        {onCancel && !cropPreviewUrl && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={onCancel} type="button" variant="outline"><Typography variant="memoryButton">Отмена</Typography></Button> : null}
+        {onCancel && !cropPreviewUrl && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={requestCancel} type="button" variant="outline"><Typography variant="memoryButton">{cancelLabel}</Typography></Button> : null}
         </>}
       </section>
     </main>
