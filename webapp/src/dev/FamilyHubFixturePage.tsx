@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import type { FamilyHomeResponse } from '@web-app-demo/contracts'
 
 import { ThemeProvider, isMemolyTheme, useMemolyTheme } from '@/features/theme'
-import { FamilyHubPage } from '@/features/family/FamilyHubPage'
-import { FeedPresentation } from '@/features/feed/presentation/FeedPresentation'
+import { FamilyHubPage } from '@/features/family'
+import { FeedPresentation } from '@/features/feed'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { Typography } from '@/components/typography'
 
