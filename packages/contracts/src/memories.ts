@@ -46,6 +46,12 @@ export const listMemoriesQuerySchema = z.object({
   kind: memoryKindSchema.optional(),
   cursor: z.string().min(1).max(2_048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  unreadOnly: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+}).strict()
+
+export const seenMemoriesRequestSchema = z.object({
+  memoryIds: z.array(uuid).min(1).max(50),
+  expectedMembershipEpoch: z.number().int().positive().safe(),
 }).strict()
 
 export const setLikeRequestSchema = z.object({ liked: z.boolean() }).strict()
@@ -183,6 +189,7 @@ export type MemoryStatus = z.infer<typeof memoryStatusSchema>
 export type CreateMemoryRequest = z.infer<typeof createMemoryRequestSchema>
 export type UpdateMemoryRequest = z.infer<typeof updateMemoryRequestSchema>
 export type ListMemoriesQuery = z.infer<typeof listMemoriesQuerySchema>
+export type SeenMemoriesRequest = z.infer<typeof seenMemoriesRequestSchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
 export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>

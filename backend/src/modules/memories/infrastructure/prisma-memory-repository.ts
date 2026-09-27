@@ -3,9 +3,11 @@ import type {
   LikeResponse,
   MemoryDto,
   MemoryStatus,
+  SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
 import { memoryDtoSchema } from '@web-app-demo/contracts'
+import { Prisma } from '../../../generated/prisma/client'
 
 import type { DbClient } from '../../../db'
 import { insertTask } from '../../../outbox/store'
@@ -16,8 +18,9 @@ import type {
 } from '../../../idempotency'
 import type { FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
-import type { MemoryCursorFilters, MemoryCursorPosition } from '../domain/memory-cursor'
+import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 import type { MemoryRepository } from '../application/ports'
+import { allocatePublicationOrdinal, lockPublicationFamily } from './publication-boundary'
 
 type MemberRole = 'full' | 'viewer'
 
@@ -41,6 +44,8 @@ export class PrismaMemoryRepository implements MemoryRepository {
       now: idempotency.now,
       execute: async (tx) => {
         await lockFamilyFeed(tx, scope.familyId)
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
+        const publication = await lockPublicationFamily(tx, scope.familyId)
         const role = await lockMember(tx, scope, 'full')
         const child = await tx.child.findFirst({
           where: { id: input.childId, familyId: scope.familyId },
@@ -54,6 +59,8 @@ export class PrismaMemoryRepository implements MemoryRepository {
         })
         if (!author) throw new MemoryFailure('not_found', 'Пользователь не найден')
 
+        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
+
         const created = await tx.memory.create({
           data: {
             familyId: scope.familyId,
@@ -62,6 +69,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
             kind: input.kind,
             body: input.body,
             occurredAt: new Date(input.occurredAt),
+            firstPublishedOrdinal,
           },
           include: memoryInclude(),
         })
@@ -130,7 +138,13 @@ export class PrismaMemoryRepository implements MemoryRepository {
 
   update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest) {
     return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
+      const publication = await lockPublicationFamily(tx, scope.familyId)
       const role = await lockMember(tx, scope, 'full')
+      const current = await tx.memory.findFirst({
+        where: { id: memoryId, familyId: scope.familyId },
+        select: { occurredAt: true, status: true, firstPublishedOrdinal: true },
+      })
       const updated = await tx.memory.updateMany({
         where: {
           id: memoryId,
@@ -145,6 +159,14 @@ export class PrismaMemoryRepository implements MemoryRepository {
         },
       })
       if (updated.count === 0) await throwMutationMiss(tx, scope.familyId, memoryId)
+      if (publication.trackingActivated && current?.status === 'published' &&
+          current.firstPublishedOrdinal !== null &&
+          current.occurredAt.getTime() !== new Date(input.occurredAt).getTime()) {
+        await tx.$executeRaw`
+          UPDATE families SET unread_order_version = unread_order_version + 1
+           WHERE id = ${scope.familyId}::uuid
+        `
+      }
       return getMemory(tx, scope, role, memoryId)
     })
   }
@@ -228,6 +250,67 @@ export class PrismaMemoryRepository implements MemoryRepository {
       return { count, likedByMe: ownLike !== null }
     })
   }
+
+  listUnreadFirst(scope: FamilyScope, filters: MemoryCursorFilters, limit: number) {
+    return this.db.$transaction(async (tx) => {
+      const context = await lockUnreadContext(tx, scope)
+      const snapshotPublicationOrdinal = context.trackingActivated ? context.publicationOrdinal.toString() : '0'
+      const baselineOrdinal = context.baselineOrdinal.toString()
+      const orderVersion = context.orderVersion.toString()
+      const page = await findUnreadPage(tx, scope, context.role, filters,
+        snapshotPublicationOrdinal, baselineOrdinal, context.membershipEpoch, undefined, limit)
+      return { ...page, snapshotPublicationOrdinal, baselineOrdinal, orderVersion, membershipEpoch: context.membershipEpoch }
+    })
+  }
+
+  listUnreadAfter(scope: FamilyScope, filters: MemoryCursorFilters, cursor: UnreadMemoryCursorClaims, limit: number) {
+    return this.db.$transaction(async (tx) => {
+      const context = await lockUnreadContext(tx, scope)
+      if (context.membershipEpoch !== cursor.membershipEpoch ||
+          context.baselineOrdinal.toString() !== cursor.baselineOrdinal ||
+          context.orderVersion.toString() !== cursor.orderVersion ||
+          !context.trackingActivated) {
+        throw new MemoryFailure('version_conflict', 'Период просмотра изменился')
+      }
+      return findUnreadPage(tx, scope, context.role, filters, cursor.snapshotPublicationOrdinal,
+        cursor.baselineOrdinal, cursor.membershipEpoch, cursor.before, limit)
+    })
+  }
+
+  async markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void> {
+    const memoryIds = [...new Set(input.memoryIds)].sort()
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
+      const family = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM families WHERE id = ${scope.familyId}::uuid AND status = 'active' FOR SHARE
+      `
+      if (!family[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
+      const members = await tx.$queryRaw<Array<{ membershipEpoch: number }>>`
+        SELECT membership_epoch AS "membershipEpoch" FROM family_members
+         WHERE family_id = ${scope.familyId}::uuid AND user_id = ${scope.principal.userId}::uuid
+           AND revoked_at IS NULL FOR SHARE
+      `
+      const member = members[0]
+      if (!member) throw new MemoryFailure('not_found', 'Семья не найдена')
+      if (member.membershipEpoch !== input.expectedMembershipEpoch) {
+        throw new MemoryFailure('version_conflict', 'Период членства изменился')
+      }
+      // Lock all submitted rows in a stable order so deletion cannot commit after validation
+      // but before seen is inserted, and overlapping batches cannot invert row-lock order.
+      const found = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM memories
+         WHERE family_id = ${scope.familyId}::uuid
+           AND id IN (${Prisma.join(memoryIds.map((id) => Prisma.sql`${id}::uuid`))})
+           AND status = 'published' AND deleted_at IS NULL
+         ORDER BY id FOR SHARE
+      `)
+      if (found.length !== memoryIds.length) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
+      await tx.memorySeen.createMany({ data: memoryIds.map((memoryId) => ({
+        familyId: scope.familyId, userId: scope.principal.userId,
+        membershipEpoch: member.membershipEpoch, memoryId,
+      })), skipDuplicates: true })
+    })
+  }
 }
 
 async function lockFamilyFeed(tx: PrismaTransactionClient, familyId: string) {
@@ -289,6 +372,47 @@ async function findPage(
     items: page.map((memory) => dto(memory, scope.principal.userId, role)),
     hasNext,
   }
+}
+
+async function lockUnreadContext(tx: PrismaTransactionClient, scope: FamilyScope) {
+  const rows = await tx.$queryRaw<Array<{
+    role: MemberRole; membershipEpoch: number; baselineOrdinal: bigint
+    publicationOrdinal: bigint; orderVersion: bigint; trackingActivated: boolean
+  }>>`
+    SELECT fm.role::text AS role, fm.membership_epoch AS "membershipEpoch",
+           COALESCE(fm.unread_baseline_ordinal, 0) AS "baselineOrdinal",
+           f.publication_ordinal AS "publicationOrdinal",
+           f.unread_order_version AS "orderVersion",
+           f.unread_tracking_activated_at IS NOT NULL AS "trackingActivated"
+      FROM family_members fm JOIN families f ON f.id = fm.family_id
+     WHERE fm.family_id = ${scope.familyId}::uuid AND fm.user_id = ${scope.principal.userId}::uuid
+       AND fm.revoked_at IS NULL AND f.status = 'active'
+     FOR SHARE OF f, fm
+  `
+  if (!rows[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
+  return rows[0]
+}
+
+async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, role: MemberRole,
+  filters: MemoryCursorFilters, snapshotPublicationOrdinal: string, baselineOrdinal: string,
+  membershipEpoch: number, before: MemoryCursorPosition | undefined, limit: number) {
+  const memories = await tx.memory.findMany({
+    where: {
+      familyId: scope.familyId, status: 'published', deletedAt: null,
+      authorId: { not: scope.principal.userId },
+      firstPublishedOrdinal: { gt: BigInt(baselineOrdinal), lte: BigInt(snapshotPublicationOrdinal) },
+      seenByMembers: { none: { userId: scope.principal.userId, membershipEpoch } },
+      ...(filters.childId ? { childId: filters.childId } : {}),
+      ...(filters.kind ? { kind: filters.kind } : {}),
+      ...(before ? { AND: [beforePosition(before)] } : {}),
+    },
+    include: memoryInclude(),
+    orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+  })
+  const hasNext = memories.length > limit
+  const page = hasNext ? memories.slice(0, limit) : memories
+  return { items: page.map((memory) => dto(memory, scope.principal.userId, role)), hasNext }
 }
 
 async function getMemory(

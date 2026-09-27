@@ -6,6 +6,7 @@ import type {
   ListMemoriesQuery,
   MemoryDto,
   MemoryPage,
+  SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
 
@@ -13,9 +14,12 @@ import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
 import {
   decodeMemoryCursor,
+  decodeUnreadMemoryCursor,
   encodeMemoryCursor,
+  encodeUnreadMemoryCursor,
   type MemoryCursorFilters,
   validateMemoryCursorContext,
+  validateUnreadMemoryCursorContext,
 } from '../domain/memory-cursor'
 import type { MediaMemoryCatalog, MemoryRepository } from './ports'
 
@@ -56,6 +60,33 @@ export class MemoryService {
       kind: query.kind ?? null,
     }
     const now = this.now()
+    if (query.unreadOnly === true) {
+      const cursor = query.cursor ? decodeUnreadMemoryCursor(query.cursor, this.cursorSecret, now) : undefined
+      if (cursor) validateUnreadMemoryCursorContext(cursor, {
+        familyId: scope.familyId, userId: scope.principal.userId, filters,
+      })
+      let page: { items: MemoryDto[]; hasNext: boolean }
+      let unreadContext: { snapshotPublicationOrdinal: string; baselineOrdinal: string; orderVersion: string; membershipEpoch: number }
+      if (cursor) {
+        page = await this.repository.listUnreadAfter(scope, filters, cursor, query.limit)
+        unreadContext = cursor
+      } else {
+        const firstPage = await this.repository.listUnreadFirst(scope, filters, query.limit)
+        page = firstPage
+        unreadContext = firstPage
+      }
+      const last = page.items.at(-1)
+      return { items: page.items, nextCursor: page.hasNext && last
+        ? encodeUnreadMemoryCursor({
+          familyId: scope.familyId, userId: scope.principal.userId, filters,
+          snapshotPublicationOrdinal: unreadContext.snapshotPublicationOrdinal,
+          baselineOrdinal: unreadContext.baselineOrdinal,
+          orderVersion: unreadContext.orderVersion,
+          membershipEpoch: unreadContext.membershipEpoch,
+          before: { id: last.id, occurredAt: last.occurredAt },
+          expiresAt: cursor?.expiresAt ?? new Date(now.getTime() + cursorLifetimeMs).toISOString(),
+        }, this.cursorSecret) : null }
+    }
     const cursor = query.cursor
       ? decodeMemoryCursor(query.cursor, this.cursorSecret, now)
       : undefined
@@ -111,6 +142,11 @@ export class MemoryService {
   async setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse> {
     await this.access.requireMember(scope)
     return this.repository.setLike(scope, memoryId, liked)
+  }
+
+  async markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void> {
+    await this.access.requireMember(scope)
+    await this.repository.markSeen(scope, input)
   }
 }
 
