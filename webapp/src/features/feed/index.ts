@@ -10,4 +10,5 @@ export {
 } from './components'
 export { FeedPresentation, type FeedFilter } from './presentation'
 export { FeedPage } from './FeedPage'
+export { SeenBatchQueue } from './seen-batch-queue'
 export { MediaPlaybackCoordinator } from './playback'

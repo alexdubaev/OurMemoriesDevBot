@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import type { MemoryDto } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -24,6 +24,7 @@ export type MemoryCardPresentationProps = {
   occurredTime: string
   onLike: () => void
   onOpen: () => void
+  seenContentRef?: Ref<HTMLDivElement>
 }
 
 export function MemoryCardPresentation({
@@ -44,6 +45,7 @@ export function MemoryCardPresentation({
   occurredTime,
   onLike,
   onOpen,
+  seenContentRef,
 }: MemoryCardPresentationProps) {
   const hasCaption = body.trim().length > 0
   const interactive = mode === 'feed'
@@ -55,7 +57,7 @@ export function MemoryCardPresentation({
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>
-      {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'media-well surface-inset video-wrap' : 'media-well surface-inset'} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
+      {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'media-well surface-inset video-wrap' : 'media-well surface-inset'} contentRef={seenContentRef} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
       <div className="actions">
         <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
       </div>
@@ -63,7 +65,7 @@ export function MemoryCardPresentation({
       {kind === 'video'
         ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
         : kind === 'note'
-          ? <MemorySlot className="caption" slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="note-body" interactive={interactive} kind={kind} onOpen={onOpen} /> : null}</MemorySlot>
+          ? <MemorySlot className="caption" contentRef={seenContentRef} ready={hasCaption} slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="note-body" interactive={interactive} kind={kind} onOpen={onOpen} /> : null}</MemorySlot>
           : <div className="caption"><MemoryOpenButton body={body} className={body ? undefined : 'caption-open-empty'} interactive={interactive} kind={kind} onOpen={onOpen} /></div>}
     </article>
   )
@@ -71,8 +73,8 @@ export function MemoryCardPresentation({
 
 function MemoryActions({ children }: { children: ReactNode }) { return <>{children}</> }
 
-function MemorySlot({ children, className, slot }: { children: ReactNode; className?: string; slot: string }) {
-  return <div className={className} data-slot={slot}>{children}</div>
+function MemorySlot({ children, className, contentRef, ready, slot }: { children: ReactNode; className?: string; contentRef?: Ref<HTMLDivElement>; ready?: boolean; slot: string }) {
+  return <div className={className} data-seen-main="" data-seen-ready={ready === undefined ? undefined : String(ready)} data-slot={slot} ref={contentRef}>{children}</div>
 }
 
 function MemoryOpenButton({ body, className, interactive, kind, onOpen }: { body: string; className?: string; interactive: boolean; kind: MemoryDto['kind']; onOpen: () => void }) {

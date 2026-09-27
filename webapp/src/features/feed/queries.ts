@@ -8,22 +8,24 @@ import { deleteMemory, loadFeed, setMemoryLike } from './api'
 
 export const feedQueryKeys = {
   all: [...sessionQueryKeys.all, 'feed'] as const,
-  list: (familyId: string, filter: FeedFilter) => [...feedQueryKeys.all, familyId, filter] as const,
+  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) =>
+    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle] as const,
 }
 
-export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter) {
+export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) {
   return useInfiniteQuery({
-    queryKey: feedQueryKeys.list(familyId, filter),
-    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal),
+    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle),
+    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
-    staleTime: 20_000,
+    staleTime: unreadOnly ? Infinity : 20_000,
+    refetchOnWindowFocus: !unreadOnly,
   })
 }
 
-export function useMemoryLike(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter) {
+export function useMemoryLike(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) {
   const client = useQueryClient()
-  const key = feedQueryKeys.list(familyId, filter)
+  const key = feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle)
   return useMutation({
     mutationFn: ({ memoryId, liked }: { memoryId: string; liked: boolean }) => setMemoryLike(transport, familyId, memoryId, liked),
     onMutate: async ({ memoryId, liked }) => {
@@ -39,7 +41,7 @@ export function useMemoryLike(transport: AuthenticatedTransport, familyId: strin
       return { previous }
     },
     onError: (_error, _input, context) => client.setQueryData(key, context?.previous),
-    onSettled: () => client.invalidateQueries({ queryKey: key }),
+    onSettled: () => client.invalidateQueries({ queryKey: key, refetchType: unreadOnly ? 'none' : 'active' }),
   })
 }
 

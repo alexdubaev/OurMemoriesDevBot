@@ -1104,6 +1104,133 @@ test.describe.serial('T07 live feed', () => {
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
   })
 
+  test('B6 real observer and seen API take seven unread to five without moving cards or another user', async ({ page, browser }) => {
+    const secondSubject = String(900_000_000 + Math.floor(Math.random() * 90_000_000))
+    const secondUser = await prisma.user.create({ data: { displayName: 'Другой зритель E2E' } })
+    const errorPhoto = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId, body: 'Одиночное фото E2E' } })
+    const sevenIds = Array.from({ length: 7 }, () => randomUUID())
+    const oldDate = Date.now() - 500 * 24 * 60 * 60_000
+    const body = (index: number) => `Непросмотренная заметка ${index + 1}\n${Array.from({ length: 28 }, (_, line) => `Строка ${line + 1} семейного воспоминания`).join('\n')}`
+    let secondContext: Awaited<ReturnType<typeof browser.newContext>> | null = null
+    let sameAccountContext: Awaited<ReturnType<typeof browser.newContext>> | null = null
+    try {
+      await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject: secondSubject } })
+      await prisma.externalIdentity.create({ data: { userId: secondUser.id, provider: 'telegram', subject: secondSubject } })
+      await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: secondUser.id, role: 'viewer', unreadBaselineOrdinal: 0n } })
+      await prisma.$transaction(async (tx) => {
+        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: 0n } })
+        await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: 0n } })
+        for (const [index, id] of sevenIds.entries()) {
+          await tx.family.update({ where: { id: fixture.familyId }, data: { publicationOrdinal: BigInt(index + 1) } })
+          await tx.memory.create({ data: {
+            id, familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
+            kind: 'note', body: body(index), occurredAt: new Date(oldDate - index * 60_000),
+            firstPublishedOrdinal: BigInt(index + 1),
+          } })
+        }
+      })
+
+      await page.route('**/media/*/content?variant=display', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }))
+      await page.setViewportSize({ width: 390, height: 650 })
+      await page.reload()
+      await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /7 непросмотренных воспоминаний/)
+      secondContext = await browser.newContext({ viewport: { width: 390, height: 650 } })
+      const secondPage = await secondContext.newPage()
+      await installTelegramHost(secondPage, signedInitData(Number(secondSubject), 'Другой зритель E2E'))
+      await secondPage.goto('/')
+      await expect(secondPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /7 непросмотренных воспоминаний/)
+
+      await page.bringToFront()
+      await page.locator('.family-hub-card').click()
+      await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+      await page.getByRole('button', { name: 'Непросмотренные · 7' }).click()
+      await expect(page.locator('#root [data-memory-id]')).toHaveCount(7)
+      await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-seven.png'), animations: 'disabled' })
+
+      const first = page.locator(`[data-memory-id="${sevenIds[0]}"]`)
+      await first.locator('[data-seen-main]').evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        window.scrollTo({ top: window.scrollY + rect.top - 80, behavior: 'instant' })
+      })
+      await first.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+      await expect(page.locator('[data-memoly-bottom-sheet="true"]')).toBeVisible()
+      await page.waitForTimeout(1_200)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId: sevenIds[0] } })).toBe(0)
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-memoly-bottom-sheet="true"]')).toHaveCount(0)
+
+      for (let index = 0; index < 2; index += 1) {
+        const content = page.locator(`[data-memory-id="${sevenIds[index]}"] [data-seen-main]`)
+        await content.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          window.scrollTo({ top: window.scrollY + rect.top - 80, behavior: 'instant' })
+        })
+        await expect.poll(() => prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId: { in: sevenIds } } })).toBe(index + 1)
+      }
+      const anchor = page.locator(`[data-memory-id="${sevenIds[1]}"]`)
+      const anchorTop = await anchor.evaluate((element) => element.getBoundingClientRect().top)
+      await expect(page.getByRole('button', { name: 'Непросмотренные · 5' })).toBeVisible()
+      expect(await page.locator('#root [data-memory-id]').count()).toBe(7)
+      expect(Math.abs((await anchor.evaluate((element) => element.getBoundingClientRect().top)) - anchorTop)).toBeLessThanOrEqual(2)
+      await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-five-stable.png'), animations: 'disabled' })
+
+      await page.locator(`[data-memory-id="${sevenIds[2]}"] [data-seen-main]`).evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        window.scrollTo({ top: window.scrollY + rect.top - 80, behavior: 'instant' })
+      })
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await page.waitForTimeout(1_200)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId: sevenIds[2] } })).toBe(0)
+      await page.evaluate(() => {
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        Reflect.deleteProperty(document, 'visibilityState')
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+
+      await page.getByRole('button', { name: '‹ Все семьи' }).click()
+      await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /5 непросмотренных воспоминаний/)
+      await expect(secondPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /7 непросмотренных воспоминаний/)
+      sameAccountContext = await browser.newContext({ viewport: { width: 390, height: 650 } })
+      const sameAccountPage = await sameAccountContext.newPage()
+      await installTelegramHost(sameAccountPage, signedInitData(Number(subject), 'Лента E2E'))
+      await sameAccountPage.goto('/')
+      await expect(sameAccountPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /5 непросмотренных воспоминаний/)
+
+      await page.locator('.family-hub-card').click()
+      const failedPhotoCard = page.locator(`[data-memory-id="${errorPhoto.id}"]`)
+      await failedPhotoCard.scrollIntoViewIfNeeded()
+      await expect(failedPhotoCard.getByLabel('Загрузка фотографии')).toBeVisible()
+      await page.waitForTimeout(1_200)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId: errorPhoto.id } })).toBe(0)
+
+      const membership = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } } })
+      await prisma.memorySeen.createMany({ data: sevenIds.map((memoryId) => ({ familyId: fixture.familyId, userId: fixture.userId, membershipEpoch: membership.membershipEpoch, memoryId })), skipDuplicates: true })
+      await page.getByRole('button', { name: /Непросмотренные/ }).click()
+      await page.getByRole('button', { name: 'Обновить список' }).click()
+      await expect(page.getByText('Все новые воспоминания просмотрены')).toBeVisible()
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-empty.png'), animations: 'disabled' })
+      await page.getByRole('button', { name: 'Все воспоминания' }).click()
+      await page.getByRole('button', { name: 'Непросмотренные · 0' }).click()
+      await expect(page.getByText('Все новые воспоминания просмотрены')).toBeVisible()
+    } finally {
+      await sameAccountContext?.close()
+      await secondContext?.close()
+      await prisma.memory.deleteMany({ where: { id: { in: sevenIds } } })
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: null, publicationOrdinal: 0n } })
+      await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: null } })
+      await prisma.familyMember.deleteMany({ where: { familyId: fixture.familyId, userId: secondUser.id } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: secondUser.id } })
+      await prisma.user.delete({ where: { id: secondUser.id } })
+      await prisma.pilotAdmission.deleteMany({ where: { provider: 'telegram', subject: secondSubject } })
+    }
+  })
+
   test('closes access and pauses playback after membership revoke', async ({ page }) => {
     await openFeed(page)
     const voiceCard = page.locator('[data-memory-id]').filter({ hasText: 'Голос E2E' })
@@ -1119,7 +1246,8 @@ test.describe.serial('T07 live feed', () => {
     })
     await page.getByRole('button', { name: 'Фото', exact: true }).click()
 
-    await expect(page.getByText('Доступ к семейной ленте закрыт.')).toBeVisible()
+    await expect(page.getByText('Доступ к этой семье закрыт.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
     await expect.poll(() => voiceHandle!.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
     await expect(page.locator('[data-memory-id]')).toHaveCount(0)
   })

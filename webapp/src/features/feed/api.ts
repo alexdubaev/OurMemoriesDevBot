@@ -14,10 +14,12 @@ export function loadFeed(
   filter: FeedFilter,
   cursor?: string | null,
   signal?: AbortSignal,
+  unreadOnly = false,
 ): Promise<MemoryPage> {
   const query = new URLSearchParams({ limit: '20' })
   if (filter !== 'all') query.set('kind', filter)
   if (cursor) query.set('cursor', cursor)
+  if (unreadOnly) query.set('unreadOnly', 'true')
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories?${query.toString()}`,
     memoryPageSchema,
