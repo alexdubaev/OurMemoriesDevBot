@@ -6,6 +6,9 @@ set -Eeuo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
+APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
+B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
+FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
 ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-memoly}
@@ -332,6 +335,93 @@ migration_status() {
 	compose run --rm --no-deps backend bunx prisma migrate status
 }
 
+validate_forward_marker() {
+	[ -f "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only marker is missing or invalid'
+	[ "$(stat -c '%u' "$FORWARD_MARKER")" = 0 ] || die 'B2 forward-only marker must be root-owned'
+	[ "$(stat -c '%a' "$FORWARD_MARKER")" = 600 ] || die 'B2 forward-only marker must have mode 0600'
+	local -a lines
+	mapfile -t lines < "$FORWARD_MARKER"
+	[ "${#lines[@]}" -eq 3 ] || die 'B2 forward-only marker has an invalid format'
+	[[ "${lines[0]}" =~ ^B2_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'B2 forward-only target is invalid'
+	local marker_target=${BASH_REMATCH[1]}
+	[[ "${lines[1]}" =~ ^PREVIOUS_BACKEND_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'B2 previous backend tag is invalid'
+	local previous_backend=${BASH_REMATCH[1]}
+	[[ "${lines[2]}" =~ ^PREVIOUS_WEBAPP_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'B2 previous webapp tag is invalid'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$marker_target" "$MEMOLY_PRODUCT_SHA" ||
+		die 'B2 forward-only marker does not match this release lineage'
+	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$B2_RUNTIME_SHA" "$previous_backend"; then
+		die 'B2 forward-only marker does not record a legacy backend'
+	fi
+}
+
+verify_no_legacy_writers() {
+	local service running container image
+	for service in backend worker scheduler; do
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service")
+		for container in $running; do
+			image=$(docker inspect --format '{{.Config.Image}}' "$container") || die "cannot verify $service image"
+			[ "$image" = "memoly-backend:$MEMOLY_PRODUCT_SHA" ] || die "legacy $service is still running; migration is forbidden"
+		done
+	done
+}
+
+guard_membership_transition() {
+	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'B2 release guard requires an immutable release SHA'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$MEMOLY_PRODUCT_SHA^{commit}" ||
+		die 'B2 release guard cannot verify the target commit'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$B2_RUNTIME_SHA^{commit}" ||
+		die 'B2 release guard cannot verify the accepted B2 commit'
+	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$B2_RUNTIME_SHA" "$MEMOLY_PRODUCT_SHA"; then
+		die 'target predates the accepted B2 runtime; use a reviewed compatible release'
+	fi
+	if [ -e "$FORWARD_MARKER" ]; then
+		validate_forward_marker
+		verify_no_legacy_writers
+		return 0
+	fi
+	local service running image tag
+	for service in backend worker scheduler; do
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service")
+		[ "$(printf '%s\n' "$running" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1 ] ||
+			die "B2 release without a forward-only marker requires one running compatible $service"
+		image=$(docker inspect --format '{{.Config.Image}}' "$running") || die "cannot inspect $service image"
+		case "$image" in
+			memoly-backend:*) tag=${image#memoly-backend:} ;;
+			*) die "running $service does not use an immutable backend image" ;;
+		esac
+		[[ "$tag" =~ ^[0-9a-f]{40}$ ]] || die "running $service image tag is invalid"
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$B2_RUNTIME_SHA" "$tag" ||
+			die "running $service predates B2; use the guarded ci-release entry point"
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$tag" "$MEMOLY_PRODUCT_SHA" ||
+			die "running $service is not an ancestor of this release; downgrade is forbidden"
+	done
+}
+
+quiesce_legacy_runtime() {
+	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'quiescence requires the accepted immutable release SHA'
+	validate_forward_marker
+	local service running container image
+	for service in backend worker scheduler; do
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service")
+		for container in $running; do
+			image=$(docker inspect --format '{{.Config.Image}}' "$container") || die "cannot inspect $service image"
+			if [ "$image" != "memoly-backend:$MEMOLY_PRODUCT_SHA" ]; then
+				docker stop --time 30 "$container" >/dev/null || die "cannot stop legacy $service"
+			fi
+		done
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service")
+		for container in $running; do
+			image=$(docker inspect --format '{{.Config.Image}}' "$container") || die "cannot verify $service image"
+			[ "$image" = "memoly-backend:$MEMOLY_PRODUCT_SHA" ] || die "legacy $service is still running; migration is forbidden"
+		done
+	done
+	printf 'Pre-B2 backend, worker, and scheduler are stopped; compatible target containers, if any, remain running.\n'
+}
+
 validate_database_target() {
 	local backend_target postgres_database postgres_user
 	backend_target=$(compose run --rm --no-deps backend bun -e 'const raw = process.env.DATABASE_URL ?? ""; let url; try { url = new URL(raw) } catch { process.exit(2) }; const fail = () => process.exit(2); if (!(["postgres:", "postgresql:"].includes(url.protocol) && url.hostname === "postgres" && (url.port || "5432") === "5432" && url.hash === "")) fail(); const params = [...url.searchParams.entries()]; if (params.length > 1 || (params.length === 1 && (params[0][0] !== "schema" || params[0][1] !== "public"))) fail(); let database; let username; try { database = decodeURIComponent(url.pathname.replace(/^\//, "")); username = decodeURIComponent(url.username) } catch { fail() }; if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(database) || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(username)) fail(); process.stdout.write(`${url.hostname}|${url.port || "5432"}|${database}|${username}`)' 2>/dev/null) || die "cannot inspect backend database target"
@@ -456,6 +546,7 @@ readiness() {
 }
 
 rollback() {
+	[ ! -e "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
 	validate_rollback_file
 	# shellcheck disable=SC1090
 	set -a
@@ -464,6 +555,8 @@ rollback() {
 	[ "${MEMOLY_DB_ROLLBACK_ALLOWED:-false}" = false ] || die "database rollback is forbidden"
 	[ -n "${PREVIOUS_BACKEND_IMAGE_TAG:-}" ] || die "previous backend image tag is missing"
 	[ -n "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" ] || die "previous webapp image tag is missing"
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor \
+		"$B2_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG" || die 'rollback target predates the B2 membership runtime; use a compatible forward fix'
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
@@ -471,6 +564,9 @@ rollback() {
 	esac
 	load_runtime_secrets
 	validate_inputs rollback
+	if ! compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) OR EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS incompatible"); await client.end(); process.exit(result.rows[0]?.incompatible ? 1 : 0) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1; then
+		die 'rollback is forbidden after unread activation, multiple memberships, or an unreadable compatibility state; use a forward fix'
+	fi
 	gateway_preflight
 	if [ "${SELECTEL_CI_RELEASE:-false}" = true ]; then
 		restore_configuration_backup
@@ -498,6 +594,7 @@ rollback() {
 }
 
 deploy() {
+	guard_membership_transition
 	preflight
 	prepare_configuration
 	migration_status
@@ -513,7 +610,7 @@ deploy() {
 
 usage() {
 	cat <<'EOF'
-Usage: redeploy.sh {preflight|migrate|deploy|rollback|migration-status}
+Usage: redeploy.sh {preflight|migrate|deploy|rollback|migration-status|quiesce-legacy}
 
 Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
 GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
@@ -524,6 +621,7 @@ main() {
 	local action=${1:-}
 	require_command curl
 	require_command flock
+	require_command git
 	require_command readlink
 	require_command stat
 	acquire_deploy_lock
@@ -532,7 +630,8 @@ main() {
 		deploy) deploy ;;
 		rollback) rollback ;;
 		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
-		migrate) require_command docker; migrate ;;
+		quiesce-legacy) require_command docker; quiesce_legacy_runtime ;;
+		migrate) require_command docker; guard_membership_transition; migrate ;;
 		reload-gateway) die "reload-gateway is disabled; use deploy so static readiness gates edge activation" ;;
 		*) usage; exit 2 ;;
 	esac
