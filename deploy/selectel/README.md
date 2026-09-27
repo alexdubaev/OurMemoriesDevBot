@@ -315,14 +315,39 @@ families. Do not scan or backfill historical Memories. Turn on the multi-family
 gate only after every target family and the authenticated smoke checks pass.
 
 ```sh
+(
+set +x
+set -e
+export MAX_BOT_TOKEN="$(cat /opt/memoly/secrets/max_bot_token)"
+export MAX_WEBHOOK_SECRET="$(cat /opt/memoly/secrets/max_webhook_secret)"
+export MAX_INBOX_ENCRYPTION_KEY="$(cat /opt/memoly/secrets/max_inbox_encryption_key)"
 export B7_FAMILY_IDS_FILE=/opt/memoly/activation/approved-family-ids.txt
 export MEMOLY_PRODUCT_SHA='<accepted full deployed SHA>'
 export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
 export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
 docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
   bun scripts/activate-unread-tracking.ts < "$B7_FAMILY_IDS_FILE"
+)
+```
+
+Stop after the no-write validation. Check that its count matches the approved
+target list and that the compatible runtime, migrations, health, and gates still
+match the release record. Only then run this separate activation command:
+
+```sh
+(
+set +x
+set -e
+export MAX_BOT_TOKEN="$(cat /opt/memoly/secrets/max_bot_token)"
+export MAX_WEBHOOK_SECRET="$(cat /opt/memoly/secrets/max_webhook_secret)"
+export MAX_INBOX_ENCRYPTION_KEY="$(cat /opt/memoly/secrets/max_inbox_encryption_key)"
+export B7_FAMILY_IDS_FILE=/opt/memoly/activation/approved-family-ids.txt
+export MEMOLY_PRODUCT_SHA='<accepted full deployed SHA>'
+export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
 docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
   bun scripts/activate-unread-tracking.ts --apply < "$B7_FAMILY_IDS_FILE"
+)
 ```
 
 ## Config validation
