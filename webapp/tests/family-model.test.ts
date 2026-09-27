@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps } from 'react'
-import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
+import type { FamilyHomeResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
 
 import {
+  canStartMaxVideoUpload,
   familyCalendarDate,
   feedChildSubtitle,
   formatChildAge,
@@ -121,6 +122,28 @@ describe('family presentation model', () => {
     expect(roleLabel('full', true)).toBe('Владелец')
     expect(roleLabel('full', false)).toBe('Полный доступ')
     expect(roleLabel('viewer', false)).toBe('Просмотр')
+  })
+
+  test('MAX video destination needs a ready family and live full membership', () => {
+    const summary: FamilyHomeResponse['items'][number] = {
+      familyId: familyResponse.family.id,
+      name: familyResponse.family.name,
+      displaySubtitle: null,
+      childAvatarMediaId: null,
+      isOwner: true,
+      role: 'full',
+      setupStatus: 'ready',
+      capabilities: { canCreateInvite: true, canManageMembers: true, canEditChild: true, canPublishNote: true, canPublishPhoto: true, canPublishVoice: true, canPublishVideo: false, canUploadChildAvatar: true },
+      unreadCount: null,
+      unreadState: 'not_enabled',
+      membershipEpoch: 1,
+    }
+    expect(canStartMaxVideoUpload(summary, member, true)).toBe(true)
+    expect(canStartMaxVideoUpload(summary, { ...member, role: 'viewer' }, true)).toBe(false)
+    expect(canStartMaxVideoUpload({ ...summary, role: 'viewer' }, member, true)).toBe(false)
+    expect(canStartMaxVideoUpload({ ...summary, setupStatus: 'needs_child' }, member, true)).toBe(false)
+    expect(canStartMaxVideoUpload(summary, member, false)).toBe(false)
+    expect(canStartMaxVideoUpload(undefined, member, true)).toBe(false)
   })
 })
 

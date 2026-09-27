@@ -12,6 +12,7 @@ import { BootPreloader } from '@/features/app'
 import {
   acceptInvite,
   createFamilyBootstrap,
+  canStartMaxVideoUpload,
   createFamilyErrorMessage,
   feedChildSubtitle,
   FamilyOnboarding,
@@ -185,6 +186,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
+  const maxVideoPendingRef = useRef(maxVideoUploadAcceptance)
   const selectionVersion = useRef(0)
   const createKey = useRef<string | null>(null)
   const autoAcceptingInvite = useRef<Promise<unknown> | null>(null)
@@ -226,6 +228,15 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         ])
         : [{ items: [] as FamilyMemberDto[] }, { items: [] as FamilyInviteDto[] }]
       if (version !== selectionVersion.current) return
+      if (maxVideoPendingRef.current && !canStartMaxVideoUpload(
+        homeRef.current?.items.find((item) => item.familyId === familyId),
+        nextMembers.items.find((member) => member.userId === currentUserId),
+        Boolean(response.child),
+      )) {
+        setNotice('Для этой семьи загрузка видео недоступна. Выберите другую семью.')
+        setScreen('hub')
+        return
+      }
       setFamilyResponse(response)
       setMembers(nextMembers.items)
       setInvites(nextInvites.items)
@@ -240,7 +251,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     } finally {
       if (version === selectionVersion.current) setBusy(false)
     }
-  }, [refreshHome, transport])
+  }, [currentUserId, refreshHome, transport])
 
   const returnHome = useCallback((message?: string) => {
     selectionVersion.current += 1
@@ -337,10 +348,12 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setLoadingMore(true)
     try {
       const next = await loadFamilyHome(transport, cursor)
-      setHome((current) => current?.nextCursor === cursor ? {
-        ...next,
-        items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.familyId === item.familyId))],
-      } : current)
+      const current = homeRef.current
+      if (current?.nextCursor === cursor) {
+        const merged = { ...next, items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.familyId === item.familyId))] }
+        homeRef.current = merged
+        setHome(merged)
+      }
     } catch {
       setNotice('Не удалось загрузить остальные семьи. Повторите попытку.')
     } finally {
@@ -402,7 +415,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     else if (!editingChildPhoto) { setEditingChild(false); setEditingChildPhoto(false) }
   }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
-  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} onMaxVideoLaunchHandled={() => setMaxVideoPending(false)} openAddInitially={openAddFromFamily} onAccessLost={() => returnHome('Доступ к этой семье закрыт.')} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
+  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} openAddInitially={openAddFromFamily} onAccessLost={() => returnHome('Доступ к этой семье закрыт.')} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} /></div>
   return <div style={insetsStyle}><button className="family-context-back" onClick={() => returnHome()} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refreshSelected} transport={transport} /></div>
 }
 

@@ -6,6 +6,7 @@ export { ChildAvatar } from './ChildAvatar'
 export { useChildAvatar } from './useChildAvatar'
 export { IncomingInvite, IncomingInviteIssue, InviteFlow, InviteReady } from './InvitationScreens'
 export {
+  canStartMaxVideoUpload,
   familyCalendarDate,
   familyMemberName,
   feedChildSubtitle,
