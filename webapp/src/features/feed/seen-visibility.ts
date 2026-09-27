@@ -1,6 +1,13 @@
 export const SEEN_MIN_DURATION_MS = 1_000
 export const SEEN_MIN_VISIBLE_FRACTION = 0.5
 
+export function mediaCardSeenReady(state:
+  | { kind: 'voice'; objectUrl: string | null }
+  | { kind: 'video'; viewerState: 'loading' | 'ready' | 'error'; previewReady: boolean },
+) {
+  return state.kind === 'voice' ? Boolean(state.objectUrl) : state.viewerState === 'ready' && state.previewReady
+}
+
 export type SeenRect = { top: number; bottom: number; left: number; right: number; width: number; height: number }
 export type SeenViewport = { top: number; bottom: number; left: number; right: number }
 

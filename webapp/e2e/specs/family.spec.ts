@@ -308,13 +308,14 @@ test('ordinary reload and list retry preserve explicit family selection', async 
   await page.getByRole('button', { name: '‹ Все семьи' }).click()
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
 
-  let failOnce = true
+  let failHome = true
   await page.route('**/api/v1/me/families', (route) => {
-    if (failOnce) { failOnce = false; return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }) }
+    if (failHome) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
     return route.continue()
   })
   await page.reload()
   await expect(page.getByText('Не удалось загрузить семьи')).toBeVisible()
+  failHome = false
   await page.getByRole('button', { name: 'Повторить' }).click()
   await expect(page.locator('[data-slot="family-hub"] .family-hub-card')).toHaveCount(1)
   await page.locator('[data-slot="family-hub"] .family-hub-card').click()

@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test'
-import { isSeenContentVisible, SEEN_MIN_DURATION_MS, SeenDwell } from '../src/features/feed/seen-visibility'
+import { isSeenContentVisible, mediaCardSeenReady, SEEN_MIN_DURATION_MS, SeenDwell } from '../src/features/feed/seen-visibility'
+
+test('ready voice and video previews can be seen before playback, while missing or failed media cannot', () => {
+  expect(mediaCardSeenReady({ kind: 'voice', objectUrl: 'blob:ready-voice' })).toBe(true)
+  expect(mediaCardSeenReady({ kind: 'voice', objectUrl: null })).toBe(false)
+  expect(mediaCardSeenReady({ kind: 'video', viewerState: 'ready', previewReady: true })).toBe(true)
+  expect(mediaCardSeenReady({ kind: 'video', viewerState: 'loading', previewReady: true })).toBe(false)
+  expect(mediaCardSeenReady({ kind: 'video', viewerState: 'error', previewReady: true })).toBe(false)
+})
 
 const viewport = { top: 0, bottom: 700, left: 0, right: 390 }
 

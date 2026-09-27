@@ -335,6 +335,7 @@ test('a prepared voice displays its DTO duration before audio metadata loads', (
 test('a Telegram video poster renders a protected image and its duration', () => {
   const markup = renderToStaticMarkup(createElement(TelegramVideoPoster, {
     durationMs: 24_000,
+    posterReady: true,
     posterUrl: 'blob:private-telegram-video-poster',
     width: 1_920,
     height: 1_080,
@@ -344,6 +345,7 @@ test('a Telegram video poster renders a protected image and its duration', () =>
   expect(markup).toContain('aspect-ratio:1920 / 1080')
   expect(markup).toContain('aria-label="Смотреть видео в Telegram"')
   expect(markup).toContain('data-slot="telegram-video-play-control"')
+  expect(markup).toContain('data-seen-ready="true"')
   expect(markup).not.toMatch(/<(?:video|audio)\b/)
 })
 
