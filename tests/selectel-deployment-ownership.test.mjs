@@ -300,7 +300,10 @@ MEMOLY_PRODUCT_SHA=${target}
 APP_ROOT=/mock/app
 COMPOSE_PROJECT=memoly
 FORWARD_MARKER=/missing-b2-marker
+SELECTEL_CI_RELEASE=true
+SELECTEL_DEPLOY_LOCK_FD=9
 git() {
+  if [ "$5" = rev-parse ]; then printf '${target}\\n'; return 0; fi
   if [ "$5" = cat-file ]; then return 0; fi
   if [ "${'${@: -1}'}" = "$MEMOLY_PRODUCT_SHA" ]; then return 0; fi
   return 1
@@ -315,6 +318,18 @@ guard_membership_transition
   const result = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8', timeout: 30_000 })
   assert.equal(result.status, 7, `${result.stdout}${result.stderr}`)
   assert.match(result.stderr, /predates B2/)
+  const direct = spawnSync('bash', ['-s'], {
+    input: harness.replace('SELECTEL_CI_RELEASE=true', 'SELECTEL_CI_RELEASE=false'),
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(direct.status, 7)
+  assert.match(direct.stderr, /guarded ci-release entry point/)
+  const unmerged = spawnSync('bash', ['-s'], {
+    input: harness.replace(`printf '${target}\\n'; return 0`, `printf '${'d'.repeat(40)}\\n'; return 0`),
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(unmerged.status, 7)
+  assert.match(unmerged.stderr, /accepted origin\/main SHA/)
   assert.match(script, /migrate\) require_command docker; guard_membership_transition; migrate/)
   assert.match(script, /deploy\(\) \{\n\tguard_membership_transition/)
   assert.doesNotMatch(read('deploy/selectel/README.md'), /^deploy\/selectel\/redeploy\.sh migrate$/m)

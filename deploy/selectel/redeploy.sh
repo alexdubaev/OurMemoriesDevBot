@@ -367,7 +367,13 @@ verify_no_legacy_writers() {
 }
 
 guard_membership_transition() {
+	[ "${SELECTEL_CI_RELEASE:-false}" = true ] && [[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] ||
+		die 'migration and promotion require the guarded ci-release entry point and inherited release lock'
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'B2 release guard requires an immutable release SHA'
+	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse refs/remotes/origin/main)" = "$MEMOLY_PRODUCT_SHA" ] ||
+		die 'migration and promotion require the accepted origin/main SHA'
+	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse HEAD)" = "$MEMOLY_PRODUCT_SHA" ] ||
+		die 'migration and promotion require the checked-out release SHA'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$MEMOLY_PRODUCT_SHA^{commit}" ||
 		die 'B2 release guard cannot verify the target commit'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$B2_RUNTIME_SHA^{commit}" ||

@@ -254,9 +254,10 @@ Use the `ci-release.sh` entry point above for the whole B7 release. It holds
 one host release lock across checkout, image build, legacy-writer quiescence,
 migration, promotion, and public smoke. Do not run `redeploy.sh migrate` and
 `redeploy.sh deploy` as separate operator commands for the B2 transition.
-Both internal actions now reject a B2 target if a pre-B2 backend, worker, or
-scheduler is running without the validated forward-only marker. The direct
-`quiesce-legacy` action also requires that marker. A target older than a
+Both internal actions require the inherited `ci-release.sh` lock and the exact
+checked-out `origin/main` SHA. They also reject a B2 target if a pre-B2 backend,
+worker, or scheduler is running without the validated forward-only marker. The
+direct `quiesce-legacy` action requires that marker. A target older than a
 running compatible service is rejected.
 
 The entry point calls `preflight` to validate gateway ownership, shared-network
