@@ -7,7 +7,7 @@ WORKDIR /app
 # remain valid for both repository shapes.
 COPY . .
 
-RUN bun install --frozen-lockfile --filter @web-app-demo/backend
+RUN BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --network-concurrency 8 --filter @web-app-demo/backend
 
 WORKDIR /app/backend
 
@@ -19,7 +19,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN bun install --frozen-lockfile --production --filter @web-app-demo/backend
+RUN BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --production --network-concurrency 8 --filter @web-app-demo/backend
 
 FROM oven/bun:1.4.0 AS runtime
 
