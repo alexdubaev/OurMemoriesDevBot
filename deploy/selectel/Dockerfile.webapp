@@ -3,7 +3,7 @@ FROM oven/bun:1.4.0 AS build
 WORKDIR /app
 COPY . .
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --filter @web-app-demo/webapp --filter vibecoding-template
 
 ARG VITE_API_URL=
 ARG VITE_MAX_BOT_USERNAME
