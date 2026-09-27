@@ -277,10 +277,16 @@ export class FamilyService {
               ownerUserId: principal.userId,
               name: input.name,
               timezone: input.timezone,
+              unreadTrackingActivatedAt: this.multiFamilyActivation === 'on' ? this.now() : null,
             },
           })
           await tx.familyMember.create({
-            data: { familyId: family.id, userId: principal.userId, role: 'full' },
+            data: {
+              familyId: family.id,
+              userId: principal.userId,
+              role: 'full',
+              unreadBaselineOrdinal: this.multiFamilyActivation === 'on' ? 0n : null,
+            },
           })
           const response = { family: familyDto(family), child: null }
           return {
