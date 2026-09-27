@@ -20,6 +20,7 @@ maybeDescribe('personal unread memories', () => {
     CORS_ORIGINS: 'http://localhost:5173', AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
+  const enabledApp = createApp({ env: { ...env, MULTI_FAMILY_ACTIVATION: 'on' }, prisma })
   const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
 
   beforeEach(clearFixtures)
@@ -55,6 +56,53 @@ maybeDescribe('personal unread memories', () => {
       data: { unreadBaselineOrdinal: 1n } })
     await expect(activateUnreadFamily(prisma, family.id)).rejects.toThrow('member baseline is inconsistent')
     expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).unreadTrackingActivatedAt).toBeNull()
+  })
+
+  test('new families activate unread atomically only when the gate is on', async () => {
+    const offOwner = await user('off owner', '39130')
+    const oldFamily = await createFamily(offOwner)
+    const old = await prisma.family.findUniqueOrThrow({ where: { id: oldFamily.id } })
+    const oldMember = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: oldFamily.id, userId: offOwner.id } },
+    })
+    expect(old.unreadTrackingActivatedAt).toBeNull()
+    expect(oldMember.unreadBaselineOrdinal).toBeNull()
+    expect(await count(offOwner)).toEqual({ unreadCount: null, unreadState: 'not_enabled' })
+
+    const owner = await user('new owner', '39131')
+    const viewer = await user('new viewer', '39132')
+    const key = randomUUID()
+    const family = await createFamily(owner, enabledApp, key)
+    const first = await prisma.family.findUniqueOrThrow({ where: { id: family.id } })
+    const member = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.id, userId: owner.id } },
+    })
+    expect(first.unreadTrackingActivatedAt).not.toBeNull()
+    expect(first.publicationOrdinal).toBe(0n)
+    expect(member.membershipEpoch).toBe(1)
+    expect(member.unreadBaselineOrdinal).toBe(0n)
+    expect(await count(owner)).toEqual({ unreadCount: 0, unreadState: 'ready' })
+
+    const retry = await api(owner, '/families', 'POST', { name: 'Family', timezone: 'Europe/Moscow' }, key, enabledApp)
+    expect(retry.response.status).toBe(201)
+    expect(retry.body.family.id).toBe(family.id)
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).unreadTrackingActivatedAt)
+      .toEqual(first.unreadTrackingActivatedAt)
+    expect(await prisma.family.count({ where: { ownerUserId: owner.id } })).toBe(1)
+    expect(await prisma.familyMember.count({ where: { familyId: family.id, userId: owner.id } })).toBe(1)
+
+    await invite(owner, viewer, family.id)
+    const viewerMember = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.id, userId: viewer.id } },
+    })
+    expect(viewerMember.membershipEpoch).toBe(1)
+    expect(viewerMember.unreadBaselineOrdinal).toBe(0n)
+    const published = await note(owner, family, 'first new-family memory')
+    expect(published.response.status).toBe(201)
+    expect((await prisma.memory.findUniqueOrThrow({ where: { id: published.body.id } })).firstPublishedOrdinal).toBe(1n)
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).publicationOrdinal).toBe(1n)
+    expect(await count(viewer)).toEqual({ unreadCount: 1, unreadState: 'ready' })
+    expect(await count(owner)).toEqual({ unreadCount: 0, unreadState: 'ready' })
   })
 
   test('activation excludes archive, counts delayed publications once, and keeps edits and retries quiet', async () => {
@@ -453,8 +501,8 @@ maybeDescribe('personal unread memories', () => {
     return { id: record.id, sessionId: session.id, token: await signAccessToken({ sub: record.id, sessionId: session.id }, env) }
   }
 
-  async function createFamily(owner: Awaited<ReturnType<typeof user>>) {
-    const created = await api(owner, '/families', 'POST', { name: 'Family', timezone: 'Europe/Moscow' }, randomUUID())
+  async function createFamily(owner: Awaited<ReturnType<typeof user>>, runtime = app, key = randomUUID()) {
+    const created = await api(owner, '/families', 'POST', { name: 'Family', timezone: 'Europe/Moscow' }, key, runtime)
     expect(created.response.status).toBe(201)
     const avatar = await prisma.mediaAsset.create({ data: {
       familyId: created.body.family.id, uploaderId: owner.id, sourceKind: 'upload', purpose: 'child_avatar',
@@ -490,8 +538,9 @@ maybeDescribe('personal unread memories', () => {
     return { unreadCount, unreadState }
   }
 
-  async function api(actor: Awaited<ReturnType<typeof user>>, path: string, method: string, body?: unknown, key?: string) {
-    const response = await app.request(`/api/v1${path}`, { method, headers: {
+  async function api(actor: Awaited<ReturnType<typeof user>>, path: string, method: string,
+    body?: unknown, key?: string, runtime = app) {
+    const response = await runtime.request(`/api/v1${path}`, { method, headers: {
       Authorization: `Bearer ${actor.token}`,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(key ? { 'Idempotency-Key': key } : {}),
