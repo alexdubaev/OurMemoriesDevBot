@@ -29,6 +29,7 @@ B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 RESUMING_FORWARD_ONLY=false
 MARKER_TARGET_SHA=
+PREBUILT_IMAGES=false
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -51,6 +52,17 @@ validate_inputs() {
     *) die 'migration flag must be true or false' ;;
   esac
   [[ "$MAX_BOT_USERNAME" =~ ^[A-Za-z0-9_]{5,32}$ ]] || die 'MAX bot username has an invalid public username format'
+  local backend_set=false webapp_set=false
+  [ "${SELECTEL_PREBUILT_BACKEND_ID+x}" = x ] && backend_set=true
+  [ "${SELECTEL_PREBUILT_WEBAPP_ID+x}" = x ] && webapp_set=true
+  [ "$backend_set" = "$webapp_set" ] || die 'prebuilt image IDs must be supplied together'
+  if [ "$backend_set" = true ]; then
+    [[ "$SELECTEL_PREBUILT_BACKEND_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+      die 'SELECTEL_PREBUILT_BACKEND_ID must be a lowercase sha256:64hex image ID'
+    [[ "$SELECTEL_PREBUILT_WEBAPP_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+      die 'SELECTEL_PREBUILT_WEBAPP_ID must be a lowercase sha256:64hex image ID'
+    PREBUILT_IMAGES=true
+  fi
 }
 
 git_memoly() {
@@ -105,6 +117,30 @@ fetch_and_checkout() {
   [ "$head" = "$PRODUCT_SHA" ] || die 'server checkout HEAD does not equal requested release SHA'
   status=$(git_root status --porcelain)
   [ -z "$status" ] || die 'server checkout is dirty after release checkout'
+}
+
+validate_prebuilt_images() {
+  [ "$PREBUILT_IMAGES" = true ] || return 0
+  local backend_image="memoly-backend:$PRODUCT_SHA" webapp_image="memoly-webapp:$PRODUCT_SHA"
+  local backend_id webapp_id backend_revision webapp_revision
+  backend_id=$(docker image inspect --format '{{.Id}}' "$backend_image" 2>/dev/null) ||
+    die "prebuilt backend image tag is missing: $backend_image"
+  [ "$backend_id" = "$SELECTEL_PREBUILT_BACKEND_ID" ] ||
+    die 'prebuilt backend image ID does not match SELECTEL_PREBUILT_BACKEND_ID'
+  backend_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backend_image" 2>/dev/null) ||
+    die "cannot inspect prebuilt backend image revision: $backend_image"
+  [ "$backend_revision" = "$PRODUCT_SHA" ] ||
+    die "prebuilt backend image revision label does not match release SHA: $backend_image"
+
+  webapp_id=$(docker image inspect --format '{{.Id}}' "$webapp_image" 2>/dev/null) ||
+    die "prebuilt webapp image tag is missing: $webapp_image"
+  [ "$webapp_id" = "$SELECTEL_PREBUILT_WEBAPP_ID" ] ||
+    die 'prebuilt webapp image ID does not match SELECTEL_PREBUILT_WEBAPP_ID'
+  webapp_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$webapp_image" 2>/dev/null) ||
+    die "cannot inspect prebuilt webapp image revision: $webapp_image"
+  [ "$webapp_revision" = "$PRODUCT_SHA" ] ||
+    die "prebuilt webapp image revision label does not match release SHA: $webapp_image"
+  printf 'Prebuilt immutable images verified for %s.\n' "$PRODUCT_SHA"
 }
 
 compose() {
@@ -356,9 +392,12 @@ main() {
     capture_running_images
   fi
   fetch_and_checkout
+  validate_prebuilt_images
   detect_membership_rollback_boundary
 
-  SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
+  if [ "$PREBUILT_IMAGES" = false ]; then
+    SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
+  fi
   if [ "$RESUMING_FORWARD_ONLY" = false ]; then prepare_rollback; fi
 
   export MEMOLY_PRODUCT_SHA="$PRODUCT_SHA"

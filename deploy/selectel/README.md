@@ -106,6 +106,58 @@ OCI revision labels. Transfer those two images to the host through the owner’s
 approved secure channel. The build script does not connect to production, change
 the server, run migrations, or alter rollback state.
 
+If the Selectel Docker build is unavailable, the guarded entry point also accepts
+prebuilt images. Build the same two images locally with the existing
+`deploy/selectel/build-images.sh` command above, capture their immutable IDs, and
+transfer only a Docker archive through the owner-approved secure channel:
+
+```sh
+BACKEND_ID=$(docker image inspect --format '{{.Id}}' "memoly-backend:$SHA")
+WEBAPP_ID=$(docker image inspect --format '{{.Id}}' "memoly-webapp:$SHA")
+[[ "$BACKEND_ID" =~ ^sha256:[0-9a-f]{64}$ && "$WEBAPP_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'unexpected local image ID' >&2
+  exit 1
+}
+docker save --output "/secure-transfer/memoly-images-$SHA.tar" \
+  "memoly-backend:$SHA" "memoly-webapp:$SHA"
+chmod 0600 "/secure-transfer/memoly-images-$SHA.tar"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+  'install -d -m 0700 -o root -g root /opt/memoly/incoming'
+scp -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  "/secure-transfer/memoly-images-$SHA.tar" root@app.memoly.ru:/opt/memoly/incoming/
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+  "docker load --input /opt/memoly/incoming/memoly-images-$SHA.tar && \
+   rm -f /opt/memoly/incoming/memoly-images-$SHA.tar"
+```
+
+The archive must contain no secrets. Before the release, verify on the host that
+the loaded tags have exactly the captured IDs:
+
+```sh
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+  "test \"\$(docker image inspect --format '{{.Id}}' memoly-backend:$SHA)\" = '$BACKEND_ID' && \
+   test \"\$(docker image inspect --format '{{.Id}}' memoly-webapp:$SHA)\" = '$WEBAPP_ID'"
+```
+
+Invoke the same reviewed entry point with both IDs. For a normal release without
+an existing forward-only marker, the entry point verifies the exact SHA tags and
+OCI revision labels after checkout and before rollback preparation, quiescence, or
+migration, then skips only the server-side `build-images.sh` step. A release with
+an existing forward-only marker keeps its immediate legacy-writer quiescence and
+forward-recovery sequence.
+
+```sh
+git show "$SHA:deploy/selectel/ci-release.sh" |
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+    "env SELECTEL_PREBUILT_BACKEND_ID=$BACKEND_ID SELECTEL_PREBUILT_WEBAPP_ID=$WEBAPP_ID \
+     bash -s -- '$SHA' DEPLOY true id911018762027_bot"
+```
+
+Both ID variables are required together and must be lowercase `sha256:` IDs with
+64 hexadecimal characters. Do not call `redeploy.sh migrate` or `redeploy.sh deploy`
+directly for a B2 transition; the guarded entry point must retain the one-lock
+forward-only marker, migration, promotion, and rollback handling.
+
 The running service SHA may intentionally lag the checkout SHA after documentation
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
@@ -128,7 +180,7 @@ Set the third server argument to `true` only for a reviewed release that needs t
 guarded migration. This command builds both images on Selectel; no image transfer
 is needed. Do not run it until the host GitHub credential, 4 GiB disk gate, and
 rollback prerequisites above are satisfied. The local build and image-transfer
-sequence below is an alternative when server-side building is unavailable.
+sequence above is an alternative when server-side building is unavailable.
 It must not replace the guarded entry point for the first pre-B2 to B2
 transition: that transition needs one lock across legacy-writer quiescence,
 migration, and promotion. If server-side building is unavailable for B7,
