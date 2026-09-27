@@ -110,6 +110,70 @@ maybeDescribe('users and admin API integration', () => {
     expect((await secondContext.json()).user.theme).toBe('rose')
   })
 
+  test('claims welcome once per account across retries and concurrent contexts', async () => {
+    const first = await register('welcome-first@example.com')
+    const other = await register('welcome-other@example.com')
+    const path = '/api/v1/me/welcome/claim'
+    const claim = async (token: string, body?: string) => {
+      const response = await app.request(path, {
+        method: 'POST',
+        headers: { ...authenticatedHeaders(token), 'Content-Type': 'application/json' },
+        body,
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()) as { showWelcome: boolean }
+    }
+
+    const initial = await prisma.user.findUniqueOrThrow({ where: { id: first.user.id } })
+    expect(initial.welcomeShownAt).toBeNull()
+    expect(await claim(first.accessToken)).toEqual({ showWelcome: true })
+    const claimed = await prisma.user.findUniqueOrThrow({ where: { id: first.user.id } })
+    expect(claimed.welcomeShownAt).toBeInstanceOf(Date)
+    expect(await claim(first.accessToken)).toEqual({ showWelcome: false })
+    expect((await Promise.all(Array.from({ length: 10 }, () => claim(first.accessToken))))
+      .every((result) => result.showWelcome === false)).toBe(true)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: first.user.id } })).welcomeShownAt)
+      .toEqual(claimed.welcomeShownAt)
+
+    // A client-supplied id cannot claim or reset another account's marker.
+    expect(await claim(first.accessToken, JSON.stringify({ userId: other.user.id })))
+      .toEqual({ showWelcome: false })
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: other.user.id } })).welcomeShownAt)
+      .toBeNull()
+    expect(await claim(other.accessToken)).toEqual({ showWelcome: true })
+  })
+
+  test('parallel claims return exactly one first visit and reject anonymous calls', async () => {
+    const session = await register('welcome-parallel@example.com')
+    const path = '/api/v1/me/welcome/claim'
+    const anonymous = await app.request(path, { method: 'POST' })
+    expect(anonymous.status).toBe(401)
+    const results = await Promise.all(Array.from({ length: 12 }, async () => {
+      const response = await app.request(path, {
+        method: 'POST', headers: authenticatedHeaders(session.accessToken),
+      })
+      expect(response.status).toBe(200)
+      return (await response.json() as { showWelcome: boolean }).showWelcome
+    }))
+    expect(results.filter(Boolean)).toHaveLength(1)
+    expect(results.filter((value) => !value)).toHaveLength(11)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: session.user.id } })).welcomeShownAt)
+      .toBeInstanceOf(Date)
+  })
+
+  test('backfilled account never receives welcome after the migration', async () => {
+    const session = await register('welcome-existing@example.com')
+    const shownAt = new Date('2026-09-27T00:00:00.000Z')
+    await prisma.user.update({ where: { id: session.user.id }, data: { welcomeShownAt: shownAt } })
+    const response = await app.request('/api/v1/me/welcome/claim', {
+      method: 'POST', headers: authenticatedHeaders(session.accessToken),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ showWelcome: false })
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: session.user.id } })).welcomeShownAt)
+      .toEqual(shownAt)
+  })
+
   test('rejects regular users from every admin endpoint', async () => {
     const session = await register('regular@example.com')
 

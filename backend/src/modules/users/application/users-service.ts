@@ -14,6 +14,7 @@ import type {
   ProfileWriter,
   UserRecord,
   UserRoleUpdater,
+  WelcomeClaimer,
 } from './ports'
 
 type UsersServiceDependencies = {
@@ -22,10 +23,20 @@ type UsersServiceDependencies = {
   clock: Clock
   profileWriter: ProfileWriter
   userRoleUpdater: UserRoleUpdater
+  welcomeClaimer: WelcomeClaimer
 }
 
 export class UsersService {
   constructor(private readonly dependencies: UsersServiceDependencies) {}
+
+  async claimWelcome(principal: AuthenticatedPrincipal) {
+    return {
+      showWelcome: await this.dependencies.welcomeClaimer.claimWelcome(
+        principal.id,
+        this.dependencies.clock.now(),
+      ),
+    }
+  }
 
   async updateProfile(principal: AuthenticatedPrincipal, input: UpdateProfileRequest) {
     const user = await this.dependencies.profileWriter.updateProfile(

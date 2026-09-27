@@ -29,12 +29,22 @@ async function installHost(page: Page, subject: number) {
   }, signedInitData(subject))
 }
 
-test('zero-family welcome runs without a click and restores normal family navigation', async ({ page }) => {
+test('account welcome runs once across browser contexts and restores family navigation', async ({ page, browser }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installHost(page, 81000101)
+  let firstContextClaims = 0
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/me/welcome/claim') firstContextClaims += 1
+  })
   await page.goto('/')
   const welcome = page.locator('[data-slot="welcome-splash"]')
   await expect(welcome).toBeVisible()
+  const secondContext = await browser.newContext()
+  const secondPage = await secondContext.newPage()
+  await installHost(secondPage, 81000101)
+  await secondPage.goto('/')
+  await expect(secondPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await expect(secondPage.locator('[data-slot="welcome-splash"]')).toHaveCount(0)
   await expect(welcome.locator('button')).toHaveCount(0)
   await expect(welcome.locator('img')).toHaveCount(14)
   expect(await welcome.locator('.logo-wrap').evaluate((element) => Number.parseFloat(getComputedStyle(element).top))).toBeGreaterThanOrEqual(38)
@@ -49,12 +59,21 @@ test('zero-family welcome runs without a click and restores normal family naviga
   await expect(page.getByRole('button', { name: 'Создать свою семью' })).toBeVisible()
   await expect(welcome).toHaveCount(0)
   expect(await page.evaluate(() => document.body.style.overflow)).toBe('')
+  expect(firstContextClaims).toBe(1)
 
-  await page.getByRole('button', { name: 'Создать свою семью' }).click()
-  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   await expect(welcome).toHaveCount(0)
+  expect(firstContextClaims).toBe(2)
+
+  await page.getByRole('button', { name: 'Создать свою семью' }).click()
+  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
+  expect(firstContextClaims).toBe(2)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await expect(welcome).toHaveCount(0)
+  expect(firstContextClaims).toBe(3)
+  await secondContext.close()
 })
 
 test('reduced motion shows the static welcome briefly before continuing', async ({ page }) => {
@@ -66,4 +85,21 @@ test('reduced motion shows the static welcome briefly before continuing', async 
   expect(await welcome.locator('.footer').evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 2_500 })
   await expect(welcome).toHaveCount(0)
+})
+
+test('failed claim stays retryable and never guesses that Welcome is due', async ({ page }) => {
+  await installHost(page, 81000103)
+  let failed = false
+  await page.route('**/api/v1/me/welcome/claim', async (route) => {
+    if (!failed) {
+      failed = true
+      await route.abort('failed')
+    } else await route.continue()
+  })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: /Повторить/ })).toBeVisible()
+  await expect(page.locator('[data-slot="welcome-splash"]')).toHaveCount(0)
+  await page.getByRole('button', { name: /Повторить/ }).click()
+  await expect(page.locator('[data-slot="welcome-splash"]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
 })

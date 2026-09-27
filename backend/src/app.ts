@@ -196,6 +196,7 @@ export function createApp({
   app.route('/api/v1', media.routes)
   app.route('/api/v1', memories.routes)
   app.route('/api/users', users.userRoutes)
+  app.route('/api/v1', users.v1UserRoutes)
   app.route('/api/admin', users.adminRoutes)
   app.route('/api/uploads', uploads.routes)
   if (telegramRoutes) app.route('/', telegramRoutes)

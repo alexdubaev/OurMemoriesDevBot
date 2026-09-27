@@ -16,6 +16,7 @@ model User {
   role                UserRole             @default(user)
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")
+  welcomeShownAt      DateTime?            @map("welcome_shown_at")
   sessions            AuthSession[]
   passwordResetTokens PasswordResetToken[]
   avatars             UserAvatar[]

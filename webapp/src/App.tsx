@@ -33,7 +33,7 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
-import { WelcomeSplash } from '@/features/welcome'
+import { claimWelcome, WelcomeSplash } from '@/features/welcome'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -200,6 +200,9 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [welcomeGateComplete, setWelcomeGateComplete] = useState(false)
   const welcomeSeen = useRef(false)
   const welcomeResolve = useRef<(() => void) | null>(null)
+  const welcomeClaim = useRef<ReturnType<typeof claimWelcome> | null>(null)
+  const [welcomeClaimError, setWelcomeClaimError] = useState(false)
+  const [welcomeClaimRetry, setWelcomeClaimRetry] = useState(0)
 
   const finishWelcome = useCallback(() => {
     if (!welcomeResolve.current) return
@@ -393,24 +396,35 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
 
   useEffect(() => {
     let cancelled = false
-    const gateWelcome = async (catalog: FamilyHomeResponse | null) => {
-      if (!catalog || catalog.items.length !== 0 || catalog.nextCursor || welcomeSeen.current) {
-        setWelcomeGateComplete(true)
+    const start = async () => {
+      // Keep one claim promise across React's development effect replay. A replayed
+      // request would consume the server claim and hide Welcome from this mount.
+      welcomeClaim.current ??= claimWelcome(transport).catch((error: unknown) => {
+        welcomeClaim.current = null
+        throw error
+      })
+      let showWelcome: boolean
+      try {
+        ;({ showWelcome } = await welcomeClaim.current)
+      } catch {
+        if (!cancelled) setWelcomeClaimError(true)
         return
       }
-      await new Promise<void>((resolve) => {
-        welcomeResolve.current = resolve
-        setWelcomeVisible(true)
-      })
-    }
-    const start = async () => {
+      if (cancelled) return
+      setWelcomeClaimError(false)
+      if (showWelcome && !welcomeSeen.current) {
+        await new Promise<void>((resolve) => {
+          welcomeResolve.current = resolve
+          setWelcomeVisible(true)
+        })
+        if (cancelled) return
+      }
+      setWelcomeGateComplete(true)
       if (inviteToken) {
         try {
           const preview = await previewInvite(transport, inviteToken)
           if (cancelled) return
           const catalog = await refreshHome(true)
-          if (cancelled) return
-          await gateWelcome(catalog)
           if (cancelled) return
           let alreadyMember = catalog?.items.some((item) => item.familyId === preview.family.id) ?? false
           let cursor = catalog?.nextCursor ?? null
@@ -443,8 +457,6 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
       const result = await refreshHome(true)
       if (cancelled) return
-      await gateWelcome(result)
-      if (cancelled) return
       if (!cancelled && maxVideoUploadAcceptance && result?.items.length === 1 && !result.nextCursor) {
         void selectFamily(result.items[0]!.familyId)
       } else if (!cancelled && maxVideoUploadAcceptance && result?.items.length) {
@@ -458,7 +470,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       welcomeResolve.current = null
       resolve?.()
     }
-  }, [currentUserId, hostBridge.kind, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport])
+  }, [currentUserId, hostBridge.kind, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
 
   const loadMore = async () => {
     if (!home?.nextCursor || loadingMore) return
@@ -508,6 +520,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   }
 
   if (welcomeVisible) return <WelcomeSplash onComplete={finishWelcome} />
+  if (welcomeClaimError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><BrandLogo className="w-[148px]" /><div className="mt-8"><InlineError onRetry={() => { setWelcomeClaimError(false); setWelcomeClaimRetry((count) => count + 1) }} /></div></main>
   if (!welcomeGateComplete || invitePending) return <BootPreloader style={insetsStyle} />
   if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={async () => {
     setInviteIssue(null)

@@ -19,6 +19,10 @@ export type ProfileWriter = {
   updateProfile(userId: string, input: { displayName?: string | null; theme?: import('@web-app-demo/contracts').MemolyTheme }): Promise<UserRecord>
 }
 
+export type WelcomeClaimer = {
+  claimWelcome(userId: string, now: Date): Promise<boolean>
+}
+
 export type AdminDashboardReader = {
   dashboard(createdAfter: Date): Promise<AdminDashboardResponse>
 }
