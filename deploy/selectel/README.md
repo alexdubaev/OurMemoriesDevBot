@@ -314,6 +314,17 @@ stops the run, and the same approved list can resume without resetting prior
 families. Do not scan or backfill historical Memories. Turn on the multi-family
 gate only after every target family and the authenticated smoke checks pass.
 
+```sh
+export B7_FAMILY_IDS_FILE=/opt/memoly/activation/approved-family-ids.txt
+export MEMOLY_PRODUCT_SHA='<accepted full deployed SHA>'
+export MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+export MEMOLY_WEBAPP_IMAGE_TAG="$MEMOLY_PRODUCT_SHA"
+docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
+  bun scripts/activate-unread-tracking.ts < "$B7_FAMILY_IDS_FILE"
+docker compose -f /opt/memoly/compose.yml -p memoly run -T --rm --no-deps backend \
+  bun scripts/activate-unread-tracking.ts --apply < "$B7_FAMILY_IDS_FILE"
+```
+
 ## Config validation
 
 Before copying files to the host, run:
