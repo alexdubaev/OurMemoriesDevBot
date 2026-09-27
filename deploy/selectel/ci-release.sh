@@ -363,6 +363,7 @@ main() {
   release_failure() {
     local status=$?
     trap - EXIT
+    [ "$status" -eq 0 ] && exit 0
     if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
       printf 'ERROR: pre-B2 runtime cannot be restored after this release boundary; keeping legacy writers stopped for forward recovery.\n' >&2
       if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
