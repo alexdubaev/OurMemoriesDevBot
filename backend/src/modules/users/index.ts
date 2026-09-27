@@ -21,6 +21,7 @@ export function createUsersModule(options: CreateUsersModuleOptions) {
     clock: { now: () => new Date() },
     profileWriter: repository,
     userRoleUpdater: repository,
+    welcomeClaimer: repository,
   })
   return createUsersRoutes({
     adminUsersReadRateLimit: options.adminUsersReadRateLimit,

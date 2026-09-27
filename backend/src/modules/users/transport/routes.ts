@@ -8,6 +8,7 @@ import {
   updateProfileResponseSchema,
   updateUserRoleRequestSchema,
   updateUserRoleResponseSchema,
+  welcomeClaimResponseSchema,
 } from '@web-app-demo/contracts'
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
@@ -47,6 +48,19 @@ const updateProfileRoute = createRoute({
     401: { content: errorContent, description: 'Authentication required' },
     413: { content: errorContent, description: 'Request body is too large' },
     429: { content: errorContent, description: 'Too many requests' },
+  },
+})
+
+const welcomeClaimRoute = createRoute({
+  method: 'post',
+  path: '/me/welcome/claim',
+  security: bearerSecurity,
+  responses: {
+    200: {
+      content: { 'application/json': { schema: welcomeClaimResponseSchema } },
+      description: 'Atomically claim the current account welcome',
+    },
+    401: { content: errorContent, description: 'Authentication required' },
   },
 })
 
@@ -126,6 +140,7 @@ export function createUsersRoutes({
   service,
 }: CreateUsersRoutesOptions) {
   const userRoutes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
+  const v1UserRoutes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   const adminRoutes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
 
   userRoutes.use('*', requireAuth)
@@ -134,6 +149,11 @@ export function createUsersRoutes({
       service.updateProfile(c.var.user, c.req.valid('json')),
     )
     return c.json(result, 200)
+  })
+
+  v1UserRoutes.use('/me/welcome/claim', requireAuth)
+  v1UserRoutes.openapi(welcomeClaimRoute, async (c) => {
+    return c.json(await service.claimWelcome(c.var.user), 200)
   })
 
   adminRoutes.use('*', requireAuth)
@@ -154,5 +174,5 @@ export function createUsersRoutes({
     return c.json(result, 200)
   })
 
-  return { adminRoutes, userRoutes }
+  return { adminRoutes, userRoutes, v1UserRoutes }
 }

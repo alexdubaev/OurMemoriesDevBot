@@ -16,6 +16,7 @@ import type {
   AdminUsersReader,
   ProfileWriter,
   UserRoleUpdater,
+  WelcomeClaimer,
 } from '../application/ports'
 import { UsersFailure } from '../domain/errors'
 
@@ -33,9 +34,17 @@ type UsersRepository =
   & AdminDashboardReader
   & AdminUsersReader
   & UserRoleUpdater
+  & WelcomeClaimer
 
 export function createPrismaUsersRepository(db: DbClient): UsersRepository {
   return {
+    async claimWelcome(userId, now) {
+      const result = await db.user.updateMany({
+        where: { id: userId, welcomeShownAt: null },
+        data: { welcomeShownAt: now },
+      })
+      return result.count === 1
+    },
     updateProfile(userId, input) {
       return db.user.update({
         where: { id: userId },

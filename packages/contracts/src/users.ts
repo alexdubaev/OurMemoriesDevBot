@@ -16,6 +16,9 @@ export const updateProfileResponseSchema = z
   })
   .strict()
 
+export const welcomeClaimResponseSchema = z.object({ showWelcome: z.boolean() }).strict()
+export type WelcomeClaimResponse = z.infer<typeof welcomeClaimResponseSchema>
+
 const positiveIntegerQuerySchema = (defaultValue: number, maximum?: number) =>
   z.coerce.number().int().positive().max(maximum ?? Number.MAX_SAFE_INTEGER).default(defaultValue)
 
