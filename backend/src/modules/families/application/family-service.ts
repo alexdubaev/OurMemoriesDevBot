@@ -76,7 +76,7 @@ export class FamilyService {
 
   async getFamilies(principal: FamilyCreatePrincipal, query: FamilyHomeQuery): Promise<FamilyHomeResponse> {
     const { userId } = principal
-    return this.db.$transaction(async (tx) => {
+    const { response, activeIds } = await this.db.$transaction(async (tx) => {
       // The aggregate is one bounded DB value; the indexed user membership scan never
       // materializes every family card in the API process.
       const snapshots = await tx.$queryRaw<Array<{ snapshot: string; activeCount: bigint }>>`
@@ -119,13 +119,15 @@ export class FamilyService {
           role: true, familyDisplayName: true, membershipEpoch: true,
           family: {
             select: {
-              id: true, name: true, ownerUserId: true,
+              id: true, name: true, ownerUserId: true, unreadTrackingActivatedAt: true,
               children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 },
             },
           },
         },
       }) : []
       const byFamilyId = new Map(memberships.map((membership) => [membership.family.id, membership]))
+      const activeIds = visibleKeys.filter((key) => byFamilyId.get(key.familyId)?.family.unreadTrackingActivatedAt)
+        .map((key) => key.familyId)
       const ownedFamily = await tx.family.findFirst({
         where: { ownerUserId: userId, status: { not: 'deleted' } },
         select: { id: true, status: true },
@@ -169,7 +171,7 @@ export class FamilyService {
         }
       })
       const last = visibleKeys.at(-1)
-      return {
+      const response: FamilyHomeResponse = {
         version: 1,
         ownFamilyId: ownedFamily?.id ?? null,
         ownFamilyStatus: ownedFamily?.status === 'deleting' ? 'deleting' : ownedFamily ? 'active' : null,
@@ -181,7 +183,45 @@ export class FamilyService {
             userId, snapshot, this.idempotencySecret, this.now())
           : null,
       }
+      return { activeIds, response }
     }, { isolationLevel: 'RepeatableRead', timeout: 15_000 })
+    if (activeIds.length === 0) return response
+
+    try {
+      // One indexed, grouped query for the current page; a counter failure never hides family cards.
+      const rows = await this.db.$queryRaw<Array<{ familyId: string; membershipEpoch: number; unreadCount: bigint }>>`
+        SELECT fm.family_id AS "familyId", fm.membership_epoch AS "membershipEpoch",
+               COUNT(m.id) AS "unreadCount"
+          FROM family_members fm
+          JOIN families f ON f.id = fm.family_id
+          LEFT JOIN memories m ON m.family_id = fm.family_id
+           AND m.first_published_ordinal > COALESCE(fm.unread_baseline_ordinal, 0)
+           AND m.first_published_ordinal <= f.publication_ordinal
+           AND m.status = 'published' AND m.deleted_at IS NULL AND m.author_id <> ${userId}::uuid
+           AND NOT EXISTS (
+             SELECT 1 FROM memory_seen s
+              WHERE s.family_id = fm.family_id AND s.user_id = fm.user_id
+                AND s.membership_epoch = fm.membership_epoch AND s.memory_id = m.id
+           )
+         WHERE fm.user_id = ${userId}::uuid AND fm.revoked_at IS NULL
+           AND f.status = 'active' AND f.unread_tracking_activated_at IS NOT NULL
+           AND fm.family_id = ANY(${activeIds}::uuid[])
+         GROUP BY fm.family_id, fm.membership_epoch
+      `
+      const counts = new Map(rows.map((row) => [row.familyId, { epoch: row.membershipEpoch, count: Number(row.unreadCount) }]))
+      if ([...counts.values()].some((result) => !Number.isSafeInteger(result.count))) throw new Error('Unread count exceeds safe integer range')
+      return { ...response, items: response.items.map((item) => {
+        if (!activeIds.includes(item.familyId)) return item
+        const current = counts.get(item.familyId)
+        return current?.epoch === item.membershipEpoch
+          ? { ...item, unreadCount: current.count, unreadState: 'ready' as const }
+          : { ...item, unreadCount: null, unreadState: 'unavailable' as const }
+      }) }
+    } catch {
+      return { ...response, items: response.items.map((item) => activeIds.includes(item.familyId)
+        ? { ...item, unreadCount: null, unreadState: 'unavailable' as const }
+        : item) }
+    }
   }
 
   async createFamily(

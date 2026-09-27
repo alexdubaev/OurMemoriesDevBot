@@ -10,6 +10,7 @@ import {
   memoryPageSchema,
   memoryParamsSchema,
   setLikeRequestSchema,
+  seenMemoriesRequestSchema,
   telegramVideoOpenResponseSchema,
   updateMemoryRequestSchema,
 } from '@web-app-demo/contracts'
@@ -56,6 +57,11 @@ const getRoute = createRoute({
   request: { params: memoryParamsSchema },
   responses: { ...errors, 200: { content: json(memoryDtoSchema), description: 'Family memory' } },
 })
+const seenRoute = createRoute({
+  method: 'post', path: '/families/{familyId}/memories/seen', security: bearerSecurity,
+  request: { params: memoriesFamilyParamsSchema, body: { content: json(seenMemoriesRequestSchema) } },
+  responses: { ...errors, 204: { description: 'Seen state confirmed for current membership epoch' } },
+})
 const updateRoute = createRoute({
   method: 'patch', path: '/families/{familyId}/memories/{memoryId}', security: bearerSecurity,
   request: { params: memoryParamsSchema, body: { content: json(updateMemoryRequestSchema) } },
@@ -98,6 +104,10 @@ export function createMemoryRoutes({
       c.req.valid('header')['idempotency-key'],
     ))
     return c.json(result.memory, result.replayed ? 200 : 201)
+  })
+  routes.openapi(seenRoute, async (c) => {
+    await executeMemory(() => service.markSeen(scope(c.var.user, c.req.valid('param').familyId), c.req.valid('json')))
+    return c.body(null, 204)
   })
   routes.openapi(getRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')

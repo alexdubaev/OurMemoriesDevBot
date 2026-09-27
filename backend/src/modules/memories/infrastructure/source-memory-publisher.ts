@@ -4,6 +4,7 @@ import type { DbClient } from '../../../db'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
+import { allocatePublicationOrdinal, lockPublicationFamily } from './publication-boundary'
 
 export type SourceMemoryInput = {
   id: string
@@ -24,18 +25,24 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
     async publish(scope: FamilyScope, input: SourceMemoryInput, afterWrite?: AfterMemoryWrite) {
       await access.requireFull(scope)
       return db.$transaction(async (tx) => {
-        await lockFullMember(tx, scope)
+        const publication = await lockFullMember(tx, scope)
         const existing = await tx.memory.findUnique({
           where: { id: input.id },
-          select: { id: true, familyId: true, childId: true, kind: true, media: { orderBy: { position: 'asc' }, select: { mediaId: true } } },
+          select: { id: true, familyId: true, childId: true, authorId: true, kind: true, status: true, deletedAt: true,
+            media: { orderBy: { position: 'asc' }, select: { mediaId: true } } },
         })
         if (existing) {
           if (existing.familyId !== scope.familyId) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
-          if (existing.childId !== input.childId || existing.kind !== input.kind) {
+          if (existing.deletedAt || existing.status === 'deleted') throw new MemoryFailure('not_found', 'Воспоминание не найдено')
+          if (existing.childId !== input.childId || existing.kind !== input.kind || existing.authorId !== scope.principal.userId) {
             throw new MemoryFailure('invalid_input', 'Источник не соответствует сохранённому воспоминанию')
           }
           await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
           await reconcileOrderedMedia(tx, scope.familyId, existing.id, existing.media.map(({ mediaId }) => mediaId), input.mediaIds)
+          if (existing.status !== 'published') {
+            const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
+            await tx.memory.update({ where: { id: existing.id }, data: { status: 'published', firstPublishedOrdinal } })
+          }
           await afterWrite?.(tx, existing.id)
           return existing.id
         }
@@ -46,9 +53,11 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         if (input.kind !== 'note' && input.externalAttachment !== 'max-video' && !(await readyMediaCount(tx, scope.familyId, input.mediaIds))) {
           throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
         }
+        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
         await tx.memory.create({ data: {
           id: input.id, familyId: scope.familyId, childId: input.childId,
           authorId: scope.principal.userId, kind: input.kind, body: input.body, occurredAt: input.occurredAt,
+          firstPublishedOrdinal,
         } })
         if (input.mediaIds.length > 0) await tx.memoryMedia.createMany({ data: input.mediaIds.map((mediaId, position) => ({
           familyId: scope.familyId, memoryId: input.id, mediaId, position,
@@ -120,10 +129,7 @@ async function lockMediaAssetsForUpdate(tx: Pick<PrismaTransactionClient, '$quer
 
 async function lockFullMember(tx: PrismaTransactionClient, scope: FamilyScope) {
   await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
-  const family = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM families WHERE id = ${scope.familyId}::uuid AND status = 'active' FOR SHARE
-  `
-  if (!family[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
+  const family = await lockPublicationFamily(tx, scope.familyId)
   const rows = await tx.$queryRaw<Array<{ role: string }>>`
     SELECT fm.role::text AS role
       FROM family_members fm
@@ -134,4 +140,5 @@ async function lockFullMember(tx: PrismaTransactionClient, scope: FamilyScope) {
   `
   if (!rows[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
   if (rows[0].role !== 'full') throw new MemoryFailure('forbidden', 'Для этого действия нужен полный доступ')
+  return family
 }

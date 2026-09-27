@@ -373,6 +373,7 @@ model Family {
   storageUsedBytes     BigInt              @default(0) @map("storage_used_bytes")
   storageReservedBytes BigInt              @default(0) @map("storage_reserved_bytes")
   publicationOrdinal   BigInt              @default(0) @map("publication_ordinal")
+  unreadOrderVersion    BigInt              @default(0) @map("unread_order_version")
   unreadTrackingActivatedAt DateTime?      @map("unread_tracking_activated_at") @db.Timestamptz(6)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
