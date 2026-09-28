@@ -4,6 +4,19 @@ import { resolve } from 'node:path'
 
 const webappRoot = resolve(import.meta.dir, '..')
 
+test('declares the document light-only before loading styles and at the CSS root', async () => {
+  const [html, styles] = await Promise.all([
+    readFile(resolve(webappRoot, 'index.html'), 'utf8'),
+    readFile(resolve(webappRoot, 'src/index.css'), 'utf8'),
+  ])
+  const declarations = html.match(/<meta\s+name=["']color-scheme["'][^>]*>/gi) ?? []
+
+  expect(declarations).toHaveLength(1)
+  expect(declarations[0]).toMatch(/content=["']only light["']/i)
+  expect(html.indexOf(declarations[0]!)).toBeLessThan(html.indexOf('<link rel="stylesheet"'))
+  expect(styles).toMatch(/:root\s*\{\s*color-scheme:\s*only light\s*;/)
+})
+
 test('uses one cover-safe viewport that permits page zoom in the Mini App shell', async () => {
   const html = await readFile(resolve(webappRoot, 'index.html'), 'utf8')
   const viewports = html.match(/<meta\s+name=["']viewport["'][^>]*>/gi) ?? []

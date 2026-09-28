@@ -3,6 +3,10 @@
 @import "shadcn/tailwind.css";
 @import "./styles/tokens.css";
 
+:root {
+  color-scheme: only light;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
