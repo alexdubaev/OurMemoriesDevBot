@@ -9,11 +9,14 @@ export {
   createNoteMemory,
   createPhotoIdempotencyKey,
   createPhotoMemory,
+  createMediaMemory,
   getMemory,
   resolvePhotoContentType,
+  resolveComposerFile,
   updateMemory,
   validatePhotoFile,
   validatePhotoFiles,
+  validateComposerFiles,
 } from './api'
 export type { PhotoFileValidation } from './api'
 export { composerDateOnly, composerOccurredAt, photoOccurredAt } from './date'

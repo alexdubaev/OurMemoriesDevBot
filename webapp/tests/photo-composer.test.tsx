@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import {
   composerDateOnly,
   composerOccurredAt,
+  validateComposerFiles,
   validatePhotoFiles,
 } from '../src/features/composer'
 import { PhotoComposer } from '../src/features/composer/PhotoComposer'
@@ -20,6 +21,197 @@ test('accepts one to ten supported photos and rejects video or an eleventh photo
   expect(validatePhotoFiles(Array.from({ length: 10 }, (_, index) => file(`${index}.png`, 128, 'image/png')))).toEqual({ ok: true })
   expect(validatePhotoFiles([file('clip.mp4', 128, 'video/mp4')])).toEqual({ ok: false, code: 'unsupported_format' })
   expect(validatePhotoFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`)))).toEqual({ ok: false, code: 'too_many' })
+})
+
+test('mixed composer preserves selection order when 2 photos and 2 videos finish out of order', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const uploads: Array<() => void> = []
+  const originals = ['00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000002', '00000000-0000-7000-8000-000000000003', '00000000-0000-7000-8000-000000000004']
+  let reservation = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+      if (path.endsWith('/uploads')) {
+        const index = reservation++
+        return { assetId: originals[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index % 2 ? 'video/mp4' : 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) return { asset: { id: originals[Number(path.match(/upload-(\d+)/)?.[1] ?? 0)] } } as never
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Promise<Response>((resolve) => uploads.push(() => resolve(new Response(null, { status: 200 }))))
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('a.jpg'), file('b.mp4', 128, 'video/mp4'), file('c.jpg'), file('d.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(input, 'onChange'))
+    const save = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
+    let saveTask!: Promise<unknown>
+    await act(async () => { saveTask = invoke(save, 'onClick'); await flushInteractive() })
+    for (let spin = 0; spin < 20 && uploads.length < 4; spin += 1) await Promise.resolve()
+    expect(uploads).toHaveLength(3)
+    await act(async () => { for (const finish of [...uploads].reverse()) finish(); await flushInteractive() })
+    for (let spin = 0; spin < 20 && uploads.length < 4; spin += 1) await Promise.resolve()
+    expect(uploads).toHaveLength(4)
+    await act(async () => { uploads[3]!(); await saveTask })
+    const memory = requests.find(({ path }) => path.endsWith('/memories'))
+    expect(memory?.body).toMatchObject({ kind: 'media', mediaIds: originals })
+    expect(memory?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('photo + video + photo publishes one media Memory with one caption and event time', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const ids = ['00000000-0000-7000-8000-000000000031', '00000000-0000-7000-8000-000000000032', '00000000-0000-7000-8000-000000000033']
+  let next = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+      if (path.endsWith('/uploads')) {
+        const index = next++
+        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 1 ? 'video/mp4' : 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      const uploadIndex = Number(path.match(/upload-(\d+)\/finalize/)?.[1] ?? 0)
+      if (path.includes('/finalize')) return { asset: { id: ids[uploadIndex] } } as never
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('a.jpg'), file('b.mp4', 128, 'video/mp4'), file('c.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    caption.value = 'На прогулке'
+    await act(async () => invoke(caption, 'onChange'))
+    const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
+    date.value = '2026-09-20'
+    await act(async () => invoke(date, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    const creates = requests.filter(({ path }) => path.endsWith('/memories'))
+    expect(creates).toHaveLength(1)
+    expect(creates[0]?.body).toMatchObject({ kind: 'media', body: 'На прогулке', occurredAt: expect.any(String), mediaIds: ids })
+    expect(creates[0]?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('mixed selection accepts one to ten photo/video items and rejects eleven or unsupported video', () => {
+  expect(validateComposerFiles([file('one.jpg')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('one.jpg'), file('clip.mov', 128, 'video/quicktime')])).toEqual({ ok: true })
+  expect(validateComposerFiles(Array.from({ length: 10 }, (_, index) => index % 2 ? file(`${index}.mp4`, 128, 'video/mp4') : file(`${index}.jpg`)))).toEqual({ ok: true })
+  expect(validateComposerFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`))).code).toBe('too_many')
+  expect(validateComposerFiles([file('large.mp4', 100_000_001, 'video/mp4')]).ok).toBe(false)
+  expect(validateComposerFiles([file('unsupported.webm', 128, 'video/webm')]).ok).toBe(false)
+  expect(validateComposerFiles([file('wrong.mp4', 128, 'image/jpeg')]).ok).toBe(false)
+  expect(validateComposerFiles([file('wrong.jpg', 128, 'video/mp4')]).ok).toBe(false)
+  expect(validateComposerFiles([new File([new Uint8Array(128)], 'extension-only.mp4')])).toEqual({ ok: true })
+  expect(validatePhotoFiles([file('wrong.jpg', 128, 'image/png')])).toEqual({ ok: false, code: 'unsupported_format' })
+  expect(validatePhotoFiles([file('alias.heic', 128, 'image/heif')])).toEqual({ ok: true })
+  expect(validatePhotoFiles([file('alias.heif', 128, 'image/heic')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('alias.heic', 128, 'image/heif')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('wrong.jpg', 128, 'image/heif')]).ok).toBe(false)
+})
+
+test('mixed upload failure waits for all items and blocks publication until retry completes', async () => {
+  const browser = installInteractiveDom()
+  const creates: Array<Record<string, unknown>> = []
+  const ids = ['00000000-0000-7000-8000-000000000011', '00000000-0000-7000-8000-000000000012', '00000000-0000-7000-8000-000000000013']
+  const reservationAssets = new Map<string, string>()
+  let reservation = 0
+  let photoAttempts = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        const index = reservation++
+        const assetId = ids[index]!
+        reservationAssets.set(`upload-${index}`, assetId)
+        return { assetId, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 0 || index === 2 ? 'image/jpeg' : 'video/mp4' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) {
+        const uploadId = path.match(/(upload-\d+)\/finalize/)?.[1] ?? ''
+        return { asset: { id: reservationAssets.get(uploadId) } } as never
+      }
+      if (path.endsWith('/memories')) creates.push(options?.body as Record<string, unknown>)
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/0') && photoAttempts++ === 0) return new Response(null, { status: 500 })
+    return new Response(null, { status: 200 })
+  }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('fail.jpg'), file('ready.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(input, 'onChange'))
+    const publish = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
+    await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
+    expect(creates).toHaveLength(0)
+    expect(textOf(browser.container)).toContain('Не удалось загрузить медиа')
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Вернуться к вложениям'), 'onClick'))
+    expect(textOf(browser.container)).toContain('Ошибка загрузки')
+    await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
+    expect(creates).toHaveLength(1)
+    expect(creates[0]).toMatchObject({ kind: 'media', mediaIds: [ids[2], ids[1]] })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('duplicate finalized asset IDs block the single Memory request', async () => {
+  const browser = installInteractiveDom()
+  let createCount = 0
+  const duplicate = '00000000-0000-7000-8000-000000000021'
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/uploads')) {
+        const index = Math.random().toString(36).slice(2)
+        return { assetId: duplicate, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) return { asset: { id: duplicate } } as never
+      if (path.endsWith('/memories')) createCount += 1
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(createCount).toBe(0)
+    expect(textOf(browser.container)).toContain('Не удалось подтвердить фотографию')
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('keeps the StrictMode rehearsal photo preview URL live', async () => {
