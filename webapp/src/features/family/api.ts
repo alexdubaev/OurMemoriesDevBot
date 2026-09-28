@@ -116,13 +116,37 @@ export async function uploadFamilyPhoto(
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
 ) {
+  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage)
+}
+
+export async function uploadFamilyVideo(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  file: File,
+  contentType: 'video/mp4' | 'video/quicktime',
+  signal?: AbortSignal,
+  onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+) {
+  return uploadFamilyMedia(transport, familyId, file, 'video', contentType, 'memory', signal, onStage)
+}
+
+async function uploadFamilyMedia(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  file: File,
+  kind: 'photo' | 'video',
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif' | 'video/mp4' | 'video/quicktime',
+  purpose: 'child_avatar' | 'memory',
+  signal?: AbortSignal,
+  onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+) {
   onStage?.('reserve')
   const reservation = await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads`, reserveMediaUploadResponseSchema,
     {
       method: 'POST',
       body: reserveMediaUploadRequestSchema.parse({
-        purpose, kind: 'photo', contentType, byteSize: file.size,
+        purpose, kind, contentType, byteSize: file.size,
       }),
       signal,
     },
@@ -136,7 +160,7 @@ export async function uploadFamilyPhoto(
     mode: 'cors',
     signal,
   })
-  if (!response.ok && response.status !== 412) throw new Error('Не удалось загрузить фотографию')
+  if (!response.ok && response.status !== 412) throw new Error(kind === 'photo' ? 'Не удалось загрузить фотографию' : 'Не удалось загрузить видео')
   onStage?.('finalize')
   await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(reservation.upload.uploadId)}/finalize`,
