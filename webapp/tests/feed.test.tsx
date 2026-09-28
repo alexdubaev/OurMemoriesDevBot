@@ -105,6 +105,28 @@ const noteMemory: MemoryDto = {
   attachments: [],
 }
 
+const mixedMemory: MemoryDto = {
+  ...photoMemory,
+  id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  kind: 'media',
+  body: 'Фото и видео по порядку',
+  attachments: [photoMemory.attachments[0], videoMemory.attachments[0], { ...photoMemory.attachments[0], id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }, { ...videoMemory.attachments[0], id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }],
+}
+
+test('mixed memory renders one card with ordered slides and lazily mounts video', () => {
+  const markup = renderFeed(feedClientWith([mixedMemory]))
+  expect(markup.match(/data-memory-id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"/g)?.length).toBe(1)
+  expect(markup).toContain('data-memory-kind="media"')
+  const positions = [['1', 'photo'], ['2', 'video'], ['3', 'photo'], ['4', 'video']].map(([position, kind]) => markup.indexOf(`data-carousel-position="${position}" data-media-kind="${kind}"`))
+  expect(positions.every((position) => position >= 0)).toBe(true)
+  expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  expect(markup).toContain('1 / 4')
+  expect(markup).toContain('data-seen-active-index="0"')
+  expect(markup).toContain('data-carousel-active="true"')
+  expect(markup.match(/aria-hidden="true"[^>]*inert=""/g)?.length).toBe(3)
+  expect(markup).not.toContain('<video')
+})
+
 test('a next-page error keeps already displayed memories on screen', () => {
   const queryClient = feedClient()
   const query = queryClient.getQueryCache().find({ queryKey: feedQueryKeys.list(familyId, 'all') })
