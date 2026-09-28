@@ -57,7 +57,7 @@ export function createMaxVoiceProcessor(options: {
       })
       await publisher.publish(scope, {
         id: source.plannedMemoryId, childId: admission.childId, kind: 'voice', body: input.event.text ?? '',
-        occurredAt: new Date(input.event.occurredAt), mediaIds: [mediaId],
+        occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds: [mediaId],
       }, async (tx, memoryId) => {
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)

@@ -857,6 +857,7 @@ maybeDescribe('Telegram durable capture', () => {
     await prisma.memory.create({ data: {
       id: initial[0]!.plannedMemoryId, familyId: owner.familyId, childId: owner.childId,
       authorId: owner.userId, kind: 'photo', body: 'До сбоя', occurredAt: new Date('2026-08-28T00:00:00Z'),
+      firstPublishedAt: new Date(),
     } })
     await prisma.memoryMedia.createMany({ data: initial.map((source, position) => ({
       familyId: owner.familyId, memoryId: initial[0]!.plannedMemoryId, mediaId: source.plannedMediaId!, position,
@@ -930,7 +931,7 @@ maybeDescribe('Telegram durable capture', () => {
   test('changes a caption only through its live ForceReply request, and cancellation is durable', async () => {
     const owner = await familyOwner('55001')
     const memory = await prisma.memory.create({ data: {
-      familyId: owner.familyId, childId: owner.childId, authorId: owner.userId, kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(),
+      familyId: owner.familyId, childId: owner.childId, authorId: owner.userId, kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(), firstPublishedAt: new Date(),
     } })
     const expiresAt = new Date(Date.now() + 10 * 60_000)
     await prisma.captionRequest.create({ data: {
@@ -986,7 +987,7 @@ maybeDescribe('Telegram durable capture', () => {
     })
     const memory = await prisma.memory.create({ data: {
       familyId: owner.familyId, childId: owner.childId, authorId: full.userId,
-      kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(),
+      kind: 'voice', body: 'Исходная подпись', occurredAt: new Date(), firstPublishedAt: new Date(),
     } })
     await prisma.captionRequest.create({ data: {
       familyId: owner.familyId, userId: full.userId, memoryId: memory.id, chatId: 55012n,

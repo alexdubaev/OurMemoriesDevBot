@@ -414,6 +414,7 @@ async function publishSingle(
     body: event.kind === 'note' ? event.text : event.kind === 'media' ? event.caption : '',
     occurredAt: new Date('occurredAt' in event ? event.occurredAt : source.createdAt),
     mediaIds: mediaId ? [mediaId] : [],
+    ...(memoryKind(event) === 'video' && !mediaId ? { externalAttachment: 'telegram-video' as const } : {}),
   }, async (tx, committedMemoryId) => {
     await afterWrite?.(tx, committedMemoryId)
     await tx.telegramSource.update({

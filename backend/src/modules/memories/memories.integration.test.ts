@@ -6,6 +6,7 @@ import { Client } from 'pg'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
+import { Prisma } from '../../generated/prisma/client'
 import { signAccessToken } from '../auth'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -118,6 +119,26 @@ maybeDescribe('Memories API', () => {
     const replay = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', input, key)
     expect(replay.response.status).toBe(200)
     expect(replay.body).toEqual(original)
+  })
+
+  test('replays a pre-MM-0 idempotency snapshot with absent temporal fields as null', async () => {
+    const owner = await admittedUser('Владелец', '32002')
+    const family = await createFamily(owner.token, 'Семья')
+    const key = randomUUID()
+    const input = noteInput(family.body.child.id, 'Старый снимок')
+    const created = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', input, key)
+    expect(created.response.status).toBe(201)
+
+    const idempotencyRecord = await prisma.idempotencyRecord.findFirstOrThrow({ where: { key } })
+    const legacySnapshot = { ...(idempotencyRecord.responseSnapshot as Record<string, unknown>) }
+    delete legacySnapshot.firstPublishedAt
+    delete legacySnapshot.sourcePublishedAt
+    await prisma.idempotencyRecord.update({ where: { id: idempotencyRecord.id }, data: { responseSnapshot: legacySnapshot as Prisma.InputJsonValue } })
+
+    const replay = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', input, key)
+    expect(replay.response.status).toBe(200)
+    expect(replay.body).toMatchObject({ firstPublishedAt: null, sourcePublishedAt: null })
+    expect(replay.body.id).toBe(created.body.id)
   })
 
   test('enforces family isolation, child ownership, and the full/viewer mutation boundary', async () => {
@@ -462,6 +483,37 @@ maybeDescribe('Memories API', () => {
     }))).rejects.toThrow()
   })
 
+  test('publishes ordered photo/video as one media Memory and rejects voice, foreign, and unready assets', async () => {
+    const owner = await admittedUser('Владелец', '38011')
+    const otherOwner = await admittedUser('Другой владелец', '38012')
+    const family = await createFamily(owner.token, 'Семья медиа')
+    const foreignFamily = await createFamily(otherOwner.token, 'Другая семья')
+    const photo = await createMemoryAsset(family.body.family.id, owner.userId, 'photo')
+    const video = await createMemoryAsset(family.body.family.id, owner.userId, 'video')
+    const voice = await createMemoryAsset(family.body.family.id, owner.userId, 'voice')
+    const unready = await createMemoryAsset(family.body.family.id, owner.userId, 'photo', 'pending')
+    const foreign = await createMemoryAsset(foreignFamily.body.family.id, otherOwner.userId, 'photo')
+    const created = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
+      kind: 'media', childId: family.body.child.id, body: 'Фото и видео',
+      occurredAt: '2023-07-14T18:43:00.000Z', mediaIds: [photo.id, video.id],
+    }, randomUUID())
+    expect(created.response.status).toBe(201)
+    expect(created.body).toMatchObject({ kind: 'media', firstPublishedAt: expect.any(String), sourcePublishedAt: null })
+    expect(created.body.attachments.map((attachment: { id: string }) => attachment.id)).toEqual([photo.id, video.id])
+    const persisted = await prisma.memory.findUniqueOrThrow({ where: { id: created.body.id }, include: { media: { orderBy: { position: 'asc' } } } })
+    expect(persisted.media.map(({ position, mediaId }) => ({ position, mediaId }))).toEqual([
+      { position: 0, mediaId: photo.id }, { position: 1, mediaId: video.id },
+    ])
+
+    for (const mediaIds of [[voice.id], [foreign.id], [unready.id]]) {
+      const rejected = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
+        kind: 'media', childId: family.body.child.id, body: '',
+        occurredAt: '2023-07-14T18:43:00.000Z', mediaIds,
+      }, randomUUID())
+      expect(rejected.response.status).toBeGreaterThanOrEqual(400)
+    }
+  })
+
   test('returns the measured 48-peak voice waveform through the Memory contract', async () => {
     const owner = await admittedUser('Владелец', '38101')
     const family = await createFamily(owner.token, 'Семья')
@@ -503,6 +555,7 @@ maybeDescribe('Memories API', () => {
         kind: 'voice',
         body: 'Первое слово',
         occurredAt: new Date('2026-09-11T10:00:00.000Z'),
+        firstPublishedAt: new Date(),
         media: { create: { mediaId: asset.id, position: 0 } },
       },
     })
@@ -662,6 +715,16 @@ maybeDescribe('Memories API', () => {
   function createNote(token: string, familyId: string, childId: string, body: string, occurredAt = Date.now() - 30_000) {
     return request(`/api/v1/families/${familyId}/memories`, token, 'POST',
       noteInput(childId, body, occurredAt), randomUUID())
+  }
+
+  function createMemoryAsset(familyId: string, uploaderId: string, mediaKind: 'photo' | 'video' | 'voice', originalStatus: 'stored' | 'pending' = 'stored') {
+    const mime = mediaKind === 'photo' ? 'image/png' : mediaKind === 'video' ? 'video/mp4' : 'audio/ogg'
+    return prisma.mediaAsset.create({ data: {
+      familyId, uploaderId, sourceKind: 'upload', purpose: 'memory', mediaKind,
+      originalKey: `media-originals/${randomUUID()}`, declaredMime: mime, verifiedMime: mime,
+      sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: 1n,
+      originalStatus, renditionStatus: 'ready',
+    } })
   }
 
   function noteInput(childId: string, body: string, occurredAt = Date.now() - 30_000) {

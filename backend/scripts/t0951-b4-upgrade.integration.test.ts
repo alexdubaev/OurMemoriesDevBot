@@ -67,16 +67,19 @@ test('B4 guard upgrades a populated B3 database without changing archive ordinal
     await database.connect()
     await database.query('UPDATE families SET unread_tracking_activated_at = now() WHERE id = $1', [familyId])
     await database.query('UPDATE memories SET body = $1 WHERE id = $2', ['Edited historical note', memoryId])
-    const old = await database.query<{ first_published_ordinal: string | null }>(
-      'SELECT first_published_ordinal FROM memories WHERE id = $1', [memoryId])
+    const old = await database.query<{ first_published_ordinal: string | null; first_published_at: Date | null }>(
+      'SELECT first_published_ordinal, first_published_at FROM memories WHERE id = $1', [memoryId])
     expect(old.rows[0]?.first_published_ordinal).toBeNull()
+    expect(old.rows[0]?.first_published_at).toBeNull()
+    await expect(database.query('UPDATE memories SET first_published_at = now() WHERE id = $1', [memoryId]))
+      .rejects.toMatchObject({ code: '23514' })
     await expect(database.query(`INSERT INTO memories (id, family_id, child_id, author_id, kind, body, occurred_at, updated_at)
       VALUES ($1, $2, $3, $4, 'note', 'Untracked', now(), now())`,
     [randomUUID(), familyId, childId, ownerId])).rejects.toMatchObject({ code: '23514' })
     await database.query('UPDATE families SET publication_ordinal = 1 WHERE id = $1', [familyId])
     await database.query(`INSERT INTO memories
-      (id, family_id, child_id, author_id, kind, body, occurred_at, updated_at, first_published_ordinal)
-      VALUES ($1, $2, $3, $4, 'note', 'Tracked', now(), now(), 1)`,
+      (id, family_id, child_id, author_id, kind, body, occurred_at, updated_at, first_published_ordinal, first_published_at)
+      VALUES ($1, $2, $3, $4, 'note', 'Tracked', now(), now(), 1, now())`,
     [randomUUID(), familyId, childId, ownerId])
     const count = await database.query<{ count: number }>('SELECT count(*)::int AS count FROM memories')
     expect(count.rows[0]?.count).toBe(2)

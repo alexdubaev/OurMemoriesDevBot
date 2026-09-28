@@ -118,6 +118,7 @@ export function createMaxTaskProcessor(options: {
       kind: 'note',
       body: text,
       occurredAt: new Date(event.occurredAt),
+      sourcePublishedAt: new Date(event.occurredAt),
       mediaIds: [],
     }, async (tx, memoryId) => {
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })

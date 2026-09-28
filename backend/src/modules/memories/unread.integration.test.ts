@@ -99,7 +99,10 @@ maybeDescribe('personal unread memories', () => {
     expect(viewerMember.unreadBaselineOrdinal).toBe(0n)
     const published = await note(owner, family, 'first new-family memory')
     expect(published.response.status).toBe(201)
-    expect((await prisma.memory.findUniqueOrThrow({ where: { id: published.body.id } })).firstPublishedOrdinal).toBe(1n)
+    const publishedMemory = await prisma.memory.findUniqueOrThrow({ where: { id: published.body.id } })
+    expect(publishedMemory.firstPublishedOrdinal).toBe(1n)
+    expect(publishedMemory.firstPublishedAt).toBeInstanceOf(Date)
+    expect(publishedMemory.sourcePublishedAt).toBeNull()
     expect((await prisma.family.findUniqueOrThrow({ where: { id: family.id } })).publicationOrdinal).toBe(1n)
     expect(await count(viewer)).toEqual({ unreadCount: 1, unreadState: 'ready' })
     expect(await count(owner)).toEqual({ unreadCount: 0, unreadState: 'ready' })
@@ -116,9 +119,18 @@ maybeDescribe('personal unread memories', () => {
     expect((await prisma.memory.findUniqueOrThrow({ where: { id: old.body.id } })).firstPublishedOrdinal).toBeNull()
     const preActivationSourceId = randomUUID()
     const scope = { familyId: family.id, principal: { userId: owner.id, sessionId: owner.sessionId } }
+    const sourceTime = new Date('2018-01-01T04:05:06.000Z')
     const preActivationSource = () => publisher.publish(scope, { id: preActivationSourceId, childId: family.childId,
-      kind: 'note', body: 'old source', occurredAt: new Date('2018-01-01'), mediaIds: [] })
+      kind: 'note', body: 'old source', occurredAt: sourceTime, sourcePublishedAt: sourceTime, mediaIds: [] })
     await preActivationSource()
+    const sourceMemory = await prisma.memory.findUniqueOrThrow({ where: { id: preActivationSourceId } })
+    const firstPublishedAt = sourceMemory.firstPublishedAt
+    expect(sourceMemory.sourcePublishedAt).toEqual(sourceTime)
+    expect(firstPublishedAt).toBeInstanceOf(Date)
+    await preActivationSource()
+    expect((await prisma.memory.findUniqueOrThrow({ where: { id: preActivationSourceId } })).firstPublishedAt).toEqual(firstPublishedAt)
+    await expect(Promise.resolve(prisma.memory.update({ where: { id: preActivationSourceId }, data: { sourcePublishedAt: new Date() } })))
+      .rejects.toThrow()
     await activate(family.id)
     await preActivationSource()
     const fresh = await note(owner, family, 'delayed', '2020-01-01T00:00:00.000Z')
@@ -132,11 +144,13 @@ maybeDescribe('personal unread memories', () => {
     expect((await prisma.memory.findUniqueOrThrow({ where: { id: fresh.body.id } })).firstPublishedOrdinal).toBe(1n)
     expect((await prisma.memory.findUniqueOrThrow({ where: { id: sourceId } })).firstPublishedOrdinal).toBe(2n)
     expect((await prisma.memory.findUniqueOrThrow({ where: { id: preActivationSourceId } })).firstPublishedOrdinal).toBeNull()
+    const freshFirstPublishedAt = (await prisma.memory.findUniqueOrThrow({ where: { id: fresh.body.id } })).firstPublishedAt
     expect(await count(viewer)).toEqual({ unreadCount: 2, unreadState: 'ready' })
     expect(await count(owner)).toEqual({ unreadCount: 0, unreadState: 'ready' })
     const edit = await api(owner, `/families/${family.id}/memories/${fresh.body.id}`, 'PATCH',
       { body: 'edited', occurredAt: fresh.body.occurredAt, expectedVersion: 1 })
     expect(edit.response.status).toBe(200)
+    expect((await prisma.memory.findUniqueOrThrow({ where: { id: fresh.body.id } })).firstPublishedAt).toEqual(freshFirstPublishedAt)
     expect(await count(viewer)).toEqual({ unreadCount: 2, unreadState: 'ready' })
     await prisma.memory.update({ where: { id: old.body.id }, data: { body: 'archive edit' } })
     expect((await prisma.memory.findUniqueOrThrow({ where: { id: old.body.id } })).firstPublishedOrdinal).toBeNull()
@@ -440,6 +454,7 @@ maybeDescribe('personal unread memories', () => {
       familyId: family.id, childId: family.childId, authorId: owner.id,
       kind: 'note' as const, body: `synthetic ${index}`,
       occurredAt: new Date('2020-01-01'), firstPublishedOrdinal: BigInt(index + 1),
+      firstPublishedAt: new Date('2020-01-01T00:00:00.000Z'),
     })) })
     await prisma.family.update({ where: { id: family.id }, data: {
       publicationOrdinal: 2_000n, unreadTrackingActivatedAt: new Date(),
