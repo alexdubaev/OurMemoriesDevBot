@@ -22,3 +22,5 @@
 После 04 доступны записи из бота через API; после 07 видна реальная лента; после 09 доступно добавление из Mini App; пилот — только после 10–11.
 
 После принятого T09 порядок: full UI migration по `docs/design/memoly-handoff-final/` с сохранением принятой business logic → T09.5 Web Access для приглашённых VIEWER → member avatars/display names → актуализация scope T10/T11.
+
+Дополнительный согласованный пакет спецификаций: [Mixed Media + MAX History Import](plans/mixed-media-max-import/00_START_HERE.md)
