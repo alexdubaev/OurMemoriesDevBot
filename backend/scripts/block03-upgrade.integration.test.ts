@@ -109,8 +109,8 @@ test('upgrades populated Block 02 data and adds family-scoped media including ch
     const memoryId = randomUUID()
     await database.query(
       `INSERT INTO memories
-        (id, family_id, child_id, author_id, kind, body, occurred_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'note', 'Legacy-compatible note', now(), now())`,
+        (id, family_id, child_id, author_id, kind, body, occurred_at, first_published_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'note', 'Legacy-compatible note', now(), now(), now())`,
       [memoryId, familyId, childId, ownerId],
     )
 

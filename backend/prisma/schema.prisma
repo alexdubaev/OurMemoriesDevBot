@@ -491,6 +491,8 @@ model Memory {
   version          Int           @default(1)
   createdSequence  BigInt        @default(autoincrement()) @map("created_sequence")
   firstPublishedOrdinal BigInt?  @map("first_published_ordinal")
+  firstPublishedAt DateTime? @map("first_published_at") @db.Timestamptz(6)
+  sourcePublishedAt DateTime? @map("source_published_at") @db.Timestamptz(6)
   deletedAt        DateTime?     @map("deleted_at") @db.Timestamptz(6)
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -758,6 +760,7 @@ enum MemoryKind {
   photo
   video
   voice
+  media
 
   @@map("memory_kind")
 }

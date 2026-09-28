@@ -20,7 +20,7 @@ import type { FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
 import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 import type { MemoryRepository } from '../application/ports'
-import { allocatePublicationOrdinal, lockPublicationFamily } from './publication-boundary'
+import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
 
 type MemberRole = 'full' | 'viewer'
 
@@ -60,6 +60,19 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (!author) throw new MemoryFailure('not_found', 'Пользователь не найден')
 
         const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
+        const firstPublishedAt = firstPublicationTime()
+        if (input.kind !== 'note') {
+          await lockMediaAssets(tx, scope.familyId, input.mediaIds)
+          const assetKinds = await tx.mediaAsset.findMany({ where: {
+            id: { in: input.mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
+            memories: { none: {} },
+          }, select: { id: true, mediaKind: true } })
+          const expected = input.kind === 'media' ? ['photo', 'video'] : [input.kind]
+          if (assetKinds.length !== input.mediaIds.length || new Set(input.mediaIds).size !== input.mediaIds.length ||
+              assetKinds.some(({ mediaKind }) => !expected.includes(mediaKind))) {
+            throw new MemoryFailure('invalid_input', 'Медиа не подходит для этого воспоминания')
+          }
+        }
 
         const created = await tx.memory.create({
           data: {
@@ -70,6 +83,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
             body: input.body,
             occurredAt: new Date(input.occurredAt),
             firstPublishedOrdinal,
+            firstPublishedAt,
           },
           include: memoryInclude(),
         })
@@ -495,7 +509,9 @@ function dto(
     familyId: string
     childId: string
     authorId: string
-    kind: 'note' | 'photo' | 'video' | 'voice'
+    kind: 'note' | 'photo' | 'video' | 'voice' | 'media'
+    firstPublishedAt: Date | null
+    sourcePublishedAt: Date | null
     body: string
     occurredAt: Date
     createdAt: Date
@@ -530,6 +546,8 @@ function dto(
     kind: memory.kind,
     body: memory.body,
     occurredAt: memory.occurredAt.toISOString(),
+    firstPublishedAt: memory.firstPublishedAt?.toISOString() ?? null,
+    sourcePublishedAt: memory.sourcePublishedAt?.toISOString() ?? null,
     createdAt: memory.createdAt.toISOString(),
     version: memory.version,
     status: memory.status,
@@ -589,8 +607,26 @@ function measuredWaveform(value: unknown) {
     : null
 }
 
+async function lockMediaAssets(tx: Pick<PrismaTransactionClient, '$queryRaw'>, familyId: string, mediaIds: string[]) {
+  const unique = [...new Set(mediaIds)].sort()
+  if (unique.length === 0) return
+  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id FROM media_assets
+     WHERE family_id = ${familyId}::uuid
+       AND id IN (${Prisma.join(unique.map((id) => Prisma.sql`${id}::uuid`))})
+     ORDER BY id FOR UPDATE
+  `)
+}
+
 function memorySnapshot(snapshot: unknown): MemoryDto {
-  const parsed = memoryDtoSchema.safeParse(snapshot)
+  const normalizedSnapshot = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    ? {
+        ...snapshot,
+        ...(!Object.hasOwn(snapshot, 'firstPublishedAt') ? { firstPublishedAt: null } : {}),
+        ...(!Object.hasOwn(snapshot, 'sourcePublishedAt') ? { sourcePublishedAt: null } : {}),
+      }
+    : snapshot
+  const parsed = memoryDtoSchema.safeParse(normalizedSnapshot)
   if (!parsed.success) throw new MemoryFailure('conflict', 'Результат запроса больше недоступен')
   return parsed.data
 }

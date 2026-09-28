@@ -23,3 +23,8 @@ export async function allocatePublicationOrdinal(tx: PrismaTransactionClient, fa
   if (!rows[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
   return rows[0].publicationOrdinal
 }
+
+/** Publication time is independent of unread tracking and is assigned at every first publish. */
+export function firstPublicationTime(now = new Date()) {
+  return now
+}

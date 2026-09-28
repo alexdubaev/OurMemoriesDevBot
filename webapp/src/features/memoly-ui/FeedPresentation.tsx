@@ -117,5 +117,5 @@ export function FeedMemoryCard({
 }
 
 function kindLabel(kind: MemoryDto['kind']) {
-  return ({ note: 'Заметка', photo: 'Фото', video: 'Видео', voice: 'Голос' })[kind]
+  return ({ note: 'Заметка', photo: 'Фото', video: 'Видео', voice: 'Голос', media: 'Медиа' })[kind]
 }

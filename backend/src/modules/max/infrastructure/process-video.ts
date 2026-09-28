@@ -71,7 +71,9 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         kind: 'video',
         body: policy.body,
         occurredAt: new Date(input.event.occurredAt),
+        sourcePublishedAt: new Date(input.event.occurredAt),
         mediaIds: [],
+        externalAttachment: 'max-video',
       }, async (tx, memoryId) => {
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 const uuid = z.uuid()
 
-export const memoryKindSchema = z.enum(['note', 'photo', 'video', 'voice'])
+export const memoryKindSchema = z.enum(['note', 'photo', 'video', 'voice', 'media'])
 export const memoryStatusSchema = z.enum(['processing', 'published', 'failed', 'deleted'])
 
 const plainTextSchema = z.string().superRefine((value, context) => {
@@ -24,6 +24,10 @@ export const createMemoryRequestSchema = z.discriminatedUnion('kind', [
   memoryBaseInputSchema.extend({
     kind: z.literal('photo'),
     mediaIds: z.array(uuid).min(1).max(10),
+  }).strict(),
+  memoryBaseInputSchema.extend({
+    kind: z.literal('media'),
+    mediaIds: z.array(uuid).min(1).max(10).refine((ids) => new Set(ids).size === ids.length, 'Медиа не должно повторяться'),
   }).strict(),
   memoryBaseInputSchema.extend({
     kind: z.literal('video'),
@@ -162,6 +166,8 @@ export const memoryDtoSchema = z.object({
   kind: memoryKindSchema,
   body: z.string(),
   occurredAt: z.string().datetime(),
+  firstPublishedAt: z.string().datetime().nullable(),
+  sourcePublishedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   version: z.number().int().positive(),
   status: memoryStatusSchema,

@@ -55,6 +55,15 @@ describe('memory contracts', () => {
     })).toThrow()
   })
 
+  test('accepts ordered unique mixed media IDs and rejects duplicate or oversized collections', () => {
+    const mediaIds = Array.from({ length: 10 }, (_, index) => `018f01d8-0c2a-7c25-bf83-ae68985c7e${String(index).padStart(2, '0')}`)
+    const input = { kind: 'media' as const, childId, body: 'Семейная поездка', occurredAt: '2026-09-09T10:00:00.000Z', mediaIds }
+    expect(createMemoryRequestSchema.parse(input)).toEqual(input)
+    expect(() => createMemoryRequestSchema.parse({ ...input, sourcePublishedAt: '2023-07-14T18:43:00.000Z' })).toThrow()
+    expect(() => createMemoryRequestSchema.parse({ ...input, mediaIds: [mediaIds[0], mediaIds[0]] })).toThrow()
+    expect(() => createMemoryRequestSchema.parse({ ...input, mediaIds: [...mediaIds, '018f01d8-0c2a-7c25-bf83-ae68985c7e10'] })).toThrow()
+  })
+
   test('defaults feed limit to 20 and caps it at 50', () => {
     expect(listMemoriesQuerySchema.parse({})).toMatchObject({ limit: 20 })
     expect(() => listMemoriesQuerySchema.parse({ limit: '51' })).toThrow()
@@ -90,6 +99,19 @@ describe('memory contracts', () => {
       likes: { count: 0, likedByMe: false },
       capabilities: { edit: true, delete: true, like: true },
     })).toThrow()
+  })
+
+  test('exposes nullable first and source publication instants in Memory DTOs', () => {
+    const timestamp = '2026-09-28T12:34:56.000Z'
+    const memory = {
+      id: '018f01d8-0c2a-7c25-bf83-ae68985c7e90', familyId: '018f01d8-0c2a-7c25-bf83-ae68985c7e91', childId,
+      author: { id: '018f01d8-0c2a-7c25-bf83-ae68985c7e92', name: 'Автор', avatarPath: null },
+      kind: 'media' as const, body: 'Подпись', occurredAt: timestamp, createdAt: timestamp,
+      firstPublishedAt: timestamp, sourcePublishedAt: null, version: 1, status: 'published' as const, attachments: [],
+      likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true },
+    }
+    expect(memoryDtoSchema.parse(memory)).toEqual(memory)
+    expect(() => memoryDtoSchema.parse({ ...memory, sourcePublishedAt: 'not-an-instant' })).toThrow()
   })
 
   test('accepts only backend API paths in media DTOs', () => {

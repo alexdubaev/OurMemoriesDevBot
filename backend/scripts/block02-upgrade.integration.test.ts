@@ -117,8 +117,8 @@ test('upgrades a populated Block 01 database with Block 02 data constraints inta
 
     const inserted = await database.query<{ created_sequence: string }>(
       `INSERT INTO memories
-        (family_id, child_id, author_id, kind, body, occurred_at, updated_at)
-       VALUES ($1, $2, $3, 'note', 'Legacy-compatible memory', now(), now())
+        (family_id, child_id, author_id, kind, body, occurred_at, first_published_at, updated_at)
+       VALUES ($1, $2, $3, 'note', 'Legacy-compatible memory', now(), now(), now())
        RETURNING created_sequence::text`,
       [familyId, childId, ownerId],
     )
@@ -126,8 +126,8 @@ test('upgrades a populated Block 01 database with Block 02 data constraints inta
 
     await expect(database.query(
       `INSERT INTO memories
-        (family_id, child_id, author_id, kind, body, occurred_at, updated_at)
-       VALUES ($1, $2, $3, 'note', 'Wrong-family author', now(), now())`,
+        (family_id, child_id, author_id, kind, body, occurred_at, first_published_at, updated_at)
+       VALUES ($1, $2, $3, 'note', 'Wrong-family author', now(), now(), now())`,
       [familyId, childId, outsiderId],
     )).rejects.toMatchObject({ constraint: 'memories_author_membership_fkey' })
   } finally {
