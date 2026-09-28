@@ -1,5 +1,7 @@
 # Consolidated acceptance matrix
 
+**Scope/status:** MM-0…MM-4 complete. Historical import HI-0…HI-4 is `DEFERRED_POST_MVP` and is not an MVP release gate. The historical requirements below remain post-MVP acceptance criteria; they are not claims of implemented behavior. See [the post-MVP roadmap](POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
 ## Mixed-media stage
 
 | ID | Requirement |

@@ -1,5 +1,7 @@
 # HI-4 — MAX historical import end-to-end reconciliation
 
+**Status: `DEFERRED_POST_MVP` (not started).** Historical import is not an MVP release blocker. See [the post-MVP roadmap](../POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
 Depends on:
 - HI-1 merged
 - HI-2 merged

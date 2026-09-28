@@ -59,6 +59,7 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   if (body.attachments !== undefined && body.attachments !== null && !Array.isArray(body.attachments)) {
     throw new Error('Invalid MAX message attachments')
   }
+  // TODO(post-MVP MAX history import): Preserve provider attachment order for history after controlled validation confirms it matches authored/display order.
   const attachments = Array.isArray(body.attachments) ? body.attachments.map(normalizeAttachment) : []
   const text = body.text === null || body.text === undefined ? null :
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()

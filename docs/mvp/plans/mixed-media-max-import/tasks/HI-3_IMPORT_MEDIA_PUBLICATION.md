@@ -1,5 +1,7 @@
 # HI-3 — MAX history media transfer + Memory publication
 
+**Status: `DEFERRED_POST_MVP` (not started).** Historical import is not an MVP release blocker. See [the post-MVP roadmap](../POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
 Depends on:
 - MM-4 merged
 - HI-1 backend foundation merged

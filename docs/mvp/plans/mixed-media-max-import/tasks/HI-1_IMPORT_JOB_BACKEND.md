@@ -1,6 +1,8 @@
 # HI-1 — MAX historical import job backend
 
-Depends on: **HI-0 merged**
+**Status: `DEFERRED_POST_MVP` (not started).** Historical import is not an MVP release blocker. Start only after HI-0 controlled provider validation and architecture/API contract are resolved; see [the post-MVP roadmap](../POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
+Depends on: **HI-0 validated and contract frozen after MVP**
 
 May run in parallel with: HI-2.
 

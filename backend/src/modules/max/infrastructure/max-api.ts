@@ -119,10 +119,12 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       return normalizeSentVideoMessage(value)
     },
     async getMessage(messageId, signal) {
+      // TODO(post-MVP MAX history import): Add history listing only after provider validation proves no-gap pagination and a durable checkpoint; see docs/mvp/plans/mixed-media-max-import/POST_MVP_MAX_HISTORICAL_IMPORT.md.
       if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
       return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_ids: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
     },
     async getVideo(videoToken, signal) {
+      // TODO(post-MVP MAX history import): Re-resolve historical media tokens before transfer; never persist a temporary provider URL as the durable media source.
       if (typeof videoToken !== 'string' || videoToken.length === 0 || videoToken.length > 4_096) throw new MaxProviderError()
       return normalizeVideo(await request(`/videos/${encodeURIComponent(videoToken)}`, { method: 'GET' }, signal))
     },
