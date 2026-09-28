@@ -32,6 +32,7 @@ describe('MAX image processor boundary', () => {
   })
   test('does not download an over-limit quick-image message and terminally marks it unsupported', async () => {
     let downloads = 0
+    let cleanups = 0
     const tx = {
       maxSource: { updateMany: async () => ({ count: 1 }) },
       maxInbox: { updateMany: async () => ({ count: 1 }) },
@@ -46,9 +47,11 @@ describe('MAX image processor boundary', () => {
       kind: 'message_created', senderId: '1', recipientId: '2', messageId: 'm', occurredAt: new Date().toISOString(), text: null,
       attachments: Array.from({ length: 11 }, (_, index) => ({ kind: 'image' as const, providerAttachmentId: `p-${index}` })),
     }
-    const process = createMaxImageProcessor({ runtime, api: {} as MaxApiPort, media: {} as never,
+    const process = createMaxImageProcessor({ runtime, api: {} as MaxApiPort,
+      media: { discardTrustedSourceAssets: async () => { cleanups += 1 } } as never,
       download: async () => { downloads += 1; throw new Error('must not download') } })
     await expect(process({ inboxId: 'inbox', sourceId: 'source', event })).resolves.toBe('done')
     expect(downloads).toBe(0)
+    expect(cleanups).toBe(1)
   })
 })

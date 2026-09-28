@@ -941,6 +941,7 @@ enum TelegramInboxKind {
 enum MaxSourceAttachmentKind {
   image
   file
+  video
 
   @@map("max_source_attachment_kind")
 }

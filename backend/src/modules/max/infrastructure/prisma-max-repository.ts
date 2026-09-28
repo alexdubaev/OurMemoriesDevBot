@@ -50,14 +50,16 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
           },
         })
         const attachments = attachmentsOf(input.event)
-        const imageFileAttachments = attachments.filter((attachment) => attachment.kind === 'image' || attachment.kind === 'file' || attachment.kind === 'voice')
-        if (input.response?.kind === 'accepted' && imageFileAttachments.length > 0 && imageFileAttachments.length === attachments.length) {
-          await tx.maxSourceAttachment.createMany({ data: imageFileAttachments.map((attachment, position) => ({
+        // The legacy single-video reference does not reserve a private media asset.
+        const stagedAttachments = attachments.filter((attachment) => attachment.kind === 'image' || attachment.kind === 'file' ||
+          attachment.kind === 'voice' || (attachment.kind === 'video' && attachments.length > 1))
+        if (input.response?.kind === 'accepted' && stagedAttachments.length > 0 && stagedAttachments.length === attachments.length) {
+          await tx.maxSourceAttachment.createMany({ data: stagedAttachments.map((attachment, position) => ({
             sourceId: source.id,
             position,
             // MAX's current schema predates native audio; voice uses the generic file row
             // while the encrypted event retains the exact audio classification.
-            providerKind: attachment.kind === 'image' ? 'image' : 'file',
+            providerKind: attachment.kind === 'image' ? 'image' : attachment.kind === 'video' ? 'video' : 'file',
             providerAttachmentId: attachment.providerAttachmentId,
             plannedMediaId: randomUUID(),
           })) })

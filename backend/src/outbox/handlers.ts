@@ -18,7 +18,7 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
 export const taskHandlers = {
   'max:process': {
     maxAttempts: 5,
-    deadlineMs: 90_000,
+    deadlineMs: 15 * 60_000,
     retryDelayMs: providerRetryDelay,
     run: async ({ payload, signal }, runtime) => {
       const { createMaxTasks } = await import('../modules/max')

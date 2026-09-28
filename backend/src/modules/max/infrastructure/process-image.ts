@@ -8,10 +8,10 @@ import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { createMediaService, MediaFailure } from '../../media'
 import { createSourceMemoryPublisher } from '../../memories'
 import { classifyMaxImageMessage } from '../application/image-policy'
-import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
+import type { MaxApiPort, MaxInboundEvent, MaxResolvedAttachment } from '../application/ports'
 import { MaxProviderError } from './max-api'
-import type { MaxDownloadedMedia } from './media-download'
-import { MaxMediaDownloadError } from './media-download'
+import type { MaxDownloadedMedia, MaxVideoStream } from './media-download'
+import { createMaxVideoStreamDownload, MaxMediaDownloadError } from './media-download'
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
 
@@ -25,42 +25,62 @@ export function createMaxImageProcessor(options: {
   api: MaxApiPort
   media: ReturnType<typeof createMediaService>
   download: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxDownloadedMedia>
+  videoDownload?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
 }) {
   const prisma = options.runtime.prisma
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
+  const videoDownload = options.videoDownload ?? createMaxVideoStreamDownload()
   const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
+    const terminalAndDiscard = async (kind: 'denied' | 'unsupported_media', text: string) => {
+      const result = await terminal(prisma, source.id, input.inboxId, kind, input.event.senderId, text)
+      if (result === 'done') await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: source.attachments.map((row) => row.plannedMediaId) })
+      return result
+    }
     const policy = classifyMaxImageMessage(input.event)
-    if (policy.kind === 'denied') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId, deniedText)
-    if (policy.kind === 'unsupported') return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+    if (policy.kind === 'denied') return terminalAndDiscard('denied', deniedText)
+    if (policy.kind === 'unsupported') return terminalAndDiscard('unsupported_media', unsupportedText)
     if (typeof options.api.getMessage !== 'function') throw new Error('MAX message lookup is unavailable')
     const targetResult = await resolveMaxTarget(prisma, source)
     if (targetResult.kind === 'pending') return 'done'
     if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, input.event.senderId)
-    if (targetResult.kind !== 'target') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId,
+    if (targetResult.kind !== 'target') return terminalAndDiscard('denied',
       'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
     const admission = targetResult.target
+    const scope: FamilyScope = { familyId: admission.familyId, principal: { userId: admission.userId, sessionId: `max:${source.id}` } }
+    try { await access.requireFull(scope) } catch (error) {
+      if (isAuthorizationFailure(error)) return terminalAndDiscard('denied', deniedText)
+      throw error
+    }
     let resolved
-    try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) { throw error }
-    const accepted = policy.kind === 'quick-images' ? policy.attachments : [policy.attachment]
+    try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) {
+      if (!(error instanceof MaxProviderError) || error.retryable) throw error
+      return terminalAndDiscard('unsupported_media', unsupportedText)
+    }
+    const accepted = policy.kind === 'quick-images' || policy.kind === 'mixed-media' ? policy.attachments : [policy.attachment]
     if (resolved.messageId !== input.event.messageId || resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
         resolved.attachments.length !== accepted.length || resolved.attachments.some((item, index) => item.kind !== accepted[index]!.kind || item.providerAttachmentId !== accepted[index]!.providerAttachmentId)) {
-      return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      return terminalAndDiscard('unsupported_media', unsupportedText)
     }
     const planned = [...source.attachments].sort((a, b) => a.position - b.position)
-    if (planned.length !== accepted.length) return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+    if (planned.length !== accepted.length) return terminalAndDiscard('unsupported_media', unsupportedText)
     const mediaIds: string[] = []
-    const scope: FamilyScope = { familyId: admission.familyId, principal: { userId: admission.userId, sessionId: `max:${source.id}` } }
     try {
       for (let index = 0; index < planned.length; index += 1) {
         const row = planned[index]!
         const current = resolved.attachments[index]!
-        if (current.kind === 'video' || current.kind === 'voice') return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
-        mediaIds.push(await ensureAttachmentStored({ prisma, media: options.media, download: options.download, scope, row, current, maxBytes: options.runtime.env.MAX_FILE_MAX_BYTES, signal: input.signal }))
+        if (row.providerKind !== (current.kind === 'image' ? 'image' : current.kind === 'video' ? 'video' : 'file') ||
+            row.providerAttachmentId !== current.providerAttachmentId || current.kind === 'voice') throw new MaxMediaDownloadError()
+        if (current.kind === 'video') {
+          mediaIds.push(await ensureVideoStored({ prisma, media: options.media, api: options.api, download: videoDownload,
+            scope, row, current, maxBytes: options.runtime.env.MAX_VIDEO_MAX_BYTES, signal: input.signal }))
+        } else {
+          mediaIds.push(await ensureAttachmentStored({ prisma, media: options.media, download: options.download, scope, row, current, maxBytes: options.runtime.env.MAX_FILE_MAX_BYTES, signal: input.signal }))
+        }
       }
-      await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: 'photo', body: policy.body,
+      await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: policy.kind === 'mixed-media' ? 'media' : 'photo', body: policy.body,
         occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds }, async (tx, memoryId) => {
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)
@@ -77,14 +97,18 @@ export function createMaxImageProcessor(options: {
       return 'done'
     } catch (error) {
       if (error instanceof SourcePublicationLostError) {
-        await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
+        const current = await prisma.maxSource.findUnique({ where: { id: source.id }, select: { status: true } })
+        if (current?.status === 'denied' || current?.status === 'unsupported_media') {
+          await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
+        }
         return 'skipped'
       }
       if (isPermanent(error)) {
-        await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
         const denied = isAuthorizationFailure(error)
-        return terminal(prisma, source.id, input.inboxId, denied ? 'denied' : 'unsupported_media', input.event.senderId,
+        const result = await terminal(prisma, source.id, input.inboxId, denied ? 'denied' : 'unsupported_media', input.event.senderId,
           denied ? deniedText : unsupportedText)
+        if (result === 'done') await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
+        return result
       }
       throw error
     }
@@ -126,7 +150,7 @@ async function ensureAttachmentStored(input: {
   if (input.row.status === 'stored' && input.row.mediaId) return input.row.mediaId
   const waitDeadline = Date.now() + attachmentWaitTimeoutMs
   for (;;) {
-    if (input.signal?.aborted || Date.now() >= waitDeadline) throw new MaxProviderError()
+    if (input.signal?.aborted || Date.now() >= waitDeadline) throw new MaxProviderError(undefined, true)
     const fresh = await input.prisma.maxSourceAttachment.findUnique({ where: { id: input.row.id }, select: { id: true, plannedMediaId: true, mediaId: true, status: true, claimUntil: true } })
     if (!fresh) throw new Error('MAX attachment disappeared')
     if (fresh.status === 'stored' && fresh.mediaId) return fresh.mediaId
@@ -158,6 +182,79 @@ async function ensureAttachmentStored(input: {
   }
 }
 
+async function ensureVideoStored(input: {
+  prisma: BackendRuntime['prisma']
+  media: ReturnType<typeof createMediaService>
+  api: MaxApiPort
+  download: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
+  scope: FamilyScope
+  row: { id: string; plannedMediaId: string; mediaId: string | null; status: 'planned' | 'processing' | 'stored' | 'failed' }
+  current: Extract<MaxResolvedAttachment, { kind: 'video' }>
+  maxBytes: number
+  signal?: AbortSignal
+}) {
+  if (input.row.status === 'stored' && input.row.mediaId) return input.row.mediaId
+  const waitDeadline = Date.now() + attachmentWaitTimeoutMs
+  for (;;) {
+    if (input.signal?.aborted || Date.now() >= waitDeadline) throw new MaxProviderError(undefined, true)
+    const fresh = await input.prisma.maxSourceAttachment.findUnique({ where: { id: input.row.id }, select: { plannedMediaId: true, mediaId: true, status: true } })
+    if (!fresh) throw new MaxMediaDownloadError()
+    if (fresh.status === 'stored' && fresh.mediaId) return fresh.mediaId
+    if (fresh.status === 'failed') throw new MaxMediaDownloadError()
+    const claim = await claimMaxSourceAttachment(input.prisma, input.row.id, new Date())
+    if (!claim) {
+      await waitForMaxAttachmentPoll(input.signal)
+      continue
+    }
+    try {
+      const resumed = await input.media.resumeTrustedMedia(input.scope, { assetId: fresh.plannedMediaId, sourceKind: 'max' })
+      const asset = resumed ?? await (async () => {
+        if (!input.api.getVideo) throw new MaxProviderError(undefined, true)
+        const video = await input.api.getVideo(input.current.currentToken, input.signal).catch((error: unknown) => {
+          if (error instanceof MaxProviderError && !error.retryable) {
+            throw new MaxMediaDownloadError()
+          }
+          throw error
+        })
+        const rendition = video.renditions
+          .filter((candidate) => candidate.height !== null && candidate.height > 0 && candidate.height <= 720 && isAllowedVideoUrl(candidate.url))
+          .sort((a, b) => b.height! - a.height! || (b.width ?? 0) - (a.width ?? 0))[0]
+        if (!rendition || rendition.contentLength !== null && rendition.contentLength > input.maxBytes) throw new MaxMediaDownloadError()
+        const downloaded = await input.download(rendition.url, input.maxBytes, input.signal)
+        if (rendition.contentLength !== null && rendition.contentLength !== downloaded.contentLength) {
+          void downloaded.body.cancel().catch(() => undefined)
+          throw new MaxMediaDownloadError()
+        }
+        try {
+          return (await input.media.ingestTelegram(input.scope, {
+            assetId: fresh.plannedMediaId, sourceKind: 'max', kind: 'video', contentType: downloaded.contentType,
+            byteSize: downloaded.contentLength, body: downloaded.body,
+          })).asset
+        } catch (error) {
+          throw downloaded.failure() ?? error
+        } finally {
+          void downloaded.body.cancel().catch(() => undefined)
+        }
+      })()
+      const stored = await input.prisma.maxSourceAttachment.updateMany({ where: { id: input.row.id, status: 'processing', claimToken: claim.token }, data: { status: 'stored', mediaId: asset.id, claimToken: null, claimUntil: null } })
+      if (stored.count === 1) return asset.id
+      throw new MaxProviderError(undefined, true)
+    } catch (error) {
+      await input.prisma.maxSourceAttachment.updateMany({ where: { id: input.row.id, status: 'processing', claimToken: claim.token }, data: {
+        status: isPermanent(error) ? 'failed' : 'planned', claimToken: null, claimUntil: null,
+      } })
+      throw error
+    }
+  }
+}
+
+function isAllowedVideoUrl(value: string) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.port && !url.username && !url.password && /^maxvd[0-9]+\.okcdn\.ru$/i.test(url.hostname)
+  } catch { return false }
+}
+
 export async function waitForMaxAttachmentPoll(signal?: AbortSignal) {
   if (!signal) {
     await new Promise<void>((resolve) => setTimeout(resolve, 25))
@@ -165,7 +262,7 @@ export async function waitForMaxAttachmentPoll(signal?: AbortSignal) {
   }
   await new Promise<void>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout>
-    const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(new MaxProviderError()) }
+    const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(new MaxProviderError(undefined, true)) }
     timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, 25)
     signal.addEventListener('abort', abort, { once: true })
   })
