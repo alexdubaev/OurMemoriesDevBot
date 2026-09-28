@@ -1073,6 +1073,16 @@ maybeDescribe('MAX durable capture', () => {
     const video = await mp4VideoFixture()
     try {
       await prisma.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date('2026-09-14T00:00:00.000Z') } })
+      const viewer = await prisma.user.create({ data: { displayName: 'Synthetic family viewer' } })
+      await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: viewer.id, role: 'viewer', unreadBaselineOrdinal: 0n } })
+      const memories = new MemoryService(
+        createPrismaFamilyAccess(prisma),
+        new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma)),
+        { assertReadyForPublication: async () => undefined },
+        'max-mixed-feed-test-secret',
+      )
+      const viewerScope = { familyId: fixture.familyId, principal: { userId: viewer.id, sessionId: 'max-mixed-viewer' } }
+      const authorScope = { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max-mixed-author' } }
       const attachments: NonNullable<Extract<MaxInboundEvent, { kind: 'message_created' }>['attachments']> = [
         { kind: 'image', providerAttachmentId: '11' },
         { kind: 'video', providerAttachmentId: '22', durationSeconds: 1, width: 320, height: 240 },
@@ -1104,14 +1114,51 @@ maybeDescribe('MAX durable capture', () => {
       expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id }, include: { attachments: true } })).toMatchObject({ status: 'published' })
       const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } } })
       expect(memory).toMatchObject({ kind: 'media', status: 'published', body: 'one mixed caption', familyId: fixture.familyId, childId: fixture.childId,
-        occurredAt: new Date(event.occurredAt), sourcePublishedAt: new Date(event.occurredAt), firstPublishedAt: expect.any(Date), firstPublishedOrdinal: expect.any(BigInt) })
+        occurredAt: new Date(event.occurredAt), sourcePublishedAt: new Date(event.occurredAt) })
+      expect(memory.firstPublishedAt).toBeInstanceOf(Date)
+      expect(typeof memory.firstPublishedOrdinal).toBe('bigint')
       expect(memory.media.map((item) => item.asset.mediaKind)).toEqual(['photo', 'video', 'photo', 'video'])
+      expect(memory.firstPublishedAt!.getTime()).toBeGreaterThan(new Date(event.occurredAt).getTime())
+      const feed = await memories.list(viewerScope, { limit: 20 })
+      expect(feed.items).toHaveLength(1)
+      expect(feed.items[0]).toMatchObject({
+        id: source.plannedMemoryId, familyId: fixture.familyId, childId: fixture.childId,
+        author: { id: fixture.userId, name: 'MAX mixed-four' }, kind: 'media', body: event.text,
+        occurredAt: event.occurredAt, sourcePublishedAt: event.occurredAt,
+        firstPublishedAt: memory.firstPublishedAt!.toISOString(),
+        likes: { count: 0, likedByMe: false },
+        capabilities: { edit: false, delete: false, like: true },
+      })
+      expect(feed.items[0]!.attachments.map(({ id, kind, source }) => ({ id, kind, source }))).toEqual(
+        memory.media.map(({ mediaId, asset }) => ({ id: mediaId, kind: asset.mediaKind, source: 'private_storage' })),
+      )
+      const unread = await memories.list(viewerScope, { limit: 20, unreadOnly: true })
+      expect(unread.items.map(({ id }) => id)).toEqual([source.plannedMemoryId])
+      expect((await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).publicationOrdinal).toBe(1n)
       expect(await prisma.maxVideoReference.count()).toBe(0)
       expect(await prisma.memory.count()).toBe(1)
       await expect(accept(event)).resolves.toMatchObject({ duplicate: true })
       await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('skipped')
+      expect(await prisma.maxSource.count({ where: { messageId: event.messageId } })).toBe(1)
       expect(await prisma.memory.count()).toBe(1)
+      expect(await prisma.memoryMedia.count({ where: { memoryId: memory.id } })).toBe(4)
       expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max' } })).toBe(4)
+      expect((await memories.list(viewerScope, { limit: 20, unreadOnly: true })).items.map(({ id }) => id)).toEqual([memory.id])
+      await memories.markSeen(viewerScope, { memoryIds: [memory.id], expectedMembershipEpoch: 1 })
+      await memories.markSeen(viewerScope, { memoryIds: [memory.id], expectedMembershipEpoch: 1 })
+      expect(await prisma.memorySeen.count({ where: { memoryId: memory.id, userId: viewer.id } })).toBe(1)
+      expect((await memories.list(viewerScope, { limit: 20, unreadOnly: true })).items).toHaveLength(0)
+      const liked = await memories.setLike(viewerScope, memory.id, true)
+      expect(liked).toEqual({ count: 1, likedByMe: true })
+      expect((await memories.get(viewerScope, memory.id)).likes).toEqual({ count: 1, likedByMe: true })
+      const editedOccurredAt = '2024-02-03T12:34:56.789Z'
+      const edited = await memories.update(authorScope, memory.id, {
+        body: 'one mixed caption', occurredAt: editedOccurredAt, expectedVersion: memory.version,
+      })
+      expect(edited).toMatchObject({ id: memory.id, occurredAt: editedOccurredAt,
+        sourcePublishedAt: event.occurredAt, firstPublishedAt: memory.firstPublishedAt!.toISOString() })
+      expect(edited.attachments.map(({ id }) => id)).toEqual(memory.media.map(({ mediaId }) => mediaId))
+      expect((await memories.list(viewerScope, { limit: 20, unreadOnly: true })).items).toHaveLength(0)
       expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id }, select: { firstPublishedAt: true, firstPublishedOrdinal: true, sourcePublishedAt: true } })).toEqual({
         firstPublishedAt: memory.firstPublishedAt, firstPublishedOrdinal: memory.firstPublishedOrdinal, sourcePublishedAt: memory.sourcePublishedAt,
       })

@@ -1,6 +1,6 @@
 import type { MemoryAttachment, MemoryDto } from '@web-app-demo/contracts'
-import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import 'photoswipe/style.css'
 import { Dialog as DialogPrimitive } from 'radix-ui'
@@ -16,7 +16,7 @@ import { privateMediaSource } from '@/platform/media/private-media-access'
 import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
 import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
-import { loadFeed, openTelegramVideo } from './api'
+import { loadFeed, loadMemory, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
 import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
@@ -63,6 +63,32 @@ type Props = {
   openAddInitially?: boolean
   role: 'full' | 'viewer'
   transport: AuthenticatedTransport
+}
+
+function pendingVideoQueryKey(familyId: string, accountId: string, membershipEpoch: number, memoryId: string) {
+  return [...feedQueryKeys.all, familyId, 'video-rendition', accountId, membershipEpoch, memoryId] as const
+}
+
+const VideoQueryScope = createContext({ accountId: '', membershipEpoch: 0 })
+const MAX_AUTO_PENDING_VIDEOS = 3
+const MAX_AUTO_PENDING_SUCCESSES = 12
+
+function hasPendingPrivateVideo(memory: MemoryDto) {
+  return memory.attachments.some((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video' && attachment.renditionStatus === 'pending')
+}
+
+function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | undefined): MemoryDto {
+  if (!current || current.id !== memory.id || current.familyId !== memory.familyId) return memory
+  const latest = new Map(current.attachments.filter((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video').map((attachment) => [attachment.id, attachment]))
+  let changed = false
+  const attachments = memory.attachments.map((attachment) => {
+    if (attachment.source !== 'private_storage' || attachment.kind !== 'video' || attachment.renditionStatus !== 'pending') return attachment
+    const update = latest.get(attachment.id)
+    if (!update || update.source !== 'private_storage' || update.kind !== 'video' || update.renditionStatus === 'pending') return attachment
+    changed = true
+    return { ...attachment, renditionStatus: update.renditionStatus, playbackPath: update.playbackPath }
+  })
+  return changed ? { ...memory, attachments } : memory
 }
 
 export function FeedPage({
@@ -112,13 +138,34 @@ export function FeedPage({
     }
     return [...unique.values()]
   }, [feed.data])
-  const visibleItems = useMemo(() => {
-    if (!deleteTarget || items.some((memory) => memory.id === deleteTarget.id)) return items
-    const next = [...items]
+  const pendingVideoIds = useMemo(() => {
+    const opened = [detail, mixedViewer?.memory].filter((memory): memory is MemoryDto => Boolean(memory && hasPendingPrivateVideo(memory)))
+    return [...new Set([...opened, ...items.filter(hasPendingPrivateVideo)].map((memory) => memory.id))].slice(0, MAX_AUTO_PENDING_VIDEOS)
+  }, [detail, items, mixedViewer])
+  const videoRenditions = useQueries({ queries: pendingVideoIds.map((memoryId) => ({
+    queryKey: pendingVideoQueryKey(familyId, accountId, membershipEpoch ?? 0, memoryId),
+    queryFn: ({ signal }: { signal: AbortSignal }) => loadMemory(transport, familyId, memoryId, signal),
+    enabled: isAppBootstrapped,
+    retry: false,
+    refetchInterval: (query: { state: { data: MemoryDto | undefined; dataUpdateCount: number; errorUpdateCount: number } }) => {
+      if (query.state.data && !hasPendingPrivateVideo(query.state.data)) return false
+      if (query.state.dataUpdateCount >= MAX_AUTO_PENDING_SUCCESSES || query.state.errorUpdateCount >= 4) return false
+      return 5_000 * 2 ** Math.min(query.state.errorUpdateCount, 3)
+    },
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  })) })
+  const latestVideoMemories = new Map(pendingVideoIds.map((id, index) => [id, videoRenditions[index]?.data]))
+  const renderedItems = items.map((memory) => withCurrentVideoRenditions(memory, latestVideoMemories.get(memory.id)))
+  const visibleItems = (() => {
+    if (!deleteTarget || renderedItems.some((memory) => memory.id === deleteTarget.id)) return renderedItems
+    const next = [...renderedItems]
     const index = Math.max(0, Math.min(deleteTargetIndex ?? next.length, next.length))
     next.splice(index, 0, deleteTarget)
     return next
-  }, [deleteTarget, deleteTargetIndex, items])
+  })()
+  const currentDetail = detail && withCurrentVideoRenditions(detail, renderedItems.find((memory) => memory.id === detail.id) ?? latestVideoMemories.get(detail.id))
+  const currentMixedViewer = mixedViewer && { ...mixedViewer, memory: withCurrentVideoRenditions(mixedViewer.memory, renderedItems.find((memory) => memory.id === mixedViewer.memory.id) ?? latestVideoMemories.get(mixedViewer.memory.id)) }
 
   useEffect(() => {
     knownFirstId.current = null
@@ -232,6 +279,7 @@ export function FeedPage({
   }
 
   return (
+    <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
     <MediaPlaybackCoordinator>
     <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
@@ -277,8 +325,8 @@ export function FeedPage({
       {feed.isFetchNextPageError && items.length > 0 ? unreadOnly && feed.error instanceof ApiRequestError && feed.error.status === 409
         ? <div className="feed-unread-restart" role="status"><Typography as="p" variant="memoryMeta">Список изменился. Обновите непросмотренные, чтобы продолжить.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'instant' }); setUnreadCycle((value) => value + 1) }} type="button">Обновить список</Button></div>
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
-      {detail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={detail} onClose={() => setDetail(null)} registerSeenContent={detail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
-      {mixedViewer ? <MixedMediaViewer hostBridge={hostBridge} index={mixedViewer.index} initialPhotoUrl={mixedViewer.photoUrl} memory={mixedViewer.memory} onClose={() => setMixedViewer(null)} registerSeenContent={mixedViewer.memory.author.id !== accountId ? registerSeenContent(mixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {currentMixedViewer ? <MixedMediaViewer hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
@@ -325,6 +373,7 @@ export function FeedPage({
       submitting={deletion.isPending}
     />
     </MediaPlaybackCoordinator>
+    </VideoQueryScope.Provider>
   )
 }
 
@@ -419,7 +468,7 @@ function Attachment({ attachment, borrowedPhotoUrl, hostBridge, memory, photoAlb
   if (attachment.source === 'max') return <MaxVideo attachment={attachment} hostBridge={hostBridge} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} borrowedUrl={borrowedPhotoUrl} hostBridge={hostBridge} onOpenPhoto={onOpenPhoto} onUrlChange={onPhotoUrlChange} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} registerFullscreen={registerFullscreen} interactive={photoInteractive} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
-  return <PrivateVideo path={attachment.playbackPath} />
+  return <PrivateVideo attachment={attachment} memory={memory} transport={transport} />
 }
 
 export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
@@ -728,8 +777,21 @@ function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; d
   </div>
 }
 
-function PrivateVideo({ path }: { path: string | null }) {
-  const source = usePrivateMediaSource(path)
+function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<MemoryAttachment, { source: 'private_storage' }>; memory: MemoryDto; transport: AuthenticatedTransport }) {
+  const { accountId, membershipEpoch } = useContext(VideoQueryScope)
+  const rendition = useQuery({
+    queryKey: pendingVideoQueryKey(memory.familyId, accountId, membershipEpoch, memory.id),
+    queryFn: ({ signal }) => loadMemory(transport, memory.familyId, memory.id, signal),
+    enabled: false,
+    retry: false,
+  })
+  const currentAttachment = rendition.data?.id === memory.id && rendition.data.familyId === memory.familyId
+    ? rendition.data.attachments.find((item) => item.id === attachment.id)
+    : undefined
+  const effective = attachment.renditionStatus === 'pending' && currentAttachment?.source === 'private_storage' && currentAttachment.kind === 'video' && currentAttachment.renditionStatus !== 'pending' ? currentAttachment : attachment
+  const { playbackPath: path, renditionStatus } = effective
+  const playablePath = renditionStatus === 'ready' ? path : null
+  const source = usePrivateMediaSource(playablePath)
   const url = source.url
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`video:${path ?? 'missing'}`, video)
@@ -739,12 +801,13 @@ function PrivateVideo({ path }: { path: string | null }) {
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
   const canFullscreen = typeof HTMLVideoElement !== 'undefined' && 'requestFullscreen' in HTMLVideoElement.prototype
-  const viewerState = failed || source.status === 'error' ? 'error' : source.status
+  const viewerState = renditionStatus === 'pending' ? 'loading' : renditionStatus === 'failed' || failed || source.status === 'error' ? 'error' : source.status
   return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="metadata" ref={video} src={url ?? undefined} />
-    {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">Загружаем видео…</Typography> : null}
-    {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{path ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
-    <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
-    <input aria-label="Позиция видео" className="mb-3 w-full px-3" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
+    {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Загружаем видео…'}</Typography> : null}
+    {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
+    {renditionStatus === 'pending' ? <div className="px-3 pt-3"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
+    <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
+    <input aria-label="Позиция видео" className="mb-3 w-full px-3" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
   </div>
 }
 

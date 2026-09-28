@@ -112,6 +112,43 @@ test('photo + video + photo publishes one media Memory with one caption and even
   }
 })
 
+test('exactly one photo and one video publish one ordered media Memory', async () => {
+  const browser = installInteractiveDom()
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const ids = ['00000000-0000-7000-8000-000000000041', '00000000-0000-7000-8000-000000000042']
+  let next = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+      if (path.endsWith('/uploads')) {
+        const index = next++
+        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 0 ? 'image/jpeg' : 'video/mp4' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) return { asset: { id: ids[Number(path.match(/upload-(\d+)\/finalize/)?.[1] ?? 0)] } } as never
+      return { id: 'memory-1' } as never
+    },
+    raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    const creates = requests.filter(({ path }) => path.endsWith('/memories'))
+    expect(creates).toHaveLength(1)
+    expect(creates[0]?.body).toMatchObject({ kind: 'media', mediaIds: ids })
+    expect(creates[0]?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('mixed selection accepts one to ten photo/video items and rejects eleven or unsupported video', () => {
   expect(validateComposerFiles([file('one.jpg')])).toEqual({ ok: true })
   expect(validateComposerFiles([file('one.jpg'), file('clip.mov', 128, 'video/quicktime')])).toEqual({ ok: true })

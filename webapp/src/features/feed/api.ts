@@ -1,5 +1,6 @@
 import {
   likeResponseSchema,
+  memoryDtoSchema,
   memoryPageSchema,
   telegramVideoOpenResponseSchema,
   type MemoryPage,
@@ -23,6 +24,14 @@ export function loadFeed(
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories?${query.toString()}`,
     memoryPageSchema,
+    { signal },
+  )
+}
+
+export function loadMemory(transport: AuthenticatedTransport, familyId: string, memoryId: string, signal?: AbortSignal) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}`,
+    memoryDtoSchema,
     { signal },
   )
 }
