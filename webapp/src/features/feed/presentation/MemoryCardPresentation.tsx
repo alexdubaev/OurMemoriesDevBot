@@ -3,7 +3,6 @@ import type { MemoryDto } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
-import { ChildAvatar } from '@/features/family'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
 
 export type MemoryCardPresentationProps = {
@@ -31,9 +30,6 @@ export function MemoryCardPresentation({
   actions,
   authorInitials,
   authorName,
-  childName,
-  childAvatarUrl = null,
-  childAvatarCrop = null,
   body,
   kind,
   liked,
@@ -61,7 +57,6 @@ export function MemoryCardPresentation({
       <div className="actions">
         <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
       </div>
-      {childName ? <div className="memory-child-tags"><span className="memory-child-tag"><span className="memory-child-tag-avatar"><ChildAvatar avatarCrop={childAvatarCrop} avatarUrl={childAvatarUrl} name={childName} size="family-card" /></span><Typography as="b" variant="memoryMeta">{childName}</Typography></span></div> : null}
       {kind === 'video'
         ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
         : kind === 'note'

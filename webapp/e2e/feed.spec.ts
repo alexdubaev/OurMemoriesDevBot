@@ -1125,9 +1125,13 @@ test.describe.serial('T07 live feed', () => {
     })
     await page.clock.setFixedTime(new Date('2026-09-25T07:30:00.000Z'))
     await page.reload()
-    await page.getByRole('button', { name: 'Лента' }).click()
+    await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
-    await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toContainText('София')
+    await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toHaveCount(0)
+    const likeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить сердечко"]`)
+    await expect(likeButton).toBeVisible()
+    await expect(likeButton).toHaveAttribute('aria-pressed', 'false')
 
     const geometry: Record<string, unknown> = {}
     const capture = async (name: string) => {
@@ -1147,8 +1151,8 @@ test.describe.serial('T07 live feed', () => {
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-comparable-${name}.png`), fullPage: true, animations: 'disabled' })
       await page.locator(`[data-memory-id="${memory.id}"]`).screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-card-${name}.png`), animations: 'disabled' })
     }
-    for (const width of [320, 390, 430, 480]) {
-      await page.setViewportSize({ width, height: 844 })
+    for (const [width, height] of [[320, 568], [390, 844], [430, 932], [480, 844]]) {
+      await page.setViewportSize({ width, height })
       await capture(String(width))
     }
     await page.setViewportSize({ width: 390, height: 844 })
@@ -1158,6 +1162,14 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
       await capture(`${theme}-390`)
     }
+    await likeButton.click()
+    const activeLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Убрать сердечко"]`)
+    await expect(activeLikeButton).toHaveAttribute('aria-pressed', 'true')
+    await expect(activeLikeButton).toContainText('1')
+    await activeLikeButton.click()
+    const inactiveLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить сердечко"]`)
+    await expect(inactiveLikeButton).toHaveAttribute('aria-pressed', 'false')
+    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(0)
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
   })
 
