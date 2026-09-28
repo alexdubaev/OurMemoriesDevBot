@@ -382,6 +382,65 @@ maybeDescribe('Private media API', () => {
     expect(avatar.headers.get('content-type')).toBe('image/webp')
   })
 
+  test('member avatar content follows active family membership and the current ready avatar id', async () => {
+    const owner = await admittedUser('Владелец', '43501')
+    const viewer = await admittedUser('Зритель', '43502')
+    const outsider = await admittedUser('Посторонний', '43503')
+    const family = await createFamily(owner.token, 'Семья')
+    const otherFamily = await createFamily(outsider.token, 'Другая семья')
+    await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const key = `avatars/${randomUUID()}`
+    await privateStorage.storage.writeObject({
+      key, body: new Blob([pngFixture.slice().buffer as ArrayBuffer]).stream(),
+      contentLength: pngFixture.byteLength, contentType: 'image/png',
+    })
+    const avatar = await prisma.userAvatar.create({ data: {
+      userId: owner.userId, state: 'ready', objectKey: key, contentType: 'image/png',
+      byteSize: pngFixture.byteLength, expiresAt: new Date(Date.now() + 60_000), readyAt: new Date(),
+    } })
+    const path = `/api/v1/families/${family.body.family.id}/media/avatars/${owner.userId}/${avatar.id}/content`
+    const members = await jsonRequest(`/api/v1/families/${family.body.family.id}/members`, viewer.token, 'GET')
+    expect(members.body.items.find((item: { userId: string }) => item.userId === owner.userId).avatarPath).toBe(path)
+    expect(members.body.items.find((item: { userId: string }) => item.userId === viewer.userId).avatarPath).toBeNull()
+    const note = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
+      kind: 'note', childId: family.body.child.id, body: 'Воспоминание', occurredAt: new Date().toISOString(),
+    }, randomUUID())
+    expect(note.response.status).toBe(201)
+    const feed = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, viewer.token, 'GET')
+    expect(feed.body.items[0].author.avatarPath).toBe(path)
+    expect((await app.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })).status).toBe(200)
+    expect((await app.request(path, { method: 'HEAD', headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(200)
+    expect((await app.request(path)).status).toBe(401)
+    expect((await app.request(path, { headers: { Authorization: `Bearer ${outsider.token}` } })).status).toBe(404)
+    const session = await app.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    const cookie = session.headers.get('set-cookie')?.split(';', 1)[0]
+    expect(cookie).toBeTruthy()
+    expect((await app.request(path, { headers: { Cookie: cookie! } })).status).toBe(200)
+    const wrongFamilyPath = path.replace(family.body.family.id, otherFamily.body.family.id)
+    expect((await app.request(wrongFamilyPath, { headers: { Authorization: `Bearer ${outsider.token}` } })).status).toBe(404)
+    await prisma.userAvatar.delete({ where: { id: avatar.id } })
+    expect((await app.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })).status).toBe(404)
+    const replacement = await prisma.userAvatar.create({ data: {
+      userId: owner.userId, state: 'ready', objectKey: `avatars/${randomUUID()}`, contentType: 'image/png',
+      byteSize: pngFixture.byteLength, expiresAt: new Date(Date.now() + 60_000), readyAt: new Date(),
+    } })
+    const replacedMembers = await jsonRequest(`/api/v1/families/${family.body.family.id}/members`, viewer.token, 'GET')
+    expect(replacedMembers.body.items.find((item: { userId: string }) => item.userId === owner.userId).avatarPath)
+      .toBe(path.replace(avatar.id, replacement.id))
+    const viewerAvatar = await prisma.userAvatar.create({ data: {
+      userId: viewer.userId, state: 'ready', objectKey: `avatars/${randomUUID()}`, contentType: 'image/png',
+      byteSize: pngFixture.byteLength, expiresAt: new Date(Date.now() + 60_000), readyAt: new Date(),
+    } })
+    const viewerPath = `/api/v1/families/${family.body.family.id}/media/avatars/${viewer.userId}/${viewerAvatar.id}/content`
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
+      data: { revokedAt: new Date() },
+    })
+    expect((await app.request(viewerPath, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
+  })
+
   async function uploadPhoto(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array) {
     const upload = await reserveAndPut(token, familyId, purpose, bytes)
     const finalized = await jsonRequest(

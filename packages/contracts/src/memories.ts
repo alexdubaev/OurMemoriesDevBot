@@ -83,7 +83,8 @@ export const backendMediaPathSchema = z.string().superRefine((value, context) =>
   const uuidSegment = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
   const contentPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/${uuidSegment}/content$`)
   const maxVideoPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/max-videos/${uuidSegment}/content$`)
-  if (!contentPath.test(pathOnly) && !maxVideoPath.test(pathOnly)) {
+  const memberAvatarPath = new RegExp(`^/api/v1/families/${uuidSegment}/media/avatars/${uuidSegment}/${uuidSegment}/content$`)
+  if (!contentPath.test(pathOnly) && !maxVideoPath.test(pathOnly) && !memberAvatarPath.test(pathOnly)) {
     context.addIssue({ code: 'custom', message: 'Media path must target the authenticated media endpoint' })
     return
   }
@@ -95,7 +96,7 @@ export const backendMediaPathSchema = z.string().superRefine((value, context) =>
     return
   }
   for (const [name, parameterValue] of parameters) {
-    if (maxVideoPath.test(pathOnly) || name !== 'variant' || !['preview', 'display', 'playback', 'original'].includes(parameterValue)) {
+    if (maxVideoPath.test(pathOnly) || memberAvatarPath.test(pathOnly) || name !== 'variant' || !['preview', 'display', 'playback', 'original'].includes(parameterValue)) {
       context.addIssue({ code: 'custom', message: 'Media path contains an unsupported query parameter' })
       return
     }
@@ -157,7 +158,7 @@ export const memoryDtoSchema = z.object({
   id: uuid,
   familyId: uuid,
   childId: uuid,
-  author: z.object({ id: uuid, name: z.string() }).strict(),
+  author: z.object({ id: uuid, name: z.string(), avatarPath: backendMediaPathSchema.nullable() }).strict(),
   kind: memoryKindSchema,
   body: z.string(),
   occurredAt: z.string().datetime(),

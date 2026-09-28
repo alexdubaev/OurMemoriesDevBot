@@ -4,11 +4,13 @@ import type { MemoryDto } from '@web-app-demo/contracts'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
+import { MemberAvatarImage } from '@/features/avatar'
 
 export type MemoryCardPresentationProps = {
   actions: ReactNode
   authorInitials: string
   authorName: string
+  authorAvatarPath?: string | null
   childName?: string
   childAvatarUrl?: string | null
   childAvatarCrop?: ChildAvatarCrop | null
@@ -30,6 +32,7 @@ export function MemoryCardPresentation({
   actions,
   authorInitials,
   authorName,
+  authorAvatarPath,
   body,
   kind,
   liked,
@@ -49,7 +52,7 @@ export function MemoryCardPresentation({
   return (
     <article aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind}>
       <header className="memory-header" data-slot="memoly-author-row">
-        <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>
+        <MemberAvatarImage avatarPath={authorAvatarPath} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>

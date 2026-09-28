@@ -332,6 +332,20 @@ export class MediaService {
     return { ...object, body: stored.body, range }
   }
 
+  async memberAvatarContent(scope: FamilyScope, userId: string, avatarId: string, head = false) {
+    await this.access.requireMember(scope)
+    const object = await this.repository.resolveMemberAvatarContent(scope, userId, avatarId)
+    if (!object) throw new MediaFailure('not_found', 'Аватар не найден')
+    if (head) {
+      const stored = await this.storage.headObject(object.objectKey).catch((error) => { throw storageFailure(error) })
+      if (!stored) throw new MediaFailure('not_found', 'Аватар не найден')
+      return { contentType: object.contentType, contentLength: object.contentLength, body: null }
+    }
+    const stored = await this.storage.readObject({ key: object.objectKey }).catch((error) => { throw storageFailure(error) })
+    if (!stored) throw new MediaFailure('not_found', 'Аватар не найден')
+    return { contentType: object.contentType, contentLength: object.contentLength, body: stored.body }
+  }
+
   async authorizePlaybackSession(scope: FamilyScope) {
     await this.access.requireMember(scope)
   }

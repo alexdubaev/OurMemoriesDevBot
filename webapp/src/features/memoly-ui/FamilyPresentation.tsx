@@ -6,7 +6,7 @@ import { ChildHeader } from '@/components/ChildHeader'
 import { WebpIcon } from '@/components/WebpIcon'
 import { InlineError } from '@/features/feed'
 import { ChildProfile, familyMemberName, feedChildSubtitle, InviteFlow, InviteReady, roleLabel } from '@/features/family'
-import { AvatarLetter } from '@/features/session'
+import { MemberAvatarImage } from '@/features/avatar'
 import { useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'
 import { SettingsSheet } from './SettingsSheet'
@@ -102,7 +102,7 @@ function FamilyOverview({ family, child, childAvatarUrl, members, invites, usage
 function FamilyMemberRow({ member, onOpen }: { member: FamilyMemberDto; onOpen: (member: FamilyMemberDto) => void }) {
   const displayName = familyMemberName(member)
   const alias = member.familyDisplayName && member.familyDisplayName !== member.displayName ? member.displayName : null
-  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><AvatarLetter className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{alias ? <span>{alias}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span><span aria-hidden="true" className="family-row-more">•••</span></button>
+  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><MemberAvatarImage avatarPath={member.avatarPath} className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{alias ? <span>{alias}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span><span aria-hidden="true" className="family-row-more">•••</span></button>
 }
 
 function formatBytes(value: number) { if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`; return `${(value / 1024 / 1024).toFixed(1)} МБ` }

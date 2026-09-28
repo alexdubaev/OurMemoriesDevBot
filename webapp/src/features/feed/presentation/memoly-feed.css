@@ -171,6 +171,7 @@
 [data-memoly-feed] .memory-header { display: flex; min-width: 0; min-height: 54px; align-items: center; padding: 0 4px 8px 0; }
 [data-memoly-feed] .author-avatar { display: grid; width: 50px; height: 50px; flex: 0 0 50px; align-items: center; justify-content: center; margin-right: 10px; border: 5px solid rgba(248,248,243,.95); border-radius: 50%; color: #fff; background: linear-gradient(145deg, var(--memoly-accent-hi), var(--memoly-accent)); box-shadow: 5px 5px 11px rgba(119,134,125,.18), -4px -4px 10px rgba(255,255,255,.9); font-size: 17px; font-weight: 650; }
 [data-memoly-feed] .author-avatar > .author-initials { font-size: inherit; line-height: inherit; }
+[data-memoly-feed] img.author-avatar { display: block; object-fit: cover; }
 [data-memoly-feed] .author-meta { min-width: 0; }
 [data-memoly-feed] .author-name { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--memoly-ink); font-size: 18px; font-weight: 750; line-height: 1.05; white-space: nowrap; }
 [data-memoly-feed] .author-time { display: block; margin-top: 4px; color: var(--memoly-muted); font-size: 14px; }

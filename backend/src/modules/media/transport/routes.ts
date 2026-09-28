@@ -110,6 +110,18 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
       throw error
     }
   }
+  const memberAvatarContent = async (c: any, head: boolean) => {
+    const params = z.object({ familyId: z.uuid(), userId: z.uuid(), avatarId: z.uuid() }).strict().parse(c.req.param())
+    const result = await executeMedia(() => service.memberAvatarContent(scope(c), params.userId, params.avatarId, head))
+    c.header('Content-Type', result.contentType)
+    c.header('Content-Length', String(result.contentLength))
+    c.header('Cache-Control', 'private, no-store')
+    c.header('Cross-Origin-Resource-Policy', 'same-origin')
+    c.header('Referrer-Policy', 'no-referrer')
+    return c.body(result.body, 200)
+  }
+  routes.get('/families/:familyId/media/avatars/:userId/:avatarId/content', (c) => memberAvatarContent(c, false))
+  routes.on('HEAD', '/families/:familyId/media/avatars/:userId/:avatarId/content', (c) => memberAvatarContent(c, true))
   routes.get('/families/:familyId/media/max-videos/:referenceId/content', (c) => maxVideoContent(c, false))
   routes.on('HEAD', '/families/:familyId/media/max-videos/:referenceId/content', (c) => maxVideoContent(c, true))
   routes.get('/families/:familyId/media/:mediaId/content', (c) => content(c, false))
@@ -131,7 +143,7 @@ function bearerToken(authorization: string | undefined) {
 }
 
 function isContentPath(path: string) {
-  return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+)\/content$/i.test(path)
+  return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i.test(path)
 }
 
 function scope(c: any) { return { principal: { userId: c.var.user.id, sessionId: c.var.user.sessionId }, familyId: c.req.param('familyId') } }

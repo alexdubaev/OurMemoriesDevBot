@@ -1,4 +1,4 @@
-const PRIVATE_MEDIA_PATH = /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+)\/content$/i
+const PRIVATE_MEDIA_PATH = /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i
 
 let accessToken = null
 

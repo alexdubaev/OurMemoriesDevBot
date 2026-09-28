@@ -263,6 +263,23 @@ export class PrismaMediaRepository implements MediaRepository {
       ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize) }
       : null
   }
+
+  async resolveMemberAvatarContent(scope: FamilyScope, userId: string, avatarId: string): Promise<ContentObject | null> {
+    const avatar = await this.db.userAvatar.findFirst({
+      where: {
+        id: avatarId,
+        userId,
+        state: 'ready',
+        user: { familyMemberships: { some: {
+          familyId: scope.familyId,
+          revokedAt: null,
+          family: { status: 'active' },
+        } } },
+      },
+      select: { objectKey: true, contentType: true, byteSize: true },
+    })
+    return avatar ? { objectKey: avatar.objectKey, contentType: avatar.contentType, contentLength: avatar.byteSize } : null
+  }
 }
 
 async function reservationFor(tx: PrismaTransactionClient, scope: FamilyScope, uploadId: string) {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  backendMediaPathSchema,
   createMemoryRequestSchema,
   listMemoriesQuerySchema,
   mediaDtoSchema,
@@ -13,6 +14,16 @@ import {
 const childId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
 
 describe('memory contracts', () => {
+  test('accepts only a versioned family-scoped member avatar content path', () => {
+    const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
+    const userId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'
+    const avatarId = '018f01d8-0c2a-7c25-bf83-ae68985c7e92'
+    const path = `/api/v1/families/${familyId}/media/avatars/${userId}/${avatarId}/content`
+    expect(backendMediaPathSchema.parse(path)).toBe(path)
+    expect(() => backendMediaPathSchema.parse(`${path}?variant=original`)).toThrow()
+    expect(() => backendMediaPathSchema.parse(path.replace('/content', '/extra/content'))).toThrow()
+    expect(() => backendMediaPathSchema.parse(`https://example.test${path}`)).toThrow()
+  })
   test('accepts a note with up to 8,000 Unicode code points and preserves plain text', () => {
     const prefix = `<img src=x onerror=alert('xss')>`
     const body = `${prefix}${'💛'.repeat(8_000 - [...prefix].length)}`
