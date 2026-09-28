@@ -50,6 +50,10 @@ export class SeenDwell {
     this.eligibleSince.delete(id)
   }
 
+  resetCandidate(id: string) {
+    if (!this.completed.has(id)) this.eligibleSince.delete(id)
+  }
+
   clear() {
     this.eligibleSince.clear()
     this.completed.clear()

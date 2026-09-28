@@ -841,14 +841,14 @@ test.describe.serial('T07 live feed', () => {
 
     await prisma.memory.create({ data: {
       familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
-      kind: 'note', body: 'Старая добавленная запись', occurredAt: new Date(Date.now() - 7 * 24 * 60 * 60_000),
+      kind: 'note', body: 'Старая добавленная запись', occurredAt: new Date(Date.now() - 7 * 24 * 60 * 60_000), firstPublishedAt: new Date(),
     } })
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
     await expect(page.getByRole('button', { name: 'Показать новые' })).toHaveCount(0)
 
     await prisma.memory.create({ data: {
       familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
-      kind: 'note', body: 'Совсем новое воспоминание', occurredAt: new Date(),
+      kind: 'note', body: 'Совсем новое воспоминание', occurredAt: new Date(), firstPublishedAt: new Date(),
     } })
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
     await expect(page.getByRole('button', { name: 'Показать новые' })).toBeVisible()
@@ -923,7 +923,105 @@ test.describe.serial('T07 live feed', () => {
     await expectObjectUrlsClean(page, 7)
   })
 
-  test('streams voice and legacy video only after play, seeks with Range/206, and pauses on hide', async ({ page }) => {
+  test('mixed carousel swipes, scrolls vertically, pauses video, and opens the selected item', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    let openedPhotoRequests = 0
+    page.on('request', (request) => { if (request.url().includes(fixture.mixedLastPhotoId) && request.url().includes('variant=display')) openedPhotoRequests += 1 })
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    await card.scrollIntoViewIfNeeded()
+    await expect(card).toContainText('1 / 3')
+    await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/mm3-card-photo.png'), animations: 'disabled' })
+    const viewport = card.locator('.memoly-mixed-viewport')
+    await expect(viewport).toHaveCSS('touch-action', 'pan-y pinch-zoom')
+    const before = await page.evaluate(() => window.scrollY)
+    await viewport.hover()
+    await page.mouse.wheel(0, 180)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
+    await card.scrollIntoViewIfNeeded()
+    const bounds = await viewport.boundingBox()
+    if (!bounds) throw new Error('mixed carousel viewport is missing')
+    const y = bounds.y + Math.min(bounds.height / 2, 80)
+    await page.mouse.move(bounds.x + bounds.width * .8, y)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + bounds.width * .2, y, { steps: 8 })
+    await page.mouse.up()
+    await expect(card).toContainText('2 / 3')
+    await expect(card.getByRole('button', { name: 'Открыть фото' })).toHaveCount(0)
+    await expect.poll(() => card.evaluate((element) => {
+      const viewport = element.querySelector('.memoly-mixed-viewport')?.getBoundingClientRect()
+      const active = element.querySelector('[data-carousel-active="true"]')?.getBoundingClientRect()
+      return viewport && active ? Math.abs(viewport.left - active.left) : Number.POSITIVE_INFINITY
+    })).toBeLessThan(2)
+    const video = card.locator('video')
+    await expect(video).toHaveCount(1)
+    await expect(video).not.toHaveAttribute('autoplay', /.*/)
+    await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
+    const previous = card.getByRole('button', { name: 'Предыдущий элемент' })
+    await previous.focus()
+    await page.keyboard.press('Shift+Tab')
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[data-carousel-active="true"]')))).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/mm3-card-video.png'), animations: 'disabled' })
+    await card.getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false)
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('3 / 3')
+    await expect(video).toHaveCount(0)
+    await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
+    expect(openedPhotoRequests).toBeGreaterThan(0)
+    const beforeViewerRequests = openedPhotoRequests
+    await card.getByRole('button', { name: 'Открыть фото' }).click()
+    const viewer = page.locator('[data-mixed-viewer]')
+    await expect(viewer).toBeVisible()
+    await expect(viewer).toContainText('3 / 3')
+    await expect(viewer.locator('img')).toBeVisible()
+    expect(openedPhotoRequests).toBe(beforeViewerRequests)
+    await page.screenshot({ path: resolve('e2e/.artifacts/mm3-mixed-photo.png'), animations: 'disabled' })
+    await page.keyboard.press('ArrowLeft')
+    await expect(viewer).toContainText('2 / 3')
+    await expect(viewer.locator('video')).toHaveCount(1)
+    await expect(viewer.locator('[data-seen-ready="true"]')).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/mm3-mixed-video.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    await expect(card).toContainText('3 / 3')
+    // This checks mixed-card token/layout behavior in all six themes without changing the user's saved theme.
+    for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+      await page.evaluate((name) => { document.documentElement.dataset.memolyTheme = name; document.querySelector<HTMLElement>('[data-slot="memoly-theme-root"]')!.dataset.memolyTheme = name }, theme)
+      await expect(card.locator('.memoly-mixed-count')).toBeVisible()
+      const layout = await card.evaluate((element) => ({ width: element.getBoundingClientRect().width, scrollWidth: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }))
+      expect(layout.width).toBeGreaterThan(0)
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport)
+    }
+  })
+
+  test('mixed carousel accepts touch swipe while vertical touch still scrolls the feed', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="media"]')
+    await card.scrollIntoViewIfNeeded()
+    const viewport = card.locator('.memoly-mixed-viewport')
+    const bounds = await viewport.boundingBox()
+    if (!bounds) throw new Error('mixed carousel viewport is missing')
+    const session = await page.context().newCDPSession(page)
+    const touch = async (start: { x: number; y: number }, end: { x: number; y: number }) => {
+      await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] })
+      for (let step = 1; step <= 8; step += 1) {
+        await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x + (end.x - start.x) * step / 8, y: start.y + (end.y - start.y) * step / 8, id: 1 }] })
+      }
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    const y = bounds.y + Math.min(bounds.height / 2, 80)
+    await touch({ x: bounds.x + bounds.width * .8, y }, { x: bounds.x + bounds.width * .2, y })
+    await expect(card).toContainText('2 / 3')
+    const before = await page.evaluate(() => window.scrollY)
+    await touch({ x: bounds.x + bounds.width / 2, y: bounds.y + Math.min(bounds.height - 30, 220) }, { x: bounds.x + bounds.width / 2, y: bounds.y + 30 })
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
+    await session.detach()
+  })
+
+  test('streams voice and legacy video on demand after legacy metadata, seeks with Range/206, and pauses on hide', async ({ page }) => {
     await openFeed(page)
     const responses: Array<{ range: string | null; status: number; url: string }> = []
     page.on('response', (response) => {
@@ -936,7 +1034,10 @@ test.describe.serial('T07 live feed', () => {
     })
 
     await page.waitForTimeout(500)
-    expect(responses).toEqual([])
+    // The legacy player has always used preload="metadata". It may fetch a Range
+    // before play; inactive mixed video and voice must remain untouched.
+    expect(responses.every((response) => response.url.includes(fixture.legacyVideoId))).toBe(true)
+    expect(responses.some((response) => response.url.includes(fixture.mixedVideoId) || response.url.includes(fixture.voiceId))).toBe(false)
 
     const voiceCard = page.locator('[data-memory-id]').filter({ hasText: 'Голос E2E' })
     const voice = voiceCard.locator('audio')
@@ -1187,6 +1288,76 @@ test.describe.serial('T07 live feed', () => {
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
   })
 
+  test('mixed unread Memory waits for active readiness, resets dwell on slide change, and stays until seen ack', async ({ page }) => {
+    const memoryId = randomUUID()
+    const photoKey = `media-display/${randomUUID()}-unread.png`
+    const videoKey = `media-playback/${randomUUID()}-unread.mp4`
+    fixture.objectKeys.push(photoKey, videoKey)
+    const videoBytes = generatedMedia(['-f', 'lavfi', '-i', 'color=c=pink:s=320x180:d=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'])
+    await store(photoKey, pngImage.buffer, 'image/png')
+    await store(videoKey, videoBytes, 'video/mp4')
+    const photo = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key: photoKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
+    const video = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'video', variant: 'playback', key: videoKey, bytes: videoBytes, mime: 'video/mp4', width: 320, height: 180, durationMs: 8_000 })
+    let releasePhoto = () => undefined
+    let releaseSeen = () => undefined
+    const photoGate = new Promise<void>((resolve) => { releasePhoto = resolve })
+    const seenGate = new Promise<void>((resolve) => { releaseSeen = resolve })
+    let seenPostStarted = 0
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: 1n } })
+        await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: 0n } })
+        await tx.memory.create({ data: {
+          id: memoryId, familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
+          kind: 'media', body: 'Непросмотренное смешанное E2E', occurredAt: new Date(), firstPublishedAt: new Date(), firstPublishedOrdinal: 1n,
+          media: { create: [{ mediaId: photo.id, position: 0 }, { mediaId: video.id, position: 1 }] },
+        } })
+      })
+      await page.route(`**/media/${photo.id}/content?variant=display`, async (route) => { await photoGate; await route.continue() })
+      await page.route('**/memories/seen', async (route) => { seenPostStarted += 1; await seenGate; await route.continue() })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.reload()
+      await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /1 непросмотренных воспоминаний/)
+      await page.locator('.family-hub-card').click()
+      await page.getByRole('button', { name: 'Непросмотренные · 1' }).click()
+      const card = page.locator(`[data-memory-id="${memoryId}"]`)
+      await expect(card).toBeVisible()
+      await card.scrollIntoViewIfNeeded()
+      await expect(card.getByLabel('Загрузка фотографии')).toBeVisible()
+      await page.waitForTimeout(1_200)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
+      expect(seenPostStarted).toBe(0)
+      releasePhoto()
+      await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
+      await page.waitForTimeout(450)
+      await card.getByRole('button', { name: 'Следующий элемент' }).click()
+      await expect(card).toContainText('2 / 2')
+      await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
+      await page.waitForTimeout(550)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
+      expect(seenPostStarted).toBe(0)
+      await expect(card).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Непросмотренные · 1' })).toBeVisible()
+      await expect.poll(() => seenPostStarted).toBe(1)
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
+      await expect(page.getByRole('button', { name: 'Непросмотренные · 1' })).toBeVisible()
+      releaseSeen()
+      await expect.poll(() => prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
+      await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
+      await expect(card).toBeVisible()
+      await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
+      await expect(card).toContainText('1 / 2')
+      expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
+    } finally {
+      releasePhoto()
+      releaseSeen()
+      await prisma.memory.deleteMany({ where: { id: memoryId } })
+      await prisma.mediaAsset.deleteMany({ where: { id: { in: [photo.id, video.id] } } })
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: null, publicationOrdinal: 0n } })
+      await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: null } })
+    }
+  })
+
   test('B6 real observer and seen API take seven unread to five without moving cards or another user', async ({ page, browser }) => {
     const secondSubject = String(900_000_000 + Math.floor(Math.random() * 90_000_000))
     const secondUser = await prisma.user.create({ data: { displayName: 'Другой зритель E2E' } })
@@ -1208,6 +1379,7 @@ test.describe.serial('T07 live feed', () => {
           await tx.memory.create({ data: {
             id, familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
             kind: 'note', body: body(index), occurredAt: new Date(oldDate - index * 60_000),
+            firstPublishedAt: new Date(),
             firstPublishedOrdinal: BigInt(index + 1),
           } })
         }
@@ -1370,6 +1542,7 @@ async function seedFeed() {
       kind: 'note' as const,
       body: `Заметка E2E ${index}`,
       occurredAt: new Date(baseTime - (index + 4) * 60_000),
+      firstPublishedAt: new Date(baseTime),
     })),
   })
 
@@ -1403,8 +1576,19 @@ async function seedFeed() {
   await store(videoKey, videoBytes, 'video/mp4')
   const videoAsset = await createAsset({ familyId, userId: ownerUser.id, kind: 'video', variant: 'playback', key: videoKey, bytes: videoBytes, mime: 'video/mp4', width: 320, height: 180, durationMs: 8_000 })
   await createMemoryWithMedia({ familyId, childId, userId: ownerUser.id, kind: 'video', body: 'Legacy video E2E', occurredAt: new Date(baseTime - 120_000), assets: [videoAsset] })
+  const mixedPhotoAssets = await Promise.all([0, 1].map(async (index) => {
+    const key = `media-display/${randomUUID()}-mixed-${index}.png`
+    objectKeys.push(key)
+    await store(key, pngImage.buffer, 'image/png')
+    return createAsset({ familyId, userId: ownerUser.id, kind: 'photo', variant: 'display', key, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
+  }))
+  const mixedVideoKey = `media-playback/${randomUUID()}-mixed.mp4`
+  objectKeys.push(mixedVideoKey)
+  await store(mixedVideoKey, videoBytes, 'video/mp4')
+  const mixedVideoAsset = await createAsset({ familyId, userId: ownerUser.id, kind: 'video', variant: 'playback', key: mixedVideoKey, bytes: videoBytes, mime: 'video/mp4', width: 320, height: 180, durationMs: 8_000 })
+  await createMemoryWithMedia({ familyId, childId, userId: ownerUser.id, kind: 'media', body: 'Смешанное воспоминание E2E', occurredAt: new Date(baseTime - 150_000), assets: [mixedPhotoAssets[0], mixedVideoAsset, mixedPhotoAssets[1]] })
 
-  const telegramMemory = await prisma.memory.create({ data: { familyId, childId, authorId: ownerUser.id, kind: 'video', body: 'Telegram video E2E', occurredAt: new Date(baseTime - 180_000) } })
+  const telegramMemory = await prisma.memory.create({ data: { familyId, childId, authorId: ownerUser.id, kind: 'video', body: 'Telegram video E2E', occurredAt: new Date(baseTime - 180_000), firstPublishedAt: new Date(baseTime) } })
   const thumbnailKey = `media-display/${randomUUID()}-telegram-poster.png`
   objectKeys.push(thumbnailKey)
   await store(thumbnailKey, pngImage.buffer, 'image/png')
@@ -1414,7 +1598,7 @@ async function seedFeed() {
   const source = await prisma.telegramSource.create({ data: { inboxId: inbox.id, botId, chatId: BigInt(subject), messageId: 1n, senderSubject: subject, userId: user.id, familyId, childId, kind: 'video', status: 'published', plannedMemoryId: telegramMemory.id, memoryId: telegramMemory.id } })
   await prisma.telegramVideoReference.create({ data: { sourceId: source.id, memoryId: telegramMemory.id, familyId, thumbnailMediaId: thumbnail.id, fileIdCiphertext: Buffer.from('synthetic-file-id'), encryptionIv: Buffer.alloc(12, 4), encryptionAuthTag: Buffer.alloc(16, 5), fileUniqueId: 'synthetic-unique-id', width: 320, height: 180, durationMs: 8_000 } })
 
-  return { familyId, childId, userId: user.id, ownerUserId: ownerUser.id, botId, objectKeys, memoryCount: 48 }
+  return { familyId, childId, userId: user.id, ownerUserId: ownerUser.id, botId, objectKeys, memoryCount: 49, mixedLastPhotoId: mixedPhotoAssets[1].id, mixedVideoId: mixedVideoAsset.id, legacyVideoId: videoAsset.id, voiceId: voiceAsset.id }
 }
 
 async function createAsset(input: { familyId: string; userId: string; kind: 'photo' | 'video' | 'voice'; variant: 'display' | 'playback'; key: string; bytes: Buffer; mime: string; width?: number; height?: number; durationMs?: number; waveform?: number[] }) {
@@ -1439,7 +1623,7 @@ async function createAsset(input: { familyId: string; userId: string; kind: 'pho
   } })
 }
 
-async function createMemoryWithMedia(input: { familyId: string; childId: string; userId: string; kind: 'photo' | 'video' | 'voice'; body: string; occurredAt: Date; assets: Array<{ id: string }> }) {
+async function createMemoryWithMedia(input: { familyId: string; childId: string; userId: string; kind: 'photo' | 'video' | 'voice' | 'media'; body: string; occurredAt: Date; assets: Array<{ id: string }> }) {
   return prisma.memory.create({ data: {
     familyId: input.familyId,
     childId: input.childId,
@@ -1447,6 +1631,7 @@ async function createMemoryWithMedia(input: { familyId: string; childId: string;
     kind: input.kind,
     body: input.body,
     occurredAt: input.occurredAt,
+    firstPublishedAt: new Date(),
     media: { create: input.assets.map((asset, position) => ({ mediaId: asset.id, position })) },
   } })
 }
