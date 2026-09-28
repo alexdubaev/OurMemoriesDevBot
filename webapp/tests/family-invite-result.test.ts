@@ -5,9 +5,25 @@ import type { ComponentProps } from 'react'
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
 
 import { createInviteResult } from '../src/features/family/invite-result'
+import { createBrowserDevHostBridge } from '../src/platform/telegram/host-bridge'
 import { FamilyPresentation } from '../src/features/memoly-ui/FamilyPresentation'
 
 describe('family invite result hotfix', () => {
+  test('returns a MAX share URL from a browser-created family invite', async () => {
+    const token = 'A'.repeat(32)
+    const bridge = createBrowserDevHostBridge(
+      { maxBotUsername: 'OurMemoriesMaxBot' },
+      { location: { origin: 'https://app.memoly.ru' } },
+    )
+    const result = await createInviteResult({
+      create: async () => ({ rawToken: token, expiresAt: '2026-09-25T00:00:00.000Z' }),
+      toUrl: bridge.inviteLink,
+      refresh: async () => undefined,
+    })
+
+    expect(result.url).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+  })
+
   test('keeps the successful URL result when the following refresh rejects', async () => {
     let refreshCalls = 0
     const result = await createInviteResult({

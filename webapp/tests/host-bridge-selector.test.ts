@@ -19,6 +19,16 @@ test('passes the configured MAX username through the host selector', () => {
   expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
 })
 
+test('passes the configured MAX username to the ordinary browser invite flow', () => {
+  const token = 'A'.repeat(32)
+  const bridge = createHostBridge(
+    { location: { origin: 'https://app.memoly.ru' } },
+    { maxBotUsername: 'OurMemoriesMaxBot' },
+  )
+  expect(bridge.kind).toBe('browser')
+  expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+})
+
 test('host selector chooses Telegram when MAX is absent and browser otherwise', () => {
   expect(createHostBridge({ Telegram: { WebApp: { initData: 'query_id=tg-signed' } } }).kind).toBe('telegram')
   expect(createHostBridge({}).kind).toBe('browser')

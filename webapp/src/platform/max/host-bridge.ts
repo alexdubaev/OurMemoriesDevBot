@@ -3,6 +3,7 @@ import type {
   TelegramHostMetadata,
   TelegramInsets,
 } from '../host-bridge'
+import { createMaxInviteLink } from '../max-invite-link'
 
 type MaxWebApp = {
   initData?: unknown
@@ -258,14 +259,6 @@ function inviteTokenFromStartParam(startParam: string | null) {
   if (!startParam?.startsWith('invite_')) return null
   const token = startParam.slice('invite_'.length)
   return /^[A-Za-z0-9_-]{32,128}$/.test(token) ? token : null
-}
-
-function createMaxInviteLink(rawToken: string, username: string | undefined) {
-  if (!/^[A-Za-z0-9_-]{32,128}$/.test(rawToken)) return null
-  if (!isValidMaxBotUsername(username)) return null
-  const payload = `invite_${rawToken}`
-  if (payload.length > 512) return null
-  return `https://max.ru/${username}?startapp=${payload}`
 }
 
 function isValidMaxBotUsername(username: string | undefined) {
