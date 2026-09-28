@@ -34,7 +34,7 @@ function visibleViewport(layer: SeenLayer, element: HTMLElement): SeenViewport {
 
 function blockedByOverlay(layer: SeenLayer, element: HTMLElement) {
   const photoViewer = document.querySelector('.pswp--open')
-  if (layer === 'fullscreen') return !(photoViewer?.contains(element) || document.fullscreenElement?.contains(element))
+  if (layer === 'fullscreen') return !(photoViewer?.contains(element) || document.fullscreenElement?.contains(element) || element.closest('[data-mixed-viewer]'))
   if (document.fullscreenElement) return !element.contains(document.fullscreenElement)
   if (photoViewer) return true
   const overlays = document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')
@@ -46,6 +46,9 @@ function blockedByOverlay(layer: SeenLayer, element: HTMLElement) {
 }
 
 function contentReady(element: HTMLElement) {
+  if (element.dataset.seenActiveIndex !== undefined || element.querySelector('[data-seen-active-index]')) {
+    return element.querySelector('[data-carousel-active="true"] [data-seen-ready="true"]') !== null
+  }
   return element.dataset.seenReady === 'true' || element.querySelector('[data-seen-ready="true"]') !== null
 }
 
@@ -91,6 +94,7 @@ export function useMemorySeenObserver(enabled: boolean, feedBlocked: boolean, on
     const intersectingElements = intersecting.current
     const dwell = new SeenDwell()
     let priorIds = new Set<string>()
+    const activeIndexes = new Map<string, string>()
     let timer: number | null = null
     let frame: number | null = null
     let disposed = false
@@ -101,6 +105,14 @@ export function useMemorySeenObserver(enabled: boolean, feedBlocked: boolean, on
       const active = enabledRef.current && pageActive && document.visibilityState === 'visible'
       for (const [element, registration] of registrations.current) {
         if (!element.isConnected) continue
+        const carousel = element.dataset.seenActiveIndex !== undefined ? element : element.querySelector<HTMLElement>('[data-seen-active-index]')
+        if (carousel) {
+          const index = carousel.dataset.seenActiveIndex ?? '0'
+          const key = `${registration.layer}:${registration.memoryId}`
+          const previous = activeIndexes.get(key)
+          if (previous !== undefined && previous !== index) dwell.resetCandidate(registration.memoryId)
+          activeIndexes.set(key, index)
+        }
         const prior = eligibility.get(registration.memoryId) ?? false
         if (!intersectingElements.has(element)) {
           eligibility.set(registration.memoryId, prior)
@@ -141,7 +153,7 @@ export function useMemorySeenObserver(enabled: boolean, feedBlocked: boolean, on
     }, { threshold: [0, 0.25, 0.5, 0.75, 1] })
     for (const element of registrations.current.keys()) observer.current.observe(element)
     const mutations = new MutationObserver(schedule)
-    mutations.observe(document.body, { attributes: true, attributeFilter: ['data-seen-ready', 'data-state', 'aria-modal', 'class'], childList: true, subtree: true })
+    mutations.observe(document.body, { attributes: true, attributeFilter: ['data-seen-ready', 'data-seen-active-index', 'data-state', 'aria-modal', 'class'], childList: true, subtree: true })
     document.addEventListener('scroll', schedule, true)
     document.addEventListener('visibilitychange', onVisibility)
     document.addEventListener('fullscreenchange', schedule)

@@ -29,3 +29,15 @@ test('dwell needs a continuous full second and interruption resets it', () => {
   expect(dwell.update('a', true, 2_500)).toBe(true)
   expect(dwell.update('a', true, 4_000)).toBe(false)
 })
+
+test('switching ready carousel slides restarts an uncompleted memory dwell', () => {
+  const dwell = new SeenDwell()
+  expect(dwell.update('mixed', true, 0)).toBe(false)
+  expect(dwell.update('mixed', true, 900)).toBe(false)
+  dwell.resetCandidate('mixed')
+  expect(dwell.update('mixed', true, 901)).toBe(false)
+  expect(dwell.update('mixed', true, 1_900)).toBe(false)
+  expect(dwell.update('mixed', true, 1_901)).toBe(true)
+  dwell.resetCandidate('mixed')
+  expect(dwell.update('mixed', true, 4_000)).toBe(false)
+})
