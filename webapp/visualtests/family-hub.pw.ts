@@ -44,3 +44,35 @@ test('Family Hub responds to narrow/wide viewports and six themes', async ({ pag
     await page.screenshot({ path: path.join(output, `owned-${theme}.png`), animations: 'disabled' })
   }
 })
+
+test('dark device preference keeps Family Hub and Feed in each canonical light theme', async ({ page }) => {
+  for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+    const samples: Array<{ scheme: string; background: string; surface: string }> = []
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await page.goto(`/__fixtures/family-hub?state=owned&theme=${theme}`)
+      await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+      samples.push(await page.evaluate(() => ({
+        scheme: getComputedStyle(document.documentElement).colorScheme,
+        background: getComputedStyle(document.body).backgroundColor,
+        surface: getComputedStyle(document.querySelector('.family-hub-card')!).backgroundImage,
+      })))
+    }
+    expect(samples[0]).toEqual(samples[1])
+    expect(samples[0]?.scheme).toBe('light only')
+  }
+
+  const feedSamples: Array<{ scheme: string; background: string }> = []
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await page.goto('/__fixtures/family-hub?state=feed&theme=mint')
+    await expect(page.locator('[data-fixture-state="feed"]')).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', 'mint')
+    feedSamples.push(await page.evaluate(() => ({
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      background: getComputedStyle(document.body).backgroundColor,
+    })))
+  }
+  expect(feedSamples[0]).toEqual(feedSamples[1])
+  expect(feedSamples[0]?.scheme).toBe('light only')
+})
