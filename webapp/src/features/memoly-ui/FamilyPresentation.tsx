@@ -16,10 +16,12 @@ import { FamilyArchivePage } from './FamilyArchivePage'
 import { FamilyInvitesPage } from './FamilyInvitesPage'
 import { FamilyLeavePage } from './FamilyLeavePage'
 import type { FamilySettingsChange } from './family-settings-model'
+import { presentSelfNameOverride, serverConfirmsSelfName, type SelfNameOverride } from './member-profile-model'
 
 export type FamilyMemberActions = { canEditAlias: boolean; canManageRole: boolean; canRemove: boolean }
 export type FamilyPresentationProps = {
   familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null
+  currentUserId: string
   usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { url: string; expiresAt: string; inviteeDisplayName?: string } | null
   copyState: 'idle' | 'copied' | 'failed'; busy: boolean; hasError?: boolean; inviteError?: boolean; canInvite: boolean; canEditChild: boolean; canLeaveFamily: boolean; canManageFamily: boolean; childProfileOpen: boolean
   memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: () => void; onChangeChildPhoto: () => void; onOpenChild: () => void; onCloseChild: () => void
@@ -30,16 +32,24 @@ export type FamilyPresentationProps = {
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'family-settings' | 'archive' | 'invites' | 'leave-confirm'
 
-export function FamilyPresentation({ familyResponse, hostBridge, invites, members, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily }: FamilyPresentationProps) {
+export function FamilyPresentation({ familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [inviteReturnView, setInviteReturnView] = useState<'overview' | 'invites'>('overview')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ageDetailsOpen, setAgeDetailsOpen] = useState(false)
+  const [selfNameOverride, setSelfNameOverride] = useState<SelfNameOverride | null>(null)
   const settingsTriggerRef = useRef<HTMLElement | null>(null)
   const { theme } = useMemolyTheme()
   const child = familyResponse.child
-  const currentSelectedMember = selectedMember ? members.find((member) => member.userId === selectedMember.userId) ?? null : null
+  const liveSelf = members.find((member) => member.userId === currentUserId)
+  const presentedMembers = presentSelfNameOverride(members, currentUserId, selfNameOverride)
+  const currentSelectedMember = selectedMember ? presentedMembers.find((member) => member.userId === selectedMember.userId) ?? null : null
+  useEffect(() => {
+    // The member query is external state. Release the optimistic row name only once it confirms this save.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (serverConfirmsSelfName(members, currentUserId, selfNameOverride)) setSelfNameOverride(null)
+  }, [currentUserId, members, selfNameOverride])
   const openSettings = () => { if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) settingsTriggerRef.current = document.activeElement; setView('overview'); setSelectedMember(null); setSettingsOpen(true) }
   const goOverview = () => { setView('overview'); setSelectedMember(null) }
   const goInviteSource = () => setView(inviteReturnView)
@@ -61,8 +71,8 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
     <h1 className="sr-only">{childProfileOpen ? 'Профиль ребёнка' : 'Семья'}</h1>
     <div className={childProfileOpen ? 'child-shell' : 'family-shell'}>
       {childProfileOpen && child ? <ChildProfile avatarUrl={childAvatarUrl} canEdit={canEditChild} child={child} familyTimezone={familyResponse.family.timezone} onBack={() => { if (ageDetailsOpen) setAgeDetailsOpen(false); else onCloseChild() }} onEdit={onEditChild} onChangePhoto={onChangeChildPhoto} onOpenAge={() => setAgeDetailsOpen(true)} showAgeDetails={ageDetailsOpen} /> : null}
-      {!childProfileOpen && view === 'overview' ? <FamilyOverview canInvite={canInvite} child={child} childAvatarUrl={childAvatarUrl} family={familyResponse.family} hasError={hasError} invites={invites} members={members} onOpenChild={() => { setAgeDetailsOpen(false); onOpenChild() }} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
-      {!childProfileOpen && view === 'member' && currentSelectedMember ? <MemberProfile key={`${currentSelectedMember.userId}:${currentSelectedMember.role}:${currentSelectedMember.familyDisplayName ?? ''}`} actions={memberActions[currentSelectedMember.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }} busy={busy} member={currentSelectedMember} onBack={goOverview} onRefresh={onRefresh} onRemove={onRemoveMember} onSave={onUpdateMember} /> : null}
+      {!childProfileOpen && view === 'overview' ? <FamilyOverview canInvite={canInvite} child={child} childAvatarUrl={childAvatarUrl} family={familyResponse.family} hasError={hasError} invites={invites} members={presentedMembers} onOpenChild={() => { setAgeDetailsOpen(false); onOpenChild() }} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
+      {!childProfileOpen && view === 'member' && currentSelectedMember ? <MemberProfile key={`${currentSelectedMember.userId}:${currentSelectedMember.role}:${currentSelectedMember.familyDisplayName ?? ''}`} actions={memberActions[currentSelectedMember.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }} busy={busy} currentUserId={currentUserId} member={currentSelectedMember} onAccountNameSaved={(name) => setSelfNameOverride({ value: name, baseline: liveSelf?.displayName ?? null })} onBack={goOverview} onRefresh={onRefresh} onRemove={onRemoveMember} onSave={onUpdateMember} /> : null}
       {!childProfileOpen && view === 'family-settings' && canManageFamily ? <FamilySettingsPage key={`${familyResponse.family.name}:${familyResponse.family.timezone}`} busy={busy} family={familyResponse.family} onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefresh} onSave={onUpdateFamily} /> : null}
       {!childProfileOpen && view === 'archive' ? <FamilyArchivePage onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefreshUsage} usage={usage} usageFailed={usageFailed} /> : null}
       {!childProfileOpen && view === 'invites' && canInvite ? <FamilyInvitesPage busy={busy} invites={invites} onBack={goOverview} onInvite={() => { setInviteReturnView('invites'); setView('invite') }} onRevoke={onRevokeInvite} /> : null}
