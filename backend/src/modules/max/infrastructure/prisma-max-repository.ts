@@ -37,6 +37,7 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
       }
 
       if (input.event.kind === 'message_created') {
+        // TODO(post-MVP MAX history import): Validate channel chat_id + mid provenance and a shared live/history dedupe identity before extending this dialog-oriented MaxSource reservation.
         const source = await tx.maxSource.create({
           data: {
             id: randomUUID(),

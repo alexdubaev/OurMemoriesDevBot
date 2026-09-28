@@ -23,4 +23,4 @@
 
 После принятого T09 порядок: full UI migration по `docs/design/memoly-handoff-final/` с сохранением принятой business logic → T09.5 Web Access для приглашённых VIEWER → member avatars/display names → актуализация scope T10/T11.
 
-Дополнительный согласованный пакет спецификаций: [Mixed Media + MAX History Import](plans/mixed-media-max-import/00_START_HERE.md)
+Дополнительный пакет: [Mixed Media + MAX History Import](plans/mixed-media-max-import/00_START_HERE.md). Блоки **MM-0…MM-4 завершены**. Исторический импорт MAX **HI-0…HI-4 — DEFERRED_POST_MVP**, не блокирует выпуск MVP: [дорожная карта после MVP](plans/mixed-media-max-import/POST_MVP_MAX_HISTORICAL_IMPORT.md). HI-0 содержит частичный документальный аудит, но его контракт не заморожен; HI-1…HI-4 не начаты.

@@ -1,12 +1,14 @@
 # Dependency and parallel execution plan
 
+**Current status:** MM-0…MM-4 complete. HI-0…HI-4 `DEFERRED_POST_MVP`; historical import is not an MVP release blocker. HI-0 has a partial documentary audit only, and HI-1…HI-4 have not started. Resume through [the post-MVP roadmap](POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
 ## Guiding rule
 
 Parallelize only when agents can work on genuinely separate paths/contracts without creating migration/schema/central-component collisions.
 
 Do not run several agents concurrently just to appear faster.
 
-## Stage 1 — mixed-media foundation
+## Stage 1 — mixed-media foundation (complete)
 
 ### MM-0 — Domain + temporal foundation
 **Must run first.**
@@ -68,10 +70,10 @@ No historical import before MM-4 is merged.
 
 ---
 
-## Stage 2 — MAX historical channel import
+## Stage 2 — MAX historical channel import (`DEFERRED_POST_MVP`)
 
 ### HI-0 — Historical import contract + provider capability audit
-Runs after MM-4.
+Resumes after MVP; MM-4 is complete. The documentary audit is partial and the provider contract is **NOT FROZEN**.
 
 This is implementation-oriented discovery, not an endless design phase.
 
@@ -85,7 +87,7 @@ It must:
 
 HI-0 may make a small code/contracts PR if necessary, but should not build the full importer.
 
-After HI-0 merges:
+After post-MVP HI-0 validation, architecture resolution, and frozen contract:
 
 ### HI-1 — Backend import job + durable provider traversal
 May run in parallel with HI-2.
@@ -142,15 +144,15 @@ Owns:
 ## Parallel schedule summary
 
 ```text
-MM-0
+MM-0 [complete]
  ├── MM-1  ─┐
- ├── MM-2  ─┼── MM-4
+ ├── MM-2  ─┼── MM-4 [complete]
  └── MM-3  ─┘
               ↓
-             HI-0
+         AFTER MVP: HI-0 [deferred; validation/architecture gate]
              ├── HI-1 ─┐
              └── HI-2  │
-                 HI-3 ─┼── HI-4
+                 HI-3 ─┼── HI-4 → separate production rollout → authorized real import
                        ┘
 ```
 

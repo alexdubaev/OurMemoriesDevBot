@@ -1,12 +1,12 @@
 # memoLy — Mixed Media Carousel + MAX Channel History Import
 ## START HERE
 
-This specification pack is owner-approved planning material for the next memoLy media/import stage.
+This specification pack records the completed mixed-media stage and the owner-approved, deferred historical MAX import plan. **MM-0…MM-4 are complete. HI-0…HI-4 have status `DEFERRED_POST_MVP`; historical import is not an MVP release blocker.** HI-0 contains a partial documentary audit, but controlled provider validation and an architecture decision remain open. HI-1…HI-4 have not started. See [POST-MVP: MAX Historical Import](POST_MVP_MAX_HISTORICAL_IMPORT.md) for the restart path.
 
 ### Goals
 
 1. First, evolve memoLy so **one Memory can contain an ordered mix of photos and videos** and render as an Instagram-style swipe carousel.
-2. Then, add **historical MAX channel import**, where one MAX source post becomes one memoLy Memory, preserving:
+2. After MVP, add **historical MAX channel import**, where one MAX source post becomes one memoLy Memory, preserving:
    - attachment order;
    - caption/text;
    - original MAX publication time;
@@ -47,13 +47,13 @@ Confirmed current-code facts include:
 - current MAX mixed image+video message handling is not a first-class mixed-Memory path.
 - existing photo album and video pipelines should be reused rather than rebuilt.
 
-### Mandatory order
+### Mandatory order after MVP
 
-Do **not** start historical MAX import before the mixed-media Memory foundation is merged and integration-verified.
+The mixed-media Memory foundation (MM-0…MM-4) is complete. Resume historical MAX import only after MVP according to the [post-MVP roadmap](POST_MVP_MAX_HISTORICAL_IMPORT.md).
 
 High-level dependency:
 
-`MM-0 → (MM-1 || MM-2 || MM-3) → MM-4 → HI-0 → (HI-1 || HI-2) → HI-3 → HI-4`
+`MM-0 → (MM-1 || MM-2 || MM-3) → MM-4 [complete] → after MVP: HI-0 → (HI-1 || HI-2) → HI-3 → HI-4 → separate production rollout → explicitly authorized real import`
 
 See `03_DEPENDENCY_AND_PARALLEL_PLAN.md`.
 

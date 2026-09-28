@@ -1,5 +1,7 @@
 # MM-4 — Mixed-media integration reconciliation
 
+**Status: COMPLETE.** Mixed-media MM-0…MM-4 is complete. Historical MAX import is a separate `DEFERRED_POST_MVP` stage; see [the post-MVP roadmap](../POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
 Depends on:
 - MM-0 merged
 - MM-1 merged
@@ -105,8 +107,7 @@ P0/P1/P2 = 0 before merge.
 
 Merge any bounded integration fixes through a normal PR.
 
-After MM-4 merges:
-mixed-media foundation is ready for historical MAX import.
+After MM-4, the mixed-media foundation is available for a later historical MAX import. That work remains deferred until after MVP and requires the HI-0 provider/architecture gate.
 
 No production deploy in this task unless separately authorized.
 

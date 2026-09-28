@@ -1,6 +1,8 @@
 # HI-0 — MAX historical channel import contract + provider audit
 
-Depends on: **MM-4 merged**
+**Status: `DEFERRED_POST_MVP` (partial documentary audit; controlled provider validation and architecture decision unresolved).** Historical import is not an MVP release blocker. See [the post-MVP roadmap](../POST_MVP_MAX_HISTORICAL_IMPORT.md).
+
+Depends on: **MM-4 complete**; resume only after MVP assignment.
 
 ## Goal
 
@@ -161,6 +163,8 @@ Names, route, request fields, auth capability and response shape are **NOT FROZE
 
 The approved owner decisions still govern mapping: one channel post → one Memory; provider timestamp → `sourcePublishedAt` and initial `occurredAt`; memoLy publication → `firstPublishedAt`; preserve caption and attachment order; explicit family and child; retries without duplicates; no destructive rewrite. Existing `MaxSource` requires `inboxId` and direct-dialog identity fields, so reuse or alteration needs a lead decision; do not silently weaken its constraints or invent a parallel identity system.
 
-### Gate / controlled validation
+### Post-MVP gate / controlled validation
 
-HI-1 and HI-2 remain **blocked** on this provider contract. A synthetic test-channel validation must establish bot admin access, pre-join visibility, newest-first ordering, pagination request/response behavior, safe end detection, equal-millisecond boundary completeness, `mid`/`seq` semantics, page limits, deleted/edited/unavailable behavior, rate-limit/retry responses, attachment ordering, and media token/URL refresh. Record only redacted synthetic observations. If no deterministic no-gap/no-duplicate traversal can be demonstrated, escalate to the owner/lead; never claim “all history imported.” No real API calls were made for this audit.
+HI-1 and HI-2 are **not started** and remain gated after MVP on this unresolved provider contract. A synthetic test-channel validation must establish bot admin access, pre-join visibility, newest-first ordering, pagination request/response behavior, safe end detection, equal-millisecond boundary completeness, `mid`/`seq` semantics, page limits, deleted/edited/unavailable behavior, rate-limit/retry responses, attachment ordering, and media token/URL refresh. Record only redacted synthetic observations. If no deterministic no-gap/no-duplicate traversal can be demonstrated, escalate to the owner/lead; never claim “all history imported.” No real API calls were made for this audit.
+
+**UNRESOLVED ARCHITECTURE:** Channel-history provenance, a durable provider key shared with live capture, and adaptation/extension of the dialog-oriented `MaxSource` model require an explicit lead decision after provider validation. The provisional HI-1/HI-2 API above remains **NOT FROZEN**. This is a post-MVP implementation gate, not an MVP release blocker.
