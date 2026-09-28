@@ -127,6 +127,55 @@ test('mixed memory renders one card with ordered slides and lazily mounts video'
   expect(markup).not.toContain('<video')
 })
 
+test('a published private video still preparing its rendition shows pending state without becoming seen', () => {
+  const pending = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0], renditionStatus: 'pending' as const, playbackPath: null }] }
+  const markup = renderFeed(feedClientWith([pending]))
+  expect(markup).toContain('Подготавливаем видео')
+  expect(markup).toContain('data-video-viewer-state="loading"')
+  expect(markup).toContain('data-seen-ready="false"')
+  expect(markup).not.toContain('Не удалось загрузить видео')
+  expect(markup).not.toContain('role="alert"')
+})
+
+test('a pending video becomes ready from its detail response without replacing or refetching the feed list', () => {
+  const pending = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0], renditionStatus: 'pending' as const, playbackPath: null }] }
+  const queryClient = feedClientWith([pending, noteMemory])
+  const listKey = feedQueryKeys.list(familyId, 'all')
+  const listBefore = queryClient.getQueryData(listKey)
+
+  const before = renderFeed(queryClient)
+  expect(before).toContain('Подготавливаем видео')
+  expect(before.indexOf('Первые шаги')).toBeLessThan(before.indexOf('Сегодня впервые улыбнулась'))
+
+  queryClient.setQueryData([...feedQueryKeys.all, familyId, 'video-rendition', '', 0, videoMemory.id], videoMemory)
+  const after = renderFeed(queryClient)
+  expect(after).toContain('Загружаем видео')
+  expect(after).not.toContain('Подготавливаем видео')
+  expect(after).toContain('data-video-viewer-state="loading"')
+  expect(after).not.toContain('autoPlay')
+  expect(after.indexOf('Первые шаги')).toBeLessThan(after.indexOf('Сегодня впервые улыбнулась'))
+  expect(queryClient.getQueryData(listKey)).toBe(listBefore)
+})
+
+test('a ready private video keeps the source loading path and does not autoplay', () => {
+  const markup = renderFeed(feedClientWith([videoMemory]))
+  expect(markup).toContain('data-video-viewer-state="loading"')
+  expect(markup).toContain('Загружаем видео')
+  expect(markup).toContain('data-seen-ready="false"')
+  expect(markup).not.toContain('Не удалось загрузить видео')
+  expect(markup).not.toContain('autoPlay')
+})
+
+test('failed and unusable ready private videos retain a visible error', () => {
+  for (const renditionStatus of ['failed', 'ready'] as const) {
+    const unavailable = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0], renditionStatus, playbackPath: null }] }
+    const markup = renderFeed(feedClientWith([unavailable]))
+    expect(markup).toContain('data-video-viewer-state="error"')
+    expect(markup).toContain('Не удалось загрузить видео')
+    expect(markup).toContain('data-seen-ready="false"')
+  }
+})
+
 test('a next-page error keeps already displayed memories on screen', () => {
   const queryClient = feedClient()
   const query = queryClient.getQueryCache().find({ queryKey: feedQueryKeys.list(familyId, 'all') })

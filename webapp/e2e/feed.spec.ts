@@ -218,8 +218,9 @@ test.describe.serial('T07 live feed', () => {
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
     test(`feed renders the ${theme} theme at 390px`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
-      await selectTheme(page, theme)
       await openFeed(page)
+      await selectTheme(page, theme)
+      await page.getByRole('button', { name: 'Лента' }).click()
       await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
       await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
       const navColors = await page.locator('[data-testid="bottom-navigation"]').evaluate((nav) => {
@@ -237,6 +238,44 @@ test.describe.serial('T07 live feed', () => {
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-feed-${theme}-390.png`), animations: 'disabled' })
     })
   }
+
+  test('mixed card keeps all six Settings themes after reload at 320, 390, and 430px', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openFeed(page)
+    for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+      await selectTheme(page, theme)
+      await page.reload()
+      await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+      await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+      await openFeed(page)
+      const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+      await expect(card).toHaveCount(1)
+      await expect(card.locator('.memoly-mixed-slide')).toHaveCount(3)
+      await expect(card).toContainText('1 / 3')
+      for (const width of [320, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 })
+        await card.scrollIntoViewIfNeeded()
+        const layout = await card.evaluate((element) => {
+          const cardBounds = element.getBoundingClientRect()
+          const viewport = element.querySelector('.memoly-mixed-viewport')?.getBoundingClientRect()
+          return { cardLeft: cardBounds.left, cardRight: cardBounds.right, viewportLeft: viewport?.left, viewportRight: viewport?.right, scrollWidth: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }
+        })
+        expect(layout.scrollWidth).toBeLessThanOrEqual(width)
+        expect(layout.cardLeft).toBeGreaterThanOrEqual(0)
+        expect(layout.cardRight).toBeLessThanOrEqual(width)
+        expect(layout.viewportLeft).toBeGreaterThanOrEqual(layout.cardLeft)
+        expect(layout.viewportRight).toBeLessThanOrEqual(layout.cardRight)
+        const next = card.getByRole('button', { name: 'Следующий элемент' })
+        await next.focus()
+        await expect(next).toBeFocused()
+        await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('aria-label', '1 из 3, фото')
+        if (width === 390) {
+          await test.info().attach(`mm4-mixed-${theme}-390.png`, { body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
+        }
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+    }
+  })
 
   test('private feed images survive three Feed → Family → Feed remounts', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -1068,6 +1107,109 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => responses.every((response) => response.status === 206)).toBe(true)
   })
 
+  test('pending private video becomes ready in place after its Memory detail is polled', async ({ page }) => {
+    let memoryId: string | null = null
+    let detailReads = 0
+    let listReads = 0
+    let listReady = false
+    await page.route('**/api/v1/families/*/memories/*/like', async (route) => {
+      const { liked } = route.request().postDataJSON() as { liked: boolean }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ count: liked ? 1 : 0, likedByMe: liked }) })
+    })
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'GET') return route.fallback()
+      if (url.pathname.endsWith('/memories')) {
+        listReads += 1
+        const response = await route.fetch()
+        const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+        payload.items = payload.items.map((item) => {
+          if (item.body !== 'Legacy video E2E') return item
+          memoryId = String(item.id)
+          return listReady
+            ? { ...item, likes: { ...(item.likes as Record<string, unknown>), count: 7 } }
+            : { ...item, attachments: item.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null })) }
+        })
+        return route.fulfill({ response, body: JSON.stringify(payload) })
+      }
+      if (!memoryId || !url.pathname.endsWith(`/memories/${memoryId}`)) return route.continue()
+      detailReads += 1
+      const response = await route.fetch()
+      if (detailReads > 1) return route.fulfill({ response })
+      const detail = await response.json() as E2EMemoryFixture
+      detail.attachments = detail.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null }))
+      return route.fulfill({ response, body: JSON.stringify(detail) })
+    })
+
+    await openFeed(page)
+    const cards = page.locator('#root [data-memoly-feed] [data-memory-id]')
+    const card = cards.filter({ hasText: 'Legacy video E2E' })
+    await expect(card).toHaveCount(1)
+    await expect(card.getByText('Подготавливаем видео')).toBeVisible()
+    await expect.poll(() => detailReads).toBeGreaterThanOrEqual(1)
+    const cardHandle = await card.elementHandle()
+    const idsBefore = await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-memory-id')))
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('button', { name: 'Подробнее' }).click()
+    const viewer = page.getByRole('dialog')
+    await expect(viewer.getByText('Подготавливаем видео')).toBeVisible()
+
+    await expect.poll(() => detailReads, { timeout: 12_000 }).toBeGreaterThanOrEqual(2)
+    await expect(card.getByText('Подготавливаем видео')).toHaveCount(0)
+    await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
+    await expect(viewer.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
+    listReady = true
+    const priorListReads = listReads
+    await card.locator('button[aria-label$="сердечко"]').evaluate((button) => (button as HTMLButtonElement).click())
+    await expect.poll(() => listReads).toBeGreaterThan(priorListReads)
+    await expect(card.locator('button[aria-label$="сердечко"]')).toContainText('7')
+    await expect(viewer.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
+    await expect(viewer.getByText('Подготавливаем видео')).toHaveCount(0)
+    expect(await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-memory-id')))).toEqual(idsBefore)
+    expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
+    await expect(card.locator('.ml-video-row button').first()).toBeEnabled()
+  })
+
+  test('auto-polls at most three pending videos and lets another be checked manually', async ({ page }) => {
+    let pending: E2EMemoryFixture[] = []
+    const detailCalls: string[] = []
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'GET') return route.fallback()
+      if (url.pathname.endsWith('/memories')) {
+        const response = await route.fetch()
+        const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+        const original = payload.items.find((item) => item.body === 'Legacy video E2E')
+        if (!original) return route.fulfill({ response, body: JSON.stringify(payload) })
+        if (pending.length === 0) pending = Array.from({ length: 4 }, (_, index) => ({
+          ...original,
+          id: randomUUID(),
+          body: `Ожидающее видео ${index + 1}`,
+          attachments: original.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null })),
+        }))
+        payload.items = [...pending, ...payload.items]
+        return route.fulfill({ response, body: JSON.stringify(payload) })
+      }
+      const match = pending.find((item) => url.pathname.endsWith(`/memories/${item.id}`))
+      if (!match) return route.continue()
+      detailCalls.push(String(match.id))
+      const ready = String(match.id) === String(pending[3]?.id)
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(ready
+        ? { ...match, attachments: match.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'ready', playbackPath: `/api/v1/families/${fixture.familyId}/media/${fixture.legacyVideoId}/content?variant=playback` })) }
+        : match) })
+    })
+
+    await openFeed(page)
+    await expect(page.locator('[data-memory-id]').filter({ hasText: 'Ожидающее видео 4' })).toHaveCount(1)
+    await expect.poll(() => new Set(detailCalls).size).toBe(3)
+    expect(detailCalls).not.toContain(String(pending[3]?.id))
+    const fourth = page.locator('[data-memory-id]').filter({ hasText: 'Ожидающее видео 4' })
+    await fourth.getByRole('button', { name: 'Проверить готовность' }).click()
+    await expect.poll(() => detailCalls.filter((id) => id === pending[3]?.id).length).toBe(1)
+    await expect(fourth.getByText('Подготавливаем видео')).toHaveCount(0)
+    await expect(fourth.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
+  })
+
   test('opens Telegram-only video through the guarded opaque hand-off', async ({ page }) => {
     await openFeed(page)
     const card = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' })
@@ -1295,12 +1437,15 @@ test.describe.serial('T07 live feed', () => {
     const memoryId = randomUUID()
     const photoKey = `media-display/${randomUUID()}-unread.png`
     const videoKey = `media-playback/${randomUUID()}-unread.mp4`
-    fixture.objectKeys.push(photoKey, videoKey)
+    const unvisitedPhotoKey = `media-display/${randomUUID()}-unvisited.png`
+    fixture.objectKeys.push(photoKey, videoKey, unvisitedPhotoKey)
     const videoBytes = generatedMedia(['-f', 'lavfi', '-i', 'color=c=pink:s=320x180:d=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'])
     await store(photoKey, pngImage.buffer, 'image/png')
     await store(videoKey, videoBytes, 'video/mp4')
+    await store(unvisitedPhotoKey, pngImage.buffer, 'image/png')
     const photo = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key: photoKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
     const video = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'video', variant: 'playback', key: videoKey, bytes: videoBytes, mime: 'video/mp4', width: 320, height: 180, durationMs: 8_000 })
+    const unvisitedPhoto = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key: unvisitedPhotoKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
     let releasePhoto = () => undefined
     let releaseSeen = () => undefined
     const photoGate = new Promise<void>((resolve) => { releasePhoto = resolve })
@@ -1313,7 +1458,7 @@ test.describe.serial('T07 live feed', () => {
         await tx.memory.create({ data: {
           id: memoryId, familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
           kind: 'media', body: 'Непросмотренное смешанное E2E', occurredAt: new Date(), firstPublishedAt: new Date(), firstPublishedOrdinal: 1n,
-          media: { create: [{ mediaId: photo.id, position: 0 }, { mediaId: video.id, position: 1 }] },
+          media: { create: [{ mediaId: photo.id, position: 0 }, { mediaId: video.id, position: 1 }, { mediaId: unvisitedPhoto.id, position: 2 }] },
         } })
       })
       await page.route(`**/media/${photo.id}/content?variant=display`, async (route) => { await photoGate; await route.continue() })
@@ -1334,7 +1479,9 @@ test.describe.serial('T07 live feed', () => {
       await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
       await page.waitForTimeout(450)
       await card.getByRole('button', { name: 'Следующий элемент' }).click()
-      await expect(card).toContainText('2 / 2')
+      await expect(card).toContainText('2 / 3')
+      await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('data-media-kind', 'video')
+      await expect(card.locator('[data-carousel-position="3"]')).toHaveAttribute('aria-hidden', 'true')
       await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
       await page.waitForTimeout(550)
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
@@ -1348,14 +1495,17 @@ test.describe.serial('T07 live feed', () => {
       await expect.poll(() => prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
       await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
       await expect(card).toBeVisible()
+      await expect(card).toContainText('2 / 3')
+      await expect(card.locator('[data-carousel-position="3"]')).toHaveAttribute('aria-hidden', 'true')
       await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
-      await expect(card).toContainText('1 / 2')
+      await expect(card).toContainText('1 / 3')
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
+      expect(seenPostStarted).toBe(1)
     } finally {
       releasePhoto()
       releaseSeen()
       await prisma.memory.deleteMany({ where: { id: memoryId } })
-      await prisma.mediaAsset.deleteMany({ where: { id: { in: [photo.id, video.id] } } })
+      await prisma.mediaAsset.deleteMany({ where: { id: { in: [photo.id, video.id, unvisitedPhoto.id] } } })
       await prisma.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: null, publicationOrdinal: 0n } })
       await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: null } })
     }

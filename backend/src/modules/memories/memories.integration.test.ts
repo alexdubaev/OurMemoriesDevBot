@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { memoryDtoSchema, memoryPageSchema } from '@web-app-demo/contracts'
 import { Client } from 'pg'
 
 import { createApp } from '../../app'
@@ -511,6 +512,77 @@ maybeDescribe('Memories API', () => {
         occurredAt: '2023-07-14T18:43:00.000Z', mediaIds,
       }, randomUUID())
       expect(rejected.response.status).toBeGreaterThanOrEqual(400)
+    }
+  })
+
+  test('serves historical published note, photo, album, video, and voice through the Feed DTO', async () => {
+    const owner = await admittedUser('Владелец', '38013')
+    const family = await createFamily(owner.token, 'Историческая семья')
+    const familyId = family.body.family.id as string
+    const childId = family.body.child.id as string
+    const legacy = [
+      { kind: 'note', mediaKinds: [] },
+      { kind: 'photo', mediaKinds: ['photo'] },
+      { kind: 'photo', mediaKinds: ['photo', 'photo'] },
+      { kind: 'video', mediaKinds: ['video'] },
+      { kind: 'voice', mediaKinds: ['voice'] },
+    ] as const
+    const expected: Array<{
+      id: string, kind: string, attachmentIds: string[], attachmentKinds: Array<'photo' | 'video' | 'voice'>
+    }> = []
+
+    for (const [index, item] of legacy.entries()) {
+      const assets = await Promise.all(item.mediaKinds.map((kind) => createMemoryAsset(familyId, owner.userId, kind)))
+      const memory = await prisma.memory.create({ data: {
+        familyId, childId, authorId: owner.userId,
+        kind: item.kind, body: `Старая запись ${index + 1}`,
+        occurredAt: new Date(`2025-01-02T03:04:0${index}.000Z`),
+        status: 'published', firstPublishedAt: new Date(), sourcePublishedAt: null,
+        media: { create: assets.map((asset, position) => ({ mediaId: asset.id, position })) },
+      } })
+      expected.push({
+        id: memory.id, kind: item.kind,
+        attachmentIds: assets.map((asset) => asset.id),
+        attachmentKinds: [...item.mediaKinds],
+      })
+    }
+
+    // Recreate the post-MM-0 shape of rows published before the timestamp column existed.
+    // The publication guard rightly forbids creating a fresh published row with NULL here.
+    const legacyFixture = new Client({ connectionString: databaseUrl! })
+    await legacyFixture.connect()
+    try {
+      await legacyFixture.query('BEGIN')
+      await legacyFixture.query('ALTER TABLE memories DISABLE TRIGGER memories_first_publication_guard')
+      await legacyFixture.query('UPDATE memories SET first_published_at = NULL WHERE id = ANY($1::uuid[])',
+        [expected.map(({ id }) => id)])
+      await legacyFixture.query('ALTER TABLE memories ENABLE TRIGGER memories_first_publication_guard')
+      await legacyFixture.query('COMMIT')
+    } catch (error) {
+      await legacyFixture.query('ROLLBACK')
+      throw error
+    } finally {
+      await legacyFixture.end()
+    }
+
+    const listed = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'GET', undefined)
+    expect(listed.response.status).toBe(200)
+    const page = memoryPageSchema.parse(listed.body)
+    expect(page.items).toHaveLength(legacy.length)
+    expect(page.items.map(({ id }) => id)).toEqual(expected.map(({ id }) => id).reverse())
+
+    for (const item of expected) {
+      const fromFeed = page.items.find(({ id }) => id === item.id)
+      expect(fromFeed).toBeDefined()
+      expect(fromFeed).toMatchObject({
+        kind: item.kind, status: 'published', firstPublishedAt: null, sourcePublishedAt: null,
+      })
+      expect(fromFeed!.attachments.map(({ id, kind }) => ({ id, kind }))).toEqual(
+        item.attachmentIds.map((id, index) => ({ id, kind: item.attachmentKinds[index] })),
+      )
+      const detail = await request(`/api/v1/families/${familyId}/memories/${item.id}`, owner.token, 'GET', undefined)
+      expect(detail.response.status).toBe(200)
+      expect(memoryDtoSchema.parse(detail.body)).toEqual(fromFeed!)
     }
   })
 

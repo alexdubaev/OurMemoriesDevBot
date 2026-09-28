@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { createHmac, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 import { createPrisma } from '../../../backend/src/db'
 import { expect, test } from '../helpers/test'
@@ -95,8 +96,87 @@ test.describe('MM-1 mixed media composer', () => {
     expect(memory.media.map(({ mediaId }) => mediaId)).toEqual(submittedIds)
     expect(memory.media.map(({ position }) => position)).toEqual([0, 1, 2, 3])
     expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(expectedKinds)
+    // Browser E2E starts the API without its separate outbox worker. Run the same real
+    // preparation task the worker runs before checking protected playback in Feed.
+    const videoIds = memory.media.filter(({ asset }) => asset.mediaKind === 'video').map(({ mediaId }) => mediaId)
+    const prepareTasks = await prisma.taskOutbox.findMany({ where: { type: 'media:prepare', dedupeKey: { in: videoIds.map((id) => `media-prepare:${id}`) } } })
+    expect(prepareTasks).toHaveLength(2)
+    prepareVideoRenditions(videoIds)
+    await expect.poll(async () => prisma.mediaAsset.count({ where: { id: { in: videoIds }, renditionStatus: 'ready', variants: { some: { variant: 'playback' } } } })).toBe(2)
+
+    const playbackResponses: Array<{ status: number; contentType: string }> = []
+    page.on('response', (entry) => {
+      if (entry.request().method() === 'GET' && entry.url().includes('/content?variant=playback') && videoIds.some((id) => entry.url().includes(id))) {
+        playbackResponses.push({ status: entry.status(), contentType: entry.headers()['content-type'] ?? '' })
+      }
+    })
+    const feedResponse = page.waitForResponse((entry) => entry.request().method() === 'GET' && new URL(entry.url()).pathname === `/api/v1/families/${fixture!.familyId}/memories`)
     await page.getByRole('button', { name: 'Смотреть в ленте' }).click()
-    await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toHaveCount(1)
+    const feedPayload = await (await feedResponse).json() as { items: Array<{ id: string; familyId: string; childId: string; author: { id: string; name: string }; kind: string; body: string; occurredAt: string; attachments: Array<{ id: string; kind: string; renditionStatus?: string; playbackPath?: string | null }>; likes: { count: number; likedByMe: boolean }; capabilities: { edit: boolean; delete: boolean; like: boolean } }> }
+    const feedMatches = feedPayload.items.filter((item) => item.id === memory.id)
+    expect(feedMatches).toHaveLength(1)
+    expect(feedMatches[0]).toMatchObject({
+      familyId: fixture!.familyId,
+      childId: fixture!.childId,
+      author: { id: fixture!.userId, name: 'MM-1 E2E owner' },
+      kind: 'media', body: 'Первый смешанный день', occurredAt,
+      likes: { count: 0, likedByMe: false },
+      capabilities: { edit: true, delete: true, like: true },
+    })
+    expect(feedMatches[0]!.attachments.map(({ id, kind }) => ({ id, kind }))).toEqual(submittedIds.map((id, index) => ({ id, kind: expectedKinds[index] })))
+    expect(feedMatches[0]!.attachments[1]).toMatchObject({ renditionStatus: 'ready', playbackPath: expect.any(String) })
+
+    const card = page.locator(`[data-memory-id="${memory.id}"]`)
+    await expect(card).toHaveCount(1)
+    await expect(card.locator('.author-name')).toHaveText('MM-1 E2E owner')
+    await expect(card.locator('.author-time')).toContainText('15')
+    await expect(card.locator('.caption')).toContainText('Первый смешанный день')
+    await expect(card.getByRole('button', { name: 'Поставить сердечко' })).toHaveAttribute('aria-pressed', 'false')
+    await expect(card.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
+    await expect(card.locator('.memoly-mixed-slide')).toHaveCount(4)
+    await expect(card.locator('.memoly-mixed-slide').evaluateAll((slides) => slides.map((slide) => slide.getAttribute('data-media-kind')))).resolves.toEqual(expectedKinds)
+    await expect(card).toContainText('1 / 4')
+    await test.info().attach('mm4-created-feed-card-390.png', { body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
+
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('2 / 4')
+    const cardVideo = card.locator('[data-carousel-active="true"] video')
+    await expect(cardVideo).toHaveCount(1)
+    await expect(cardVideo).not.toHaveAttribute('autoplay', /.*/)
+    await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => ({ width: video.videoWidth, height: video.videoHeight, error: video.error?.code ?? null }))).toMatchObject({ width: 320, height: 180, error: null })
+    await expect(card.locator('[data-carousel-active="true"] [role="alert"]')).toHaveCount(0)
+    await card.locator('[data-carousel-active="true"]').getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(2)
+    await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.paused)).toBe(false)
+    await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+    await test.info().attach('mm4-created-ready-video-card-390.png', { body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
+    await card.getByRole('button', { name: 'Открыть воспоминание Первый смешанный день' }).click()
+    const viewer = page.locator('[data-mixed-viewer]')
+    await expect(viewer).toBeVisible()
+    await expect(viewer).toContainText('2 / 4')
+    await expect(viewer.locator('video')).toHaveCount(1)
+    await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => ({ readyState: video.readyState, width: video.videoWidth, height: video.videoHeight, error: video.error?.code ?? null }))).toMatchObject({ width: 320, height: 180, error: null })
+    await expect(viewer.getByRole('alert')).toHaveCount(0)
+    await viewer.getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(2)
+    await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+    await expect.poll(() => playbackResponses.length).toBeGreaterThan(0)
+    expect(playbackResponses.every(({ status, contentType }) => [200, 206].includes(status) && contentType.startsWith('video/mp4')), JSON.stringify(playbackResponses)).toBe(true)
+    await expect.poll(() => viewer.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    await test.info().attach('mm4-created-video-viewer-390.png', { body: await viewer.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
+    await viewer.getByRole('button', { name: 'Далее' }).click()
+    await expect(viewer).toContainText('3 / 4')
+    await expect(viewer.locator('img')).toBeVisible()
+    await test.info().attach('mm4-created-photo-viewer-390.png', { body: await viewer.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Открыть воспоминание Первый смешанный день' })).toBeFocused()
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('3 / 4')
+    await expect(cardVideo).toHaveCount(0)
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('4 / 4')
+    await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('data-media-kind', 'video')
   })
 })
 
@@ -142,6 +222,31 @@ function generatedVideo() {
   const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=orange:s=320x180:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'], { encoding: 'buffer', maxBuffer: 10_000_000 })
   if (result.status !== 0) throw new Error(`synthetic video fixture failed: ${result.stderr.toString()}`)
   return result.stdout
+}
+
+function prepareVideoRenditions(mediaIds: string[]) {
+  // Playwright executes specs in Node, while the production media task uses Bun.file.
+  // Invoke that task in Bun against the same isolated E2E database and storage.
+  const script = `
+    import { createPrisma } from './backend/src/db.ts'
+    import { createMediaTasks } from './backend/src/modules/media/index.ts'
+    import { FilesystemPrivateStorage } from './backend/src/storage/filesystem-storage.ts'
+    import { resolve } from 'node:path'
+    const prisma = createPrisma(process.env.TEST_DATABASE_URL)
+    const storage = new FilesystemPrivateStorage({ driver: 'filesystem', root: resolve('webapp/e2e/.artifacts/storage'),
+      publicBaseUrl: process.env.E2E_BACKEND_URL, signingKey: Buffer.alloc(32, 1), uploadMaxBytes: 100_000_000,
+      uploadUrlTtlSeconds: 300, downloadUrlTtlSeconds: 300 })
+    try {
+      const tasks = createMediaTasks({ prisma, privateStorage: { storage },
+        env: { FFMPEG_PATH: process.env.FFMPEG_PATH, FFPROBE_PATH: process.env.FFPROBE_PATH } })
+      for (const mediaId of JSON.parse(process.env.MM4_MEDIA_IDS)) await tasks.prepareAsset({ mediaId })
+    } finally { await prisma.$disconnect() }
+  `
+  const result = spawnSync('bun', ['-e', script], {
+    cwd: resolve('..'), env: { ...process.env, MM4_MEDIA_IDS: JSON.stringify(mediaIds) },
+    encoding: 'utf8', maxBuffer: 1_000_000,
+  })
+  if (result.status !== 0) throw new Error(`synthetic video preparation failed: ${result.stderr}`)
 }
 
 function generatedPhoto(index: number) {
