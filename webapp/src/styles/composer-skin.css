@@ -197,8 +197,13 @@
 .memoly-add-photo-picker > span:last-child { margin-top: 7px; color: var(--theme-text-muted); font-size: 13px; line-height: 1.35; }
 .memoly-add-photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
 .memoly-add-photo-thumb, .memoly-add-more { position: relative; min-width: 0; aspect-ratio: .78; margin: 0; overflow: hidden; border-radius: 16px; background: var(--theme-surface-lo); box-shadow: 5px 6px 13px var(--theme-shadow-soft), -4px -4px 9px var(--theme-glow); }
-.memoly-add-photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.memoly-add-photo-thumb button { position: absolute; right: 5px; top: 5px; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--theme-surface-hi); color: var(--foreground); font-size: 20px; box-shadow: 0 3px 8px var(--theme-shadow); }
+.memoly-add-photo-thumb img, .memoly-add-photo-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.memoly-add-media-order, .memoly-add-video-label { position: absolute; left: 7px; top: 7px; min-width: 28px; min-height: 28px; display: grid; place-items: center; border-radius: 999px; color: white; background: rgb(48 42 46 / 72%); font-size: 12px; font-weight: 700; }
+.memoly-add-video-label { top: auto; bottom: 7px; padding: 0 9px; }
+.memoly-add-upload-state { position: absolute; left: 7px; right: 7px; bottom: 7px; padding: 4px 6px; border-radius: 8px; color: white; background: rgb(48 42 46 / 76%); font-size: 10px; text-align: center; }
+.memoly-add-upload-state.is-failed { background: rgb(168 55 80 / 92%); }
+.memoly-add-upload-state.is-ready { background: rgb(48 42 46 / 64%); }
+.memoly-add-photo-thumb button { position: absolute; right: 0; top: 0; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--theme-surface-hi); color: var(--foreground); font-size: 20px; box-shadow: 0 3px 8px var(--theme-shadow); }
 .memoly-add-more { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1.5px dashed color-mix(in srgb, var(--theme-text-muted) 30%, transparent); box-shadow: var(--theme-inset-shadow); cursor: pointer; text-align: center; }
 .memoly-add-more span { color: var(--theme-text-muted); font-size: 11px; line-height: 1.2; }
 .memoly-add-caption, .memoly-add-note-field { position: relative; margin-top: 14px; border-radius: 22px; background: linear-gradient(145deg, var(--theme-surface-hi), var(--theme-inset-hi)); box-shadow: var(--theme-inset-shadow); }
