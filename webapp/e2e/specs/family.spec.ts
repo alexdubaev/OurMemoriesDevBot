@@ -3,7 +3,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { pngImage } from '../helpers/images'
+import { jpegImage, pngImage } from '../helpers/images'
 import { expect, test } from '../helpers/test'
 
 type Owner = { context: BrowserContext; page: Page }
@@ -452,6 +452,8 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('button', { name: 'Семья' }).click()
   await owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Павел' }).click()
   await expect(owner.page.getByRole('button', { name: 'Удалить из семьи' })).toHaveCount(1)
+  await expect(owner.page.getByRole('textbox', { name: 'Имя профиля' })).toHaveCount(0)
+  await expect(owner.page.getByRole('button', { name: /фото/i })).toHaveCount(0)
   const memberPatch = owner.page.waitForRequest((request) => request.method() === 'PATCH' && /\/members\/[^/]+$/.test(new URL(request.url()).pathname))
   await owner.page.getByRole('textbox', { name: 'Имя в семье' }).fill('Дедушка Петя')
   await owner.page.getByRole('button', { name: 'Сохранить изменения' }).click()
@@ -666,6 +668,113 @@ test('keeps Family and Settings within the viewport at supported mobile widths',
   await navigation.getByRole('button', { name: 'Семья' }).click()
   await expect(navigation.getByRole('button', { name: 'Семья' })).toHaveAttribute('aria-current', 'page')
 
+  await owner.context.close()
+})
+
+test('owner can edit own account profile without changing family membership', async ({ page }) => {
+  const owner = await createCompletedOwner(page, 81000104)
+  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  await owner.page.getByRole('button', { name: /Открыть участника:/ }).first().click()
+  await expect(owner.page.getByRole('region', { name: 'Профиль владельца' })).toBeVisible()
+  await expect(owner.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
+  await expect(owner.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
+  await expect(owner.page.getByText('Роль владельца изменить нельзя')).toBeVisible()
+
+  const profilePatch = owner.page.waitForRequest((request) => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/users/me')
+  await owner.page.getByRole('textbox', { name: 'Имя профиля' }).fill('Имя владельца E2E')
+  await owner.page.getByRole('button', { name: 'Сохранить имя профиля' }).click()
+  expect((await profilePatch).postDataJSON()).toEqual({ displayName: 'Имя владельца E2E' })
+  await expect(owner.page.getByText('Имя профиля сохранено.')).toBeVisible()
+  await expect(owner.page.getByRole('textbox', { name: 'Имя профиля' })).toHaveValue('Имя владельца E2E')
+  const firstAvatarUpload = owner.page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/uploads/avatar')
+  await owner.page.getByLabel('Выбрать фото профиля').setInputFiles(pngImage)
+  expect((await firstAvatarUpload).ok()).toBe(true)
+  await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveAttribute('src', /^blob:/)
+  await expect(owner.page.getByRole('button', { name: 'Изменить фото' })).toBeVisible()
+  const replacementUpload = owner.page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/uploads/avatar')
+  await owner.page.getByLabel('Выбрать фото профиля').setInputFiles(jpegImage)
+  expect((await replacementUpload).ok()).toBe(true)
+  await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveAttribute('src', /^blob:/)
+  const avatarDelete = owner.page.waitForResponse((response) => response.request().method() === 'DELETE' && new URL(response.url()).pathname === '/api/uploads/avatar')
+  await owner.page.getByRole('button', { name: 'Удалить фото' }).click()
+  expect((await avatarDelete).ok()).toBe(true)
+  await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveCount(0)
+  await expect(owner.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
+
+  const profileThemes = ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'] as const
+  for (const theme of profileThemes) {
+    await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+    await owner.page.getByRole('button', { name: 'Настройки' }).click()
+    await owner.page.getByRole('button', { name: /Оформление/ }).click()
+    await owner.page.locator(`[data-theme-choice="${theme}"]`).click()
+    await owner.page.getByRole('button', { name: 'Назад' }).click()
+    await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
+    await owner.page.getByRole('button', { name: 'Открыть участника: Имя владельца E2E' }).click()
+    await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
+    await owner.page.setViewportSize({ width: 390, height: 844 })
+    await owner.page.evaluate(() => document.fonts.ready)
+    const screenshotLayout = await owner.page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }))
+    expect(screenshotLayout.scrollWidth).toBeLessThanOrEqual(screenshotLayout.width)
+    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/member-profile-self-${theme}-390.png`), animations: 'disabled' })
+    for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+      await owner.page.setViewportSize(viewport)
+      const geometry = await owner.page.locator('.member-profile-screen').evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, viewportWidth: innerWidth, scrollWidth: document.documentElement.scrollWidth }
+      })
+      expect(geometry.left).toBeGreaterThanOrEqual(0)
+      expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth)
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewportWidth)
+    }
+  }
+  await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+  await expect(owner.page.getByRole('button', { name: 'Открыть участника: Имя владельца E2E' })).toBeVisible()
+  await owner.context.close()
+})
+
+test('full member and viewer can edit only their own account profile and cannot edit the owner account', async ({ browser, page }) => {
+  const owner = await createCompletedOwner(page, 81000105)
+  const fullStartParam = await createInvite(owner.page, 'full', 'Полный участник')
+  const full = await inviteePage(browser, 81000106, fullStartParam, 'Полный E2E')
+  await full.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await full.page.getByRole('button', { name: 'Семья' }).click()
+  await full.page.getByRole('button', { name: 'Открыть участника: Полный участник' }).click()
+  await expect(full.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
+  await expect(full.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
+  const fullProfilePatch = full.page.waitForRequest((request) => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/users/me')
+  await full.page.getByRole('textbox', { name: 'Имя профиля' }).fill('Полный профиль E2E')
+  await full.page.getByRole('button', { name: 'Сохранить имя профиля' }).click()
+  expect((await fullProfilePatch).postDataJSON()).toEqual({ displayName: 'Полный профиль E2E' })
+  await expect(full.page.getByRole('textbox', { name: 'Имя в семье' })).toBeEditable()
+  await expect(full.page.getByRole('button', { name: 'Удалить из семьи' })).toHaveCount(0)
+
+  await owner.page.getByRole('button', { name: 'Готово' }).click()
+  const viewerStartParam = await createInvite(owner.page, 'viewer', 'Участник viewer')
+  const viewer = await inviteePage(browser, 81000107, viewerStartParam, 'Viewer E2E')
+  await viewer.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await viewer.page.getByRole('button', { name: 'Семья' }).click()
+  await viewer.page.getByRole('button', { name: 'Открыть участника: Участник viewer' }).click()
+  await expect(viewer.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
+  await expect(viewer.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
+  await expect(viewer.page.getByRole('textbox', { name: 'Имя в семье' })).toBeDisabled()
+  await expect(viewer.page.getByRole('button', { name: 'Сохранить изменения' })).toHaveCount(0)
+  await expect(viewer.page.getByRole('button', { name: 'Удалить из семьи' })).toHaveCount(0)
+  const viewerProfilePatch = viewer.page.waitForRequest((request) => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/users/me')
+  await viewer.page.getByRole('textbox', { name: 'Имя профиля' }).fill('Имя viewer E2E')
+  await viewer.page.getByRole('button', { name: 'Сохранить имя профиля' }).click()
+  expect((await viewerProfilePatch).postDataJSON()).toEqual({ displayName: 'Имя viewer E2E' })
+  await expect(viewer.page.getByText('Имя профиля сохранено.')).toBeVisible()
+  await viewer.page.getByRole('button', { name: 'Назад к семье' }).click()
+  const viewerRow = viewer.page.getByRole('button', { name: 'Открыть участника: Участник viewer' })
+  await expect(viewerRow).toContainText('Имя viewer E2E')
+
+  await viewer.page.getByRole('button', { name: 'Открыть участника: Организатор E2E' }).click()
+  await expect(viewer.page.getByRole('region', { name: 'Профиль владельца' })).toBeVisible()
+  await expect(viewer.page.getByRole('textbox', { name: 'Имя профиля' })).toHaveCount(0)
+  await expect(viewer.page.getByRole('button', { name: /фото/ })).toHaveCount(0)
+  await expect(viewer.page.getByText('Роль владельца изменить нельзя')).toBeVisible()
+  await full.context.close()
+  await viewer.context.close()
   await owner.context.close()
 })
 

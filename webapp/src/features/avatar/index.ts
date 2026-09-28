@@ -1,5 +1,5 @@
 export { AvatarPanel } from './AvatarPanel'
-export { avatarQueryKeys, useAvatarImage, useAvatarQuery } from './queries'
+export { avatarQueryKeys, useAvatarImage, useAvatarQuery, useDeleteAvatarMutation, useUploadAvatarMutation } from './queries'
 export {
   AvatarUploadError,
   describeAvatarFile,

@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { updateProfileRequestSchema, type UserDto } from '@web-app-demo/contracts'
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { AuthContext, type AuthContextValue } from '../src/features/auth/context'
 import { validateProfileForm } from '../src/features/users/profile-form'
 import { ProfilePanel } from '../src/features/users/ProfilePanel'
+import { updateProfile } from '../src/features/users/api'
+import type { AuthenticatedTransport } from '../src/platform/api'
 
 const tooShortName = 'A'
 const tooLongName = 'x'.repeat(81)
@@ -66,6 +68,17 @@ test('the panel shows no error and allows saving for a valid or cleared name', (
     expect(html).not.toContain('aria-invalid="true"')
     expect(saveButtonDisabled(html)).toBe(false)
   }
+})
+
+test('account display name uses only the current-user profile PATCH endpoint', async () => {
+  const request = mock(async () => ({ user: { id: 'user_1', email: 'user@example.com', displayName: 'New Name', role: 'user', createdAt: '2026-05-11T00:00:00.000Z' } }))
+  const transport = { request, raw: async () => new Response() } as unknown as AuthenticatedTransport
+
+  await updateProfile(transport, { displayName: 'New Name' })
+
+  expect(request).toHaveBeenCalledTimes(1)
+  expect(request.mock.calls[0]?.[0]).toBe('/api/users/me')
+  expect(request.mock.calls[0]?.[2]).toEqual({ method: 'PATCH', body: { displayName: 'New Name' } })
 })
 
 function contractMessage(displayName: string) {

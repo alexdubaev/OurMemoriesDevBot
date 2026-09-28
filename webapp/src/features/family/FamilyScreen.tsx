@@ -99,6 +99,7 @@ export function FamilyScreen({
           childAvatarUrl={avatarUrl}
           copyState={copyState}
           familyResponse={familyResponse}
+          currentUserId={currentUserId}
           hostBridge={hostBridge}
           hasError={Boolean(error)}
           inviteError={inviteError}
