@@ -1044,7 +1044,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(voice).toHaveAttribute('src', /^\/api\//)
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
     await voiceCard.getByRole('button', { name: 'Слушать' }).click()
-    await expect.poll(() => responses.some((response) => response.range && response.status === 206)).toBe(true)
+    await expect.poll(() => responses.some((response) => response.url.includes(fixture.voiceId) && response.range && response.status === 206)).toBe(true)
     await expect.poll(() => voice.evaluate((element) => !(element as HTMLAudioElement).paused)).toBe(true)
 
     await page.evaluate(() => {
@@ -1060,8 +1060,11 @@ test.describe.serial('T07 live feed', () => {
 
     const videoCard = page.locator('[data-memory-id]').filter({ hasText: 'Legacy video E2E' })
     await videoCard.getByRole('button', { name: 'Смотреть' }).click()
-    await expect.poll(() => responses.filter((response) => response.range && response.status === 206).length).toBeGreaterThan(1)
+    const legacyVideo = videoCard.locator('video')
+    await expect.poll(() => legacyVideo.evaluate((element: HTMLVideoElement) => !element.paused && element.currentTime > 0)).toBe(true)
+    expect(responses.some((response) => response.url.includes(fixture.legacyVideoId) && response.range && response.status === 206)).toBe(true)
     await videoCard.getByLabel('Позиция видео').fill('2')
+    await expect.poll(() => legacyVideo.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThanOrEqual(1.9)
     await expect.poll(() => responses.every((response) => response.status === 206)).toBe(true)
   })
 
