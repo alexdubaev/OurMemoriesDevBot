@@ -656,6 +656,29 @@ test('memory actions menu is available to every role while delete remains capabi
   expect(renderFeed(viewerClient)).toContain('aria-label="Действия с воспоминанием"')
 })
 
+test('memory like exposes a dedicated lightweight control while preserving pressed and count semantics', () => {
+  const props = {
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: '',
+    kind: 'note' as const,
+    media: null,
+    memoryId,
+    occurredTime: '10:00',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+  }
+  const empty = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, liked: false, likeCount: 0 }))
+  const liked = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, liked: true, likeCount: 12 }))
+
+  expect(empty).toMatch(/<button[^>]*aria-label="Поставить сердечко"[^>]*aria-pressed="false"[^>]*class="memory-like"/)
+  expect(empty).toMatch(/class="memory-like"[^>]*><img[^>]*height="24"/)
+  expect(empty).not.toContain('>0</span>')
+  expect(liked).toMatch(/<button[^>]*aria-label="Убрать сердечко"[^>]*aria-pressed="true"[^>]*class="memory-like is-liked"/)
+  expect(liked).toContain('>12</span>')
+})
+
 test('memoLy feed card keeps the media slot and open-memory callback around a private album', () => {
   let opened = false
   const markup = renderToStaticMarkup(createElement(FeedMemoryCard, {

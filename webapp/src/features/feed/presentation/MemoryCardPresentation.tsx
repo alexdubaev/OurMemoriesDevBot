@@ -88,12 +88,12 @@ function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: bo
     <button
       aria-label={liked ? 'Убрать сердечко' : 'Поставить сердечко'}
       aria-pressed={liked}
-      className={`action like${liked ? ' is-liked on' : ''}`}
+      className={`memory-like${liked ? ' is-liked' : ''}`}
       disabled={!interactive}
       onClick={onLike}
       type="button"
     >
-      <WebpIcon decorative name={liked ? 'heart-filled' : 'heart'} size={20} state={liked ? 'active' : 'default'} />
+      <WebpIcon decorative name={liked ? 'heart-filled' : 'heart'} size={24} state={liked ? 'active' : 'default'} />
       {likeCount > 0 ? <Typography as="span" variant="memoryMeta">{likeCount}</Typography> : null}
     </button>
   )

@@ -144,6 +144,63 @@ test.describe.serial('T07 live feed', () => {
     })
   }
 
+  test('memory like stays lightweight and accessible across phone sizes and themes', async ({ page }) => {
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Фотоальбом E2E' })
+    const like = card.getByRole('button', { name: 'Поставить сердечко' })
+
+    for (const [width, height] of [[320, 568], [390, 844], [430, 932]]) {
+      await page.setViewportSize({ width, height })
+      await like.scrollIntoViewIfNeeded()
+      const geometry = await like.evaluate((button) => {
+        const rect = button.getBoundingClientRect()
+        const icon = button.querySelector('[data-slot="webp-icon"]')!.getBoundingClientRect()
+        const style = getComputedStyle(button)
+        return { width: rect.width, height: rect.height, iconWidth: icon.width, iconHeight: icon.height, background: style.backgroundImage, shadow: style.boxShadow }
+      })
+      expect(geometry.width).toBeGreaterThanOrEqual(44)
+      expect(geometry.height).toBeGreaterThanOrEqual(44)
+      expect(geometry.iconWidth).toBe(24)
+      expect(geometry.iconHeight).toBe(24)
+      expect(geometry.background).toBe('none')
+      expect(geometry.shadow).toBe('none')
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-${width}x${height}.png`), animations: 'disabled' })
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(like).toHaveAttribute('aria-pressed', 'false')
+    await expect(like).toHaveText('')
+    await like.focus()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(like).toBeFocused()
+    await expect(like).toHaveCSS('outline-style', 'solid')
+    await like.hover()
+    await expect(like).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    await like.click()
+    const unlike = card.getByRole('button', { name: 'Убрать сердечко' })
+    await expect(unlike).toHaveAttribute('aria-pressed', 'true')
+    await expect(unlike).toContainText('1')
+    await unlike.evaluate((button) => (button as HTMLElement).blur())
+    await page.mouse.move(0, 0)
+    await page.screenshot({ path: resolve('e2e/.artifacts/memory-like-liked-count-390.png'), animations: 'disabled' })
+    await unlike.click()
+    await expect(like).toHaveAttribute('aria-pressed', 'false')
+    await expect(like).toHaveText('')
+    await like.evaluate((button) => (button as HTMLElement).blur())
+    await page.mouse.move(0, 0)
+
+    for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
+      await page.evaluate((name) => {
+        document.documentElement.setAttribute('data-memoly-theme', name)
+        document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', name)
+      }, theme)
+      await expect(like).toHaveCSS('box-shadow', 'none')
+      await expect(like).toHaveCSS('background-image', 'none')
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-${theme}-390.png`), animations: 'disabled' })
+    }
+  })
+
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
     test(`feed renders the ${theme} theme at 390px`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
