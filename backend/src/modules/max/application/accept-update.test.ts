@@ -39,6 +39,20 @@ describe('MAX durable acceptance policy', () => {
     expect(selectMaxImmediateResponse(event)).toEqual({ kind: 'accepted', text: 'Получено. Сохраняем…', destinationUserId: '11' })
   })
 
+  test('accepts ordered mixed image and video attachments within the shared ten-item limit', () => {
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '11', recipientId: '99', messageId: 'mixed-1',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'One caption',
+      attachments: [
+        { kind: 'image', providerAttachmentId: '1' },
+        { kind: 'video', providerAttachmentId: '2', durationSeconds: 4, width: 320, height: 240 },
+        { kind: 'image', providerAttachmentId: '3' },
+      ],
+    }
+    expect(selectMaxImmediateResponse(event)?.kind).toBe('accepted')
+    expect(selectMaxImmediateResponse({ ...event, attachments: Array.from({ length: 11 }, () => event.attachments![0]!) })?.kind).toBe('unsupported_media')
+  })
+
   test('passes normalized event, stable key, encrypted payload, identity and response to repository', async () => {
     const calls: unknown[] = []
     const repository: MaxAcceptRepository = {

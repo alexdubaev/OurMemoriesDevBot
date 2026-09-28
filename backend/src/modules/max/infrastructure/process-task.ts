@@ -9,7 +9,7 @@ import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { createMaxImageProcessor } from './process-image'
 import { createMaxVideoProcessor } from './process-video'
 import { createMaxVoiceProcessor } from './process-voice'
-import type { MaxDownloadedMedia } from './media-download'
+import type { MaxDownloadedMedia, MaxVideoStream } from './media-download'
 import { resolveMaxTarget, chooseMaxTarget, expireMaxTarget } from './source-target'
 import { parseChoicePayload, savedFamilyText } from '../../../bot-family-target'
 
@@ -30,13 +30,14 @@ export function createMaxTaskProcessor(options: {
   api?: MaxApiPort
   media?: ReturnType<typeof import('../../media').createMediaService>
   download?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxDownloadedMedia>
+  videoDownload?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
 }): (payload: unknown, signal?: AbortSignal) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
   const imageProcessor = options.api && options.media && options.download
-    ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download })
+    ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download, videoDownload: options.videoDownload })
     : null
   const videoProcessor = options.api ? createMaxVideoProcessor({ runtime: options.runtime, api: options.api }) : null
   const voiceProcessor = options.api && options.media && options.download

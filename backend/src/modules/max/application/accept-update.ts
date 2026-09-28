@@ -33,10 +33,9 @@ export function selectMaxImmediateResponse(event: MaxInboundEvent): MaxImmediate
     const files = attachments.filter((attachment) => attachment.kind === 'file' && !attachment.providerAttachmentId.startsWith('unsupported:'))
     const voices = attachments.filter((attachment) => attachment.kind === 'voice')
     const videos = attachments.filter((attachment) => attachment.kind === 'video')
-    const supported = (images.length === attachments.length && images.length >= 1 && images.length <= 10) ||
+    const supported = (images.length + videos.length === attachments.length && attachments.length >= 1 && attachments.length <= 10) ||
       (files.length === 1 && attachments.length === 1) ||
-      (voices.length === 1 && attachments.length === 1) ||
-      (videos.length === 1 && attachments.length === 1)
+      (voices.length === 1 && attachments.length === 1)
     return supported
       ? { kind: 'accepted', text: acceptedText, destinationUserId: event.senderId }
       : { kind: 'unsupported_media', text: unsupportedMediaText, destinationUserId: event.senderId }
