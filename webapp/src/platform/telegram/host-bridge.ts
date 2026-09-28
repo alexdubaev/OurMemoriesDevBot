@@ -1,4 +1,5 @@
 import type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
+import { createMaxInviteLink } from '../max-invite-link'
 export type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
 
 type TelegramWebApp = {
@@ -119,7 +120,7 @@ export function createBrowserDevHostBridge(
     initData: () => null,
     rawAuthData: () => null,
     inviteToken: () => inviteTokenFromBrowserSearch(browserHost?.location?.search),
-    inviteLink: (rawToken) => createBrowserInviteLink(rawToken, browserHost?.location?.origin),
+    inviteLink: (rawToken) => createMaxInviteLink(rawToken, options.maxBotUsername),
     metadata: () => metadata,
     ready: () => undefined,
     close: () => undefined,
@@ -200,17 +201,6 @@ function createTelegramInviteLink(rawToken: string) {
   const payload = `invite_${rawToken}`
   if (payload.length > 512) return null
   return `${botUrl}?startapp=${payload}`
-}
-
-function createBrowserInviteLink(rawToken: string, origin: unknown) {
-  if (!/^[A-Za-z0-9_-]{32,128}$/.test(rawToken) || typeof origin !== 'string') return null
-  try {
-    const url = new URL('/', origin)
-    url.searchParams.set('invite', rawToken)
-    return url.toString()
-  } catch {
-    return null
-  }
 }
 
 function isValidMaxBotUsername(username: string | undefined) {

@@ -165,4 +165,29 @@ describe('Telegram HostBridge', () => {
     expect(bridge.openTelegramVideo('https://t.me/OurMemoriesDevBot?start=watch_abcdefghijklmnopqrstuvwxyzABCDEF')).toBe(false)
     expect(bridge.inviteLink('A'.repeat(32))).toBeNull()
   })
+
+  test('routes new browser invites to MAX while retaining legacy inbound URLs', () => {
+    const token = 'A'.repeat(32)
+    const bridge = createBrowserDevHostBridge(
+      { maxBotUsername: 'OurMemoriesMaxBot' },
+      { location: { origin: 'https://app.memoly.ru', search: `?invite=${token}` } },
+    )
+
+    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+    expect(bridge.inviteLink(token)).not.toContain('app.memoly.ru')
+    expect(bridge.inviteToken()).toBe(token)
+    expect(bridge.inviteLink(token)).not.toMatch(/familyId|userId|childId|role/)
+  })
+
+  test('browser invite generation rejects invalid tokens and MAX configuration', () => {
+    const token = 'A'.repeat(32)
+    const host = { location: { origin: 'https://app.memoly.ru' } }
+    const bridge = createBrowserDevHostBridge({ maxBotUsername: 'OurMemoriesMaxBot' }, host)
+
+    expect(bridge.inviteLink('A'.repeat(31))).toBeNull()
+    expect(bridge.inviteLink('A'.repeat(129))).toBeNull()
+    expect(bridge.inviteLink(`${'A'.repeat(31)}.`)).toBeNull()
+    expect(createBrowserDevHostBridge({}, host).inviteLink(token)).toBeNull()
+    expect(createBrowserDevHostBridge({ maxBotUsername: 'bad-name' }, host).inviteLink(token)).toBeNull()
+  })
 })
