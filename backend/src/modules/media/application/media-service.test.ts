@@ -155,6 +155,7 @@ function createService(options: {
     commitFinalization: options.commit,
     readyForMemory: async () => false,
     resolveContent: async () => null,
+    resolveMemberAvatarContent: async () => null,
   }
   const processPhoto: PhotoProcessor = options.processPhoto ?? (async () => ({
     verifiedMime: 'image/jpeg', originalSha256: 'original', width: 1200, height: 1600,

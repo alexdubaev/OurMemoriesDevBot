@@ -1,10 +1,12 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
-import { sessionQueryKeys, useAuth } from '@/features/auth'
+import { authQueryKeys, sessionQueryKeys, useAuth } from '@/features/auth'
+import type { MeResponse } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload } from './api'
 import { AvatarUploadError, describeAvatarFile, uploadAvatarObject } from './upload'
+import { memberAvatarUpdatedEvent, reconcileMemberAvatarCache } from './member-avatar-query'
 
 function describeRejection(reason: 'type' | 'too-small' | 'too-large') {
   if (reason === 'type') return 'Pick a JPEG, PNG, or HEIC image.'
@@ -54,8 +56,11 @@ export function useUploadAvatarMutation() {
 
       return finalizeAvatarUpload(auth.transport, upload.uploadId)
     },
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
+      if (!auth.user?.id || queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id !== auth.user.id) return
       queryClient.setQueryData(avatarQueryKeys.current(), response)
+      await reconcileMemberAvatarCache(queryClient)
+      window.dispatchEvent(new CustomEvent(memberAvatarUpdatedEvent, { detail: { accountId: auth.user.id } }))
     },
   })
 }
@@ -66,8 +71,11 @@ export function useDeleteAvatarMutation() {
 
   return useMutation({
     mutationFn: () => deleteAvatar(auth.transport),
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
+      if (!auth.user?.id || queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id !== auth.user.id) return
       queryClient.setQueryData(avatarQueryKeys.current(), response)
+      await reconcileMemberAvatarCache(queryClient)
+      window.dispatchEvent(new CustomEvent(memberAvatarUpdatedEvent, { detail: { accountId: auth.user.id } }))
     },
   })
 }

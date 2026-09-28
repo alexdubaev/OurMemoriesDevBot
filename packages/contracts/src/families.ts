@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { userSchema } from './auth'
+import { backendMediaPathSchema } from './memories'
 
 export const familyRoleSchema = z.enum(['full', 'viewer'])
 
@@ -122,6 +123,7 @@ export const removeMemberRequestSchema = z.object({
 export const familyMemberSchema = z
   .object({
     userId: z.uuid(),
+    avatarPath: backendMediaPathSchema.nullable(),
     displayName: z.string().nullable(),
     familyDisplayName: z.string().nullable(),
     role: familyRoleSchema,

@@ -2,6 +2,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test'
 import { createHmac, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createPrisma } from '../../../backend/src/db'
 
 import { jpegImage, pngImage } from '../helpers/images'
 import { expect, test } from '../helpers/test'
@@ -690,16 +691,19 @@ test('owner can edit own account profile without changing family membership', as
   await owner.page.getByLabel('Выбрать фото профиля').setInputFiles(pngImage)
   expect((await firstAvatarUpload).ok()).toBe(true)
   await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveAttribute('src', /^blob:/)
+  await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+  await expect(owner.page.locator('.family-member-row img.family-member-avatar')).toHaveAttribute('src', /^blob:/)
+  const firstMemberAvatarSrc = await owner.page.locator('.family-member-row img.family-member-avatar').getAttribute('src')
+  await owner.page.getByRole('button', { name: 'Открыть участника: Имя владельца E2E' }).click()
   await expect(owner.page.getByRole('button', { name: 'Изменить фото' })).toBeVisible()
   const replacementUpload = owner.page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/uploads/avatar')
   await owner.page.getByLabel('Выбрать фото профиля').setInputFiles(jpegImage)
   expect((await replacementUpload).ok()).toBe(true)
   await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveAttribute('src', /^blob:/)
-  const avatarDelete = owner.page.waitForResponse((response) => response.request().method() === 'DELETE' && new URL(response.url()).pathname === '/api/uploads/avatar')
-  await owner.page.getByRole('button', { name: 'Удалить фото' }).click()
-  expect((await avatarDelete).ok()).toBe(true)
-  await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveCount(0)
-  await expect(owner.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
+  await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+  await expect(owner.page.locator('.family-member-row img.family-member-avatar')).toHaveAttribute('src', /^blob:/)
+  expect(await owner.page.locator('.family-member-row img.family-member-avatar').getAttribute('src')).not.toBe(firstMemberAvatarSrc)
+  await owner.page.getByRole('button', { name: 'Открыть участника: Имя владельца E2E' }).click()
 
   const profileThemes = ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'] as const
   for (const theme of profileThemes) {
@@ -715,9 +719,9 @@ test('owner can edit own account profile without changing family membership', as
     await owner.page.evaluate(() => document.fonts.ready)
     const screenshotLayout = await owner.page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }))
     expect(screenshotLayout.scrollWidth).toBeLessThanOrEqual(screenshotLayout.width)
-    await owner.page.screenshot({ path: resolve(`e2e/.artifacts/member-profile-self-${theme}-390.png`), animations: 'disabled' })
     for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
       await owner.page.setViewportSize(viewport)
+      await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toBeVisible()
       const geometry = await owner.page.locator('.member-profile-screen').evaluate((element) => {
         const rect = element.getBoundingClientRect()
         return { left: rect.left, right: rect.right, viewportWidth: innerWidth, scrollWidth: document.documentElement.scrollWidth }
@@ -725,10 +729,85 @@ test('owner can edit own account profile without changing family membership', as
       expect(geometry.left).toBeGreaterThanOrEqual(0)
       expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth)
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewportWidth)
+      await owner.page.screenshot({ path: resolve(`e2e/.artifacts/member-profile-self-${theme}-${viewport.width}.png`), animations: 'disabled' })
     }
   }
+  const avatarDelete = owner.page.waitForResponse((response) => response.request().method() === 'DELETE' && new URL(response.url()).pathname === '/api/uploads/avatar')
+  await owner.page.getByRole('button', { name: 'Удалить фото' }).click()
+  expect((await avatarDelete).ok()).toBe(true)
+  await expect(owner.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveCount(0)
+  await expect(owner.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
   await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+  await expect(owner.page.locator('.family-member-row img.family-member-avatar')).toHaveCount(0)
   await expect(owner.page.getByRole('button', { name: 'Открыть участника: Имя владельца E2E' })).toBeVisible()
+  await owner.context.close()
+})
+
+test('participant avatar appears to the owner in family, read-only profile, and feed author', async ({ browser, page }) => {
+  const ownerSubject = 82000000 + Math.floor(Math.random() * 10_000_000)
+  const participantSubject = ownerSubject + 1
+  const prisma = createPrisma(process.env.TEST_DATABASE_URL!)
+  try {
+    await prisma.pilotAdmission.createMany({
+      data: [ownerSubject, participantSubject].map((subject) => ({ provider: 'telegram' as const, subject: String(subject) })),
+      skipDuplicates: true,
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+  const owner = await createCompletedOwner(page, ownerSubject)
+  const avatarResponses: string[] = []
+  owner.page.on('response', (response) => {
+    const path = new URL(response.url()).pathname
+    if (response.request().method() === 'GET' && response.status() === 200 && /\/media\/avatars\/[^/]+\/[^/]+\/content$/.test(path)) avatarResponses.push(path)
+  })
+  const startParam = await createInvite(owner.page, 'full', 'Дедушка Павел')
+  const participant = await inviteePage(browser, participantSubject, startParam, 'Павел E2E')
+  await participant.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await participant.page.getByRole('button', { name: 'Семья' }).click()
+  await owner.page.getByRole('button', { name: 'Готово' }).click()
+
+  const refreshOwnerFamily = async () => {
+    await owner.page.getByRole('button', { name: '‹ Все семьи' }).click()
+    await owner.page.locator('[data-slot="family-hub"] .family-hub-card').click()
+    await owner.page.getByRole('button', { name: 'Семья' }).click()
+  }
+  await refreshOwnerFamily()
+  const ownerRow = owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Павел' })
+  await expect(ownerRow.locator('[data-slot="avatar-letter"]')).toBeVisible()
+  await expect(ownerRow.locator('img.family-member-avatar')).toHaveCount(0)
+
+  await participant.page.getByRole('button', { name: 'Открыть участника: Дедушка Павел' }).click()
+  await participant.page.getByLabel('Выбрать фото профиля').setInputFiles(pngImage)
+  await expect(participant.page.locator('.member-profile-hero img[alt="Фото профиля"]')).toHaveAttribute('src', /^blob:/)
+  await refreshOwnerFamily()
+  await expect(ownerRow.locator('img.family-member-avatar')).toHaveAttribute('src', /^blob:/)
+  await ownerRow.click()
+  await expect(owner.page.locator('.member-profile-hero img.member-profile-avatar')).toHaveAttribute('src', /^blob:/)
+  await expect(owner.page.getByRole('button', { name: /(?:Добавить|Изменить|Удалить) фото/ })).toHaveCount(0)
+  expect(avatarResponses).toHaveLength(1)
+  await owner.page.getByRole('button', { name: 'Назад к семье' }).click()
+
+  await participant.page.getByRole('button', { name: 'Назад к семье' }).click()
+  await participant.page.getByRole('button', { name: 'Лента' }).click()
+  await participant.page.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await participant.page.getByRole('button', { name: 'Добавить заметку' }).click()
+  await participant.page.getByRole('textbox', { name: 'Текст заметки' }).fill('Заметка участника с фото E2E')
+  await participant.page.getByRole('button', { name: 'Опубликовать' }).click()
+  await expect(participant.page.getByRole('heading', { name: 'Заметка сохранена!' })).toBeVisible()
+  avatarResponses.length = 0
+  await owner.page.reload()
+  await expect(owner.page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await owner.page.locator('[data-slot="family-hub"] .family-hub-card').click()
+  const openNote = owner.page.getByRole('button', { name: 'Открыть воспоминание Заметка участника с фото E2E' })
+  await expect(openNote).toBeVisible()
+  const card = openNote.locator('xpath=ancestor::article[1]')
+  await expect(card.locator('img.author-avatar')).toHaveAttribute('src', /^blob:/)
+  expect(avatarResponses).toHaveLength(1)
+  await owner.page.setViewportSize({ width: 390, height: 844 })
+  await owner.page.screenshot({ path: resolve('e2e/.artifacts/participant-avatar-owner-feed-390.png'), animations: 'disabled' })
+
+  await participant.context.close()
   await owner.context.close()
 })
 

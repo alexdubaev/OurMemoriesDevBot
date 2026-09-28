@@ -88,6 +88,7 @@ export type MediaRepository = {
   }): Promise<FinalizeCommit>
   readyForMemory(scope: FamilyScope, mediaIds: string[]): Promise<boolean>
   resolveContent(scope: FamilyScope, mediaId: string, variant: MediaVariant): Promise<ContentObject | null>
+  resolveMemberAvatarContent(scope: FamilyScope, userId: string, avatarId: string): Promise<ContentObject | null>
 }
 
 export type PhotoProcessor = (inputPath: string) => Promise<{

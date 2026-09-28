@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } 
 import { WebpIcon } from '@/components/WebpIcon'
 import { familyMemberName, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
+import { MemberAvatarImage } from '@/features/avatar'
 import { describeAvatarFile, useAvatarImage, useAvatarQuery, useDeleteAvatarMutation, useUploadAvatarMutation } from '@/features/avatar'
 import { useUpdateProfileMutation, validateProfileForm } from '@/features/users'
 import type { FamilyMemberActions } from './FamilyPresentation'
@@ -94,7 +95,7 @@ export function MemberProfile({ member, actions, busy, currentUserId, onBack, on
 }
 
 function MemberProfileHero({ displayName, member }: { displayName: string; member: FamilyMemberDto }) {
-  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><AvatarLetter className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
+  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><MemberAvatarImage avatarPath={member.avatarPath} className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
 }
 
 function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: boolean; displayName: string; member: FamilyMemberDto; onNameSaved: (name: string | null) => void }) {

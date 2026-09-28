@@ -548,7 +548,7 @@ export class FamilyService {
     if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
     const members = await this.db.familyMember.findMany({
       where: { familyId: scope.familyId, revokedAt: null },
-      include: { user: { select: { displayName: true } } },
+      include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
       orderBy: { joinedAt: 'asc' },
     })
     return {
@@ -879,7 +879,7 @@ export class FamilyService {
       }
       const member = await tx.familyMember.findUniqueOrThrow({
         where: { familyId_userId: { familyId: scope.familyId, userId } },
-        include: { user: { select: { displayName: true } } },
+        include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
       })
       return { membership: memberDto(member, family.ownerUserId) }
     })
@@ -1117,17 +1117,21 @@ function validAvatarCrop(value: unknown): value is { x: number; y: number; width
 
 function memberDto(
   member: {
+    familyId: string
     userId: string
     role: 'full' | 'viewer'
     familyDisplayName: string | null
     joinedAt: Date
     version: number
-    user: { displayName: string | null }
+    user: { displayName: string | null; avatars: Array<{ id: string }> }
   },
   ownerUserId: string,
 ): FamilyMemberDto {
   return {
     userId: member.userId,
+    avatarPath: member.user.avatars[0]
+      ? `/api/v1/families/${member.familyId}/media/avatars/${member.userId}/${member.user.avatars[0].id}/content`
+      : null,
     displayName: member.user.displayName,
     familyDisplayName: member.familyDisplayName,
     role: member.role,
@@ -1145,7 +1149,7 @@ async function inviteResponse(
   const family = await tx.family.findUniqueOrThrow({ where: { id: familyId } })
   const member = await tx.familyMember.findFirst({
     where: { familyId, userId, revokedAt: null },
-    include: { user: { select: { displayName: true } } },
+    include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
   })
   if (!member) throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
   return {

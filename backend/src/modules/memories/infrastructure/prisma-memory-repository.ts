@@ -467,7 +467,11 @@ function visibleStatuses(role: MemberRole): MemoryStatus[] {
 
 function memoryInclude() {
   return {
-    author: { select: { displayName: true } },
+    author: { select: {
+      displayName: true,
+      avatars: { where: { state: 'ready' as const }, select: { id: true }, take: 1 },
+      familyMemberships: { where: { revokedAt: null, family: { status: 'active' as const } }, select: { familyId: true } },
+    } },
     likes: {
       where: { member: { revokedAt: null, family: { status: 'active' as const } } },
       select: { userId: true },
@@ -497,7 +501,7 @@ function dto(
     createdAt: Date
     version: number
     status: 'processing' | 'published' | 'failed' | 'deleted'
-    author: { displayName: string | null }
+    author: { displayName: string | null; avatars: Array<{ id: string }>; familyMemberships: Array<{ familyId: string }> }
     likes: Array<{ userId: string }>
     media: Array<{ asset: {
       id: string
@@ -519,7 +523,10 @@ function dto(
     id: memory.id,
     familyId: memory.familyId,
     childId: memory.childId,
-    author: { id: memory.authorId, name: memory.author.displayName ?? 'Участник семьи' },
+    author: { id: memory.authorId, name: memory.author.displayName ?? 'Участник семьи',
+      avatarPath: memory.author.familyMemberships.some(({ familyId }) => familyId === memory.familyId) && memory.author.avatars[0]
+        ? `/api/v1/families/${memory.familyId}/media/avatars/${memory.authorId}/${memory.author.avatars[0].id}/content`
+        : null },
     kind: memory.kind,
     body: memory.body,
     occurredAt: memory.occurredAt.toISOString(),

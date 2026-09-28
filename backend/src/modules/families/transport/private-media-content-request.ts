@@ -1,4 +1,4 @@
-const privateMediaContentPath = /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+)\/content$/i
+const privateMediaContentPath = /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i
 
 /**
  * The media content endpoint authenticates with either a Bearer token or its

@@ -250,6 +250,7 @@ export function FeedPage({
           isDeleteSource={deleteTarget?.id === memory.id}
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
+          authorAvatarPath={memory.author.avatarPath}
           childName={memory.childId === childId ? childName : undefined}
           childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
@@ -407,6 +408,7 @@ function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTime
       actions={null}
       authorInitials={initials(memory.author.name)}
       authorName={memory.author.name}
+      authorAvatarPath={memory.author.avatarPath}
       body={memory.body}
       kind={memory.kind}
       liked={memory.likes.likedByMe}
