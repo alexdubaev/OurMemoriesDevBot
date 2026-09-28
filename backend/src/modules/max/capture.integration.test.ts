@@ -1220,6 +1220,55 @@ maybeDescribe('MAX durable capture', () => {
     } finally { await video.cleanup(); await fixture.cleanup() }
   })
 
+  test('terminally rejects malformed getVideo metadata after storing an earlier photo', async () => {
+    const fixture = await imageFixture('77155', 'mixed-video-shape')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77155', recipientId: '900', messageId: 'max-mixed-video-shape',
+        occurredAt: '2023-07-14T18:43:00.123Z', text: 'invalid video metadata', attachments: [
+          { kind: 'image', providerAttachmentId: '11' },
+          { kind: 'video', providerAttachmentId: '22', durationSeconds: 1, width: 320, height: 240 },
+        ],
+      }
+      const accepted = await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: { ...fixture.api(event), getVideo: async () => { throw new MaxProviderError() } },
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+      })
+      await expect(process({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'unsupported_media' })
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max', deletedAt: { not: null } } })).toBe(1)
+    } finally { await fixture.cleanup() }
+  })
+
+  test('terminally rejects malformed getMessage metadata and discards prior staged mixed media', async () => {
+    const fixture = await imageFixture('77156', 'mixed-message-shape')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77156', recipientId: '900', messageId: 'max-mixed-message-shape',
+        occurredAt: '2023-07-14T18:43:00.123Z', text: 'invalid message metadata', attachments: [
+          { kind: 'image', providerAttachmentId: '11' },
+          { kind: 'video', providerAttachmentId: '22', durationSeconds: 1, width: 320, height: 240 },
+        ],
+      }
+      const accepted = await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
+      const photoId = source.attachments.find(({ position }) => position === 0)!.plannedMediaId
+      await fixture.media.ingestTrustedPhoto({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } },
+        { assetId: photoId, sourceKind: 'max', bytes: pngFixture })
+      const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: { ...fixture.api(event), getMessage: async () => { throw new MaxProviderError() } },
+        download: async () => { throw new Error('must not download after malformed message lookup') },
+      })
+      await expect(process({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'unsupported_media' })
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })).toMatchObject({ deletedAt: expect.any(Date) })
+    } finally { await fixture.cleanup() }
+  })
+
   test('rejects mixed publication after a target membership is revoked without retargeting or fetching provider media', async () => {
     const fixture = await imageFixture('77154', 'mixed-revoked')
     try {

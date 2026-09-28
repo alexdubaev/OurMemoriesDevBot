@@ -50,7 +50,14 @@ export function createMaxImageProcessor(options: {
       throw error
     }
     let resolved
-    try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) { throw error }
+    try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) {
+      if (!(error instanceof MaxProviderError) || error.retryable) throw error
+      const result = await terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      if (result === 'done') {
+        await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: source.attachments.map((row) => row.plannedMediaId) })
+      }
+      return result
+    }
     const accepted = policy.kind === 'quick-images' || policy.kind === 'mixed-media' ? policy.attachments : [policy.attachment]
     if (resolved.messageId !== input.event.messageId || resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
         resolved.attachments.length !== accepted.length || resolved.attachments.some((item, index) => item.kind !== accepted[index]!.kind || item.providerAttachmentId !== accepted[index]!.providerAttachmentId)) {
@@ -203,7 +210,7 @@ async function ensureVideoStored(input: {
       const asset = resumed ?? await (async () => {
         if (!input.api.getVideo) throw new MaxProviderError(undefined, true)
         const video = await input.api.getVideo(input.current.currentToken, input.signal).catch((error: unknown) => {
-          if (error instanceof MaxProviderError && !error.retryable && error.status && error.status >= 400 && error.status < 500) {
+          if (error instanceof MaxProviderError && !error.retryable) {
             throw new MaxMediaDownloadError()
           }
           throw error
