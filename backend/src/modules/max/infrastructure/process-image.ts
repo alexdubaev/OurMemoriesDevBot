@@ -34,37 +34,38 @@ export function createMaxImageProcessor(options: {
   const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
+    const terminalAndDiscard = async (kind: 'denied' | 'unsupported_media', text: string) => {
+      const result = await terminal(prisma, source.id, input.inboxId, kind, input.event.senderId, text)
+      if (result === 'done') await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: source.attachments.map((row) => row.plannedMediaId) })
+      return result
+    }
     const policy = classifyMaxImageMessage(input.event)
-    if (policy.kind === 'denied') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId, deniedText)
-    if (policy.kind === 'unsupported') return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+    if (policy.kind === 'denied') return terminalAndDiscard('denied', deniedText)
+    if (policy.kind === 'unsupported') return terminalAndDiscard('unsupported_media', unsupportedText)
     if (typeof options.api.getMessage !== 'function') throw new Error('MAX message lookup is unavailable')
     const targetResult = await resolveMaxTarget(prisma, source)
     if (targetResult.kind === 'pending') return 'done'
     if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, input.event.senderId)
-    if (targetResult.kind !== 'target') return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId,
+    if (targetResult.kind !== 'target') return terminalAndDiscard('denied',
       'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
     const admission = targetResult.target
     const scope: FamilyScope = { familyId: admission.familyId, principal: { userId: admission.userId, sessionId: `max:${source.id}` } }
     try { await access.requireFull(scope) } catch (error) {
-      if (isAuthorizationFailure(error)) return terminal(prisma, source.id, input.inboxId, 'denied', input.event.senderId, deniedText)
+      if (isAuthorizationFailure(error)) return terminalAndDiscard('denied', deniedText)
       throw error
     }
     let resolved
     try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) {
       if (!(error instanceof MaxProviderError) || error.retryable) throw error
-      const result = await terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
-      if (result === 'done') {
-        await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: source.attachments.map((row) => row.plannedMediaId) })
-      }
-      return result
+      return terminalAndDiscard('unsupported_media', unsupportedText)
     }
     const accepted = policy.kind === 'quick-images' || policy.kind === 'mixed-media' ? policy.attachments : [policy.attachment]
     if (resolved.messageId !== input.event.messageId || resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
         resolved.attachments.length !== accepted.length || resolved.attachments.some((item, index) => item.kind !== accepted[index]!.kind || item.providerAttachmentId !== accepted[index]!.providerAttachmentId)) {
-      return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      return terminalAndDiscard('unsupported_media', unsupportedText)
     }
     const planned = [...source.attachments].sort((a, b) => a.position - b.position)
-    if (planned.length !== accepted.length) return terminal(prisma, source.id, input.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+    if (planned.length !== accepted.length) return terminalAndDiscard('unsupported_media', unsupportedText)
     const mediaIds: string[] = []
     try {
       for (let index = 0; index < planned.length; index += 1) {

@@ -1269,6 +1269,62 @@ maybeDescribe('MAX durable capture', () => {
     } finally { await fixture.cleanup() }
   })
 
+  test('discards staged mixed media when resolved attachment identity changes', async () => {
+    const fixture = await imageFixture('77157', 'mixed-identity-changed')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77157', recipientId: '900', messageId: 'max-mixed-identity-changed',
+        occurredAt: '2023-07-14T18:43:00.123Z', text: 'changed', attachments: [
+          { kind: 'image', providerAttachmentId: '11' },
+          { kind: 'video', providerAttachmentId: '22', durationSeconds: 1, width: 320, height: 240 },
+        ],
+      }
+      const accepted = await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
+      const photoId = source.attachments.find(({ position }) => position === 0)!.plannedMediaId
+      await fixture.media.ingestTrustedPhoto({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } },
+        { assetId: photoId, sourceKind: 'max', bytes: pngFixture })
+      const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: { ...fixture.api(event), getMessage: async () => {
+          const resolved = await fixture.api(event).getMessage!(event.messageId)
+          return { ...resolved, attachments: resolved.attachments.map((item, index) =>
+            index === 0 ? { ...item, providerAttachmentId: 'different' } : item) }
+        } },
+        download: async () => { throw new Error('must not download mismatched attachment') },
+      })
+      await expect(process({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'unsupported_media' })
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })).toMatchObject({ deletedAt: expect.any(Date) })
+    } finally { await fixture.cleanup() }
+  })
+
+  test('discards staged mixed media when planned attachment count is incomplete', async () => {
+    const fixture = await imageFixture('77158', 'mixed-plan-incomplete')
+    try {
+      const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
+        kind: 'message_created', senderId: '77158', recipientId: '900', messageId: 'max-mixed-plan-incomplete',
+        occurredAt: '2023-07-14T18:43:00.123Z', text: 'incomplete plan', attachments: [
+          { kind: 'image', providerAttachmentId: '11' },
+          { kind: 'video', providerAttachmentId: '22', durationSeconds: 1, width: 320, height: 240 },
+        ],
+      }
+      const accepted = await accept(event)
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
+      const photoId = source.attachments.find(({ position }) => position === 0)!.plannedMediaId
+      await fixture.media.ingestTrustedPhoto({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } },
+        { assetId: photoId, sourceKind: 'max', bytes: pngFixture })
+      await prisma.maxSourceAttachment.delete({ where: { sourceId_position: { sourceId: source.id, position: 1 } } })
+      const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: fixture.api(event), download: async () => { throw new Error('must not download incomplete plan') },
+      })
+      await expect(process({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'unsupported_media' })
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })).toMatchObject({ deletedAt: expect.any(Date) })
+    } finally { await fixture.cleanup() }
+  })
+
   test('rejects mixed publication after a target membership is revoked without retargeting or fetching provider media', async () => {
     const fixture = await imageFixture('77154', 'mixed-revoked')
     try {
@@ -1280,8 +1336,11 @@ maybeDescribe('MAX durable capture', () => {
         ],
       }
       const accepted = await accept(event)
-      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId } })
+      const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
       await expect(resolveMaxTarget(prisma, source)).resolves.toMatchObject({ kind: 'target', target: { familyId: fixture.familyId, childId: fixture.childId } })
+      const photoId = source.attachments.find(({ position }) => position === 0)!.plannedMediaId
+      await fixture.media.ingestTrustedPhoto({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } },
+        { assetId: photoId, sourceKind: 'max', bytes: pngFixture })
       const successor = await prisma.user.create({ data: { displayName: 'Synthetic owner' } })
       await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: successor.id, role: 'full' } })
       await prisma.family.update({ where: { id: fixture.familyId }, data: { ownerUserId: successor.id } })
@@ -1295,6 +1354,7 @@ maybeDescribe('MAX durable capture', () => {
       expect(providerCalls).toBe(0)
       expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'denied', familyId: fixture.familyId, childId: fixture.childId })
       expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })).toMatchObject({ deletedAt: expect.any(Date) })
     } finally { await fixture.cleanup() }
   })
 
@@ -1349,7 +1409,8 @@ maybeDescribe('MAX durable capture', () => {
        getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }), getSubscriptions: async () => [], createSubscription: async () => ({ success: true }), deleteSubscription: async () => ({ success: true }), sendMessage: async () => undefined,
        createVideoUpload: async () => ({ url: 'https://upload.example.test/video', token: 'upload-token' }), sendVideoMessage: async () => ({ messageId: 'unused' }),
         getMessage: async () => ({ messageId: event.messageId, senderId, recipientId: event.recipientId, attachments: [{ kind: 'image' as const, providerAttachmentId: '1', url: 'https://i.oneme.ru/1' }] }),
-      }, media: {} as never, download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })(task.payload)
+      }, media: { discardTrustedSourceAssets: async () => undefined } as never,
+      download: async () => { downloads += 1; return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } } })(task.payload)
     }
     expect(downloads).toBe(0)
     expect(await prisma.memory.count()).toBe(0)

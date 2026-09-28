@@ -33,6 +33,16 @@ export async function resolveMaxTarget(db: DbClient, source: MaxSource, now = ne
   } else {
     const candidate = found.candidates[0]!
     await db.$transaction(async (tx) => {
+      // A stale source snapshot can reach this transaction after another processor has
+      // selected the target and started media ingestion. Serialize only resolution of
+      // this source, then re-read before taking the actor/family locks. In particular,
+      // do not lock the source row before lockBotTarget: the choice callback takes the
+      // actor/family locks before updating that row.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-target:${source.id}`}, 0))`
+      const current = await tx.maxSource.findUnique({ where: { id: source.id }, select: {
+        status: true, userId: true, familyId: true, childId: true, choiceExpiresAt: true,
+      } })
+      if (!current || current.status !== 'accepted' || current.userId || current.familyId || current.childId || current.choiceExpiresAt) return
       if (!(await lockBotTarget(tx, found.userId, candidate))) return
       await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted', userId: null, familyId: null }, data: {
         userId: found.userId, familyId: candidate.familyId, childId: candidate.childId,
