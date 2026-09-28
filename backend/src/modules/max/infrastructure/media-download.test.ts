@@ -110,4 +110,38 @@ describe('MAX credential-free media download', () => {
     await expect(new Response(result.body).arrayBuffer()).rejects.toBeInstanceOf(MaxProviderError)
     expect(result.failure()?.retryable).toBe(true)
   })
+
+  test('lets a valid body finish after the short response-header timeout', async () => {
+    const download = createMaxVideoStreamDownload({ timeoutMs: 5, fetch: async (_input, init) => new Response(new ReadableStream({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 30))
+        if (init?.signal?.aborted) { controller.error(new Error('header timer aborted the body')); return }
+        controller.enqueue(Uint8Array.of(1, 2, 3))
+        controller.close()
+      },
+    }), { headers: { 'content-type': 'video/mp4', 'content-length': '3' } }) })
+    const result = await download('https://maxvd123.okcdn.ru/video', 10)
+    expect(new Uint8Array(await new Response(result.body).arrayBuffer())).toEqual(Uint8Array.of(1, 2, 3))
+    expect(result.failure()).toBeNull()
+  })
+
+  test('uses a bounded body fallback only when no caller deadline is supplied', async () => {
+    const makeDownload = () => createMaxVideoStreamDownload({ timeoutMs: 5, bodyTimeoutMs: 10,
+      fetch: async (_input, init) => new Response(new ReadableStream({
+        async pull(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 30))
+          if (init?.signal?.aborted) { controller.error(new Error('body timed out')); return }
+          controller.enqueue(Uint8Array.of(1))
+          controller.close()
+        },
+      }), { headers: { 'content-type': 'video/mp4', 'content-length': '1' } }),
+    })
+    const withoutCaller = await makeDownload()('https://maxvd123.okcdn.ru/video', 10)
+    await expect(new Response(withoutCaller.body).arrayBuffer()).rejects.toBeInstanceOf(MaxProviderError)
+    expect(withoutCaller.failure()?.retryable).toBe(true)
+    const caller = new AbortController()
+    const withCaller = await makeDownload()('https://maxvd123.okcdn.ru/video', 10, caller.signal)
+    expect(new Uint8Array(await new Response(withCaller.body).arrayBuffer())).toEqual(Uint8Array.of(1))
+    expect(withCaller.failure()).toBeNull()
+  })
 })

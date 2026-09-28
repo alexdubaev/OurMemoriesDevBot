@@ -24,22 +24,36 @@ export type MaxVideoStream = {
 }
 
 /** The CDN response is passed to private storage as a stream. No video-sized Uint8Array is allocated. */
-export function createMaxVideoStreamDownload(options: { fetch?: FetchLike; timeoutMs?: number } = {}) {
+export function createMaxVideoStreamDownload(options: { fetch?: FetchLike; timeoutMs?: number; bodyTimeoutMs?: number } = {}) {
   const fetchImpl = options.fetch ?? fetch
   const timeoutMs = options.timeoutMs ?? 30_000
+  const bodyTimeoutMs = options.bodyTimeoutMs ?? 15 * 60_000
   return async (url: string, maxBytes: number, callerSignal?: AbortSignal): Promise<MaxVideoStream> => {
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || !isAllowedMediaUrl(url, true)) throw new MaxMediaDownloadError()
     const controller = new AbortController()
     const abortCaller = () => controller.abort()
     callerSignal?.addEventListener('abort', abortCaller, { once: true })
     if (callerSignal?.aborted) controller.abort()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    const cleanup = () => { clearTimeout(timeout); callerSignal?.removeEventListener('abort', abortCaller) }
+    const headerTimeout = setTimeout(() => controller.abort(), timeoutMs)
+    let bodyTimeout: ReturnType<typeof setTimeout> | undefined
+    let abortBody: (() => void) | undefined
+    const cleanup = () => {
+      clearTimeout(headerTimeout)
+      clearTimeout(bodyTimeout)
+      callerSignal?.removeEventListener('abort', abortCaller)
+      if (abortBody) controller.signal.removeEventListener('abort', abortBody)
+    }
     let response: Response
     try {
       response = await fetchImpl(url, { method: 'GET', redirect: 'manual', credentials: 'omit', referrer: '', headers: {}, signal: controller.signal })
     } catch {
       cleanup()
+      throw new MaxProviderError(undefined, true)
+    }
+    clearTimeout(headerTimeout)
+    if (controller.signal.aborted) {
+      cleanup()
+      void response.body?.cancel().catch(() => undefined)
       throw new MaxProviderError(undefined, true)
     }
     if (response.status === 408 || response.status === 429 || response.status >= 500) {
@@ -56,7 +70,10 @@ export function createMaxVideoStreamDownload(options: { fetch?: FetchLike; timeo
       void response.body?.cancel().catch(() => undefined)
       throw new MaxMediaDownloadError()
     }
+    if (!callerSignal) bodyTimeout = setTimeout(() => controller.abort(), bodyTimeoutMs)
     const reader = response.body.getReader()
+    abortBody = () => { void reader.cancel().catch(() => undefined) }
+    controller.signal.addEventListener('abort', abortBody, { once: true })
     let total = 0
     let streamFailure: MaxProviderError | MaxMediaDownloadError | null = null
     const body = new ReadableStream<Uint8Array>({

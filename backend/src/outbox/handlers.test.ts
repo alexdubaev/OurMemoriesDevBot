@@ -11,6 +11,7 @@ describe('the task type registry', () => {
     expect(isTaskType('max:process')).toBe(true)
     expect(isTaskType('max:deliver-response')).toBe(true)
     expect(taskHandlers['max:process']!.maxAttempts).toBe(5)
+    expect(taskHandlers['max:process']!.deadlineMs).toBe(15 * 60_000)
     expect(taskHandlers['max:deliver-response']!.deadlineMs).toBe(30_000)
     expect(taskHandlers['max:deliver-response']!.retryDelayMs!({ retryAfterSeconds: 17 }, 1)).toBe(17_000)
   })
