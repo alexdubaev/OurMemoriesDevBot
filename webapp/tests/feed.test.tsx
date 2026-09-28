@@ -702,9 +702,10 @@ test('memory like exposes a dedicated lightweight control while preserving press
   const liked = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, liked: true, likeCount: 12 }))
 
   expect(empty).toMatch(/<button[^>]*aria-label="Поставить сердечко"[^>]*aria-pressed="false"[^>]*class="memory-like"/)
-  expect(empty).toMatch(/class="memory-like"[^>]*><img[^>]*height="24"/)
+  expect(empty).toMatch(/class="memory-like"[^>]*><span[^>]*data-slot="webp-icon"[^>]*background-color:currentColor/)
   expect(empty).not.toContain('>0</span>')
   expect(liked).toMatch(/<button[^>]*aria-label="Убрать сердечко"[^>]*aria-pressed="true"[^>]*class="memory-like is-liked"/)
+  expect(liked).toMatch(/class="memory-like is-liked"[^>]*><span[^>]*data-slot="webp-icon"[^>]*background-color:currentColor/)
   expect(liked).toContain('>12</span>')
 })
 

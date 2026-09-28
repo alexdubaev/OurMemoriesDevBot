@@ -184,21 +184,35 @@ test.describe.serial('T07 live feed', () => {
     await unlike.evaluate((button) => (button as HTMLElement).blur())
     await page.mouse.move(0, 0)
     await page.screenshot({ path: resolve('e2e/.artifacts/memory-like-liked-count-390.png'), animations: 'disabled' })
-    await unlike.click()
-    await expect(like).toHaveAttribute('aria-pressed', 'false')
-    await expect(like).toHaveText('')
-    await like.evaluate((button) => (button as HTMLElement).blur())
-    await page.mouse.move(0, 0)
 
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
       await page.evaluate((name) => {
         document.documentElement.setAttribute('data-memoly-theme', name)
         document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', name)
       }, theme)
-      await expect(like).toHaveCSS('box-shadow', 'none')
-      await expect(like).toHaveCSS('background-image', 'none')
-      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-${theme}-390.png`), animations: 'disabled' })
+      await expect(unlike).toHaveCSS('box-shadow', 'none')
+      await expect(unlike).toHaveCSS('background-image', 'none')
+      const colors = await unlike.evaluate((button) => {
+        const icon = button.querySelector<HTMLElement>('[data-slot="webp-icon"]')!
+        const token = getComputedStyle(document.documentElement).getPropertyValue('--theme-accent-text').trim()
+        const hex = Number.parseInt(token.slice(1), 16)
+        return {
+          button: getComputedStyle(button).color,
+          icon: getComputedStyle(icon).backgroundColor,
+          mask: getComputedStyle(icon).maskImage,
+          expected: `rgb(${(hex >> 16) & 255}, ${(hex >> 8) & 255}, ${hex & 255})`,
+          tag: icon.tagName,
+        }
+      })
+      expect(colors.button).toBe(colors.expected)
+      expect(colors.icon).toBe(colors.expected)
+      expect(colors.mask).not.toBe('none')
+      expect(colors.tag).toBe('SPAN')
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-liked-${theme}-390.png`), animations: 'disabled' })
     }
+    await unlike.click()
+    await expect(like).toHaveAttribute('aria-pressed', 'false')
+    await expect(like).toHaveText('')
   })
 
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {

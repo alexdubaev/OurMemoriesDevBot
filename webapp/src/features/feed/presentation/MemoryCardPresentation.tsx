@@ -88,7 +88,7 @@ function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: bo
       onClick={onLike}
       type="button"
     >
-      <WebpIcon decorative name={liked ? 'heart-filled' : 'heart'} size={24} state={liked ? 'active' : 'default'} />
+      <WebpIcon decorative monochrome name={liked ? 'heart-filled' : 'heart'} size={24} state={liked ? 'active' : 'default'} />
       {likeCount > 0 ? <Typography as="span" variant="memoryMeta">{likeCount}</Typography> : null}
     </button>
   )
