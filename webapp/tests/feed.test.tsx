@@ -221,6 +221,35 @@ test('video cards treat whitespace-only captions as empty', () => {
   expect(markup).not.toContain('class="caption"')
 })
 
+test('memory child details stay out of the card while like state and count remain visible', () => {
+  for (const childProps of [
+    { childName: 'Лиза', childAvatarUrl: '/child.webp', childAvatarCrop: { x: 0, y: 0, scale: 1 } },
+    {},
+  ]) {
+    const markup = renderToStaticMarkup(MemoryCardPresentation({
+      actions: null,
+      authorInitials: 'М',
+      authorName: 'Мама',
+      ...childProps,
+      body: 'Первое слово',
+      kind: 'photo',
+      liked: true,
+      likeCount: 3,
+      media: createElement('div', null, 'photo'),
+      memoryId: 'child-tag-hidden',
+      occurredTime: 'Сегодня, 10:24',
+      onLike: () => undefined,
+      onOpen: () => undefined,
+    }))
+
+    expect(markup).not.toContain('memory-child-tag')
+    expect(markup).not.toContain('Лиза')
+    expect(markup).toContain('aria-label="Убрать сердечко"')
+    expect(markup).toContain('aria-pressed="true"')
+    expect(markup).toContain('>3</span>')
+  }
+})
+
 test('delete preview cards preserve the selected memory while removing interactive actions', () => {
   const markup = renderToStaticMarkup(MemoryCardPresentation({
     actions: createElement('button', { 'aria-label': 'Действия с воспоминанием' }, '...'),

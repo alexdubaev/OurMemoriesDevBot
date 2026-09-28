@@ -274,11 +274,6 @@
 [data-memoly-feed] .author-time { margin-top: 3px; font-size: 12.5px; }
 [data-memoly-feed] .media-well { padding: 5px; border-radius: 22px; }
 [data-memoly-feed] .actions { gap: 7px; padding: 7px 2px 5px; }
-[data-memoly-feed] .memory-child-tags { display: flex; align-items: center; gap: 6px; padding: 0 4px 5px; }
-[data-memoly-feed] .memory-child-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px 3px 3px; border-radius: 999px; color: #62737e; background: #edf0eb; font-size: 10.5px; font-weight: 650; }
-[data-memoly-feed] .memory-child-tag-avatar, [data-memoly-feed] .memory-child-tag-avatar [data-slot='child-avatar'], [data-memoly-feed] .memory-child-tag-avatar [data-slot='avatar-letter'] { display: block; width: 22px !important; height: 22px !important; overflow: hidden; border-radius: 50%; }
-[data-memoly-feed] .memory-child-tag-avatar [data-slot='child-avatar-image'] { width: 100%; height: 100%; object-fit: cover; }
-[data-memoly-feed] .memory-child-tag b { font: inherit; }
 [data-memoly-feed] .action { min-height: 44px; height: 44px; gap: 7px; padding: 0 13px; border-radius: 15px; font-size: 14px; }
 [data-memoly-feed] .action [data-slot="webp-icon"] { width: 19px; height: 19px; }
 [data-memoly-feed] .caption { padding: 1px 4px 0; font-size: 14px; font-weight: 500; line-height: 1.38; }
