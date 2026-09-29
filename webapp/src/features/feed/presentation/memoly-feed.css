@@ -197,6 +197,7 @@
 [data-memoly-feed] .memoly-mixed-slide-media img, [data-memoly-feed] .memoly-mixed-slide-media video { max-height: 70dvh; object-fit: contain; }
 [data-memoly-feed] .memoly-mixed-slide-media .ml-media-button,
 [data-memoly-feed] .memoly-mixed-slide-media .ml-media-slot,
+[data-memoly-feed] .memoly-mixed-slide-media .memoly-max-video-readiness,
 [data-memoly-feed] .memoly-mixed-slide-media .memoly-private-video-v2,
 [data-memoly-feed] .memoly-mixed-slide-media .memoly-video-viewer-v2 { height: 100%; }
 [data-memoly-feed] .memoly-mixed-slide-media .ml-media-button img { width: 100%; height: 100%; max-height: none; object-fit: cover; }
@@ -213,6 +214,10 @@
 [data-memoly-feed] .memoly-mixed-slide-media .memoly-video-viewer-v2-status,
 [data-memoly-feed] .memoly-mixed-slide-media .memoly-video-viewer-v2-error { position: absolute; right: 8px; bottom: 58px; left: 8px; margin: 0; }
 [data-memoly-feed] .memoly-mixed-slide-media .memoly-video-viewer-v2-retry { position: absolute; right: 8px; bottom: 58px; left: 8px; width: auto; margin: 0; }
+[data-memoly-feed] .memoly-mixed-slide-media [data-video-viewer-state='processing'] .memoly-video-viewer-v2-status,
+[data-memoly-feed] .memoly-mixed-slide-media [data-video-viewer-state='unknown'] .memoly-video-viewer-v2-status,
+[data-memoly-feed] .memoly-mixed-slide-media [data-video-viewer-state='check-error'] .memoly-video-viewer-v2-status,
+[data-memoly-feed] .memoly-mixed-slide-media [data-video-viewer-state='error'] .memoly-video-viewer-v2-error { bottom: 110px; }
 [data-memoly-feed] .memoly-mixed-placeholder { display: block; width: 100%; height: 100%; }
 [data-memoly-feed] .memoly-mixed-controls { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding-inline: 4px; color: var(--theme-text, var(--memoly-ink)); }
 [data-memoly-feed] .memoly-mixed-controls button { width: 44px; height: 44px; border-radius: 12px; font-size: 28px; line-height: 1; }

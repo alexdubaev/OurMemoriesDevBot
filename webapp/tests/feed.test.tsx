@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from '../src/features/feed/max-video-readiness'
 import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
@@ -687,6 +688,71 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).not.toContain('aspect-video')
     expect(markup).not.toContain('object-cover')
   }
+})
+
+test('MAX readiness URL uses the validated playback reference, not attachment identity', () => {
+  const referenceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+  const playbackPath = `/api/v1/families/${familyId}/media/max-videos/${referenceId}/content`
+  expect(maxVideoReadinessPath(playbackPath)).toBe(`/api/v1/families/${familyId}/media/max-videos/${referenceId}/readiness`)
+  expect(maxVideoReadinessPath(`${playbackPath}?token=unsafe`)).toBeNull()
+  expect(maxVideoReadinessPath(`/api/v1/families/${familyId}/media/${referenceId}/content`)).toBeNull()
+})
+
+test('MAX processing and unknown remain neutral while unavailable is terminal', () => {
+  for (const [readinessState, label] of [['processing', 'Видео обрабатывается…'], ['unknown', 'Готовность видео пока неизвестна'], ['unavailable', 'Видео недоступно']] as const) {
+    const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+      durationMs: 24_000, height: 720, onCheckReadiness: () => undefined, onOpen: () => undefined,
+      readinessState, src: null, width: 1_280,
+    }))
+    expect(markup).toContain(`data-video-viewer-state="${readinessState}"`)
+    expect(markup).toContain(label)
+    expect(markup).toContain('data-seen-ready="false"')
+    expect(markup).not.toContain('Не удалось загрузить видео')
+    if (readinessState === 'unavailable') expect(markup).not.toContain('Проверить готовность')
+    else expect(markup).toContain('Проверить готовность')
+  }
+  expect(maxVideoReadinessInterval({ data: { state: 'processing', recheckable: true }, dataUpdateCount: 11, errorUpdateCount: 0 })).toBe(5_000)
+  expect(maxVideoReadinessInterval({ data: { state: 'unknown', recheckable: true }, dataUpdateCount: 12, errorUpdateCount: 0 })).toBe(false)
+  expect(maxVideoReadinessInterval({ data: undefined, dataUpdateCount: 0, errorUpdateCount: 4 })).toBe(false)
+  expect(maxVideoReadinessInterval({ data: { state: 'unavailable', recheckable: false }, dataUpdateCount: 1, errorUpdateCount: 0 })).toBe(false)
+})
+
+test('MAX readiness network checks never exceed three simultaneous requests', async () => {
+  let active = 0
+  let peak = 0
+  const releases: Array<() => void> = []
+  const checks = Array.from({ length: 5 }, () => withMaxVideoReadinessSlot(new AbortController().signal, async () => {
+    active += 1
+    peak = Math.max(peak, active)
+    await new Promise<void>((resolve) => releases.push(resolve))
+    active -= 1
+  }))
+  await Promise.resolve()
+  expect(active).toBe(3)
+  for (let index = 0; index < 5; index += 1) {
+    releases[index]?.()
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+  await Promise.all(checks)
+  expect(peak).toBe(3)
+})
+
+test('an aborted queued MAX readiness check never starts a request', async () => {
+  const releases: Array<() => void> = []
+  let started = 0
+  const active = Array.from({ length: 3 }, () => withMaxVideoReadinessSlot(new AbortController().signal, async () => {
+    started += 1
+    await new Promise<void>((resolve) => releases.push(resolve))
+  }))
+  const controller = new AbortController()
+  const queued = withMaxVideoReadinessSlot(controller.signal, async () => { started += 1 })
+  controller.abort()
+  await expect(queued).rejects.toBeDefined()
+  expect(started).toBe(3)
+  releases.forEach((release) => release())
+  await Promise.all(active)
+  expect(started).toBe(3)
 })
 
 test('a MAX video source is assigned and loaded once per distinct source', () => {

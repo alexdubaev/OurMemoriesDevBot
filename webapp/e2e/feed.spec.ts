@@ -438,6 +438,11 @@ test.describe.serial('T07 live feed', () => {
       if (!bytes) return route.continue()
       await route.fulfill({ body: bytes, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' } })
     })
+    await page.route('**/api/v1/families/*/media/max-videos/*/readiness', async (route) => {
+      const referenceId = new URL(route.request().url()).pathname.split('/').at(-2)
+      if (!referenceId || !maxVideoById.has(referenceId)) return route.continue()
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'ready', recheckable: false }) })
+    })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const requestUrl = new URL(route.request().url())
       if (requestUrl.searchParams.has('cursor')) return route.continue()
@@ -1038,6 +1043,114 @@ test.describe.serial('T07 live feed', () => {
       expect(layout.width).toBeGreaterThan(0)
       expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport)
     }
+  })
+
+  test('MAX mixed slide checks readiness only when active and replaces processing with ready in place', async ({ page }) => {
+    const referenceId = randomUUID()
+    const attachmentId = randomUUID()
+    const contentPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/content`
+    const readinessPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/readiness`
+    let checks = 0
+    let mockedReadiness: 'processing' | 'unknown' | 'ready' = 'processing'
+    const checkTimes: number[] = []
+    const contentRequests: string[] = []
+    page.on('request', (request) => { if (request.url().includes(contentPath)) contentRequests.push(request.url()) })
+    await page.route(`**${readinessPath}`, async (route) => {
+      checks += 1
+      checkTimes.push(Date.now())
+      const state = mockedReadiness
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state, recheckable: state !== 'ready' }) })
+    })
+    const bytes = generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=320x180:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'])
+    await page.route(`**${contentPath}`, (route) => route.fulfill({ body: bytes, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' } }))
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      payload.items = payload.items.map((item) => item.body === 'Смешанное воспоминание E2E'
+        ? { ...item, attachments: item.attachments.map((attachment, index) => index === 1
+          ? { id: attachmentId, source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath }
+          : attachment) }
+        : item)
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await page.evaluate(async () => { await Promise.all((await navigator.serviceWorker?.getRegistrations() ?? []).map((registration) => registration.unregister())) })
+    await page.reload()
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    await card.scrollIntoViewIfNeeded()
+    await expect(card).toContainText('1 / 3')
+    expect(checks).toBe(0)
+    expect(contentRequests).toHaveLength(0)
+    const cardHandle = await card.elementHandle()
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('2 / 3')
+    await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
+    await expect(card.getByText('Видео обрабатывается…')).toBeVisible()
+    expect(contentRequests).toHaveLength(0)
+    expect(checks).toBe(1)
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('3 / 3')
+    await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
+    await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
+    await page.waitForTimeout(500)
+    expect(checks, `readiness checks after carousel remount: ${checkTimes.map((time) => time - checkTimes[0]!)}`).toBe(1)
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('3 / 3')
+    await expect(card.locator('[data-video-viewer-state]')).toHaveCount(0)
+    await page.waitForTimeout(5_200)
+    expect(checks).toBe(1)
+    await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
+    await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
+    await expect.poll(() => checks, { timeout: 2_000 }).toBe(2)
+    mockedReadiness = 'unknown'
+    await card.getByRole('button', { name: 'Проверить готовность' }).click()
+    await expect(card.locator('[data-video-viewer-state="unknown"]')).toBeVisible()
+    await expect(card.getByText('Готовность видео пока неизвестна')).toBeVisible()
+    await expect(card.getByText('Не удалось загрузить видео')).toHaveCount(0)
+    expect(contentRequests).toHaveLength(0)
+    mockedReadiness = 'ready'
+    await card.getByRole('button', { name: 'Проверить готовность' }).click()
+    await expect.poll(() => checks).toBe(4)
+    await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`${referenceId}/content$`))
+    await expect(card).toContainText('2 / 3')
+    expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
+    expect(contentRequests.some((url) => url.includes(contentPath))).toBe(true)
+  })
+
+  test('offscreen MAX card waits to check readiness and shows confirmed unavailable distinctly', async ({ page }) => {
+    const referenceId = randomUUID()
+    const memoryId = randomUUID()
+    const contentPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/content`
+    const readinessPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/readiness`
+    let checks = 0
+    let contentRequests = 0
+    page.on('request', (request) => { if (request.url().includes(contentPath)) contentRequests += 1 })
+    await page.route(`**${readinessPath}`, async (route) => {
+      checks += 1
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'unavailable', recheckable: false }) })
+    })
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      const first = payload.items[0]
+      if (!first) return route.fulfill({ response, body: JSON.stringify(payload) })
+      payload.items.push({ ...first, id: memoryId, kind: 'video', body: 'Недоступное MAX видео E2E', attachments: [{ id: randomUUID(), source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath }] })
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await openFeed(page)
+    const card = page.locator(`[data-memory-id="${memoryId}"]`)
+    await expect(card).toHaveCount(1)
+    await page.waitForTimeout(750)
+    expect(checks).toBe(0)
+    await card.scrollIntoViewIfNeeded()
+    await expect(card.locator('[data-video-viewer-state="unavailable"]')).toBeVisible()
+    await expect(card.getByText('Видео недоступно')).toBeVisible()
+    await expect(card.getByText('Не удалось загрузить видео')).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Проверить готовность' })).toHaveCount(0)
+    expect(checks).toBe(1)
+    expect(contentRequests).toBe(0)
   })
 
   test('photo album swipes in Feed and opens the selected photo without losing its position', async ({ page }) => {

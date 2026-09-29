@@ -1,4 +1,4 @@
-import type { MemoryAttachment, MemoryDto } from '@web-app-demo/contracts'
+import { maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
@@ -32,6 +32,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
+import { maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
@@ -502,7 +503,7 @@ function Attachment({ attachment, borrowedPhotoUrl, hostBridge, memory, photoAlb
   transport: AuthenticatedTransport
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
-  if (attachment.source === 'max') return <MaxVideo attachment={attachment} hostBridge={hostBridge} />
+  if (attachment.source === 'max') return <MaxVideo attachment={attachment} hostBridge={hostBridge} transport={transport} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} borrowedUrl={borrowedPhotoUrl} hostBridge={hostBridge} onOpenPhoto={onOpenPhoto} onUrlChange={onPhotoUrlChange} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} registerFullscreen={registerFullscreen} interactive={photoInteractive} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
   return <PrivateVideo attachment={attachment} memory={memory} transport={transport} />
@@ -635,19 +636,53 @@ export function TelegramVideoPoster({ durationMs, posterUrl, posterReady = false
   </button>
 }
 
-function MaxVideo({ attachment, hostBridge }: {
+function MaxVideo({ attachment, hostBridge, transport }: {
   attachment: Extract<MemoryAttachment, { source: 'max' }>
   hostBridge: HostBridge
+  transport: AuthenticatedTransport
 }) {
-  const source = useMaxVideoSource(attachment.playbackPath)
-  return <MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onOpen={() => hostBridge.openBot()} onRetry={attachment.playbackPath ? source.retry : undefined} sourceStatus={source.status} src={source.url} width={attachment.width} />
+  const root = useRef<HTMLDivElement | null>(null)
+  const [nearViewport, setNearViewport] = useState(false)
+  const [readinessClock, setReadinessClock] = useState(() => Date.now())
+  const { accountId, membershipEpoch } = useContext(VideoQueryScope)
+  const queryClient = useQueryClient()
+  const readinessPath = maxVideoReadinessPath(attachment.playbackPath)
+  const readinessKey = [...feedQueryKeys.all, 'max-video-readiness', accountId, membershipEpoch, readinessPath] as const
+  const cachedReadiness = queryClient.getQueryState<MaxVideoReadiness>(readinessKey)
+  const checkInterval = cachedReadiness ? maxVideoReadinessInterval(cachedReadiness) : 0
+  const nextCheckAt = checkInterval === false ? null : Math.max(cachedReadiness?.dataUpdatedAt ?? 0, cachedReadiness?.errorUpdatedAt ?? 0) + checkInterval
+  useEffect(() => {
+    const element = root.current
+    if (!element || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => setNearViewport(Boolean(entry?.isIntersecting)), { rootMargin: '600px 0px' })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => {
+    if (!nearViewport || nextCheckAt === null || nextCheckAt <= readinessClock) return
+    const timer = window.setTimeout(() => setReadinessClock(Date.now()), Math.max(0, nextCheckAt - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [nearViewport, nextCheckAt, readinessClock])
+  const readiness = useQuery({
+    queryKey: readinessKey,
+    queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(readinessPath!, maxVideoReadinessSchema, { signal })),
+    enabled: nearViewport && Boolean(readinessPath) && nextCheckAt !== null && nextCheckAt <= readinessClock,
+    retry: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  })
+  const readinessState = !readinessPath ? 'unknown' : readiness.data?.state ?? (readiness.isError ? 'check-error' : 'checking')
+  const source = useMaxVideoSource(readinessState === 'ready' ? attachment.playbackPath : null)
+  return <div className="memoly-max-video-readiness" ref={root}><MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onCheckReadiness={readinessPath ? () => void readiness.refetch() : undefined} onOpen={() => hostBridge.openBot()} onRetry={readinessState === 'ready' ? source.retry : undefined} readinessState={readinessState} sourceStatus={readinessState === 'ready' ? source.status : 'loading'} src={readinessState === 'ready' ? source.url : null} width={attachment.width} /></div>
 }
 
 type MaxVideoPreviewProps = {
   durationMs: number | null
   height: number | null
   onOpen: () => void
+  onCheckReadiness?: () => void
   onRetry?: () => void
+  readinessState?: MaxVideoReadiness['state'] | 'checking' | 'check-error'
   sourceStatus?: 'loading' | 'ready' | 'error'
   src: string | null
   width: number | null
@@ -657,7 +692,7 @@ export function MaxVideoPreview(props: MaxVideoPreviewProps) {
   return <MaxVideoPreviewContent key={props.src ?? 'missing'} {...props} />
 }
 
-function MaxVideoPreviewContent({ durationMs, height, onOpen, onRetry, sourceStatus, src, width }: MaxVideoPreviewProps) {
+function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, onRetry, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
@@ -667,14 +702,16 @@ function MaxVideoPreviewContent({ durationMs, height, onOpen, onRetry, sourceSta
   const [intrinsicDimensions, setIntrinsicDimensions] = useState<{ width: number; height: number } | null>(null)
   const loadedSource = useRef<string | null>(null)
   const sourceFailed = sourceStatus === 'error'
-  const viewerState = sourceFailed || failed ? 'error' : src ? 'ready' : 'loading'
+  const viewerState = readinessState === 'processing' || readinessState === 'unknown' || readinessState === 'unavailable' || readinessState === 'checking' || readinessState === 'check-error'
+    ? readinessState
+    : sourceFailed || failed ? 'error' : src ? 'ready' : 'loading'
   const frameDimensions = intrinsicDimensions ?? { width, height }
   const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
   useEffect(() => {
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
-  return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-started={started} data-video-viewer-state={viewerState}>
+  return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady })} data-video-started={started} data-video-viewer-state={viewerState}>
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
       <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
         const element = event.currentTarget
@@ -686,7 +723,7 @@ function MaxVideoPreviewContent({ durationMs, height, onOpen, onRetry, sourceSta
           try { element.currentTime = 0.001 } catch { /* Some WebViews reject a seek before the first frame is buffered. */ }
         }
       }} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} />
-      {!started && !failed && !sourceFailed ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
+      {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
         try { await element.play() } catch { setFailed(true) }
@@ -696,8 +733,10 @@ function MaxVideoPreviewContent({ durationMs, height, onOpen, onRetry, sourceSta
       {viewerState !== 'ready' ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
       <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
     </div>
-    {viewerState === 'loading' ? <div className="memoly-video-viewer-v2-status" role="status"><span className="memoly-video-viewer-v2-spinner" aria-hidden="true" /><Typography as="span" variant="memoryMeta">Загружаем видео…</Typography></div> : null}
+    {viewerState === 'loading' || viewerState === 'checking' || viewerState === 'processing' || viewerState === 'unknown' || viewerState === 'check-error' ? <div className="memoly-video-viewer-v2-status" role="status">{viewerState !== 'unknown' && viewerState !== 'check-error' ? <span className="memoly-video-viewer-v2-spinner" aria-hidden="true" /> : null}<Typography as="span" variant="memoryMeta">{viewerState === 'processing' ? 'Видео обрабатывается…' : viewerState === 'unknown' ? 'Готовность видео пока неизвестна' : viewerState === 'check-error' ? 'Не удалось проверить готовность видео' : viewerState === 'checking' ? 'Проверяем готовность видео…' : 'Загружаем видео…'}</Typography></div> : null}
+    {viewerState === 'unavailable' ? <div className="memoly-video-viewer-v2-error" role="alert"><Typography as="strong" variant="memoryBodyMedium">Видео недоступно</Typography></div> : null}
     {viewerState === 'error' ? <div className="memoly-video-viewer-v2-error" role="alert"><Typography as="strong" variant="memoryBodyMedium">Не удалось загрузить видео</Typography><Typography as="span" variant="memoryMeta">Попробуйте открыть оригинал в MAX.</Typography></div> : null}
+    {(viewerState === 'processing' || viewerState === 'unknown' || viewerState === 'check-error') && onCheckReadiness ? <Button className="memoly-video-viewer-v2-retry" onClick={onCheckReadiness} type="button">Проверить готовность</Button> : null}
     {viewerState === 'error' && (onRetry || src) ? <Button className="memoly-video-viewer-v2-retry" onClick={() => { setPreviewReady(false); if (sourceFailed) onRetry?.(); else { setFailed(false); video.current?.load() } }} type="button">Повторить</Button> : null}
     <Button className="memoly-video-viewer-v2-open" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
   </div>
