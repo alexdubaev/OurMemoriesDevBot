@@ -16,8 +16,10 @@ function runHandler({ legacy = false, quiesced = false, promoted = false, trigge
     input: `
 set -euo pipefail
 LEGACY_MEMBERSHIP_RUNTIME=${legacy}
+LEGACY_MM0_RUNTIME=false
 QUIESCE_STARTED=${quiesced}
 PROMOTION_STARTED=${promoted}
+MM0_FORWARD_MARKER=/nonexistent-mm0-marker
 APP_ROOT=/mock/app
 bash() { printf 'ACTION:%s\\n' "$*"; return 0; }
 ${releaseFailure}

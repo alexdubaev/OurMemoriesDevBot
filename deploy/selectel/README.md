@@ -335,12 +335,46 @@ container using the target immutable backend image. It then verifies
 scheduler or static and never reloads Caddy. Do not substitute `prisma db
 push`, direct SQL, or an ad-hoc migration command.
 
+For the first release containing `20260928100000_mm0_domain_temporal_foundation`,
+`ci-release.sh` identifies an old publisher by ancestry against the first
+compatible runtime commit `0074d04c8e7f88b2327b56cea10ca38647d36190`.
+It validates a backup while the old backend, worker and scheduler are healthy.
+It then writes the root-owned mode-0600
+`/opt/memoly/.selectel-mm0-forward-only` marker, stops all three old writer
+services, and only then invokes `db:deploy`. The MM0 SQL contains multiple DDL
+statements without an explicit transaction. A failed migration command has an
+unknown database state. Keep the marker and old writers stopped;
+`FORWARD_FIX_REQUIRED` means prepare a compatible forward release. Do not
+restart the pre-MM0 publisher against this database.
+The known `memoly-spike-max-video-backend-1` container is an additional writer
+outside the Compose project. The guarded MM0 release compares only normalized
+database host, port and name inside the containers, without printing URLs or
+credentials. An unclassifiable running spike blocks migration while the old
+runtime is still healthy. If it targets the production database, release disables
+its restart policy, stops it before MM0 SQL, verifies it stayed stopped, and
+leaves it paused after success until a compatible forward fix is reviewed.
+An absent spike or one proven to target a different database is untouched.
+If marker validation fails during recovery, the release handler stops every
+backend, worker and scheduler container in the Compose project, also pauses the
+known spike when its database relation is same or unknown, and requires operator
+inspection before a forward fix.
+
+If build, preflight or backup validation fails before the marker is written,
+the old runtime remains running. An interrupted MM0 release revalidates a fresh
+backup before retrying migration. Successful promotion verifies all four running
+image tags and OCI revision labels before removing the marker. Direct
+`redeploy.sh rollback` still rejects a pre-MM0 backend tag after marker removal.
+The earlier B2 boundary retains its own compatibility checks. When an already
+armed B2 release crosses MM0, the durable MM0 marker supersedes the B2 marker;
+if power fails between those steps, recovery validates both and continues under
+the MM0 marker. A pre-MM0 retry target is rejected.
+
 Promotion checks migration status, promotes backend and verifies internal
 readiness, promotes worker and scheduler, promotes internal static, then
 validates and activates the gateway Caddyfile. If activation or reload fails,
 the previous contents are restored and public health is checked. The release
 entry point attempts application rollback only when the previous runtime
-passes its compatibility guard; the first B2 transition is forward-only.
+passes its compatibility guard; the first B2 and MM0 transitions are forward-only.
 
 Rollback promotes the configured previous backend/webapp tags through the same
 Compose project and readiness checks. It also restores the release-owned Compose
