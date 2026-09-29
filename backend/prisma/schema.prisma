@@ -1033,6 +1033,9 @@ enum MaxInboxEventKind {
   message_created
   bot_started
   family_choice
+  bot_added
+  bot_removed
+  bot_admin_permissions_changed
 
   @@map("max_inbox_event_kind")
 }

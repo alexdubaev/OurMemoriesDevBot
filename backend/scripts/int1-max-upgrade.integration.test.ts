@@ -15,17 +15,19 @@ const backupMigrations = [
   '20260929200000_allow_signed_max_backup_channel_ids',
   '20260929210000_pace_max_backup_channel_sends',
 ]
+const lifecycleMigration = '20260929220000_max_channel_lifecycle_events'
 
-test('upgrades populated migration 39 to MAX backup migrations 40–42 without backfilling legacy memories', async () => {
+test('upgrades populated migration 39 through MAX backup and lifecycle migrations without backfilling legacy memories', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))
     .map((entry) => entry.name).sort()
-  expect(migrationNames).toHaveLength(42)
+  expect(migrationNames).toHaveLength(43)
   expect(migrationNames[38]).toBe(lastPreBackupMigration)
-  expect(migrationNames.slice(39)).toEqual(backupMigrations)
+  expect(migrationNames.slice(39, 42)).toEqual(backupMigrations)
+  expect(migrationNames.slice(42)).toEqual([lifecycleMigration])
 
   const databaseName = `int1_max_upgrade_${process.pid}_${Date.now()}_${randomUUID().slice(0, 8)}`
   const upgradedUrl = new URL(databaseUrl)
@@ -129,9 +131,9 @@ test('upgrades populated migration 39 to MAX backup migrations 40–42 without b
       `SELECT migration_name FROM "_prisma_migrations"
        WHERE migration_name > $1 ORDER BY migration_name`, [lastPreBackupMigration],
     )
-    expect(applied.rows.map((row) => row.migration_name)).toEqual(backupMigrations)
+    expect(applied.rows.map((row) => row.migration_name)).toEqual([...backupMigrations, lifecycleMigration])
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM "_prisma_migrations"`))
-      .rows[0].count).toBe(42)
+      .rows[0].count).toBe(43)
     expect((await database.query(legacySql, [legacyMemoryId])).rows).toEqual(before.rows)
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM max_memory_backups`))
       .rows[0].count).toBe(0)

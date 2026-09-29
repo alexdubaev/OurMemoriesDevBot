@@ -97,6 +97,7 @@ export type MaxVideoResolution = {
   durationMs: number | null
 }
 
+/** Events currently routed into MAX message processing. */
 export type MaxInboundEvent =
   | {
       kind: 'message_created'
@@ -118,6 +119,14 @@ export type MaxInboundEvent =
     }
   | { kind: 'family_choice'; callbackId: string; payload: string; userId: string; occurredAt: string }
 
+/** Lifecycle events are captured durably but intentionally excluded from worker processing. */
+export type MaxLifecycleEvent =
+  | { kind: 'bot_added'; rawPayload: string }
+  | { kind: 'bot_removed'; rawPayload: string }
+  | { kind: 'bot_admin_permissions_changed'; rawPayload: string }
+
+export type MaxAcceptedEvent = MaxInboundEvent | MaxLifecycleEvent
+
 export type MaxAcceptResult = { inboxId: string; duplicate: boolean }
 
 export type MaxImmediateResponse = {
@@ -129,7 +138,7 @@ export type MaxImmediateResponse = {
 export type MaxAcceptRepository = {
   accept(input: {
     botId: string
-    event: MaxInboundEvent
+    event: MaxAcceptedEvent
     eventKey: string
     encrypted: EncryptedMaxPayload
     response: MaxImmediateResponse | null

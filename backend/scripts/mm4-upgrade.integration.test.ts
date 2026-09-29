@@ -17,6 +17,7 @@ const expectedUpgradeMigrations = [
   '20260929180000_max_memory_backup_reservation',
   '20260929200000_allow_signed_max_backup_channel_ids',
   '20260929210000_pace_max_backup_channel_sends',
+  '20260929220000_max_channel_lifecycle_events',
 ]
 
 test('upgrades populated pre-MM memories without changing legacy publication history', async () => {

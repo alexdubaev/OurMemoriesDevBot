@@ -3,13 +3,13 @@ import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
-import type { MaxInboundEvent } from '../application/ports'
+import type { MaxAcceptedEvent } from '../application/ports'
 import { normalizeMaxUpdate } from './update-mapping'
 
 export function createMaxWebhook(options: {
   secret: string
   bodyLimitBytes: number
-  acceptUpdate: (event: MaxInboundEvent) => Promise<unknown>
+  acceptUpdate: (event: MaxAcceptedEvent) => Promise<unknown>
 }) {
   const routes = new Hono()
   routes.use('/webhooks/max', async (c, next) => {
@@ -28,7 +28,7 @@ export function createMaxWebhook(options: {
     let update: unknown
     try { update = JSON.parse(body) } catch { return c.json({ ok: false }, 400) }
     let event: ReturnType<typeof normalizeMaxUpdate>
-    try { event = normalizeMaxUpdate(update) } catch { return c.json({ ok: false }, 400) }
+    try { event = normalizeMaxUpdate(update, body) } catch { return c.json({ ok: false }, 400) }
     if (event.kind === 'ignored') return c.json({ ok: true }, 200)
     try {
       await options.acceptUpdate(event)
