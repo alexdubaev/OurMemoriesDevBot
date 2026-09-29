@@ -29,6 +29,13 @@ export type PhotoComposerProps = {
   transport: AuthenticatedTransport
   onCancel: () => void
   onSuccess: () => void | Promise<void>
+  onTiming?: (sample: UploadTimingSample) => void
+}
+
+export type UploadTimingSample = {
+  stage: 'validation' | 'reserve' | 'bytes_upload' | 'finalize' | 'provider_processing' | 'wait_all' | 'memory_create' | 'feed_refresh'
+  durationMs: number
+  fileIndex?: number
 }
 
 type SaveStage = 'reserve' | 'upload' | 'finalize' | 'create'
@@ -52,11 +59,16 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess }: PhotoComposerProps) {
+export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess, onTiming }: PhotoComposerProps) {
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
   const [occurredDate, setOccurredDate] = useState(() => familyCalendarDate(familyTimezone))
   const [completedCount, setCompletedCount] = useState(0)
+  const [byteProgress, setByteProgress] = useState<number | null>(null)
+  const loadedBytes = useRef<number[]>([])
+  const acceptedTransfers = useRef<boolean[]>([])
+  const [allBytesAccepted, setAllBytesAccepted] = useState(false)
+  const hasByteEvents = useRef(false)
   const [itemStates, setItemStates] = useState<Array<'selected' | 'uploading' | 'ready' | 'failed'>>([])
   const [status, setStatus] = useState<'idle' | 'saving' | 'error' | 'success'>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -74,6 +86,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const fileInput = useRef<HTMLInputElement | null>(null)
   const [createUncertain, setCreateUncertain] = useState(false)
   const [restartRequiredIndex, setRestartRequiredIndex] = useState<number | null>(null)
+
+  function recordTiming(stage: UploadTimingSample['stage'], startedAt: number, fileIndex?: number) {
+    if (!onTiming) return
+    try { onTiming({ stage, durationMs: Math.max(0, performance.now() - startedAt), ...(fileIndex === undefined ? {} : { fileIndex }) }) } catch { /* Diagnostics must not affect uploads. */ }
+  }
 
   useEffect(() => () => abortController.current?.abort(), [])
 
@@ -95,6 +112,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     setFiles(selection)
     setPreflightKinds(null)
     completedAssets.current = selection.map(() => null)
+    loadedBytes.current = selection.map(() => 0)
+    acceptedTransfers.current = selection.map(() => false)
+    setAllBytesAccepted(false)
+    hasByteEvents.current = false
+    setByteProgress(null)
     verifiedMedia.current = null
     reserveKeys.current = selection.map(() => null)
     maxCapabilities.current = selection.map(() => null)
@@ -114,6 +136,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     setFiles(next)
     setPreflightKinds(null)
     completedAssets.current = next.map(() => null)
+    loadedBytes.current = next.map(() => 0)
+    acceptedTransfers.current = next.map(() => false)
+    setAllBytesAccepted(false)
+    hasByteEvents.current = false
+    setByteProgress(null)
     verifiedMedia.current = null
     reserveKeys.current = next.map(() => null)
     maxCapabilities.current = next.map(() => null)
@@ -132,7 +159,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     if (changed === 'date') submission.current = null
   }
 
-  async function uploadMaxAttachment(file: File, mimeType: string, index: number, reserveKey: string, onStage: (stage: 'reserve' | 'upload' | 'finalize') => void, signal: AbortSignal) {
+  async function uploadMaxAttachment(file: File, mimeType: string, index: number, reserveKey: string, onStage: (stage: 'reserve' | 'upload' | 'finalize') => void, signal: AbortSignal, onProgress: (loaded: number, total: number) => void, onAccepted: () => void) {
     const requireRestart = (current: NonNullable<(typeof maxCapabilities.current)[number]>) => {
       maxCapabilities.current[index] = { ...current, restartRequired: true }
       setRestartRequiredIndex(index)
@@ -180,7 +207,8 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       if (!capability.uploadUrl) throw new Error('Не удалось подготовить загрузку видео')
       onStage('upload')
       try {
-        await uploadVideoToMax(capability.uploadUrl, file, signal)
+        await uploadVideoToMax(capability.uploadUrl, file, signal, onProgress)
+        onAccepted()
       } catch (error) {
         maxCapabilities.current[index] = { ...capability, uploadAttempts: capability.uploadAttempts + 1, recoverUpload: true, ambiguousUpload: true }
         throw error
@@ -239,11 +267,34 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     const key = idempotencyKey.current ?? createPhotoIdempotencyKey()
     idempotencyKey.current = key
     submission.current = { caption: caption.trim(), date: occurredDate, occurredAt }
+    acceptedTransfers.current = files.map((_, index) => Boolean(completedAssets.current[index] || maxCapabilities.current[index]?.uploaded))
+    setAllBytesAccepted(files.every((_, index) => acceptedTransfers.current[index]))
+
+    const markAccepted = (index: number) => {
+      acceptedTransfers.current[index] = true
+      if (files.every((_, itemIndex) => acceptedTransfers.current[itemIndex] || completedAssets.current[itemIndex])) {
+        setAllBytesAccepted(true)
+      }
+    }
+
+    const updateProgress = (index: number, loaded: number, total: number) => {
+      if (controller.signal.aborted || !Number.isFinite(loaded) || !Number.isFinite(total) || total <= 0) return
+      const file = files[index]
+      if (!file) return
+      const measured = Math.min(file.size, Math.max(0, file.size * loaded / total))
+      hasByteEvents.current = true
+      loadedBytes.current[index] = Math.max(loadedBytes.current[index] ?? 0, measured)
+      const totalBytes = files.reduce((sum, item) => sum + item.size, 0)
+      const sentBytes = files.reduce((sum, item, itemIndex) => sum + (completedAssets.current[itemIndex] ? item.size : loadedBytes.current[itemIndex] ?? 0), 0)
+      const measuredPercent = Math.min(99, Math.max(0, Math.floor(sentBytes / totalBytes * 100)))
+      setByteProgress((previous) => Math.max(previous ?? 0, measuredPercent))
+    }
 
     const saveStage: { current: SaveStage } = { current: 'reserve' }
     try {
+      const validationStartedAt = performance.now()
       const mediaItems: ComposerMedia[] = verifiedMedia.current ?? []
-      if (!verifiedMedia.current) {
+      try { if (!verifiedMedia.current) {
         for (const file of files) {
           controller.signal.throwIfAborted()
           const media = await verifyComposerFile(file)
@@ -253,41 +304,70 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
           mediaItems.push(media)
         }
         verifiedMedia.current = mediaItems
-      }
+      } } finally { recordTiming('validation', validationStartedAt) }
       controller.signal.throwIfAborted()
       setPreflightKinds(mediaItems.map((media) => media.kind))
       setCompletedCount(completedAssets.current.slice(0, files.length).filter(Boolean).length)
       setItemStates(files.map((_, index) => completedAssets.current[index] ? 'ready' : 'selected'))
-      let firstFailure: unknown
-      let firstFailureStage: SaveStage | null = null
-      for (let index = 0; index < files.length; index += 1) {
-          controller.signal.throwIfAborted()
+      const failures: Array<{ index: number; reason: unknown; stage: SaveStage }> = []
+      const activeStages = new Map<number, SaveStage>()
+      const updateActiveStage = () => {
+        const stages = [...activeStages.values()]
+        setErrorStage(stages.includes('upload') ? 'upload' : stages.includes('reserve') ? 'reserve' : 'finalize')
+      }
+      const waitAllStartedAt = performance.now()
+      let nextIndex = 0
+      const processAttachments = async () => {
+        while (nextIndex < files.length && failures.length === 0 && !controller.signal.aborted) {
+          const index = nextIndex++
           if (completedAssets.current[index]) continue
           const file = files[index]
           if (!file) continue
           const itemStage: { current: SaveStage } = { current: 'reserve' }
+          activeStages.set(index, 'reserve')
+          updateActiveStage()
+          let stageStartedAt = performance.now()
+          const finishStage = () => {
+            const timedStage = itemStage.current === 'upload' ? 'bytes_upload' : itemStage.current === 'finalize' && mediaItems[index]?.kind === 'video' ? 'provider_processing' : itemStage.current === 'finalize' ? 'finalize' : 'reserve'
+            recordTiming(timedStage, stageStartedAt, index)
+            stageStartedAt = performance.now()
+          }
           try {
             setItemStates((states) => states.map((state, current) => current === index ? 'uploading' : state))
             const media = mediaItems[index]!
-            const onStage = (nextStage: 'reserve' | 'upload' | 'finalize') => { itemStage.current = nextStage; setErrorStage(nextStage) }
+            const onStage = (nextStage: 'reserve' | 'upload' | 'finalize') => { if (nextStage !== itemStage.current) finishStage(); itemStage.current = nextStage; activeStages.set(index, nextStage); updateActiveStage() }
             const reserveKey = reserveKeys.current[index] ?? createPhotoIdempotencyKey()
             reserveKeys.current[index] = reserveKey
             const assetId = media.kind === 'photo'
-              ? await uploadFamilyPhoto(transport, familyId, file, media.contentType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif', 'memory', controller.signal, onStage, reserveKey)
-              : await uploadMaxAttachment(file, media.contentType, index, reserveKey, onStage, controller.signal)
+              ? await uploadFamilyPhoto(transport, familyId, file, media.contentType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif', 'memory', controller.signal, onStage, reserveKey, (loaded, total) => updateProgress(index, loaded, total), () => markAccepted(index))
+              : await uploadMaxAttachment(file, media.contentType, index, reserveKey, onStage, controller.signal, (loaded, total) => updateProgress(index, loaded, total), () => markAccepted(index))
+            finishStage()
             if (completedAssets.current.some((existing, assetIndex) => assetIndex !== index && existing === assetId)) throw new Error('Повторяется загруженное медиа.')
             completedAssets.current[index] = assetId
+            markAccepted(index)
+            loadedBytes.current[index] = file.size
+            if (hasByteEvents.current) updateProgress(index, file.size, file.size)
             setItemStates((states) => states.map((state, current) => current === index ? 'ready' : state))
             setCompletedCount((count) => count + 1)
           } catch (reason) {
-            if (controller.signal.aborted) throw reason
+            finishStage()
+            if (controller.signal.aborted) break
             if (reason instanceof ApiRequestError && (['UPLOAD_EXPIRED', 'PHOTO_FINALIZE_RESERVATION_EXPIRED'].includes(reason.code) || (itemStage.current === 'reserve' && reason.code === 'STORAGE_UNAVAILABLE'))) reserveKeys.current[index] = null
             if (mediaItems[index]?.kind === 'video' && reason instanceof ApiRequestError && (reason.code === 'UPLOAD_EXPIRED' || reason.code === 'CONFLICT')) { reserveKeys.current[index] = null; maxCapabilities.current[index] = null }
+            loadedBytes.current[index] = 0
             setItemStates((states) => states.map((state, current) => current === index ? 'failed' : state))
-            if (!firstFailure || reason instanceof AmbiguousMaxUploadTerminalError) { firstFailure = reason; firstFailureStage = itemStage.current }
+            failures.push({ index, reason, stage: itemStage.current })
+          } finally {
+            activeStages.delete(index)
+            updateActiveStage()
           }
+        }
       }
-      if (firstFailure) { saveStage.current = firstFailureStage ?? saveStage.current; throw firstFailure }
+      await Promise.all([processAttachments(), processAttachments()])
+      recordTiming('wait_all', waitAllStartedAt)
+      controller.signal.throwIfAborted()
+      const failure = failures.sort((left, right) => Number(right.reason instanceof AmbiguousMaxUploadTerminalError) - Number(left.reason instanceof AmbiguousMaxUploadTerminalError) || left.index - right.index)[0]
+      if (failure) { saveStage.current = failure.stage; throw failure.reason }
       const mediaIds = completedAssets.current.slice(0, files.length)
       if (mediaIds.some((id) => !id) || new Set(mediaIds).size !== mediaIds.length) throw new Error('Не удалось подготовить все вложения.')
       const kinds = mediaItems.map((media) => media.kind)
@@ -296,7 +376,8 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       saveStage.current = 'create'
       setErrorStage(saveStage.current)
       setCreateUncertain(true)
-      await createMediaMemory(transport, familyId, {
+      const createStartedAt = performance.now()
+      try { await createMediaMemory(transport, familyId, {
         kind,
         childId,
         body: caption.trim(),
@@ -305,7 +386,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
           ? { source: 'max' as const, sessionId: id! }
           : { source: 'private_storage' as const, mediaId: id! }) }),
         idempotencyKey: key,
-      }, controller.signal)
+      }, controller.signal) } finally { recordTiming('memory_create', createStartedAt) }
       setStatus('success')
     } catch (reason) {
       if (controller.signal.aborted) return
@@ -357,6 +438,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
 
   function addAnother() {
     setFiles([])
+    loadedBytes.current = []
+    acceptedTransfers.current = []
+    setAllBytesAccepted(false)
+    hasByteEvents.current = false
+    setByteProgress(null)
     setPreflightKinds(null)
     setCaption('')
     setOccurredDate(familyCalendarDate(familyTimezone))
@@ -376,9 +462,14 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     submission.current = null
   }
 
+  async function showFeed() {
+    const startedAt = performance.now()
+    try { await onSuccess() } finally { recordTiming('feed_refresh', startedAt) }
+  }
+
   const containsVideo = preflightKinds?.some((kind) => kind === 'video') ?? files.some((file) => resolveComposerFile(file)?.kind === 'video')
   return <main className="memoly-add-page" data-add-screen="photo">
-    {status === 'success' ? <section aria-label={containsVideo ? 'Воспоминание опубликовано' : 'Фото опубликованы'} className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Воспоминание опубликовано!' : 'Фото опубликованы!'}</Typography><Typography as="p" variant="memoryBody">Теперь они в ленте воспоминаний</Typography><div className="memoly-add-success-actions"><Button onClick={() => void onSuccess()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></div></section> : status === 'error' && errorStage ? <section aria-label={containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'} className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'}</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{createUncertain && errorStage === 'create' ? <Typography as="p" variant="memoryMeta">Ответ о публикации не получен. Повторите сохранение этой же заявки, чтобы проверить результат.</Typography> : null}{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions">{restartRequiredIndex === null ? <Button onClick={() => void save()} type="button">Попробовать снова</Button> : null}{createUncertain ? null : <Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">{containsVideo ? 'Вернуться к вложениям' : 'Вернуться к фото'}</Button>}</div></section> : <>
+    {status === 'success' ? <section aria-label={containsVideo ? 'Воспоминание опубликовано' : 'Фото опубликованы'} className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Воспоминание опубликовано!' : 'Фото опубликованы!'}</Typography><Typography as="p" variant="memoryBody">Теперь они в ленте воспоминаний</Typography><div className="memoly-add-success-actions"><Button onClick={() => void showFeed()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></div></section> : status === 'error' && errorStage ? <section aria-label={containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'} className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'}</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{createUncertain && errorStage === 'create' ? <Typography as="p" variant="memoryMeta">Ответ о публикации не получен. Повторите сохранение этой же заявки, чтобы проверить результат.</Typography> : null}{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions">{restartRequiredIndex === null ? <Button onClick={() => void save()} type="button">Попробовать снова</Button> : null}{createUncertain ? null : <Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">{containsVideo ? 'Вернуться к вложениям' : 'Вернуться к фото'}</Button>}</div></section> : <>
       <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving' || createUncertain} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">Добавить фото и видео</Typography><span /></header>
       <section aria-labelledby="photo-composer-title" className="memoly-add-body">
         <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/x-matroska,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.mkv,.webm" className="memoly-add-native-file" disabled={status === 'saving' || createUncertain || restartRequiredIndex !== null || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
@@ -386,15 +477,15 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
         <div className="memoly-add-caption"><textarea aria-label={containsVideo ? 'Подпись к воспоминанию' : 'Подпись к фотографиям'} disabled={status === 'saving' || createUncertain} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { invalidateMetadata('caption') }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
         <AddDateField disabled={status === 'saving' || createUncertain} id="photo-composer-date" label={containsVideo ? 'Дата воспоминания' : 'Дата фотографий'} onChange={(value) => { if (value !== occurredDate) { invalidateMetadata('date') }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} />
         <Button className="memoly-add-publish" disabled={status === 'saving' || restartRequiredIndex !== null || !files.length || [...caption].length > 8000} onClick={() => void save()} type="button">Опубликовать{files.length ? ` (${files.length})` : ''}</Button>
-        {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><ProgressBar label="Сохранение вложений" /><Typography as="p" variant="memoryBody">{errorStage === 'reserve' ? 'Подготавливаем вложения…' : errorStage === 'upload' ? 'Загружаем вложения…' : errorStage === 'finalize' ? 'Обрабатываем вложения…' : 'Публикуем воспоминание…'}</Typography><Typography as="p" variant="memoryMeta">Готово вложений: {completedCount} из {files.length}</Typography><Button disabled={createUncertain} onClick={cancel} type="button" variant="outline">Отменить</Button></div> : null}
+        {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><ProgressBar label="Сохранение вложений" value={allBytesAccepted ? 100 : errorStage === 'upload' ? byteProgress : null} /><Typography as="p" variant="memoryBody">{errorStage === 'create' ? 'Публикуем воспоминание…' : allBytesAccepted ? 'Обрабатываем вложения…' : errorStage === 'reserve' ? 'Подготавливаем вложения…' : errorStage === 'upload' ? byteProgress === null ? 'Загружаем вложения…' : `Загружено ${byteProgress}% байт…` : 'Обрабатываем вложения…'}</Typography><Typography as="p" variant="memoryMeta">Готово вложений: {completedCount} из {files.length}</Typography><Button disabled={createUncertain} onClick={cancel} type="button" variant="outline">Отменить</Button></div> : null}
         {error ? <div className="memoly-add-error" data-save-stage={errorStage ?? undefined} role="alert"><WebpIcon decorative name="warning" size={28} /><Typography as="p" variant="memoryBody">{error}</Typography>{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}{files.length ? <Button onClick={() => void save()} type="button">Повторить</Button> : null}</div> : null}
       </section>
     </>}
   </main>
 }
 
-function ProgressBar({ label }: { label: string }) {
-  return <div aria-label={label} className="memoly-composer-progress" role="progressbar"><span className="memoly-composer-progress-indeterminate" /></div>
+function ProgressBar({ label, value }: { label: string; value: number | null }) {
+  return <div aria-label={label} aria-valuemax={value === null ? undefined : 100} aria-valuemin={value === null ? undefined : 0} aria-valuenow={value ?? undefined} className="memoly-composer-progress" role="progressbar"><span className={value === null ? 'memoly-composer-progress-indeterminate' : undefined} style={value === null ? undefined : { width: `${value}%` }} /></div>
 }
 
 function MediaPreview({ file, index, kind, onRemove, removeDisabled, state, showState }: { file: File; index: number; kind?: 'photo' | 'video'; onRemove: (index: number) => void; removeDisabled?: boolean; state: 'selected' | 'uploading' | 'ready' | 'failed'; showState: boolean }) {
