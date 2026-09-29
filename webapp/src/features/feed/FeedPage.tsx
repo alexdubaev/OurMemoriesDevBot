@@ -32,6 +32,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
+import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { mediaCardSeenReady } from './seen-visibility'
@@ -72,10 +73,6 @@ function pendingVideoQueryKey(familyId: string, accountId: string, membershipEpo
 const VideoQueryScope = createContext({ accountId: '', membershipEpoch: 0 })
 const MAX_AUTO_PENDING_VIDEOS = 3
 const MAX_AUTO_PENDING_SUCCESSES = 12
-
-function hasPendingPrivateVideo(memory: MemoryDto) {
-  return memory.attachments.some((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video' && attachment.renditionStatus === 'pending')
-}
 
 function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | undefined): MemoryDto {
   if (!current || current.id !== memory.id || current.familyId !== memory.familyId) return memory
@@ -138,11 +135,35 @@ export function FeedPage({
     }
     return [...unique.values()]
   }, [feed.data])
-  const pendingVideoIds = useMemo(() => {
-    const opened = [detail, mixedViewer?.memory].filter((memory): memory is MemoryDto => Boolean(memory && hasPendingPrivateVideo(memory)))
-    return [...new Set([...opened, ...items.filter(hasPendingPrivateVideo)].map((memory) => memory.id))].slice(0, MAX_AUTO_PENDING_VIDEOS)
-  }, [detail, items, mixedViewer])
-  const videoRenditions = useQueries({ queries: pendingVideoIds.map((memoryId) => ({
+  const [nearbyPendingVideoIds, setNearbyPendingVideoIds] = useState<string[]>([])
+  useEffect(() => {
+    const pending = new Set(items.filter(hasPendingPrivateVideo).map((memory) => memory.id))
+    if (pending.size === 0 || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver((entries) => {
+      setNearbyPendingVideoIds((current) => {
+        const next = new Set(current.filter((id) => pending.has(id)))
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.memoryId
+          if (!id || !pending.has(id)) continue
+          if (entry.isIntersecting) next.add(id)
+          else next.delete(id)
+        }
+        return current.length === next.size && current.every((id) => next.has(id)) ? current : [...next]
+      })
+    }, { rootMargin: '600px 0px' })
+    document.querySelectorAll<HTMLElement>('.memory-card[data-memory-id]').forEach((card) => {
+      if (pending.has(card.dataset.memoryId ?? '')) observer.observe(card)
+    })
+    return () => observer.disconnect()
+  }, [items])
+  const openedPendingMemories = [detail, mixedViewer?.memory].filter((memory): memory is MemoryDto => Boolean(memory))
+  const pendingCandidates = new Set([...items.filter(hasPendingPrivateVideo), ...openedPendingMemories.filter(hasPendingPrivateVideo)].map((memory) => memory.id))
+  const retiredPendingIds = new Set([...pendingCandidates].filter((id) => {
+    const state = queryClient.getQueryState<MemoryDto>(pendingVideoQueryKey(familyId, accountId, membershipEpoch ?? 0, id))
+    return Boolean(state && ((state.data?.id === id && state.data.familyId === familyId && !hasPendingPrivateVideo(state.data)) || state.dataUpdateCount >= MAX_AUTO_PENDING_SUCCESSES || state.errorUpdateCount >= 4))
+  }))
+  const pendingVideoIds = selectPendingPrivateVideoIds(items, openedPendingMemories, nearbyPendingVideoIds, MAX_AUTO_PENDING_VIDEOS, retiredPendingIds)
+  useQueries({ queries: pendingVideoIds.map((memoryId) => ({
     queryKey: pendingVideoQueryKey(familyId, accountId, membershipEpoch ?? 0, memoryId),
     queryFn: ({ signal }: { signal: AbortSignal }) => loadMemory(transport, familyId, memoryId, signal),
     enabled: isAppBootstrapped,
@@ -155,7 +176,7 @@ export function FeedPage({
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
   })) })
-  const latestVideoMemories = new Map(pendingVideoIds.map((id, index) => [id, videoRenditions[index]?.data]))
+  const latestVideoMemories = new Map([...pendingCandidates].map((id) => [id, queryClient.getQueryData<MemoryDto>(pendingVideoQueryKey(familyId, accountId, membershipEpoch ?? 0, id))]))
   const renderedItems = items.map((memory) => withCurrentVideoRenditions(memory, latestVideoMemories.get(memory.id)))
   const visibleItems = (() => {
     if (!deleteTarget || renderedItems.some((memory) => memory.id === deleteTarget.id)) return renderedItems
@@ -310,14 +331,14 @@ export function FeedPage({
           kind={memory.kind}
           liked={memory.likes.likedByMe}
           likeCount={memory.likes.count}
-          media={memory.kind === 'media'
-            ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} transport={transport} />
+          media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
+            ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           seenContentRef={memory.author.id !== accountId ? registerSeenContent(memory.id, 'feed') : undefined}
           occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
           onLike={() => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
-          onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (memory.kind === 'media') { const index = mixedIndexes.current.get(memory.id) ?? 0; setMixedViewer({ memory, index, photoUrl: mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) } else setDetail(memory) }}
+          onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 1)) { const index = mixedIndexes.current.get(memory.id) ?? 0; setMixedViewer({ memory, index, photoUrl: mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) } else setDetail(memory) }}
         />
       }} /> : null}
       <div aria-hidden="true" data-testid="feed-load-more-sentinel" ref={sentinel} />
@@ -352,7 +373,7 @@ export function FeedPage({
             setDeleteTargetIndex(items.findIndex((item) => item.id === actionsMemory.id))
             setDeleteTarget(actionsMemory)
           } : undefined}
-          onDetails={() => { detailReturnFocusRef.current = actionTriggerRef.current; setActionsMemory(null); if (actionsMemory.kind === 'media') { const index = mixedIndexes.current.get(actionsMemory.id) ?? 0; setMixedViewer({ memory: actionsMemory, index, photoUrl: mixedPhotoUrls.current.get(actionsMemory.attachments[index]?.id) }) } else setDetail(actionsMemory) }}
+          onDetails={() => { detailReturnFocusRef.current = actionTriggerRef.current; setActionsMemory(null); if (actionsMemory.kind === 'media' || (actionsMemory.kind === 'photo' && actionsMemory.attachments.length > 1)) { const index = mixedIndexes.current.get(actionsMemory.id) ?? 0; setMixedViewer({ memory: actionsMemory, index, photoUrl: mixedPhotoUrls.current.get(actionsMemory.attachments[index]?.id) }) } else setDetail(actionsMemory) }}
           onEdit={actionsMemory.capabilities.edit ? () => { setActionsMemory(null); setEditingMemory(actionsMemory) } : undefined}
         />
       ) : null}
@@ -377,17 +398,21 @@ export function FeedPage({
   )
 }
 
-function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChange, onOpen, transport }: {
+function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, transport }: {
   hostBridge: HostBridge
   memory: MemoryDto
   onIndexChange: (index: number) => void
   onPhotoUrlChange: (attachmentId: string, url: string | null) => void
   onOpen: (index: number, trigger: HTMLElement, photoUrl?: string) => void
+  registerFullscreen?: (element: HTMLElement | null) => void
   transport: AuthenticatedTransport
 }) {
   const [viewportRef, embla] = useEmblaCarousel({ align: 'start', containScroll: 'trimSnaps' })
   const [index, setIndex] = useState(0)
+  const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
+  const photoViewerSession = useRef<AbortController | null>(null)
+  useEffect(() => () => photoViewerSession.current?.abort(), [])
   const select = useCallback(() => {
     if (!embla) return
     const next = embla.selectedScrollSnap()
@@ -402,12 +427,23 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
   }, [embla, select])
   const open = (at: number, trigger: HTMLElement, photoUrl?: string) => {
     root.current?.querySelectorAll('video').forEach((video) => video.pause())
+    if (memory.kind === 'photo') {
+      photoViewerSession.current?.abort()
+      const session = new AbortController()
+      photoViewerSession.current = session
+      setPhotoViewerError(false)
+      const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> => attachment.source === 'private_storage' && attachment.kind === 'photo')
+      void showPrivatePhotoAlbum(photos, at, transport, trigger, hostBridge, session.signal, registerFullscreen)
+        .catch(() => { if (!session.signal.aborted && photoViewerSession.current === session) setPhotoViewerError(true) })
+        .finally(() => { if (photoViewerSession.current === session) photoViewerSession.current = null })
+      return
+    }
     onOpen(at, trigger, photoUrl)
   }
   return <div aria-label={`Медиа воспоминания, ${memory.attachments.length} элементов`} className="memoly-mixed-carousel" data-seen-active-index={index} ref={root} role="group">
-    <div className="memoly-mixed-viewport" ref={viewportRef}>
+    <div className="memoly-mixed-viewport" data-media-stage="feed" ref={viewportRef}>
       <div className="memoly-mixed-track">
-        {memory.attachments.map((attachment, position) => <div aria-hidden={position !== index} aria-label={position === index ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-slide" data-carousel-active={position === index} data-carousel-position={position + 1} data-media-kind={attachment.kind} inert={position !== index} key={attachment.id} role={position === index ? 'group' : undefined} style={position === index ? undefined : { aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }}>
+        {memory.attachments.map((attachment, position) => <div aria-hidden={position !== index} aria-label={position === index ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-slide" data-carousel-active={position === index} data-carousel-position={position + 1} data-media-kind={attachment.kind} inert={position !== index} key={attachment.id} role={position === index ? 'group' : undefined}>
           {position === index || (attachment.kind === 'photo' && Math.abs(position - index) === 1)
             ? <MixedSlideMedia attachment={attachment} hostBridge={hostBridge} memory={memory} onOpen={(trigger, photoUrl) => open(position, trigger, photoUrl)} onPhotoUrlChange={onPhotoUrlChange} transport={transport} />
             : <span aria-hidden="true" className="memoly-mixed-placeholder" />}
@@ -419,6 +455,7 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
       <Typography as="span" aria-live="polite" className="memoly-mixed-count" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography>
       <button aria-label="Следующий элемент" disabled={index === memory.attachments.length - 1} onClick={() => embla?.scrollNext()} type="button"><Typography as="span" variant="memoryMeta">›</Typography></button>
     </div> : null}
+    {photoViewerError ? <Typography as="p" className="memoly-photo-viewer-error" role="alert" variant="memoryMeta">Не удалось открыть фото. Попробуйте ещё раз.</Typography> : null}
   </div>
 }
 
@@ -805,9 +842,11 @@ function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<M
   return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="metadata" ref={video} src={url ?? undefined} />
     {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Загружаем видео…'}</Typography> : null}
     {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
-    {renditionStatus === 'pending' ? <div className="px-3 pt-3"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
-    <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
-    <input aria-label="Позиция видео" className="mb-3 w-full px-3" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
+    <div className="memoly-private-video-v2-controls">
+      {renditionStatus === 'pending' ? <div className="px-3 pt-3"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
+      <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
+      <input aria-label="Позиция видео" className="mb-3 w-full px-3" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
+    </div>
   </div>
 }
 
@@ -871,7 +910,7 @@ async function showPrivatePhotoAlbum(
   attachments: Array<Extract<MemoryAttachment, { source: 'private_storage' }>>,
   index: number,
   transport: AuthenticatedTransport,
-  trigger: HTMLButtonElement,
+  trigger: HTMLElement,
   hostBridge: HostBridge,
   signal: AbortSignal,
   registerFullscreen?: (element: HTMLElement | null) => void,

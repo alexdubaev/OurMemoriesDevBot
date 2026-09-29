@@ -5,6 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
 import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
@@ -112,6 +113,49 @@ const mixedMemory: MemoryDto = {
   body: 'Фото и видео по порядку',
   attachments: [photoMemory.attachments[0], videoMemory.attachments[0], { ...photoMemory.attachments[0], id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }, { ...videoMemory.attachments[0], id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }],
 }
+
+test('photo albums of five and ten keep one Memory and ordered Feed carousel slides', () => {
+  for (const count of [5, 10]) {
+    const album: MemoryDto = {
+      ...photoMemory,
+      attachments: Array.from({ length: count }, (_, index) => ({
+        ...photoMemory.attachments[0]!,
+        id: `photo-${index + 1}`,
+      })),
+    }
+    const markup = renderFeed(feedClientWith([album]))
+    expect(markup.match(/data-memory-id="66666666-6666-4666-8666-666666666666"/g)?.length).toBe(1)
+    expect(markup).toContain(`1 / ${count}`)
+    const positions = Array.from({ length: count }, (_, index) => markup.indexOf(`data-carousel-position="${index + 1}" data-media-kind="photo"`))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(markup.match(/aria-hidden="true"[^>]*inert=""/g)?.length).toBe(count - 1)
+  }
+})
+
+test('a single photo uses the same fixed Feed stage without carousel navigation', () => {
+  const markup = renderFeed(feedClientWith([photoMemory]))
+  expect(markup).toContain('data-media-stage="feed"')
+  expect(markup).toContain('data-carousel-position="1" data-media-kind="photo"')
+  expect(markup).not.toContain('memoly-mixed-controls')
+  expect(markup).toContain('Загрузка фотографии')
+})
+
+test('mixed slides use one fixed stage without attachment-specific sizing', () => {
+  const markup = renderFeed(feedClientWith([mixedMemory]))
+  expect(markup).toContain('data-media-stage="feed"')
+  expect(markup).not.toMatch(/data-carousel-position="[2-4]"[^>]*style="aspect-ratio/)
+})
+
+test('automatic rendition checks prioritize an opened Memory and nearby pending cards only', () => {
+  const pending = (id: string): MemoryDto => ({ ...videoMemory, id, attachments: [{ ...videoMemory.attachments[0]!, renditionStatus: 'pending', playbackPath: null }] })
+  const items = [pending('far'), pending('near-a'), pending('near-b'), pending('near-c'), pending('near-d')]
+  expect(selectPendingPrivateVideoIds(items, [], ['near-a', 'near-b', 'near-c', 'near-d'], 3)).toEqual(['near-a', 'near-b', 'near-c'])
+  expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3)).toEqual(['far', 'near-a', 'near-b'])
+  expect(selectPendingPrivateVideoIds(items, [], ['far-ready', 'near-a'], 3)).toEqual(['near-a'])
+  expect(selectPendingPrivateVideoIds(items, [], ['near-a', 'near-b', 'near-c', 'near-d'], 3, new Set(['near-a']))).toEqual(['near-b', 'near-c', 'near-d'])
+  expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3, new Set(['far', 'near-a']))).toEqual(['near-b', 'near-c'])
+})
 
 test('mixed memory renders one card with ordered slides and lazily mounts video', () => {
   const markup = renderFeed(feedClientWith([mixedMemory]))
