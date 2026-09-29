@@ -383,6 +383,7 @@ model Family {
   unreadOrderVersion    BigInt              @default(0) @map("unread_order_version")
   unreadTrackingActivatedAt DateTime?      @map("unread_tracking_activated_at") @db.Timestamptz(6)
   maxBackupChatId      BigInt?             @unique(map: "families_max_backup_chat_id_key") @map("max_backup_chat_id")
+  maxBackupNextSendAt  DateTime?           @map("max_backup_next_send_at") @db.Timestamptz(6)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
   owner                User                @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")

@@ -26,6 +26,7 @@ function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolea
   }
   const repo: MaxMemoryBackupRepository = {
     async load() { return backup },
+    async reserveChannelSendDelay() { return 0 },
     async persistUploadToken(_record, attachment, token) {
       const target = backup.attachments[attachment.position]
       if (target.uploadToken) return false

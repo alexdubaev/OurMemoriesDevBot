@@ -1,5 +1,6 @@
 import sharp from 'sharp'
 import decodeHeic from 'heic-decode'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import type { DbClient } from '../../../db'
 import type { MaxMemoryBackupState } from '../../../generated/prisma/enums'
@@ -50,6 +51,7 @@ type Backup = {
 export type MaxMemoryBackupRepository = {
   load(memoryId: string): Promise<Backup | null>
   persistUploadToken(backup: Backup, attachment: BackupAttachment, token: string): Promise<boolean>
+  reserveChannelSendDelay(backup: Backup): Promise<number | null>
   updateState(backup: Backup, state: 'pending' | 'needs_configuration' | 'uploading' | 'send_intent' | 'sent' | 'ambiguous' | 'failed', patch?: { sendIntentAt?: Date | null; providerMessageId?: string; lastErrorCode?: string | null }): Promise<boolean>
 }
 
@@ -148,6 +150,25 @@ export function createMaxMemoryBackupProcessor(options: {
       }
       throw error
     }
+    try {
+      const waitMs = await options.repository.reserveChannelSendDelay(backup)
+      if (waitMs === null) {
+        await options.repository.updateState(backup, 'failed', { lastErrorCode: 'backup_channel_changed' })
+        throw new TerminalTaskError('MAX backup channel configuration changed before send')
+      }
+      if (waitMs > 0) await delay(waitMs, undefined, { signal })
+    } catch (error) {
+      if (finalAttempt && !(error instanceof TerminalTaskError)) {
+        await options.repository.updateState(backup, 'failed', { lastErrorCode: 'pre_send_attempts_exhausted' }).catch(() => false)
+      }
+      throw error
+    }
+    backup = await options.repository.load(memoryId)
+    if (!backup || backup.state === 'sent' || backup.state === 'ambiguous' || backup.state === 'send_intent') return
+    if (backup.family.maxBackupChatId !== backup.channelChatId || !backup.channelChatId || backup.memory.status !== 'published' || backup.memory.deletedAt) {
+      await options.repository.updateState(backup, 'failed', { lastErrorCode: 'backup_precondition_changed' })
+      throw new TerminalTaskError('MAX backup preconditions changed before send')
+    }
     const chatId = backup.channelChatId.toString()
     const sendIntentAt = (options.now ?? (() => new Date()))()
     const intended = await options.repository.updateState(backup, 'send_intent', { sendIntentAt })
@@ -212,6 +233,19 @@ export function createPrismaMaxMemoryBackupRepository(prisma: DbClient): MaxMemo
         data: { uploadToken: token },
       })
       return result.count === 1
+    },
+    async reserveChannelSendDelay(backup) {
+      const reserved = await prisma.$queryRaw<Array<{ wait_ms: number }>>`
+        WITH slot AS (
+          UPDATE families
+          SET max_backup_next_send_at = GREATEST(COALESCE(max_backup_next_send_at, clock_timestamp()), clock_timestamp()) + interval '550 milliseconds'
+          WHERE id = ${backup.familyId}::uuid AND max_backup_chat_id = ${backup.channelChatId}
+          RETURNING max_backup_next_send_at
+        )
+        SELECT GREATEST(0, CEIL(EXTRACT(EPOCH FROM (slot.max_backup_next_send_at - interval '550 milliseconds' - clock_timestamp())) * 1000))::integer AS wait_ms
+        FROM slot
+      `
+      return reserved[0]?.wait_ms ?? null
     },
     async updateState(backup, state, patch = {}) {
       const releasingSendIntent = (state === 'uploading' || state === 'failed') && backup.state === 'send_intent' && backup.sendIntentAt !== null && patch.sendIntentAt === null

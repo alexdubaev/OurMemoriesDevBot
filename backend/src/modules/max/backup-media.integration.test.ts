@@ -28,6 +28,28 @@ maybeDescribe('MAX durable photo backup', () => {
 
   afterAll(async () => { await prisma.$disconnect() })
 
+  test('reserves twelve distinct send slots for one channel across repository instances', async () => {
+    const user = await prisma.user.create({ data: { displayName: 'Synthetic MAX pacing test' } })
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: {
+        ownerUserId: user.id, name: 'Synthetic MAX pacing test', timezone: 'UTC', maxBackupChatId: -88_002n,
+      } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      return created
+    })
+    fixtures.add({ familyId: family.id, userId: user.id })
+    const first = createPrismaMaxMemoryBackupRepository(prisma)
+    const second = createPrismaMaxMemoryBackupRepository(prisma)
+    const backup = { familyId: family.id, channelChatId: family.maxBackupChatId } as Parameters<typeof first.reserveChannelSendDelay>[0]
+    const delays = await Promise.all(Array.from({ length: 12 }, (_, index) =>
+      (index % 2 === 0 ? first : second).reserveChannelSendDelay(backup)))
+    expect(delays.every((value) => value !== null)).toBe(true)
+    const ordered = (delays as number[]).sort((left, right) => left - right)
+    for (let index = 1; index < ordered.length; index += 1) {
+      expect(ordered[index]! - ordered[index - 1]!).toBeGreaterThanOrEqual(400)
+    }
+  })
+
   test('reserves one ordered photo album, persists the provider identity, and retains private originals on reprocess', async () => {
     const user = await prisma.user.create({ data: { displayName: 'Synthetic MAX backup test' } })
     const family = await prisma.$transaction(async (tx) => {
