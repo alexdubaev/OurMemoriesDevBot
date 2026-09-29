@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 const root = resolve(import.meta.dirname, '..')
-const read = (relativePath) => readFileSync(resolve(root, relativePath), 'utf8')
+const read = (relativePath) => readFileSync(resolve(root, relativePath), 'utf8').replaceAll('\r\n', '\n')
 
 test('Selectel image builder uses its checkout with an explicit safe Git directory', () => {
   const scriptPath = resolve(root, 'deploy/selectel/build-images.sh')
@@ -46,6 +46,7 @@ chmod +x "$temp/bin/git" "$temp/bin/docker"
 export BUILDER_REPO="$repo" REAL_GIT="$real_git" EXPECTED_SHA="$sha"
 cd "$temp"
 PATH="$temp/bin:$PATH" SELECTEL_MAX_BOT_USERNAME=id911018762027_bot bash "$repo/deploy/selectel/build-images.sh" "$sha"
+test -z "$("$real_git" -C "$repo" status --porcelain)"
 `
   const result = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8', timeout: 30_000 })
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
