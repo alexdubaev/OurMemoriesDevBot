@@ -1,7 +1,6 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { createHmac, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
 
 import { createPrisma } from '../../../backend/src/db'
 import { expect, test } from '../helpers/test'
@@ -19,6 +18,16 @@ test.describe('MM-1 mixed media composer', () => {
 
   test.afterAll(async () => {
     if (fixture) {
+      const memories = await prisma.memory.findMany({ where: { familyId: fixture.familyId }, select: { id: true } })
+      await prisma.taskOutbox.deleteMany({ where: { type: 'max:backup-media', dedupeKey: { in: memories.map(({ id }) => `max-backup-media:${id}`) } } })
+      await prisma.maxMemoryBackup.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.maxVideoReference.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.memoryMedia.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.memory.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.maxOutboundSource.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.mediaAsset.deleteMany({ where: { familyId: fixture.familyId } })
+      await prisma.child.deleteMany({ where: { familyId: fixture.familyId } })
       await prisma.family.deleteMany({ where: { id: fixture.familyId } })
       await prisma.externalIdentity.deleteMany({ where: { userId: fixture.userId } })
       await prisma.authSession.deleteMany({ where: { userId: fixture.userId } })
@@ -32,6 +41,7 @@ test.describe('MM-1 mixed media composer', () => {
     await installTelegramHost(page, signedInitData(Number(subject), 'MM-1 E2E'))
     await page.clock.setFixedTime(new Date('2026-09-20T06:00:00.000Z'))
     await page.goto('/')
+    const provider = await installSyntheticMaxProvider(page, fixture!, generatedVideo())
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
     await page.locator('.family-hub-card').click()
     await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
@@ -63,6 +73,14 @@ test.describe('MM-1 mixed media composer', () => {
     await page.setViewportSize({ width: 390, height: 844 })
 
     const requestBodies: Array<Record<string, unknown>> = []
+    await page.evaluate(() => {
+      const observed: string[] = []
+      Object.assign(window, { __mm1ProgressStates: observed })
+      new MutationObserver(() => {
+        const loading = document.querySelector('.memoly-add-loading')
+        if (loading) observed.push(loading.textContent ?? '')
+      }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    })
     page.on('request', (request) => {
       if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/v1/families/${fixture!.familyId}/memories`) {
         requestBodies.push(request.postDataJSON() as Record<string, unknown>)
@@ -71,18 +89,26 @@ test.describe('MM-1 mixed media composer', () => {
     const before = await prisma.memory.count({ where: { familyId: fixture!.familyId } })
     const publishResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/v1/families/${fixture!.familyId}/memories`))
     await page.getByRole('button', { name: 'Опубликовать (4)' }).click()
+    await provider.finalizeStarted
+    await expect(page.getByText('Обрабатываем вложения…')).toBeVisible()
+    await expect(page.getByRole('progressbar', { name: 'Сохранение вложений' })).toHaveAttribute('aria-valuenow', '100')
+    provider.releaseFinalizes()
     const response = await publishResponse
     expect(response.ok()).toBe(true)
     await expect(page.getByRole('heading', { name: 'Воспоминание опубликовано!' })).toBeVisible()
+    const progressStates = await page.evaluate(() => (window as Window & { __mm1ProgressStates?: string[] }).__mm1ProgressStates ?? [])
+    expect(progressStates.some((state) => /Загружено \d+% байт/.test(state))).toBe(true)
+    expect(progressStates.some((state) => state.includes('Обрабатываем вложения…'))).toBe(true)
     expect(requestBodies).toHaveLength(1)
     expect(requestBodies[0]).toMatchObject({ kind: 'media', body: 'Первый смешанный день', occurredAt })
-    expect(Array.isArray(requestBodies[0]!.mediaIds)).toBe(true)
-    const submittedIds = requestBodies[0]!.mediaIds as string[]
-    expect(submittedIds).toHaveLength(4)
+    const submittedAttachments = requestBodies[0]!.attachments as Array<{ source: 'private_storage'; mediaId: string } | { source: 'max'; sessionId: string }>
+    expect(submittedAttachments.map((item) => item.source)).toEqual(['private_storage', 'max', 'private_storage', 'max'])
+    expect(provider.finalizedSessionIds.toSorted()).toEqual(submittedAttachments.filter((item) => item.source === 'max').map((item) => item.sessionId).toSorted())
+    expect(provider.uploadedSessionIds.toSorted()).toEqual(provider.finalizedSessionIds.toSorted())
 
     const created = await prisma.memory.findMany({
       where: { familyId: fixture!.familyId },
-      include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } },
+      include: { media: { orderBy: { position: 'asc' }, include: { asset: true } }, maxVideoReferences: { orderBy: { attachmentPosition: 'asc' } } },
       orderBy: { createdAt: 'desc' },
       take: 1,
     })
@@ -93,20 +119,15 @@ test.describe('MM-1 mixed media composer', () => {
     expect(memory.body).toBe('Первый смешанный день')
     expect(memory.occurredAt.toISOString()).toBe(occurredAt)
     expect(memory.sourcePublishedAt).toBeNull()
-    expect(memory.media.map(({ mediaId }) => mediaId)).toEqual(submittedIds)
-    expect(memory.media.map(({ position }) => position)).toEqual([0, 1, 2, 3])
-    expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(expectedKinds)
-    // Browser E2E starts the API without its separate outbox worker. Run the same real
-    // preparation task the worker runs before checking protected playback in Feed.
-    const videoIds = memory.media.filter(({ asset }) => asset.mediaKind === 'video').map(({ mediaId }) => mediaId)
-    const prepareTasks = await prisma.taskOutbox.findMany({ where: { type: 'media:prepare', dedupeKey: { in: videoIds.map((id) => `media-prepare:${id}`) } } })
-    expect(prepareTasks).toHaveLength(2)
-    prepareVideoRenditions(videoIds)
-    await expect.poll(async () => prisma.mediaAsset.count({ where: { id: { in: videoIds }, renditionStatus: 'ready', variants: { some: { variant: 'playback' } } } })).toBe(2)
+    expect(memory.media.map(({ mediaId }) => mediaId)).toEqual(submittedAttachments.filter((item) => item.source === 'private_storage').map((item) => item.mediaId))
+    expect(memory.media.map(({ position }) => position)).toEqual([0, 2])
+    expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(['photo', 'photo'])
+    expect(memory.maxVideoReferences.map(({ attachmentPosition }) => attachmentPosition)).toEqual([1, 3])
+    expect(memory.maxVideoReferences.map(({ providerAttachmentId }) => providerAttachmentId)).toEqual(['synthetic-video-1', 'synthetic-video-2'])
 
     const playbackResponses: Array<{ status: number; contentType: string }> = []
     page.on('response', (entry) => {
-      if (entry.request().method() === 'GET' && entry.url().includes('/content?variant=playback') && videoIds.some((id) => entry.url().includes(id))) {
+      if (entry.request().method() === 'GET' && entry.url().includes('/media/max-videos/') && entry.url().endsWith('/content')) {
         playbackResponses.push({ status: entry.status(), contentType: entry.headers()['content-type'] ?? '' })
       }
     })
@@ -123,8 +144,11 @@ test.describe('MM-1 mixed media composer', () => {
       likes: { count: 0, likedByMe: false },
       capabilities: { edit: true, delete: true, like: true },
     })
-    expect(feedMatches[0]!.attachments.map(({ id, kind }) => ({ id, kind }))).toEqual(submittedIds.map((id, index) => ({ id, kind: expectedKinds[index] })))
-    expect(feedMatches[0]!.attachments[1]).toMatchObject({ renditionStatus: 'ready', playbackPath: expect.any(String) })
+    expect(feedMatches[0]!.attachments.map(({ kind, source }) => ({ kind, source }))).toEqual([
+      { kind: 'photo', source: 'private_storage' }, { kind: 'video', source: 'max' },
+      { kind: 'photo', source: 'private_storage' }, { kind: 'video', source: 'max' },
+    ])
+    expect(feedMatches[0]!.attachments[1]).toMatchObject({ id: memory.maxVideoReferences[0]!.id, playbackPath: expect.any(String) })
 
     const card = page.locator(`[data-memory-id="${memory.id}"]`)
     await expect(card).toHaveCount(1)
@@ -136,16 +160,32 @@ test.describe('MM-1 mixed media composer', () => {
     await expect(card.locator('.memoly-mixed-slide')).toHaveCount(4)
     await expect(card.locator('.memoly-mixed-slide').evaluateAll((slides) => slides.map((slide) => slide.getAttribute('data-media-kind')))).resolves.toEqual(expectedKinds)
     await expect(card).toContainText('1 / 4')
+    const photoStage390 = await card.locator('[data-carousel-active="true"]').evaluate((slide) => {
+      const bounds = slide.getBoundingClientRect()
+      return { width: bounds.width, height: bounds.height }
+    })
+    expect(Math.abs(photoStage390.width / photoStage390.height - 4 / 3)).toBeLessThan(0.02)
     await test.info().attach('mm4-created-feed-card-390.png', { body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
 
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     await expect(card).toContainText('2 / 4')
+    for (const width of [390, 320, 430]) {
+      await page.setViewportSize({ width, height: 844 })
+      const stage = await card.locator('[data-carousel-active="true"]').evaluate((slide) => {
+        const bounds = slide.getBoundingClientRect()
+        return { width: bounds.width, height: bounds.height }
+      })
+      expect(Math.abs(stage.width / stage.height - 4 / 3), `video stage at ${width}px`).toBeLessThan(0.02)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), `horizontal overflow at ${width}px`).toBeLessThanOrEqual(width)
+      if (width === 390) expect(Math.abs(stage.height - photoStage390.height)).toBeLessThan(2)
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
     const cardVideo = card.locator('[data-carousel-active="true"] video')
     await expect(cardVideo).toHaveCount(1)
     await expect(cardVideo).not.toHaveAttribute('autoplay', /.*/)
     await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => ({ width: video.videoWidth, height: video.videoHeight, error: video.error?.code ?? null }))).toMatchObject({ width: 320, height: 180, error: null })
     await expect(card.locator('[data-carousel-active="true"] [role="alert"]')).toHaveCount(0)
-    await card.locator('[data-carousel-active="true"]').getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await card.locator('[data-carousel-active="true"]').getByRole('button', { name: 'Смотреть видео', exact: true }).click()
     await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(2)
     await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.paused)).toBe(false)
     await expect.poll(() => cardVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
@@ -157,7 +197,7 @@ test.describe('MM-1 mixed media composer', () => {
     await expect(viewer.locator('video')).toHaveCount(1)
     await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => ({ readyState: video.readyState, width: video.videoWidth, height: video.videoHeight, error: video.error?.code ?? null }))).toMatchObject({ width: 320, height: 180, error: null })
     await expect(viewer.getByRole('alert')).toHaveCount(0)
-    await viewer.getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await viewer.getByRole('button', { name: 'Смотреть видео', exact: true }).click()
     await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(2)
     await expect.poll(() => viewer.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
     await expect.poll(() => playbackResponses.length).toBeGreaterThan(0)
@@ -174,11 +214,235 @@ test.describe('MM-1 mixed media composer', () => {
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     await expect(card).toContainText('3 / 4')
     await expect(cardVideo).toHaveCount(0)
+    await waitForActiveSlideAlignment(card)
+    const returnedPhotoStage390 = await card.locator('[data-carousel-active="true"]').evaluate((slide) => {
+      const bounds = slide.getBoundingClientRect()
+      return { width: bounds.width, height: bounds.height }
+    })
+    expect(Math.abs(returnedPhotoStage390.height - photoStage390.height)).toBeLessThan(2)
+    await test.info().attach('int1-mixed-returned-photo-card-390.png', {
+      body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+    })
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     await expect(card).toContainText('4 / 4')
     await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('data-media-kind', 'video')
   })
+
+  test('publishes five app photos once and opens the selected Feed slide', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await installTelegramHost(page, signedInitData(Number(subject), 'MM-1 E2E'))
+    await page.clock.setFixedTime(new Date('2026-09-20T06:00:00.000Z'))
+    await page.goto('/')
+    let documentNavigations = 0
+    page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documentNavigations += 1 })
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    await page.locator('.family-hub-card').click()
+    await page.getByRole('button', { name: 'Добавить' }).click()
+    await page.getByRole('button', { name: 'Добавить фото и видео' }).click()
+    await expect(page.locator('[data-add-screen="photo"]')).toBeVisible()
+
+    const files = Array.from({ length: 5 }, (_, index) => ({
+      name: `five-photo-${index + 1}.png`, mimeType: 'image/png', buffer: generatedLargePhoto(index),
+    }))
+    await page.locator('#photo-composer-files').setInputFiles(files)
+    await page.locator('#photo-composer-caption').fill('Пять кадров E2E')
+    await page.locator('#photo-composer-date').fill('2024-06-15')
+    await expect(page.locator('.memoly-add-photo-thumb')).toHaveCount(5)
+    await expect(page.locator('.memoly-add-media-order')).toHaveText(['1', '2', '3', '4', '5'])
+
+    // Let the real signed PUTs reach the backend, then hold their responses so the browser
+    // visibly reports aggregate upload progress before the remaining three files start.
+    let signalTwoUploads!: () => void
+    let releaseUploads!: () => void
+    const twoUploads = new Promise<void>((resolve) => { signalTwoUploads = resolve })
+    const uploadGate = new Promise<void>((resolve) => { releaseUploads = resolve })
+    let uploaded = 0
+    await page.route('**/storage/objects/**', async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue()
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      uploaded += 1
+      if (uploaded === 2) signalTwoUploads()
+      await uploadGate
+      await route.fulfill({ response })
+    })
+    const requestBodies: Array<Record<string, unknown>> = []
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/v1/families/${fixture!.familyId}/memories`) {
+        requestBodies.push(request.postDataJSON() as Record<string, unknown>)
+      }
+    })
+    let signalCreateReached!: () => void
+    let releaseCreate!: () => void
+    const createReached = new Promise<void>((resolve) => { signalCreateReached = resolve })
+    const createGate = new Promise<void>((resolve) => { releaseCreate = resolve })
+    await page.route(`**/api/v1/families/${fixture!.familyId}/memories`, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue()
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      signalCreateReached()
+      await createGate
+      await route.fulfill({ response })
+    })
+    const before = await prisma.memory.count({ where: { familyId: fixture!.familyId } })
+    const publishResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/v1/families/${fixture!.familyId}/memories`))
+    await page.getByRole('button', { name: 'Опубликовать (5)' }).click()
+    await twoUploads
+    try {
+      await expect(page.locator('.memoly-add-loading')).toContainText('Готово вложений: 0 из 5')
+      await test.info().attach('int1-five-photo-upload-active-390.png', {
+        body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+      })
+    } finally { releaseUploads() }
+    await createReached
+    try {
+      await expect(page.getByRole('progressbar', { name: 'Сохранение вложений' })).toHaveAttribute('aria-valuenow', '100')
+      await test.info().attach('int1-five-photo-upload-complete-390.png', {
+        body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+      })
+    } finally { releaseCreate() }
+    expect((await publishResponse).ok()).toBe(true)
+    await expect(page.getByRole('heading', { name: 'Фото опубликованы!' })).toBeVisible()
+    expect(uploaded).toBe(5)
+    expect(requestBodies).toHaveLength(1)
+    expect(requestBodies[0]).toMatchObject({ kind: 'photo', body: 'Пять кадров E2E', occurredAt })
+    const submittedIds = requestBodies[0]!.mediaIds as string[]
+    expect(submittedIds).toHaveLength(5)
+    expect(new Set(submittedIds).size).toBe(5)
+
+    const memory = await prisma.memory.findFirstOrThrow({
+      where: { familyId: fixture!.familyId, body: 'Пять кадров E2E' },
+      include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } },
+    })
+    expect(await prisma.memory.count({ where: { familyId: fixture!.familyId } })).toBe(before + 1)
+    expect(memory.kind).toBe('photo')
+    expect(memory.media.map(({ position }) => position)).toEqual([0, 1, 2, 3, 4])
+    expect(memory.media.map(({ mediaId }) => mediaId)).toEqual(submittedIds)
+    expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(['photo', 'photo', 'photo', 'photo', 'photo'])
+
+    await page.getByRole('button', { name: 'Смотреть в ленте' }).click()
+    const card = page.locator(`[data-memory-id="${memory.id}"]`)
+    await expect(card).toHaveCount(1)
+    await expect(card.locator('.memoly-mixed-slide')).toHaveCount(5)
+    await expect(card.locator('.memoly-mixed-slide').evaluateAll((slides) => slides.map((slide) => slide.getAttribute('data-media-kind')))).resolves.toEqual(['photo', 'photo', 'photo', 'photo', 'photo'])
+    await expect(card).toContainText('1 / 5')
+    for (const width of [390, 320, 430]) {
+      await page.setViewportSize({ width, height: 844 })
+      const stage = await card.locator('[data-carousel-active="true"]').evaluate((slide) => {
+        const bounds = slide.getBoundingClientRect()
+        return { width: bounds.width, height: bounds.height }
+      })
+      expect(Math.abs(stage.width / stage.height - 4 / 3), `photo stage at ${width}px`).toBeLessThan(0.02)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), `horizontal overflow at ${width}px`).toBeLessThanOrEqual(width)
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await test.info().attach('int1-five-photo-feed-carousel-390.png', {
+      body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+    })
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card).toContainText('3 / 5')
+    await waitForActiveSlideAlignment(card)
+    await card.locator('[data-carousel-active="true"]').getByRole('button', { name: 'Открыть фото' }).click()
+    const viewer = page.locator('.pswp--open')
+    await expect(viewer).toBeVisible()
+    await expect(viewer.locator('.pswp__counter')).toHaveText('3 / 5')
+    await test.info().attach('int1-five-photo-selected-viewer-390.png', {
+      body: await viewer.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+    })
+    expect(documentNavigations).toBe(0)
+    expect(await prisma.memory.count({ where: { familyId: fixture!.familyId } })).toBe(before + 1)
+  })
 })
+
+async function waitForActiveSlideAlignment(card: Locator) {
+  let previousLeftDelta: number | null = null
+  let alignedFrames = 0
+  await expect.poll(async () => {
+    const leftDelta = await card.evaluate((element) => {
+      const viewport = element.querySelector('.memoly-mixed-viewport')!
+      const activeSlide = element.querySelector('[data-carousel-active="true"]')!
+      return activeSlide.getBoundingClientRect().left - viewport.getBoundingClientRect().left
+    })
+    alignedFrames = Math.abs(leftDelta) < 1 && previousLeftDelta !== null && Math.abs(leftDelta - previousLeftDelta) < 0.05
+      ? alignedFrames + 1 : 0
+    previousLeftDelta = leftDelta
+    return alignedFrames
+  }, { intervals: [40, 40, 40, 40, 40, 40, 40, 40, 40, 40], timeout: 5_000 }).toBeGreaterThanOrEqual(3)
+}
+
+async function installSyntheticMaxProvider(page: Page, owner: { userId: string; familyId: string; childId: string }, video: Buffer) {
+  const sessions = new Map<string, { uploadToken: string; uploaded: boolean; providerAttachmentId: string }>()
+  const uploadedSessionIds: string[] = []
+  const finalizedSessionIds: string[] = []
+  let signalFinalizeStarted!: () => void
+  let releaseFinalizes!: () => void
+  const finalizeStarted = new Promise<void>((resolve) => { signalFinalizeStarted = resolve })
+  const finalizeGate = new Promise<void>((resolve) => { releaseFinalizes = resolve })
+  const base = `/api/v1/families/${owner.familyId}/max-video-uploads`
+
+  // The E2E API intentionally runs with MAX disabled. These three routes simulate only its
+  // provider boundary; the real Memory create and Feed still execute against PostgreSQL.
+  await page.route(`**${base}/reserve`, async (route) => {
+    const input = route.request().postDataJSON() as {
+      childId: string; body: string; mode: string; occurredAt: string; fileName: string;
+      idempotencyKey: string
+    }
+    expect(input).toMatchObject({ childId: owner.childId, body: '', mode: 'attachment' })
+    const sessionId = randomUUID()
+    const uploadToken = `synthetic-max-token-${sessionId}`
+    const expiresAt = new Date(Date.now() + 15 * 60_000)
+    await prisma.maxVideoUploadSession.create({ data: {
+      id: sessionId, familyId: owner.familyId, authorId: owner.userId, childId: owner.childId,
+      plannedMemoryId: randomUUID(), body: '', mode: 'attachment', occurredAt: new Date(input.occurredAt),
+      idempotencyFingerprint: randomUUID(), idempotencyKey: input.idempotencyKey,
+      expiresAt, state: 'reserved', providerUploadToken: uploadToken,
+    } })
+    sessions.set(sessionId, { uploadToken, uploaded: false,
+      providerAttachmentId: input.fileName.includes('video-b') ? 'synthetic-video-1' : 'synthetic-video-2' })
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({
+      state: 'reserved', sessionId, expiresAt: expiresAt.toISOString(),
+      uploadUrl: new URL(`/synthetic-max-upload/${sessionId}`, page.url()).toString(), uploadToken,
+    }) })
+  })
+  await page.route('**/synthetic-max-upload/*', async (route) => {
+    const sessionId = new URL(route.request().url()).pathname.split('/').at(-1)!
+    const session = sessions.get(sessionId)
+    expect(session).toBeDefined()
+    expect(route.request().method()).toBe('POST')
+    expect(route.request().postDataBuffer()?.byteLength).toBeGreaterThan(video.byteLength)
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    session!.uploaded = true
+    uploadedSessionIds.push(sessionId)
+    await route.fulfill({ status: 200, body: '{}' })
+  })
+  await page.route(new RegExp(`${base}/[0-9a-f-]{36}/finalize$`), async (route) => {
+    const sessionId = new URL(route.request().url()).pathname.split('/').at(-2)!
+    const session = sessions.get(sessionId)
+    expect(session?.uploaded).toBe(true)
+    expect(route.request().postDataJSON()).toEqual({ uploadToken: session!.uploadToken })
+    signalFinalizeStarted()
+    await finalizeGate
+    await prisma.$transaction(async (tx) => {
+      await tx.maxVideoUploadSession.update({ where: { id: sessionId }, data: { state: 'finalized' } })
+      await tx.maxOutboundSource.create({ data: {
+        uploadSessionId: sessionId, familyId: owner.familyId, recipientId: 900n,
+        messageId: `synthetic-max-message-${sessionId}`, providerAttachmentId: session!.providerAttachmentId,
+        width: 320, height: 180, durationMs: 2_000,
+      } })
+    })
+    finalizedSessionIds.push(sessionId)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'finalized', sessionId }) })
+  })
+  await page.route(`**/api/v1/families/${owner.familyId}/media/max-videos/*/readiness`, (route) => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ state: 'ready', recheckable: false }),
+  }))
+  // Private playback is fetched by the service worker, so route at context scope.
+  await page.context().route(`**/api/v1/families/${owner.familyId}/media/max-videos/*/content`, (route) => route.fulfill({
+    body: video, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' },
+  }))
+  return { uploadedSessionIds, finalizedSessionIds, finalizeStarted, releaseFinalizes }
+}
 
 async function seedOwner() {
   const prior = await prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'telegram', subject } }, select: { userId: true } })
@@ -224,34 +488,17 @@ function generatedVideo() {
   return result.stdout
 }
 
-function prepareVideoRenditions(mediaIds: string[]) {
-  // Playwright executes specs in Node, while the production media task uses Bun.file.
-  // Invoke that task in Bun against the same isolated E2E database and storage.
-  const script = `
-    import { createPrisma } from './backend/src/db.ts'
-    import { createMediaTasks } from './backend/src/modules/media/index.ts'
-    import { FilesystemPrivateStorage } from './backend/src/storage/filesystem-storage.ts'
-    import { resolve } from 'node:path'
-    const prisma = createPrisma(process.env.TEST_DATABASE_URL)
-    const storage = new FilesystemPrivateStorage({ driver: 'filesystem', root: resolve('webapp/e2e/.artifacts/storage'),
-      publicBaseUrl: process.env.E2E_BACKEND_URL, signingKey: Buffer.alloc(32, 1), uploadMaxBytes: 100_000_000,
-      uploadUrlTtlSeconds: 300, downloadUrlTtlSeconds: 300 })
-    try {
-      const tasks = createMediaTasks({ prisma, privateStorage: { storage },
-        env: { FFMPEG_PATH: process.env.FFMPEG_PATH, FFPROBE_PATH: process.env.FFPROBE_PATH } })
-      for (const mediaId of JSON.parse(process.env.MM4_MEDIA_IDS)) await tasks.prepareAsset({ mediaId })
-    } finally { await prisma.$disconnect() }
-  `
-  const result = spawnSync('bun', ['-e', script], {
-    cwd: resolve('..'), env: { ...process.env, MM4_MEDIA_IDS: JSON.stringify(mediaIds) },
-    encoding: 'utf8', maxBuffer: 1_000_000,
-  })
-  if (result.status !== 0) throw new Error(`synthetic video preparation failed: ${result.stderr}`)
-}
-
 function generatedPhoto(index: number) {
   const color = index === 1 ? 'orange' : 'blue'
   const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=${color}:s=32x24:d=0.1`, '-frames:v', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1_000_000 })
   if (result.status !== 0) throw new Error(`synthetic photo fixture failed: ${result.stderr.toString()}`)
+  return result.stdout
+}
+
+function generatedLargePhoto(index: number) {
+  const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+    '-i', `testsrc2=s=1024x768:d=0.1:rate=${25 + index}`, '-frames:v', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1'],
+  { encoding: 'buffer', maxBuffer: 2_000_000 })
+  if (result.status !== 0) throw new Error(`synthetic large photo fixture failed: ${result.stderr.toString()}`)
   return result.stdout
 }
