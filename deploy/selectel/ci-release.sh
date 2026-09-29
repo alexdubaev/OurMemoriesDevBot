@@ -24,10 +24,16 @@ RUN_MIGRATION=${3:-false}
 MAX_BOT_USERNAME=${4:-}
 PROMOTION_STARTED=false
 LEGACY_MEMBERSHIP_RUNTIME=false
+LEGACY_MM0_RUNTIME=false
 QUIESCE_STARTED=false
 B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
+MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
+MM0_MIGRATION=20260928100000_mm0_domain_temporal_foundation
+MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
+MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
 RESUMING_FORWARD_ONLY=false
+RESUMING_MM0=false
 MARKER_TARGET_SHA=
 PREBUILT_IMAGES=false
 
@@ -184,7 +190,7 @@ capture_running_images() {
 }
 
 detect_membership_rollback_boundary() {
-  if [ "$RESUMING_FORWARD_ONLY" = true ]; then
+  if [ "$RESUMING_FORWARD_ONLY" = true ] && [ "$RESUMING_MM0" = false ]; then
     git_root merge-base --is-ancestor "$MARKER_TARGET_SHA" "$PRODUCT_SHA" ||
       die 'forward-only recovery target must descend from the interrupted release'
     LEGACY_MEMBERSHIP_RUNTIME=true
@@ -201,6 +207,71 @@ detect_membership_rollback_boundary() {
     LEGACY_MEMBERSHIP_RUNTIME=true
     printf 'Pre-B2 runtime detected; release will quiesce legacy writers before migration and use forward-only recovery.\n'
   fi
+}
+
+detect_mm0_boundary() {
+  git_root cat-file -e "$MM0_RUNTIME_SHA^{commit}" 2>/dev/null || die 'accepted MM0 runtime commit is unavailable'
+  if git_root merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PRODUCT_SHA"; then
+    git_root cat-file -e "$PRODUCT_SHA:backend/prisma/migrations/$MM0_MIGRATION/migration.sql" 2>/dev/null ||
+      die 'MM0-compatible release is missing the MM0 migration SQL'
+  fi
+  if [ "$RESUMING_MM0" = true ]; then
+    git_root merge-base --is-ancestor "$MARKER_TARGET_SHA" "$PRODUCT_SHA" ||
+      die 'MM0 forward-only recovery target must descend from the interrupted release'
+    LEGACY_MM0_RUNTIME=true
+    return
+  fi
+  if git_root merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PRODUCT_SHA" &&
+     ! git_root merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG"; then
+    LEGACY_MM0_RUNTIME=true
+    printf 'Pre-MM0 runtime detected; the migration boundary requires a validated backup and forward-only recovery.\n'
+  fi
+}
+
+load_mm0_marker() {
+  [ -f "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] || die 'MM0 forward-only marker is invalid'
+  [ "$(stat -c '%u' "$MM0_FORWARD_MARKER")" = 0 ] &&
+    [ "$(stat -c '%a' "$MM0_FORWARD_MARKER")" = 600 ] || die 'MM0 forward-only marker ownership or mode is invalid'
+  local -a lines
+  mapfile -t lines < "$MM0_FORWARD_MARKER"
+  [ "${#lines[@]}" -eq 3 ] || die 'MM0 forward-only marker format is invalid'
+  [[ "${lines[0]}" =~ ^MM0_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'MM0 marker target is invalid'
+  MARKER_TARGET_SHA=${BASH_REMATCH[1]}
+  git_root merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$MARKER_TARGET_SHA" ||
+    die 'MM0 marker target predates the compatible MM0 runtime'
+  [[ "${lines[1]}" =~ ^PREVIOUS_BACKEND_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'MM0 marker backend is invalid'
+  PREVIOUS_BACKEND_IMAGE_TAG=${BASH_REMATCH[1]}
+  [[ "${lines[2]}" =~ ^PREVIOUS_WEBAPP_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'MM0 marker webapp is invalid'
+  PREVIOUS_WEBAPP_IMAGE_TAG=${BASH_REMATCH[1]}
+  export PREVIOUS_BACKEND_IMAGE_TAG PREVIOUS_WEBAPP_IMAGE_TAG
+  RESUMING_FORWARD_ONLY=true
+  RESUMING_MM0=true
+}
+
+write_mm0_marker() {
+  [ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] || die 'MM0 forward-only marker already exists'
+  local temp="$MM0_FORWARD_MARKER.tmp.$$"
+  install -m 0600 /dev/null "$temp"
+  printf 'MM0_FORWARD_ONLY_TARGET=%s\nPREVIOUS_BACKEND_IMAGE_TAG=%s\nPREVIOUS_WEBAPP_IMAGE_TAG=%s\n' \
+    "$PRODUCT_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG" "$PREVIOUS_WEBAPP_IMAGE_TAG" > "$temp"
+  sync -f "$temp" || die 'cannot persist MM0 forward-only marker contents'
+  mv -- "$temp" "$MM0_FORWARD_MARKER"
+  sync -f "$SERVER_ROOT" || die 'cannot persist MM0 forward-only marker directory entry'
+}
+
+verify_promoted_revision() {
+  local service image expected revision
+  for service in backend worker scheduler static; do
+    image=$(service_image "$service")
+    case "$service" in
+      static) expected="memoly-webapp:$PRODUCT_SHA" ;;
+      *) expected="memoly-backend:$PRODUCT_SHA" ;;
+    esac
+    [ "$image" = "$expected" ] || die "promoted $service image does not match the release SHA"
+    revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" 2>/dev/null) ||
+      die "cannot inspect promoted $service revision label"
+    [ "$revision" = "$PRODUCT_SHA" ] || die "promoted $service revision label does not match the release SHA"
+  done
 }
 
 load_forward_marker() {
@@ -353,6 +424,7 @@ main() {
   require_command find
   require_command sha256sum
   require_command stat
+  require_command sync
   validate_inputs
   [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
   exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
@@ -364,15 +436,26 @@ main() {
     local status=$?
     trap - EXIT
     [ "$status" -eq 0 ] && exit 0
-    if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
+    if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
+      printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
+      if ! FORWARD_MARKER="$MM0_FORWARD_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
+        printf 'ERROR: marker-based quiescence failed; stopping every application writer.\n' >&2
+        MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
+          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
+      fi
+    elif [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
+      if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+        printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
+      fi
       printf 'ERROR: pre-B2 runtime cannot be restored after this release boundary; keeping legacy writers stopped for forward recovery.\n' >&2
-      if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
-        printf 'ERROR: could not confirm legacy writers are stopped; immediate operator inspection is required.\n' >&2
+      if ! MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
+        MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
+          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
       fi
     elif [ "$PROMOTION_STARTED" = true ]; then
       printf 'ERROR: release promotion failed; attempting application rollback.\n' >&2
       if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback; then
-        printf 'ERROR: automatic application rollback failed; manual rollback is required.\n' >&2
+        printf 'ERROR: automatic application rollback failed; a compatible forward fix may be required.\n' >&2
       fi
     fi
     exit "$status"
@@ -380,8 +463,28 @@ main() {
   trap release_failure EXIT
 
   validate_repository
-  if [ -e "$FORWARD_MARKER" ]; then
+  if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
+    load_mm0_marker
+    if [ -e "$FORWARD_MARKER" ] || [ -L "$FORWARD_MARKER" ]; then
+      local mm_target=$MARKER_TARGET_SHA mm_backend=$PREVIOUS_BACKEND_IMAGE_TAG mm_webapp=$PREVIOUS_WEBAPP_IMAGE_TAG
+      load_forward_marker
+      [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$mm_backend" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$mm_webapp" ] ||
+        die 'B2 and MM0 forward-only markers disagree about previous images'
+      git_root merge-base --is-ancestor "$MARKER_TARGET_SHA" "$mm_target" ||
+        die 'B2 and MM0 forward-only markers have incompatible release lineages'
+      MARKER_TARGET_SHA=$mm_target
+      PREVIOUS_BACKEND_IMAGE_TAG=$mm_backend
+      PREVIOUS_WEBAPP_IMAGE_TAG=$mm_webapp
+      export PREVIOUS_BACKEND_IMAGE_TAG PREVIOUS_WEBAPP_IMAGE_TAG
+      rm -- "$FORWARD_MARKER"
+    fi
+    LEGACY_MM0_RUNTIME=true
+    export MEMOLY_PRODUCT_SHA="$MARKER_TARGET_SHA"
+    FORWARD_MARKER="$MM0_FORWARD_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
+  fi
+  if [ "$RESUMING_MM0" = false ] && [ -e "$FORWARD_MARKER" ]; then
     load_forward_marker
+    MM0_ACTIVE_MARKER=$FORWARD_MARKER
     LEGACY_MEMBERSHIP_RUNTIME=true
     QUIESCE_STARTED=true
     export MEMOLY_PRODUCT_SHA="$MARKER_TARGET_SHA"
@@ -395,6 +498,7 @@ main() {
   fetch_and_checkout
   validate_prebuilt_images
   detect_membership_rollback_boundary
+  detect_mm0_boundary
 
   if [ "$PREBUILT_IMAGES" = false ]; then
     SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
@@ -406,7 +510,14 @@ main() {
   export MEMOLY_WEBAPP_IMAGE_TAG="$PRODUCT_SHA"
   export MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-app.memoly.ru}
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" preflight
-  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ]; then
+  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = true ]; then
+    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" backup-migration
+  fi
+  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = false ]; then
+    bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status ||
+      die 'pending MM0 migration requires the guarded migration input before quiescing old writers'
+  fi
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
     if [ "$RUN_MIGRATION" = false ]; then
       bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status ||
         die 'pending migrations require the guarded migration input before crossing the B2 runtime boundary'
@@ -415,16 +526,38 @@ main() {
     QUIESCE_STARTED=true
     bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
   fi
+  if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+    if [ "$RESUMING_MM0" = false ]; then
+      write_mm0_marker
+      MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
+      if [ "$RESUMING_FORWARD_ONLY" = true ]; then rm -- "$FORWARD_MARKER"; fi
+    fi
+    QUIESCE_STARTED=true
+    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
+  fi
   if [ "$RUN_MIGRATION" = true ]; then
-    bash "$APP_ROOT/deploy/selectel/redeploy.sh" migrate
+    if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+      FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true MM0_BACKUP_PREPARED=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" migrate
+    else
+      bash "$APP_ROOT/deploy/selectel/redeploy.sh" migrate
+    fi
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
   PROMOTION_STARTED=true
-  bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
+  if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
+  else
+    bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
+  fi
+  verify_promoted_revision
   public_smoke
   write_release_manifest
   PROMOTION_STARTED=false
-  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ]; then rm -- "$FORWARD_MARKER"; fi
+  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$MM0_ACTIVE_MARKER" = "$MM0_FORWARD_MARKER" ]; then rm -- "$MM0_FORWARD_MARKER"; fi
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] &&
+     { [ "$LEGACY_MM0_RUNTIME" = false ] || [ "$MM0_ACTIVE_MARKER" = "$FORWARD_MARKER" ]; }; then
+    rm -- "$FORWARD_MARKER"
+  fi
 }
 
 main "$@"

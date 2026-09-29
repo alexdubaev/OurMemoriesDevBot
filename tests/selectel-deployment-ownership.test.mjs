@@ -178,9 +178,10 @@ test('redeploy script fails closed and exposes safe promotion phases', () => {
   const activateBody = script.slice(script.indexOf('activate_gateway() {'), script.indexOf('\n}\n\ngateway_public_health()'))
   assert.ok(activateBody.indexOf('validate_candidate_caddy') < activateBody.indexOf('backup_gateway_caddyfile'))
   assert.ok(activateBody.indexOf('backup_gateway_caddyfile') < activateBody.indexOf('in-place-file.sh" activate'))
-  assert.ok(rollbackBody.indexOf('verify_static_internal') < rollbackBody.indexOf('render_edge_candidate'))
   assert.ok(rollbackBody.indexOf('render_edge_candidate') < rollbackBody.indexOf('validate_candidate_caddy'))
   assert.ok(rollbackBody.indexOf('validate_candidate_caddy') < rollbackBody.indexOf('activate_gateway'))
+  assert.ok(rollbackBody.indexOf('verify_static_internal') < rollbackBody.indexOf('activate_gateway'))
+  assert.ok(rollbackBody.indexOf('verify_static_internal') < rollbackBody.indexOf('caddy reload'))
   assert.ok(rollbackBody.indexOf('activate_gateway') < rollbackBody.indexOf('readiness'))
 
   for (const match of script.matchAll(/^\s*compose up .*$/gm)) {
@@ -203,8 +204,8 @@ test('one-shot migration backs up and validates before guarded db:deploy', () =>
   const migrateBody = script.match(/migrate\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
   const backupBody = script.slice(script.indexOf('backup_database() {'), script.indexOf('\n}\n\nmigrate()'))
 
-  assert.match(script, /Usage: redeploy\.sh \{preflight\|migrate\|deploy\|rollback\|migration-status\|quiesce-legacy\}/)
-  assert.match(script, /migrate\) require_command docker; migrate/)
+  assert.match(script, /Usage: redeploy\.sh \{preflight\|backup-migration\|migrate\|deploy\|rollback\|migration-status\|quiesce-legacy\|quiesce-all\}/)
+  assert.match(script, /migrate\) require_command docker; guard_membership_transition; migrate/)
   assert.match(backupBody, /timestamp=\$\(date -u \+%Y%m%dT%H%M%SZ\)/)
   assert.match(backupBody, /backups\/postgres-\$\{MEMOLY_PRODUCT_SHA\}-\$\{timestamp\}\.dump/)
   assert.match(backupBody, /install -d -m 0700 "\$SERVER_ROOT\/backups"/)
@@ -244,6 +245,9 @@ die() { printf 'DIE:%s\\n' "$*" >&2; exit 1; }
 validate_forward_marker() { :; }
 MEMOLY_PRODUCT_SHA=${target}
 COMPOSE_PROJECT=memoly
+FORWARD_MARKER=/missing-b2-marker
+MM0_FORWARD_MARKER=/missing-mm0-marker
+MM0_BOUNDARY=false
 LEGACY_RUNNING=true
 docker() {
   if [ "$1" = ps ]; then
@@ -265,11 +269,11 @@ docker() {
 quiesce_legacy_runtime
 `
   const marker = resolve(root, 'tests/.selectel-b2-stop-marker')
-  const bashMarker = marker.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+  const bashMarker = marker.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
   rmSync(marker, { force: true })
   const result = spawnSync('bash', ['-s'], {
     input: harness, encoding: 'utf8', timeout: 30_000,
-    env: { ...process.env, STOP_MARKER: bashMarker },
+    env: { ...process.env, STOP_MARKER: bashMarker, WSLENV: [process.env.WSLENV, 'STOP_MARKER'].filter(Boolean).join(':') },
   })
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
   const stopped = readFileSync(marker, 'utf8')
@@ -300,6 +304,7 @@ MEMOLY_PRODUCT_SHA=${target}
 APP_ROOT=/mock/app
 COMPOSE_PROJECT=memoly
 FORWARD_MARKER=/missing-b2-marker
+MM0_FORWARD_MARKER=/missing-mm0-marker
 SELECTEL_CI_RELEASE=true
 SELECTEL_DEPLOY_LOCK_FD=9
 git() {

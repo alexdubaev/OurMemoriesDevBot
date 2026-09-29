@@ -379,6 +379,15 @@ private media bucket. Use Ansible only when it reduces repeatable host configura
 users, firewall, systemd, proxy); keep database data, credentials, and releases out of playbook
 templates. The operator owns TLS, backups, restore tests, patching, monitoring, and rollback.
 
+For the Selectel release flow, use the guarded `deploy/selectel/ci-release.sh`
+entry point and its [runbook](../deploy/selectel/README.md). The MM0 migration
+`20260928100000_mm0_domain_temporal_foundation` crosses a forward-only runtime
+boundary: a validated backup precedes stopping the old backend, worker and
+scheduler; a durable marker is armed before `db:deploy`. If the attempt fails or
+its outcome is unknown, keep old writers stopped and issue a compatible forward
+fix. A direct rollback to a pre-MM0 publisher is blocked even after a successful
+release clears the marker.
+
 ## Local validation
 
 Cloud mutation is never part of the local test suite. A release is the explicit broad-regression

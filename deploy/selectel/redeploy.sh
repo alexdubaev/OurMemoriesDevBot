@@ -8,6 +8,9 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
 B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
+MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
+MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
+MM0_SPIKE_CONTAINER=memoly-spike-max-video-backend-1
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
 ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
@@ -336,21 +339,27 @@ migration_status() {
 }
 
 validate_forward_marker() {
-	[ -f "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only marker is missing or invalid'
-	[ "$(stat -c '%u' "$FORWARD_MARKER")" = 0 ] || die 'B2 forward-only marker must be root-owned'
-	[ "$(stat -c '%a' "$FORWARD_MARKER")" = 600 ] || die 'B2 forward-only marker must have mode 0600'
+	[ -f "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'forward-only marker is missing or invalid'
+	[ "$(stat -c '%u' "$FORWARD_MARKER")" = 0 ] || die 'forward-only marker must be root-owned'
+	[ "$(stat -c '%a' "$FORWARD_MARKER")" = 600 ] || die 'forward-only marker must have mode 0600'
 	local -a lines
 	mapfile -t lines < "$FORWARD_MARKER"
-	[ "${#lines[@]}" -eq 3 ] || die 'B2 forward-only marker has an invalid format'
-	[[ "${lines[0]}" =~ ^B2_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'B2 forward-only target is invalid'
+	[ "${#lines[@]}" -eq 3 ] || die 'forward-only marker has an invalid format'
+	if [ "$FORWARD_MARKER" = "$MM0_FORWARD_MARKER" ]; then
+		[[ "${lines[0]}" =~ ^MM0_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'MM0 forward-only target is invalid'
+	else
+		[[ "${lines[0]}" =~ ^B2_FORWARD_ONLY_TARGET=([0-9a-f]{40})$ ]] || die 'B2 forward-only target is invalid'
+	fi
 	local marker_target=${BASH_REMATCH[1]}
 	[[ "${lines[1]}" =~ ^PREVIOUS_BACKEND_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'B2 previous backend tag is invalid'
 	local previous_backend=${BASH_REMATCH[1]}
 	[[ "${lines[2]}" =~ ^PREVIOUS_WEBAPP_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'B2 previous webapp tag is invalid'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$marker_target" "$MEMOLY_PRODUCT_SHA" ||
 		die 'B2 forward-only marker does not match this release lineage'
-	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$B2_RUNTIME_SHA" "$previous_backend"; then
-		die 'B2 forward-only marker does not record a legacy backend'
+	local boundary_sha=$B2_RUNTIME_SHA
+	[ "$FORWARD_MARKER" = "$MM0_FORWARD_MARKER" ] && boundary_sha=$MM0_RUNTIME_SHA
+	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$boundary_sha" "$previous_backend"; then
+		die 'forward-only marker does not record a legacy backend'
 	fi
 }
 
@@ -364,6 +373,70 @@ verify_no_legacy_writers() {
 			[ "$image" = "memoly-backend:$MEMOLY_PRODUCT_SHA" ] || die "legacy $service is still running; migration is forbidden"
 		done
 	done
+	if [ "${MM0_BOUNDARY:-false}" = true ] || [ "$FORWARD_MARKER" = "$MM0_FORWARD_MARKER" ]; then
+		verify_mm0_spike_stopped
+	fi
+}
+
+mm0_spike_id() {
+	local ids
+	ids=$(docker ps -q --filter "name=^/${MM0_SPIKE_CONTAINER}$") || die 'cannot enumerate MAX video spike writer'
+	[ "$(printf '%s\n' "$ids" | awk 'NF { count += 1 } END { print count + 0 }')" -le 1 ] ||
+		die 'MAX video spike writer identity is ambiguous'
+	printf '%s\n' "$ids"
+}
+
+mm0_spike_relation() {
+	local spike_id=$1 postgres_ids postgres_database spike_target database_script
+	# Return only a normalized host/port/database tuple. Credentials never leave either container.
+	database_script='const raw = process.env.DATABASE_URL ?? ""; let url; try { url = new URL(raw) } catch { process.exit(2) }; if (!["postgres:", "postgresql:"].includes(url.protocol) || url.hash) process.exit(2); const params = [...url.searchParams.entries()]; if (params.length > 1 || (params.length === 1 && (params[0][0] !== "schema" || params[0][1] !== "public"))) process.exit(2); let database; try { database = decodeURIComponent(url.pathname.slice(1)) } catch { process.exit(2) }; if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(database)) process.exit(2); process.stdout.write(`${url.hostname}|${url.port || "5432"}|${database}`)'
+	postgres_ids=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+		--filter 'label=com.docker.compose.service=postgres') || die 'cannot enumerate production PostgreSQL service'
+	[ "$(printf '%s\n' "$postgres_ids" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1 ] ||
+		die 'production PostgreSQL service identity is ambiguous'
+	postgres_database=$(docker exec "$postgres_ids" sh -c 'printf "%s" "$POSTGRES_DB"' 2>/dev/null) ||
+		die 'cannot determine production PostgreSQL database name'
+	[[ "$postgres_database" =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ ]] ||
+		die 'production PostgreSQL database name is invalid'
+	spike_target=$(docker exec "$spike_id" bun -e "$database_script" 2>/dev/null) ||
+		die 'cannot determine MAX video spike database target; MM0 migration is forbidden'
+	if [ "$spike_target" = "postgres|5432|$postgres_database" ]; then
+		printf 'same\n'
+	elif [[ "$spike_target" == postgres\|5432\|* ]]; then
+		printf 'different\n'
+	else
+		die 'MAX video spike database relation is ambiguous; MM0 migration is forbidden'
+	fi
+}
+
+verify_mm0_spike_stopped() {
+	local spike_id relation
+	spike_id=$(mm0_spike_id) || die 'cannot inspect MAX video spike writer'
+	[ -n "$spike_id" ] || return 0
+	relation=$(mm0_spike_relation "$spike_id") || die 'cannot classify MAX video spike database target'
+	[ "$relation" = different ] || die 'MAX video spike writer still targets the production database; MM0 migration is forbidden'
+}
+
+precheck_mm0_spike_relation() {
+	local spike_id
+	spike_id=$(mm0_spike_id) || die 'cannot inspect MAX video spike writer before MM0 backup'
+	[ -n "$spike_id" ] || return 0
+	mm0_spike_relation "$spike_id" >/dev/null || die 'cannot classify MAX video spike database target before MM0 migration'
+}
+
+quiesce_mm0_spike() {
+	local spike_id relation
+	spike_id=$(mm0_spike_id) || die 'cannot inspect MAX video spike writer'
+	[ -n "$spike_id" ] || return 0
+	if relation=$(mm0_spike_relation "$spike_id"); then
+		[ "$relation" = different ] && return 0
+	elif [ "${1:-}" != emergency ]; then
+		die 'cannot classify MAX video spike database target; MM0 migration is forbidden'
+	fi
+	docker update --restart=no "$spike_id" >/dev/null || die 'cannot disable MAX video spike restart policy'
+	docker stop --time 30 "$spike_id" >/dev/null || die 'cannot stop MAX video spike writer'
+	spike_id=$(mm0_spike_id) || die 'cannot verify MAX video spike writer is stopped'
+	[ -z "$spike_id" ] || die 'MAX video spike writer is still running'
 }
 
 guard_membership_transition() {
@@ -381,11 +454,13 @@ guard_membership_transition() {
 	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$B2_RUNTIME_SHA" "$MEMOLY_PRODUCT_SHA"; then
 		die 'target predates the accepted B2 runtime; use a reviewed compatible release'
 	fi
+	[ "${1:-}" = backup ] && return 0
 	if [ -e "$FORWARD_MARKER" ]; then
 		validate_forward_marker
 		verify_no_legacy_writers
 		return 0
 	fi
+	[ ! -e "$MM0_FORWARD_MARKER" ] || die 'MM0 forward-only release requires guarded forward recovery'
 	local service running image tag
 	for service in backend worker scheduler; do
 		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
@@ -425,7 +500,29 @@ quiesce_legacy_runtime() {
 			[ "$image" = "memoly-backend:$MEMOLY_PRODUCT_SHA" ] || die "legacy $service is still running; migration is forbidden"
 		done
 	done
+	if [ "${MM0_BOUNDARY:-false}" = true ] || [ "$FORWARD_MARKER" = "$MM0_FORWARD_MARKER" ]; then
+		quiesce_mm0_spike
+	fi
 	printf 'Pre-B2 backend, worker, and scheduler are stopped; compatible target containers, if any, remain running.\n'
+}
+
+quiesce_all_writers() {
+	[ "${SELECTEL_CI_RELEASE:-false}" = true ] && [[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] ||
+		die 'quiesce-all requires the guarded ci-release entry point and inherited release lock'
+	local service running container
+	for service in backend worker scheduler; do
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service") || die "cannot enumerate $service writers"
+		for container in $running; do
+			docker stop --time 30 "$container" >/dev/null || die "cannot stop $service writer"
+		done
+		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter "label=com.docker.compose.service=$service") || die "cannot verify $service writers are stopped"
+		[ -z "$running" ] || die "$service writer is still running"
+	done
+	if [ "${MM0_BOUNDARY:-false}" = true ] || [ "$FORWARD_MARKER" = "$MM0_FORWARD_MARKER" ]; then
+		quiesce_mm0_spike emergency
+	fi
 }
 
 validate_database_target() {
@@ -483,7 +580,12 @@ backup_database() {
 migrate() {
 	preflight
 	validate_database_target
-	backup_database
+	if [ "${MM0_BACKUP_PREPARED:-false}" = true ]; then
+		validate_forward_marker
+		verify_no_legacy_writers
+	else
+		backup_database
+	fi
 	if ! compose run --rm --no-deps backend bun run db:deploy >/dev/null 2>&1; then
 		die "database migration failed; application services were not promoted"
 	fi
@@ -491,6 +593,13 @@ migrate() {
 		die "database migration status failed; application services were not promoted"
 	fi
 	printf 'Database migration complete. Application services were not promoted.\n'
+}
+
+backup_migration() {
+	preflight
+	validate_database_target
+	if [ "${MM0_BOUNDARY:-false}" = true ]; then precheck_mm0_spike_relation; fi
+	backup_database
 }
 
 promote_backend() {
@@ -553,6 +662,8 @@ readiness() {
 
 rollback() {
 	[ ! -e "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
+	[ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] ||
+		die 'FORWARD_FIX_REQUIRED: MM0 migration may have applied; rollback is forbidden'
 	validate_rollback_file
 	# shellcheck disable=SC1090
 	set -a
@@ -563,6 +674,9 @@ rollback() {
 	[ -n "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" ] || die "previous webapp image tag is missing"
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor \
 		"$B2_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG" || die 'rollback target predates the B2 membership runtime; use a compatible forward fix'
+	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG"; then
+		die 'FORWARD_FIX_REQUIRED: rollback target predates the MM0 runtime and cannot publish against this database'
+	fi
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
@@ -616,7 +730,7 @@ deploy() {
 
 usage() {
 	cat <<'EOF'
-Usage: redeploy.sh {preflight|migrate|deploy|rollback|migration-status|quiesce-legacy}
+Usage: redeploy.sh {preflight|backup-migration|migrate|deploy|rollback|migration-status|quiesce-legacy|quiesce-all}
 
 Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
 GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
@@ -636,7 +750,9 @@ main() {
 		deploy) deploy ;;
 		rollback) rollback ;;
 		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
+		backup-migration) require_command docker; guard_membership_transition backup; backup_migration ;;
 		quiesce-legacy) require_command docker; quiesce_legacy_runtime ;;
+		quiesce-all) require_command docker; quiesce_all_writers ;;
 		migrate) require_command docker; guard_membership_transition; migrate ;;
 		reload-gateway) die "reload-gateway is disabled; use deploy so static readiness gates edge activation" ;;
 		*) usage; exit 2 ;;
