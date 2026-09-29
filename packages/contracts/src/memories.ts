@@ -27,8 +27,16 @@ export const createMemoryRequestSchema = z.discriminatedUnion('kind', [
   }).strict(),
   memoryBaseInputSchema.extend({
     kind: z.literal('media'),
-    mediaIds: z.array(uuid).min(1).max(10).refine((ids) => new Set(ids).size === ids.length, 'Медиа не должно повторяться'),
-  }).strict(),
+    mediaIds: z.array(uuid).min(1).max(10).refine((ids) => new Set(ids).size === ids.length, 'Медиа не должно повторяться').optional(),
+    attachments: z.array(z.discriminatedUnion('source', [
+      z.object({ source: z.literal('private_storage'), mediaId: uuid }).strict(),
+      z.object({ source: z.literal('max'), sessionId: uuid }).strict(),
+    ])).min(1).max(10).optional(),
+  }).strict().superRefine((value, context) => {
+    if (Boolean(value.mediaIds) === Boolean(value.attachments)) context.addIssue({ code: 'custom', message: 'Укажите один список вложений' })
+    const refs = value.attachments?.map((entry) => `${entry.source}:${entry.source === 'max' ? entry.sessionId : entry.mediaId}`) ?? []
+    if (new Set(refs).size !== refs.length) context.addIssue({ code: 'custom', message: 'Вложения не должны повторяться' })
+  }),
   memoryBaseInputSchema.extend({
     kind: z.literal('video'),
     mediaIds: z.array(uuid).length(1),

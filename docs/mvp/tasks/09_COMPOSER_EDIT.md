@@ -59,7 +59,7 @@ MVP этого блока:
 - transport: `Browser/MAX WebView → MAX` напрямую, без proxy больших video bytes через memoLy backend;
 - production Video Composer уже поддерживает Reserve → direct upload → Finalize → Memory → Feed;
 - T09 только подключает этот готовый flow к обычному `Добавить`;
-- текущий production video limit — до `250 MB` для поддерживаемых форматов;
+- текущий production video limit — до `250 МБ` для поддерживаемых форматов; байтовая граница уточнена в разделе 8;
 - MAX остаётся video storage/delivery adapter MVP, но `Memory.authorId` остаётся внутренним memoLy User и core domain не должен становиться MAX-specific;
 - запись голоса внутри Mini App через MediaRecorder переносится на post-MVP, а не удаляется из roadmap.
 
@@ -228,7 +228,8 @@ Body обязателен после trim.
 
 - выбор существующего video file;
 - `.mp4`, `.mov`, `.mkv`, `.webm`;
-- текущий production limit `250 MB`;
+- текущий production limit `250 МБ`: документация MAX для MP4/MOV/MKV/WEBM указывает «до 250 МБ», но не определяет точное число байтов; приложение консервативно допускает не более `250 000 000` байтов;
+- в Mixed Media видео использует тот же прямой browser→MAX Reserve/Upload/Finalize и тот же предел; фото сохраняются через private-media path, после готовности всех вложений публикуется одно Memory с исходным порядком;
 - caption;
 - date;
 - Reserve;
@@ -529,7 +530,7 @@ Edit/Delete:
 - **F09.10** `Голос или видео → Видео` открывает существующий production Video Composer, а не новый uploader.
 - **F09.11** Реальный video проходит существующий Reserve → direct MAX upload → Finalize → Memory → Feed flow.
 - **F09.12** Progress/Cancel/Retry работают через normal Add flow.
-- **F09.13** >250 MB отклоняется согласно текущей production video policy; старый 100 MB limit не возвращается.
+- **F09.13** Файл больше `250 000 000` байтов отклоняется согласно текущей production video policy; старый 100 MB limit не возвращается.
 
 ### Voice
 

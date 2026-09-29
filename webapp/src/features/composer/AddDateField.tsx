@@ -1,7 +1,8 @@
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 
-export function AddDateField({ id, label, onChange, today, value }: {
+export function AddDateField({ disabled = false, id, label, onChange, today, value }: {
+  disabled?: boolean
   id: string
   label: string
   onChange: (value: string) => void
@@ -17,6 +18,6 @@ export function AddDateField({ id, label, onChange, today, value }: {
     <WebpIcon decorative name="calendar" size={20} />
     <Typography as="span" className="memoly-add-date-text" variant="memoryBodyMedium">{value === today ? `Сегодня, ${text}` : text}</Typography>
     <WebpIcon decorative name="chevron" size={17} />
-    <input aria-label={label} id={id} max={today} onChange={(event) => onChange(event.currentTarget.value)} type="date" value={value} />
+    <input aria-label={label} disabled={disabled} id={id} max={today} onChange={(event) => onChange(event.currentTarget.value)} type="date" value={value} />
   </label>
 }

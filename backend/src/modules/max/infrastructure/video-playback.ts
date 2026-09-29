@@ -1,3 +1,5 @@
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+
 import type { BackendRuntime } from '../../../runtime'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { MediaFailure } from '../../media'
@@ -6,10 +8,9 @@ import { MaxProviderError } from './max-api'
 
 const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
 const maxHeight = 720
-const fallbackMaxBytes = 250_000_000
 
 export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
-  const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? fallbackMaxBytes
+  const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
   const familyAccess = createPrismaFamilyAccess(options.runtime.prisma)
   return {
     async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
@@ -34,8 +35,9 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
         throw error
       }
-      const current = resolved.attachments[reference.attachmentPosition]
-      if (resolved.attachments.length !== 1 || reference.attachmentPosition !== 0 || !current || current.kind !== 'video' || resolved.messageId !== source.messageId ||
+      const providerPosition = reference.source ? reference.attachmentPosition : 0
+      const current = resolved.attachments[providerPosition]
+      if (resolved.attachments.length !== 1 || (reference.source && reference.attachmentPosition !== 0) || !current || current.kind !== 'video' || resolved.messageId !== source.messageId ||
         resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId) ||
         current.providerAttachmentId !== reference.providerAttachmentId) throw new MediaFailure('not_found', 'Медиа не найдено')
 

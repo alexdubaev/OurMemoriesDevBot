@@ -38,11 +38,24 @@ function failingService(code: string, message: string): DirectVideoUploadService
   } as DirectVideoUploadService
 }
 
-async function reserve(app: ReturnType<typeof appFor>) {
+async function reserve(app: ReturnType<typeof appFor>, fileSize = input.fileSize) {
   return app.request(`/families/${familyId}/max-video-uploads/reserve`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, fileSize }),
   })
 }
+
+test('validates the decimal MAX direct-video size boundary at the route', async () => {
+  const app = appFor({
+    reserve: async () => ({ state: 'reserved', sessionId: familyId, expiresAt: '2026-09-20T10:00:00.000Z' }),
+    finalize: async () => { throw new Error('not used') },
+  })
+  for (const fileSize of [72_300_000, 249_999_999, 250_000_000]) {
+    expect((await reserve(app, fileSize)).status).toBe(201)
+  }
+  for (const fileSize of [250_000_001, 250 * 1024 * 1024]) {
+    expect((await reserve(app, fileSize)).status).toBe(422)
+  }
+})
 
 test('returns distinct safe codes for the two Reserve pre-session not-found branches', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => {})

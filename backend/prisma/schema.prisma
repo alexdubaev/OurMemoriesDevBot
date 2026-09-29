@@ -148,6 +148,7 @@ model MaxVideoUploadSession {
   childId               String                      @map("child_id") @db.Uuid
   plannedMemoryId       String                      @map("planned_memory_id") @db.Uuid
   body                  String
+  mode                  String                      @default("standalone")
   occurredAt            DateTime                    @map("occurred_at") @db.Timestamptz(6)
   idempotencyFingerprint String                     @map("idempotency_fingerprint")
   idempotencyKey        String                      @map("idempotency_key")
@@ -181,6 +182,9 @@ model MaxOutboundSource {
   recipientId           BigInt                 @map("recipient_id")
   messageId             String                 @map("message_id")
   providerAttachmentId  String                 @map("provider_attachment_id")
+  width                 Int?
+  height                Int?
+  durationMs            Int?                   @map("duration_ms")
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
   uploadSession         MaxVideoUploadSession  @relation(fields: [uploadSessionId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_outbound_sources_upload_session_id_family_id_fkey")
@@ -218,7 +222,7 @@ model MaxVideoReference {
   id                   String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sourceId             String?    @unique(map: "max_video_references_source_id_key") @map("source_id") @db.Uuid
   outboundSourceId     String?    @unique(map: "max_video_references_outbound_source_id_key") @map("outbound_source_id") @db.Uuid
-  memoryId             String     @unique(map: "max_video_references_memory_id_key") @map("memory_id") @db.Uuid
+  memoryId             String     @map("memory_id") @db.Uuid
   familyId             String     @map("family_id") @db.Uuid
   attachmentPosition   Int        @map("attachment_position")
   providerAttachmentId String     @map("provider_attachment_id")
@@ -233,7 +237,8 @@ model MaxVideoReference {
   @@index([familyId], map: "max_video_references_family_id_idx")
   @@unique([sourceId, familyId], map: "max_video_references_source_id_family_id_key")
   @@unique([outboundSourceId, familyId], map: "max_video_references_outbound_source_id_family_id_key")
-  @@unique([memoryId, familyId], map: "max_video_references_memory_id_family_id_key")
+  @@index([memoryId, familyId], map: "max_video_references_memory_id_family_id_idx")
+  @@unique([memoryId, attachmentPosition], map: "max_video_references_memory_position_key")
   @@map("max_video_references")
 }
 
@@ -505,7 +510,7 @@ model Memory {
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
   telegramVideoReference TelegramVideoReference?
-  maxVideoReference     MaxVideoReference?
+  maxVideoReferences    MaxVideoReference[]
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@unique([familyId, firstPublishedOrdinal], map: "memories_family_id_first_published_ordinal_key")

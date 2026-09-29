@@ -13,6 +13,12 @@ import { verifyComposerFile } from '../src/features/composer/api'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import { ApiRequestError } from '../src/platform/api'
 
+function sizedFile(name: string, size: number, type = 'video/mp4') {
+  const synthetic = file(name, 128, type)
+  Object.defineProperty(synthetic, 'size', { value: size })
+  return synthetic
+}
+
 function file(name: string, size = 128, type = 'image/jpeg') {
   const bytes = new Uint8Array(size)
   const signature = type === 'image/png' ? Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
@@ -31,134 +37,280 @@ test('accepts one to ten supported photos and rejects video or an eleventh photo
   expect(validatePhotoFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`)))).toEqual({ ok: false, code: 'too_many' })
 })
 
-test('mixed composer uploads serially and preserves selected order', async () => {
-  const browser = installInteractiveDom()
-  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
-  const uploads: Array<() => void> = []
-  const originals = ['00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000002', '00000000-0000-7000-8000-000000000003', '00000000-0000-7000-8000-000000000004']
-  let reservation = 0
+function installMaxUpload() {
+  const prior = globalThis.XMLHttpRequest
+  let uploads = 0
+  const names: string[] = []
+  class FakeXHR {
+    upload = { addEventListener: () => undefined }
+    status = 200
+    listeners: Record<string, () => void> = {}
+    open() {}
+    send(form: FormData) { uploads += 1; names.push((form.get('data') as File).name); queueMicrotask(() => this.listeners.load?.()) }
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+  }
+  // @ts-expect-error focused browser transport double
+  globalThis.XMLHttpRequest = FakeXHR
+  return { count: () => uploads, names: () => names, restore: () => { globalThis.XMLHttpRequest = prior } }
+}
+
+function mixedTransport(requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }>) {
+  let photoIndex = 0
+  let videoIndex = 0
+  const photoIds = ['00000000-0000-7000-8000-000000000031', '00000000-0000-7000-8000-000000000033']
+  const videoIds = ['00000000-0000-7000-8000-000000000032', '00000000-0000-7000-8000-000000000034']
   const transport: AuthenticatedTransport = {
     request: async (path, _schema, options) => {
       requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
-      if (path.endsWith('/uploads')) {
-        const index = reservation++
-        return { assetId: originals[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index % 2 ? 'video/mp4' : 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      if (path.endsWith('/max-video-uploads/reserve')) {
+        const id = videoIds[videoIndex++]!
+        return { state: 'reserved', sessionId: id, expiresAt: '2026-09-22T00:05:00.000Z', uploadUrl: 'https://max.test/opaque', uploadToken: 'opaque-token' } as never
       }
-      if (path.includes('/finalize')) return { asset: { id: originals[Number(path.match(/upload-(\d+)/)?.[1] ?? 0)] } } as never
+      if (path.includes('/max-video-uploads/') && path.endsWith('/finalize')) return { state: 'finalized', sessionId: path.split('/').at(-2) } as never
+      if (path.endsWith('/uploads')) {
+        const index = photoIndex++
+        return { assetId: photoIds[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) return { asset: { id: photoIds[Number(path.match(/upload-(\d+)/)?.[1] ?? 0)] } } as never
       return { id: 'memory-1' } as never
-    },
-    raw: async () => new Response(),
+    }, raw: async () => new Response(),
   }
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Promise<Response>((resolve) => uploads.push(() => resolve(new Response(null, { status: 200 }))))
+  return transport
+}
+
+for (const names of [
+  ['one.jpg', 'two.mp4'],
+  ['one.jpg', 'two.mp4', 'three.jpg'],
+  ['one.jpg', 'two.mp4', 'three.jpg', 'four.mp4'],
+]) {
+  test(`mixed ${names.join('+')} preserves order and creates one Memory`, async () => {
+    const browser = installInteractiveDom()
+    const max = installMaxUpload()
+    const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+    const transport = mixedTransport(requests)
+    const priorFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response(null, { status: 200 })
+    const root = createRoot(browser.container)
+    try {
+      await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+      const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+      input.files = names.map((name) => name.endsWith('.mp4') ? file(name, 128, 'video/mp4') : file(name))
+      await act(async () => invoke(input, 'onChange'))
+      await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+      const creates = requests.filter(({ path }) => path.endsWith('/memories'))
+      expect(creates).toHaveLength(1)
+      const expected = names.map((name, index) => name.endsWith('.mp4') ? { source: 'max', sessionId: index === 1 ? '00000000-0000-7000-8000-000000000032' : '00000000-0000-7000-8000-000000000034' } : { source: 'private_storage', mediaId: index === 0 ? '00000000-0000-7000-8000-000000000031' : '00000000-0000-7000-8000-000000000033' })
+      expect(creates[0]?.body).toMatchObject({ kind: 'media', attachments: expected })
+      expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve')).every(({ body }) => body.mode === 'attachment')).toBe(true)
+      expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(names.filter((name) => name.endsWith('.jpg')).length)
+      expect(max.count()).toBe(names.filter((name) => name.endsWith('.mp4')).length)
+    } finally { await act(async () => root.unmount()); browser.restore(); max.restore(); globalThis.fetch = priorFetch }
+  })
+}
+
+test('MAX reserve canonicalizes MOV/MP4 metadata and accepts signed WebM', async () => {
+  const browser = installInteractiveDom()
+  const max = installMaxUpload()
+  const priorFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const transport = mixedTransport(requests)
   const root = createRoot(browser.container)
   try {
     await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    input.files = [file('a.jpg'), file('b.mp4', 128, 'video/mp4'), file('c.jpg'), file('d.mp4', 128, 'video/mp4')]
+    const webm = new File([Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3, 0x87, 0x42, 0x82, 0x84, ...new TextEncoder().encode('webm')), new Uint8Array(128)], 'clip.webm', { type: 'application/octet-stream' })
+    input.files = [file('one.jpg'), file('misnamed.mov', 128, 'video/mp4'), webm]
     await act(async () => invoke(input, 'onChange'))
-    const save = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
-    let saveTask!: Promise<unknown>
-    await act(async () => { saveTask = invoke(save, 'onClick'); await flushInteractive() })
-    expect(uploads).toHaveLength(1)
-    expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(1)
-    for (let index = 0; index < 4; index += 1) {
-      await act(async () => { uploads[index]!(); await flushInteractive() })
-      if (index < 3) {
-        expect(uploads).toHaveLength(index + 2)
-        expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(index + 2)
-      }
-    }
-    await act(async () => { await saveTask })
-    const memory = requests.find(({ path }) => path.endsWith('/memories'))
-    expect(memory?.body).toMatchObject({ kind: 'media', mediaIds: originals })
-    expect(memory?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
-  } finally {
-    await act(async () => root.unmount())
-    browser.restore()
-    globalThis.fetch = originalFetch
-  }
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    const reserves = requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve')).map(({ body }) => body)
+    expect(reserves).toHaveLength(2)
+    expect(reserves.map((body) => [body.fileName, body.mimeType])).toEqual([['misnamed.mp4', 'video/mp4'], ['clip.webm', 'video/webm']])
+    expect(max.names()).toEqual(['misnamed.mov', 'clip.webm'])
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(1)
+    expect(max.count()).toBe(2)
+  } finally { await act(async () => root.unmount()); browser.restore(); max.restore(); globalThis.fetch = priorFetch }
 })
 
-test('photo + video + photo publishes one media Memory with one caption and event time', async () => {
+test('MAX finalize retry and lost create response keep one session, bytes, and exact create key', async () => {
   const browser = installInteractiveDom()
-  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
-  const ids = ['00000000-0000-7000-8000-000000000031', '00000000-0000-7000-8000-000000000032', '00000000-0000-7000-8000-000000000033']
-  let next = 0
-  const transport: AuthenticatedTransport = {
-    request: async (path, _schema, options) => {
-      requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
-      if (path.endsWith('/uploads')) {
-        const index = next++
-        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 1 ? 'video/mp4' : 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
-      }
-      const uploadIndex = Number(path.match(/upload-(\d+)\/finalize/)?.[1] ?? 0)
-      if (path.includes('/finalize')) return { asset: { id: ids[uploadIndex] } } as never
-      return { id: 'memory-1' } as never
-    },
-    raw: async () => new Response(),
-  }
-  const originalFetch = globalThis.fetch
+  const max = installMaxUpload()
+  const priorFetch = globalThis.fetch
   globalThis.fetch = async () => new Response(null, { status: 200 })
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const base = mixedTransport(requests)
+  let maxFinalize = 0
+  let createCount = 0
+  let cancelCount = 0
+  const transport: AuthenticatedTransport = {
+    ...base,
+    request: async (path, schema, options) => {
+      if (path.includes('/max-video-uploads/') && path.endsWith('/finalize') && maxFinalize++ === 0) {
+        requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+        return { state: 'processing', sessionId: '00000000-0000-7000-8000-000000000032', retryable: true } as never
+      }
+      if (path.endsWith('/memories') && createCount++ === 0) {
+        requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+        throw new Error('response lost')
+      }
+      return base.request(path, schema, options)
+    },
+  }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => { cancelCount += 1 }, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.mp4', 128, 'video/mp4'), file('three.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(0)
+    const retry = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430')
+    await act(async () => { invoke(retry(), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(1)
+    expect(textOf(browser.container)).toContain('Повторите сохранение этой же заявки')
+    expect(findAll(browser.container, (node) => node.tagName === 'BUTTON' && (node.attributes['aria-label'] === 'Назад' || textOf(node).includes('\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f')))).toHaveLength(0)
+    expect(cancelCount).toBe(0)
+    await act(async () => { invoke(retry(), 'onClick'); await flushInteractive() })
+    const creates = requests.filter(({ path }) => path.endsWith('/memories'))
+    expect(creates).toHaveLength(2)
+    expect(creates[1]?.body).toEqual(creates[0]?.body)
+    expect(creates[1]?.headers).toEqual(creates[0]?.headers)
+    expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve'))).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.includes('/max-video-uploads/') && path.endsWith('/finalize'))).toHaveLength(2)
+    expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(2)
+    expect(max.count()).toBe(1)
+  } finally { await act(async () => root.unmount()); browser.restore(); max.restore(); globalThis.fetch = priorFetch }
+})
+
+test('cancel and back are disabled while a create response is unresolved', async () => {
+  const browser = installInteractiveDom()
+  const priorFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  let resolveCreate!: (value: { id: string }) => void
+  let cancelCount = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/uploads')) return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: 'upload-1', method: 'PUT', url: 'https://storage.test/one', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      if (path.includes('/finalize')) return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      return new Promise<{ id: string }>((resolve) => { resolveCreate = resolve }) as never
+    }, raw: async () => new Response(),
+  }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => { cancelCount += 1 }, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    const cancel = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041e\u0442\u043c\u0435\u043d\u0438\u0442\u044c')
+    const back = findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === '\u041d\u0430\u0437\u0430\u0434')
+    expect(cancel.disabled).toBe(true)
+    expect(back.disabled).toBe(true)
+    await act(async () => { invoke(cancel, 'onClick'); invoke(back, 'onClick') })
+    expect(cancelCount).toBe(0)
+    await act(async () => { resolveCreate({ id: 'memory-1' }); await flushInteractive() })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = priorFetch }
+})
+
+test('editing caption and date after video finalize reuses the MAX session and uploads', async () => {
+  const browser = installInteractiveDom()
+  const max = installMaxUpload()
+  const priorFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const base = mixedTransport(requests)
+  let photoReserves = 0
+  const transport: AuthenticatedTransport = {
+    ...base,
+    request: async (path, schema, options) => {
+      if (path.endsWith('/uploads') && photoReserves++ === 1) throw new Error('photo unavailable')
+      return base.request(path, schema, options)
+    },
+  }
   const root = createRoot(browser.container)
   try {
     await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    input.files = [file('a.jpg'), file('b.mp4', 128, 'video/mp4'), file('c.jpg')]
+    input.files = [file('one.jpg'), file('two.mp4', 128, 'video/mp4'), file('three.jpg')]
     await act(async () => invoke(input, 'onChange'))
+    const publish = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c'))
+    await act(async () => { invoke(publish(), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(0)
+    const back = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u044f\u043c')
+    await act(async () => invoke(back, 'onClick'))
     const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
-    caption.value = 'На прогулке'
+    caption.value = 'Updated caption'
     await act(async () => invoke(caption, 'onChange'))
     const date = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'date')
     date.value = '2026-09-20'
     await act(async () => invoke(date, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
-    const creates = requests.filter(({ path }) => path.endsWith('/memories'))
-    expect(creates).toHaveLength(1)
-    expect(creates[0]?.body).toMatchObject({ kind: 'media', body: 'На прогулке', occurredAt: expect.any(String), mediaIds: ids })
-    expect(creates[0]?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
-  } finally {
-    await act(async () => root.unmount())
-    browser.restore()
-    globalThis.fetch = originalFetch
-  }
+    await act(async () => { invoke(publish(), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve'))).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.includes('/max-video-uploads/') && path.endsWith('/finalize'))).toHaveLength(1)
+    expect(max.count()).toBe(1)
+    expect(String(requests.filter(({ path }) => path.endsWith('/memories'))[0]?.body.occurredAt)).toBe('2026-09-20T12:00:00.000Z')
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))[0]?.body).toMatchObject({ body: 'Updated caption' })
+    expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve'))[0]?.body.body).toBe('')
+  } finally { await act(async () => root.unmount()); browser.restore(); max.restore(); globalThis.fetch = priorFetch }
 })
 
-test('exactly one photo and one video publish one ordered media Memory', async () => {
+test('definitive create 422 unlocks editing while reusing finalized attachments', async () => {
   const browser = installInteractiveDom()
-  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
-  const ids = ['00000000-0000-7000-8000-000000000041', '00000000-0000-7000-8000-000000000042']
-  let next = 0
-  const transport: AuthenticatedTransport = {
-    request: async (path, _schema, options) => {
-      requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
-      if (path.endsWith('/uploads')) {
-        const index = next++
-        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 0 ? 'image/jpeg' : 'video/mp4' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
-      }
-      if (path.includes('/finalize')) return { asset: { id: ids[Number(path.match(/upload-(\d+)\/finalize/)?.[1] ?? 0)] } } as never
-      return { id: 'memory-1' } as never
-    },
-    raw: async () => new Response(),
-  }
-  const originalFetch = globalThis.fetch
+  const max = installMaxUpload()
+  const priorFetch = globalThis.fetch
   globalThis.fetch = async () => new Response(null, { status: 200 })
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const base = mixedTransport(requests)
+  let creates = 0
+  const transport: AuthenticatedTransport = {
+    ...base,
+    request: async (path, schema, options) => {
+      if (path.endsWith('/memories') && creates++ === 0) {
+        requests.push({ path, body: (options?.body ?? {}) as Record<string, unknown>, headers: options?.headers })
+        throw new ApiRequestError(422, 'VALIDATION_ERROR', 'invalid')
+      }
+      return base.request(path, schema, options)
+    },
+  }
   const root = createRoot(browser.container)
   try {
     await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     input.files = [file('one.jpg'), file('two.mp4', 128, 'video/mp4')]
     await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
-    const creates = requests.filter(({ path }) => path.endsWith('/memories'))
-    expect(creates).toHaveLength(1)
-    expect(creates[0]?.body).toMatchObject({ kind: 'media', mediaIds: ids })
-    expect(creates[0]?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
-  } finally {
-    await act(async () => root.unmount())
-    browser.restore()
-    globalThis.fetch = originalFetch
-  }
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u044f\u043c'), 'onClick'))
+    const caption = findOne(browser.container, (node) => node.tagName === 'TEXTAREA')
+    expect(caption.disabled).toBe(false)
+    caption.value = 'Corrected'
+    await act(async () => invoke(caption, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    const posted = requests.filter(({ path }) => path.endsWith('/memories'))
+    expect(posted).toHaveLength(2)
+    expect(posted[1]?.body.body).toBe('Corrected')
+    expect(posted[1]?.headers).not.toEqual(posted[0]?.headers)
+    expect(max.count()).toBe(1)
+    expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve'))).toHaveLength(1)
+  } finally { await act(async () => root.unmount()); browser.restore(); max.restore(); globalThis.fetch = priorFetch }
+})
+
+test('oversize video error reports actual decimal File.size', async () => {
+  const browser = installInteractiveDom()
+  const transport: AuthenticatedTransport = { request: async () => ({}) as never, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [sizedFile('clip.mov', 262_144_000, 'video/quicktime')]
+    await act(async () => invoke(input, 'onChange'))
+    expect(textOf(browser.container)).toContain('262,1')
+    expect(textOf(browser.container)).toContain('250')
+    expect(textOf(browser.container).replace(/\s/g, '')).toContain('262144000байт')
+    input.files = [sizedFile('edge.mov', 250_000_001, 'video/quicktime')]
+    await act(async () => invoke(input, 'onChange'))
+    expect(textOf(browser.container).replace(/\s/g, '')).toContain('250000001байт')
+  } finally { await act(async () => root.unmount()); browser.restore() }
 })
 
 test('mixed selection accepts one to ten photo/video items and rejects eleven or unsupported video', () => {
@@ -166,8 +318,8 @@ test('mixed selection accepts one to ten photo/video items and rejects eleven or
   expect(validateComposerFiles([file('one.jpg'), file('clip.mov', 128, 'video/quicktime')])).toEqual({ ok: true })
   expect(validateComposerFiles(Array.from({ length: 10 }, (_, index) => index % 2 ? file(`${index}.mp4`, 128, 'video/mp4') : file(`${index}.jpg`)))).toEqual({ ok: true })
   expect(validateComposerFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`))).code).toBe('too_many')
-  expect(validateComposerFiles([file('large.mp4', 100_000_001, 'video/mp4')]).ok).toBe(false)
-  expect(validateComposerFiles([file('unsupported.webm', 128, 'video/webm')]).ok).toBe(false)
+  expect(validateComposerFiles([sizedFile('large.mp4', 250_000_001)]).ok).toBe(false)
+  expect(validateComposerFiles([file('unsupported.webm', 128, 'video/webm')]).ok).toBe(true)
   expect(validateComposerFiles([file('wrong.mp4', 128, 'image/jpeg')]).ok).toBe(false)
   expect(validateComposerFiles([file('wrong.jpg', 128, 'video/mp4')]).ok).toBe(false)
   expect(validateComposerFiles([new File([new Uint8Array(128)], 'extension-only.mp4')])).toEqual({ ok: true })
@@ -196,7 +348,24 @@ test('ambiguous iPhone files use actual supported signatures, not extension alon
   expect(await verifyComposerFile(fake)).toBeNull()
   expect(await verifyComposerFile(new File([Uint8Array.of(0xff, 0xd8, 0xff, ...Array(61).fill(0))], 'IMG_4'))).toEqual({ kind: 'photo', contentType: 'image/jpeg' })
   const mismatchedVideo = new File([new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode('ftypqt  '), ...Array(52).fill(0)])], 'misdeclared.mov', { type: 'video/mp4' })
-  expect(await verifyComposerFile(mismatchedVideo)).toBeNull()
+  expect(await verifyComposerFile(mismatchedVideo)).toEqual({ kind: 'video', contentType: 'video/quicktime' })
+})
+
+test('WebM and Matroska require a valid EBML DocType and canonical MIME', async () => {
+  const ebml = (docType: string, name: string, type: string) => {
+    const value = new TextEncoder().encode(docType)
+    return new File([Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3, 0x80 | (3 + value.length), 0x42, 0x82, 0x80 | value.length, ...value), new Uint8Array(128)], name, { type })
+  }
+  const webm = ebml('webm', 'clip.webm', 'application/octet-stream')
+  const mkv = ebml('matroska', 'clip.mkv', 'video/x-matroska')
+  expect(validateComposerFiles([webm, mkv])).toEqual({ ok: true })
+  expect(await verifyComposerFile(webm)).toEqual({ kind: 'video', contentType: 'video/webm' })
+  expect(await verifyComposerFile(mkv)).toEqual({ kind: 'video', contentType: 'video/x-matroska' })
+  expect(await verifyComposerFile(ebml('unknown', 'bad.webm', 'video/webm'))).toBeNull()
+  expect(await verifyComposerFile(new File([new Uint8Array(128)], 'bad.mkv', { type: 'video/x-matroska' }))).toBeNull()
+  expect(await verifyComposerFile(new File([Uint8Array.of(0, 0, 0, 0, ...new TextEncoder().encode('ftypzzzz')), new Uint8Array(128)], 'bad.mp4', { type: 'video/mp4' }))).toBeNull()
+  const mislabeled = file('video.mov', 128, 'video/mp4')
+  expect(await verifyComposerFile(mislabeled)).toEqual({ kind: 'video', contentType: 'video/mp4' })
 })
 
 test('preflights every selected signature before reserving any item', async () => {
@@ -210,7 +379,7 @@ test('preflights every selected signature before reserving any item', async () =
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     input.files = [file('good.jpg'), new File([new TextEncoder().encode('<svg>unsafe</svg>'.padEnd(128))], 'bad.jpg', { type: 'image/jpeg' })]
     await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
     expect([reserves, creates]).toEqual([0, 0])
     expect(textOf(browser.container)).toContain('Файл не соответствует поддерживаемому формату')
   } finally { await act(async () => root.unmount()); browser.restore() }
@@ -236,7 +405,7 @@ test('extensionless generic iPhone JPEG publishes with detected MIME', async () 
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     input.files = [new File([Uint8Array.of(0xff, 0xd8, 0xff, ...Array(125).fill(0))], 'IMG_2026')]
     await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
     expect([reservedType, createdKind]).toEqual(['image/jpeg', 'photo'])
   } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
 })
@@ -270,7 +439,7 @@ test('transient 502 PUT retries the same signed URL before finalize and creates 
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
     input.files = [file('one.jpg')]
     await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
     expect([reserves, puts, finalizes, creates]).toEqual([1, 2, 1, 1])
   } finally {
     await act(async () => root.unmount())
@@ -279,56 +448,142 @@ test('transient 502 PUT retries the same signed URL before finalize and creates 
   }
 })
 
-test('mixed upload failure waits for all items and blocks publication until retry completes', async () => {
+test('lost MAX upload response finalizes the same session without resending bytes', async () => {
   const browser = installInteractiveDom()
-  const creates: Array<Record<string, unknown>> = []
-  const ids = ['00000000-0000-7000-8000-000000000011', '00000000-0000-7000-8000-000000000012', '00000000-0000-7000-8000-000000000013']
-  const reservationAssets = new Map<string, string>()
-  let reservation = 0
-  let photoAttempts = 0
-  const transport: AuthenticatedTransport = {
-    request: async (path, _schema, options) => {
-      if (path.endsWith('/uploads')) {
-        const index = reservation++
-        const assetId = ids[index]!
-        reservationAssets.set(`upload-${index}`, assetId)
-        return { assetId, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': index === 0 || index === 2 ? 'image/jpeg' : 'video/mp4' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
-      }
-      if (path.includes('/finalize')) {
-        const uploadId = path.match(/(upload-\d+)\/finalize/)?.[1] ?? ''
-        return { asset: { id: reservationAssets.get(uploadId) } } as never
-      }
-      if (path.endsWith('/memories')) creates.push(options?.body as Record<string, unknown>)
-      return { id: 'memory-1' } as never
-    },
-    raw: async () => new Response(),
+  const priorXHR = globalThis.XMLHttpRequest
+  const priorFetch = globalThis.fetch
+  let uploads = 0
+  class FailOnceXHR {
+    upload = { addEventListener: () => undefined }
+    status = 200
+    listeners: Record<string, () => void> = {}
+    open() {}
+    send() { uploads += 1; queueMicrotask(() => { if (uploads === 1) this.listeners.error?.(); else this.listeners.load?.() }) }
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
   }
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (url) => {
-    if (String(url).endsWith('/0') && photoAttempts++ === 0) return new Response(null, { status: 400 })
-    return new Response(null, { status: 200 })
+  // @ts-expect-error focused browser transport double
+  globalThis.XMLHttpRequest = FailOnceXHR
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
+  const transport = mixedTransport(requests)
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(0)
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430'), 'onClick'); await flushInteractive() })
+    expect(requests.filter(({ path }) => path.endsWith('/memories'))).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.endsWith('/max-video-uploads/reserve'))).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.includes('/max-video-uploads/') && path.endsWith('/finalize'))).toHaveLength(1)
+    expect(uploads).toBe(1)
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR; globalThis.fetch = priorFetch }
+})
+
+test('ambiguous MAX upload stays blocked after processing then expiry until explicit reselection', async () => {
+  const browser = installInteractiveDom()
+  const priorXHR = globalThis.XMLHttpRequest
+  let uploads = 0
+  class LostResponseXHR {
+    upload = { addEventListener: () => undefined }
+    status = 200
+    listeners: Record<string, () => void> = {}
+    open() {}
+    send() { uploads += 1; queueMicrotask(() => this.listeners.error?.()) }
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+  }
+  // @ts-expect-error focused browser transport double
+  globalThis.XMLHttpRequest = LostResponseXHR
+  let reserves = 0
+  let finalizes = 0
+  let creates = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/max-video-uploads/reserve')) {
+        reserves += 1
+        return { state: 'reserved', sessionId: '00000000-0000-7000-8000-000000000032', expiresAt: '2026-09-22T00:05:00.000Z', uploadUrl: 'https://max.test/opaque', uploadToken: 'opaque-token' } as never
+      }
+      if (path.includes('/max-video-uploads/') && path.endsWith('/finalize')) {
+        finalizes += 1
+        return finalizes === 1
+          ? { state: 'processing', sessionId: '00000000-0000-7000-8000-000000000032', retryable: true, code: 'attachment_not_ready' } as never
+          : { state: 'expired', sessionId: '00000000-0000-7000-8000-000000000032', retryable: false, code: 'upload_expired' } as never
+      }
+      if (path.endsWith('/memories')) creates += 1
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
   }
   const root = createRoot(browser.container)
   try {
     await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
     const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    input.files = [file('fail.jpg'), file('ready.mp4', 128, 'video/mp4')]
+    input.files = [file('clip.mp4', 128, 'video/mp4')]
     await act(async () => invoke(input, 'onChange'))
-    const publish = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
-    await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
-    expect(creates).toHaveLength(0)
-    expect(textOf(browser.container)).toContain('Не удалось загрузить медиа')
-    expect(textOf(browser.container)).toContain('Не удалось загрузить фото или видео')
-    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Вернуться к вложениям'), 'onClick'))
-    expect(textOf(browser.container)).toContain('Ошибка загрузки')
-    await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
-    expect(creates).toHaveLength(1)
-    expect(creates[0]).toMatchObject({ kind: 'media', mediaIds: [ids[2], ids[1]] })
-  } finally {
-    await act(async () => root.unmount())
-    browser.restore()
-    globalThis.fetch = originalFetch
+    const publish = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c'))
+    const retry = () => findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430')
+    await act(async () => { invoke(publish(), 'onClick'); await flushInteractive() })
+    await act(async () => { invoke(retry(), 'onClick'); await flushInteractive() })
+    expect([reserves, uploads, finalizes, creates]).toEqual([1, 1, 1, 0])
+    await act(async () => { invoke(retry(), 'onClick'); await flushInteractive() })
+    expect([reserves, uploads, finalizes, creates]).toEqual([1, 1, 2, 0])
+    expect(textOf(browser.container)).toContain('\u0423\u0434\u0430\u043b\u0438\u0442\u0435 \u044d\u0442\u043e \u0432\u0438\u0434\u0435\u043e')
+    expect(findAll(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430')).toHaveLength(0)
+    const back = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u044f\u043c')
+    await act(async () => invoke(back, 'onClick'))
+    expect(publish().disabled).toBe(true)
+    expect([reserves, uploads, finalizes, creates]).toEqual([1, 1, 2, 0])
+    const remove = findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === '\u0423\u0434\u0430\u043b\u0438\u0442\u044c clip.mp4')
+    await act(async () => invoke(remove, 'onClick'))
+    expect([reserves, uploads, finalizes, creates]).toEqual([1, 1, 2, 0])
+    const picker = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    expect(picker.disabled).toBe(false)
+    picker.files = [file('clip.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(picker, 'onChange'))
+    await act(async () => { invoke(publish(), 'onClick'); await flushInteractive() })
+    expect([reserves, uploads]).toEqual([2, 2])
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('successful MAX transfer processing then expiry never silently reuploads', async () => {
+  const browser = installInteractiveDom()
+  const max = installMaxUpload()
+  let reserves = 0
+  let finalizes = 0
+  let creates = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/max-video-uploads/reserve')) {
+        reserves += 1
+        return { state: 'reserved', sessionId: '00000000-0000-7000-8000-000000000032', expiresAt: '2026-09-22T00:05:00.000Z', uploadUrl: 'https://max.test/opaque', uploadToken: 'opaque-token' } as never
+      }
+      if (path.includes('/max-video-uploads/') && path.endsWith('/finalize')) {
+        finalizes += 1
+        return finalizes === 1
+          ? { state: 'processing', sessionId: '00000000-0000-7000-8000-000000000032', retryable: true, code: 'attachment_not_ready' } as never
+          : { state: 'expired', sessionId: '00000000-0000-7000-8000-000000000032', retryable: false, code: 'upload_expired' } as never
+      }
+      if (path.endsWith('/memories')) creates += 1
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
   }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('clip.mp4', 128, 'video/mp4')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c')), 'onClick'); await flushInteractive() })
+    const retry = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430')
+    await act(async () => { invoke(retry, 'onClick'); await flushInteractive() })
+    expect([reserves, max.count(), finalizes, creates]).toEqual([1, 1, 2, 0])
+    expect(textOf(browser.container)).toContain('\u0423\u0434\u0430\u043b\u0438\u0442\u0435 \u044d\u0442\u043e \u0432\u0438\u0434\u0435\u043e')
+    expect(findAll(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === '\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430')).toHaveLength(0)
+  } finally { await act(async () => root.unmount()); browser.restore(); max.restore() }
 })
 
 test('duplicate finalized asset IDs block the single Memory request', async () => {
@@ -699,39 +954,16 @@ for (const count of [6, 10]) {
   })
 }
 
-test('publishes JPEG, QuickTime MOV, transcoded MOV/MP4, and iOS HEIC in selected order as one mixed Memory', async () => {
-  const browser = installInteractiveDom()
-  const assetIds = [1, 2, 3, 4, 5].map((index) => `00000000-0000-7000-8000-${String(index).padStart(12, '0')}`)
-  const reserves: Array<Record<string, unknown>> = []
-  let puts = 0
-  let finalizes = 0
-  const creates: Array<Record<string, unknown>> = []
-  const transport: AuthenticatedTransport = {
-    request: async (path, _schema, options) => {
-      if (path.endsWith('/uploads')) {
-        reserves.push(options?.body as Record<string, unknown>)
-        const index = reserves.length - 1
-        return { assetId: assetIds[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': reserves[index]!.contentType }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
-      }
-      if (path.includes('/finalize')) { finalizes += 1; return { asset: { id: assetIds[finalizes - 1] } } as never }
-      creates.push(options?.body as Record<string, unknown>)
-      return { id: 'memory-1' } as never
-    }, raw: async () => new Response(),
-  }
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => { puts += 1; return new Response(null, { status: 200 }) }
-  const root = createRoot(browser.container)
-  try {
-    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
-    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-    input.files = [file('first.jpg'), file('clip.mov', 128, 'video/x-quicktime'), file('transcoded.mov', 128, 'video/mp4'), file('quicktime.mp4', 128, 'video/quicktime'), file('last.heic', 128, 'image/heic-sequence')]
-    await act(async () => invoke(input, 'onChange'))
-    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
-    expect(reserves.map((body) => [body.kind, body.contentType])).toEqual([['photo', 'image/jpeg'], ['video', 'video/quicktime'], ['video', 'video/mp4'], ['video', 'video/quicktime'], ['photo', 'image/heic']])
-    expect([puts, finalizes]).toEqual([5, 5])
-    expect(creates).toHaveLength(1)
-    expect(creates[0]).toMatchObject({ kind: 'media', mediaIds: assetIds })
-  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+test('synthetic 72.3 MB QuickTime MOV and generic MIME are accepted by signature', async () => {
+  const mov = sizedFile('clip.mov', 72_300_000, 'video/quicktime')
+  expect(validateComposerFiles([mov])).toEqual({ ok: true })
+  expect(await verifyComposerFile(mov)).toEqual({ kind: 'video', contentType: 'video/quicktime' })
+  const generic = new File([new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode('ftypqt  '), ...Array(116).fill(0)])], 'clip.mov', { type: 'application/octet-stream' })
+  expect(await verifyComposerFile(generic)).toEqual({ kind: 'video', contentType: 'video/quicktime' })
+  expect(validateComposerFiles([sizedFile('edge.mp4', 250_000_000)])).toEqual({ ok: true })
+  expect(validateComposerFiles([sizedFile('over.mp4', 250_000_001)])).toEqual({ ok: false, code: 'too_large_video' })
+  expect(validateComposerFiles([sizedFile('binary.mp4', 262_144_000)])).toEqual({ ok: false, code: 'too_large_video' })
+  expect(await verifyComposerFile(new File([new Uint8Array(128)], 'bad.mov', { type: 'video/quicktime' }))).toBeNull()
 })
 
 test('expired reservation rotates only its file key and retains the Memory key', async () => {

@@ -64,6 +64,17 @@ describe('memory contracts', () => {
     expect(() => createMemoryRequestSchema.parse({ ...input, mediaIds: [...mediaIds, '018f01d8-0c2a-7c25-bf83-ae68985c7e10'] })).toThrow()
   })
 
+  test('accepts ordered private and MAX references with unique IDs', () => {
+    const mediaId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'
+    const sessionId = '018f01d8-0c2a-7c25-bf83-ae68985c7e92'
+    const input = { kind: 'media' as const, childId, body: '', occurredAt: '2026-09-09T10:00:00.000Z', attachments: [
+      { source: 'private_storage' as const, mediaId }, { source: 'max' as const, sessionId },
+    ] }
+    expect(createMemoryRequestSchema.parse(input)).toEqual(input)
+    expect(createMemoryRequestSchema.safeParse({ ...input, attachments: [input.attachments[1], input.attachments[1]] }).success).toBe(false)
+    expect(createMemoryRequestSchema.safeParse({ ...input, mediaIds: [mediaId] }).success).toBe(false)
+  })
+
   test('defaults feed limit to 20 and caps it at 50', () => {
     expect(listMemoriesQuerySchema.parse({})).toMatchObject({ limit: 20 })
     expect(() => listMemoriesQuerySchema.parse({ limit: '51' })).toThrow()

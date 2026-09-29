@@ -61,17 +61,36 @@ export class PrismaMemoryRepository implements MemoryRepository {
 
         const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
         const firstPublishedAt = firstPublicationTime()
+        const attachments = input.kind === 'media'
+          ? input.attachments ?? (input.mediaIds ?? []).map((mediaId) => ({ source: 'private_storage' as const, mediaId }))
+          : input.kind === 'note' ? [] : input.mediaIds.map((mediaId) => ({ source: 'private_storage' as const, mediaId }))
+        const mediaIds = attachments.flatMap((entry) => entry.source === 'private_storage' ? [entry.mediaId] : [])
+        const sessionIds = attachments.flatMap((entry) => entry.source === 'max' ? [entry.sessionId] : [])
         if (input.kind !== 'note') {
-          await lockMediaAssets(tx, scope.familyId, input.mediaIds)
+          if (attachments.length < 1 || attachments.length > 10 || new Set(sessionIds).size !== sessionIds.length) {
+            throw new MemoryFailure('invalid_input', 'Неподходящий состав вложений')
+          }
+          await lockMediaAssets(tx, scope.familyId, mediaIds)
           const assetKinds = await tx.mediaAsset.findMany({ where: {
-            id: { in: input.mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
+            id: { in: mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
             memories: { none: {} },
           }, select: { id: true, mediaKind: true } })
           const expected = input.kind === 'media' ? ['photo', 'video'] : [input.kind]
-          if (assetKinds.length !== input.mediaIds.length || new Set(input.mediaIds).size !== input.mediaIds.length ||
+          if (assetKinds.length !== mediaIds.length || new Set(mediaIds).size !== mediaIds.length ||
               assetKinds.some(({ mediaKind }) => !expected.includes(mediaKind))) {
-            throw new MemoryFailure('invalid_input', 'Медиа не подходит для этого воспоминания')
+            throw new MemoryFailure('media_unavailable', 'Медиа недоступно для публикации')
           }
+        }
+        for (const sessionId of [...sessionIds].sort()) {
+          await tx.$queryRaw`SELECT id FROM max_video_upload_sessions WHERE id = ${sessionId}::uuid AND family_id = ${scope.familyId}::uuid FOR UPDATE`
+        }
+        const sessions = sessionIds.length ? await tx.maxVideoUploadSession.findMany({
+          where: { id: { in: sessionIds }, familyId: scope.familyId, authorId: scope.principal.userId,
+            childId: input.childId, mode: 'attachment', state: 'finalized' },
+          include: { outboundSource: { include: { videoReference: true } } },
+        }) : []
+        if (sessions.length !== sessionIds.length || sessions.some((session) => !session.outboundSource || session.outboundSource.videoReference)) {
+          throw new MemoryFailure('invalid_input', 'Видео MAX не готово или уже использовано')
         }
 
         const created = await tx.memory.create({
@@ -88,14 +107,24 @@ export class PrismaMemoryRepository implements MemoryRepository {
           include: memoryInclude(),
         })
         if (input.kind !== 'note') {
-          await tx.memoryMedia.createMany({
-            data: input.mediaIds.map((mediaId, position) => ({
+          if (mediaIds.length) await tx.memoryMedia.createMany({
+            data: attachments.flatMap((entry, position) => entry.source === 'private_storage' ? [{
               familyId: scope.familyId,
               memoryId: created.id,
-              mediaId,
+              mediaId: entry.mediaId,
               position,
-            })),
+            }] : []),
           })
+          for (const [position, entry] of attachments.entries()) {
+            if (entry.source !== 'max') continue
+            const source = sessions.find((session) => session.id === entry.sessionId)?.outboundSource
+            if (!source) throw new MemoryFailure('invalid_input', 'Видео MAX не найдено')
+            await tx.maxVideoReference.create({ data: {
+              familyId: scope.familyId, memoryId: created.id, outboundSourceId: source.id,
+              attachmentPosition: position, providerAttachmentId: source.providerAttachmentId,
+              width: source.width, height: source.height, durationMs: source.durationMs,
+            } })
+          }
         }
         const memory = input.kind === 'note' ? created : await tx.memory.findUniqueOrThrow({
           where: { id: created.id }, include: memoryInclude(),
@@ -505,8 +534,9 @@ function memoryInclude() {
     telegramVideoReference: {
       select: { id: true, width: true, height: true, durationMs: true, thumbnailMedia: { select: { id: true, variants: { select: { variant: true } } } } },
     },
-    maxVideoReference: {
-      select: { id: true, width: true, height: true, durationMs: true },
+    maxVideoReferences: {
+      orderBy: { attachmentPosition: 'asc' as const },
+      select: { id: true, attachmentPosition: true, width: true, height: true, durationMs: true },
     },
   } as const
 }
@@ -527,7 +557,7 @@ function dto(
     status: 'processing' | 'published' | 'failed' | 'deleted'
     author: { displayName: string | null; avatars: Array<{ id: string }>; familyMemberships: Array<{ familyId: string }> }
     likes: Array<{ userId: string }>
-    media: Array<{ asset: {
+    media: Array<{ position: number; asset: {
       id: string
       mediaKind: 'photo' | 'video' | 'voice'
       width: number | null
@@ -538,7 +568,7 @@ function dto(
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
     telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
-    maxVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null } | null
+    maxVideoReferences: Array<{ id: string; attachmentPosition: number; width: number | null; height: number | null; durationMs: number | null }>
   },
   principalUserId: string,
   role: MemberRole,
@@ -560,10 +590,10 @@ function dto(
     version: memory.version,
     status: memory.status,
     attachments: [
-      ...memory.media.map(({ asset }) => {
+      ...memory.media.map(({ asset, position }) => {
       const path = (variant: string) => `/api/v1/families/${memory.familyId}/media/${asset.id}/content?variant=${variant}`
       const variants = new Set(asset.variants.map(({ variant }) => variant))
-      return {
+      return { position, attachment: {
         id: asset.id,
         source: 'private_storage' as const,
         kind: asset.mediaKind,
@@ -576,9 +606,9 @@ function dto(
         playbackPath: variants.has('playback') ? path('playback') : null,
         originalDownloadPath: path('original'),
         waveform: measuredWaveform(asset.waveform),
-      }
+      } }
       }),
-      ...(memory.telegramVideoReference ? [{
+      ...(memory.telegramVideoReference ? [{ position: memory.media.length, attachment: {
         id: memory.telegramVideoReference.id,
         source: 'telegram' as const,
         kind: 'video' as const,
@@ -589,17 +619,17 @@ function dto(
           ? `/api/v1/families/${memory.familyId}/media/${memory.telegramVideoReference.thumbnailMedia.id}/content?variant=display`
           : null,
         openInTelegramPath: `/api/v1/families/${memory.familyId}/memories/${memory.id}/telegram-video`,
-      }] : []),
-      ...(memory.maxVideoReference ? [{
-        id: memory.maxVideoReference.id,
+      } }] : []),
+      ...memory.maxVideoReferences.map((reference) => ({ position: reference.attachmentPosition, attachment: {
+        id: reference.id,
         source: 'max' as const,
         kind: 'video' as const,
-        width: memory.maxVideoReference.width,
-        height: memory.maxVideoReference.height,
-        durationMs: memory.maxVideoReference.durationMs,
-        playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${memory.maxVideoReference.id}/content`,
-      }] : []),
-    ],
+        width: reference.width,
+        height: reference.height,
+        durationMs: reference.durationMs,
+        playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${reference.id}/content`,
+      } })),
+    ].sort((a, b) => a.position - b.position).map((entry) => entry.attachment),
     likes: {
       count: memory.likes.length,
       likedByMe: memory.likes.some((like) => like.userId === principalUserId),

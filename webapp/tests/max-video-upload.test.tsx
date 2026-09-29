@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
-  MAX_VIDEO_BYTES,
   createIdempotencyKey,
   finalizeMaxVideo,
   reserveMaxVideo,
@@ -16,14 +16,25 @@ import { uploadVideoToMax } from '../src/features/max-video-upload/xhr-upload'
 import { ApiRequestError, type AuthenticatedTransport } from '../src/platform/api'
 
 function file(name: string, size = 10, type = 'video/mp4') {
-  return new File([new Uint8Array(size)], name, { type })
+  const selected = new File([new Uint8Array(Math.min(size, 10))], name, { type })
+  Object.defineProperty(selected, 'size', { value: size })
+  return selected
 }
 
 test('accepts only supported video extensions and the 250 MB cap', () => {
+  expect(MAX_DIRECT_VIDEO_MAX_BYTES).toBe(250_000_000)
+  for (const size of [72_300_000, 249_999_999, 250_000_000]) {
+    expect(validateVideoFile(file('first.mp4', size))).toEqual({ ok: true })
+  }
+  for (const size of [250_000_001, 250 * 1024 * 1024]) {
+    expect(validateVideoFile(file('first.mp4', size))).toEqual({ ok: false, code: 'too_large' })
+  }
   expect(validateVideoFile(file('first.mp4'))).toEqual({ ok: true })
   expect(validateVideoFile(file('first.MOV', 10, ''))).toEqual({ ok: true })
+  expect(validateVideoFile(file('first.mov', 10, 'video/quicktime'))).toEqual({ ok: true })
+  expect(validateVideoFile(file('first.mp4', 10, 'application/octet-stream'))).toEqual({ ok: false, code: 'unsupported_format' })
   expect(validateVideoFile(file('first.avi'))).toEqual({ ok: false, code: 'unsupported_format' })
-  expect(validateVideoFile(file('first.webm', MAX_VIDEO_BYTES + 1))).toEqual({ ok: false, code: 'too_large' })
+  expect(validateVideoFile(file('first.webm', MAX_DIRECT_VIDEO_MAX_BYTES + 1))).toEqual({ ok: false, code: 'too_large' })
 })
 
 test('redacts provider URL and token from upload errors and sends no Authorization header', async () => {

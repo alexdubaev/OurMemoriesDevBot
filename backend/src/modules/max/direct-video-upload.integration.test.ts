@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
@@ -90,7 +90,7 @@ function repository(initial = session()) {
     },
     createOutboundSource: async (input) => {
       outbound += 1
-      return { id: '77777777-7777-4777-8777-777777777777', ...input, createdAt: new Date(), updatedAt: new Date() }
+      return { id: '77777777-7777-4777-8777-777777777777', ...input, width: input.width ?? null, height: input.height ?? null, durationMs: input.durationMs ?? null, createdAt: new Date(), updatedAt: new Date() }
     },
     find: async () => current,
     claim: async () => {
@@ -106,6 +106,22 @@ function repository(initial = session()) {
 }
 
 describe('MAX direct video upload application service', () => {
+  test('finalizes attachment mode without publishing a standalone Memory and replays session ID', async () => {
+    const state = repository(session({ mode: 'attachment', body: '' }))
+    let publishes = 0
+    let sends = 0
+    const service = createMaxDirectVideoUploadService({ access: access(), api: api({
+      sendVideoMessage: async (input) => { sends += 1; expect(input.text).toBe('Видео для воспоминания'); return { messageId: 'message-1' } },
+    }), repository: state.repository, publisher: { publish: async () => { publishes += 1; return 'memory-id' } },
+      now: () => new Date('2026-09-20T10:00:00.000Z') })
+    const first = await service.finalize(scope, state.getSession().id, 'provider-token')
+    const replay = await service.finalize(scope, state.getSession().id, 'provider-token')
+    expect(first).toEqual({ state: 'finalized', sessionId: state.getSession().id })
+    expect(replay).toEqual(first)
+    expect(sends).toBe(1)
+    expect(publishes).toBe(0)
+    expect(state.getOutbound()).toBe(1)
+  })
   test('reserves only supported metadata and does not issue a second durable session on idempotent retry', async () => {
     const state = repository()
     let capabilityCalls = 0
@@ -131,8 +147,12 @@ describe('MAX direct video upload application service', () => {
     expect(state.getSession().providerUploadToken).toBe('provider-token-1')
     await expect(service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
       fileName: 'clip.exe', fileSize: 128, mimeType: 'application/octet-stream', idempotencyKey: 'bad' })).rejects.toMatchObject({ kind: 'invalid_input' })
+    for (const fileSize of [250_000_001, 250 * 1024 * 1024, 250 * 1024 * 1024 + 1]) {
+      await expect(service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
+        fileName: 'clip.mp4', fileSize, mimeType: 'video/mp4', idempotencyKey: 'large' })).rejects.toMatchObject({ kind: 'invalid_input' })
+    }
     await expect(service.reserve(scope, { childId, body: 'caption', occurredAt: '2026-09-20T10:00:00.000Z',
-      fileName: 'clip.mp4', fileSize: 250 * 1024 * 1024 + 1, mimeType: 'video/mp4', idempotencyKey: 'large' })).rejects.toMatchObject({ kind: 'invalid_input' })
+      fileName: 'clip.mp4', fileSize: 250_000_000, mimeType: 'video/mp4', idempotencyKey: 'boundary' })).resolves.toMatchObject({ sessionId: first.sessionId })
   })
 
   test('recovers one capability after durable token persistence fails', async () => {
@@ -185,6 +205,10 @@ describe('MAX direct video upload application service', () => {
 
     expect(fingerprints).toHaveLength(2)
     expect(fingerprints[0]).not.toBe(fingerprints[1])
+    expect(fingerprints[0]).toBe(createHash('sha256').update(JSON.stringify({
+      idempotencyKey: 'operation-a', childId, body: input.body, occurredAt: input.occurredAt,
+      fileName: input.fileName, fileSize: input.fileSize, mimeType: input.mimeType,
+    })).digest('hex'))
   })
 
   test('rejects captions above 4000 Unicode code points while accepting the boundary', async () => {

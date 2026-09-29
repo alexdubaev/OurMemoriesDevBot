@@ -1,8 +1,8 @@
 import { z } from 'zod'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
 
-export const MAX_VIDEO_BYTES = 250 * 1024 * 1024
 const acceptedExtensions = new Set(['mp4', 'mov', 'mkv', 'webm'])
 const acceptedMimeTypes = new Set(['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm'])
 
@@ -30,7 +30,7 @@ export type VideoFileValidation =
 export function validateVideoFile(file: File): VideoFileValidation {
   const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
   if (!acceptedExtensions.has(extension)) return { ok: false, code: 'unsupported_format' }
-  if (file.size > MAX_VIDEO_BYTES) return { ok: false, code: 'too_large' }
+  if (file.size > MAX_DIRECT_VIDEO_MAX_BYTES) return { ok: false, code: 'too_large' }
   if (file.type && !acceptedMimeTypes.has(file.type)) return { ok: false, code: 'unsupported_format' }
   return { ok: true }
 }
@@ -46,11 +46,11 @@ export type MaxVideoFinalize = z.infer<typeof finalizeResponseSchema>
 export function reserveMaxVideo(
   transport: AuthenticatedTransport,
   familyId: string,
-  input: { childId: string; body: string; occurredAt: string; file: File; idempotencyKey?: string },
+  input: { childId: string; body: string; occurredAt: string; file: File; idempotencyKey?: string; mode?: 'attachment'; mimeType?: string; fileName?: string },
   signal?: AbortSignal,
 ) {
   const extension = input.file.name.split('.').pop()?.toLowerCase() ?? ''
-  const mimeType = input.file.type || mimeTypeForExtension(extension)
+  const mimeType = input.mimeType ?? (input.file.type || mimeTypeForExtension(extension))
   return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}/max-video-uploads/reserve`, reserveResponseSchema, {
     method: 'POST',
     signal,
@@ -58,9 +58,10 @@ export function reserveMaxVideo(
       childId: input.childId,
       body: input.body.trim(),
       occurredAt: input.occurredAt,
-      fileName: input.file.name,
+      fileName: input.fileName ?? input.file.name,
       fileSize: input.file.size,
       mimeType,
+      ...(input.mode ? { mode: input.mode } : {}),
       idempotencyKey: input.idempotencyKey ?? createIdempotencyKey(),
     },
   })
