@@ -19,6 +19,7 @@ import { createPrismaIdempotencyExecutor } from '../../idempotency'
 import { createAuthModule } from '../auth'
 import { createMaxDirectVideoUploadRoutes } from './transport/direct-video-upload-routes'
 import { disabledEmailDelivery } from '../../email'
+import { createMaxMemoryBackupProcessor, createPrismaMaxMemoryBackupRepository } from './infrastructure/backup-media'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
@@ -83,9 +84,15 @@ export function createMaxTasks(runtime: BackendRuntime) {
     download: createMaxMediaDownload(),
     resolveInviteStart: createInviteStartResolver(runtime.prisma),
   })
+  const processBackupMedia = createMaxMemoryBackupProcessor({
+    repository: createPrismaMaxMemoryBackupRepository(runtime.prisma),
+    storage: runtime.privateStorage.storage,
+    api,
+  })
   return {
     process: (payload: unknown, signal?: AbortSignal) => processTask(payload, signal),
     deliverResponse: createMaxResponseDelivery({ prisma: runtime.prisma, api }),
+    backupMedia: processBackupMedia,
   }
 }
 

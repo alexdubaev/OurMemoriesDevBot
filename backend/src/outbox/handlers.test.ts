@@ -10,6 +10,7 @@ describe('the task type registry', () => {
   test('registers MAX processing and independent response delivery lazily', () => {
     expect(isTaskType('max:process')).toBe(true)
     expect(isTaskType('max:deliver-response')).toBe(true)
+    expect(isTaskType('max:backup-media')).toBe(true)
     expect(taskHandlers['max:process']!.maxAttempts).toBe(5)
     expect(taskHandlers['max:process']!.deadlineMs).toBe(15 * 60_000)
     expect(taskHandlers['max:deliver-response']!.deadlineMs).toBe(30_000)

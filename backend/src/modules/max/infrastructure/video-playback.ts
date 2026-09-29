@@ -1,4 +1,4 @@
-import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoReadiness } from '@web-app-demo/contracts'
 
 import type { BackendRuntime } from '../../../runtime'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
@@ -12,8 +12,7 @@ const maxHeight = 720
 export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
   const familyAccess = createPrismaFamilyAccess(options.runtime.prisma)
-  return {
-    async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
+  const resolve = async (scope: FamilyScope, referenceId: string, signal?: AbortSignal): Promise<{ readiness: MaxVideoReadiness; url?: string }> => {
       await familyAccess.requireMember(scope)
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
         id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
@@ -26,32 +25,50 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         (reference.source && reference.source.memoryId !== reference.memory.id) || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
-      const expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
+      let expectedSenderId: string
+      try {
+        expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        return { readiness: { state: 'unknown', recheckable: true } }
+      }
 
       let resolved
       try {
         resolved = await options.api.getMessage(source.messageId, signal)
       } catch (error) {
-        if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
-        throw error
+        if (signal?.aborted) throw error
+        return { readiness: { state: 'unknown', recheckable: true } }
       }
       const providerPosition = reference.source ? reference.attachmentPosition : 0
       const current = resolved.attachments[providerPosition]
-      if (resolved.attachments.length !== 1 || (reference.source && reference.attachmentPosition !== 0) || !current || current.kind !== 'video' || resolved.messageId !== source.messageId ||
-        resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId) ||
-        current.providerAttachmentId !== reference.providerAttachmentId) throw new MediaFailure('not_found', 'Медиа не найдено')
+      if (resolved.messageId !== source.messageId || resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId)) throw new MediaFailure('not_found', 'Медиа не найдено')
+      if (!current || current.kind !== 'video' || current.providerAttachmentId !== reference.providerAttachmentId) {
+        throw new MediaFailure('not_found', 'Медиа не найдено')
+      }
 
-      if (typeof options.api.getVideo !== 'function') throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+      if (typeof options.api.getVideo !== 'function') return { readiness: { state: 'unknown', recheckable: true } }
       let video
       try {
         video = await options.api.getVideo(current.currentToken, signal)
       } catch (error) {
-        if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
-        throw error
+        if (signal?.aborted) throw error
+        return { readiness: isVideoProcessing(error) ? { state: 'processing', recheckable: true } : { state: 'unknown', recheckable: true } }
       }
       const rendition = selectRendition(video.renditions)
-      if (!rendition) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
-      return fetchCdnVideo(rendition.url, rangeHeader, method, maxBytes, signal)
+      if (!rendition) return { readiness: { state: 'unknown', recheckable: true } }
+      return { readiness: { state: 'ready', recheckable: false }, url: rendition.url }
+  }
+  return {
+    async readiness(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
+      return (await resolve(scope, referenceId, signal)).readiness
+    },
+    async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
+      const result = await resolve(scope, referenceId, signal)
+      if (result.readiness.state === 'processing') throw new MediaFailure('video_processing', 'Видео обрабатывается')
+      if (result.readiness.state === 'unknown') throw new MediaFailure('video_readiness_unknown', 'Готовность видео пока неизвестна')
+      if (result.readiness.state === 'unavailable') throw new MediaFailure('video_unavailable', 'Медиа недоступно')
+      return fetchCdnVideo(result.url!, rangeHeader, method, maxBytes, signal)
     },
   }
 }
@@ -61,8 +78,8 @@ async function resolveOutboundSender(api: MaxApiPort, signal?: AbortSignal) {
   try {
     identity = await api.getMe(signal)
   } catch (error) {
-    if (isTerminalProviderShape(error)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
-    throw error
+    if (signal?.aborted) throw error
+    throw new MediaFailure('video_readiness_unknown', 'Готовность видео пока неизвестна')
   }
   if (!identity.isBot || !Number.isSafeInteger(identity.userId) || identity.userId <= 0) {
     throw new MediaFailure('unsupported_media', 'Медиа недоступно')
@@ -97,9 +114,10 @@ export async function fetchCdnVideo(url: string, rangeHeader: string | undefined
   if (range && response.status !== 206) {
     const total = response.status === 416 ? parseUnsatisfiedContentRange(response.headers.get('content-range')) : null
     await cancelBody(response.body, signal)
+    if (response.status !== 416) throw new MediaFailure('video_readiness_unknown', 'Готовность видео пока неизвестна')
     throw new MediaFailure('range_not_satisfiable', 'Запрошенный диапазон недоступен', undefined, total === null ? undefined : { total })
   }
-  if (!range && response.status !== 200) { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
+  if (!range && response.status !== 200) { await cancelBody(response.body, signal); throw new MediaFailure('video_readiness_unknown', 'Готовность видео пока неизвестна') }
   if ((response.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase() !== 'video/mp4') { await cancelBody(response.body, signal); throw new MediaFailure('unsupported_media', 'Медиа недоступно') }
 
   const contentLength = parseLength(response.headers.get('content-length'))
@@ -222,6 +240,7 @@ function isAllowedCdnUrl(value: string) {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname) } catch { return false }
 }
 
-function isTerminalProviderShape(error: unknown) {
-  return error instanceof MaxProviderError && !error.retryable
+function isVideoProcessing(error: unknown) {
+  return error instanceof MaxProviderError && error.code === 'attachment.not.ready' &&
+    typeof error.status === 'number' && error.status >= 400 && error.status < 500
 }
