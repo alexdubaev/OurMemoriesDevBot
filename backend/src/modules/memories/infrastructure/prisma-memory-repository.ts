@@ -59,8 +59,6 @@ export class PrismaMemoryRepository implements MemoryRepository {
         })
         if (!author) throw new MemoryFailure('not_found', 'Пользователь не найден')
 
-        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
-        const firstPublishedAt = firstPublicationTime()
         const attachments = input.kind === 'media'
           ? input.attachments ?? (input.mediaIds ?? []).map((mediaId) => ({ source: 'private_storage' as const, mediaId }))
           : input.kind === 'note' ? [] : input.mediaIds.map((mediaId) => ({ source: 'private_storage' as const, mediaId }))
@@ -82,6 +80,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
               assetKinds.some(({ mediaKind }) => !expected.includes(mediaKind))) {
             throw new MemoryFailure('media_unavailable', 'Медиа недоступно для публикации')
           }
+          if (input.kind === 'media' && assetKinds.some(({ mediaKind }) => mediaKind === 'video')) {
+            throw new MemoryFailure('invalid_input', 'Добавьте видео через загрузку MAX, затем прикрепите его к воспоминанию')
+          }
         }
         for (const sessionId of [...sessionIds].sort()) {
           await tx.$queryRaw`SELECT id FROM max_video_upload_sessions WHERE id = ${sessionId}::uuid AND family_id = ${scope.familyId}::uuid FOR UPDATE`
@@ -95,6 +96,8 @@ export class PrismaMemoryRepository implements MemoryRepository {
           throw new MemoryFailure('invalid_input', 'Видео MAX не готово или уже использовано')
         }
 
+        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
+        const firstPublishedAt = firstPublicationTime()
         const created = await tx.memory.create({
           data: {
             familyId: scope.familyId,

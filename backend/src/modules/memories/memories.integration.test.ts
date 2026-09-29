@@ -512,7 +512,7 @@ maybeDescribe('Memories API', () => {
     }))).rejects.toThrow()
   })
 
-  test('publishes ordered photo/video as one media Memory and rejects voice, foreign, and unready assets', async () => {
+  test('rejects private-storage video for a new mixed Memory and preserves the source assets', async () => {
     const owner = await admittedUser('Владелец', '38011')
     const otherOwner = await admittedUser('Другой владелец', '38012')
     const family = await createFamily(owner.token, 'Семья медиа')
@@ -522,22 +522,18 @@ maybeDescribe('Memories API', () => {
     const voice = await createMemoryAsset(family.body.family.id, owner.userId, 'voice')
     const unready = await createMemoryAsset(family.body.family.id, owner.userId, 'photo', 'pending')
     const foreign = await createMemoryAsset(foreignFamily.body.family.id, otherOwner.userId, 'photo')
+    const backupTasksBefore = await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })
     const created = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
       kind: 'media', childId: family.body.child.id, body: 'Фото и видео',
       occurredAt: '2023-07-14T18:43:00.000Z', mediaIds: [photo.id, video.id],
     }, randomUUID())
-    expect(created.response.status).toBe(201)
-    expect(created.body).toMatchObject({ kind: 'media', firstPublishedAt: expect.any(String), sourcePublishedAt: null })
-    expect(created.body.attachments.map((attachment: { id: string }) => attachment.id)).toEqual([photo.id, video.id])
-    const persisted = await prisma.memory.findUniqueOrThrow({ where: { id: created.body.id }, include: { media: { orderBy: { position: 'asc' } } } })
-    expect(persisted.media.map(({ position, mediaId }) => ({ position, mediaId }))).toEqual([
-      { position: 0, mediaId: photo.id }, { position: 1, mediaId: video.id },
-    ])
-    const backup = await prisma.maxMemoryBackup.findUniqueOrThrow({ where: { memoryId: created.body.id }, include: { attachments: { orderBy: { position: 'asc' } } } })
-    expect(backup.attachments.map(({ position, kind, mediaId, uploadSessionId }) => ({ position, kind, mediaId, uploadSessionId }))).toEqual([
-      { position: 0, kind: 'image', mediaId: photo.id, uploadSessionId: null },
-      { position: 1, kind: 'video', mediaId: video.id, uploadSessionId: null },
-    ])
+    expect(created.response.status).toBe(422)
+    expect(created.body.error.message).toContain('загрузку MAX')
+    expect(await prisma.memory.count({ where: { familyId: family.body.family.id } })).toBe(0)
+    expect(await prisma.maxMemoryBackup.count({ where: { familyId: family.body.family.id } })).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(backupTasksBefore)
+    expect(await prisma.memoryMedia.count({ where: { mediaId: { in: [photo.id, video.id] } } })).toBe(0)
+    expect(await prisma.mediaAsset.count({ where: { id: { in: [photo.id, video.id] }, originalStatus: 'stored', deletedAt: null } })).toBe(2)
 
     for (const mediaIds of [[voice.id], [foreign.id], [unready.id]]) {
       const rejected = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
