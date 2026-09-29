@@ -9,7 +9,9 @@ import {
   validatePhotoFiles,
 } from '../src/features/composer'
 import { PhotoComposer } from '../src/features/composer/PhotoComposer'
+import type { UploadTimingSample } from '../src/features/composer/PhotoComposer'
 import { verifyComposerFile } from '../src/features/composer/api'
+import { uploadFamilyPhoto } from '../src/features/family/api'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import { ApiRequestError } from '../src/platform/api'
 
@@ -46,7 +48,8 @@ function installMaxUpload() {
     status = 200
     listeners: Record<string, () => void> = {}
     open() {}
-    send(form: FormData) { uploads += 1; names.push((form.get('data') as File).name); queueMicrotask(() => this.listeners.load?.()) }
+    setRequestHeader() {}
+    send(body: FormData | File) { if (body instanceof FormData) { uploads += 1; names.push((body.get('data') as File).name) }; queueMicrotask(() => this.listeners.load?.()) }
     abort() { this.listeners.abort?.() }
     addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
   }
@@ -458,7 +461,8 @@ test('lost MAX upload response finalizes the same session without resending byte
     status = 200
     listeners: Record<string, () => void> = {}
     open() {}
-    send() { uploads += 1; queueMicrotask(() => { if (uploads === 1) this.listeners.error?.(); else this.listeners.load?.() }) }
+    setRequestHeader() {}
+    send(body: FormData | File) { if (body instanceof FormData) uploads += 1; queueMicrotask(() => { if (body instanceof FormData && uploads === 1) this.listeners.error?.(); else this.listeners.load?.() }) }
     abort() { this.listeners.abort?.() }
     addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
   }
@@ -953,6 +957,430 @@ for (const count of [6, 10]) {
     } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
   })
 }
+
+test('PERF-1 AFTER: synthetic stage timing for 1, 5, and 10 bounded concurrent photos', async () => {
+  const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
+  for (const count of [1, 5, 10]) {
+    const browser = installInteractiveDom()
+    const samples: UploadTimingSample[] = []
+    let reserved = 0
+    let created = 0
+    const transport: AuthenticatedTransport = {
+      request: async (path) => {
+        if (path.endsWith('/uploads')) {
+          await sleep(5)
+          const index = reserved++
+          return { assetId: `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: {}, contentLength: 128 } } as never
+        }
+        if (path.includes('/finalize')) { await sleep(6); return { asset: { id: 'asset' } } as never }
+        await sleep(7)
+        created += 1
+        return { id: 'memory' } as never
+      }, raw: async () => new Response(),
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () => { await sleep(8); return new Response(null, { status: 200 }) }
+    const root = createRoot(browser.container)
+    try {
+      await act(async () => root.render(createElement(PhotoComposer, {
+        childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport,
+        onCancel: () => undefined, onSuccess: () => sleep(4), onTiming: (sample) => samples.push(sample),
+      })))
+      const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+      input.files = Array.from({ length: count }, (_, index) => file(`synthetic-${index}.jpg`))
+      await act(async () => invoke(input, 'onChange'))
+      await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await sleep(count * 25 + 40); await flushInteractive() })
+      expect(created).toBe(1)
+      await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Смотреть в ленте'), 'onClick'); await sleep(10) })
+      expect(samples.filter((sample) => sample.stage === 'reserve')).toHaveLength(count)
+      expect(samples.filter((sample) => sample.stage === 'bytes_upload')).toHaveLength(count)
+      expect(samples.filter((sample) => sample.stage === 'finalize')).toHaveLength(count)
+      expect(samples.filter((sample) => sample.stage === 'wait_all')).toHaveLength(1)
+      expect(samples.filter((sample) => sample.stage === 'memory_create')).toHaveLength(1)
+      expect(samples.filter((sample) => sample.stage === 'feed_refresh')).toHaveLength(1)
+      const totals = Object.fromEntries(['validation', 'reserve', 'bytes_upload', 'finalize', 'wait_all', 'memory_create', 'feed_refresh'].map((stage) => [stage, Math.round(samples.filter((sample) => sample.stage === stage).reduce((sum, sample) => sum + sample.durationMs, 0))]))
+      console.info(`PERF-1 AFTER count=${count} ${JSON.stringify(totals)}`)
+    } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+  }
+})
+
+for (const count of [5, 10]) {
+  test(`PERF-1 limits ${count} photo chains to two and publishes selection order after reverse completion`, async () => {
+    const browser = installInteractiveDom()
+    const ids = Array.from({ length: count }, (_, index) => `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`)
+    let active = 0
+    let peak = 0
+    let nextReservation = 0
+    const finished: number[] = []
+    const creates: Array<Record<string, unknown>> = []
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    const transport: AuthenticatedTransport = {
+      request: async (path, _schema, options) => {
+        if (path.endsWith('/uploads')) {
+          const index = nextReservation++
+          active += 1
+          peak = Math.max(peak, active)
+          await sleep(index % 2 === 0 ? 12 : 1)
+          return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: {} } } as never
+        }
+        if (path.includes('/finalize')) {
+          const index = Number(path.match(/upload-(\d+)/)?.[1])
+          await sleep(index % 2 === 0 ? 12 : 1)
+          finished.push(index)
+          active -= 1
+          return { asset: { id: ids[index] } } as never
+        }
+        creates.push(options?.body as Record<string, unknown>)
+        expect(active).toBe(0)
+        expect(finished).toHaveLength(count)
+        return { id: 'memory' } as never
+      }, raw: async () => new Response(),
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response(null, { status: 200 })
+    const root = createRoot(browser.container)
+    try {
+      await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+      const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+      input.files = Array.from({ length: count }, (_, index) => file(`photo-${index}.jpg`))
+      await act(async () => invoke(input, 'onChange'))
+      await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await sleep(count * 40); await flushInteractive() })
+      expect(peak).toBe(2)
+      expect(finished[0]).toBe(1)
+      expect(creates).toHaveLength(1)
+      expect(creates[0]).toMatchObject({ kind: 'photo', mediaIds: ids })
+    } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+  })
+}
+
+test('PERF-1 waits for the other active finalize after a reserve failure, then retries without reuploading it', async () => {
+  const browser = installInteractiveDom()
+  const ids = [1, 2, 3].map((index) => `00000000-0000-7000-8000-${String(index).padStart(12, '0')}`)
+  let reserveCalls = 0
+  let firstFinalized = false
+  const creates: Array<Record<string, unknown>> = []
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        const call = reserveCalls++
+        if (call === 1) throw new ApiRequestError(503, 'STORAGE_UNAVAILABLE', 'unavailable')
+        const index = call === 0 ? 0 : call - 1
+        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: {} } } as never
+      }
+      if (path.includes('/finalize')) {
+        const index = Number(path.match(/upload-(\d+)/)?.[1])
+        if (index === 0) await new Promise<void>((resolve) => setTimeout(resolve, 20))
+        if (index === 0) firstFinalized = true
+        return { asset: { id: ids[index] } } as never
+      }
+      creates.push(options?.body as Record<string, unknown>)
+      return { id: 'memory' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.jpg'), file('three.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await new Promise((resolve) => setTimeout(resolve, 40)); await flushInteractive() })
+    expect(firstFinalized).toBe(true)
+    expect(reserveCalls).toBe(2)
+    expect(creates).toHaveLength(0)
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(reserveCalls).toBe(4)
+    expect(creates).toHaveLength(1)
+    expect(creates[0]).toMatchObject({ kind: 'photo', mediaIds: ids })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+})
+
+test('photo PUT reports measured bytes, retries 5xx with the same signed request, and accepts 412', async () => {
+  const priorXHR = globalThis.XMLHttpRequest
+  const requests: Array<{ method: string; url: string; headers: Record<string, string>; credentials: boolean }> = []
+  const progress: number[] = []
+  class FakeXHR {
+    status = 0
+    withCredentials = true
+    upload = { addEventListener: (_name: string, listener: (event: { lengthComputable: boolean; loaded: number; total: number }) => void) => { this.progress = listener } }
+    progress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void
+    listeners: Record<string, () => void> = {}
+    headers: Record<string, string> = {}
+    method = ''
+    url = ''
+    open(method: string, url: string) { this.method = method; this.url = url }
+    setRequestHeader(name: string, value: string) { this.headers[name] = value }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    abort() { this.listeners.abort?.() }
+    send() {
+      requests.push({ method: this.method, url: this.url, headers: this.headers, credentials: this.withCredentials })
+      this.progress?.({ lengthComputable: true, loaded: 64, total: 128 })
+      this.progress?.({ lengthComputable: false, loaded: 128, total: 128 })
+      this.status = requests.length === 1 ? 502 : 412
+      queueMicrotask(() => this.listeners.load?.())
+    }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = FakeXHR
+  const paths: string[] = []
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    paths.push(path)
+    return path.endsWith('/uploads')
+      ? { assetId: 'asset', upload: { uploadId: 'upload', method: 'PUT', url: 'https://storage.test/signed', headers: { 'Content-Type': 'image/jpeg', 'If-None-Match': '*' } } } as never
+      : { asset: { id: 'asset' } } as never
+  }, raw: async () => new Response() }
+  try {
+    expect(await uploadFamilyPhoto(transport, 'family', file('photo.jpg'), 'image/jpeg', 'memory', undefined, undefined, 'key', (loaded) => progress.push(loaded))).toBe('asset')
+    expect(requests).toEqual([1, 2].map(() => ({ method: 'PUT', url: 'https://storage.test/signed', headers: { 'Content-Type': 'image/jpeg', 'If-None-Match': '*' }, credentials: false })))
+    expect(progress).toEqual([64, 64])
+    expect(paths.filter((path) => path.endsWith('/finalize'))).toHaveLength(1)
+  } finally { globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('photo PUT aborts the active XHR without finalizing', async () => {
+  const priorXHR = globalThis.XMLHttpRequest
+  let aborted = 0
+  class WaitingXHR {
+    upload = { addEventListener() {} }
+    listeners: Record<string, () => void> = {}
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    abort() { aborted += 1; this.listeners.abort?.() }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = WaitingXHR
+  const controller = new AbortController()
+  const paths: string[] = []
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    paths.push(path)
+    return { assetId: 'asset', upload: { uploadId: 'upload', method: 'PUT', url: 'https://storage.test/signed', headers: {} } } as never
+  }, raw: async () => new Response() }
+  try {
+    const pending = uploadFamilyPhoto(transport, 'family', file('photo.jpg'), 'image/jpeg', 'memory', controller.signal, undefined, 'key', () => undefined)
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(aborted).toBe(1)
+    expect(paths.filter((path) => path.endsWith('/finalize'))).toHaveLength(0)
+  } finally { globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('composer shows 99 before accepted PUT, then 100 accepted bytes during processing', async () => {
+  const browser = installInteractiveDom()
+  const priorXHR = globalThis.XMLHttpRequest
+  const instances: ControlledXHR[] = []
+  class ControlledXHR {
+    status = 200
+    withCredentials = false
+    progress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void
+    upload = { addEventListener: (_name: string, listener: (event: { lengthComputable: boolean; loaded: number; total: number }) => void) => { this.progress = listener } }
+    listeners: Record<string, () => void> = {}
+    constructor() { instances.push(this) }
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    advance(loaded: number, total: number) { this.progress?.({ lengthComputable: true, loaded, total }) }
+    finish() { this.listeners.load?.() }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = ControlledXHR
+  let reserved = 0
+  let finalizeSecond: (() => void) | undefined
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    if (path.endsWith('/uploads')) {
+      const index = reserved++
+      return { assetId: `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: {} } } as never
+    }
+    if (path.includes('/finalize')) {
+      if (path.includes('upload-1')) await new Promise<void>((resolve) => { finalizeSecond = resolve })
+      return { asset: { id: 'asset' } } as never
+    }
+    return { id: 'memory' } as never
+  }, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  const label = () => textOf(findOne(browser.container, (node) => node.tagName === 'DIV' && node.attributes.role === 'status' && node.attributes.class === 'memoly-add-loading'))
+  const bar = () => findOne(browser.container, (node) => node.attributes.role === 'progressbar')
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.jpg', 256)]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(bar().attributes['aria-valuenow']).toBeUndefined()
+    await act(async () => instances[0]!.advance(64, 128))
+    expect(label()).toContain('16%')
+    await act(async () => { instances[0]!.finish(); await flushInteractive() })
+    expect(instances).toHaveLength(2)
+    await act(async () => instances[1]!.advance(128, 256))
+    expect(label()).toContain('66%')
+    await act(async () => instances[1]!.advance(20, 256))
+    expect(label()).toContain('66%')
+    await act(async () => instances[1]!.advance(999, 256))
+    expect(bar().attributes['aria-valuenow']).toBe('99')
+    await act(async () => { instances[1]!.finish(); await flushInteractive() })
+    expect(label()).toContain('Обрабатываем вложения')
+    expect(label()).not.toContain('Загружено 100%')
+    expect(bar().attributes['aria-valuenow']).toBe('100')
+    expect(textOf(browser.container)).not.toContain('Фото опубликованы!')
+    await act(async () => { finalizeSecond?.(); await flushInteractive() })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('composer progress keeps its high water after a failed PUT and never shows 100 before acceptance', async () => {
+  const browser = installInteractiveDom()
+  const priorXHR = globalThis.XMLHttpRequest
+  const instances: ProgressXHR[] = []
+  class ProgressXHR {
+    status = 200
+    progress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void
+    upload = { addEventListener: (_name: string, listener: (event: { lengthComputable: boolean; loaded: number; total: number }) => void) => { this.progress = listener } }
+    listeners: Record<string, () => void> = {}
+    constructor() { instances.push(this) }
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    advance(loaded: number) { this.progress?.({ lengthComputable: true, loaded, total: 128 }) }
+    finish(status: number) { this.status = status; this.listeners.load?.() }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = ProgressXHR
+  let reserves = 0
+  let creates = 0
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    if (path.endsWith('/uploads')) {
+      reserves += 1
+      return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: `upload-${reserves}`, method: 'PUT', url: 'https://storage.test/one', headers: {} } } as never
+    }
+    if (path.includes('/finalize')) return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+    creates += 1
+    return { id: 'memory' } as never
+  }, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  const bar = () => findOne(browser.container, (node) => node.attributes.role === 'progressbar')
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => instances[0]!.advance(96))
+    expect(bar().attributes['aria-valuenow']).toBe('75')
+    await act(async () => { instances[0]!.finish(400); await flushInteractive() })
+    expect(creates).toBe(0)
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    await act(async () => instances[1]!.advance(16))
+    expect(bar().attributes['aria-valuenow']).toBe('75')
+    await act(async () => instances[1]!.advance(128))
+    expect(bar().attributes['aria-valuenow']).toBe('99')
+    await act(async () => { instances[1]!.finish(200); await flushInteractive() })
+    expect([reserves, creates]).toEqual([2, 1])
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('accepted photo bytes return to upload phase when finalize expiry requires a new PUT', async () => {
+  const browser = installInteractiveDom()
+  const priorXHR = globalThis.XMLHttpRequest
+  const instances: RetryXHR[] = []
+  class RetryXHR {
+    status = 200
+    progress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void
+    upload = { addEventListener: (_name: string, listener: (event: { lengthComputable: boolean; loaded: number; total: number }) => void) => { this.progress = listener } }
+    listeners: Record<string, () => void> = {}
+    constructor() { instances.push(this) }
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    abort() { this.listeners.abort?.() }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    advance(loaded: number) { this.progress?.({ lengthComputable: true, loaded, total: 128 }) }
+    finish() { this.listeners.load?.() }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = RetryXHR
+  let reservations = 0
+  let finalizes = 0
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    if (path.endsWith('/uploads')) {
+      reservations += 1
+      return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: `upload-${reservations}`, method: 'PUT', url: `https://storage.test/${reservations}`, headers: {} } } as never
+    }
+    if (path.includes('/finalize')) {
+      finalizes += 1
+      if (finalizes === 1) throw new ApiRequestError(409, 'PHOTO_FINALIZE_RESERVATION_EXPIRED', 'expired')
+      return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+    }
+    return { id: 'memory' } as never
+  }, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  const bar = () => findOne(browser.container, (node) => node.attributes.role === 'progressbar')
+  const loading = () => textOf(findOne(browser.container, (node) => node.attributes.role === 'status' && node.attributes.class === 'memoly-add-loading'))
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => instances[0]!.advance(128))
+    expect(bar().attributes['aria-valuenow']).toBe('99')
+    await act(async () => { instances[0]!.finish(); await flushInteractive() })
+    expect(finalizes).toBe(1)
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(reservations).toBe(2)
+    expect(instances).toHaveLength(2)
+    expect(bar().attributes['aria-valuenow']).toBe('99')
+    expect(loading()).toContain('Загружено 99% байт')
+    expect(loading()).not.toContain('Обрабатываем вложения')
+    await act(async () => { instances[1]!.finish(); await flushInteractive() })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR }
+})
+
+test('PERF-1 cancel aborts both active photo transfers and never creates Memory', async () => {
+  const browser = installInteractiveDom()
+  ;(globalThis.window as unknown as { confirm: () => boolean }).confirm = () => true
+  const priorXHR = globalThis.XMLHttpRequest
+  let started = 0
+  let aborted = 0
+  class WaitingXHR {
+    upload = { addEventListener() {} }
+    listeners: Record<string, () => void> = {}
+    open() {}
+    setRequestHeader() {}
+    send() { started += 1 }
+    addEventListener(name: string, listener: () => void) { this.listeners[name] = listener }
+    abort() { aborted += 1; this.listeners.abort?.() }
+  }
+  // @ts-expect-error focused XHR double
+  globalThis.XMLHttpRequest = WaitingXHR
+  let creates = 0
+  let cancelCount = 0
+  const transport: AuthenticatedTransport = { request: async (path) => {
+    if (path.endsWith('/uploads')) {
+      const index = started
+      return { assetId: `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`, upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: {} } } as never
+    }
+    if (path.endsWith('/memories')) creates += 1
+    return { asset: { id: 'asset' } } as never
+  }, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => { cancelCount += 1 }, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg'), file('two.jpg'), file('three.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(started).toBe(2)
+    await act(async () => { invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Отменить'), 'onClick'); await flushInteractive() })
+    expect([aborted, creates, cancelCount]).toEqual([2, 0, 1])
+    expect(started).toBe(2)
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.XMLHttpRequest = priorXHR }
+})
 
 test('synthetic 72.3 MB QuickTime MOV and generic MIME are accepted by signature', async () => {
   const mov = sizedFile('clip.mov', 72_300_000, 'video/quicktime')
