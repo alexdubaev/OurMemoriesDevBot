@@ -338,6 +338,34 @@ maybeDescribe('Memories API', () => {
     }
   })
 
+  test('locks family before membership while reading a memory', async () => {
+    const owner = await admittedUser('Владелец', '37503')
+    const family = await createFamily(owner.token, 'Семья')
+    const created = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Порядок блокировок')
+    const blocker = await beginDatabaseBlock('SELECT id FROM families WHERE id = $1 FOR UPDATE', [family.body.family.id])
+    const probe = new Client({ connectionString: databaseUrl! })
+    await probe.connect()
+    let reading: ReturnType<typeof request> | undefined
+    try {
+      reading = request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
+        owner.token, 'GET', undefined)
+      await waitForLockedQuery(blocker, 'families')
+      await probe.query('BEGIN')
+      // A blocked family lock must not retain a lock on the membership row. Otherwise a
+      // concurrent media reservation can lock these two rows in the opposite order.
+      const membership = await probe.query(
+        'SELECT user_id FROM family_members WHERE family_id = $1 AND user_id = $2 FOR UPDATE NOWAIT',
+        [family.body.family.id, owner.userId],
+      )
+      expect(membership.rowCount).toBe(1)
+    } finally {
+      await probe.query('ROLLBACK')
+      await probe.end()
+      await rollbackAndClose(blocker)
+      if (reading) expect((await reading).response.status).toBe(200)
+    }
+  })
+
   test('serializes downgrade against an in-flight update authorization', async () => {
     const owner = await admittedUser('Владелец', '37601')
     const full = await admittedUser('Полный доступ', '37602')

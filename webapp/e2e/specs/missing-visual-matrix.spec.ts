@@ -486,7 +486,7 @@ async function openAddSheet(page: Page) {
 
 async function openPhotoEmpty(page: Page) {
   await openAddSheet(page)
-  await page.getByRole('button', { name: 'Добавить фото' }).click()
+  await page.getByRole('button', { name: 'Добавить фото и видео' }).click()
   await expect(page.locator('[data-add-screen="photo"]')).toBeVisible()
 }
 

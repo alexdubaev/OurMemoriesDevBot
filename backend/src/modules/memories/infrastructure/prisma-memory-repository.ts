@@ -339,15 +339,16 @@ async function lockMember(
   scope: FamilyScope,
   required: 'member' | 'full',
 ): Promise<MemberRole> {
+  const family = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM families WHERE id = ${scope.familyId}::uuid AND status = 'active' FOR SHARE
+  `
+  if (!family[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
   const rows = await tx.$queryRaw<Array<{ role: MemberRole }>>`
-    SELECT fm.role::text AS role
-      FROM family_members fm
-      JOIN families f ON f.id = fm.family_id
-     WHERE fm.family_id = ${scope.familyId}::uuid
-       AND fm.user_id = ${scope.principal.userId}::uuid
-       AND fm.revoked_at IS NULL
-       AND f.status = 'active'
-     FOR SHARE OF fm, f
+    SELECT role::text AS role FROM family_members
+     WHERE family_id = ${scope.familyId}::uuid
+       AND user_id = ${scope.principal.userId}::uuid
+       AND revoked_at IS NULL
+     FOR SHARE
   `
   const role = rows[0]?.role
   if (!role) throw new MemoryFailure('not_found', 'Семья не найдена')
@@ -389,22 +390,29 @@ async function findPage(
 }
 
 async function lockUnreadContext(tx: PrismaTransactionClient, scope: FamilyScope) {
-  const rows = await tx.$queryRaw<Array<{
-    role: MemberRole; membershipEpoch: number; baselineOrdinal: bigint
+  const family = await tx.$queryRaw<Array<{
     publicationOrdinal: bigint; orderVersion: bigint; trackingActivated: boolean
   }>>`
-    SELECT fm.role::text AS role, fm.membership_epoch AS "membershipEpoch",
-           COALESCE(fm.unread_baseline_ordinal, 0) AS "baselineOrdinal",
-           f.publication_ordinal AS "publicationOrdinal",
-           f.unread_order_version AS "orderVersion",
-           f.unread_tracking_activated_at IS NOT NULL AS "trackingActivated"
-      FROM family_members fm JOIN families f ON f.id = fm.family_id
-     WHERE fm.family_id = ${scope.familyId}::uuid AND fm.user_id = ${scope.principal.userId}::uuid
-       AND fm.revoked_at IS NULL AND f.status = 'active'
-     FOR SHARE OF f, fm
+    SELECT publication_ordinal AS "publicationOrdinal",
+           unread_order_version AS "orderVersion",
+           unread_tracking_activated_at IS NOT NULL AS "trackingActivated"
+      FROM families
+     WHERE id = ${scope.familyId}::uuid AND status = 'active'
+     FOR SHARE
   `
-  if (!rows[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
-  return rows[0]
+  if (!family[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
+  const member = await tx.$queryRaw<Array<{
+    role: MemberRole; membershipEpoch: number; baselineOrdinal: bigint
+  }>>`
+    SELECT role::text AS role, membership_epoch AS "membershipEpoch",
+           COALESCE(unread_baseline_ordinal, 0) AS "baselineOrdinal"
+      FROM family_members
+     WHERE family_id = ${scope.familyId}::uuid AND user_id = ${scope.principal.userId}::uuid
+       AND revoked_at IS NULL
+     FOR SHARE
+  `
+  if (!member[0]) throw new MemoryFailure('not_found', 'Семья не найдена')
+  return { ...family[0], ...member[0] }
 }
 
 async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, role: MemberRole,

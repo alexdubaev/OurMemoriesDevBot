@@ -258,6 +258,7 @@ test('production AddSheet exposes the T09 first-level actions and an accessible 
   )
 
   expect(markup).toContain('Добавить воспоминание')
+  expect(markup).toContain('aria-label="Добавить фото и видео"')
   expect(markup).toContain('Сохраняйте моменты, которые важны')
   expect(markup).toContain('Фото')
   expect(markup).toContain('Заметка')

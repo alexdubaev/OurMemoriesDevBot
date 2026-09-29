@@ -11,7 +11,10 @@ import {
   createMediaMemory,
   resolveComposerFile,
   validateComposerFiles,
+  validateSize,
+  verifyComposerFile,
 } from './api'
+import type { ComposerMedia } from './api'
 import { composerOccurredAt } from './date'
 import { AddDateField } from './AddDateField'
 import '@/styles/composer-skin.css'
@@ -26,6 +29,8 @@ export type PhotoComposerProps = {
 }
 
 type SaveStage = 'reserve' | 'upload' | 'finalize' | 'create'
+
+class UnsupportedComposerFileError extends Error {}
 
 function safeFinalizeApplicationCode(reason: unknown): string | null {
   if (!(reason instanceof ApiRequestError) || !/^PHOTO_FINALIZE_[A-Z_]+$/.test(reason.code)) return null
@@ -42,7 +47,10 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const [error, setError] = useState<string | null>(null)
   const [errorStage, setErrorStage] = useState<SaveStage | null>(null)
   const [finalizeApplicationCode, setFinalizeApplicationCode] = useState<string | null>(null)
+  const [preflightKinds, setPreflightKinds] = useState<Array<'photo' | 'video'> | null>(null)
   const completedAssets = useRef<Array<string | null>>([])
+  const verifiedMedia = useRef<ComposerMedia[] | null>(null)
+  const reserveKeys = useRef<Array<string | null>>([])
   const idempotencyKey = useRef<string | null>(null)
   const submission = useRef<{ caption: string; date: string; occurredAt: string } | null>(null)
   const saving = useRef(false)
@@ -57,13 +65,20 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     const selection = [...files, ...next]
     const validation = validateComposerFiles(selection)
     if (!validation.ok) {
-      setError(validation.code === 'too_many' ? 'Выберите от 1 до 10 фото и видео.' : 'Поддерживаются JPG, PNG, WebP, HEIC, MP4 и MOV. Видео должно быть от 64 байт до 100 МБ.')
+      setError(validation.code === 'too_many' ? 'Выберите от 1 до 10 фото и видео.'
+        : validation.code === 'too_large_photo' ? 'Фото должно быть не больше 20 МБ.'
+          : validation.code === 'too_large_video' ? 'Видео в этом воспоминании должно быть не больше 100 МБ.'
+            : validation.code === 'too_small' ? 'Файл должен быть не меньше 64 байт.'
+              : 'Поддерживаются JPG, PNG, WebP, HEIC, HEIF, MP4 и MOV.')
       setErrorStage(null)
       setStatus('error')
       return
     }
     setFiles(selection)
+    setPreflightKinds(null)
     completedAssets.current = selection.map(() => null)
+    verifiedMedia.current = null
+    reserveKeys.current = selection.map(() => null)
     setItemStates(selection.map(() => 'selected'))
     idempotencyKey.current = null
     submission.current = null
@@ -78,7 +93,10 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     if (saving.current) return
     const next = files.filter((_, current) => current !== index)
     setFiles(next)
+    setPreflightKinds(null)
     completedAssets.current = next.map(() => null)
+    verifiedMedia.current = null
+    reserveKeys.current = next.map(() => null)
     setItemStates(next.map(() => 'selected'))
     idempotencyKey.current = null
     submission.current = null
@@ -122,42 +140,54 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
 
     const saveStage: { current: SaveStage } = { current: 'reserve' }
     try {
+      const mediaItems: ComposerMedia[] = verifiedMedia.current ?? []
+      if (!verifiedMedia.current) {
+        for (const file of files) {
+          controller.signal.throwIfAborted()
+          const media = await verifyComposerFile(file)
+          if (!media) throw new UnsupportedComposerFileError('Файл не соответствует поддерживаемому формату.')
+          const validation = validateSize(file, media)
+          if (!validation.ok) throw new UnsupportedComposerFileError(validation.code === 'too_large_photo' ? 'Фото должно быть не больше 20 МБ.' : validation.code === 'too_large_video' ? 'Видео в этом воспоминании должно быть не больше 100 МБ.' : 'Файл должен быть не меньше 64 байт.')
+          mediaItems.push(media)
+        }
+        verifiedMedia.current = mediaItems
+      }
+      controller.signal.throwIfAborted()
+      setPreflightKinds(mediaItems.map((media) => media.kind))
       setCompletedCount(completedAssets.current.slice(0, files.length).filter(Boolean).length)
       setItemStates(files.map((_, index) => completedAssets.current[index] ? 'ready' : 'selected'))
-      let nextIndex = 0
       let firstFailure: unknown
       let firstFailureStage: SaveStage | null = null
-      const worker = async () => {
-        while (true) {
-          const index = nextIndex++
-          if (index >= files.length) return
+      for (let index = 0; index < files.length; index += 1) {
+          controller.signal.throwIfAborted()
           if (completedAssets.current[index]) continue
           const file = files[index]
           if (!file) continue
-          const media = resolveComposerFile(file)
-          if (!media) throw new Error('Поддерживаются JPG, PNG, WebP, HEIC, MP4 и MOV. Видео должно быть от 64 байт до 100 МБ.')
           const itemStage: { current: SaveStage } = { current: 'reserve' }
           try {
             setItemStates((states) => states.map((state, current) => current === index ? 'uploading' : state))
-            const onStage = (nextStage: 'reserve' | 'upload' | 'finalize') => { itemStage.current = nextStage; saveStage.current = nextStage; setErrorStage(nextStage) }
+            const media = mediaItems[index]!
+            const onStage = (nextStage: 'reserve' | 'upload' | 'finalize') => { itemStage.current = nextStage; setErrorStage(nextStage) }
+            const reserveKey = reserveKeys.current[index] ?? createPhotoIdempotencyKey()
+            reserveKeys.current[index] = reserveKey
             const assetId = media.kind === 'photo'
-              ? await uploadFamilyPhoto(transport, familyId, file, media.contentType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif', 'memory', controller.signal, onStage)
-              : await uploadFamilyVideo(transport, familyId, file, media.contentType as 'video/mp4' | 'video/quicktime', controller.signal, onStage)
+              ? await uploadFamilyPhoto(transport, familyId, file, media.contentType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif', 'memory', controller.signal, onStage, reserveKey)
+              : await uploadFamilyVideo(transport, familyId, file, media.contentType as 'video/mp4' | 'video/quicktime', controller.signal, onStage, reserveKey)
             if (completedAssets.current.some((existing, assetIndex) => assetIndex !== index && existing === assetId)) throw new Error('Повторяется загруженное медиа.')
             completedAssets.current[index] = assetId
             setItemStates((states) => states.map((state, current) => current === index ? 'ready' : state))
             setCompletedCount((count) => count + 1)
           } catch (reason) {
+            if (controller.signal.aborted) throw reason
+            if (reason instanceof ApiRequestError && (['UPLOAD_EXPIRED', 'PHOTO_FINALIZE_RESERVATION_EXPIRED'].includes(reason.code) || (itemStage.current === 'reserve' && reason.code === 'STORAGE_UNAVAILABLE'))) reserveKeys.current[index] = null
             setItemStates((states) => states.map((state, current) => current === index ? 'failed' : state))
             if (!firstFailure) { firstFailure = reason; firstFailureStage = itemStage.current }
           }
-        }
       }
-      await Promise.all(Array.from({ length: Math.min(3, files.length) }, () => worker()))
       if (firstFailure) { saveStage.current = firstFailureStage ?? saveStage.current; throw firstFailure }
       const mediaIds = completedAssets.current.slice(0, files.length)
       if (mediaIds.some((id) => !id) || new Set(mediaIds).size !== mediaIds.length) throw new Error('Не удалось подготовить все вложения.')
-      const kinds = files.map((file) => resolveComposerFile(file)?.kind)
+      const kinds = mediaItems.map((media) => media.kind)
       const kind = kinds.every((item) => item === 'photo') ? 'photo' as const
         : kinds.every((item) => item === 'video') && files.length === 1 ? 'video' as const
           : 'media' as const
@@ -175,10 +205,22 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       setStatus('success')
     } catch (reason) {
       if (controller.signal.aborted) return
+      if (reason instanceof UnsupportedComposerFileError) {
+        setErrorStage(null)
+        setError(reason.message)
+        setStatus('error')
+        return
+      }
       setErrorStage(saveStage.current)
       setStatus('error')
       if (saveStage.current === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
-      setError(saveStage.current === 'reserve'
+      setError(saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.status === 403
+        ? 'Нет доступа к загрузке в эту семью.'
+        : saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.code === 'FILE_TOO_LARGE'
+          ? 'Недостаточно свободного места или слишком много незавершённых загрузок. Попробуйте позже.'
+          : saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.code === 'STORAGE_UNAVAILABLE'
+            ? 'Хранилище временно недоступно. Попробуйте ещё раз.'
+            : saveStage.current === 'reserve'
         ? `${containsVideo ? 'Не удалось подготовить сохранение фото или видео' : 'Не удалось подготовить сохранение фотографий'}. Попробуйте ещё раз.`
         : saveStage.current === 'upload'
           ? `Не удалось загрузить ${containsVideo ? 'фото или видео' : 'фотографию'}. Попробуйте ещё раз.`
@@ -203,6 +245,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
 
   function addAnother() {
     setFiles([])
+    setPreflightKinds(null)
     setCaption('')
     setOccurredDate(familyCalendarDate(familyTimezone))
     setCompletedCount(0)
@@ -211,18 +254,20 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     setErrorStage(null)
     setFinalizeApplicationCode(null)
     completedAssets.current = []
+    verifiedMedia.current = null
+    reserveKeys.current = []
     setItemStates([])
     idempotencyKey.current = null
     submission.current = null
   }
 
-  const containsVideo = files.some((file) => resolveComposerFile(file)?.kind === 'video')
+  const containsVideo = preflightKinds?.some((kind) => kind === 'video') ?? files.some((file) => resolveComposerFile(file)?.kind === 'video')
   return <main className="memoly-add-page" data-add-screen="photo">
     {status === 'success' ? <section aria-label={containsVideo ? 'Воспоминание опубликовано' : 'Фото опубликованы'} className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Воспоминание опубликовано!' : 'Фото опубликованы!'}</Typography><Typography as="p" variant="memoryBody">Теперь они в ленте воспоминаний</Typography><div className="memoly-add-success-actions"><Button onClick={() => void onSuccess()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></div></section> : status === 'error' && errorStage ? <section aria-label={containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'} className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'}</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions"><Button onClick={() => void save()} type="button">Попробовать снова</Button><Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">{containsVideo ? 'Вернуться к вложениям' : 'Вернуться к фото'}</Button></div></section> : <>
-      <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving'} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">{containsVideo ? 'Добавить фото и видео' : 'Добавить фото'}</Typography><span /></header>
+      <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving'} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">Добавить фото и видео</Typography><span /></header>
       <section aria-labelledby="photo-composer-title" className="memoly-add-body">
         <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov" className="memoly-add-native-file" disabled={status === 'saving' || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
-        {files.length ? <div aria-label={containsVideo ? 'Предпросмотр вложений' : 'Предпросмотр фотографий'} className="memoly-add-photo-grid">{files.map((file, index) => <MediaPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} onRemove={removeFile} state={itemStates[index] ?? 'selected'} showState={itemStates.some((state) => state !== 'selected')} />)}{files.length < 10 ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />до 10 файлов</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">Выберите фото и видео</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 вложений</Typography></label>}
+        {files.length ? <div aria-label={containsVideo ? 'Предпросмотр вложений' : 'Предпросмотр фотографий'} className="memoly-add-photo-grid">{files.map((file, index) => <MediaPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} kind={preflightKinds?.[index]} onRemove={removeFile} state={itemStates[index] ?? 'selected'} showState={itemStates.some((state) => state !== 'selected')} />)}{files.length < 10 ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />до 10 файлов</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">Выберите фото и видео</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 вложений</Typography></label>}
         <div className="memoly-add-caption"><textarea aria-label={containsVideo ? 'Подпись к воспоминанию' : 'Подпись к фотографиям'} disabled={status === 'saving'} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { idempotencyKey.current = null; submission.current = null }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
         <AddDateField id="photo-composer-date" label={containsVideo ? 'Дата воспоминания' : 'Дата фотографий'} onChange={(value) => { if (value !== occurredDate) { idempotencyKey.current = null; submission.current = null }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} />
         <Button className="memoly-add-publish" disabled={status === 'saving' || !files.length || [...caption].length > 8000} onClick={() => void save()} type="button">Опубликовать{files.length ? ` (${files.length})` : ''}</Button>
@@ -237,9 +282,9 @@ function ProgressBar({ label }: { label: string }) {
   return <div aria-label={label} className="memoly-composer-progress" role="progressbar"><span className="memoly-composer-progress-indeterminate" /></div>
 }
 
-function MediaPreview({ file, index, onRemove, state, showState }: { file: File; index: number; onRemove: (index: number) => void; state: 'selected' | 'uploading' | 'ready' | 'failed'; showState: boolean }) {
+function MediaPreview({ file, index, kind, onRemove, state, showState }: { file: File; index: number; kind?: 'photo' | 'video'; onRemove: (index: number) => void; state: 'selected' | 'uploading' | 'ready' | 'failed'; showState: boolean }) {
   const [src, setSrc] = useState<string | null>(null)
-  const isVideo = resolveComposerFile(file)?.kind === 'video'
+  const isVideo = (kind ?? resolveComposerFile(file)?.kind) === 'video'
   useEffect(() => {
     if (typeof URL.createObjectURL !== 'function') return
     const nextSrc = URL.createObjectURL(file)

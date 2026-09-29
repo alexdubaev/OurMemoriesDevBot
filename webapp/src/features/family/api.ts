@@ -115,8 +115,9 @@ export async function uploadFamilyPhoto(
   purpose: 'child_avatar' | 'memory',
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+  idempotencyKey?: string,
 ) {
-  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage)
+  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage, idempotencyKey)
 }
 
 export async function uploadFamilyVideo(
@@ -126,8 +127,9 @@ export async function uploadFamilyVideo(
   contentType: 'video/mp4' | 'video/quicktime',
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+  idempotencyKey?: string,
 ) {
-  return uploadFamilyMedia(transport, familyId, file, 'video', contentType, 'memory', signal, onStage)
+  return uploadFamilyMedia(transport, familyId, file, 'video', contentType, 'memory', signal, onStage, idempotencyKey)
 }
 
 async function uploadFamilyMedia(
@@ -139,6 +141,7 @@ async function uploadFamilyMedia(
   purpose: 'child_avatar' | 'memory',
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
+  idempotencyKey?: string,
 ) {
   onStage?.('reserve')
   const reservation = await transport.request(
@@ -148,19 +151,30 @@ async function uploadFamilyMedia(
       body: reserveMediaUploadRequestSchema.parse({
         purpose, kind, contentType, byteSize: file.size,
       }),
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
       signal,
     },
   )
   onStage?.('upload')
-  const response = await fetch(reservation.upload.url, {
-    method: reservation.upload.method,
-    headers: reservation.upload.headers,
-    body: file,
-    credentials: 'omit',
-    mode: 'cors',
-    signal,
-  })
-  if (!response.ok && response.status !== 412) throw new Error(kind === 'photo' ? 'Не удалось загрузить фотографию' : 'Не удалось загрузить видео')
+  let response: Response | undefined
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted()
+    try {
+      response = await fetch(reservation.upload.url, {
+        method: reservation.upload.method,
+        headers: reservation.upload.headers,
+        body: file,
+        credentials: 'omit',
+        mode: 'cors',
+        signal,
+      })
+      if (response.ok || response.status === 412 || response.status < 500 || attempt === 2) break
+    } catch (error) {
+      if (signal?.aborted || attempt === 2) throw error
+    }
+  }
+  signal?.throwIfAborted()
+  if (!response?.ok && response?.status !== 412) throw new Error(kind === 'photo' ? 'Не удалось загрузить фотографию' : 'Не удалось загрузить видео')
   onStage?.('finalize')
   await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(reservation.upload.uploadId)}/finalize`,

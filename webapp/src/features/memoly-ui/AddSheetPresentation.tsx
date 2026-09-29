@@ -101,7 +101,7 @@ export function AddSheetPanel({
       <DrawerTitle className="sheet-title">Добавить воспоминание</DrawerTitle>
       <DrawerDescription className="sheet-subtitle">Сохраняйте моменты, которые важны</DrawerDescription>
       <div className="add-options">
-        <AddAction icon="photo" label="Добавить фото" name="photo" onClick={onPhoto} copy={<>Снимок<br />из жизни</>} />
+        <AddAction icon="photo" label="Добавить фото и видео" name="photo" onClick={onPhoto} copy={<>Файлы<br />с устройства</>} />
         <AddAction icon="note" label="Добавить заметку" name="note" onClick={onNote} copy={<>Мысли<br />и события</>} />
         <AddAction icon="voice" label="Добавить голос или видео" name="voice-or-video" onClick={onVoiceOrVideo} copy={<>Файл<br />с устройства</>} />
       </div>
@@ -113,7 +113,7 @@ function AddAction({ icon, label, name, onClick, copy }: { icon: 'note' | 'photo
   const kind = name === 'photo' ? 'kind-photo' : name === 'note' ? 'kind-note' : 'kind-media'
   return <button aria-label={label} className={`add-option ${kind}`} data-add-action={name} onClick={onClick} type="button">
     <span className="add-option-icon"><WebpIcon decorative name={icon} size={38} state="active" /></span>
-    <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? 'Фото' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
+    <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? 'Фото и видео' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
     <Typography as="span" className="add-option-copy" tone="muted" variant="memoryMeta">{copy}</Typography>
   </button>
 }
