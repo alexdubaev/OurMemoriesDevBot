@@ -1,5 +1,5 @@
 import {
-  apiErrorSchema, finalizeMediaUploadResponseSchema, idempotencyKeyHeadersSchema, mediaContentParamsSchema,
+  apiErrorSchema, finalizeMediaUploadResponseSchema, idempotencyKeyHeadersSchema, maxVideoReadinessSchema, mediaContentParamsSchema,
   mediaContentQuerySchema, mediaFamilyParamsSchema, mediaUploadParamsSchema,
   reserveMediaUploadRequestSchema, reserveMediaUploadResponseSchema,
 } from '@web-app-demo/contracts'
@@ -110,6 +110,13 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
       throw error
     }
   }
+  routes.get('/families/:familyId/media/max-videos/:referenceId/readiness', async (c) => {
+    if (!maxVideoPlayback) return c.json({ error: { code: 'NOT_FOUND', message: 'Маршрут не найден' } }, 404)
+    const params = maxVideoContentParamsSchema.parse(c.req.param())
+    const readiness = await executeMedia(() => maxVideoPlayback.readiness({ ...scope(c), familyId: params.familyId }, params.referenceId, c.req.raw.signal))
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(maxVideoReadinessSchema.parse(readiness))
+  })
   const memberAvatarContent = async (c: any, head: boolean) => {
     const params = z.object({ familyId: z.uuid(), userId: z.uuid(), avatarId: z.uuid() }).strict().parse(c.req.param())
     const result = await executeMedia(() => service.memberAvatarContent(scope(c), params.userId, params.avatarId, head))
@@ -143,7 +150,8 @@ function bearerToken(authorization: string | undefined) {
 }
 
 function isContentPath(path: string) {
-  return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i.test(path)
+  return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i.test(path) ||
+    /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/readiness$/i.test(path)
 }
 
 function scope(c: any) { return { principal: { userId: c.var.user.id, sessionId: c.var.user.sessionId }, familyId: c.req.param('familyId') } }

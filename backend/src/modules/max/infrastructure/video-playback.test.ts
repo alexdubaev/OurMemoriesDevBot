@@ -1,8 +1,67 @@
 import { describe, expect, test } from 'bun:test'
 
 import { fetchCdnVideo, selectRendition, createMaxVideoPlayback } from './video-playback'
+import { MaxProviderError } from './max-api'
 
 describe('MAX guarded video transport', () => {
+  test('classifies processing, transition to ready, and ambiguous provider states without sends', async () => {
+    let mode: 'processing' | 'ready' | 'unknown' | 'missing' | 'terminal' | 'uncoded404' | 'other404' = 'processing'
+    let position = 2
+    let sends = 0
+    const playback = createMaxVideoPlayback({
+      runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
+        familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
+        maxVideoReference: { findFirst: async () => ({
+          id: 'ref', familyId: 'family', attachmentPosition: position, providerAttachmentId: 'video-id',
+          source: { familyId: 'family', memoryId: 'memory', senderSubject: 'sender', recipientId: 123n, messageId: 'message' },
+          outboundSource: null, memory: { id: 'memory', familyId: 'family', status: 'published', deletedAt: null },
+        }) },
+      } } as never,
+      api: {
+        sendVideoMessage: async () => { sends++; throw new Error('must not send') },
+        getMessage: async () => {
+          if (mode === 'missing') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+          if (mode === 'terminal') throw new MaxProviderError(undefined, false, 410, 'message_deleted')
+          const photo = (id: string) => ({ kind: 'image', providerAttachmentId: id, url: 'https://example.test/photo' })
+          const video = { kind: 'video', providerAttachmentId: 'video-id', currentToken: 'token', inboundDurationSeconds: null, width: null, height: null }
+          return { messageId: 'message', senderId: 'sender', recipientId: '123', attachments: position === 1
+            ? [photo('photo-1'), video, photo('photo-2')]
+            : [photo('photo-1'), photo('photo-2'), video] }
+        },
+        getVideo: async () => {
+          if (mode === 'processing') throw new MaxProviderError(undefined, false, 404, 'attachment.not.ready')
+          if (mode === 'uncoded404') throw new MaxProviderError(undefined, false, 404)
+          if (mode === 'other404') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+          if (mode === 'unknown') throw new MaxProviderError()
+          return { width: 1280, height: 720, durationMs: null, renditions: [{ url: 'https://maxvd1.okcdn.ru/video', width: 1280, height: 720, contentLength: 2 }] }
+        },
+      } as never,
+    })
+    const scope = { familyId: 'family', principal: { userId: 'viewer', sessionId: 'session' } }
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'processing', recheckable: true })
+    position = 1
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'processing', recheckable: true })
+    await expect(playback.content(scope, 'ref', undefined, 'HEAD')).rejects.toMatchObject({ kind: 'video_processing' })
+    mode = 'unknown'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
+    mode = 'uncoded404'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
+    mode = 'other404'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
+    mode = 'ready'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'ready', recheckable: false })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(new Uint8Array([1, 2]), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '2' } })) as unknown as typeof fetch
+    try {
+      const media = await playback.content(scope, 'ref', undefined, 'GET')
+      expect(await new Response(media.body).arrayBuffer()).toHaveLength(2)
+    } finally { globalThis.fetch = originalFetch }
+    mode = 'missing'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
+    mode = 'terminal'
+    expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
+    expect(sends).toBe(0)
+  })
   test('selects the highest MP4 rendition at or below 720p and rejects unsafe hosts', () => {
     expect(selectRendition([
       { url: 'https://maxvd1.okcdn.ru/1080.mp4?sig=x', width: 1920, height: 1080, contentLength: 1 },
@@ -84,6 +143,17 @@ describe('MAX guarded video transport', () => {
     globalThis.fetch = (async () => new Response(null, { status: 416, headers: { 'content-range': 'bytes */10' } })) as unknown as typeof fetch
     try {
       await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video.mp4', 'bytes=10-', 'GET', 250)).rejects.toMatchObject({ kind: 'range_not_satisfiable', details: { total: 10 } })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  test('treats transient CDN responses as recheckable rather than unsupported media', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(null, { status: 503 })) as unknown as typeof fetch
+    try {
+      await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video', undefined, 'HEAD', 250))
+        .rejects.toMatchObject({ kind: 'video_readiness_unknown' })
+      await expect(fetchCdnVideo('https://maxvd1.okcdn.ru/video', 'bytes=0-1', 'GET', 250))
+        .rejects.toMatchObject({ kind: 'video_readiness_unknown' })
     } finally { globalThis.fetch = originalFetch }
   })
 

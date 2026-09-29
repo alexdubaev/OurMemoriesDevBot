@@ -66,6 +66,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
           : input.kind === 'note' ? [] : input.mediaIds.map((mediaId) => ({ source: 'private_storage' as const, mediaId }))
         const mediaIds = attachments.flatMap((entry) => entry.source === 'private_storage' ? [entry.mediaId] : [])
         const sessionIds = attachments.flatMap((entry) => entry.source === 'max' ? [entry.sessionId] : [])
+        let assetKindById = new Map<string, 'photo' | 'video' | 'voice'>()
         if (input.kind !== 'note') {
           if (attachments.length < 1 || attachments.length > 10 || new Set(sessionIds).size !== sessionIds.length) {
             throw new MemoryFailure('invalid_input', 'Неподходящий состав вложений')
@@ -75,6 +76,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
             id: { in: mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
             memories: { none: {} },
           }, select: { id: true, mediaKind: true } })
+          assetKindById = new Map(assetKinds.map(({ id, mediaKind }) => [id, mediaKind]))
           const expected = input.kind === 'media' ? ['photo', 'video'] : [input.kind]
           if (assetKinds.length !== mediaIds.length || new Set(mediaIds).size !== mediaIds.length ||
               assetKinds.some(({ mediaKind }) => !expected.includes(mediaKind))) {
@@ -124,6 +126,33 @@ export class PrismaMemoryRepository implements MemoryRepository {
               attachmentPosition: position, providerAttachmentId: source.providerAttachmentId,
               width: source.width, height: source.height, durationMs: source.durationMs,
             } })
+          }
+        }
+        if (input.kind === 'photo' || input.kind === 'media') {
+          const family = await tx.family.findUniqueOrThrow({
+            where: { id: scope.familyId }, select: { maxBackupChatId: true },
+          })
+          const backup = await tx.maxMemoryBackup.create({ data: {
+            familyId: scope.familyId,
+            memoryId: created.id,
+            body: input.body,
+            state: family.maxBackupChatId === null ? 'needs_configuration' : 'pending',
+            channelChatId: family.maxBackupChatId,
+          } })
+          await tx.maxMemoryBackupAttachment.createMany({ data: attachments.map((entry, position) => ({
+            backupId: backup.id,
+            familyId: scope.familyId,
+            position,
+            kind: entry.source === 'max' || assetKindById.get(entry.mediaId) === 'video' ? 'video' : 'image',
+            ...(entry.source === 'max' ? { uploadSessionId: entry.sessionId } : { mediaId: entry.mediaId }),
+          })) })
+          if (family.maxBackupChatId !== null) {
+            await insertTask(tx, {
+              type: 'max:backup-media',
+              dedupeKey: `max-backup-media:${created.id}`,
+              payload: { memoryId: created.id },
+              scheduledFor: idempotency.now,
+            })
           }
         }
         const memory = input.kind === 'note' ? created : await tx.memory.findUniqueOrThrow({

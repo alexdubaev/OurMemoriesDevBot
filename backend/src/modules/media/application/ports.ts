@@ -1,5 +1,6 @@
 import type {
   MediaAssetDto,
+  MaxVideoReadiness,
   MediaPurpose,
   MediaVariant,
   PrivateMediaKind,
@@ -41,6 +42,7 @@ export type ContentObject = {
 }
 
 export type MaxVideoPlayback = {
+  readiness(scope: FamilyScope, referenceId: string, signal?: AbortSignal): Promise<MaxVideoReadiness>
   content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal): Promise<{
     body: ReadableStream<Uint8Array> | null
     contentType: string

@@ -1,6 +1,9 @@
 export type MediaFailureKind =
   | 'invalid_file'
   | 'unsupported_media'
+  | 'video_processing'
+  | 'video_readiness_unknown'
+  | 'video_unavailable'
   | 'range_not_satisfiable'
   | 'not_found'
   | 'forbidden'

@@ -140,6 +140,14 @@ export const maxVideoAttachmentSchema = z.object({
   playbackPath: backendMediaPathSchema,
 }).strict()
 
+/** Readiness is a fresh provider check; processing and unknown can be checked again. */
+export const maxVideoReadinessSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('processing'), recheckable: z.literal(true) }).strict(),
+  z.object({ state: z.literal('unknown'), recheckable: z.literal(true) }).strict(),
+  z.object({ state: z.literal('ready'), recheckable: z.literal(false) }).strict(),
+  z.object({ state: z.literal('unavailable'), recheckable: z.literal(false) }).strict(),
+])
+
 const telegramVideoOpenPathSchema = z.string().superRefine((value, context) => {
   const uuidSegment = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
   const path = new RegExp(`^/api/v1/families/${uuidSegment}/memories/${uuidSegment}/telegram-video$`)
@@ -208,6 +216,7 @@ export type SeenMemoriesRequest = z.infer<typeof seenMemoriesRequestSchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
 export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>
+export type MaxVideoReadiness = z.infer<typeof maxVideoReadinessSchema>
 export type TelegramVideoAttachment = z.infer<typeof telegramVideoAttachmentSchema>
 export type MemoryAttachment = z.infer<typeof memoryAttachmentSchema>
 export type MemoryPage = z.infer<typeof memoryPageSchema>
