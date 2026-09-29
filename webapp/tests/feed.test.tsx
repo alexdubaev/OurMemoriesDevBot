@@ -5,7 +5,9 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
+import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from '../src/features/feed/max-video-readiness'
 import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
@@ -112,6 +114,49 @@ const mixedMemory: MemoryDto = {
   body: 'Фото и видео по порядку',
   attachments: [photoMemory.attachments[0], videoMemory.attachments[0], { ...photoMemory.attachments[0], id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }, { ...videoMemory.attachments[0], id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }],
 }
+
+test('photo albums of five and ten keep one Memory and ordered Feed carousel slides', () => {
+  for (const count of [5, 10]) {
+    const album: MemoryDto = {
+      ...photoMemory,
+      attachments: Array.from({ length: count }, (_, index) => ({
+        ...photoMemory.attachments[0]!,
+        id: `photo-${index + 1}`,
+      })),
+    }
+    const markup = renderFeed(feedClientWith([album]))
+    expect(markup.match(/data-memory-id="66666666-6666-4666-8666-666666666666"/g)?.length).toBe(1)
+    expect(markup).toContain(`1 / ${count}`)
+    const positions = Array.from({ length: count }, (_, index) => markup.indexOf(`data-carousel-position="${index + 1}" data-media-kind="photo"`))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(markup.match(/aria-hidden="true"[^>]*inert=""/g)?.length).toBe(count - 1)
+  }
+})
+
+test('a single photo uses the same fixed Feed stage without carousel navigation', () => {
+  const markup = renderFeed(feedClientWith([photoMemory]))
+  expect(markup).toContain('data-media-stage="feed"')
+  expect(markup).toContain('data-carousel-position="1" data-media-kind="photo"')
+  expect(markup).not.toContain('memoly-mixed-controls')
+  expect(markup).toContain('Загрузка фотографии')
+})
+
+test('mixed slides use one fixed stage without attachment-specific sizing', () => {
+  const markup = renderFeed(feedClientWith([mixedMemory]))
+  expect(markup).toContain('data-media-stage="feed"')
+  expect(markup).not.toMatch(/data-carousel-position="[2-4]"[^>]*style="aspect-ratio/)
+})
+
+test('automatic rendition checks prioritize an opened Memory and nearby pending cards only', () => {
+  const pending = (id: string): MemoryDto => ({ ...videoMemory, id, attachments: [{ ...videoMemory.attachments[0]!, renditionStatus: 'pending', playbackPath: null }] })
+  const items = [pending('far'), pending('near-a'), pending('near-b'), pending('near-c'), pending('near-d')]
+  expect(selectPendingPrivateVideoIds(items, [], ['near-a', 'near-b', 'near-c', 'near-d'], 3)).toEqual(['near-a', 'near-b', 'near-c'])
+  expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3)).toEqual(['far', 'near-a', 'near-b'])
+  expect(selectPendingPrivateVideoIds(items, [], ['far-ready', 'near-a'], 3)).toEqual(['near-a'])
+  expect(selectPendingPrivateVideoIds(items, [], ['near-a', 'near-b', 'near-c', 'near-d'], 3, new Set(['near-a']))).toEqual(['near-b', 'near-c', 'near-d'])
+  expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3, new Set(['far', 'near-a']))).toEqual(['near-b', 'near-c'])
+})
 
 test('mixed memory renders one card with ordered slides and lazily mounts video', () => {
   const markup = renderFeed(feedClientWith([mixedMemory]))
@@ -643,6 +688,71 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).not.toContain('aspect-video')
     expect(markup).not.toContain('object-cover')
   }
+})
+
+test('MAX readiness URL uses the validated playback reference, not attachment identity', () => {
+  const referenceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+  const playbackPath = `/api/v1/families/${familyId}/media/max-videos/${referenceId}/content`
+  expect(maxVideoReadinessPath(playbackPath)).toBe(`/api/v1/families/${familyId}/media/max-videos/${referenceId}/readiness`)
+  expect(maxVideoReadinessPath(`${playbackPath}?token=unsafe`)).toBeNull()
+  expect(maxVideoReadinessPath(`/api/v1/families/${familyId}/media/${referenceId}/content`)).toBeNull()
+})
+
+test('MAX processing and unknown remain neutral while unavailable is terminal', () => {
+  for (const [readinessState, label] of [['processing', 'Видео обрабатывается…'], ['unknown', 'Готовность видео пока неизвестна'], ['unavailable', 'Видео недоступно']] as const) {
+    const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+      durationMs: 24_000, height: 720, onCheckReadiness: () => undefined, onOpen: () => undefined,
+      readinessState, src: null, width: 1_280,
+    }))
+    expect(markup).toContain(`data-video-viewer-state="${readinessState}"`)
+    expect(markup).toContain(label)
+    expect(markup).toContain('data-seen-ready="false"')
+    expect(markup).not.toContain('Не удалось загрузить видео')
+    if (readinessState === 'unavailable') expect(markup).not.toContain('Проверить готовность')
+    else expect(markup).toContain('Проверить готовность')
+  }
+  expect(maxVideoReadinessInterval({ data: { state: 'processing', recheckable: true }, dataUpdateCount: 11, errorUpdateCount: 0 })).toBe(5_000)
+  expect(maxVideoReadinessInterval({ data: { state: 'unknown', recheckable: true }, dataUpdateCount: 12, errorUpdateCount: 0 })).toBe(false)
+  expect(maxVideoReadinessInterval({ data: undefined, dataUpdateCount: 0, errorUpdateCount: 4 })).toBe(false)
+  expect(maxVideoReadinessInterval({ data: { state: 'unavailable', recheckable: false }, dataUpdateCount: 1, errorUpdateCount: 0 })).toBe(false)
+})
+
+test('MAX readiness network checks never exceed three simultaneous requests', async () => {
+  let active = 0
+  let peak = 0
+  const releases: Array<() => void> = []
+  const checks = Array.from({ length: 5 }, () => withMaxVideoReadinessSlot(new AbortController().signal, async () => {
+    active += 1
+    peak = Math.max(peak, active)
+    await new Promise<void>((resolve) => releases.push(resolve))
+    active -= 1
+  }))
+  await Promise.resolve()
+  expect(active).toBe(3)
+  for (let index = 0; index < 5; index += 1) {
+    releases[index]?.()
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+  await Promise.all(checks)
+  expect(peak).toBe(3)
+})
+
+test('an aborted queued MAX readiness check never starts a request', async () => {
+  const releases: Array<() => void> = []
+  let started = 0
+  const active = Array.from({ length: 3 }, () => withMaxVideoReadinessSlot(new AbortController().signal, async () => {
+    started += 1
+    await new Promise<void>((resolve) => releases.push(resolve))
+  }))
+  const controller = new AbortController()
+  const queued = withMaxVideoReadinessSlot(controller.signal, async () => { started += 1 })
+  controller.abort()
+  await expect(queued).rejects.toBeDefined()
+  expect(started).toBe(3)
+  releases.forEach((release) => release())
+  await Promise.all(active)
+  expect(started).toBe(3)
 })
 
 test('a MAX video source is assigned and loaded once per distinct source', () => {
