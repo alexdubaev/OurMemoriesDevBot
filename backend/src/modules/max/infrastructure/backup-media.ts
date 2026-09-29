@@ -163,19 +163,20 @@ export function createMaxMemoryBackupProcessor(options: {
       }
       sent = await options.api.sendMediaMessage(input, signal)
     } catch (error) {
-      if (isExplicitAttachmentNotReady(error)) {
+      if (isExplicitAttachmentNotReady(error) || isExplicitRateLimit(error)) {
+        const lastErrorCode = isExplicitRateLimit(error) ? 'rate_limited' : 'attachment_not_ready'
         if (finalAttempt) {
           const failed = await options.repository.updateState(backup, 'failed', {
             sendIntentAt: null,
-            lastErrorCode: 'attachment_not_ready',
+            lastErrorCode,
           }).catch(() => false)
-          if (failed) throw new TerminalTaskError('MAX backup attachment was not ready on its final attempt', { cause: error })
-          throw new TerminalTaskError('MAX backup state changed after an explicit attachment-not-ready response', { cause: error })
+          if (failed) throw new TerminalTaskError('MAX backup send was rejected on its final attempt', { cause: error })
+          throw new TerminalTaskError('MAX backup state changed after an explicit send rejection', { cause: error })
         }
 
         const released = await options.repository.updateState(backup, 'uploading', {
           sendIntentAt: null,
-          lastErrorCode: 'attachment_not_ready',
+          lastErrorCode,
         }).catch(() => false)
         if (!released) throw new TerminalTaskError('MAX backup send intent could not be safely released', { cause: error })
         throw new MaxProviderError(error.retryAfterSeconds, true, error.status, error.code)
@@ -237,6 +238,10 @@ function isExplicitAttachmentNotReady(error: unknown): error is MaxProviderError
     typeof error.status === 'number' && error.status >= 400 && error.status < 500
 }
 
+function isExplicitRateLimit(error: unknown): error is MaxProviderError {
+  return error instanceof MaxProviderError && error.status === 429
+}
+
 async function readBounded(body: ReadableStream<Uint8Array>, maximum: number) {
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
@@ -263,16 +268,23 @@ async function normalizePhoto(bytes: Uint8Array, mime: string): Promise<{
   contentType: 'image/jpeg' | 'image/png' | 'image/heic'
 }> {
   if (mime === 'image/jpeg' || mime === 'image/png') {
-    return { bytes, contentType: mime }
+    const source = sharp(bytes, { failOn: 'error', limitInputPixels: 40_000_000, pages: 1 })
+    const metadata = await source.metadata()
+    if (!metadata.width || !metadata.height) throw new TerminalTaskError('MAX backup photo dimensions are unavailable')
+    if (metadata.width <= 7_680 && metadata.height <= 7_680) return { bytes, contentType: mime }
+    const converted = await source.rotate().resize({ width: 7_680, height: 7_680, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer()
+    if (converted.byteLength > maxPhotoBytes) throw new TerminalTaskError('Converted MAX backup photo exceeds the 20 MB provider limit')
+    return { bytes: new Uint8Array(converted), contentType: 'image/jpeg' }
   }
   let converted: Buffer
   if (mime === 'image/webp') {
-    converted = await sharp(bytes, { failOn: 'error', limitInputPixels: 40_000_000, pages: 1 }).rotate().jpeg({ quality: 90 }).toBuffer()
+    converted = await sharp(bytes, { failOn: 'error', limitInputPixels: 40_000_000, pages: 1 }).rotate()
+      .resize({ width: 7_680, height: 7_680, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer()
   } else if (mime === 'image/heic') {
     const decoded = await decodeHeic({ buffer: Buffer.from(bytes) })
     converted = await sharp(Buffer.from(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength), {
       raw: { width: decoded.width, height: decoded.height, channels: 4 }, limitInputPixels: 40_000_000,
-    }).jpeg({ quality: 90 }).toBuffer()
+    }).resize({ width: 7_680, height: 7_680, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer()
   } else throw new TerminalTaskError('MAX backup photo format is unsupported')
   if (converted.byteLength > maxPhotoBytes) throw new TerminalTaskError('Converted MAX backup photo exceeds the 20 MB provider limit')
   return { bytes: new Uint8Array(converted), contentType: 'image/jpeg' as const }

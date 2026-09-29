@@ -1,13 +1,15 @@
 import { describe, expect, test } from 'bun:test'
+import sharp from 'sharp'
 
 import type { PrivateStorage } from '../../../storage'
 import type { MaxApiPort, MaxSendMediaMessageInput } from '../application/ports'
 import { createMaxMemoryBackupProcessor, type MaxMemoryBackupRepository } from './backup-media'
 import { MaxProviderError } from './max-api'
 
-const bytes = Uint8Array.of(1, 2, 3)
+const bytes = new Uint8Array(await sharp({ create: { width: 1, height: 1, channels: 3, background: '#ffffff' } }).png().toBuffer())
 
-function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolean; published?: boolean } = {}) {
+function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolean; published?: boolean; imageBytes?: Uint8Array } = {}) {
+  const originalBytes = options.imageBytes ?? bytes
   const backup: any = {
     id: 'backup-id', memoryId: '11111111-1111-4111-8111-111111111111', familyId: 'family-id', body: 'Caption',
     state: options.configured === false ? 'needs_configuration' : 'pending', channelChatId: options.configured === false ? null : 88001n,
@@ -17,7 +19,7 @@ function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolea
     attachments: kinds.map((kind, position) => ({
       position, kind, uploadToken: null,
       media: kind === 'image' ? { id: `photo-${position}`, familyId: 'family-id', mediaKind: 'photo',
-        originalKey: `media-originals/${position}`, byteSize: 3n, verifiedMime: 'image/png', declaredMime: 'image/png',
+        originalKey: `media-originals/${position}`, byteSize: BigInt(originalBytes.byteLength), verifiedMime: 'image/png', declaredMime: 'image/png',
         originalStatus: 'stored', deletedAt: null, storageDeletedAt: null } : null,
       uploadSession: kind === 'video' ? { familyId: 'family-id', state: 'finalized', providerUploadToken: `video-${position}` } : null,
     })),
@@ -43,6 +45,7 @@ function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolea
     },
   }
   const uploads: number[] = []
+  const uploadedImages: Uint8Array[] = []
   const sends: MaxSendMediaMessageInput[] = []
   const successfulSends: string[] = []
   let failSend = false
@@ -51,6 +54,7 @@ function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolea
   const api: Pick<MaxApiPort, 'uploadImage' | 'sendMediaMessage'> = {
     async uploadImage(input) {
       uploads.push(input.bytes.byteLength)
+      uploadedImages.push(input.bytes)
       if (uploads.length === failUploadAt) throw new Error('temporary upload failure')
       return { token: `image-token-${uploads.length}` }
     },
@@ -67,11 +71,11 @@ function fixture(kinds: Array<'image' | 'video'>, options: { configured?: boolea
     },
   }
   const storage = {
-    async readObject() { return { key: 'original', contentLength: bytes.byteLength, contentType: 'image/png', body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close() } }) } },
+    async readObject() { return { key: 'original', contentLength: originalBytes.byteLength, contentType: 'image/png', body: new ReadableStream({ start(controller) { controller.enqueue(originalBytes); controller.close() } }) } },
   } as unknown as PrivateStorage
   const process = createMaxMemoryBackupProcessor({ repository: repo, storage, api, now: () => new Date('2026-09-29T00:00:00Z') })
   return {
-    backup, uploads, sends, successfulSends, process,
+    backup, uploads, uploadedImages, sends, successfulSends, process,
     failSend: (value: boolean) => { failSend = value },
     failNextSend: (error: unknown) => { nextSendError = error },
     failUploadAt: (count: number | null) => { failUploadAt = count },
@@ -111,6 +115,40 @@ describe('MAX Memory backup outbox processor', () => {
     await state.process({ memoryId: state.backup.memoryId })
     expect(state.sends).toHaveLength(1)
     expect(state.backup.state).toBe('ambiguous')
+  })
+
+  test('resizes a valid wide app photo before uploading it to MAX', async () => {
+    const wide = new Uint8Array(await sharp({ create: { width: 8_000, height: 1, channels: 3, background: '#ffffff' } }).png().toBuffer())
+    const state = fixture(['image'], { imageBytes: wide })
+    await state.process({ memoryId: state.backup.memoryId })
+    const uploaded = await sharp(state.uploadedImages[0]!).metadata()
+    expect(uploaded.width).toBeLessThanOrEqual(7_680)
+    expect(uploaded.height).toBeLessThanOrEqual(7_680)
+    expect(state.backup.state).toBe('sent')
+  })
+
+  test('retries an explicit MAX 429 without losing the provider delay or sending twice successfully', async () => {
+    const state = fixture(['image'])
+    state.failNextSend(new MaxProviderError(3, true, 429, 'rate.limit'))
+    await expect(state.process({ memoryId: state.backup.memoryId })).rejects.toMatchObject({
+      name: 'MaxProviderError', status: 429, retryAfterSeconds: 3, retryable: true,
+    })
+    expect(state.backup.state).toBe('uploading')
+    expect(state.backup.sendIntentAt).toBeNull()
+    await state.process({ memoryId: state.backup.memoryId })
+    expect(state.sends).toHaveLength(2)
+    expect(state.successfulSends).toHaveLength(1)
+    expect(state.uploads).toHaveLength(1)
+    expect(state.backup.state).toBe('sent')
+  })
+
+  test('fails an explicit MAX 429 on the final outbox attempt', async () => {
+    const state = fixture(['image'])
+    state.failNextSend(new MaxProviderError(3, true, 429, 'rate.limit'))
+    await expect(state.process({ memoryId: state.backup.memoryId }, undefined, true)).rejects.toThrow('final attempt')
+    expect(state.backup.state).toBe('failed')
+    expect(state.backup.sendIntentAt).toBeNull()
+    expect(state.successfulSends).toHaveLength(0)
   })
 
   test('retries only an explicit attachment-not-ready response and succeeds on the next attempt', async () => {
