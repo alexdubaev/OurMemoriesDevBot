@@ -1,9 +1,27 @@
-import type { MaxInboundEvent } from '../application/ports'
+import type { MaxAcceptedEvent } from '../application/ports'
 
-export type MaxMappedUpdate = MaxInboundEvent | { kind: 'ignored' }
+export type MaxMappedUpdate = MaxAcceptedEvent | { kind: 'ignored' }
 
-export function normalizeMaxUpdate(input: unknown): MaxMappedUpdate {
+export function normalizeMaxUpdate(input: unknown, rawBody?: string): MaxMappedUpdate {
   if (!isRecord(input) || typeof input.update_type !== 'string') throw new Error('Invalid MAX update')
+  if (isLifecycleType(input.update_type)) {
+    if (rawBody === undefined) throw new Error('Missing raw MAX lifecycle update body')
+    let rawUpdate: unknown
+    try { rawUpdate = JSON.parse(rawBody) } catch { throw new Error('Invalid raw MAX lifecycle update body') }
+    if (!isRecord(rawUpdate) || rawUpdate.update_type !== input.update_type || !isNonNegativeSafeInteger(input.timestamp)) {
+      throw new Error('Invalid MAX lifecycle update envelope')
+    }
+    if (input.update_type === 'bot_added' || input.update_type === 'bot_removed') {
+      const chatId = readRawTopLevelInteger(rawBody, 'chat_id')
+      const rawUser = readRawTopLevelObject(rawBody, 'user')
+      const userId = rawUser === null ? null : readRawTopLevelInteger(rawUser, 'user_id')
+      if (chatId === null || !isInt64(chatId) || !isRecord(input.user) || userId === null || !isInt64(userId) ||
+          typeof input.is_channel !== 'boolean') {
+        throw new Error('Invalid MAX bot_added update')
+      }
+    }
+    return { kind: input.update_type, rawPayload: rawBody }
+  }
   if (input.update_type !== 'message_created' && input.update_type !== 'bot_started' && input.update_type !== 'message_callback') return { kind: 'ignored' }
   const timestamp = input.timestamp
   if (!isNonNegativeSafeInteger(timestamp)) throw new Error('Invalid MAX timestamp')
@@ -11,6 +29,126 @@ export function normalizeMaxUpdate(input: unknown): MaxMappedUpdate {
   if (input.update_type === 'bot_started') return normalizeBotStarted(input, occurredAt)
   if (input.update_type === 'message_callback') return normalizeChoiceCallback(input, occurredAt)
   return normalizeMessage(input, occurredAt)
+}
+
+function readRawTopLevelInteger(json: string, targetKey: string): string | null {
+  let index = skipWhitespace(json, 0)
+  if (json[index] !== '{') return null
+  index++
+  let found: string | null = null
+  while (index < json.length) {
+    index = skipWhitespace(json, index)
+    if (json[index] === '}') return found
+    if (json[index] !== '"') return null
+    const keyEnd = scanJsonString(json, index)
+    if (keyEnd === null) return null
+    let key: unknown
+    try { key = JSON.parse(json.slice(index, keyEnd)) } catch { return null }
+    index = skipWhitespace(json, keyEnd)
+    if (json[index] !== ':') return null
+    index = skipWhitespace(json, index + 1)
+    const valueStart = index
+    if (key === targetKey) {
+      const match = /^-?(?:0|[1-9][0-9]*)/.exec(json.slice(valueStart))
+      if (!match) return null
+      const token = match[0]
+      index += token.length
+      index = skipWhitespace(json, index)
+      if (json[index] !== ',' && json[index] !== '}') return null
+      if (found !== null) return null
+      found = token
+    } else {
+      index = skipJsonValue(json, index)
+      if (index < 0) return null
+    }
+    index = skipWhitespace(json, index)
+    if (json[index] === ',') { index++; continue }
+    if (json[index] === '}') return found
+    return null
+  }
+  return null
+}
+
+function readRawTopLevelObject(json: string, targetKey: string): string | null {
+  let index = skipWhitespace(json, 0)
+  if (json[index] !== '{') return null
+  index++
+  let found: string | null = null
+  while (index < json.length) {
+    index = skipWhitespace(json, index)
+    if (json[index] === '}') return found
+    if (json[index] !== '"') return null
+    const keyEnd = scanJsonString(json, index)
+    if (keyEnd === null) return null
+    let key: unknown
+    try { key = JSON.parse(json.slice(index, keyEnd)) } catch { return null }
+    index = skipWhitespace(json, keyEnd)
+    if (json[index] !== ':') return null
+    index = skipWhitespace(json, index + 1)
+    const valueStart = index
+    const valueEnd = skipJsonValue(json, valueStart)
+    if (valueEnd < 0) return null
+    if (key === targetKey) {
+      if (json[valueStart] !== '{' || found !== null) return null
+      found = json.slice(valueStart, valueEnd)
+    }
+    index = skipWhitespace(json, valueEnd)
+    if (json[index] === ',') { index++; continue }
+    if (json[index] === '}') return found
+    return null
+  }
+  return null
+}
+
+function scanJsonString(json: string, start: number): number | null {
+  let escaped = false
+  for (let index = start + 1; index < json.length; index++) {
+    if (escaped) { escaped = false; continue }
+    if (json[index] === '\\') { escaped = true; continue }
+    if (json[index] === '"') return index + 1
+  }
+  return null
+}
+
+function skipJsonValue(json: string, start: number): number {
+  if (json[start] === '"') return scanJsonString(json, start) ?? -1
+  if (json[start] !== '{' && json[start] !== '[') {
+    let index = start
+    while (index < json.length && json[index] !== ',' && json[index] !== '}') index++
+    return index
+  }
+  const stack = [json[start] === '{' ? '}' : ']']
+  let index = start + 1
+  while (index < json.length && stack.length > 0) {
+    const char = json[index]
+    if (char === '"') {
+      const end = scanJsonString(json, index)
+      if (end === null) return -1
+      index = end
+      continue
+    }
+    if (char === '{') stack.push('}')
+    else if (char === '[') stack.push(']')
+    else if (char === stack[stack.length - 1]) stack.pop()
+    index++
+  }
+  return stack.length === 0 ? index : -1
+}
+
+function skipWhitespace(json: string, start: number) {
+  let index = start
+  while (index < json.length && /\s/.test(json[index]!)) index++
+  return index
+}
+
+function isInt64(value: string) {
+  if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) return false
+  const integer = BigInt(value)
+  return integer >= -9_223_372_036_854_775_808n && integer <= 9_223_372_036_854_775_807n
+}
+
+function isLifecycleType(value: string): value is 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed' {
+  return value === 'bot_added' || value === 'bot_removed' || value === 'bot_admin_permissions_changed'
 }
 
 function normalizeChoiceCallback(input: Record<string, unknown>, occurredAt: string): MaxMappedUpdate {

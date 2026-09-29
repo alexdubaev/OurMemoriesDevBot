@@ -36,6 +36,10 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
         return { inboxId: existing.id, duplicate: true }
       }
 
+      // Channel lifecycle updates are retained for a later explicit workflow. They must not enter
+      // message processing, which expects a MaxSource and can create Memories or responses.
+      if (isLifecycleEvent(input.event)) return { inboxId, duplicate: false }
+
       if (input.event.kind === 'message_created') {
         // TODO(post-MVP MAX history import): Validate channel chat_id + mid provenance and a shared live/history dedupe identity before extending this dialog-oriented MaxSource reservation.
         const source = await tx.maxSource.create({
@@ -86,6 +90,10 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
       return { inboxId, duplicate: false }
     })
   }
+}
+
+function isLifecycleEvent(event: Parameters<MaxAcceptRepository['accept']>[0]['event']) {
+  return event.kind === 'bot_added' || event.kind === 'bot_removed' || event.kind === 'bot_admin_permissions_changed'
 }
 
 async function queue(

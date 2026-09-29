@@ -145,6 +145,27 @@ maybeDescribe('MAX durable capture', () => {
     expect(completed.encryptedPayload.byteLength).toBe(0)
   })
 
+  test('stores channel lifecycle events encrypted only and treats identical deliveries as duplicates', async () => {
+    const chatId = '9223372036854775807'
+    const rawBody = `{"update_type":"bot_added","timestamp":1757844000002,"chat_id":${chatId},"is_channel":true,"user":{"user_id":77}}`
+    const first = await webhook.request('/webhooks/max', { method: 'POST', headers, body: rawBody })
+    const duplicate = await webhook.request('/webhooks/max', { method: 'POST', headers, body: rawBody })
+    expect(first.status).toBe(200)
+    expect(duplicate.status).toBe(200)
+
+    const inboxRows = await prisma.maxInbox.findMany({ include: { source: true, responses: true } })
+    expect(inboxRows).toHaveLength(1)
+    expect(inboxRows[0].eventKind).toBe('bot_added')
+    expect(inboxRows[0].source).toBeNull()
+    expect(inboxRows[0].responses).toHaveLength(0)
+    expect(crypto.decrypt<{ kind: string; rawPayload: string }>({ ciphertext: inboxRows[0].encryptedPayload, iv: inboxRows[0].encryptionIv, authTag: inboxRows[0].encryptionAuthTag }))
+      .toEqual({ kind: 'bot_added', rawPayload: rawBody })
+    expect(await prisma.taskOutbox.count()).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.count()).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+  })
+
   test('routes valid and invalid invite starts without accepting or creating Core data', async () => {
     const fixedNow = new Date('2026-09-15T10:00:00.000Z')
     const active = await maxFamily('23001', 'full')

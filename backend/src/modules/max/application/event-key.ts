@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 
-import type { MaxInboundEvent } from './ports'
+import type { MaxAcceptedEvent } from './ports'
 
-export function maxEventKey(botId: string, event: MaxInboundEvent): string {
+export function maxEventKey(botId: string, event: MaxAcceptedEvent): string {
+  if (event.kind === 'bot_added' || event.kind === 'bot_removed' || event.kind === 'bot_admin_permissions_changed') {
+    return sha256(lengthPrefixed([event.kind, botId, sha256(event.rawPayload)]))
+  }
   const fields = event.kind === 'message_created'
     ? [event.kind, botId, event.recipientId, event.messageId]
     : event.kind === 'family_choice'

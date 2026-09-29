@@ -41,3 +41,16 @@ test('accepts valid events before acknowledging and returns retryable failure wh
   const failed = route(async () => { throw new Error('test failure') })
   expect((await failed.request('/webhooks/max', { method: 'POST', headers: { 'X-Max-Bot-Api-Secret': secret }, body: valid })).status).toBe(503)
 })
+
+test('forwards the exact raw lifecycle update to acceptance instead of acknowledging it as unknown', async () => {
+  const rawBody = '{"update_type":"bot_added","timestamp":1700000000000,"chat_id":9223372036854775807,"is_channel":true,"user":{"user_id":42}}'
+  let accepted: unknown
+  const app = route(async (event) => { accepted = event })
+  const response = await app.request('/webhooks/max', {
+    method: 'POST',
+    headers: { 'X-Max-Bot-Api-Secret': secret, 'Content-Type': 'application/json' },
+    body: rawBody,
+  })
+  expect(response.status).toBe(200)
+  expect(accepted).toEqual({ kind: 'bot_added', rawPayload: rawBody })
+})

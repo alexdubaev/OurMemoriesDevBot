@@ -46,13 +46,17 @@ describe('MAX API client', () => {
       url: 'https://example.com/hook', time: 1700000000000, updateTypes: ['message_created'],
     }])
     await expect(api.createSubscription({
-      url: 'https://example.com/hook', updateTypes: ['message_created', 'bot_started'], secret: 'test-only-secret',
+      url: 'https://example.com/hook', updateTypes: [
+        'message_callback', 'bot_started', 'message_created', 'bot_added', 'bot_removed', 'bot_admin_permissions_changed',
+      ], secret: 'test-only-secret',
     })).resolves.toEqual({ success: true })
     expect(requests[0]!.url).toBe('https://platform-api2.max.ru/subscriptions')
     expect(requests[1]!.method).toBe('POST')
     const requestBody = await requests[1]!.json()
     expect(requestBody).toEqual({
-      url: 'https://example.com/hook', update_types: ['message_created', 'bot_started'], secret: 'test-only-secret',
+      url: 'https://example.com/hook', update_types: [
+        'message_callback', 'bot_started', 'message_created', 'bot_added', 'bot_removed', 'bot_admin_permissions_changed',
+      ], secret: 'test-only-secret',
     })
     expect(JSON.stringify(requestBody)).not.toContain('version')
   })
@@ -202,6 +206,15 @@ describe('MAX API client', () => {
     await expect(api.getMessage('live-m/1')).resolves.toEqual({
       messageId: 'live-m/1', senderId: '42', recipientId: '99', attachments: [],
     })
+  })
+
+  test('rejects truly unknown subscription update types before calling the provider', async () => {
+    let fetchCalls = 0
+    const api = createMaxApi(token, { fetch: async () => { fetchCalls++; return response({ success: true }) } })
+    await expect(api.createSubscription({
+      url: 'https://example.com/hook', updateTypes: ['message_created', 'future_unknown_type'], secret: 'test-only-secret',
+    })).rejects.toBeInstanceOf(MaxProviderError)
+    expect(fetchCalls).toBe(0)
   })
 
   test('re-fetches the confirmed audio shape and returns only its transient source URL', async () => {

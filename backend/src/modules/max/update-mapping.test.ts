@@ -20,6 +20,66 @@ const messageFixture = {
 }
 
 describe('MAX update mapping', () => {
+  test('recognizes channel lifecycle event types and retains the exact signed chat id in raw JSON', () => {
+    const chatId = '-9223372036854775808'
+    for (const updateType of ['bot_added', 'bot_removed', 'bot_admin_permissions_changed'] as const) {
+      const rawBody = updateType === 'bot_added' || updateType === 'bot_removed'
+        ? `{"update_type":"${updateType}","timestamp":1700000000123,"chat_id":${chatId},"user":{"user_id":9223372036854775807},"is_channel":true}`
+        : `{"update_type":"${updateType}","timestamp":1700000000123,"chat_id":${chatId}}`
+      const result = normalizeMaxUpdate(JSON.parse(rawBody), rawBody)
+      expect(result).toEqual({ kind: updateType, rawPayload: rawBody })
+      expect((result as { rawPayload?: string }).rawPayload).toContain(`"chat_id":${chatId}`)
+    }
+  })
+
+  test('rejects malformed bot_added envelope fields and non-int64 chat ids without rounding', () => {
+    const valid = { update_type: 'bot_added', timestamp: 1700000000123, chat_id: 9, user: { user_id: 77 }, is_channel: true }
+    const malformed = [
+      { ...valid, timestamp: undefined }, { ...valid, chat_id: undefined }, { ...valid, user: undefined },
+      { ...valid, is_channel: undefined }, { ...valid, chat_id: 1.5 }, { ...valid, chat_id: '9' },
+      { ...valid, chat_id: 9223372036854775808n },
+    ]
+    for (const update of malformed) {
+      const rawBody = JSON.stringify(update, (_key, value) => typeof value === 'bigint' ? value.toString() : value)
+      expect(() => normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toThrow()
+    }
+    for (const chatId of ['1.5', '"9"', '9223372036854775808']) {
+      const rawBody = `{"update_type":"bot_added","timestamp":1700000000123,"chat_id":${chatId},"user":{"user_id":77},"is_channel":true}`
+      expect(() => normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toThrow()
+    }
+    for (const user of [
+      '{}', '{"user_id":"77"}', '{"user_id":1.5}', '{"user_id":9223372036854775808}',
+    ]) {
+      const rawBody = `{"update_type":"bot_added","timestamp":1700000000123,"chat_id":9,"user":${user},"is_channel":true}`
+      expect(() => normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toThrow()
+    }
+  })
+
+  test('rejects lifecycle raw-body discriminator mismatches and invalid timestamps', () => {
+    const rawBody = '{"update_type":"bot_removed","timestamp":1700000000123}'
+    expect(() => normalizeMaxUpdate({ update_type: 'bot_added', timestamp: 1700000000123 }, rawBody)).toThrow()
+    for (const timestamp of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const raw = JSON.stringify({ update_type: 'bot_removed', timestamp })
+      expect(() => normalizeMaxUpdate(JSON.parse(raw), raw)).toThrow()
+    }
+  })
+
+  test('validates the documented bot_removed chat and actor fields', () => {
+    for (const update of [
+      { update_type: 'bot_removed', timestamp: 1700000000123, chat_id: 9, user: { user_id: 77 }, is_channel: true },
+      { update_type: 'bot_removed', timestamp: 1700000000123, chat_id: 9, user: {}, is_channel: true },
+      { update_type: 'bot_removed', timestamp: 1700000000123, chat_id: 9, user: { user_id: '77' }, is_channel: true },
+      { update_type: 'bot_removed', timestamp: 1700000000123, chat_id: 9, user: { user_id: 77 }, is_channel: undefined },
+    ]) {
+      const rawBody = JSON.stringify(update)
+      if (update.user?.user_id === 77 && update.is_channel === true) {
+        expect(normalizeMaxUpdate(JSON.parse(rawBody), rawBody).kind).toBe('bot_removed')
+      } else {
+        expect(() => normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toThrow()
+      }
+    }
+  })
+
   test('maps a live-shaped direct dialog with a numeric chat id', () => {
     expect(normalizeMaxUpdate({
       update_type: 'message_created', timestamp: 1700000000123,
