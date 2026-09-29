@@ -35,7 +35,7 @@ export function createMaxImageProcessor(options: {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const terminalAndDiscard = async (kind: 'denied' | 'unsupported_media', text: string) => {
-      const result = await terminal(prisma, source.id, input.inboxId, kind, input.event.senderId, text)
+      const result = await terminal(prisma, source.id, input.inboxId, kind, responseActor(input.event), text)
       if (result === 'done') await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: source.attachments.map((row) => row.plannedMediaId) })
       return result
     }
@@ -43,9 +43,9 @@ export function createMaxImageProcessor(options: {
     if (policy.kind === 'denied') return terminalAndDiscard('denied', deniedText)
     if (policy.kind === 'unsupported') return terminalAndDiscard('unsupported_media', unsupportedText)
     if (typeof options.api.getMessage !== 'function') throw new Error('MAX message lookup is unavailable')
-    const targetResult = await resolveMaxTarget(prisma, source)
+    const targetResult = await resolveMaxTarget(prisma, source, new Date(), input.event.isChannel === true)
     if (targetResult.kind === 'pending') return 'done'
-    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, input.event.senderId)
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, responseActor(input.event))
     if (targetResult.kind !== 'target') return terminalAndDiscard('denied',
       'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
     const admission = targetResult.target
@@ -60,7 +60,7 @@ export function createMaxImageProcessor(options: {
       return terminalAndDiscard('unsupported_media', unsupportedText)
     }
     const accepted = policy.kind === 'quick-images' || policy.kind === 'mixed-media' ? policy.attachments : [policy.attachment]
-    if (resolved.messageId !== input.event.messageId || resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
+    if (resolved.messageId !== input.event.messageId || (!input.event.isChannel && resolved.senderId !== input.event.senderId) || resolved.recipientId !== input.event.recipientId ||
         resolved.attachments.length !== accepted.length || resolved.attachments.some((item, index) => item.kind !== accepted[index]!.kind || item.providerAttachmentId !== accepted[index]!.providerAttachmentId)) {
       return terminalAndDiscard('unsupported_media', unsupportedText)
     }
@@ -89,6 +89,7 @@ export function createMaxImageProcessor(options: {
         await tx.maxSourceAttachment.updateMany({ where: { sourceId: source.id }, data: { status: 'stored' } })
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(),
           encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+        if (input.event.isChannel) return
         const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'saved' } },
           create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedFamilyText(family.name) },
           update: { destinationUserId: BigInt(input.event.senderId), text: savedFamilyText(family.name) }, select: { id: true } })
@@ -105,7 +106,7 @@ export function createMaxImageProcessor(options: {
       }
       if (isPermanent(error)) {
         const denied = isAuthorizationFailure(error)
-        const result = await terminal(prisma, source.id, input.inboxId, denied ? 'denied' : 'unsupported_media', input.event.senderId,
+        const result = await terminal(prisma, source.id, input.inboxId, denied ? 'denied' : 'unsupported_media', responseActor(input.event),
           denied ? deniedText : unsupportedText)
         if (result === 'done') await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: planned.map((row) => row.plannedMediaId) })
         return result
@@ -292,10 +293,15 @@ async function terminal(db: DbClient, sourceId: string, inboxId: string, kind: '
     const changed = await tx.maxSource.updateMany({ where: { id: sourceId, status: 'accepted' }, data: { status: kind, rejectionCode: kind } })
     if (changed.count !== 1) return 'skipped'
     await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    if (BigInt(destinationUserId) === 0n) return 'done'
     const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId, kind } }, create: { inboxId, destinationUserId: BigInt(destinationUserId), kind, text }, update: { destinationUserId: BigInt(destinationUserId), text }, select: { id: true } })
     await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
     return 'done'
   })
+}
+
+function responseActor(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
+  return event.isChannel ? '0' : event.senderId
 }
 
 export function taskPayloadForImage(value: unknown) {

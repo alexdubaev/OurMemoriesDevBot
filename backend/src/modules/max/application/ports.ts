@@ -103,6 +103,8 @@ export type MaxInboundEvent =
       kind: 'message_created'
       senderId: string
       recipientId: string
+      /** Present only for posts addressed to a MAX channel; recipientId is its signed chat_id. */
+      isChannel?: true
       messageId: string
       occurredAt: string
       text: string | null

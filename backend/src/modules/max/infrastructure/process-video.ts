@@ -24,15 +24,15 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const policy = classifyMaxVideoMessage(input.event)
-    if (policy.kind === 'denied') return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId, deniedText)
+    if (policy.kind === 'denied') return terminal(prisma, source.id, source.inboxId, 'denied', responseActor(input.event), deniedText)
     if (policy.kind !== 'video' || typeof options.api.getVideo !== 'function') {
-      return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
     }
 
-    const targetResult = await resolveMaxTarget(prisma, source)
+    const targetResult = await resolveMaxTarget(prisma, source, new Date(), input.event.isChannel === true)
     if (targetResult.kind === 'pending') return 'done'
-    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, source.inboxId, input.event.senderId)
-    if (targetResult.kind !== 'target') return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId,
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, responseActor(input.event))
+    if (targetResult.kind !== 'target') return terminal(prisma, source.id, source.inboxId, 'denied', responseActor(input.event),
       'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
     const admission = targetResult.target
 
@@ -40,27 +40,27 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
     try {
       resolved = await options.api.getMessage(input.event.messageId, input.signal)
     } catch (error) {
-      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
       throw error
     }
     const attachment = resolved.attachments.length === 1 ? resolved.attachments[0] : null
     if (!attachment || attachment.kind !== 'video' || resolved.messageId !== input.event.messageId ||
-      resolved.senderId !== input.event.senderId || resolved.recipientId !== input.event.recipientId ||
+      (!input.event.isChannel && resolved.senderId !== input.event.senderId) || resolved.recipientId !== input.event.recipientId ||
       attachment.providerAttachmentId !== policy.attachment.providerAttachmentId) {
-      return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
     }
 
     let video
     try {
       video = await options.api.getVideo(attachment.currentToken, input.signal)
     } catch (error) {
-      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+      if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
       throw error
     }
     const rendition = video.renditions
       .filter((candidate) => isAllowedCdnUrl(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
       .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0]
-    if (!rendition) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', input.event.senderId, unsupportedText)
+    if (!rendition) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
 
     const durationMs = normalizeVideoDurationMs(attachment.inboundDurationSeconds, video.durationMs)
     const scope: FamilyScope = { familyId: admission.familyId, principal: { userId: admission.userId, sessionId: `max:${source.id}` } }
@@ -94,6 +94,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
         } })
+        if (input.event.isChannel) return
         const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'saved' } },
           create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedFamilyText(family.name) },
           update: { destinationUserId: BigInt(input.event.senderId), text: savedFamilyText(family.name) }, select: { id: true } })
@@ -106,7 +107,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       }
       return 'done'
     } catch (error) {
-      if (isExpectedAuthorizationFailure(error)) return terminal(prisma, source.id, source.inboxId, 'denied', input.event.senderId, deniedText)
+      if (isExpectedAuthorizationFailure(error)) return terminal(prisma, source.id, source.inboxId, 'denied', responseActor(input.event), deniedText)
       throw error
     }
   }
@@ -148,10 +149,15 @@ async function terminal(db: DbClient, sourceId: string, inboxId: string, kind: '
     const changed = await tx.maxSource.updateMany({ where: { id: sourceId, status: 'accepted' }, data: { status: kind, rejectionCode: kind } })
     if (changed.count !== 1) return 'skipped'
     await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    if (BigInt(destinationUserId) === 0n) return 'done'
     const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId, kind } }, create: { inboxId, destinationUserId: BigInt(destinationUserId), kind, text }, update: { destinationUserId: BigInt(destinationUserId), text }, select: { id: true } })
     await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
     return 'done'
   })
+}
+
+function responseActor(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
+  return event.isChannel ? '0' : event.senderId
 }
 
 function isExpectedAuthorizationFailure(error: unknown) {

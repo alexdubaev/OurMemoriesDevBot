@@ -16,6 +16,12 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
 
   async accept(input: Parameters<MaxAcceptRepository['accept']>[0]): Promise<MaxAcceptResult> {
     return this.db.$transaction(async (tx) => {
+      if (input.event.kind === 'message_created' && input.event.isChannel) {
+        const selfBackup = await tx.maxMemoryBackup.findFirst({ where: {
+          channelChatId: BigInt(input.event.recipientId), providerMessageId: input.event.messageId,
+        }, select: { id: true } })
+        if (selfBackup) return { inboxId: '', duplicate: true }
+      }
       const inboxId = randomUUID()
       const inserted = await tx.maxInbox.createMany({
         data: [{
@@ -41,7 +47,6 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
       if (isLifecycleEvent(input.event)) return { inboxId, duplicate: false }
 
       if (input.event.kind === 'message_created') {
-        // TODO(post-MVP MAX history import): Validate channel chat_id + mid provenance and a shared live/history dedupe identity before extending this dialog-oriented MaxSource reservation.
         const source = await tx.maxSource.create({
           data: {
             id: randomUUID(),
@@ -58,7 +63,8 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
         // The legacy single-video reference does not reserve a private media asset.
         const stagedAttachments = attachments.filter((attachment) => attachment.kind === 'image' || attachment.kind === 'file' ||
           attachment.kind === 'voice' || (attachment.kind === 'video' && attachments.length > 1))
-        if (input.response?.kind === 'accepted' && stagedAttachments.length > 0 && stagedAttachments.length === attachments.length) {
+        if ((input.response?.kind === 'accepted' || (input.event.isChannel && isSupportedChannelAttachmentSet(attachments))) &&
+            stagedAttachments.length > 0 && stagedAttachments.length === attachments.length) {
           await tx.maxSourceAttachment.createMany({ data: stagedAttachments.map((attachment, position) => ({
             sourceId: source.id,
             position,
@@ -90,6 +96,13 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
       return { inboxId, duplicate: false }
     })
   }
+}
+
+function isSupportedChannelAttachmentSet(attachments: ReturnType<typeof attachmentsOf>) {
+  if (attachments.length === 0 || attachments.length > 10) return false
+  const imagesAndVideos = attachments.every((attachment) => attachment.kind === 'image' || attachment.kind === 'video')
+  if (imagesAndVideos) return true
+  return attachments.length === 1 && (attachments[0]!.kind === 'file' || attachments[0]!.kind === 'voice')
 }
 
 function isLifecycleEvent(event: Parameters<MaxAcceptRepository['accept']>[0]['event']) {

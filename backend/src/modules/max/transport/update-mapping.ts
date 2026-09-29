@@ -179,17 +179,20 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   if (!isRecord(input.message)) throw new Error('Invalid MAX message')
   const message = input.message
   if (message.body === null || message.body === undefined) return { kind: 'ignored' }
-  if (!isRecord(message.sender)) return { kind: 'ignored' }
+  const sender = isRecord(message.sender) ? message.sender : null
   if (!isRecord(message.recipient)) throw new Error('Invalid MAX recipient')
-  // MAX always supplies all Recipient keys. The chat_type discriminator identifies direct dialogs;
-  // their chat_id may be null (legacy shape) or a positive numeric id (live shape).
+  // MAX always supplies all Recipient keys. Channel posts use the signed channel chat_id;
+  // dialogs retain the user_id identity used by the established direct-message flow.
   if (!Object.hasOwn(message.recipient, 'chat_id') || !Object.hasOwn(message.recipient, 'chat_type') ||
       !Object.hasOwn(message.recipient, 'user_id')) throw new Error('Invalid MAX recipient')
-  if (message.recipient.chat_type !== 'dialog' ||
-      (message.recipient.chat_id !== null && !isPositiveSafeInteger(message.recipient.chat_id))) return { kind: 'ignored' }
-  if (!isPositiveSafeInteger(message.sender.user_id) || !isPositiveSafeInteger(message.recipient.user_id)) {
-    throw new Error('Invalid MAX message identifiers')
-  }
+  const isChannel = message.recipient.chat_type === 'channel'
+  const isDialog = message.recipient.chat_type === 'dialog'
+  if ((!isChannel && !isDialog) ||
+      (message.recipient.chat_id !== null && (isChannel ? !isInt64Number(message.recipient.chat_id) || message.recipient.chat_id === 0 : !isPositiveSafeInteger(message.recipient.chat_id)))) return { kind: 'ignored' }
+  if (isDialog && !isPositiveSafeInteger(message.recipient.user_id)) return { kind: 'ignored' }
+  if (sender === null && !isChannel) return { kind: 'ignored' }
+  if (sender !== null && !isPositiveSafeInteger(sender.user_id)) throw new Error('Invalid MAX message identifiers')
+  if (isChannel && message.recipient.chat_id === null) return { kind: 'ignored' }
   if (!isRecord(message.body)) throw new Error('Invalid MAX message body')
   if (typeof message.body.mid !== 'string' || message.body.mid.length === 0) throw new Error('Invalid MAX message id')
   const body = message.body
@@ -203,8 +206,8 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
   if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
-    kind: 'message_created', senderId: String(message.sender.user_id), recipientId: String(message.recipient.user_id),
-    messageId, occurredAt, text, attachments,
+    kind: 'message_created', senderId: sender ? String(sender.user_id) : '0', recipientId: String(isChannel ? message.recipient.chat_id : message.recipient.user_id),
+    messageId, occurredAt, text, attachments, ...(isChannel ? { isChannel: true } : {}),
   }
 }
 
@@ -269,6 +272,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function isInt64Number(value: unknown): value is number {
+  // JSON number precision cannot represent arbitrary int64 values. Channel ids arrive as
+  // numbers in MAX webhook JSON, so require a safe integer here; raw source ids stay strings.
+  return typeof value === 'number' && Number.isSafeInteger(value)
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {

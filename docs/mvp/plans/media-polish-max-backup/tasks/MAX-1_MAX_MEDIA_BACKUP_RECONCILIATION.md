@@ -61,6 +61,9 @@ If current channel/live route is missing/regressed relative to established MVP, 
 Use durable provider identity.
 Do NOT dedupe by caption/timestamp/content similarity.
 
+## Outbound note contract
+Plain `note` Memories do not have a MAX backup representation in the current MAX-1 contract. Only `photo` and `media` Memories create `max:backup-media` work and durable `MaxMemoryBackup` provider references; a missing MAX post for an ordinary text note is therefore current-scope behavior, not a regression.
+
 ## Critical loop prevention
 Because memoLy writes backup to MAX and also ingests live MAX:
 - memoLy-generated backup posts must not re-enter as duplicate Memory;
