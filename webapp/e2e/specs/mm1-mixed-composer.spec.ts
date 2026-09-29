@@ -36,7 +36,7 @@ test.describe('MM-1 mixed media composer', () => {
     await page.locator('.family-hub-card').click()
     await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
     await page.getByRole('button', { name: 'Добавить' }).click()
-    await page.getByRole('button', { name: 'Добавить фото' }).click()
+    await page.getByRole('button', { name: 'Добавить фото и видео' }).click()
     await expect(page.locator('[data-add-screen="photo"]')).toBeVisible()
 
     const files = [

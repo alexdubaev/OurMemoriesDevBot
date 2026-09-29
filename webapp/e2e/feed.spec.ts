@@ -680,7 +680,7 @@ test.describe.serial('T07 live feed', () => {
         const options = panel.locator('[data-add-action]')
         await expect(options).toHaveCount(3)
         await expect(options.nth(0)).toHaveAttribute('data-add-action', 'photo')
-        await expect(options.nth(0)).toHaveAccessibleName('Добавить фото')
+        await expect(options.nth(0)).toHaveAccessibleName('Добавить фото и видео')
         await expect(options.nth(1)).toHaveAttribute('data-add-action', 'note')
         await expect(options.nth(1)).toHaveAccessibleName('Добавить заметку')
         await expect(options.nth(2)).toHaveAttribute('data-add-action', 'voice-or-video')
@@ -772,8 +772,8 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.getByRole('heading', { name: 'Добавить заметку' })).toBeVisible()
       await page.getByRole('button', { name: 'Назад' }).click()
       await addButton.click()
-      await page.getByRole('button', { name: 'Добавить фото' }).click()
-      await expect(page.getByRole('heading', { name: 'Добавить фото' })).toBeVisible()
+      await page.getByRole('button', { name: 'Добавить фото и видео' }).click()
+      await expect(page.getByRole('heading', { name: 'Добавить фото и видео' })).toBeVisible()
       await page.getByRole('button', { name: 'Назад' }).click()
     } finally {
       await prisma.familyMember.update({

@@ -9,11 +9,19 @@ import {
   validatePhotoFiles,
 } from '../src/features/composer'
 import { PhotoComposer } from '../src/features/composer/PhotoComposer'
+import { verifyComposerFile } from '../src/features/composer/api'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import { ApiRequestError } from '../src/platform/api'
 
 function file(name: string, size = 128, type = 'image/jpeg') {
-  return new File([new Uint8Array(size)], name, { type })
+  const bytes = new Uint8Array(size)
+  const signature = type === 'image/png' ? Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+    : type === 'image/webp' ? new Uint8Array([...new TextEncoder().encode('RIFF'), 0, 0, 0, 0, ...new TextEncoder().encode('WEBP')])
+    : type === 'image/heic' || type === 'image/heif' || type === 'image/heic-sequence' || type === 'image/heif-sequence' ? new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode('ftypheic')])
+      : type === 'video/mp4' || type === 'video/quicktime' || type === 'video/x-quicktime' ? new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode(type === 'video/mp4' ? 'ftypisom' : 'ftypqt  ')])
+        : Uint8Array.of(0xff, 0xd8, 0xff)
+  bytes.set(signature.slice(0, size))
+  return new File([bytes], name, { type })
 }
 
 test('accepts one to ten supported photos and rejects video or an eleventh photo', () => {
@@ -23,7 +31,7 @@ test('accepts one to ten supported photos and rejects video or an eleventh photo
   expect(validatePhotoFiles(Array.from({ length: 11 }, (_, index) => file(`${index}.jpg`)))).toEqual({ ok: false, code: 'too_many' })
 })
 
-test('mixed composer preserves selection order when 2 photos and 2 videos finish out of order', async () => {
+test('mixed composer uploads serially and preserves selected order', async () => {
   const browser = installInteractiveDom()
   const requests: Array<{ path: string; body: Record<string, unknown>; headers?: HeadersInit }> = []
   const uploads: Array<() => void> = []
@@ -52,12 +60,16 @@ test('mixed composer preserves selection order when 2 photos and 2 videos finish
     const save = findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать'))
     let saveTask!: Promise<unknown>
     await act(async () => { saveTask = invoke(save, 'onClick'); await flushInteractive() })
-    for (let spin = 0; spin < 20 && uploads.length < 4; spin += 1) await Promise.resolve()
-    expect(uploads).toHaveLength(3)
-    await act(async () => { for (const finish of [...uploads].reverse()) finish(); await flushInteractive() })
-    for (let spin = 0; spin < 20 && uploads.length < 4; spin += 1) await Promise.resolve()
-    expect(uploads).toHaveLength(4)
-    await act(async () => { uploads[3]!(); await saveTask })
+    expect(uploads).toHaveLength(1)
+    expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(1)
+    for (let index = 0; index < 4; index += 1) {
+      await act(async () => { uploads[index]!(); await flushInteractive() })
+      if (index < 3) {
+        expect(uploads).toHaveLength(index + 2)
+        expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(index + 2)
+      }
+    }
+    await act(async () => { await saveTask })
     const memory = requests.find(({ path }) => path.endsWith('/memories'))
     expect(memory?.body).toMatchObject({ kind: 'media', mediaIds: originals })
     expect(memory?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
@@ -164,6 +176,107 @@ test('mixed selection accepts one to ten photo/video items and rejects eleven or
   expect(validatePhotoFiles([file('alias.heif', 128, 'image/heic')])).toEqual({ ok: true })
   expect(validateComposerFiles([file('alias.heic', 128, 'image/heif')])).toEqual({ ok: true })
   expect(validateComposerFiles([file('wrong.jpg', 128, 'image/heif')]).ok).toBe(false)
+  expect(validateComposerFiles([file('large.jpg', 20_000_001, 'image/jpeg')])).toEqual({ ok: false, code: 'too_large_photo' })
+  expect(validateComposerFiles([file('small.jpg', 63, 'image/jpeg')])).toEqual({ ok: false, code: 'too_small' })
+  expect(validateComposerFiles([file('transcoded.heic', 128, 'image/jpeg')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('camera.heif', 128, 'application/octet-stream')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('camera.mov', 128, 'video/x-quicktime')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('burst.heic', 128, 'image/heic-sequence')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('camera.mov', 128, 'video/mov')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('transcoded.mov', 128, 'video/mp4')])).toEqual({ ok: true })
+  expect(validateComposerFiles([file('quicktime.mp4', 128, 'video/quicktime')])).toEqual({ ok: true })
+})
+
+test('ambiguous iPhone files use actual supported signatures, not extension alone', async () => {
+  const jpeg = new File([Uint8Array.of(0xff, 0xd8, 0xff, ...Array(61).fill(0))], 'IMG_1.heic', { type: 'image/jpeg' })
+  const heic = new File([new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode('ftypheic'), ...Array(52).fill(0)])], 'IMG_2.heif', { type: 'application/octet-stream' })
+  const fake = new File([new TextEncoder().encode('<svg><script></script></svg>'.padEnd(64))], 'IMG_3.heic')
+  expect(await verifyComposerFile(jpeg)).toEqual({ kind: 'photo', contentType: 'image/jpeg' })
+  expect(await verifyComposerFile(heic)).toEqual({ kind: 'photo', contentType: 'image/heic' })
+  expect(await verifyComposerFile(fake)).toBeNull()
+  expect(await verifyComposerFile(new File([Uint8Array.of(0xff, 0xd8, 0xff, ...Array(61).fill(0))], 'IMG_4'))).toEqual({ kind: 'photo', contentType: 'image/jpeg' })
+  const mismatchedVideo = new File([new Uint8Array([0, 0, 0, 0, ...new TextEncoder().encode('ftypqt  '), ...Array(52).fill(0)])], 'misdeclared.mov', { type: 'video/mp4' })
+  expect(await verifyComposerFile(mismatchedVideo)).toBeNull()
+})
+
+test('preflights every selected signature before reserving any item', async () => {
+  const browser = installInteractiveDom()
+  let reserves = 0
+  let creates = 0
+  const transport: AuthenticatedTransport = { request: async (path) => { if (path.endsWith('/uploads')) reserves += 1; if (path.endsWith('/memories')) creates += 1; return {} as never }, raw: async () => new Response() }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('good.jpg'), new File([new TextEncoder().encode('<svg>unsafe</svg>'.padEnd(128))], 'bad.jpg', { type: 'image/jpeg' })]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect([reserves, creates]).toEqual([0, 0])
+    expect(textOf(browser.container)).toContain('Файл не соответствует поддерживаемому формату')
+  } finally { await act(async () => root.unmount()); browser.restore() }
+})
+
+test('extensionless generic iPhone JPEG publishes with detected MIME', async () => {
+  const browser = installInteractiveDom()
+  let reservedType: unknown
+  let createdKind: unknown
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) { reservedType = (options?.body as Record<string, unknown>).contentType; return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/photo', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never }
+      if (path.includes('/finalize')) return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      createdKind = (options?.body as Record<string, unknown>).kind
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [new File([Uint8Array.of(0xff, 0xd8, 0xff, ...Array(125).fill(0))], 'IMG_2026')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect([reservedType, createdKind]).toEqual(['image/jpeg', 'photo'])
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+})
+
+test('transient 502 PUT retries the same signed URL before finalize and creates once', async () => {
+  const browser = installInteractiveDom()
+  let reserves = 0
+  let puts = 0
+  let finalizes = 0
+  let creates = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path) => {
+      if (path.endsWith('/uploads')) {
+        reserves += 1
+        return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/same-url', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) { finalizes += 1; return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never }
+      creates += 1
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    expect(String(url)).toBe('https://storage.test/same-url')
+    puts += 1
+    return new Response(null, { status: puts === 1 ? 502 : 412 })
+  }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect([reserves, puts, finalizes, creates]).toEqual([1, 2, 1, 1])
+  } finally {
+    await act(async () => root.unmount())
+    browser.restore()
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('mixed upload failure waits for all items and blocks publication until retry completes', async () => {
@@ -192,7 +305,7 @@ test('mixed upload failure waits for all items and blocks publication until retr
   }
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
-    if (String(url).endsWith('/0') && photoAttempts++ === 0) return new Response(null, { status: 500 })
+    if (String(url).endsWith('/0') && photoAttempts++ === 0) return new Response(null, { status: 400 })
     return new Response(null, { status: 200 })
   }
   const root = createRoot(browser.container)
@@ -205,6 +318,7 @@ test('mixed upload failure waits for all items and blocks publication until retr
     await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
     expect(creates).toHaveLength(0)
     expect(textOf(browser.container)).toContain('Не удалось загрузить медиа')
+    expect(textOf(browser.container)).toContain('Не удалось загрузить фото или видео')
     await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Вернуться к вложениям'), 'onClick'))
     expect(textOf(browser.container)).toContain('Ошибка загрузки')
     await act(async () => { await invoke(publish(), 'onClick'); await flushInteractive() })
@@ -337,7 +451,7 @@ test('finalizes every selected photo before creating exactly one idempotent memo
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
 
     expect(requests.filter(({ path }) => path.endsWith('/uploads'))).toHaveLength(2)
-    expect(requests.filter(({ path }) => path.endsWith('/uploads')).every(({ headers }) => !headers || !('Idempotency-Key' in headers))).toBe(true)
+    expect(requests.filter(({ path }) => path.endsWith('/uploads')).every(({ headers }) => Boolean((headers as Record<string, string>)?.['Idempotency-Key']))).toBe(true)
     expect(requests.filter(({ path }) => path.includes('/finalize'))).toHaveLength(2)
     const memoryRequests = requests.filter(({ path }) => path.endsWith('/memories'))
     expect(memoryRequests).toHaveLength(1)
@@ -356,12 +470,15 @@ test('finalizes every selected photo before creating exactly one idempotent memo
 test('recoverable reserve failure keeps selected files, caption, and date for retry', async () => {
   const browser = installInteractiveDom()
   let reserveCount = 0
+  const reserveKeys: string[] = []
   let publishedBody: Record<string, unknown> | null = null
   const transport: AuthenticatedTransport = {
     request: async (path, _schema, options) => {
       if (path.endsWith('/uploads')) {
         reserveCount += 1
-        expect(options?.headers).toBeUndefined()
+        const reserveKey = (options?.headers as Record<string, string>)?.['Idempotency-Key']
+        expect(typeof reserveKey).toBe('string')
+        reserveKeys.push(reserveKey!)
         if (reserveCount === 1) throw new Error('offline')
         return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/asset-1', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
       }
@@ -398,6 +515,7 @@ test('recoverable reserve failure keeps selected files, caption, and date for re
 
     await act(async () => { await invoke(save(), 'onClick'); await flushInteractive() })
     expect(reserveCount).toBe(2)
+    expect(reserveKeys[1]).toBe(reserveKeys[0])
     expect(publishedBody).toMatchObject({ body: 'Сохрани дату', kind: 'photo' })
   } finally {
     await act(async () => root.unmount())
@@ -494,6 +612,162 @@ test('manual retry starts a fresh reservation after a missing object', async () 
     browser.restore()
     globalThis.fetch = originalFetch
   }
+})
+
+test('storage-unavailable reserve retry rotates only the released file reservation', async () => {
+  const browser = installInteractiveDom()
+  const ids = ['00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000002']
+  const reserveKeys: string[] = []
+  const puts: string[] = []
+  const finalizes: string[] = []
+  const creates: Array<Record<string, unknown>> = []
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        const key = (options?.headers as Record<string, string>)['Idempotency-Key']!
+        reserveKeys.push(key)
+        if (reserveKeys.length === 2) throw new ApiRequestError(503, 'STORAGE_UNAVAILABLE', 'storage unavailable')
+        if (reserveKeys.length === 3 && key === reserveKeys[1]) throw new ApiRequestError(409, 'IDEMPOTENCY_CONFLICT', 'released reservation')
+        const index = reserveKeys.length === 1 ? 0 : 1
+        return { assetId: ids[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) { finalizes.push(path); return { asset: { id: ids[finalizes.length - 1] } } as never }
+      creates.push(options?.body as Record<string, unknown>)
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { puts.push(String(url)); return new Response(null, { status: 200 }) }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('ready.jpg'), file('retry.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(creates).toHaveLength(0)
+    expect(textOf(browser.container)).toContain('Хранилище временно недоступно')
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(reserveKeys).toHaveLength(3)
+    expect(reserveKeys[2]).not.toBe(reserveKeys[1])
+    expect(puts).toEqual(['https://storage.test/0', 'https://storage.test/1'])
+    expect(finalizes).toHaveLength(2)
+    expect(creates).toHaveLength(1)
+    expect(creates[0]).toMatchObject({ kind: 'photo', mediaIds: ids })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+})
+
+for (const count of [6, 10]) {
+  test(`publishes ${count} ordered JPEG photos as one Memory after every upload finalizes`, async () => {
+    const browser = installInteractiveDom()
+    const assetIds = Array.from({ length: count }, (_, index) => `00000000-0000-7000-8000-${String(index + 1).padStart(12, '0')}`)
+    const reserveBodies: Array<Record<string, unknown>> = []
+    const putUrls: string[] = []
+    const finalizes: string[] = []
+    const creates: Array<Record<string, unknown>> = []
+    const transport: AuthenticatedTransport = {
+      request: async (path, _schema, options) => {
+        if (path.endsWith('/uploads')) {
+          reserveBodies.push(options?.body as Record<string, unknown>)
+          const index = reserveBodies.length - 1
+          return { assetId: assetIds[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+        }
+        if (path.includes('/finalize')) {
+          finalizes.push(path)
+          return { asset: { id: assetIds[finalizes.length - 1] } } as never
+        }
+        creates.push(options?.body as Record<string, unknown>)
+        return { id: 'memory-1' } as never
+      }, raw: async () => new Response(),
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (url) => { putUrls.push(String(url)); return new Response(null, { status: 200 }) }
+    const root = createRoot(browser.container)
+    try {
+      await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+      const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+      input.files = Array.from({ length: count }, (_, index) => file(`photo-${index}.jpg`))
+      await act(async () => invoke(input, 'onChange'))
+      await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+      expect(reserveBodies).toHaveLength(count)
+      expect(reserveBodies.every((body) => body.kind === 'photo' && body.contentType === 'image/jpeg')).toBe(true)
+      expect(putUrls).toEqual(Array.from({ length: count }, (_, index) => `https://storage.test/${index}`))
+      expect(finalizes).toHaveLength(count)
+      expect(creates).toHaveLength(1)
+      expect(creates[0]).toMatchObject({ kind: 'photo', mediaIds: assetIds })
+    } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+  })
+}
+
+test('publishes JPEG, QuickTime MOV, transcoded MOV/MP4, and iOS HEIC in selected order as one mixed Memory', async () => {
+  const browser = installInteractiveDom()
+  const assetIds = [1, 2, 3, 4, 5].map((index) => `00000000-0000-7000-8000-${String(index).padStart(12, '0')}`)
+  const reserves: Array<Record<string, unknown>> = []
+  let puts = 0
+  let finalizes = 0
+  const creates: Array<Record<string, unknown>> = []
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        reserves.push(options?.body as Record<string, unknown>)
+        const index = reserves.length - 1
+        return { assetId: assetIds[index], upload: { uploadId: `upload-${index}`, method: 'PUT', url: `https://storage.test/${index}`, headers: { 'Content-Type': reserves[index]!.contentType }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) { finalizes += 1; return { asset: { id: assetIds[finalizes - 1] } } as never }
+      creates.push(options?.body as Record<string, unknown>)
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { puts += 1; return new Response(null, { status: 200 }) }
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('first.jpg'), file('clip.mov', 128, 'video/x-quicktime'), file('transcoded.mov', 128, 'video/mp4'), file('quicktime.mp4', 128, 'video/quicktime'), file('last.heic', 128, 'image/heic-sequence')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    expect(reserves.map((body) => [body.kind, body.contentType])).toEqual([['photo', 'image/jpeg'], ['video', 'video/quicktime'], ['video', 'video/mp4'], ['video', 'video/quicktime'], ['photo', 'image/heic']])
+    expect([puts, finalizes]).toEqual([5, 5])
+    expect(creates).toHaveLength(1)
+    expect(creates[0]).toMatchObject({ kind: 'media', mediaIds: assetIds })
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
+})
+
+test('expired reservation rotates only its file key and retains the Memory key', async () => {
+  const browser = installInteractiveDom()
+  const reserveKeys: string[] = []
+  const memoryKeys: string[] = []
+  let finalizes = 0
+  const transport: AuthenticatedTransport = {
+    request: async (path, _schema, options) => {
+      if (path.endsWith('/uploads')) {
+        reserveKeys.push((options?.headers as Record<string, string>)['Idempotency-Key']!)
+        return { assetId: '00000000-0000-7000-8000-000000000001', upload: { uploadId: '00000000-0000-7000-8000-000000000003', method: 'PUT', url: 'https://storage.test/same', headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128, expiresAt: '2026-09-22T00:00:00.000Z' }, reservationExpiresAt: '2026-09-22T00:05:00.000Z' } as never
+      }
+      if (path.includes('/finalize')) {
+        finalizes += 1
+        if (finalizes === 1) throw new ApiRequestError(410, 'UPLOAD_EXPIRED', 'Срок загрузки истёк')
+        return { asset: { id: '00000000-0000-7000-8000-000000000001' } } as never
+      }
+      memoryKeys.push((options?.headers as Record<string, string>)['Idempotency-Key']!)
+      return { id: 'memory-1' } as never
+    }, raw: async () => new Response(),
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 200 })
+  const root = createRoot(browser.container)
+  try {
+    await act(async () => root.render(createElement(PhotoComposer, { childId: '00000000-0000-7000-8000-000000000001', familyId: '00000000-0000-7000-8000-000000000002', familyTimezone: 'UTC', transport, onCancel: () => undefined, onSuccess: () => undefined })))
+    const input = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    input.files = [file('one.jpg')]
+    await act(async () => invoke(input, 'onChange'))
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node).startsWith('Опубликовать')), 'onClick'); await flushInteractive() })
+    await act(async () => { await invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Попробовать снова'), 'onClick'); await flushInteractive() })
+    expect(reserveKeys).toHaveLength(2)
+    expect(reserveKeys[1]).not.toBe(reserveKeys[0])
+    expect(memoryKeys).toHaveLength(1)
+  } finally { await act(async () => root.unmount()); browser.restore(); globalThis.fetch = originalFetch }
 })
 
 test('create retry reuses finalized photo and the exact idempotent payload', async () => {
