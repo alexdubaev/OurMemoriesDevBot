@@ -13,6 +13,7 @@ const lastLegacyMigration = '20260927150000_welcome_first_run_claim'
 const expectedUpgradeMigrations = [
   '20260928100000_mm0_domain_temporal_foundation',
   '20260928130000_mm2_max_mixed_video_attachment',
+  '20260929120000_mixed_max_direct_attachments',
 ]
 
 test('upgrades populated pre-MM memories without changing legacy publication history', async () => {
