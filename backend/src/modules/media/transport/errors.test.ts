@@ -20,3 +20,12 @@ test('preserves safe codes for every finalize branch that rejects an uploaded ph
     expect((result as AppError).code).toBe(code)
   }
 })
+
+test('MAX processing and terminal playback have distinct HTTP codes', () => {
+  const processing = toMediaAppError(new MediaFailure('video_processing', 'processing')) as AppError
+  const unknown = toMediaAppError(new MediaFailure('video_readiness_unknown', 'unknown')) as AppError
+  const terminal = toMediaAppError(new MediaFailure('video_unavailable', 'unavailable')) as AppError
+  expect([processing.status, processing.code]).toEqual([409, 'MAX_VIDEO_PROCESSING'])
+  expect([unknown.status, unknown.code]).toEqual([503, 'MAX_VIDEO_READINESS_UNKNOWN'])
+  expect([terminal.status, terminal.code]).toEqual([415, 'MAX_VIDEO_UNAVAILABLE'])
+})

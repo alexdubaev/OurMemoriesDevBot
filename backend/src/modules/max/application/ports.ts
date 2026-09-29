@@ -35,6 +35,19 @@ export type MaxSendVideoMessageInput = {
   uploadToken: string
 }
 
+export type MaxImageUploadInput = {
+  bytes: Uint8Array
+  contentType: 'image/jpeg' | 'image/png' | 'image/heic'
+  /** A generated backup name, never the private original filename. */
+  fileName: string
+}
+
+export type MaxSendMediaMessageInput = {
+  chatId: string
+  text: string
+  attachments: Array<{ kind: 'image' | 'video'; token: string }>
+}
+
 export type MaxApiPort = {
   getMe(signal?: AbortSignal): Promise<MaxBotIdentity>
   getSubscriptions(signal?: AbortSignal): Promise<MaxSubscription[]>
@@ -44,6 +57,8 @@ export type MaxApiPort = {
   answerCallback?(callbackId: string, text: string, signal?: AbortSignal): Promise<void>
   createVideoUpload(signal?: AbortSignal): Promise<MaxVideoUploadCapability>
   sendVideoMessage(input: MaxSendVideoMessageInput, signal?: AbortSignal): Promise<{ messageId: string }>
+  uploadImage?(input: MaxImageUploadInput, signal?: AbortSignal): Promise<{ token: string }>
+  sendMediaMessage?(input: MaxSendMediaMessageInput, signal?: AbortSignal): Promise<{ messageId: string }>
   findVideoMessageByIntent?(intentId: string, userId: string, signal?: AbortSignal): Promise<{ messageId: string } | null>
   getMessage(messageId: string, signal?: AbortSignal): Promise<MaxResolvedMessage>
   getVideo?(videoToken: string, signal?: AbortSignal): Promise<MaxVideoResolution>

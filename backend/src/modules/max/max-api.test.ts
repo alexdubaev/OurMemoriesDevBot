@@ -288,6 +288,126 @@ describe('MAX API client', () => {
     })
   })
 
+  test('uploads one private image through the pinned MAX image host and reads its nested token', async () => {
+    const requests: Request[] = []
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      requests.push(new Request(input, init))
+      expect(init?.redirect).toBe('manual')
+      return requests.length === 1
+        ? response({ url: 'https://iu.oneme.ru/uploadImage?apiToken=opaque' })
+        : response({ photos: { 'photo-1': { token: 'image-token-1' } } })
+    } })
+    const bytes = Uint8Array.of(0xff, 0xd8, 0xff)
+
+    await expect(api.uploadImage!({ bytes, contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .resolves.toEqual({ token: 'image-token-1' })
+    expect(requests.map((request) => [request.method, request.url])).toEqual([
+      ['POST', 'https://platform-api2.max.ru/uploads?type=image'],
+      ['POST', 'https://iu.oneme.ru/uploadImage?apiToken=opaque'],
+    ])
+    expect(requests[0]!.headers.get('authorization')).toBe(token)
+    expect(requests[1]!.headers.get('authorization')).toBe(token)
+    const form = await requests[1]!.formData()
+    const file = form.get('data') as File
+    expect(file.name).toBe('backup.jpg')
+    expect(file.type).toBe('image/jpeg')
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+  })
+
+  test('rejects unsafe image upload URLs, redirects, malformed tokens, and oversized input', async () => {
+    for (const url of ['http://iu.oneme.ru/uploadImage', 'https://evil.example/uploadImage',
+      'https://iu.oneme.ru.evil.example/uploadImage', 'https://user:pass@iu.oneme.ru/uploadImage',
+      'https://iu.oneme.ru:444/uploadImage']) {
+      const api = createMaxApi(token, { fetch: async () => response({ url }) })
+      await expect(api.uploadImage!({ bytes: Uint8Array.of(1), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+        .rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+    }
+    const redirected = createMaxApi(token, { fetch: async (_input, init) => {
+      expect(init?.redirect).toBe('manual')
+      return new Response(null, { status: 302, headers: { location: 'https://evil.example' } })
+    } })
+    await expect(redirected.uploadImage!({ bytes: Uint8Array.of(1), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .rejects.toMatchObject({ name: 'MaxProviderError', retryable: false })
+    let calls = 0
+    const malformed = createMaxApi(token, { fetch: async () => ++calls % 2
+      ? response({ url: 'https://iu.oneme.ru/uploadImage?apiToken=opaque' })
+      : response({ photos: { a: { token: 'one' }, b: { token: 'two' } } }) })
+    await expect(malformed.uploadImage!({ bytes: Uint8Array.of(1), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+    const missingToken = createMaxApi(token, { fetch: async () => ++calls % 2
+      ? response({ url: 'https://iu.oneme.ru/uploadImage?apiToken=opaque' })
+      : response({ photos: { 'photo-1': { token: '' } } }) })
+    await expect(missingToken.uploadImage!({ bytes: Uint8Array.of(1), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+    const oversized = createMaxApi(token, { fetch: async () => { throw new Error('unexpected fetch') } })
+    await expect(oversized.uploadImage!({ bytes: new Uint8Array(20_000_001), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+  })
+
+  test('sends 1, 5, and 10 ordered image tokens as one channel post with a durable id', async () => {
+    for (const count of [1, 5, 10]) {
+      const requests: Request[] = []
+      const api = createMaxApi(token, { fetch: async (input, init) => {
+        requests.push(new Request(input, init))
+        return response({ message: { body: { mid: `album-${count}` } } })
+      } })
+      const attachments = Array.from({ length: count }, (_, index) => ({ kind: 'image' as const, token: `image-${index}` }))
+      await expect(api.sendMediaMessage!({ chatId: '12345', text: '', attachments }))
+        .resolves.toEqual({ messageId: `album-${count}` })
+      expect(requests).toHaveLength(1)
+      expect(requests[0]!.url).toBe('https://platform-api2.max.ru/messages?chat_id=12345')
+      expect(await requests[0]!.json()).toEqual({ text: '', attachments: attachments.map((item) => ({
+        type: 'image', payload: { token: item.token },
+      })) })
+    }
+  })
+
+  test('preserves a negative signed channel ID exactly in the send request', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      request = new Request(input, init)
+      return response({ message: { mid: 'negative-channel-message' } })
+    } })
+    await expect(api.sendMediaMessage!({ chatId: '-88001', text: '', attachments: [{ kind: 'image', token: 'photo' }] }))
+      .resolves.toEqual({ messageId: 'negative-channel-message' })
+    expect(request!.url).toBe('https://platform-api2.max.ru/messages?chat_id=-88001')
+  })
+
+  test('preserves mixed attachment order and validates channel and token bounds', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      request = new Request(input, init)
+      return response({ message: { mid: 'mixed-1' } })
+    } })
+    await expect(api.sendMediaMessage!({ chatId: '900', text: 'Caption', attachments: [
+      { kind: 'image', token: 'p1' }, { kind: 'video', token: 'v2' },
+      { kind: 'image', token: 'p3' }, { kind: 'video', token: 'v4' },
+    ] })).resolves.toEqual({ messageId: 'mixed-1' })
+    expect(await request!.json()).toEqual({ text: 'Caption', attachments: [
+      { type: 'image', payload: { token: 'p1' } }, { type: 'video', payload: { token: 'v2' } },
+      { type: 'image', payload: { token: 'p3' } }, { type: 'video', payload: { token: 'v4' } },
+    ] })
+    for (const chatId of ['', '0', '-0', 'abc', '9223372036854775808', '-9223372036854775809']) {
+      await expect(api.sendMediaMessage!({ chatId, text: '', attachments: [{ kind: 'image', token: 'p' }] }))
+        .rejects.toBeInstanceOf(MaxProviderError)
+    }
+    await expect(api.sendMediaMessage!({ chatId: '900', text: '', attachments: [] })).rejects.toBeInstanceOf(MaxProviderError)
+    await expect(api.sendMediaMessage!({ chatId: '900', text: '', attachments: Array.from({ length: 11 }, () => ({ kind: 'image', token: 'p' })) }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+    await expect(api.sendMediaMessage!({ chatId: '900', text: '', attachments: [{ kind: 'image', token: '' }] }))
+      .rejects.toBeInstanceOf(MaxProviderError)
+  })
+
+  test('keeps provider upload and send failures retryable without exposing tokens', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ message: token }, 503) })
+    await expect(api.uploadImage!({ bytes: Uint8Array.of(1), contentType: 'image/jpeg', fileName: 'backup.jpg' }))
+      .rejects.toMatchObject({ retryable: true, status: 503 })
+    await expect(api.sendMediaMessage!({ chatId: '900', text: '', attachments: [{ kind: 'image', token: 'sensitive-media-token' }] }))
+      .rejects.toMatchObject({ retryable: true, status: 503 })
+    await expect(api.sendMediaMessage!({ chatId: '900', text: '', attachments: [{ kind: 'image', token: 'sensitive-media-token' }] }))
+      .rejects.not.toThrow('sensitive-media-token')
+  })
+
   test('accepts the live-shaped send response with the provider identity in message body', async () => {
     const api = createMaxApi(token, {
       fetch: async () => response({ message: {

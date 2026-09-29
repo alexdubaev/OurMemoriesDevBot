@@ -52,6 +52,9 @@ export function createMaxAcceptUpdate(options: {
 }): (event: MaxInboundEvent) => Promise<MaxAcceptResult> {
   const now = options.now ?? (() => new Date())
   return async (event) => {
+    if (event.kind === 'message_created' && event.senderId === options.botId) {
+      return { inboxId: '', duplicate: true }
+    }
     const eventKey = maxEventKey(options.botId, event)
     return options.repository.accept({
       botId: options.botId,

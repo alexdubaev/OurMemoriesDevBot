@@ -6,6 +6,7 @@ import {
   listMemoriesQuerySchema,
   mediaDtoSchema,
   maxVideoAttachmentSchema,
+  maxVideoReadinessSchema,
   memoryDtoSchema,
   seenMemoriesRequestSchema,
   telegramVideoAttachmentSchema,
@@ -14,6 +15,13 @@ import {
 const childId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
 
 describe('memory contracts', () => {
+  test('MAX readiness survives JSON and enforces retry semantics', () => {
+    for (const state of ['processing', 'ready', 'unavailable', 'unknown'] as const) {
+      const recheckable = state === 'processing' || state === 'unknown'
+      expect(maxVideoReadinessSchema.parse(JSON.parse(JSON.stringify({ state, recheckable })))).toMatchObject({ state, recheckable })
+      expect(maxVideoReadinessSchema.safeParse({ state, recheckable: !recheckable }).success).toBe(false)
+    }
+  })
   test('accepts only a versioned family-scoped member avatar content path', () => {
     const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
     const userId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'

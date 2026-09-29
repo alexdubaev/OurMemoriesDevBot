@@ -512,7 +512,7 @@ maybeDescribe('Memories API', () => {
     }))).rejects.toThrow()
   })
 
-  test('publishes ordered photo/video as one media Memory and rejects voice, foreign, and unready assets', async () => {
+  test('rejects private-storage video for a new mixed Memory and preserves the source assets', async () => {
     const owner = await admittedUser('Владелец', '38011')
     const otherOwner = await admittedUser('Другой владелец', '38012')
     const family = await createFamily(owner.token, 'Семья медиа')
@@ -522,17 +522,18 @@ maybeDescribe('Memories API', () => {
     const voice = await createMemoryAsset(family.body.family.id, owner.userId, 'voice')
     const unready = await createMemoryAsset(family.body.family.id, owner.userId, 'photo', 'pending')
     const foreign = await createMemoryAsset(foreignFamily.body.family.id, otherOwner.userId, 'photo')
+    const backupTasksBefore = await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })
     const created = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
       kind: 'media', childId: family.body.child.id, body: 'Фото и видео',
       occurredAt: '2023-07-14T18:43:00.000Z', mediaIds: [photo.id, video.id],
     }, randomUUID())
-    expect(created.response.status).toBe(201)
-    expect(created.body).toMatchObject({ kind: 'media', firstPublishedAt: expect.any(String), sourcePublishedAt: null })
-    expect(created.body.attachments.map((attachment: { id: string }) => attachment.id)).toEqual([photo.id, video.id])
-    const persisted = await prisma.memory.findUniqueOrThrow({ where: { id: created.body.id }, include: { media: { orderBy: { position: 'asc' } } } })
-    expect(persisted.media.map(({ position, mediaId }) => ({ position, mediaId }))).toEqual([
-      { position: 0, mediaId: photo.id }, { position: 1, mediaId: video.id },
-    ])
+    expect(created.response.status).toBe(422)
+    expect(created.body.error.message).toContain('загрузку MAX')
+    expect(await prisma.memory.count({ where: { familyId: family.body.family.id } })).toBe(0)
+    expect(await prisma.maxMemoryBackup.count({ where: { familyId: family.body.family.id } })).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(backupTasksBefore)
+    expect(await prisma.memoryMedia.count({ where: { mediaId: { in: [photo.id, video.id] } } })).toBe(0)
+    expect(await prisma.mediaAsset.count({ where: { id: { in: [photo.id, video.id] }, originalStatus: 'stored', deletedAt: null } })).toBe(2)
 
     for (const mediaIds of [[voice.id], [foreign.id], [unready.id]]) {
       const rejected = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
@@ -584,6 +585,19 @@ maybeDescribe('Memories API', () => {
     expect(replay.response.status).toBe(200)
     expect(replay.body).toEqual(created.body)
     expect(await prisma.memory.count({ where: { familyId } })).toBe(1)
+    const backup = await prisma.maxMemoryBackup.findUniqueOrThrow({
+      where: { memoryId: created.body.id }, include: { attachments: { orderBy: { position: 'asc' } } },
+    })
+    expect(backup).toMatchObject({ familyId, body: input.body, state: 'needs_configuration', channelChatId: null })
+    expect(backup.attachments.map(({ position, kind, mediaId, uploadSessionId }) =>
+      ({ position, kind, mediaId, uploadSessionId }))).toEqual([
+      { position: 0, kind: 'image', mediaId: photoA.id, uploadSessionId: null },
+      { position: 1, kind: 'video', mediaId: null, uploadSessionId: videoA },
+      { position: 2, kind: 'image', mediaId: photoB.id, uploadSessionId: null },
+      { position: 3, kind: 'video', mediaId: null, uploadSessionId: videoB },
+    ])
+    expect(await prisma.maxMemoryBackup.count({ where: { memoryId: created.body.id } })).toBe(1)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media', dedupeKey: `max-backup-media:${created.body.id}` } })).toBe(0)
 
     const unready = await makeSession('unready', { state: 'reserved' })
     const foreign = await makeSession('foreign', { familyId: foreignFamily.body.family.id, authorId: other.userId, childId: foreignFamily.body.child.id })
@@ -605,6 +619,32 @@ maybeDescribe('Memories API', () => {
     expect(partial.response.status).toBeGreaterThanOrEqual(400)
     expect(await prisma.memoryMedia.count({ where: { mediaId: freshPhoto.id } })).toBe(0)
     expect(await prisma.memory.count({ where: { familyId } })).toBe(1)
+  })
+
+  test('reserves one ordered MAX backup and task for 1, 5, and 10 app photos', async () => {
+    const owner = await admittedUser('Владелец', '38113')
+    const family = await createFamily(owner.token, 'Фото семья')
+    const familyId = family.body.family.id as string
+    const childId = family.body.child.id as string
+    await prisma.family.update({ where: { id: familyId }, data: { maxBackupChatId: BigInt(88001) } })
+    await expect(Promise.resolve(prisma.family.update({ where: { id: familyId }, data: { maxBackupChatId: BigInt(0) } }))).rejects.toThrow()
+    for (const count of [1, 5, 10]) {
+      const assets = await Promise.all(Array.from({ length: count }, () => createMemoryAsset(familyId, owner.userId, 'photo')))
+      const input = { kind: 'photo', childId, body: `Album ${count}`, occurredAt: '2023-07-14T18:43:00.000Z', mediaIds: assets.map(({ id }) => id) }
+      const key = randomUUID()
+      const created = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', input, key)
+      expect(created.response.status).toBe(201)
+      const replay = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', input, key)
+      expect(replay.response.status).toBe(200)
+      expect(replay.body).toEqual(created.body)
+      const backup = await prisma.maxMemoryBackup.findUniqueOrThrow({ where: { memoryId: created.body.id }, include: { attachments: { orderBy: { position: 'asc' } } } })
+      expect(backup).toMatchObject({ familyId, body: input.body, state: 'pending', channelChatId: BigInt(88001), providerMessageId: null, sendIntentAt: null })
+      expect(backup.attachments.map(({ position, kind, mediaId, uploadSessionId }) => ({ position, kind, mediaId, uploadSessionId }))).toEqual(
+        assets.map((asset, position) => ({ position, kind: 'image', mediaId: asset.id, uploadSessionId: null })),
+      )
+      expect(await prisma.maxMemoryBackup.count({ where: { memoryId: created.body.id } })).toBe(1)
+      expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media', dedupeKey: `max-backup-media:${created.body.id}` } })).toBe(1)
+    }
   })
 
   test('serves historical published note, photo, album, video, and voice through the Feed DTO', async () => {

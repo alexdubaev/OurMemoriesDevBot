@@ -108,6 +108,29 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.taskOutbox.count({ where: { type: { startsWith: 'max:' } } })).toBe(2)
   })
 
+  test('acknowledges the bot own backup post without inbox, source, response, or tasks', async () => {
+    const selfPost = {
+      ...textUpdate,
+      message: {
+        ...textUpdate.message,
+        sender: { user_id: 900 },
+        body: { ...textUpdate.message.body, mid: 'max-self-backup-1' },
+      },
+    }
+    const body = JSON.stringify(selfPost)
+    const responses = await Promise.all(Array.from({ length: 2 }, () => webhook.request('/webhooks/max', { method: 'POST', headers, body })))
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(await prisma.maxInbox.count()).toBe(0)
+    expect(await prisma.maxSource.count()).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    expect(await prisma.taskOutbox.count()).toBe(0)
+
+    const userResponse = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(textUpdate) })
+    expect(userResponse.status).toBe(200)
+    expect(await prisma.maxInbox.count()).toBe(1)
+    expect(await prisma.maxSource.count()).toBe(1)
+  })
+
   test('bot_started queues processing before creating one welcome response and no source', async () => {
     const response = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(botStarted) })
     expect(response.status).toBe(200)
@@ -1162,6 +1185,107 @@ maybeDescribe('MAX durable capture', () => {
       expect(await prisma.memory.findUniqueOrThrow({ where: { id: memory.id }, select: { firstPublishedAt: true, firstPublishedOrdinal: true, sourcePublishedAt: true } })).toEqual({
         firstPublishedAt: memory.firstPublishedAt, firstPublishedOrdinal: memory.firstPublishedOrdinal, sourcePublishedAt: memory.sourcePublishedAt,
       })
+    } finally { await video.cleanup(); await fixture.cleanup() }
+  })
+
+  test('captures a live MAX post with five photos and three videos once in source order', async () => {
+    const fixture = await imageFixture('77159', 'live-mixed-eight')
+    const video = await mp4VideoFixture()
+    const occurredAt = '2023-07-14T18:43:00.123Z'
+    const providerAttachments = [
+      { type: 'image', payload: { photo_id: 611, token: 'photo-token-611', url: 'https://i.oneme.ru/photo-611' } },
+      { type: 'video', payload: { id: 612, token: 'video-token-612', url: 'https://v.oneme.ru/video-612', duration: 1, width: 320, height: 240 } },
+      { type: 'image', payload: { photo_id: 613, token: 'photo-token-613', url: 'https://i.oneme.ru/photo-613' } },
+      { type: 'video', payload: { id: 614, token: 'video-token-614', url: 'https://v.oneme.ru/video-614', duration: 1, width: 320, height: 240 } },
+      { type: 'image', payload: { photo_id: 615, token: 'photo-token-615', url: 'https://i.oneme.ru/photo-615' } },
+      { type: 'video', payload: { id: 616, token: 'video-token-616', url: 'https://v.oneme.ru/video-616', duration: 1, width: 320, height: 240 } },
+      { type: 'image', payload: { photo_id: 617, token: 'photo-token-617', url: 'https://i.oneme.ru/photo-617' } },
+      { type: 'image', payload: { photo_id: 618, token: 'photo-token-618', url: 'https://i.oneme.ru/photo-618' } },
+    ]
+    const raw = {
+      update_type: 'message_created', timestamp: Date.parse(occurredAt), message: {
+        sender: { user_id: 77159 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+        body: { mid: 'max-live-mixed-eight', text: 'live mixed memory', attachments: providerAttachments },
+      },
+    }
+    const body = JSON.stringify(raw)
+    try {
+      const [first, duplicate] = await Promise.all([
+        webhook.request('/webhooks/max', { method: 'POST', headers, body }),
+        webhook.request('/webhooks/max', { method: 'POST', headers, body }),
+      ])
+      expect(first.status).toBe(200)
+      expect(duplicate.status).toBe(200)
+      expect(await prisma.maxInbox.count()).toBe(1)
+      expect(await prisma.maxSource.count()).toBe(1)
+      expect(await prisma.maxOutgoingResponse.count()).toBe(1)
+
+      const event = normalizeMaxUpdate(raw)
+      if (event.kind !== 'message_created') throw new Error('mixed live fixture did not normalize to a message')
+      const source = await prisma.maxSource.findUniqueOrThrow({
+        where: { botId_recipientId_messageId: { botId: 900n, recipientId: 900n, messageId: 'max-live-mixed-eight' } },
+        include: { attachments: { orderBy: { position: 'asc' } } },
+      })
+      expect(source).toMatchObject({ senderSubject: '77159', recipientId: 900n, messageId: 'max-live-mixed-eight' })
+      expect(source.attachments.map(({ position, providerKind, providerAttachmentId }) => ({ position, providerKind, providerAttachmentId }))).toEqual([
+        { position: 0, providerKind: 'image', providerAttachmentId: '611' },
+        { position: 1, providerKind: 'video', providerAttachmentId: '612' },
+        { position: 2, providerKind: 'image', providerAttachmentId: '613' },
+        { position: 3, providerKind: 'video', providerAttachmentId: '614' },
+        { position: 4, providerKind: 'image', providerAttachmentId: '615' },
+        { position: 5, providerKind: 'video', providerAttachmentId: '616' },
+        { position: 6, providerKind: 'image', providerAttachmentId: '617' },
+        { position: 7, providerKind: 'image', providerAttachmentId: '618' },
+      ])
+      const memories = new MemoryService(
+        createPrismaFamilyAccess(prisma),
+        new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma)),
+        { assertReadyForPublication: async () => undefined },
+        'max-live-mixed-feed-test-secret',
+      )
+      const processor = createMaxTaskProcessor({
+        runtime: fixture.runtime, crypto, api: {
+          ...fixture.api(event),
+          getVideo: async () => ({ width: 320, height: 240, durationMs: 1000,
+            renditions: [{ url: 'https://maxvd123.okcdn.ru/live-fixture?sig=synthetic', width: 320, height: 240, contentLength: video.bytes.byteLength }] }),
+        },
+        media: fixture.media,
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+        videoDownload: createMaxVideoStreamDownload({ fetch: async () => new Response(
+          new Blob([video.bytes.slice().buffer as ArrayBuffer]).stream(),
+          { headers: { 'content-type': 'video/mp4', 'content-length': String(video.bytes.byteLength) } },
+        ) }),
+      })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({
+        where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${source.inboxId}` } },
+      })
+      await expect(processor(task.payload)).resolves.toBe('done')
+      const memory = await prisma.memory.findUniqueOrThrow({
+        where: { id: source.plannedMemoryId },
+        include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } },
+      })
+      expect(memory).toMatchObject({
+        id: source.plannedMemoryId, kind: 'media', status: 'published', body: 'live mixed memory',
+        familyId: fixture.familyId, childId: fixture.childId,
+        occurredAt: new Date(occurredAt), sourcePublishedAt: new Date(occurredAt),
+      })
+      expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(['photo', 'video', 'photo', 'video', 'photo', 'video', 'photo', 'photo'])
+      const feed = await memories.list(
+        { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max-live-mixed-feed' } },
+        { limit: 20 },
+      )
+      expect(feed.items).toHaveLength(1)
+      expect(feed.items[0]).toMatchObject({
+        id: source.plannedMemoryId, kind: 'media', body: 'live mixed memory',
+        occurredAt, sourcePublishedAt: occurredAt,
+      })
+      expect(feed.items[0]!.attachments.map(({ id, kind }) => ({ id, kind }))).toEqual(
+        memory.media.map(({ mediaId, asset }) => ({ id: mediaId, kind: asset.mediaKind })),
+      )
+      expect(await prisma.memory.count()).toBe(1)
+      expect(await prisma.memoryMedia.count({ where: { memoryId: memory.id } })).toBe(8)
+      await expect(processor(task.payload)).resolves.toBe('skipped')
+      expect(await prisma.memory.count()).toBe(1)
     } finally { await video.cleanup(); await fixture.cleanup() }
   })
 

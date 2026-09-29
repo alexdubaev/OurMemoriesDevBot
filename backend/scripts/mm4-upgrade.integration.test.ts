@@ -14,6 +14,9 @@ const expectedUpgradeMigrations = [
   '20260928100000_mm0_domain_temporal_foundation',
   '20260928130000_mm2_max_mixed_video_attachment',
   '20260929120000_mixed_max_direct_attachments',
+  '20260929180000_max_memory_backup_reservation',
+  '20260929200000_allow_signed_max_backup_channel_ids',
+  '20260929210000_pace_max_backup_channel_sends',
 ]
 
 test('upgrades populated pre-MM memories without changing legacy publication history', async () => {

@@ -166,6 +166,7 @@ model MaxVideoUploadSession {
   author                User                        @relation("MaxVideoUploadAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "max_video_upload_sessions_author_id_fkey")
   child                 Child                       @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_video_upload_sessions_child_id_family_id_fkey")
   outboundSource        MaxOutboundSource?
+  backupAttachments     MaxMemoryBackupAttachment[]
 
   @@unique([id, familyId], map: "max_video_upload_sessions_id_family_id_key")
   @@unique([familyId, idempotencyKey], map: "max_video_upload_sessions_family_idempotency_key")
@@ -381,6 +382,8 @@ model Family {
   publicationOrdinal   BigInt              @default(0) @map("publication_ordinal")
   unreadOrderVersion    BigInt              @default(0) @map("unread_order_version")
   unreadTrackingActivatedAt DateTime?      @map("unread_tracking_activated_at") @db.Timestamptz(6)
+  maxBackupChatId      BigInt?             @unique(map: "families_max_backup_chat_id_key") @map("max_backup_chat_id")
+  maxBackupNextSendAt  DateTime?           @map("max_backup_next_send_at") @db.Timestamptz(6)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
   owner                User                @relation("FamilyOwner", fields: [ownerUserId], references: [id], onDelete: Restrict, map: "families_owner_user_id_fkey")
@@ -394,6 +397,8 @@ model Family {
   captionRequests      CaptionRequest[]
   maxVideoUploadSessions MaxVideoUploadSession[]
   maxOutboundSources   MaxOutboundSource[]
+  maxMemoryBackups     MaxMemoryBackup[]
+  maxBackupAttachments MaxMemoryBackupAttachment[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -511,6 +516,7 @@ model Memory {
   captionRequests  CaptionRequest[]
   telegramVideoReference TelegramVideoReference?
   maxVideoReferences    MaxVideoReference[]
+  maxBackup             MaxMemoryBackup?
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@unique([familyId, firstPublishedOrdinal], map: "memories_family_id_first_published_ordinal_key")
@@ -560,6 +566,49 @@ model MemoryMedia {
   @@map("memory_media")
 }
 
+/// App-created photo/media backup reservation; source MAX ingestion never creates this row.
+model MaxMemoryBackup {
+  id                 String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId           String                @map("family_id") @db.Uuid
+  memoryId           String                @unique(map: "max_memory_backups_memory_id_key") @map("memory_id") @db.Uuid
+  body               String
+  state              MaxMemoryBackupState  @default(needs_configuration)
+  channelChatId      BigInt?               @map("channel_chat_id")
+  providerMessageId  String?               @map("provider_message_id")
+  sendIntentAt       DateTime?             @map("send_intent_at") @db.Timestamptz(6)
+  lastErrorCode      String?               @map("last_error_code")
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family             Family                @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_memory_backups_family_id_fkey")
+  memory             Memory                @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_memory_backups_memory_id_family_id_fkey")
+  attachments        MaxMemoryBackupAttachment[]
+
+  @@unique([id, familyId], map: "max_memory_backups_id_family_id_key")
+  @@unique([memoryId, familyId], map: "max_memory_backups_memory_id_family_id_key")
+  @@unique([channelChatId, providerMessageId], map: "max_memory_backups_channel_message_key")
+  @@index([familyId, state], map: "max_memory_backups_family_state_idx")
+  @@map("max_memory_backups")
+}
+
+model MaxMemoryBackupAttachment {
+  backupId         String                       @map("backup_id") @db.Uuid
+  familyId         String                       @map("family_id") @db.Uuid
+  position         Int
+  kind             MaxMemoryBackupAttachmentKind
+  mediaId          String?                      @map("media_id") @db.Uuid
+  uploadSessionId  String?                      @map("upload_session_id") @db.Uuid
+  uploadToken      String?                      @map("upload_token")
+  backup           MaxMemoryBackup              @relation(fields: [backupId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_memory_backup_attachments_backup_id_family_id_fkey")
+  family           Family                       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_memory_backup_attachments_family_id_fkey")
+  media            MediaAsset?                  @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_memory_backup_attachments_media_id_family_id_fkey")
+  uploadSession    MaxVideoUploadSession?       @relation(fields: [uploadSessionId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_memory_backup_attachments_upload_session_id_family_id_fkey")
+
+  @@id([backupId, position])
+  @@index([familyId, mediaId], map: "max_memory_backup_attachments_family_media_idx")
+  @@index([familyId, uploadSessionId], map: "max_memory_backup_attachments_family_session_idx")
+  @@map("max_memory_backup_attachments")
+}
+
 model MediaAsset {
   id                 String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
   familyId           String               @map("family_id") @db.Uuid
@@ -589,6 +638,7 @@ model MediaAsset {
   variants           MediaVariant[]
   reservation        UploadReservation?
   memories           MemoryMedia[]
+  backupAttachments  MaxMemoryBackupAttachment[]
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   avatarForChildren  Child[]              @relation("ChildAvatar")
 
@@ -777,6 +827,25 @@ enum MemoryStatus {
   deleted
 
   @@map("memory_status")
+}
+
+enum MaxMemoryBackupState {
+  pending
+  needs_configuration
+  uploading
+  send_intent
+  sent
+  ambiguous
+  failed
+
+  @@map("max_memory_backup_state")
+}
+
+enum MaxMemoryBackupAttachmentKind {
+  image
+  video
+
+  @@map("max_memory_backup_attachment_kind")
 }
 
 enum MediaSourceKind {

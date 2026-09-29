@@ -70,4 +70,27 @@ describe('MAX durable acceptance policy', () => {
     expect(calls[0]).toMatchObject({ botId: '99', event, encrypted, now, response: { kind: 'accepted', destinationUserId: '11' } })
     expect((calls[0] as { eventKey: string }).eventKey).toMatch(/^[a-f0-9]{64}$/)
   })
+
+  test('acknowledges a message from the configured bot without encrypting or persisting it', async () => {
+    let encrypted = 0
+    let accepted = 0
+    let clockReads = 0
+    const repository: MaxAcceptRepository = {
+      accept: async () => { accepted += 1; return { inboxId: 'unexpected', duplicate: false } },
+    }
+    const event: MaxInboundEvent = {
+      kind: 'message_created', senderId: '99', recipientId: '11', messageId: 'backup-post-1',
+      occurredAt: '2026-09-14T10:00:00.000Z', text: 'ordinary caption',
+      attachments: [{ kind: 'image', providerAttachmentId: '123' }],
+    }
+    const accept = createMaxAcceptUpdate({
+      botId: '99', repository,
+      encrypt: () => { encrypted += 1; return { ciphertext: Uint8Array.of(1), iv: Uint8Array.of(2), authTag: Uint8Array.of(3) } },
+      now: () => { clockReads += 1; return new Date() },
+    })
+    expect(await accept(event)).toEqual({ inboxId: '', duplicate: true })
+    expect({ encrypted, accepted, clockReads }).toEqual({ encrypted: 0, accepted: 0, clockReads: 0 })
+    expect(await accept({ ...event, senderId: '11' })).toEqual({ inboxId: 'unexpected', duplicate: false })
+    expect({ encrypted, accepted, clockReads }).toEqual({ encrypted: 1, accepted: 1, clockReads: 1 })
+  })
 })

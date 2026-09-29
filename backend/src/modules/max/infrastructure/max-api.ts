@@ -8,10 +8,15 @@ import type {
   MaxVideoResolution,
   MaxVideoUploadCapability,
   MaxSendVideoMessageInput,
+  MaxImageUploadInput,
+  MaxSendMediaMessageInput,
 } from '../application/ports'
 
 const MAX_API_BASE = 'https://platform-api2.max.ru'
 const REQUEST_TIMEOUT_MS = 10_000
+const MAX_INT64_MIN = -9_223_372_036_854_775_808n
+const MAX_INT64_MAX = 9_223_372_036_854_775_807n
+const MAX_PRIVATE_PHOTO_BYTES = 20_000_000
 
 export class MaxProviderError extends Error {
   readonly retryAfterSeconds?: number
@@ -32,16 +37,17 @@ export class MaxProviderError extends Error {
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export function createMaxApi(token: string, options: { fetch?: FetchLike } = {}): MaxApiPort {
-  const request = async (path: string, init: RequestInit, callerSignal?: AbortSignal): Promise<unknown> => {
+  const requestUrl = async (url: string, init: RequestInit, callerSignal?: AbortSignal): Promise<unknown> => {
     const controller = new AbortController()
     const onCallerAbort = () => controller.abort()
     callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
     if (callerSignal?.aborted) controller.abort()
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
     try {
-      const response = await (options.fetch ?? fetch)(`${MAX_API_BASE}${path}`, {
+      const response = await (options.fetch ?? fetch)(url, {
         ...init,
         headers: { ...(init.headers ?? {}), Authorization: token },
+        redirect: 'manual',
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -65,6 +71,8 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
       callerSignal?.removeEventListener('abort', onCallerAbort)
     }
   }
+  const request = (path: string, init: RequestInit, callerSignal?: AbortSignal) =>
+    requestUrl(`${MAX_API_BASE}${path}`, init, callerSignal)
 
   return {
     async getMe(signal) {
@@ -115,6 +123,26 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: input.text, attachments: [{ type: 'video', payload: { token: input.uploadToken } }] }),
+      }, signal)
+      return normalizeSentVideoMessage(value)
+    },
+    async uploadImage(input: MaxImageUploadInput, signal) {
+      validateImageUploadInput(input)
+      const capability = await request('/uploads?type=image', { method: 'POST' }, signal)
+      const uploadUrl = normalizeImageUploadUrl(capability)
+      const form = new FormData()
+      form.set('data', new Blob([Uint8Array.from(input.bytes)], { type: input.contentType }), input.fileName)
+      const uploaded = await requestUrl(uploadUrl, { method: 'POST', body: form }, signal)
+      return { token: normalizeImageUploadToken(uploaded) }
+    },
+    async sendMediaMessage(input: MaxSendMediaMessageInput, signal) {
+      validateSendMediaMessageInput(input)
+      const value = await request(`/messages?${new URLSearchParams({ chat_id: input.chatId }).toString()}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: input.text, attachments: input.attachments.map((attachment) => ({
+          type: attachment.kind, payload: { token: attachment.token },
+        })) }),
       }, signal)
       return normalizeSentVideoMessage(value)
     },
@@ -283,6 +311,49 @@ function validateSendVideoMessageInput(input: MaxSendVideoMessageInput) {
   if (typeof input.uploadToken !== 'string' || input.uploadToken.length === 0 || input.uploadToken.length > 4_096) {
     throw new MaxProviderError()
   }
+}
+
+function validateImageUploadInput(input: MaxImageUploadInput) {
+  if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_PRIVATE_PHOTO_BYTES ||
+      !['image/jpeg', 'image/png', 'image/heic'].includes(input.contentType) ||
+      typeof input.fileName !== 'string' || !/^[A-Za-z0-9_-]{1,120}\.(?:jpe?g|png|heic)$/.test(input.fileName)) {
+    throw new MaxProviderError()
+  }
+}
+
+function normalizeImageUploadUrl(value: unknown): string {
+  if (!isRecord(value) || typeof value.url !== 'string') throw new MaxProviderError()
+  try {
+    const url = new URL(value.url)
+    if (url.protocol !== 'https:' || url.hostname !== 'iu.oneme.ru' || url.port || url.username || url.password ||
+        url.hash || url.pathname !== '/uploadImage') throw new MaxProviderError()
+    return value.url
+  } catch {
+    throw new MaxProviderError()
+  }
+}
+
+function normalizeImageUploadToken(value: unknown): string {
+  if (!isRecord(value) || !isRecord(value.photos)) throw new MaxProviderError()
+  const photos = Object.entries(value.photos)
+  const photo = photos[0]
+  if (photos.length !== 1 || !photo || photo[0].length === 0 || photo[0].length > 512 ||
+      !isRecord(photo[1]) || typeof photo[1].token !== 'string' ||
+      photo[1].token.length === 0 || photo[1].token.length > 4_096) throw new MaxProviderError()
+  return photo[1].token
+}
+
+function validateSendMediaMessageInput(input: MaxSendMediaMessageInput) {
+  if (typeof input.chatId !== 'string' || !/^-?[1-9][0-9]{0,18}$/.test(input.chatId) ||
+      typeof input.text !== 'string' || [...input.text].length > 4_000 ||
+      !Array.isArray(input.attachments) || input.attachments.length < 1 || input.attachments.length > 10 ||
+      input.attachments.some((attachment) => !isRecord(attachment) ||
+        (attachment.kind !== 'image' && attachment.kind !== 'video') ||
+        typeof attachment.token !== 'string' || attachment.token.length === 0 || attachment.token.length > 4_096)) {
+    throw new MaxProviderError()
+  }
+  const chatId = BigInt(input.chatId)
+  if (chatId < MAX_INT64_MIN || chatId > MAX_INT64_MAX) throw new MaxProviderError()
 }
 
 function normalizeVideoUploadCapability(value: unknown): MaxVideoUploadCapability {
