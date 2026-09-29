@@ -42,6 +42,7 @@
 - Modify `backend/src/modules/max/infrastructure/max-api.ts` and `backend/src/modules/max/max-api.test.ts`
 - Modify `backend/src/modules/max/capture.integration.test.ts`
 - Modify `backend/scripts/int1-max-upgrade.integration.test.ts` to preserve the migration-39 upgrade assertion after adding migration 43
+- Modify `backend/scripts/mm4-upgrade.integration.test.ts` to expect the additive lifecycle migration after the existing MM/backup upgrade sequence
 - Modify `backend/prisma/schema.prisma`
 - Create `backend/prisma/migrations/20260929220000_max_channel_lifecycle_events/migration.sql`
 
@@ -53,6 +54,6 @@
 - [x] Add exact lifecycle enum labels with a new additive Prisma migration; do not edit historical migrations.
 - [x] Implement stable deduplication and a stored-only lifecycle path that leaves encrypted payload available for follow-up inspection and does not queue the worker.
 - [x] Allow only the three verified lifecycle names in the existing MAX subscription client; preserve the previous supported types and reject unknown names.
-- [x] Run focused tests, MAX capture and migration-upgrade integration tests, TypeScript check, Prisma schema validation, and diff whitespace check.
+- [x] Run focused tests, MAX capture and both migration-upgrade integration tests, TypeScript check, Prisma schema validation, and diff whitespace check.
 
 **Stop conditions:** Any documented required event field cannot be validated without assuming undocumented fields; any test shows a lifecycle event can create a Memory, response, or worker task; or the repository reveals a migration conflict.
