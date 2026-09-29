@@ -1062,7 +1062,8 @@ test.describe.serial('T07 live feed', () => {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state, recheckable: state !== 'ready' }) })
     })
     const bytes = generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=320x180:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'])
-    await page.route(`**${contentPath}`, (route) => route.fulfill({ body: bytes, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' } }))
+    // Private video playback is fetched by the service worker, outside page.route.
+    await page.context().route(`**${contentPath}`, (route) => route.fulfill({ body: bytes, contentType: 'video/mp4', headers: { 'accept-ranges': 'bytes' } }))
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
       const response = await route.fetch()
@@ -1078,6 +1079,21 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    const waitForActiveSlideAlignment = async () => {
+      let previousDelta: number | null = null
+      let stableFrames = 0
+      await expect.poll(async () => {
+        const delta = await card.evaluate((element) => {
+          const viewport = element.querySelector('.memoly-mixed-viewport')!
+          const slide = element.querySelector('[data-carousel-active="true"]')!
+          return slide.getBoundingClientRect().left - viewport.getBoundingClientRect().left
+        })
+        stableFrames = Math.abs(delta) < 1 && previousDelta !== null && Math.abs(delta - previousDelta) < 0.05
+          ? stableFrames + 1 : 0
+        previousDelta = delta
+        return stableFrames
+      }, { intervals: [40, 40, 40, 40, 40, 40, 40, 40, 40, 40], timeout: 5_000 }).toBeGreaterThanOrEqual(3)
+    }
     await card.scrollIntoViewIfNeeded()
     await expect(card).toContainText('1 / 3')
     expect(checks).toBe(0)
@@ -1087,6 +1103,10 @@ test.describe.serial('T07 live feed', () => {
     await expect(card).toContainText('2 / 3')
     await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
     await expect(card.getByText('Видео обрабатывается…')).toBeVisible()
+    await waitForActiveSlideAlignment()
+    await test.info().attach('int1-max-video-processing-card.png', {
+      body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+    })
     expect(contentRequests).toHaveLength(0)
     expect(checks).toBe(1)
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
@@ -1114,8 +1134,17 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => checks).toBe(4)
     await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`${referenceId}/content$`))
     await expect(card).toContainText('2 / 3')
+    await waitForActiveSlideAlignment()
+    await expect.poll(() => card.locator('[data-carousel-active="true"] video').evaluate((video: HTMLVideoElement) => ({
+      width: video.videoWidth, height: video.videoHeight, hasMetadata: video.readyState >= 1, error: video.error?.code ?? null,
+    }))).toMatchObject({ width: 320, height: 180, hasMetadata: true, error: null })
+    await expect(card.getByText('Не удалось загрузить видео')).toHaveCount(0)
+    await expect(card.locator('[data-carousel-active="true"] [role="alert"]')).toHaveCount(0)
     expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
     expect(contentRequests.some((url) => url.includes(contentPath))).toBe(true)
+    await test.info().attach('int1-max-video-ready-card.png', {
+      body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png',
+    })
   })
 
   test('offscreen MAX card waits to check readiness and shows confirmed unavailable distinctly', async ({ page }) => {
