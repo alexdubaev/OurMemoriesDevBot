@@ -261,7 +261,7 @@ export class MediaService {
       if (!original) throw new MediaFailure('upload_incomplete', 'Файл не найден в хранилище')
       await pipeline(Readable.fromWeb(original.body as never), createWriteStream(originalPath))
       let verifiedMime = upload.declaredMime
-      let sha256 = await sha256File(originalPath)
+      let sha256: string
       let width: number | null = null
       let height: number | null = null
       let durationMs: number | null = null
@@ -288,6 +288,7 @@ export class MediaService {
             height: rendered.height, durationMs: null })
         }
       } else {
+        sha256 = await sha256File(originalPath)
         const probed = await this.probeMedia(originalPath, upload.kind)
         width = probed.width
         height = probed.height
