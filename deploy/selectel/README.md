@@ -47,6 +47,16 @@ access boundary, the build inputs, the migration gate, and the rollback contract
   sudo -n -u memoly git -C /opt/memoly/app ls-remote origin refs/heads/main
   ```
 
+- Every existing tracked source path in the current and requested revisions, and
+  each existing directory leading to those paths, must be owned by `memoly:memoly`.
+  The guarded entry point checks this before switching revisions and again after
+  checkout. Git operations always run as `memoly`; a failed switch stops the
+  release. Build output and runtime/generated state stay outside tracked source.
+  If the guard reports a path, inspect that path and repair only the identified
+  tracked file or directory through approved host maintenance, then rerun the
+  preflight. Do not recursively change ownership of `/opt/memoly`, reset the
+  checkout, or clean files to recover a release.
+
 - The release preflight requires at least 4 GiB free on the filesystem containing
   `/opt/memoly`. The current host has roughly 2 GiB free, so releases stop at the
   disk check until the owner completes approved host maintenance.

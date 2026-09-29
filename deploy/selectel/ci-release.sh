@@ -91,6 +91,43 @@ validate_repository() {
   [ -z "$status" ] || die 'application checkout must be clean before release'
 }
 
+require_release_ownership() {
+  [ -n "$APP_GROUP" ] || APP_GROUP=$(id -gn "$APP_USER") || die "cannot determine release group for $APP_USER"
+  local expected_uid expected_gid
+  expected_uid=$(id -u "$APP_USER") || die "cannot determine release user ID: $APP_USER"
+  expected_gid=$(getent group "$APP_GROUP" | cut -d: -f3)
+  [[ "$expected_gid" =~ ^[0-9]+$ ]] || die "cannot determine release group ID: $APP_GROUP"
+
+  check_path_owner() {
+    local candidate=$1 actual_uid actual_gid
+    [ -e "$candidate" ] || [ -L "$candidate" ] || return 0
+    read -r actual_uid actual_gid < <(stat -c '%u %g' -- "$candidate" 2>/dev/null) ||
+      die "cannot inspect checkout ownership at ${candidate#"$APP_ROOT"/}"
+    if [ "$actual_uid" != "$expected_uid" ] || [ "$actual_gid" != "$expected_gid" ]; then
+      die "unsafe checkout ownership at ${candidate#"$APP_ROOT"/}: expected $APP_USER:$APP_GROUP"
+    fi
+  }
+
+  check_tree_paths() {
+    local revision=$1 path parent candidate
+    if ! git_memoly ls-tree -r --name-only -z "$revision" | while IFS= read -r -d '' path; do
+      candidate=$APP_ROOT/$path
+      check_path_owner "$candidate"
+      parent=$(dirname -- "$candidate")
+      while [ "$parent" != "$APP_ROOT" ] && [[ "$parent" == "$APP_ROOT"/* ]]; do
+        check_path_owner "$parent"
+        parent=$(dirname -- "$parent")
+      done
+    done; then
+      die "cannot inspect tracked paths for checkout ownership: $revision"
+    fi
+  }
+
+  check_path_owner "$APP_ROOT"
+  check_tree_paths HEAD
+  check_tree_paths "$PRODUCT_SHA"
+}
+
 check_disk_space() {
   local available
   available=$(df -Pk "$SERVER_ROOT" | awk 'NR == 2 { print $4 }')
@@ -105,23 +142,18 @@ fetch_and_checkout() {
   accepted_sha=$(git_memoly rev-parse refs/remotes/origin/main 2>/dev/null || true)
   [ "$accepted_sha" = "$PRODUCT_SHA" ] || die "requested SHA is not the current accepted origin/main SHA"
 
+  require_release_ownership
   if ! git_memoly switch --detach "$PRODUCT_SHA" >/dev/null 2>&1; then
-    # The historical host checkout may contain root-owned deployment files.
-    # A root fallback is allowed only after the clean status check above.
-    git_root switch --detach "$PRODUCT_SHA" >/dev/null 2>&1 || die 'cannot checkout requested release SHA'
-    [ -n "$APP_GROUP" ] || APP_GROUP=$(id -gn "$APP_USER")
-    # Repair only Git metadata written by the root fallback. Deployment files
-    # may intentionally remain root-owned and are handled by this fallback on
-    # the next release as needed.
-    for path in HEAD index logs/HEAD; do
-      [ -e "$APP_ROOT/.git/$path" ] && chown "$APP_USER:$APP_GROUP" "$APP_ROOT/.git/$path"
-    done
+    # Git diagnostics can include host paths or remote details; surface only a
+    # sanitized failure and leave checkout repair to scoped host maintenance.
+    die 'cannot checkout requested release SHA as the release user; inspect checkout ownership and Git state'
   fi
 
   local head status
-  head=$(git_root rev-parse HEAD)
+  head=$(git_memoly rev-parse HEAD) || die 'cannot inspect server checkout HEAD after switch'
   [ "$head" = "$PRODUCT_SHA" ] || die 'server checkout HEAD does not equal requested release SHA'
-  status=$(git_root status --porcelain)
+  require_release_ownership
+  status=$(git_memoly status --porcelain) || die 'cannot inspect server checkout status after switch'
   [ -z "$status" ] || die 'server checkout is dirty after release checkout'
 }
 
@@ -414,6 +446,7 @@ main() {
   require_command df
   require_command docker
   require_command git
+  require_command getent
   require_command id
   require_command install
   require_command sudo
@@ -502,6 +535,10 @@ main() {
 
   if [ "$PREBUILT_IMAGES" = false ]; then
     SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
+    require_release_ownership
+    local post_build_status
+    post_build_status=$(git_memoly status --porcelain) || die 'cannot inspect application checkout after image build preparation'
+    [ -z "$post_build_status" ] || die 'application checkout changed during image build preparation'
   fi
   if [ "$RESUMING_FORWARD_ONLY" = false ]; then prepare_rollback; fi
 
