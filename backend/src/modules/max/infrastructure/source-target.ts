@@ -5,11 +5,12 @@ import { choiceWindowMs, loadPublishCandidates, readCandidates, lockBotActor, lo
 export type MaxTarget = { userId: string; familyId: string; childId: string }
 export type MaxTargetResult = { kind: 'target'; target: MaxTarget } | { kind: 'pending' | 'expired' | 'unavailable' }
 
-export async function resolveMaxTarget(db: DbClient, source: MaxSource, now = new Date()): Promise<MaxTargetResult> {
+export async function resolveMaxTarget(db: DbClient, source: MaxSource, now = new Date(), isChannel = false): Promise<MaxTargetResult> {
   if (source.userId && source.familyId && source.childId) {
     return { kind: 'target', target: { userId: source.userId, familyId: source.familyId, childId: source.childId } }
   }
   if (source.choiceExpiresAt) return { kind: source.choiceExpiresAt > now ? 'pending' : 'expired' }
+  if (isChannel) return resolveChannelTarget(db, source)
   const found = await loadPublishCandidates(db, 'max', source.senderSubject)
   if (!found || found.candidates.length === 0) return { kind: 'unavailable' }
   if (found.candidates.length > 1) {
@@ -57,6 +58,28 @@ export async function resolveMaxTarget(db: DbClient, source: MaxSource, now = ne
   return { kind: !current.choiceExpiresAt ? 'unavailable' : current.choiceExpiresAt <= now ? 'expired' : 'pending' }
 }
 
+/** A channel post is routed only through its active signed chat binding. */
+async function resolveChannelTarget(db: DbClient, source: MaxSource): Promise<MaxTargetResult> {
+  const family = await db.family.findFirst({ where: { status: 'active', maxBackupChatId: source.recipientId }, select: {
+    id: true, ownerUserId: true,
+    children: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 1, select: { id: true } },
+    members: { where: { revokedAt: null, role: 'full' }, select: { userId: true, user: { select: { externalIdentities: { where: { provider: 'max', subject: source.senderSubject }, select: { id: true }, take: 1 } } } } },
+  } })
+  if (!family || family.children.length === 0) return { kind: 'unavailable' }
+  const actorId = source.senderSubject === '0' ? family.ownerUserId : family.members.find((member) => member.user.externalIdentities.length > 0)?.userId
+  if (!actorId) return { kind: 'unavailable' }
+  const changed = await db.maxSource.updateMany({ where: { id: source.id, status: 'accepted', userId: null, familyId: null }, data: {
+    userId: actorId, familyId: family.id, childId: family.children[0]!.id,
+  } })
+  if (changed.count !== 1) {
+    const current = await db.maxSource.findUnique({ where: { id: source.id }, select: { userId: true, familyId: true, childId: true } })
+    return current?.userId && current.familyId && current.childId
+      ? { kind: 'target', target: { userId: current.userId, familyId: current.familyId, childId: current.childId } }
+      : { kind: 'unavailable' }
+  }
+  return { kind: 'target', target: { userId: actorId, familyId: family.id, childId: family.children[0]!.id } }
+}
+
 export async function chooseMaxTarget(db: DbClient, sourceId: string, index: number, senderSubject: string, now?: Date) {
   const source = await db.maxSource.findUnique({ where: { id: sourceId } })
   if (!source || source.senderSubject !== senderSubject || !source.userId) return 'denied' as const
@@ -91,11 +114,13 @@ export async function expireMaxTarget(db: DbClient, sourceId: string, inboxId: s
     await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: {
       status: 'processed', processedAt: now, encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
     } })
-    const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId, kind: 'denied' } },
-      create: { inboxId, destinationUserId: BigInt(destinationUserId), kind: 'denied', text: 'Время выбора семьи истекло. Отправьте материал заново.' },
-      update: {}, select: { id: true } })
-    await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`,
-      payload: { responseId: response.id }, scheduledFor: now }], skipDuplicates: true })
+    if (BigInt(destinationUserId) > 0n) {
+      const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId, kind: 'denied' } },
+        create: { inboxId, destinationUserId: BigInt(destinationUserId), kind: 'denied', text: 'Время выбора семьи истекло. Отправьте материал заново.' },
+        update: {}, select: { id: true } })
+      await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`,
+        payload: { responseId: response.id }, scheduledFor: now }], skipDuplicates: true })
+    }
     return 'done' as const
   })
 }

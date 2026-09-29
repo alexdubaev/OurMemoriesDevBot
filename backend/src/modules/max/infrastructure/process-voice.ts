@@ -29,12 +29,12 @@ export function createMaxVoiceProcessor(options: {
     if (!source || source.status !== 'accepted') return 'skipped'
     const attachment = input.event.attachments?.length === 1 ? input.event.attachments[0] : undefined
     if (!attachment || attachment.kind !== 'voice') throw new MaxProviderError()
-    if (!isMaxCaptionWithinLimit(input.event.text)) return terminalDenied(prisma, source.id, input.inboxId, input.event.senderId)
+    if (!isMaxCaptionWithinLimit(input.event.text)) return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event))
     if (typeof options.api.getMessage !== 'function') throw new Error('MAX message lookup is unavailable')
-    const targetResult = await resolveMaxTarget(prisma, source)
+    const targetResult = await resolveMaxTarget(prisma, source, new Date(), input.event.isChannel === true)
     if (targetResult.kind === 'pending') return 'done'
-    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, input.event.senderId)
-    if (targetResult.kind !== 'target') return terminalDenied(prisma, source.id, input.inboxId, input.event.senderId,
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, input.inboxId, responseActor(input.event))
+    if (targetResult.kind !== 'target') return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event),
       'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.')
     const admission = targetResult.target
 
@@ -43,7 +43,7 @@ export function createMaxVoiceProcessor(options: {
       current = await resolveMaxVoiceSource(options.api, input.event, input.signal)
     } catch (error) {
       if (error instanceof MaxProviderError && error.code === 'message_identity_mismatch') {
-        return terminalDenied(prisma, source.id, input.inboxId, input.event.senderId)
+        return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event))
       }
       throw error
     }
@@ -68,6 +68,7 @@ export function createMaxVoiceProcessor(options: {
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
         } })
+        if (input.event.isChannel) return
         const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'saved' } },
           create: { inboxId: input.inboxId, destinationUserId: BigInt(input.event.senderId), kind: 'saved', text: savedFamilyText(family.name) },
           update: { destinationUserId: BigInt(input.event.senderId), text: savedFamilyText(family.name) }, select: { id: true } })
@@ -76,8 +77,8 @@ export function createMaxVoiceProcessor(options: {
       return 'done'
     } catch (error) {
       await options.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [row.plannedMediaId] })
-      if (isAuthorizationFailure(error)) return terminalDenied(prisma, source.id, input.inboxId, input.event.senderId)
-      if (isPermanentAudioFailure(error)) return terminalDenied(prisma, source.id, input.inboxId, input.event.senderId)
+      if (isAuthorizationFailure(error)) return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event))
+      if (isPermanentAudioFailure(error)) return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event))
       // A recognized audio message is a supported path. Transient acquisition/storage
       // failures remain retryable; neither path emits the unsupported-media fallback.
       throw error
@@ -95,7 +96,7 @@ export async function resolveMaxVoiceSource(
   try {
     const resolved = await api.getMessage(event.messageId, signal)
     const current = resolved.attachments[0]
-    if (resolved.messageId !== event.messageId || resolved.senderId !== event.senderId || resolved.recipientId !== event.recipientId ||
+    if (resolved.messageId !== event.messageId || (!event.isChannel && resolved.senderId !== event.senderId) || resolved.recipientId !== event.recipientId ||
         resolved.attachments.length !== 1 || current?.kind !== 'voice' || current.providerAttachmentId !== attachment.providerAttachmentId) {
         throw new MaxProviderError(undefined, false, 400, 'message_identity_mismatch')
     }
@@ -180,8 +181,13 @@ async function terminalDenied(db: DbClient, sourceId: string, inboxId: string, d
     const changed = await tx.maxSource.updateMany({ where: { id: sourceId, status: 'accepted' }, data: { status: 'denied', rejectionCode: 'denied' } })
     if (changed.count !== 1) return 'skipped'
     await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    if (BigInt(destinationUserId) === 0n) return 'done'
     const response = await tx.maxOutgoingResponse.upsert({ where: { inboxId_kind: { inboxId, kind: 'denied' } }, create: { inboxId, destinationUserId: BigInt(destinationUserId), kind: 'denied', text }, update: { destinationUserId: BigInt(destinationUserId), text }, select: { id: true } })
     await tx.taskOutbox.createMany({ data: [{ type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date() }], skipDuplicates: true })
     return 'done'
   })
+}
+
+function responseActor(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
+  return event.isChannel ? '0' : event.senderId
 }

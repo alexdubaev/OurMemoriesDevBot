@@ -93,15 +93,15 @@ describe('MAX update mapping', () => {
     })
   })
 
-  test('keeps group and channel messages out of direct-dialog capture', () => {
+  test('keeps group messages out of capture while accepting signed channel posts without a sender', () => {
     expect(normalizeMaxUpdate({
       ...messageFixture,
       message: { ...messageFixture.message, recipient: { chat_type: 'group', chat_id: 901, user_id: 99 } },
     })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({
       ...messageFixture,
-      message: { ...messageFixture.message, recipient: { chat_type: 'channel', chat_id: 902, user_id: 99 } },
-    })).toEqual({ kind: 'ignored' })
+      message: { ...messageFixture.message, sender: undefined, recipient: { chat_type: 'channel', chat_id: -79560265048692, user_id: null } },
+    })).toMatchObject({ kind: 'message_created', senderId: '0', recipientId: '-79560265048692', isChannel: true })
   })
 
   test('ignores malformed direct-dialog recipient chat ids safely', () => {

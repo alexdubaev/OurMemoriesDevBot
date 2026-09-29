@@ -208,6 +208,15 @@ describe('MAX API client', () => {
     })
   })
 
+  test('resolves channel messages by the exact signed chat id when the provider omits the sender', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{ recipient: {
+      chat_id: -79560265048692, chat_type: 'channel', user_id: null,
+    }, body: { mid: 'channel-message', attachments: [] } }] }) })
+    await expect(api.getMessage('channel-message')).resolves.toEqual({
+      messageId: 'channel-message', senderId: '0', recipientId: '-79560265048692', attachments: [],
+    })
+  })
+
   test('rejects truly unknown subscription update types before calling the provider', async () => {
     let fetchCalls = 0
     const api = createMaxApi(token, { fetch: async () => { fetchCalls++; return response({ success: true }) } })

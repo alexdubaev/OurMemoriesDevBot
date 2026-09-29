@@ -94,19 +94,19 @@ export function createMaxTaskProcessor(options: {
         return voiceProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
       }
       if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
-      return await terminalSource(prisma, source, 'unsupported_media', event.senderId, unsupportedMediaText) ? 'done' : 'skipped'
+      return await terminalSource(prisma, source, 'unsupported_media', responseActor(event), unsupportedMediaText) ? 'done' : 'skipped'
     }
 
     if (!isPublishableText(event.text)) {
-      return await deny(prisma, source) ? 'done' : 'skipped'
+      return await deny(prisma, source, undefined, event.isChannel === true) ? 'done' : 'skipped'
     }
     const text = event.text
 
-    const targetResult = await resolveMaxTarget(prisma, source)
+    const targetResult = await resolveMaxTarget(prisma, source, new Date(), event.isChannel === true)
     if (targetResult.kind === 'pending') return 'done'
-    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, source.inboxId, source.senderSubject)
+    if (targetResult.kind === 'expired') return expireMaxTarget(prisma, source.id, source.inboxId, responseActor(event))
     if (targetResult.kind !== 'target') return await deny(prisma, source,
-      'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.') ? 'done' : 'skipped'
+      'Материал не сохранён: нет семьи с правом публикации и профилем ребёнка.', event.isChannel === true) ? 'done' : 'skipped'
     const admission = targetResult.target
 
     const scope: FamilyScope = {
@@ -127,9 +127,9 @@ export function createMaxTaskProcessor(options: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,
         } })
         await markInboxProcessed(tx, inbox.id)
-        await createResponseAndTask(tx, {
-          inboxId: inbox.id, destinationUserId: source.senderSubject, kind: 'saved', text: savedFamilyText(family.name),
-        })
+      if (!event.isChannel) await createResponseAndTask(tx, {
+        inboxId: inbox.id, destinationUserId: source.senderSubject, kind: 'saved', text: savedFamilyText(family.name),
+      })
     })
     try {
       for (let attempt = 0; ; attempt += 1) {
@@ -143,7 +143,7 @@ export function createMaxTaskProcessor(options: {
       return 'done'
     } catch (error) {
       if (isExpectedAuthorizationFailure(error)) {
-        await deny(prisma, source)
+        await deny(prisma, source, undefined, event.isChannel === true)
         return 'done'
       }
       throw error
@@ -198,16 +198,16 @@ function isExpectedAuthorizationFailure(error: unknown) {
   return kind === 'not_found' || kind === 'forbidden'
 }
 
-async function deny(db: DbClient, source: MaxSource, text = deniedText) {
+async function deny(db: DbClient, source: MaxSource, text = deniedText, suppressResponse = false) {
   return db.$transaction(async (tx) => {
     const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
       status: 'denied', rejectionCode: 'denied',
     } })
     if (changed.count !== 1) return false
     await markInboxProcessed(tx, source.inboxId)
-    await createResponseAndTask(tx, {
-      inboxId: source.inboxId, destinationUserId: source.senderSubject, kind: 'denied', text,
-    })
+      if (!suppressResponse) await createResponseAndTask(tx, {
+        inboxId: source.inboxId, destinationUserId: source.senderSubject, kind: 'denied', text,
+      })
     return true
   })
 }
@@ -219,7 +219,7 @@ async function terminalSource(db: DbClient, source: MaxSource, kind: 'unsupporte
     } })
     if (changed.count !== 1) return false
     await markInboxProcessed(tx, source.inboxId)
-    await createResponseAndTask(tx, { inboxId: source.inboxId, destinationUserId, kind, text })
+    if (BigInt(destinationUserId) > 0n) await createResponseAndTask(tx, { inboxId: source.inboxId, destinationUserId, kind, text })
     return true
   })
 }
@@ -252,4 +252,8 @@ async function createResponseAndTask(
   await tx.taskOutbox.createMany({ data: [{
     type: 'max:deliver-response', dedupeKey: `max-response:${response.id}`, payload: { responseId: response.id }, scheduledFor: new Date(),
   }], skipDuplicates: true })
+}
+
+function responseActor(event: Extract<MaxInboundEvent, { kind: 'message_created' }>) {
+  return event.isChannel ? '0' : event.senderId
 }

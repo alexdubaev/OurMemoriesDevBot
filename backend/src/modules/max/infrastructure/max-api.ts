@@ -165,13 +165,25 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
   }
   const candidate = isRecord(value) && Array.isArray(value.messages) ? value.messages[0] :
     isRecord(value) && isRecord(value.message) ? value.message : value
-  if (!isRecord(candidate) || !isRecord(candidate.sender) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
-      !isPositiveSafeInteger(candidate.sender.user_id) || !isPositiveSafeInteger(candidate.recipient.user_id) ||
-      (candidate.recipient.chat_id !== null && !isPositiveSafeInteger(candidate.recipient.chat_id)) || candidate.recipient.chat_type !== 'dialog' ||
+  if (!isRecord(candidate) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
+      (candidate.recipient.chat_type !== 'dialog' && candidate.recipient.chat_type !== 'channel') ||
+      (candidate.recipient.chat_type === 'dialog' && (!isRecord(candidate.sender) || !isPositiveSafeInteger(candidate.sender.user_id) || !isPositiveSafeInteger(candidate.recipient.user_id))) ||
+      (candidate.recipient.chat_type === 'channel' && (!isInt64Id(candidate.recipient.chat_id) || candidate.recipient.chat_id === 0 ||
+        isRecord(candidate.sender) && !isPositiveSafeInteger(candidate.sender.user_id))) ||
+      (candidate.recipient.chat_type === 'dialog' && candidate.recipient.chat_id !== null && !isPositiveSafeInteger(candidate.recipient.chat_id)) ||
       typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
       !Array.isArray(candidate.body.attachments)) throw new MaxProviderError()
   const attachments = candidate.body.attachments.map(normalizeResolvedAttachment)
-  return { messageId: expectedMessageId, senderId: String(candidate.sender.user_id), recipientId: String(candidate.recipient.user_id), attachments }
+  return { messageId: expectedMessageId,
+    senderId: candidate.recipient.chat_type === 'channel' && !isRecord(candidate.sender) ? '0' : String((candidate.sender as Record<string, unknown>).user_id),
+    recipientId: candidate.recipient.chat_type === 'channel' ? String(candidate.recipient.chat_id) : String(candidate.recipient.user_id), attachments }
+}
+
+function isInt64Id(value: unknown): value is number | string {
+  if (typeof value === 'number') return Number.isSafeInteger(value)
+  if (typeof value !== 'string' || !/^-?(?:0|[1-9][0-9]*)$/.test(value)) return false
+  try { const parsed = BigInt(value); return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n }
+  catch { return false }
 }
 
 function normalizeResolvedAttachment(value: unknown) {
