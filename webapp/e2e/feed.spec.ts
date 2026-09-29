@@ -1089,6 +1089,65 @@ test.describe.serial('T07 live feed', () => {
     await expect(card).toContainText('2 / 2')
   })
 
+  test('five-photo Memory swipes through every Feed slide and opens the selected photo', async ({ page }) => {
+    const keys = Array.from({ length: 5 }, (_, index) => `media-display/${randomUUID()}-five-photo-${index}.png`)
+    fixture.objectKeys.push(...keys)
+    for (const key of keys) await store(key, pngImage.buffer, 'image/png')
+    const assets = await Promise.all(keys.map((key) => createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })))
+    let memoryId: string | null = null
+    try {
+      const memory = await createMemoryWithMedia({ familyId: fixture.familyId, childId: fixture.childId, userId: fixture.ownerUserId, kind: 'photo', body: 'Пять фотографий E2E', occurredAt: new Date(), assets })
+      memoryId = memory.id
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.reload()
+      await openFeed(page)
+      const card = page.locator(`[data-memory-id="${memory.id}"]`)
+      await card.scrollIntoViewIfNeeded()
+      const viewport = card.locator('.memoly-mixed-viewport')
+      await expect(card.locator('.memoly-mixed-slide')).toHaveCount(5)
+      await expect(card).toContainText('1 / 5')
+      const initialStage = await viewport.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { width: rect.width, height: rect.height }
+      })
+      expect(initialStage.width / initialStage.height).toBeCloseTo(4 / 3, 2)
+      const touch = await page.context().newCDPSession(page)
+      try {
+        for (let next = 2; next <= 5; next += 1) {
+          await card.scrollIntoViewIfNeeded()
+          const bounds = await viewport.boundingBox()
+          if (!bounds) throw new Error('five-photo carousel viewport is missing')
+          const y = bounds.y + bounds.height / 2
+          await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + bounds.width * .8, y, id: 1 }] })
+          for (let step = 1; step <= 8; step += 1) {
+            await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: bounds.x + bounds.width * (.8 - .6 * step / 8), y, id: 1 }] })
+          }
+          await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+          await expect(card).toContainText(`${next} / 5`)
+          await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('aria-label', `${next} из 5, фото`)
+          await expect.poll(() => card.evaluate((element) => {
+            const stage = element.querySelector('.memoly-mixed-viewport')?.getBoundingClientRect()
+            const active = element.querySelector('[data-carousel-active="true"]')?.getBoundingClientRect()
+            return stage && active ? Math.abs(stage.left - active.left) : Number.POSITIVE_INFINITY
+          })).toBeLessThan(2)
+          const height = await viewport.evaluate((element) => element.getBoundingClientRect().height)
+          expect(height).toBeCloseTo(initialStage.height, 1)
+        }
+      } finally {
+        await touch.detach()
+      }
+      const opener = card.getByRole('button', { name: 'Открыть фото' })
+      await opener.click()
+      await expect(page.locator('.pswp__counter')).toContainText('5 / 5')
+      await page.locator('.pswp__button--close').click()
+      await expect(opener).toBeFocused()
+      await expect(card).toContainText('5 / 5')
+    } finally {
+      if (memoryId) await prisma.memory.deleteMany({ where: { id: memoryId } })
+      await prisma.mediaAsset.deleteMany({ where: { id: { in: assets.map((asset) => asset.id) } } })
+    }
+  })
+
   test('photo album fetch failure restores focus and retries the selected slide', async ({ page }) => {
     await openFeed(page)
     const album = await prisma.memory.findFirst({ where: { familyId: fixture.familyId, body: 'Фотоальбом E2E' }, include: { media: { orderBy: { position: 'asc' } } } })
