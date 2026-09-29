@@ -116,8 +116,10 @@ export async function uploadFamilyPhoto(
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
   idempotencyKey?: string,
+  onProgress?: (loaded: number, total: number) => void,
+  onAccepted?: () => void,
 ) {
-  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage, idempotencyKey)
+  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage, idempotencyKey, onProgress, onAccepted)
 }
 
 export async function uploadFamilyVideo(
@@ -142,6 +144,8 @@ async function uploadFamilyMedia(
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
   idempotencyKey?: string,
+  onProgress?: (loaded: number, total: number) => void,
+  onAccepted?: () => void,
 ) {
   onStage?.('reserve')
   const reservation = await transport.request(
@@ -156,18 +160,20 @@ async function uploadFamilyMedia(
     },
   )
   onStage?.('upload')
-  let response: Response | undefined
+  let response: { ok: boolean; status: number } | undefined
   for (let attempt = 0; attempt < 3; attempt += 1) {
     signal?.throwIfAborted()
     try {
-      response = await fetch(reservation.upload.url, {
+      response = onProgress && typeof XMLHttpRequest !== 'undefined'
+        ? await putWithProgress(reservation.upload.url, reservation.upload.method, reservation.upload.headers, file, signal, onProgress)
+        : await fetch(reservation.upload.url, {
         method: reservation.upload.method,
         headers: reservation.upload.headers,
         body: file,
         credentials: 'omit',
         mode: 'cors',
         signal,
-      })
+        })
       if (response.ok || response.status === 412 || response.status < 500 || attempt === 2) break
     } catch (error) {
       if (signal?.aborted || attempt === 2) throw error
@@ -175,6 +181,7 @@ async function uploadFamilyMedia(
   }
   signal?.throwIfAborted()
   if (!response?.ok && response?.status !== 412) throw new Error(kind === 'photo' ? 'Не удалось загрузить фотографию' : 'Не удалось загрузить видео')
+  if (response.ok) onAccepted?.()
   onStage?.('finalize')
   await transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(reservation.upload.uploadId)}/finalize`,
@@ -182,6 +189,35 @@ async function uploadFamilyMedia(
     { method: 'POST', signal },
   )
   return reservation.assetId
+}
+
+function putWithProgress(url: string, method: string, headers: Record<string, string>, file: File, signal: AbortSignal | undefined, onProgress: (loaded: number, total: number) => void): Promise<{ ok: boolean; status: number }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', abort)
+      if (error) reject(error)
+      else resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status })
+    }
+    const abort = () => { xhr.abort(); finish(new DOMException('Загрузка отменена', 'AbortError')) }
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(event.loaded, event.total)
+    })
+    xhr.addEventListener('load', () => finish())
+    xhr.addEventListener('error', () => finish(new Error('Не удалось загрузить файл')))
+    xhr.addEventListener('abort', () => finish(new DOMException('Загрузка отменена', 'AbortError')))
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) { abort(); return }
+    try {
+      xhr.open(method, url)
+      xhr.withCredentials = false
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value)
+      xhr.send(file)
+    } catch { finish(new Error('Не удалось загрузить файл')) }
+  })
 }
 
 export function createInvite(
