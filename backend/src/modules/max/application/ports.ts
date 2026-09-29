@@ -135,6 +135,7 @@ export type MaxVideoUploadSession = {
   childId: string
   plannedMemoryId: string
   body: string
+  mode?: 'standalone' | 'attachment'
   occurredAt: Date
   idempotencyFingerprint: string
   idempotencyKey: string
@@ -157,6 +158,9 @@ export type MaxOutboundSource = {
   recipientId: string
   messageId: string
   providerAttachmentId: string
+  width: number | null
+  height: number | null
+  durationMs: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -180,7 +184,8 @@ export type MaxVideoUploadCapabilityPersistence = {
   persisted: boolean
 }
 
-export type MaxOutboundSourceInput = Omit<MaxOutboundSource, 'id' | 'createdAt' | 'updatedAt'>
+export type MaxOutboundSourceInput = Omit<MaxOutboundSource, 'id' | 'createdAt' | 'updatedAt' | 'width' | 'height' | 'durationMs'> &
+  Partial<Pick<MaxOutboundSource, 'width' | 'height' | 'durationMs'>>
 
 export type MaxDirectUploadRepository = {
   reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation>

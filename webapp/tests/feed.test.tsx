@@ -127,6 +127,31 @@ test('mixed memory renders one card with ordered slides and lazily mounts video'
   expect(markup).not.toContain('<video')
 })
 
+test('one mixed card keeps private photo, MAX video, private photo in order with lazy video', () => {
+  const maxAttachment = {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    source: 'max' as const,
+    kind: 'video' as const,
+    width: 1_920,
+    height: 1_080,
+    durationMs: 24_000,
+    playbackPath: `/api/v1/families/${familyId}/media/max-videos/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/content`,
+  }
+  const mixed: MemoryDto = {
+    ...mixedMemory,
+    attachments: [photoMemory.attachments[0]!, maxAttachment, mixedMemory.attachments[2]!],
+  }
+  const markup = renderFeed(feedClientWith([mixed]))
+  expect(markup.match(/data-memory-id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"/g)?.length).toBe(1)
+  const positions = [['1', 'photo'], ['2', 'video'], ['3', 'photo']].map(([position, kind]) => markup.indexOf(`data-carousel-position="${position}" data-media-kind="${kind}"`))
+  expect(positions.every((position) => position >= 0)).toBe(true)
+  expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  expect(markup).toContain('1 / 3')
+  expect(markup).toContain('data-carousel-active="true"')
+  expect(markup).not.toContain('<video')
+  expect(markup).toContain('data-seen-active-index="0"')
+})
+
 test('a published private video still preparing its rendition shows pending state without becoming seen', () => {
   const pending = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0], renditionStatus: 'pending' as const, playbackPath: null }] }
   const markup = renderFeed(feedClientWith([pending]))

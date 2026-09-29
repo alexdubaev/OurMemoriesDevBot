@@ -543,6 +543,70 @@ maybeDescribe('Memories API', () => {
     }
   })
 
+  test('publishes ordered private/MAX attachments once and replays the exact Memory', async () => {
+    const owner = await admittedUser('Владелец', '38111')
+    const other = await admittedUser('Другой', '38112')
+    const family = await createFamily(owner.token, 'Смешанная семья')
+    const foreignFamily = await createFamily(other.token, 'Чужая семья')
+    const familyId = family.body.family.id as string
+    const childId = family.body.child.id as string
+    const photoA = await createMemoryAsset(familyId, owner.userId, 'photo')
+    const photoB = await createMemoryAsset(familyId, owner.userId, 'photo')
+    const makeSession = async (suffix: string, overrides: { familyId?: string; authorId?: string; childId?: string; state?: 'reserved' | 'finalized' } = {}) => {
+      const id = randomUUID()
+      const targetFamily = overrides.familyId ?? familyId
+      await prisma.maxVideoUploadSession.create({ data: {
+        id, familyId: targetFamily, authorId: overrides.authorId ?? owner.userId,
+        childId: overrides.childId ?? childId, plannedMemoryId: randomUUID(), body: '', mode: 'attachment',
+        occurredAt: new Date('2023-07-14T18:43:00.000Z'), idempotencyFingerprint: randomUUID(),
+        idempotencyKey: `test-${suffix}-${randomUUID()}`, expiresAt: new Date(Date.now() + 60_000), state: overrides.state ?? 'finalized',
+      } })
+      if ((overrides.state ?? 'finalized') === 'finalized') await prisma.maxOutboundSource.create({ data: {
+        uploadSessionId: id, familyId: targetFamily, recipientId: BigInt(123), messageId: randomUUID(),
+        providerAttachmentId: `video-${suffix}`, width: 1280, height: 720, durationMs: 7000,
+      } })
+      return id
+    }
+    const videoA = await makeSession('a')
+    const videoB = await makeSession('b')
+    const input = { kind: 'media', childId, body: 'Смешанное воспоминание', occurredAt: '2023-07-14T18:43:00.000Z',
+      attachments: [
+        { source: 'private_storage', mediaId: photoA.id }, { source: 'max', sessionId: videoA },
+        { source: 'private_storage', mediaId: photoB.id }, { source: 'max', sessionId: videoB },
+      ] }
+    const key = randomUUID()
+    const created = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', input, key)
+    expect(created.response.status).toBe(201)
+    expect(created.body.attachments.map((item: { source: string }) => item.source)).toEqual(['private_storage', 'max', 'private_storage', 'max'])
+    expect(created.body.attachments[1]).toMatchObject({ width: 1280, height: 720, durationMs: 7000 })
+    expect(memoryDtoSchema.safeParse(created.body).success).toBe(true)
+    const replay = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', input, key)
+    expect(replay.response.status).toBe(200)
+    expect(replay.body).toEqual(created.body)
+    expect(await prisma.memory.count({ where: { familyId } })).toBe(1)
+
+    const unready = await makeSession('unready', { state: 'reserved' })
+    const foreign = await makeSession('foreign', { familyId: foreignFamily.body.family.id, authorId: other.userId, childId: foreignFamily.body.child.id })
+    const wrongAuthor = await makeSession('author', { authorId: other.userId })
+    for (const sessionId of [unready, foreign, wrongAuthor]) {
+      const rejected = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', {
+        ...input, attachments: [{ source: 'max', sessionId }],
+      }, randomUUID())
+      expect(rejected.response.status).toBeGreaterThanOrEqual(400)
+    }
+    const duplicate = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', {
+      ...input, attachments: [{ source: 'max', sessionId: videoA }, { source: 'max', sessionId: videoA }],
+    }, randomUUID())
+    expect(duplicate.response.status).toBeGreaterThanOrEqual(400)
+    const freshPhoto = await createMemoryAsset(familyId, owner.userId, 'photo')
+    const partial = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', {
+      ...input, attachments: [{ source: 'private_storage', mediaId: freshPhoto.id }, { source: 'max', sessionId: unready }],
+    }, randomUUID())
+    expect(partial.response.status).toBeGreaterThanOrEqual(400)
+    expect(await prisma.memoryMedia.count({ where: { mediaId: freshPhoto.id } })).toBe(0)
+    expect(await prisma.memory.count({ where: { familyId } })).toBe(1)
+  })
+
   test('serves historical published note, photo, album, video, and voice through the Feed DTO', async () => {
     const owner = await admittedUser('Владелец', '38013')
     const family = await createFamily(owner.token, 'Историческая семья')
@@ -675,6 +739,8 @@ maybeDescribe('Memories API', () => {
     await prisma.memoryLike.deleteMany()
     await prisma.memoryMedia.deleteMany()
     await prisma.memory.deleteMany()
+    await prisma.maxOutboundSource.deleteMany()
+    await prisma.maxVideoUploadSession.deleteMany()
     await prisma.familyInvite.deleteMany()
     await prisma.child.deleteMany()
     await prisma.family.deleteMany()

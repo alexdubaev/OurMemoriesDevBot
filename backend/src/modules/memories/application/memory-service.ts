@@ -43,9 +43,6 @@ export class MemoryService {
     await this.access.requireFull(scope)
     const now = this.now()
     assertOccurredAt(input.occurredAt, now)
-    if (input.kind !== 'note') {
-      await this.mediaCatalog.assertReadyForPublication(scope, input.mediaIds)
-    }
     return this.repository.create(scope, input, {
       key: idempotencyKey,
       payloadHash: hashPayload(input),

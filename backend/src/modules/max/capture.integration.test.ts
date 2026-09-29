@@ -1053,7 +1053,7 @@ maybeDescribe('MAX durable capture', () => {
       const process = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })
       await expect(process(task.payload)).resolves.toBe('done')
       const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
-      const reference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { memoryId: memory.id } })
+      const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { memoryId: memory.id } })
       expect(memory).toMatchObject({ familyId: fixture.familyId, childId: fixture.childId, kind: 'video', body: 'video caption', status: 'published' })
       expect(reference).toMatchObject({ sourceId: source.id, memoryId: memory.id, familyId: fixture.familyId, attachmentPosition: 0, providerAttachmentId: '123', width: 1280, height: 720, durationMs: 7000 })
       expect(await prisma.mediaAsset.count()).toBe(0)

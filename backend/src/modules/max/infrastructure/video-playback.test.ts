@@ -234,6 +234,10 @@ describe('MAX guarded video transport', () => {
 
   test('plays an authorized outbound MAX video through its separate source projection', async () => {
     const originalFetch = globalThis.fetch
+    let carouselPosition = 1
+    let senderId = '900'
+    let providerAttachmentId = 'attachment-id'
+    let videoCalls = 0
     globalThis.fetch = (async () => new Response(new Uint8Array([1, 2]), { status: 200, headers: {
       'content-type': 'video/mp4', 'content-length': '2',
     } })) as unknown as typeof fetch
@@ -242,7 +246,7 @@ describe('MAX guarded video transport', () => {
         runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
           familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
           maxVideoReference: { findFirst: async () => ({
-            id: 'reference-id', familyId: 'family-id', attachmentPosition: 0, providerAttachmentId: 'attachment-id',
+            id: 'reference-id', familyId: 'family-id', attachmentPosition: carouselPosition, providerAttachmentId: 'attachment-id',
             source: null,
             outboundSource: { familyId: 'family-id', recipientId: 123n, messageId: 'outbound-message-id' },
             memory: { id: 'memory-id', familyId: 'family-id', status: 'published', deletedAt: null },
@@ -250,23 +254,29 @@ describe('MAX guarded video transport', () => {
         } } as never,
         api: {
           getMe: async () => ({ userId: 900, username: 'OurMemoriesMaxBot', isBot: true }),
-          getMessage: async () => ({ messageId: 'outbound-message-id', senderId: '900', recipientId: '123', attachments: [
-            { kind: 'video', providerAttachmentId: 'attachment-id', currentToken: 'rotating-token', inboundDurationSeconds: null, width: 1280, height: 720 },
+          getMessage: async () => ({ messageId: 'outbound-message-id', senderId, recipientId: '123', attachments: [
+            { kind: 'video', providerAttachmentId, currentToken: 'rotating-token', inboundDurationSeconds: null, width: 1280, height: 720 },
           ] }),
-          getVideo: async () => ({ width: 1280, height: 720, durationMs: null, renditions: [
+          getVideo: async () => { videoCalls += 1; return { width: 1280, height: 720, durationMs: null, renditions: [
             { url: 'https://maxvd1.okcdn.ru/outbound-video?sig=opaque', width: 1280, height: 720, contentLength: 2 },
-          ] }),
+          ] } },
         } as never,
       })
 
-      const result = await playback.content(
-        { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } },
-        'reference-id', undefined, 'GET',
-      )
-
-      expect(result.contentType).toBe('video/mp4')
-      expect(result.bodyLength).toBe(2)
-      expect(await new Response(result.body).arrayBuffer()).toHaveLength(2)
+      const scope = { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } }
+      for (const position of [1, 2]) {
+        carouselPosition = position
+        const result = await playback.content(scope, 'reference-id', undefined, 'GET')
+        expect(result.contentType).toBe('video/mp4')
+        expect(result.bodyLength).toBe(2)
+        expect(await new Response(result.body).arrayBuffer()).toHaveLength(2)
+      }
+      senderId = 'attacker'
+      await expect(playback.content(scope, 'reference-id', undefined, 'GET')).rejects.toMatchObject({ kind: 'not_found' })
+      senderId = '900'
+      providerAttachmentId = 'wrong-attachment'
+      await expect(playback.content(scope, 'reference-id', undefined, 'GET')).rejects.toMatchObject({ kind: 'not_found' })
+      expect(videoCalls).toBe(2)
     } finally { globalThis.fetch = originalFetch }
   })
 })

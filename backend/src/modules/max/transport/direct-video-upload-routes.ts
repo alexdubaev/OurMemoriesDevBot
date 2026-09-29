@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import { z } from 'zod'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
 
 import { AppError, validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
@@ -10,13 +11,15 @@ const bearerSecurity = [{ BearerAuth: [] }]
 const json = <Schema extends z.ZodType>(schema: Schema) => ({ 'application/json': { schema } })
 const familyParams = z.object({ familyId: z.uuid() }).strict()
 const sessionParams = z.object({ familyId: z.uuid(), sessionId: z.uuid() }).strict()
-const caption = z.string().min(1).refine((value) => [...value].length <= 4_000, 'Caption must be at most 4000 Unicode code points')
+const caption = z.string().refine((value) => [...value].length <= 4_000, 'Caption must be at most 4000 Unicode code points')
 const reserveBody = z.object({
-  childId: z.uuid(), body: caption, occurredAt: z.string().datetime({ offset: true }),
-  fileName: z.string().min(1).max(255), fileSize: z.number().int().positive().max(250 * 1024 * 1024),
+  childId: z.uuid(), body: caption, mode: z.enum(['standalone', 'attachment']).optional(), occurredAt: z.string().datetime({ offset: true }),
+  fileName: z.string().min(1).max(255), fileSize: z.number().int().positive().max(MAX_DIRECT_VIDEO_MAX_BYTES),
   mimeType: z.enum(['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm']),
   idempotencyKey: z.string().min(1).max(128),
-}).strict()
+}).strict().superRefine((value, context) => {
+  if (value.mode !== 'attachment' && !value.body.trim()) context.addIssue({ code: 'custom', path: ['body'], message: 'Caption is required' })
+})
 const finalizeBody = z.object({ uploadToken: z.string().min(1).max(4_096) }).strict()
 const reserveResponse = z.object({ state: z.enum(['reserved', 'existing']), sessionId: z.uuid(), expiresAt: z.string().datetime(), uploadUrl: z.string().url().optional(), uploadToken: z.string().optional() }).strict()
 const finalizeResponse = z.object({

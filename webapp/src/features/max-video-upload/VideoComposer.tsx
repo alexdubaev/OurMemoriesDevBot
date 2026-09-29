@@ -273,8 +273,8 @@ function ProgressBar({ label, value }: { label: string; value: number | null }) 
 }
 
 function formatFileSize(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.ceil(bytes / 1024))} КБ`
-  return `${(bytes / (1024 * 1024)).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} МБ`
+  if (bytes < 1_000_000) return `${Math.max(1, Math.ceil(bytes / 1_000))} КБ`
+  return `${(bytes / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} МБ`
 }
 
 function VideoFilePreview({ file }: { file: File }) {

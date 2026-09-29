@@ -17,7 +17,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
 
   async reserve(input: MaxVideoUploadReserveInput): Promise<MaxVideoUploadReservation> {
     const body = input.body.trim()
-    if (!body || [...body].length > 4_000 || !input.idempotencyKey || !input.idempotencyFingerprint) {
+    if ((input.mode !== 'attachment' && !body) || [...body].length > 4_000 || !input.idempotencyKey || !input.idempotencyFingerprint) {
       throw new Error('Invalid MAX video upload reservation')
     }
 
@@ -41,6 +41,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
           childId: input.childId,
           plannedMemoryId: input.plannedMemoryId,
           body,
+          mode: input.mode ?? 'standalone',
           occurredAt: input.occurredAt,
           idempotencyFingerprint: input.idempotencyFingerprint,
           idempotencyKey: input.idempotencyKey,
@@ -136,6 +137,9 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
       recipientId: BigInt(input.recipientId),
       messageId: input.messageId,
       providerAttachmentId: input.providerAttachmentId,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      durationMs: input.durationMs ?? null,
     } })
     return normalizeOutboundSource(created)
   }
@@ -209,6 +213,7 @@ function normalizeSession(value: Record<string, unknown>): MaxVideoUploadSession
     childId: String(value.childId),
     plannedMemoryId: String(value.plannedMemoryId),
     body: String(value.body),
+    mode: value.mode === 'attachment' ? 'attachment' : 'standalone',
     occurredAt: asDate(value.occurredAt),
     idempotencyFingerprint: String(value.idempotencyFingerprint),
     idempotencyKey: String(value.idempotencyKey),
@@ -233,6 +238,9 @@ function normalizeOutboundSource(value: Record<string, unknown>): MaxOutboundSou
     recipientId: String(value.recipientId),
     messageId: String(value.messageId),
     providerAttachmentId: String(value.providerAttachmentId),
+    width: typeof value.width === 'number' ? value.width : null,
+    height: typeof value.height === 'number' ? value.height : null,
+    durationMs: typeof value.durationMs === 'number' ? value.durationMs : null,
     createdAt: asDate(value.createdAt),
     updatedAt: asDate(value.updatedAt),
   }

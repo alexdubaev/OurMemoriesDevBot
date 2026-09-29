@@ -51,3 +51,13 @@ test('marks membership and child Reserve not-found branches for transport loggin
   await expect(service({ assertChild: async () => false }).reserve(scope, input))
     .rejects.toMatchObject({ kind: 'not_found', code: 'reserve_not_found_child' })
 })
+
+test('enforces the decimal MAX direct-video size boundary before reserving', async () => {
+  const upload = service({ reserve: async () => { throw new Error('reached repository') } })
+  for (const fileSize of [72_300_000, 249_999_999, 250_000_000]) {
+    await expect(upload.reserve(scope, { ...input, fileSize })).rejects.toThrow('reached repository')
+  }
+  for (const fileSize of [250_000_001, 250 * 1024 * 1024]) {
+    await expect(upload.reserve(scope, { ...input, fileSize })).rejects.toMatchObject({ kind: 'invalid_input' })
+  }
+})

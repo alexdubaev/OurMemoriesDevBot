@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 
-import type { MemoryDto } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type MemoryDto } from '@web-app-demo/contracts'
 
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
@@ -12,13 +12,13 @@ import type {
   MaxVideoUploadSession,
 } from './ports'
 
-const maxFileBytes = 250 * 1024 * 1024
 const reservationTtlMs = 15 * 60 * 1_000
 const attachmentReadyAttempts = 3
 
 export type DirectVideoUploadReserveInput = {
   childId: string
   body: string
+  mode?: 'standalone' | 'attachment'
   occurredAt: string
   fileName: string
   fileSize: number
@@ -161,6 +161,7 @@ export function createMaxDirectVideoUploadService(options: {
           childId: input.childId,
           plannedMemoryId: randomUUID(),
           body: input.body.trim(),
+          mode: input.mode ?? 'standalone',
           occurredAt,
           idempotencyFingerprint,
           idempotencyKey: input.idempotencyKey,
@@ -274,7 +275,7 @@ export function createMaxDirectVideoUploadService(options: {
             }
             const sent = await sendVideoMessageWithRetry(options.api, {
               userId: targetUserId,
-              text: session.body,
+              text: session.mode === 'attachment' ? 'Видео для воспоминания' : session.body,
               uploadToken: token,
             })
             providerMessageId = sent.messageId
@@ -297,8 +298,11 @@ export function createMaxDirectVideoUploadService(options: {
           recipientId: await recipientId(options.repository, scope),
           messageId: providerMessageId,
           providerAttachmentId: video.providerAttachmentId,
+          width: video.width,
+          height: video.height,
+          durationMs: video.inboundDurationSeconds === null ? null : Math.max(1, Math.round(video.inboundDurationSeconds * 1_000)),
         })
-        await options.publisher.publish(scope, {
+        if (session.mode !== 'attachment') await options.publisher.publish(scope, {
           id: session.plannedMemoryId,
           childId: session.childId,
           kind: 'video',
@@ -308,7 +312,7 @@ export function createMaxDirectVideoUploadService(options: {
           externalAttachment: 'max-video',
         }, async (tx, memoryId) => {
           await tx.maxVideoReference.upsert({
-            where: { memoryId_familyId: { memoryId, familyId: scope.familyId } },
+            where: { outboundSourceId_familyId: { outboundSourceId: outbound.id, familyId: scope.familyId } },
             create: {
               id: randomUUID(), outboundSourceId: outbound.id, memoryId, familyId: scope.familyId,
               attachmentPosition: 0, providerAttachmentId: video.providerAttachmentId,
@@ -343,6 +347,7 @@ export function createMaxDirectVideoUploadService(options: {
 }
 
 async function finalizedResult(scope: FamilyScope, session: MaxVideoUploadSession, reader?: MemoryReader): Promise<DirectVideoUploadFinalizeResult> {
+  if (session.mode === 'attachment') return { state: 'finalized', sessionId: session.id }
   const memory = reader ? await reader.get(scope, session.plannedMemoryId) : undefined
   return { state: 'finalized', sessionId: session.id, memoryId: session.plannedMemoryId, ...(memory ? { memory } : {}) }
 }
@@ -384,10 +389,10 @@ function validateReservation(input: DirectVideoUploadReserveInput, current: Date
   const accepted = new Map([
     ['mp4', 'video/mp4'], ['mov', 'video/quicktime'], ['mkv', 'video/x-matroska'], ['webm', 'video/webm'],
   ])
-  if (!extension || accepted.get(extension) !== input.mimeType || !Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > maxFileBytes) {
+  if (!extension || accepted.get(extension) !== input.mimeType || !Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > MAX_DIRECT_VIDEO_MAX_BYTES) {
     throw new MaxDirectUploadFailure('invalid_input', 'Поддерживаются видео MP4, MOV, MKV и WebM размером до 250 МБ')
   }
-  if (!input.body.trim() || [...input.body].length > 4_000 || !input.idempotencyKey || input.idempotencyKey.length > 128) {
+  if ((input.mode !== 'attachment' && !input.body.trim()) || [...input.body].length > 4_000 || !input.idempotencyKey || input.idempotencyKey.length > 128) {
     throw new MaxDirectUploadFailure('invalid_input', 'Некорректные данные видео')
   }
   if (/[\\/\u0000-\u001f]/.test(input.fileName)) {
@@ -403,6 +408,7 @@ function fingerprint(input: DirectVideoUploadReserveInput) {
   return createHash('sha256').update(JSON.stringify({
     idempotencyKey: input.idempotencyKey, childId: input.childId, body: input.body.trim(), occurredAt: input.occurredAt,
     fileName: input.fileName, fileSize: input.fileSize, mimeType: input.mimeType,
+    ...(input.mode === 'attachment' ? { mode: 'attachment' } : {}),
   })).digest('hex')
 }
 

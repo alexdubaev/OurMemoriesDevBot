@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 
 import { z } from 'zod'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
 
 import { isUsableEmailAddress } from './email/address'
 
@@ -51,7 +52,7 @@ const envSchema = z.object({
   MAX_MINI_APP_URL: optionalUrlSchema,
   MAX_WEBHOOK_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(1024 * 1024).default(512 * 1024),
   MAX_FILE_MAX_BYTES: z.coerce.number().int().positive().max(20_000_000).default(20_000_000),
-  MAX_VIDEO_MAX_BYTES: z.coerce.number().int().positive().max(250_000_000).default(250_000_000),
+  MAX_VIDEO_MAX_BYTES: z.coerce.number().int().positive().max(MAX_DIRECT_VIDEO_MAX_BYTES).default(MAX_DIRECT_VIDEO_MAX_BYTES),
   TELEGRAM_ENABLED: booleanStringSchema,
   TELEGRAM_BOT_TOKEN: optionalStringSchema,
   TELEGRAM_BOT_EXPECTED_USERNAME: stringWithDefault('OurMemoriesDevBot')
