@@ -23,7 +23,7 @@ export async function prepareMedia(
   const args = input.kind === 'voice'
     ? ['-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-i', input.inputPath, '-map', '0:a:0', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-fs', '104857600', '-y', input.outputPath]
     : ['-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-i', input.inputPath, '-map', '0:v:0', '-map', '0:a?', '-vf',
-        "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease,format=yuv420p",
+        "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', '-fs', '104857600', '-y', input.outputPath]
   const encoded = await runner.run(runner.ffmpegPath, args, { signal: input.signal, timeoutMs: 4 * 60_000 })
   if (encoded.exitCode !== 0) throw new MediaFailure('unsupported_media', 'Не удалось подготовить воспроизводимую копию')

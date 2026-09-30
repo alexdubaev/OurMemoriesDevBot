@@ -64,4 +64,28 @@ describe('FFmpeg rendition runtime', () => {
       expect(prepared).toMatchObject({ mime: 'video/mp4', width: 320, height: 240, durationMs: expect.any(Number), waveform: null })
     } finally { await rm(root, { recursive: true, force: true }) }
   }, 30_000)
+
+  test('prepares portrait video with even H.264 dimensions for HTML5 playback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 't05-portrait-video-'))
+    const runner = createFfmpegRunner({})
+    try {
+      await assertFfmpegCapabilities(runner)
+      const source = join(root, 'source.mp4')
+      const output = join(root, 'playback.mp4')
+      const fixture = await runner.run(runner.ffmpegPath, [
+        '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=720x1280:rate=25:duration=1',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:v', 'libx264', '-c:a', 'aac', '-y', source,
+      ])
+      expect(fixture.exitCode).toBe(0)
+
+      const prepared = await prepareMedia({ inputPath: source, outputPath: output, kind: 'video' }, runner)
+      if (prepared.width === null || prepared.height === null
+        || prepared.width <= 0 || prepared.height <= 0
+        || prepared.width >= prepared.height || prepared.height >= 1280
+        || prepared.width % 2 !== 0 || prepared.height % 2 !== 0) {
+        throw new Error(`Expected even portrait rendition dimensions, received ${prepared.width}x${prepared.height}`)
+      }
+      expect(prepared).toMatchObject({ mime: 'video/mp4', width: expect.any(Number), height: expect.any(Number), durationMs: expect.any(Number), waveform: null })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  }, 30_000)
 })
