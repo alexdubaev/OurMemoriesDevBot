@@ -104,7 +104,7 @@ test('viewer navigation replaces add with a non-focusable viewing label', () => 
   expect(markup).not.toContain('tabindex="0"')
 })
 
-test('memoLy feed presentation composes the child hero, filters, and scoped navigation', () => {
+test('memoLy feed presentation composes the child hero and scoped navigation without type filters', () => {
   const markup = render(
     createElement(
       FeedPresentation,
@@ -113,6 +113,9 @@ test('memoLy feed presentation composes the child hero, filters, and scoped navi
         childName: 'Саша',
         childSubtitle: '2 года 8 месяцев',
         insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        unreadState: 'ready',
+        unreadOnly: false,
+        onUnreadChange: () => undefined,
         onFamily: () => undefined,
         onFeed: () => undefined,
         onFilterChange: () => undefined,
@@ -124,7 +127,7 @@ test('memoLy feed presentation composes the child hero, filters, and scoped navi
 
   expect(markup).toContain('data-memoly-feed="true"')
   expect(markup).toContain('data-slot="memoly-child-hero"')
-  expect(markup).toContain('data-slot="memoly-filter-rail"')
+  expect(markup).not.toContain('data-slot="memoly-filter-rail"')
   expect(markup).toContain('data-bottom-navigation-appearance="memoly"')
   expect(markup).toContain('aria-pressed="true"')
 })
@@ -133,7 +136,7 @@ test('memoLy content rail keeps date groups and cards separated', async () => {
   const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
 
   expect(css).toContain('[data-memoly-feed] .feed-content { display: flex; min-width: 0; flex-direction: column; gap: 0; }')
-  expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
+  expect(css).not.toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
   expect(css).toContain('[data-memoly-feed] .feed-section { min-width: 0; }')
 })
 
@@ -160,14 +163,14 @@ test('memoLy shell keeps horizontal host insets at the narrow breakpoint and con
   expect(markup).toContain('--host-inset-left:11px')
   expect(markup).toContain('--host-inset-right:13px')
   expect(markup).toContain('class="app"')
-  expect(markup).toContain('class="filters-wrap surface-inset"')
+  expect(markup).not.toContain('class="filters-wrap surface-inset"')
   expect(css).toContain('padding: max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);')
   expect(css).not.toContain('padding: max(12px, var(--host-inset-top))')
-  expect(css).toContain('.media-well .ml-media-button { overflow: hidden; border-radius: 19px; }')
+  expect(css).toContain('.memory-media-slot .ml-media-button')
   expect(sharedTokens).toContain('padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left))')
   expect(sharedTokens).toContain('padding-bottom: var(--host-inset-bottom) !important')
   expect(sharedTokens).toContain('width: min(calc(100% - 20px - var(--host-inset-left) - var(--host-inset-right)), 460px) !important')
-  expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
+  expect(css).not.toContain('grid-template-columns: repeat(5, minmax(0, 1fr));')
   expect(sharedTokens).toContain("nav[data-bottom-navigation-appearance='memoly']")
 })
 

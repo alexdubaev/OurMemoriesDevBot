@@ -94,14 +94,16 @@ export function FeedPage({
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAccessLost, onFilterChange, role, transport,
   openAddInitially = false,
 }: Props) {
+  // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
+  void filter
   const queryClient = useQueryClient()
   const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [unreadCycle, setUnreadCycle] = useState(0)
-  const feed = useFeedQuery(transport, familyId, filter, unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
+  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
-  const like = useMemoryLike(transport, familyId, filter, unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
+  const like = useMemoryLike(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
   const [actionsMemory, setActionsMemory] = useState<MemoryDto | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MemoryDto | null>(null)
   const [deleteTargetIndex, setDeleteTargetIndex] = useState<number | null>(null)
@@ -119,7 +121,7 @@ export function FeedPage({
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const registerSeenContent = useMemorySeenObserver(Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const feedScope = useMemo(() => ({ familyId, filter, unreadOnly, unreadCycle }), [familyId, filter, unreadOnly, unreadCycle])
+  const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle }), [familyId, unreadOnly, unreadCycle])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
   const [refreshErrorFor, setRefreshErrorFor] = useState<typeof feedScope | null>(null)
   const newAvailable = newAvailableFor === feedScope
@@ -191,7 +193,7 @@ export function FeedPage({
 
   useEffect(() => {
     knownFirstId.current = null
-  }, [familyId, filter, accountId, membershipEpoch])
+  }, [familyId, accountId, membershipEpoch])
 
   useEffect(() => {
     if (!unreadOnly && !knownFirstId.current && items[0]) knownFirstId.current = items[0].id
@@ -222,7 +224,7 @@ export function FeedPage({
       if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
-        const latest = await loadFeed(transport, familyId, filter, null)
+        const latest = await loadFeed(transport, familyId, 'all', null)
         if (disposed) return
         const latestFirstId = latest.items[0]?.id ?? null
         if (unreadOnly && knownFirstId.current === null) {
@@ -248,7 +250,7 @@ export function FeedPage({
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [familyId, feedScope, filter, refetch, transport, unreadOnly])
+  }, [familyId, feedScope, refetch, transport, unreadOnly])
 
   useEffect(() => {
     const target = sentinel.current
@@ -303,18 +305,18 @@ export function FeedPage({
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
     <MediaPlaybackCoordinator>
-    <FeedPresentation activeFilter={filter} childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
+    <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
-      onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={(next) => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange(next) }}
+      onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
       role={role} unreadCount={unreadCount} unreadOnly={unreadOnly} unreadState={unreadState}>
-      {unreadOnly ? <div className="feed-unread-note"><Typography as="p" variant="memoryMeta">Просмотренные карточки останутся на месте до обновления списка. Фильтр типа действует отдельно.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'auto' }); setUnreadCycle((value) => value + 1) }} type="button" variant="outline">Обновить список</Button></div> : null}
+      {unreadOnly ? <div className="feed-unread-note"><Typography as="p" variant="memoryMeta">Просмотренные карточки останутся на месте до обновления списка.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'auto' }); setUnreadCycle((value) => value + 1) }} type="button" variant="outline">Обновить список</Button></div> : null}
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? unreadOnly
-        ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">{filter === 'all' ? 'Новых воспоминаний пока нет.' : 'Для выбранного типа новых воспоминаний нет.'}</Typography><Button onClick={() => setUnreadOnly(false)} type="button">Показать все</Button></div>
-        : <EmptyState filtered={filter !== 'all'} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
+        ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography><Button onClick={() => setUnreadOnly(false)} type="button">Показать все</Button></div>
+        : <EmptyState filtered={false} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
       {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
@@ -453,7 +455,10 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
     </div>
     {memory.attachments.length > 1 ? <div className="memoly-mixed-controls">
       <button aria-label="Предыдущий элемент" disabled={index === 0} onClick={() => embla?.scrollPrev()} type="button"><Typography as="span" variant="memoryMeta">‹</Typography></button>
-      <Typography as="span" aria-live="polite" className="memoly-mixed-count" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography>
+      <div aria-label="Положение карусели" aria-live="polite" className="memoly-mixed-dots" role="group">
+        <Typography as="span" className="sr-only" variant="memoryMeta">{index + 1} из {memory.attachments.length}</Typography>
+        {memory.attachments.map((attachment, position) => <span aria-current={position === index ? 'step' : undefined} aria-hidden="true" className={position === index ? 'active' : ''} data-carousel-dot={position + 1} key={attachment.id} />)}
+      </div>
       <button aria-label="Следующий элемент" disabled={index === memory.attachments.length - 1} onClick={() => embla?.scrollNext()} type="button"><Typography as="span" variant="memoryMeta">›</Typography></button>
     </div> : null}
     {photoViewerError ? <Typography as="p" className="memoly-photo-viewer-error" role="alert" variant="memoryMeta">Не удалось открыть фото. Попробуйте ещё раз.</Typography> : null}

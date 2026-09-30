@@ -57,7 +57,7 @@ export function MemoryCardPresentation({
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>
-      {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'media-well surface-inset video-wrap' : 'media-well surface-inset'} contentRef={seenContentRef} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
+      {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'memory-media-slot video-wrap' : 'memory-media-slot'} contentRef={seenContentRef} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
       {kind === 'note'
         ? <MemorySlot className="caption note-story-slot" contentRef={seenContentRef} ready={hasCaption} slot="memoly-note-layout">{hasCaption ? <NoteStoryPresentation body={body} interactive={interactive} onOpen={onOpen} /> : null}</MemorySlot>
         : kind === 'video'

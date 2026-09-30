@@ -114,47 +114,6 @@
 [data-memoly-feed] .feed-unread-empty, [data-memoly-feed] .feed-unread-restart { display: grid; justify-items: center; gap: 12px; padding: 36px 18px; border-radius: 24px; background: var(--memoly-card-hi); text-align: center; }
 [data-memoly-feed] .feed-unread-empty button, [data-memoly-feed] .feed-unread-restart button { min-height: 44px; padding: 0 18px; border-radius: 16px; background: var(--memoly-accent-soft); color: var(--memoly-ink); }
 
-[data-memoly-feed] .filters-wrap {
-  margin: 14px 0 12px;
-  padding: 8px;
-  border-radius: 26px;
-  background: linear-gradient(145deg, rgba(234,239,233,.95), rgba(248,248,243,.92));
-  box-shadow: inset 5px 5px 12px rgba(120,137,126,.15), inset -5px -5px 10px rgba(255,255,255,.8), 0 1px 0 rgba(255,255,255,.8);
-}
-
-[data-memoly-feed] .filters {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-}
-
-[data-memoly-feed] .filter {
-  display: flex;
-  min-width: 0;
-  height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  overflow: hidden;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 18px;
-  color: var(--memoly-ink);
-  background: linear-gradient(145deg, var(--memoly-card-hi), #eceee8);
-  box-shadow: 6px 6px 14px rgba(120,136,126,.17), -5px -5px 12px rgba(255,255,255,.87), inset 1px 1px 0 rgba(255,255,255,.9);
-  font-size: 10.2px;
-  font-weight: 590;
-  letter-spacing: -.15px;
-  white-space: nowrap;
-}
-
-[data-memoly-feed] .filter > [data-slot="webp-icon"] { width: 16px; height: 16px; flex: 0 0 16px; }
-[data-memoly-feed] .filter > span { min-width: 0; overflow: hidden; font-size: inherit; font-weight: inherit; line-height: inherit; letter-spacing: inherit; text-overflow: clip; white-space: nowrap; }
-[data-memoly-feed] .filter.active,
-[data-memoly-feed] .filter[aria-pressed="true"] { color: var(--memoly-accent-text); background: linear-gradient(145deg, var(--memoly-accent-soft), color-mix(in srgb, var(--memoly-accent-soft) 72%, var(--memoly-accent))); box-shadow: inset 4px 4px 10px rgba(102,126,111,.22), inset -4px -4px 8px rgba(255,255,255,.72); }
-
 [data-memoly-feed] .feed-section { min-width: 0; }
 [data-memoly-feed] .date-heading { display: flex; align-items: center; gap: 9px; margin: 9px 4px; color: #697582; font-size: 18px; font-weight: 760; line-height: 1.2; }
 [data-memoly-feed] .feed-section:first-child .date-heading { margin-top: 0; }
@@ -176,16 +135,6 @@
 [data-memoly-feed] .author-name { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--memoly-ink); font-size: 18px; font-weight: 750; line-height: 1.05; white-space: nowrap; }
 [data-memoly-feed] .author-time { display: block; margin-top: 4px; color: var(--memoly-muted); font-size: 14px; }
 [data-memoly-feed] .memory-header > [aria-label="Действия с воспоминанием"] { width: 44px; height: 44px; min-width: 44px; margin-left: auto; padding: 8px 3px 8px 12px; }
-
-[data-memoly-feed] .media-well { min-width: 0; padding: 6px; border-radius: 24px; background: linear-gradient(145deg, rgba(234,239,233,.95), rgba(248,248,243,.92)); box-shadow: inset 5px 5px 12px rgba(120,137,126,.15), inset -5px -5px 10px rgba(255,255,255,.8), 0 1px 0 rgba(255,255,255,.8); }
-[data-memoly-feed] .media-well > :first-child { width: 100%; min-width: 0; }
-[data-memoly-feed] .media-well img { display: block; max-width: 100%; }
-[data-memoly-feed] .media-well .ml-media-slot { width: 100%; overflow: hidden; border-radius: 19px; }
-[data-memoly-feed] .media-well .ml-media-button { overflow: hidden; border-radius: 19px; }
-[data-memoly-feed] .media-well .ml-audio { display: block; width: 100%; min-width: 0; }
-[data-memoly-feed] .media-well [data-slot="voice-waveform"] { width: 100%; min-width: 0; }
-[data-memoly-feed] .media-well.video-wrap { position: relative; }
-[data-memoly-feed] .media-well.video-wrap > :first-child { min-width: 0; }
 
 [data-memoly-feed] .memoly-mixed-carousel { position: relative; width: 100%; min-width: 0; }
 [data-memoly-feed] .memoly-mixed-viewport { overflow: hidden; border-radius: 19px; touch-action: pan-y pinch-zoom; }
@@ -253,16 +202,6 @@
 [data-memoly-feed] .memoly-private-video-v2-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin: 0; padding: 16px; text-align: center; color: #fff; background: rgb(21 19 21 / 88%); }
 [data-memoly-feed] .memoly-private-video-v2-state p { margin: 0; }
 [data-memoly-feed] .memoly-private-video-v2-state button { min-height: 44px; }
-[data-memoly-feed] .media-well.video-wrap { aspect-ratio: 4 / 5; }
-[data-memoly-feed] .media-well.video-wrap > [data-slot='memoly-video-layout'] { height: 100%; }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2,
-[data-memoly-feed] .media-well.video-wrap .memoly-max-video-readiness,
-[data-memoly-feed] .media-well.video-wrap .ml-media-slot { height: 100%; }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2 { position: relative; padding: 0; background: transparent; box-shadow: none; }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2-frame { height: 100%; border-radius: 18px; }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2-frame video { width: 100%; height: 100%; max-height: none; }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2-controls { position: absolute; right: 0; bottom: 0; left: 0; padding: 5px 9px 7px; color: white; background: linear-gradient(transparent, rgb(21 19 21 / 82%) 22%); }
-[data-memoly-feed] .media-well.video-wrap .memoly-private-video-v2 input[type='range'] { min-height: 44px; }
 [data-memoly-feed] .memoly-video-control-row { display: flex; min-height: 44px; align-items: center; gap: 12px; }
 [data-memoly-feed] .memoly-video-control { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border-radius: 50%; color: white; background: rgb(24 22 25 / 50%); }
 [data-memoly-feed] .memoly-video-control:disabled { opacity: .5; }
@@ -340,51 +279,12 @@
   [data-memoly-feed] .author-time { font-size: 12px; }
 }
 
-/* Effective feed rules from the frozen UI v2 cascade, scoped to the React feed. */
-[data-memoly-feed] .filters-wrap { margin: 8px 0 10px; padding: 5px; border-radius: 20px; }
-[data-memoly-feed] .filter.ds-chip {
-  position: relative;
-  isolation: isolate;
-  min-height: 42px;
-  height: 42px;
-  gap: 4px;
-  padding: 0 6px;
-  border-radius: 16px;
-  color: #223f59;
-  background: linear-gradient(145deg, var(--memoly-card-hi), var(--memoly-card-lo));
-  box-shadow: 6px 6px 14px rgba(120,136,126,.17), -5px -5px 12px rgba(255,255,255,.87), inset 1px 1px 0 rgba(255,255,255,.84);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: -.1px;
-}
-[data-memoly-feed] .filter.ds-chip > [data-slot="webp-icon"] { width: 16px; height: 16px; flex-basis: 16px; }
-[data-memoly-feed] .filter.ds-chip::after {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  z-index: 2;
-  border: 1.5px solid transparent;
-  border-radius: 13px;
-  opacity: 0;
-  pointer-events: none;
-}
-[data-memoly-feed] .filter.ds-chip > * { position: relative; z-index: 3; }
-[data-memoly-feed] .filter.ds-chip.active {
-  color: #24455b;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--theme-accent-soft) 72%, white 28%), color-mix(in srgb, var(--theme-accent-hi) 62%, white 38%));
-  box-shadow: inset 5px 5px 12px color-mix(in srgb, var(--theme-accent-deep) 18%, rgba(86,106,92,.18) 82%), inset -5px -5px 12px rgba(255,255,255,.84), 2px 2px 6px rgba(107,131,118,.08), -1px -1px 2px rgba(255,255,255,.45);
-}
-[data-memoly-feed] .filter.ds-chip.active::after {
-  opacity: 1;
-  border-color: color-mix(in srgb, var(--theme-accent-deep) 42%, rgba(255,255,255,.52));
-  box-shadow: inset 0 0 0 .5px rgba(255,255,255,.48), 0 0 0 1px rgba(168,198,179,.08);
-}
+/* Effective card rules from the frozen UI v2 cascade, scoped to the React feed. */
 [data-memoly-feed] .memory-card { padding: 14px; border-radius: 27px; margin-bottom: 16px; }
 [data-memoly-feed] .memory-header { min-height: 48px; padding: 0 2px 6px 0; }
 [data-memoly-feed] .author-avatar { width: 44px; height: 44px; flex-basis: 44px; border-width: 4px; margin-right: 8px; }
 [data-memoly-feed] .author-name { font-size: 16px; }
 [data-memoly-feed] .author-time { margin-top: 3px; font-size: 12.5px; }
-[data-memoly-feed] .media-well { padding: 5px; border-radius: 22px; }
 [data-memoly-feed] .actions { gap: 7px; padding: 7px 2px 5px; }
 [data-memoly-feed] .action { min-height: 44px; height: 44px; gap: 7px; padding: 0 13px; border-radius: 15px; font-size: 14px; }
 [data-memoly-feed] .action [data-slot="webp-icon"] { width: 19px; height: 19px; }
@@ -393,17 +293,40 @@
 [data-memoly-feed] .feed-new-available { position: sticky; top: 12px; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding: 8px 10px; border-radius: 16px; background: var(--memoly-card-hi); box-shadow: var(--memoly-shadow); }
 [data-memoly-feed] .feed-new-available > button { min-height: 44px; padding: 0 12px; border-radius: 14px; background: var(--memoly-accent-soft); color: var(--memoly-ink); }
 [data-memoly-feed] .feed-error-state { margin: 10px 0 16px; }
-@media (min-width: 391px) and (max-width: 440px) {
-  [data-memoly-feed] .filter.ds-chip { gap: 3px; padding-inline: 4px; }
-}
-@media (max-width: 390px) {
-  [data-memoly-feed] .filters-wrap { padding: 4px; }
-  [data-memoly-feed] .filters { gap: 3px; }
-  [data-memoly-feed] .filter.ds-chip { min-height: 40px; height: 40px; gap: 3px; padding: 0 4px; font-size: 10px; }
-  [data-memoly-feed] .filter.ds-chip > [data-slot="webp-icon"] { width: 15px; height: 15px; flex-basis: 15px; }
-}
-@media (max-width: 350px) {
-  [data-memoly-feed] .app { padding-inline: 9px; }
-  [data-memoly-feed] .filter.ds-chip { min-height: 38px; height: 38px; gap: 1px; padding: 0 1px; font-size: 9px; }
-  [data-memoly-feed] .filter.ds-chip > [data-slot="webp-icon"] { width: 12px; height: 12px; flex-basis: 12px; }
-}
+
+/* Feed memories use the card itself as the only surface. */
+[data-memoly-feed] .memory-media-slot { min-width: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+[data-memoly-feed] .memory-media-slot > :first-child { width: 100%; min-width: 0; }
+[data-memoly-feed] .memory-media-slot img { display: block; max-width: 100%; }
+[data-memoly-feed] .memory-media-slot .ml-media-slot,
+[data-memoly-feed] .memory-media-slot .ml-media-button { overflow: hidden; border-radius: 0; }
+[data-memoly-feed] .memory-media-slot .ml-audio { display: block; width: 100%; min-width: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+[data-memoly-feed] .memory-media-slot.video-wrap { position: relative; aspect-ratio: 4 / 5; }
+[data-memoly-feed] .memory-media-slot.video-wrap > [data-slot='memoly-video-layout'],
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2,
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-max-video-readiness,
+[data-memoly-feed] .memory-media-slot.video-wrap .ml-media-slot { height: 100%; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2 { position: relative; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2-frame { height: 100%; border-radius: 0; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2-frame video { width: 100%; height: 100%; max-height: none; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2-controls { position: absolute; right: 0; bottom: 0; left: 0; padding: 5px 9px 7px; color: white; background: linear-gradient(transparent, rgb(21 19 21 / 82%) 22%); }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-private-video-v2 input[type='range'] { min-height: 44px; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-max-video-readiness,
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-video-viewer-v2 { padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-max-video-readiness,
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-video-viewer-v2 { height: 100%; }
+[data-memoly-feed] .memory-media-slot.video-wrap .memoly-video-viewer-v2-frame { width: 100%; height: 100%; max-height: none; border-radius: 0; aspect-ratio: auto !important; }
+[data-memoly-feed] .memory-card .memoly-mixed-viewport { border-radius: 0; }
+[data-memoly-feed] .memory-card .memoly-mixed-controls { min-height: 44px; justify-content: center; gap: 8px; padding: 0; }
+[data-memoly-feed] .memory-card .memoly-mixed-controls > button { width: 44px; height: 44px; }
+[data-memoly-feed] .memory-card .memoly-mixed-dots { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; }
+[data-memoly-feed] .memory-card .memoly-mixed-dots > span:not(.sr-only) { display: block; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--memoly-muted); opacity: .55; }
+[data-memoly-feed] .memory-card .memoly-mixed-dots > span.active { width: 9px; height: 9px; flex-basis: 9px; background: var(--memoly-accent-deep); opacity: 1; }
+[data-memoly-feed] .memory-card .memoly-mixed-controls > button:focus-visible { outline: 2px solid var(--theme-accent-deep); outline-offset: -1px; }
+[data-memoly-feed] [data-memoly-note-gradient] { position: relative; display: block; width: 100%; min-block-size: 0; padding: 6px 4px; overflow: visible; border: 0; border-radius: 0; color: var(--memoly-ink); background: transparent; box-shadow: none; font: inherit; font-size: 18px; line-height: 1.5; text-align: left; }
+[data-memoly-feed] [data-memoly-note-gradient]::before,
+[data-memoly-feed] [data-memoly-note-gradient]::after { display: none; }
+[data-memoly-feed] [data-memoly-note-gradient]:focus-visible { outline-offset: 0; }
+[data-memoly-feed] .feed-unread-control { width: fit-content; max-width: 100%; gap: 2px; margin: 12px auto 14px; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--memoly-card-lo) 74%, transparent); }
+[data-memoly-feed] .feed-unread-control button { min-height: 44px; flex: initial; padding: 5px 13px; border-radius: 999px; font-size: 12px; }
+[data-memoly-feed] .feed-unread-control button.active { box-shadow: 0 2px 7px rgba(74, 82, 77, .12); }
