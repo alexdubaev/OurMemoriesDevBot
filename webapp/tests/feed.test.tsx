@@ -19,7 +19,7 @@ import { FeedMemoryCard } from '../src/features/memoly-ui/FeedPresentation'
 import { BottomNavigation } from '../src/components/BottomNavigation'
 import { deleteMemory, setMemoryReaction } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
-import { feedQueryKeys, matchesReactionFeedScope, removeMemoryFromCachedFeeds, updateReactionInFeed } from '../src/features/feed/queries'
+import { feedQueryKeys, matchesReactionFeedScope, reconcileReactionCaches, removeMemoryFromCachedFeeds, updateReactionInFeed } from '../src/features/feed/queries'
 import { MemoryReactionQueue, reactionCountsAfterChange } from '../src/features/feed/reaction-queue'
 import { FeedPresentation, MemoryCardPresentation } from '../src/features/feed/presentation'
 import { MemoryReactions } from '../src/features/feed/presentation/MemoryReactions'
@@ -1099,6 +1099,22 @@ test('reaction cache updates only the target Memory and exact account membership
   expect(matchesReactionFeedScope(key, familyId, 'account-a', 4)).toBe(true)
   expect(matchesReactionFeedScope(key, familyId, 'account-b', 4)).toBe(false)
   expect(matchesReactionFeedScope(key, familyId, 'account-a', 5)).toBe(false)
+})
+
+test('authoritative reaction repair updates unread caches in place and ignores a late repair after newer intent', () => {
+  const other = { ...photoMemory, id: 'other-memory' }
+  const cache = { pages: [{ items: [memory, other], nextCursor: null }], pageParams: [null] }
+  const unreadKey = feedQueryKeys.list(familyId, 'all', true, 'account-a', 4, 1)
+  const otherAccountKey = feedQueryKeys.list(familyId, 'all', true, 'account-b', 4, 1)
+  const repaired = reconcileReactionCaches([[unreadKey, cache], [otherAccountKey, cache]], familyId, 'account-a', 4, memoryId, { reactionCounts: { laugh: 3 }, currentUserReaction: 'laugh' }, 7, 7)
+
+  expect(repaired).toHaveLength(1)
+  expect(repaired[0]?.[0]).toEqual(unreadKey)
+  expect(repaired[0]?.[1]?.pages[0]?.items.map((item) => item.id)).toEqual([memoryId, other.id])
+  expect(repaired[0]?.[1]?.pages[0]?.items[0]?.currentUserReaction).toBe('laugh')
+  expect(repaired[0]?.[1]?.pages[0]?.items[1]).toBe(other)
+  expect(reconcileReactionCaches([[unreadKey, cache]], familyId, 'account-a', 4, memoryId, { reactionCounts: { heart: 1 }, currentUserReaction: 'heart' }, 7, 8)).toEqual([])
+  expect(cache.pages[0]?.items[0]?.currentUserReaction).toBeNull()
 })
 
 test('failed final reaction write rolls back only its Memory and reports one failure', async () => {

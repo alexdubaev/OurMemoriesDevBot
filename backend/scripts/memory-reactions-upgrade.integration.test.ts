@@ -34,7 +34,7 @@ test('backfills every existing like to heart without changing identity or timest
       "finished_at" TIMESTAMPTZ, "migration_name" VARCHAR(255) NOT NULL, "logs" TEXT,
       "rolled_back_at" TIMESTAMPTZ, "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
       "applied_steps_count" INTEGER NOT NULL DEFAULT 0)`)
-    for (const migrationName of migrations.slice(0, -1)) {
+    for (const migrationName of migrations.slice(0, boundary)) {
       const sql = await readFile(resolve(migrationsRoot, migrationName, 'migration.sql'), 'utf8')
       await database.query(sql)
       await database.query(`INSERT INTO "_prisma_migrations"

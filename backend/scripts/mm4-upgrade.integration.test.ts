@@ -29,7 +29,9 @@ test('upgrades populated pre-MM memories without changing legacy publication his
     .map((entry) => entry.name).sort()
   const boundary = migrationNames.indexOf(lastLegacyMigration)
   expect(boundary).toBeGreaterThan(-1)
-  expect(migrationNames.slice(boundary + 1)).toEqual(expectedUpgradeMigrations)
+  expect(migrationNames.slice(boundary + 1, boundary + 1 + expectedUpgradeMigrations.length))
+    .toEqual(expectedUpgradeMigrations)
+  const allUpgradeMigrations = migrationNames.slice(boundary + 1)
 
   const databaseName = `mm4_upgrade_${process.pid}_${Date.now()}_${randomUUID().slice(0, 8)}`
   const upgradedUrl = new URL(databaseUrl)
@@ -136,7 +138,7 @@ test('upgrades populated pre-MM memories without changing legacy publication his
       `SELECT migration_name FROM "_prisma_migrations"
        WHERE migration_name > $1 ORDER BY migration_name`, [lastLegacyMigration],
     )
-    expect(applied.rows.map((row) => row.migration_name)).toEqual(expectedUpgradeMigrations)
+    expect(applied.rows.map((row) => row.migration_name)).toEqual(allUpgradeMigrations)
     const rows = await database.query<{
       id: string, kind: string, first_published_ordinal: string | null,
       first_published_at: Date | null, source_published_at: Date | null,

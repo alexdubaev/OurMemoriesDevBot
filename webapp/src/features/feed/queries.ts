@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './presentation'
-import { deleteMemory, loadFeed, setMemoryReaction } from './api'
+import { deleteMemory, loadFeed, loadMemory, setMemoryReaction } from './api'
 import { MemoryReactionQueue, reactionCountsAfterChange } from './reaction-queue'
 
 export const feedQueryKeys = {
@@ -29,6 +29,7 @@ export function useFeedQuery(transport: AuthenticatedTransport, familyId: string
 export function useMemoryReaction(transport: AuthenticatedTransport, familyId: string, accountId = '', membershipEpoch = 0) {
   const client = useQueryClient()
   const queues = useRef(new Map<string, MemoryReactionQueue>())
+  const revisions = useRef(new Map<string, number>())
   const apply = useCallback((memoryId: string, reaction: MemoryReaction | null, counts?: MemoryDto['reactionCounts'], confirmed?: MemoryReaction | null) => {
     const feeds = client.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] }).filter(([key]) => matchesReactionFeedScope(key, familyId, accountId, membershipEpoch))
     for (const [key, feed] of feeds) {
@@ -38,6 +39,8 @@ export function useMemoryReaction(transport: AuthenticatedTransport, familyId: s
   }, [accountId, client, familyId, membershipEpoch])
   const setReaction = useCallback((memoryId: string, reaction: MemoryReaction | null) => {
     const queueKey = `${familyId}:${accountId}:${membershipEpoch}:${memoryId}`
+    const revision = (revisions.current.get(queueKey) ?? 0) + 1
+    revisions.current.set(queueKey, revision)
     const feeds = client.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] }).filter(([key]) => matchesReactionFeedScope(key, familyId, accountId, membershipEpoch))
     const memory = feeds
       .flatMap(([, feed]) => feed?.pages.flatMap((page) => page.items) ?? []).find((item) => item.id === memoryId)
@@ -55,10 +58,13 @@ export function useMemoryReaction(transport: AuthenticatedTransport, familyId: s
         },
         () => {
           toast.error('Не удалось сохранить реакцию')
-          void client.invalidateQueries({
-            predicate: (query) => matchesReactionFeedScope(query.queryKey, familyId, accountId, membershipEpoch) && query.queryKey[4] !== true,
-            refetchType: 'active',
-          })
+          const failedRevision = revisions.current.get(queueKey)
+          void loadMemory(transport, familyId, memoryId).then((authoritative) => {
+            if (revisions.current.get(queueKey) !== failedRevision) return
+            const feeds = client.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] })
+            const repaired = reconcileReactionCaches(feeds, familyId, accountId, membershipEpoch, memoryId, authoritative, failedRevision!, revisions.current.get(queueKey) ?? 0)
+            for (const [key, cache] of repaired) client.setQueryData(key, cache)
+          }).catch(() => undefined)
         },
       )
       queues.current.set(queueKey, queue)
@@ -83,6 +89,30 @@ export function updateReactionInFeed(cache: FeedCache, memoryId: string, reactio
     ...page,
     items: page.items.map((memory) => memory.id !== memoryId ? memory : reactionMemory(memory, reaction, counts, confirmed)),
   })) }
+}
+
+export function reconcileReactionCaches(
+  entries: Array<[readonly unknown[], FeedCache | undefined]>,
+  familyId: string,
+  accountId: string,
+  membershipEpoch: number,
+  memoryId: string,
+  authoritative: Pick<MemoryDto, 'reactionCounts' | 'currentUserReaction'>,
+  failedRevision: number,
+  currentRevision: number,
+) {
+  if (failedRevision !== currentRevision) return []
+  return entries.flatMap(([key, cache]) => !cache || !matchesReactionFeedScope(key, familyId, accountId, membershipEpoch)
+    ? []
+    : [[key, { ...cache, pages: cache.pages.map((page) => ({
+      ...page,
+      items: page.items.map((memory) => memory.id !== memoryId ? memory : {
+        ...memory,
+        reactionCounts: authoritative.reactionCounts,
+        currentUserReaction: authoritative.currentUserReaction,
+        likes: { likedByMe: authoritative.currentUserReaction === 'heart', count: Object.values(authoritative.reactionCounts).reduce((total, count) => total + count, 0) },
+      }),
+    })) }]] as Array<[readonly unknown[], FeedCache]>)
 }
 
 export function useMemoryDelete(
