@@ -138,7 +138,13 @@ export class MemoryService {
 
   async setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse> {
     await this.access.requireMember(scope)
-    return this.repository.setLike(scope, memoryId, liked)
+    const result = await this.repository.setReaction(scope, memoryId, liked ? 'heart' : null)
+    return result.likes
+  }
+
+  async setReaction(scope: FamilyScope, memoryId: string, reaction: import('@web-app-demo/contracts').MemoryReaction | null) {
+    await this.access.requireMember(scope)
+    return this.repository.setReaction(scope, memoryId, reaction)
   }
 
   async markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void> {

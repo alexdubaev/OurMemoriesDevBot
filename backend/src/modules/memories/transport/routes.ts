@@ -4,12 +4,14 @@ import {
   idempotencyKeyHeadersSchema,
   ifMatchVersionHeadersSchema,
   likeResponseSchema,
+  reactionResponseSchema,
   listMemoriesQuerySchema,
   memoriesFamilyParamsSchema,
   memoryDtoSchema,
   memoryPageSchema,
   memoryParamsSchema,
   setLikeRequestSchema,
+  setReactionRequestSchema,
   seenMemoriesRequestSchema,
   telegramVideoOpenResponseSchema,
   updateMemoryRequestSchema,
@@ -77,6 +79,11 @@ const likeRoute = createRoute({
   request: { params: memoryParamsSchema, body: { content: json(setLikeRequestSchema) } },
   responses: { ...errors, 200: { content: json(likeResponseSchema), description: 'Idempotent like state' } },
 })
+const reactionRoute = createRoute({
+  method: 'put', path: '/families/{familyId}/memories/{memoryId}/reaction', security: bearerSecurity,
+  request: { params: memoryParamsSchema, body: { content: json(setReactionRequestSchema) } },
+  responses: { ...errors, 200: { content: json(reactionResponseSchema), description: 'Desired reaction state' } },
+})
 const telegramVideoRoute = createRoute({
   method: 'post', path: '/families/{familyId}/memories/{memoryId}/telegram-video', security: bearerSecurity,
   request: { params: memoryParamsSchema },
@@ -129,6 +136,10 @@ export function createMemoryRoutes({
   routes.openapi(likeRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')
     return service.setLike(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json').liked)
+  })))
+  routes.openapi(reactionRoute, async (c) => c.json(await executeMemory(() => {
+    const params = c.req.valid('param')
+    return service.setReaction(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json').reaction)
   })))
   routes.openapi(telegramVideoRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')

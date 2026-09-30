@@ -128,32 +128,29 @@ test.describe.serial('T07 live feed', () => {
     })
   }
 
-  test('memory like stays lightweight and accessible across phone sizes and themes', async ({ page }) => {
+  test('memory reactions stay lightweight, keyboard accessible, and theme-aware across phone sizes', async ({ page }) => {
     await openFeed(page)
     const card = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Фотоальбом E2E' })
-    const like = card.getByRole('button', { name: 'Поставить сердечко' })
+    const like = card.getByRole('button', { name: 'Поставить реакцию ❤️' })
 
     for (const [width, height] of [[320, 568], [390, 844], [430, 932]]) {
       await page.setViewportSize({ width, height })
       await like.scrollIntoViewIfNeeded()
       const geometry = await like.evaluate((button) => {
         const rect = button.getBoundingClientRect()
-        const icon = button.querySelector('[data-slot="webp-icon"]')!.getBoundingClientRect()
         const style = getComputedStyle(button)
-        return { width: rect.width, height: rect.height, iconWidth: icon.width, iconHeight: icon.height, background: style.backgroundImage, shadow: style.boxShadow }
+        return { width: rect.width, height: rect.height, background: style.backgroundImage, shadow: style.boxShadow }
       })
       expect(geometry.width).toBeGreaterThanOrEqual(44)
       expect(geometry.height).toBeGreaterThanOrEqual(44)
-      expect(geometry.iconWidth).toBe(24)
-      expect(geometry.iconHeight).toBe(24)
       expect(geometry.background).toBe('none')
       expect(geometry.shadow).toBe('none')
-      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-${width}x${height}.png`), animations: 'disabled' })
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-reaction-${width}x${height}.png`), animations: 'disabled' })
     }
 
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(like).toHaveAttribute('aria-pressed', 'false')
-    await expect(like).toHaveText('')
+    await expect(like).toHaveText('❤️')
     await like.focus()
     await page.keyboard.press('Tab')
     await page.keyboard.press('Shift+Tab')
@@ -162,41 +159,33 @@ test.describe.serial('T07 live feed', () => {
     await like.hover()
     await expect(like).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     await like.click()
-    const unlike = card.getByRole('button', { name: 'Убрать сердечко' })
+    const unlike = card.getByRole('button', { name: /Сердце: .*выбрано/ })
     await expect(unlike).toHaveAttribute('aria-pressed', 'true')
     await expect(unlike).toContainText('1')
     await unlike.evaluate((button) => (button as HTMLElement).blur())
     await page.mouse.move(0, 0)
-    await page.screenshot({ path: resolve('e2e/.artifacts/memory-like-liked-count-390.png'), animations: 'disabled' })
+    await page.screenshot({ path: resolve('e2e/.artifacts/memory-reaction-liked-count-390.png'), animations: 'disabled' })
 
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
       await page.evaluate((name) => {
         document.documentElement.setAttribute('data-memoly-theme', name)
         document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', name)
       }, theme)
-      await expect(unlike).toHaveCSS('box-shadow', 'none')
-      await expect(unlike).toHaveCSS('background-image', 'none')
+      await expect(unlike).not.toHaveCSS('box-shadow', 'none')
       const colors = await unlike.evaluate((button) => {
-        const icon = button.querySelector<HTMLElement>('[data-slot="webp-icon"]')!
         const token = getComputedStyle(document.documentElement).getPropertyValue('--theme-accent-text').trim()
         const hex = Number.parseInt(token.slice(1), 16)
         return {
           button: getComputedStyle(button).color,
-          icon: getComputedStyle(icon).backgroundColor,
-          mask: getComputedStyle(icon).maskImage,
           expected: `rgb(${(hex >> 16) & 255}, ${(hex >> 8) & 255}, ${hex & 255})`,
-          tag: icon.tagName,
         }
       })
       expect(colors.button).toBe(colors.expected)
-      expect(colors.icon).toBe(colors.expected)
-      expect(colors.mask).not.toBe('none')
-      expect(colors.tag).toBe('SPAN')
-      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-like-liked-${theme}-390.png`), animations: 'disabled' })
+      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-reaction-selected-${theme}-390.png`), animations: 'disabled' })
     }
     await unlike.click()
     await expect(like).toHaveAttribute('aria-pressed', 'false')
-    await expect(like).toHaveText('')
+    await expect(like).toHaveText('❤️')
   })
 
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
@@ -444,6 +433,8 @@ test.describe.serial('T07 live feed', () => {
           occurredAt: now,
           createdAt: now,
           likes: { count: maxVideoLikedByMe.get(video.id) ? 1 : 0, likedByMe: maxVideoLikedByMe.get(video.id) ?? false },
+          reactionCounts: maxVideoLikedByMe.get(video.id) ? { heart: 1 } : {},
+          currentUserReaction: maxVideoLikedByMe.get(video.id) ? 'heart' : null,
           attachments: [{
             id: randomUUID(), source: 'max', kind: 'video', width: video.width, height: video.height,
             durationMs: 2_000, playbackPath: `/api/v1/families/${first.familyId}/media/max-videos/${video.id}/content`,
@@ -467,14 +458,15 @@ test.describe.serial('T07 live feed', () => {
       ]
       await route.fulfill({ response, body: JSON.stringify(payload) })
     })
-    await page.route('**/api/v1/families/*/memories/*/like', async (route) => {
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
       const segments = new URL(route.request().url()).pathname.split('/')
       const targetId = segments[segments.length - 2]
       if (!targetId || !maxVideoLikedByMe.has(targetId)) return route.continue()
-      const payload = route.request().postDataJSON() as { liked?: unknown }
-      if (typeof payload.liked !== 'boolean') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INVALID_REQUEST' } }) })
-      maxVideoLikedByMe.set(targetId, payload.liked)
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ count: payload.liked ? 1 : 0, likedByMe: payload.liked }) })
+      const payload = route.request().postDataJSON() as { reaction?: unknown }
+      if (payload.reaction !== null && payload.reaction !== 'heart') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INVALID_REQUEST' } }) })
+      const liked = payload.reaction === 'heart'
+      maxVideoLikedByMe.set(targetId, liked)
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reactionCounts: liked ? { heart: 1 } : {}, currentUserReaction: liked ? 'heart' : null, likes: { count: liked ? 1 : 0, likedByMe: liked } }) })
     })
 
     // Keep this browser-only provider fixture on the page request path so Playwright can
@@ -574,9 +566,9 @@ test.describe.serial('T07 live feed', () => {
     expect(await maxVideo.evaluate((entry) => entry.muted)).toBe(false)
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть', exact: true })).toHaveCount(0)
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    const like = maxVideoCard.getByRole('button', { name: 'Поставить сердечко' })
+    const like = maxVideoCard.getByRole('button', { name: 'Поставить реакцию ❤️' })
     await like.click()
-    await expect(maxVideoCard.getByRole('button', { name: 'Убрать сердечко' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(maxVideoCard.getByRole('button', { name: 'Сердце: 1, выбрано' })).toHaveAttribute('aria-pressed', 'true')
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
     await page.setViewportSize({ width: 390, height: 844 })
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
@@ -636,15 +628,15 @@ test.describe.serial('T07 live feed', () => {
     await openFeed(page)
     await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toContainText('Просмотр')
     await expect(page.getByRole('button', { name: 'Добавить' })).toHaveCount(0)
-    await page.route('**/api/v1/families/*/memories/*/like', (route) => route.fulfill({
+    await page.route('**/api/v1/families/*/memories/*/reaction', (route) => route.fulfill({
       status: 503,
       contentType: 'application/json',
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic like failure' } }),
     }))
     const albumCard = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' })
-    await expect(albumCard.getByRole('button', { name: /сердечко/i })).toBeEnabled()
+    await expect(albumCard.getByRole('button', { name: /реакцию ❤️/i })).toBeEnabled()
     await expect(albumCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    const like = albumCard.getByRole('button', { name: /сердечко/i })
+    const like = albumCard.getByRole('button', { name: /реакцию ❤️/i })
     await like.click()
     await expect(like).toHaveAttribute('aria-pressed', 'false')
     await expect(albumCard).toContainText('Фотоальбом E2E')
@@ -1454,10 +1446,6 @@ test.describe.serial('T07 live feed', () => {
     let detailReads = 0
     let listReads = 0
     let listReady = false
-    await page.route('**/api/v1/families/*/memories/*/like', async (route) => {
-      const { liked } = route.request().postDataJSON() as { liked: boolean }
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ count: liked ? 1 : 0, likedByMe: liked }) })
-    })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const url = new URL(route.request().url())
       if (route.request().method() !== 'GET') return route.fallback()
@@ -1743,7 +1731,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toHaveCount(0)
-    const likeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить сердечко"]`)
+    const likeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить реакцию ❤️"]`)
     await expect(likeButton).toBeVisible()
     await expect(likeButton).toHaveAttribute('aria-pressed', 'false')
 
@@ -1783,11 +1771,11 @@ test.describe.serial('T07 live feed', () => {
       await capture(`${theme}-390`)
     }
     await likeButton.click()
-    const activeLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Убрать сердечко"]`)
+    const activeLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Сердце: 1, выбрано"]`)
     await expect(activeLikeButton).toHaveAttribute('aria-pressed', 'true')
     await expect(activeLikeButton).toContainText('1')
     await activeLikeButton.click()
-    const inactiveLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить сердечко"]`)
+    const inactiveLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить реакцию ❤️"]`)
     await expect(inactiveLikeButton).toHaveAttribute('aria-pressed', 'false')
     await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(0)
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
@@ -1797,6 +1785,50 @@ test.describe.serial('T07 live feed', () => {
         await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: priorMemberUnreadState })
       })
     }
+  })
+
+  test('fixed reaction picker selects, replaces, removes, and fits small screens', async ({ page }) => {
+    await openFeed(page)
+    const card = page.locator('[data-memory-id]').first()
+    await expect(card).toBeVisible()
+    let current: string | null = null
+    const counts: Record<string, number> = {}
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      const payload = route.request().postDataJSON() as { reaction: string | null }
+      if (current) counts[current] = Math.max(0, (counts[current] ?? 0) - 1)
+      if (current && counts[current] === 0) delete counts[current]
+      current = payload.reaction
+      if (current) counts[current] = (counts[current] ?? 0) + 1
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reactionCounts: counts, currentUserReaction: current, likes: { count: Object.values(counts).reduce((total, count) => total + count, 0), likedByMe: current === 'heart' } }) })
+    })
+    const quickHeart = card.getByRole('button', { name: 'Поставить реакцию ❤️' })
+    await expect(quickHeart).toBeVisible()
+    await quickHeart.click()
+    await expect(card.getByRole('button', { name: /Сердце: .*выбрано/ })).toBeVisible()
+    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
+    await expect(page.getByRole('group', { name: 'Реакции' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Смех' })).toBeVisible()
+    await page.getByRole('button', { name: 'Смех' }).click()
+    await expect(card.getByRole('button', { name: /Смех: .*выбрано/ })).toBeVisible()
+    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('group', { name: 'Реакции' })).toHaveCount(0)
+    await card.getByRole('button', { name: /Смех: .*выбрано/ }).click()
+    await expect(card.getByRole('button', { name: 'Поставить реакцию ❤️' })).toBeVisible()
+    for (const width of [320, 390, 430]) {
+      await page.setViewportSize({ width, height: 844 })
+      const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
+      expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
+    }
+    await page.setViewportSize({ width: 320, height: 844 })
+    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
+    const picker = page.getByRole('group', { name: 'Реакции' })
+    await expect(picker).toBeVisible()
+    const bounds = await picker.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320)
+    await page.screenshot({ path: resolve('e2e/.artifacts/memory-reaction-picker-320.png'), fullPage: true })
   })
 
   test('mixed unread Memory waits for active readiness, resets dwell on slide change, and stays until seen ack', async ({ page }) => {
