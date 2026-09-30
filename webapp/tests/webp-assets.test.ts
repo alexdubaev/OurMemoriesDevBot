@@ -28,6 +28,8 @@ const requiredNames = [
   'pencil',
   'note',
   'photo',
+  'fullscreen',
+  'pause',
   'play',
   'plus',
   'retry',
@@ -47,7 +49,7 @@ test('the runtime icon directory contains complete optimized WebP RGBA pairs', a
   const files = (await readdir(publicIcons)).toSorted()
   const expected = requiredNames
     .flatMap((name) =>
-      (['heart', 'heart-filled', 'play'].includes(name) ? ['active', 'default', 'white'] : ['active', 'default']).flatMap((state) =>
+      (['heart', 'heart-filled', 'pause', 'play'].includes(name) ? ['active', 'default', 'white'] : ['active', 'default']).flatMap((state) =>
         [2, 3].map((density) => `${name}-${state}@${density}x.webp`),
       ),
     )
@@ -90,5 +92,15 @@ test('runtime icon URLs resolve through the canonical asset manifest', () => {
     height: 48,
     src: '/assets/icons/play-white@2x.webp',
     width: 48,
+  })
+  expect(resolveWebpIconSource('fullscreen', 'default', 2)).toEqual({
+    height: 48,
+    src: '/assets/icons/fullscreen-default@2x.webp',
+    width: 48,
+  })
+  expect(resolveWebpIconSource('pause', 'white', 3)).toEqual({
+    height: 72,
+    src: '/assets/icons/pause-white@3x.webp',
+    width: 72,
   })
 })

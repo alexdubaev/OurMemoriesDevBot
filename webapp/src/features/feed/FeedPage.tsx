@@ -738,7 +738,7 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
     {viewerState === 'error' ? <div className="memoly-video-viewer-v2-error" role="alert"><Typography as="strong" variant="memoryBodyMedium">Не удалось загрузить видео</Typography><Typography as="span" variant="memoryMeta">Попробуйте открыть оригинал в MAX.</Typography></div> : null}
     {(viewerState === 'processing' || viewerState === 'unknown' || viewerState === 'check-error') && onCheckReadiness ? <Button className="memoly-video-viewer-v2-retry" onClick={onCheckReadiness} type="button">Проверить готовность</Button> : null}
     {viewerState === 'error' && (onRetry || src) ? <Button className="memoly-video-viewer-v2-retry" onClick={() => { setPreviewReady(false); if (sourceFailed) onRetry?.(); else { setFailed(false); video.current?.load() } }} type="button">Повторить</Button> : null}
-    <Button className="memoly-video-viewer-v2-open" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button>
+    {viewerState === 'error' || viewerState === 'unavailable' ? <Button className="memoly-video-viewer-v2-open" onClick={onOpen} type="button" variant="outline">Открыть в MAX</Button> : null}
   </div>
 }
 
@@ -883,8 +883,12 @@ function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<M
     {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
     <div className="memoly-private-video-v2-controls">
       {renditionStatus === 'pending' ? <div className="px-3 pt-3"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
-      <div className="flex flex-wrap items-center gap-2 p-3"><Button disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { await element.play(); setPlaying(true) } else { element.pause(); setPlaying(false) } })()} type="button">{playing ? 'Пауза' : 'Смотреть'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography><Button disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} type="button">Полный экран</Button></div>
-      <input aria-label="Позиция видео" className="mb-3 w-full px-3" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
+      <div className="memoly-video-control-row">
+        <button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-video-control" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} title={playing ? 'Пауза' : 'Воспроизвести'} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={20} state="white" /></button>
+        <Typography className="flex-1 text-right text-white" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography>
+        <button aria-label="На весь экран" className="memoly-video-control" disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} title="На весь экран" type="button"><WebpIcon decorative monochrome name="fullscreen" size={18} /></button>
+      </div>
+      <input aria-label="Позиция видео" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
     </div>
   </div>
 }
