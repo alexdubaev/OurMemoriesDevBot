@@ -76,6 +76,12 @@ test.describe.serial('T07 live feed', () => {
       await installTelegramHost(page, initData, responsiveWidth ? { bottom: 18, top: 24 } : undefined)
     }
     if (responsiveWidth) await page.setViewportSize({ width: Number(responsiveWidth), height: 844 })
+    if (testInfo.title === 'closes access and pauses playback after membership revoke') {
+      await prisma.$transaction(async (tx) => {
+        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: 0n } })
+        await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: 0n } })
+      })
+    }
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   })
@@ -106,17 +112,7 @@ test.describe.serial('T07 live feed', () => {
           viewportHeight: window.innerHeight,
         }
       })
-      const filterMetrics = await page.locator('[data-slot="memoly-filter-rail"] .filter').evaluateAll((buttons) => buttons.map((button) => {
-        const label = button.querySelector<HTMLElement>(':scope > span')
-        if (!label) return { clipped: true, inBounds: false, text: '' }
-        const buttonRect = button.getBoundingClientRect()
-        const labelRect = label.getBoundingClientRect()
-        return {
-          clipped: label.scrollWidth > label.clientWidth + 1,
-          inBounds: labelRect.left >= buttonRect.left && labelRect.right <= buttonRect.right,
-          text: label.textContent ?? '',
-        }
-      }))
+      const unreadControl = page.locator('.feed-unread-control')
 
       expect(metrics).not.toBeNull()
       expect(metrics!.clientWidth).toBe(width)
@@ -127,19 +123,7 @@ test.describe.serial('T07 live feed', () => {
       expect(metrics!.navBottom).toBe(metrics!.viewportHeight)
       expect(metrics!.navPaddingBottom).toBe(18)
       expect(metrics!.scrollPaddingBottom).toBeGreaterThan(16)
-      expect(filterMetrics).toHaveLength(5)
-      expect(filterMetrics.map((filter) => filter.text)).toEqual(['Все', 'Фото', 'Видео', 'Голос', 'Заметки'])
-      expect(filterMetrics.every((filter) => !filter.clipped && filter.inBounds), JSON.stringify(filterMetrics)).toBe(true)
-      if (width === 320) {
-        const rail = page.locator('[data-slot="memoly-filter-rail"]')
-        const scrollable = await rail.evaluate((element) => element.scrollWidth > element.clientWidth)
-        expect(scrollable).toBe(false)
-        const railRight = await rail.evaluate((element) => element.getBoundingClientRect().right)
-        const lastFilterRight = await page.getByRole('button', { name: 'Заметки' }).evaluate((element) => element.getBoundingClientRect().right)
-        expect(lastFilterRight).toBeLessThanOrEqual(railRight)
-        await page.getByRole('button', { name: 'Заметки' }).focus()
-        await expect(page.getByRole('button', { name: 'Заметки' })).toBeFocused()
-      }
+      await expect(unreadControl).toHaveCount(0)
       await page.screenshot({ path: resolve(`e2e/.artifacts/task-5-feed-${width}.png`), fullPage: true })
     })
   }
@@ -222,7 +206,7 @@ test.describe.serial('T07 live feed', () => {
       await selectTheme(page, theme)
       await page.getByRole('button', { name: 'Лента' }).click()
       await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
-      await expect(page.locator('[data-slot="memoly-filter-rail"] .filter')).toHaveCount(5)
+      await expect(page.locator('[data-slot="memoly-filter-rail"]')).toHaveCount(0)
       const navColors = await page.locator('[data-testid="bottom-navigation"]').evaluate((nav) => {
         const item = nav.querySelector('[data-nav-position="home"]')
         const icon = item?.querySelector('[data-slot="webp-icon"]')
@@ -251,7 +235,7 @@ test.describe.serial('T07 live feed', () => {
       const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
       await expect(card).toHaveCount(1)
       await expect(card.locator('.memoly-mixed-slide')).toHaveCount(3)
-      await expect(card).toContainText('1 / 3')
+      await expect(card.locator('[data-carousel-dot]')).toHaveCount(3)
       for (const width of [320, 390, 430]) {
         await page.setViewportSize({ width, height: 844 })
         await card.scrollIntoViewIfNeeded()
@@ -281,12 +265,12 @@ test.describe.serial('T07 live feed', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openFeed(page)
     const photo = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).getByRole('img', { name: 'Воспоминание' })
-    const photoFrame = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).locator('.media-well .ml-media-button')
+    const photoFrame = page.locator('[data-memory-id]').filter({ hasText: 'Одиночное фото E2E' }).locator('.memory-media-slot .ml-media-button')
     const videoPoster = page.locator('[data-memory-id]').filter({ hasText: 'Telegram video E2E' }).getByRole('img', { name: 'Кадр видео' })
     await expect(photo).toHaveAttribute('src', /^blob:/)
     await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     await expect(photoFrame).toHaveCSS('overflow', 'hidden')
-    await expect(photoFrame).toHaveCSS('border-radius', '19px')
+    await expect(photoFrame).toHaveCSS('border-radius', '0px')
     await expect(videoPoster).toHaveAttribute('src', /^blob:/)
     await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
@@ -296,7 +280,7 @@ test.describe.serial('T07 live feed', () => {
       await page.getByRole('button', { name: 'Лента', exact: true }).click()
       await expect(photo).toHaveAttribute('src', /^blob:/)
       await expect.poll(() => photo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-      await expect(photoFrame).toHaveCSS('border-radius', '19px')
+      await expect(photoFrame).toHaveCSS('border-radius', '0px')
       await expect(videoPoster).toHaveAttribute('src', /^blob:/)
       await expect.poll(() => videoPoster.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     }
@@ -355,11 +339,11 @@ test.describe.serial('T07 live feed', () => {
       await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(photo.width)
       await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalHeight)).toBe(photo.height)
       await expect(frame).toHaveCSS('overflow', 'hidden')
-      await expect(frame).toHaveCSS('border-radius', '19px')
+      await expect(frame).toHaveCSS('border-radius', '0px')
       const geometry = await image.evaluate((element) => {
         const imageRect = element.getBoundingClientRect()
         const frameRect = element.closest('.ml-media-button')!.getBoundingClientRect()
-        const wellRect = element.closest('.media-well')!.getBoundingClientRect()
+        const wellRect = element.closest('.memory-media-slot')!.getBoundingClientRect()
         const actionsRect = element.closest('.memory-card')!.querySelector('.actions')!.getBoundingClientRect()
         return {
           imageWidth: imageRect.width, imageHeight: imageRect.height,
@@ -979,7 +963,7 @@ test.describe.serial('T07 live feed', () => {
     await openFeed(page)
     const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
     await card.scrollIntoViewIfNeeded()
-    await expect(card).toContainText('1 / 3')
+    await expect(card.locator('[data-carousel-dot]')).toHaveCount(3)
     await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
     await page.screenshot({ path: resolve('e2e/.artifacts/mm3-card-photo.png'), animations: 'disabled' })
     const viewport = card.locator('.memoly-mixed-viewport')
@@ -997,7 +981,7 @@ test.describe.serial('T07 live feed', () => {
     await page.mouse.down()
     await page.mouse.move(bounds.x + bounds.width * .2, y, { steps: 8 })
     await page.mouse.up()
-    await expect(card).toContainText('2 / 3')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     expect(await viewport.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(stageHeight, 1)
     await expect(card.getByRole('button', { name: 'Открыть фото' })).toHaveCount(0)
     await expect.poll(() => card.evaluate((element) => {
@@ -1037,7 +1021,7 @@ test.describe.serial('T07 live feed', () => {
     await card.getByRole('button', { name: 'Воспроизвести видео' }).click()
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false)
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
-    await expect(card).toContainText('3 / 3')
+    await expect(card.locator('[data-carousel-dot="3"]')).toHaveAttribute('aria-current', 'step')
     expect(await viewport.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(stageHeight, 1)
     await expect(video).toHaveCount(0)
     await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
@@ -1057,11 +1041,12 @@ test.describe.serial('T07 live feed', () => {
     await page.screenshot({ path: resolve('e2e/.artifacts/mm3-mixed-video.png'), animations: 'disabled' })
     await page.keyboard.press('Escape')
     await expect(viewer).toHaveCount(0)
-    await expect(card).toContainText('3 / 3')
+    await expect(card.locator('[data-carousel-dot="3"]')).toHaveAttribute('aria-current', 'step')
     // This checks mixed-card token/layout behavior in all six themes without changing the user's saved theme.
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
       await page.evaluate((name) => { document.documentElement.dataset.memolyTheme = name; document.querySelector<HTMLElement>('[data-slot="memoly-theme-root"]')!.dataset.memolyTheme = name }, theme)
-      await expect(card.locator('.memoly-mixed-count')).toBeVisible()
+      await expect(card.locator('.memoly-mixed-dots')).toBeVisible()
+      await expect(card.locator('[data-carousel-dot]')).toHaveCount(3)
       const layout = await card.evaluate((element) => ({ width: element.getBoundingClientRect().width, scrollWidth: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }))
       expect(layout.width).toBeGreaterThan(0)
       expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport)
@@ -1118,12 +1103,12 @@ test.describe.serial('T07 live feed', () => {
       }, { intervals: [40, 40, 40, 40, 40, 40, 40, 40, 40, 40], timeout: 5_000 }).toBeGreaterThanOrEqual(3)
     }
     await card.scrollIntoViewIfNeeded()
-    await expect(card).toContainText('1 / 3')
+    await expect(card.locator('[data-carousel-dot]')).toHaveCount(3)
     expect(checks).toBe(0)
     expect(contentRequests).toHaveLength(0)
     const cardHandle = await card.elementHandle()
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
-    await expect(card).toContainText('2 / 3')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
     await expect(card.getByText('Видео обрабатывается…')).toBeVisible()
     await waitForActiveSlideAlignment()
@@ -1133,13 +1118,13 @@ test.describe.serial('T07 live feed', () => {
     expect(contentRequests).toHaveLength(0)
     expect(checks).toBe(1)
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
-    await expect(card).toContainText('3 / 3')
+    await expect(card.locator('[data-carousel-dot="3"]')).toHaveAttribute('aria-current', 'step')
     await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
     await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
     await page.waitForTimeout(500)
     expect(checks, `readiness checks after carousel remount: ${checkTimes.map((time) => time - checkTimes[0]!)}`).toBe(1)
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
-    await expect(card).toContainText('3 / 3')
+    await expect(card.locator('[data-carousel-dot="3"]')).toHaveAttribute('aria-current', 'step')
     await expect(card.locator('[data-video-viewer-state]')).toHaveCount(0)
     await page.waitForTimeout(5_200)
     expect(checks).toBe(1)
@@ -1156,7 +1141,7 @@ test.describe.serial('T07 live feed', () => {
     await card.getByRole('button', { name: 'Проверить готовность' }).click()
     await expect.poll(() => checks).toBe(4)
     await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`${referenceId}/content$`))
-    await expect(card).toContainText('2 / 3')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     await waitForActiveSlideAlignment()
     await expect.poll(() => card.locator('[data-carousel-active="true"] video').evaluate((video: HTMLVideoElement) => ({
       width: video.videoWidth, height: video.videoHeight, hasMetadata: video.readyState >= 1, error: video.error?.code ?? null,
@@ -1213,7 +1198,7 @@ test.describe.serial('T07 live feed', () => {
     const viewport = card.locator('.memoly-mixed-viewport')
     await expect(viewport).toHaveAttribute('data-media-stage', 'feed')
     await expect(card.locator('.memoly-mixed-slide')).toHaveCount(2)
-    await expect(card).toContainText('1 / 2')
+    await expect(card.locator('[data-carousel-dot]')).toHaveCount(2)
     const initialHeight = await viewport.evaluate((element) => element.getBoundingClientRect().height)
     const bounds = await viewport.boundingBox()
     if (!bounds) throw new Error('photo carousel viewport is missing')
@@ -1225,7 +1210,7 @@ test.describe.serial('T07 live feed', () => {
     }
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await touch.detach()
-    await expect(card).toContainText('2 / 2')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('aria-label', '2 из 2, фото')
     await expect.poll(() => card.evaluate((element) => {
       const viewportBounds = element.querySelector('.memoly-mixed-viewport')?.getBoundingClientRect()
@@ -1244,14 +1229,14 @@ test.describe.serial('T07 live feed', () => {
       expect(layout.ratio).toBeCloseTo(4 / 5, 2)
       expect(layout.pageWidth).toBeLessThanOrEqual(width)
       expect(layout.viewportWidth).toBe(width)
-      await expect(card).toContainText('2 / 2')
+      await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     }
     const opener = card.getByRole('button', { name: 'Открыть фото' })
     await opener.click()
     await expect(page.locator('.pswp__counter')).toContainText('2 / 2')
     await page.locator('.pswp__button--close').click()
     await expect(opener).toBeFocused()
-    await expect(card).toContainText('2 / 2')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
   })
 
   test('five-photo Memory swipes through every Feed slide and opens the selected photo', async ({ page }) => {
@@ -1270,7 +1255,7 @@ test.describe.serial('T07 live feed', () => {
       await card.scrollIntoViewIfNeeded()
       const viewport = card.locator('.memoly-mixed-viewport')
       await expect(card.locator('.memoly-mixed-slide')).toHaveCount(5)
-      await expect(card).toContainText('1 / 5')
+      await expect(card.locator('[data-carousel-dot]')).toHaveCount(5)
       const initialStage = await viewport.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         return { width: rect.width, height: rect.height }
@@ -1288,7 +1273,7 @@ test.describe.serial('T07 live feed', () => {
             await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: bounds.x + bounds.width * (.8 - .6 * step / 8), y, id: 1 }] })
           }
           await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-          await expect(card).toContainText(`${next} / 5`)
+          await expect(card.locator(`[data-carousel-dot="${next}"]`)).toHaveAttribute('aria-current', 'step')
           await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('aria-label', `${next} из 5, фото`)
           await expect.poll(() => card.evaluate((element) => {
             const stage = element.querySelector('.memoly-mixed-viewport')?.getBoundingClientRect()
@@ -1306,7 +1291,7 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.locator('.pswp__counter')).toContainText('5 / 5')
       await page.locator('.pswp__button--close').click()
       await expect(opener).toBeFocused()
-      await expect(card).toContainText('5 / 5')
+      await expect(card.locator('[data-carousel-dot="5"]')).toHaveAttribute('aria-current', 'step')
     } finally {
       if (memoryId) await prisma.memory.deleteMany({ where: { id: memoryId } })
       await prisma.mediaAsset.deleteMany({ where: { id: { in: assets.map((asset) => asset.id) } } })
@@ -1321,7 +1306,7 @@ test.describe.serial('T07 live feed', () => {
     const card = page.locator(`[data-memory-id="${album.id}"]`)
     await card.scrollIntoViewIfNeeded()
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
-    await expect(card).toContainText('2 / 2')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     await expect(card.locator('[data-carousel-position="2"] [data-seen-ready="true"]')).toHaveCount(1)
     let failedOnce = false
     await page.route(`**/media/${secondMediaId}/content?variant=display`, async (route) => {
@@ -1342,7 +1327,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(card.getByRole('alert')).toHaveCount(0)
     await page.locator('.pswp__button--close').click()
     await expect(opener).toBeFocused()
-    await expect(card).toContainText('2 / 2')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     expect(failedOnce).toBe(true)
   })
 
@@ -1410,7 +1395,7 @@ test.describe.serial('T07 live feed', () => {
     }
     const y = bounds.y + Math.min(bounds.height / 2, 80)
     await touch({ x: bounds.x + bounds.width * .8, y }, { x: bounds.x + bounds.width * .2, y })
-    await expect(card).toContainText('2 / 3')
+    await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     const before = await page.evaluate(() => window.scrollY)
     await touch({ x: bounds.x + bounds.width / 2, y: bounds.y + Math.min(bounds.height - 30, 220) }, { x: bounds.x + bounds.width / 2, y: bounds.y + 30 })
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
@@ -1418,7 +1403,6 @@ test.describe.serial('T07 live feed', () => {
   })
 
   test('streams voice and legacy video on demand after legacy metadata, seeks with Range/206, and pauses on hide', async ({ page }) => {
-    await openFeed(page)
     const responses: Array<{ range: string | null; status: number; url: string }> = []
     page.on('response', (response) => {
       if (!response.url().includes('/media/') || !response.url().includes('variant=playback')) return
@@ -1428,6 +1412,7 @@ test.describe.serial('T07 live feed', () => {
         url: response.url(),
       })
     })
+    await openFeed(page)
 
     await page.waitForTimeout(500)
     // The legacy player has always used preload="metadata". It may fetch a Range
@@ -1723,7 +1708,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.locator('[data-slot="feed-empty"]')).toBeVisible()
   })
 
-  test('compares the canonical photo card and filter geometry with deterministic visual data', async ({ page }) => {
+  test('compares the canonical photo card and unread-toggle geometry with deterministic visual data', async ({ page }) => {
     const canonical = readFileSync(resolve('../docs/memoly-final-functional-state-pack.html'))
     expect(createHash('sha256').update(canonical).digest('hex')).toBe('180f8c9b6e60369513cffd5eb9dbb3cb3397649407df996dcf907ab0fa38c5b4')
     const imageBase64 = canonical.toString('utf8').match(/class="media photo" src="data:image\/jpeg;base64,([^"]+)"/)?.[1]
@@ -1737,6 +1722,13 @@ test.describe.serial('T07 live feed', () => {
     await prisma.child.update({ where: { id: fixture.childId }, data: { displayName: 'София', birthDate: new Date('2024-05-25T00:00:00.000Z') } })
     const body = 'Моё солнышко утром ☀️\nКак же ты любишь своего зайку 🤍'
     const memory = await createMemoryWithMedia({ familyId: fixture.familyId, childId: fixture.childId, userId: fixture.ownerUserId, kind: 'photo', body, occurredAt: new Date(Date.now() + 30_000), assets: [asset] })
+    const priorUnreadState = await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId }, select: { unreadTrackingActivatedAt: true, publicationOrdinal: true } })
+    const priorMemberUnreadState = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, select: { unreadBaselineOrdinal: true } })
+    try {
+    await prisma.$transaction(async (tx) => {
+      await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: 1n } })
+      await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: 0n } })
+    })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       if (route.request().method() !== 'GET') return route.continue()
       const response = await route.fetch()
@@ -1759,7 +1751,13 @@ test.describe.serial('T07 live feed', () => {
     const capture = async (name: string) => {
       await page.evaluate(() => document.fonts.ready)
       await page.locator(`[data-memory-id="${memory.id}"] img`).first().evaluate((image: HTMLImageElement) => image.decode())
-      await expect(page.locator('.filters-wrap .filter')).toHaveCount(5)
+      await expect(page.locator('.filters-wrap .filter')).toHaveCount(0)
+      const unreadControl = page.locator('.feed-unread-control')
+      await expect(unreadControl).toBeVisible()
+      const controlGeometry = await unreadControl.evaluate((element) => ({ width: element.getBoundingClientRect().width, viewportWidth: document.documentElement.clientWidth, buttonHeights: [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height) }))
+      expect(controlGeometry.width).toBeLessThan(controlGeometry.viewportWidth)
+      expect(controlGeometry.buttonHeights).toHaveLength(2)
+      expect(controlGeometry.buttonHeights.every((height) => height >= 44)).toBe(true)
       const metrics = await page.evaluate(() => {
         const measure = (selector: string) => {
           const element = document.querySelector<HTMLElement>(selector)!
@@ -1767,7 +1765,7 @@ test.describe.serial('T07 live feed', () => {
           const css = getComputedStyle(element)
           return { x: rect.x, y: rect.y, w: rect.width, h: rect.height, marginTop: css.marginTop, marginBottom: css.marginBottom, padding: css.padding, gap: css.gap, overflowX: css.overflowX, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }
         }
-        return { header: measure('[data-child-header-mode="feed"]'), app: measure('[data-slot="feed-scroll"]'), filtersWrap: measure('.filters-wrap'), filters: measure('.filters'), chips: [...document.querySelectorAll<HTMLElement>('.filters .filter')].map((item) => ({ text: item.textContent?.trim(), x: item.getBoundingClientRect().x, w: item.getBoundingClientRect().width, h: item.getBoundingClientRect().height })), date: measure('.date-heading'), card: measure('.memory-card'), cardHeader: measure('.memory-card .memory-header'), media: measure('.memory-card .media-well'), caption: measure('.memory-card .caption') }
+        return { header: measure('[data-child-header-mode="feed"]'), app: measure('[data-slot="feed-scroll"]'), unreadControl: measure('.feed-unread-control'), card: measure('.memory-card'), cardHeader: measure('.memory-card .memory-header'), media: measure('.memory-card .memory-media-slot'), caption: measure('.memory-card .caption') }
       })
       geometry[name] = metrics
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-comparable-${name}.png`), fullPage: true, animations: 'disabled' })
@@ -1793,6 +1791,12 @@ test.describe.serial('T07 live feed', () => {
     await expect(inactiveLikeButton).toHaveAttribute('aria-pressed', 'false')
     await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(0)
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
+    } finally {
+      await prisma.$transaction(async (tx) => {
+        await tx.family.update({ where: { id: fixture.familyId }, data: priorUnreadState })
+        await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: priorMemberUnreadState })
+      })
+    }
   })
 
   test('mixed unread Memory waits for active readiness, resets dwell on slide change, and stays until seen ack', async ({ page }) => {
@@ -1841,7 +1845,7 @@ test.describe.serial('T07 live feed', () => {
       await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
       await page.waitForTimeout(450)
       await card.getByRole('button', { name: 'Следующий элемент' }).click()
-      await expect(card).toContainText('2 / 3')
+      await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
       await expect(card.locator('[data-carousel-active="true"]')).toHaveAttribute('data-media-kind', 'video')
       await expect(card.locator('[data-carousel-position="3"]')).toHaveAttribute('aria-hidden', 'true')
       await expect(card.locator('[data-carousel-active="true"] [data-seen-ready="true"]')).toBeVisible()
@@ -1857,10 +1861,10 @@ test.describe.serial('T07 live feed', () => {
       await expect.poll(() => prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
       await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
       await expect(card).toBeVisible()
-      await expect(card).toContainText('2 / 3')
+      await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
       await expect(card.locator('[data-carousel-position="3"]')).toHaveAttribute('aria-hidden', 'true')
       await card.getByRole('button', { name: 'Предыдущий элемент' }).click()
-      await expect(card).toContainText('1 / 3')
+      await expect(card.locator('[data-carousel-dot]')).toHaveCount(3)
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
       expect(seenPostStarted).toBe(1)
     } finally {
@@ -1985,7 +1989,7 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
       await page.setViewportSize({ width: 390, height: 844 })
       await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-empty.png'), animations: 'disabled' })
-      await page.getByRole('button', { name: 'Все воспоминания' }).click()
+      await page.getByRole('button', { name: 'Все', exact: true }).click()
       await page.getByRole('button', { name: 'Непросмотренные · 0' }).click()
       await expect(page.getByText('Все новые воспоминания просмотрены')).toBeVisible()
     } finally {
@@ -2014,7 +2018,7 @@ test.describe.serial('T07 live feed', () => {
       where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
       data: { revokedAt: new Date() },
     })
-    await page.getByRole('button', { name: 'Фото', exact: true }).click()
+    await page.getByRole('button', { name: /Непросмотренные/ }).click()
 
     await expect(page.getByText('Доступ к этой семье закрыт.')).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
@@ -2287,7 +2291,7 @@ function triggerTelegramBack(page: Page) {
 async function openFeed(page: Page) {
   await page.locator('[data-slot="family-hub"] .family-hub-card').click()
   await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
-  await expect(page.locator('[data-slot="memoly-filter-rail"]')).toBeVisible()
+  await expect(page.locator('[data-slot="memoly-filter-rail"]')).toHaveCount(0)
   await expect(page.locator('[data-memory-kind="photo"]').first()).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await expect(page.getByText('Фотоальбом E2E')).toBeVisible()

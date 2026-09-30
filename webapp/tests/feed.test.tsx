@@ -129,7 +129,8 @@ test('photo albums of five and ten keep one Memory and ordered Feed carousel sli
     }
     const markup = renderFeed(feedClientWith([album]))
     expect(markup.match(/data-memory-id="66666666-6666-4666-8666-666666666666"/g)?.length).toBe(1)
-    expect(markup).toContain(`1 / ${count}`)
+    expect(markup).toContain(`data-carousel-dot="${count}"`)
+    expect(markup).not.toContain(`1 / ${count}`)
     const positions = Array.from({ length: count }, (_, index) => markup.indexOf(`data-carousel-position="${index + 1}" data-media-kind="photo"`))
     expect(positions.every((position) => position >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
@@ -153,7 +154,7 @@ test('an empty photo caption adds no Open footer and the media itself remains th
   expect(markup).not.toContain('caption-open-empty')
 })
 
-test('notes keep selectable story text, omit system labels, and keep the like below the panel', () => {
+test('notes keep selectable text in the memory surface and omit system labels', () => {
   for (const body of ['Привет', 'Сегодня гуляли в парке и впервые кормили уток вместе.', 'Утром мы долго собирались. Потом пошли гулять, встретили друзей и провели весь день вместе. Вечером Лиза уснула в машине по дороге домой.', 'Первая строка\n\nВторая строка ❤️ <script>alert("x")</script>']) {
     const markup = renderFeed(feedClientWith([{ ...noteMemory, body }]))
     const panelIndex = markup.indexOf('data-memoly-note-gradient')
@@ -178,23 +179,21 @@ test('notes keep selectable story text, omit system labels, and keep the like be
   }
 })
 
-test('note gradient keeps natural text flow, semantic focus, and system typography', () => {
+test('note content stays unboxed with natural text flow and semantic focus', () => {
   const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
   const rules: postcss.Rule[] = []
   postcss.parse(css).walkRules((rule) => rules.push(rule))
-  const panel = rules.find((rule) => rule.selector === '[data-memoly-feed] [data-memoly-note-gradient]')
+  const panel = rules.filter((rule) => rule.selector === '[data-memoly-feed] [data-memoly-note-gradient]').at(-1)
   const declarations = Object.fromEntries(panel?.nodes?.filter((node): node is postcss.Declaration => node.type === 'decl').map(({ prop, value }) => [prop, value]) ?? [])
-  expect(declarations['min-block-size']).toBe('104px')
-  expect(declarations['inline-size']).toBe('100%')
-  expect(declarations['padding']).toBe('26px 24px')
-  expect(declarations['border-radius']).toBe('24px')
+  expect(declarations['min-block-size']).toBe('0')
+  expect(declarations['width']).toBe('100%')
+  expect(declarations['padding']).toBe('6px 4px')
+  expect(declarations['border-radius']).toBe('0')
   expect(declarations['box-shadow']).toBe('none')
-  expect(declarations['font-family']).toContain('-apple-system')
-  expect(declarations['font-size']).toBe('20px')
-  expect(declarations['font-weight']).toBe('400')
+  expect(declarations['font']).toBe('inherit')
+  expect(declarations['font-size']).toBe('18px')
   expect(declarations['line-height']).toBe('1.5')
-  expect(declarations['letter-spacing']).toBe('-.15px')
-  expect(declarations['background-image']).toContain('linear-gradient(120deg')
+  expect(declarations['background']).toBe('transparent')
   expect(css).not.toContain('.note-story-panel')
   expect(panel?.nodes?.some((node) => node.type === 'decl' && node.value.includes('!important'))).toBe(false)
 })
@@ -214,7 +213,7 @@ test('portrait Feed stages are not height-clipped and video seek targets remain 
   const rules: postcss.Rule[] = []
   postcss.parse(css).walkRules((rule) => rules.push(rule))
   const feedViewport = rules.find((rule) => rule.selector.includes('.memoly-mixed-viewport[data-media-stage='))
-  const soloVideoStage = rules.find((rule) => rule.selector === '[data-memoly-feed] .media-well.video-wrap' && rule.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio'))
+  const soloVideoStage = rules.find((rule) => rule.selector === '[data-memoly-feed] .memory-media-slot.video-wrap' && rule.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio'))
   expect(feedViewport?.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio' && node.value === '4 / 5')).toBe(true)
   expect(soloVideoStage?.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio' && node.value === '4 / 5')).toBe(true)
   expect(feedViewport?.nodes?.some((node) => node.type === 'decl' && node.prop === 'max-height')).toBe(false)
@@ -247,7 +246,8 @@ test('mixed memory renders one card with ordered slides and lazily mounts video'
   const positions = [['1', 'photo'], ['2', 'video'], ['3', 'photo'], ['4', 'video']].map(([position, kind]) => markup.indexOf(`data-carousel-position="${position}" data-media-kind="${kind}"`))
   expect(positions.every((position) => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((a, b) => a - b))
-  expect(markup).toContain('1 / 4')
+  expect(markup).toContain('data-carousel-dot="4"')
+  expect(markup).not.toContain('1 / 4')
   expect(markup).toContain('data-seen-active-index="0"')
   expect(markup).toContain('data-carousel-active="true"')
   expect(markup.match(/aria-hidden="true"[^>]*inert=""/g)?.length).toBe(3)
@@ -273,7 +273,8 @@ test('one mixed card keeps private photo, MAX video, private photo in order with
   const positions = [['1', 'photo'], ['2', 'video'], ['3', 'photo']].map(([position, kind]) => markup.indexOf(`data-carousel-position="${position}" data-media-kind="${kind}"`))
   expect(positions.every((position) => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((a, b) => a - b))
-  expect(markup).toContain('1 / 3')
+  expect(markup).toContain('data-carousel-dot="3"')
+  expect(markup).not.toContain('1 / 3')
   expect(markup).toContain('data-carousel-active="true"')
   expect(markup).not.toContain('<video')
   expect(markup).toContain('data-seen-active-index="0"')
@@ -362,9 +363,9 @@ test('new-memory refresh keeps its notice and first id until refetch succeeds', 
   expect(cleared).toBe(1)
 })
 
-test('an empty filtered feed offers a reset without presenting a nonfunctional bot action', () => {
+test('the feed ignores legacy type filters and keeps the all-content empty state', () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  queryClient.setQueryData(feedQueryKeys.list(familyId, 'photo'), {
+  queryClient.setQueryData(feedQueryKeys.list(familyId, 'all'), {
     pages: [{ items: [], nextCursor: null }], pageParams: [null],
   })
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(FeedPage, {
@@ -372,8 +373,9 @@ test('an empty filtered feed offers a reset without presenting a nonfunctional b
     hostBridge, insets: { top: 0, right: 0, bottom: 0, left: 0 }, onFamily: () => undefined,
     onFilterChange: () => undefined, onAccessLost: () => undefined, role: 'full', transport,
   })))
-  expect(markup).toContain('data-slot="feed-filter-empty"')
-  expect(markup).toContain('Показать все')
+  expect(markup).toContain('data-slot="feed-empty"')
+  expect(markup).not.toContain('data-slot="feed-filter-empty"')
+  expect(markup).not.toContain('Показать все')
   expect(markup).not.toContain('Открыть бота')
 })
 
@@ -418,7 +420,7 @@ test('video cards remove the standalone open action and collapse when the captio
 
   const markup = renderToStaticMarkup(card)
   expect(markup).toContain('data-memory-kind="video"')
-  expect(markup).toMatch(/class="media-well surface-inset video-wrap(?: |")/)
+  expect(markup).toMatch(/class="memory-media-slot video-wrap(?: |")/)
   expect(markup).not.toContain('Открыть')
   expect(markup).toContain('aria-label="Поставить сердечко"')
 })
@@ -439,7 +441,7 @@ test('video cards treat whitespace-only captions as empty', () => {
     onOpen: () => undefined,
   }))
 
-  expect(markup).toMatch(/class="media-well surface-inset video-wrap(?: |")/)
+  expect(markup).toMatch(/class="memory-media-slot video-wrap(?: |")/)
   expect(markup).not.toContain('has-caption')
   expect(markup).not.toContain('class="caption"')
 })
@@ -1124,12 +1126,15 @@ test('the feed header renders the memoLy logo above the child profile instead of
   expect(markup.indexOf('data-slot="app-brand"')).toBeLessThan(markup.indexOf('data-slot="child-profile"'))
 })
 
-test('the feed presentation keeps the approved filter and memory composition', () => {
+test('the feed presentation keeps one memory surface and only the unread mode toggle', () => {
   const markup = renderToStaticMarkup(createElement(FeedPresentation, {
     activeFilter: 'all',
     childName: 'Лиза',
     childSubtitle: '2 года',
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    unreadState: 'ready',
+    unreadOnly: false,
+    onUnreadChange: () => undefined,
     onFamily: () => undefined,
     onFeed: () => undefined,
     onFilterChange: () => undefined,
@@ -1152,16 +1157,18 @@ test('the feed presentation keeps the approved filter and memory composition', (
     }),
   )))
 
-  expect(markup).toContain('class="filters-wrap surface-inset"')
-  expect(markup).toContain('class="filters"')
-  expect(markup.match(/class="filter(?: |")/g)).toHaveLength(5)
-  expect(markup.match(/class="filter ds-chip/g)).toHaveLength(5)
+  expect(markup).not.toContain('memoly-filter-rail')
+  expect(markup).not.toContain('Фото</span>')
+  expect(markup).toContain('aria-label="Режим ленты"')
+  expect(markup).toContain('>Все</span>')
+  expect(markup).toContain('>Непросмотренные</span>')
   expect(markup).toContain('class="feed-section"')
   expect(markup).toContain('class="date-heading"')
   expect(markup).not.toContain('class="date-dot"')
   expect(markup).toContain('class="memory-card surface-raised')
   expect(markup).toContain('class="memory-header"')
-  expect(markup).toContain('class="media-well surface-inset"')
+  expect(markup).toContain('class="memory-media-slot"')
+  expect(markup).not.toContain('surface-inset')
   expect(markup).toContain('class="actions"')
   expect(markup).toMatch(/class="caption(?: |")/)
 })
