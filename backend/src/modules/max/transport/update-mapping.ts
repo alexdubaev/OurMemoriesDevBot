@@ -181,12 +181,11 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   if (message.body === null || message.body === undefined) return { kind: 'ignored' }
   const sender = isRecord(message.sender) ? message.sender : null
   if (!isRecord(message.recipient)) throw new Error('Invalid MAX recipient')
-  // MAX always supplies all Recipient keys. Channel posts use the signed channel chat_id;
-  // dialogs retain the user_id identity used by the established direct-message flow.
-  if (!Object.hasOwn(message.recipient, 'chat_id') || !Object.hasOwn(message.recipient, 'chat_type') ||
-      !Object.hasOwn(message.recipient, 'user_id')) throw new Error('Invalid MAX recipient')
+  // Channel posts provide chat identity and can omit user_id; dialogs require the user identity.
+  if (!Object.hasOwn(message.recipient, 'chat_id') || !Object.hasOwn(message.recipient, 'chat_type')) throw new Error('Invalid MAX recipient')
   const isChannel = message.recipient.chat_type === 'channel'
   const isDialog = message.recipient.chat_type === 'dialog'
+  if (isDialog && !Object.hasOwn(message.recipient, 'user_id')) throw new Error('Invalid MAX recipient')
   if ((!isChannel && !isDialog) ||
       (message.recipient.chat_id !== null && (isChannel ? !isInt64Number(message.recipient.chat_id) || message.recipient.chat_id === 0 : !isPositiveSafeInteger(message.recipient.chat_id)))) return { kind: 'ignored' }
   if (isDialog && !isPositiveSafeInteger(message.recipient.user_id)) return { kind: 'ignored' }

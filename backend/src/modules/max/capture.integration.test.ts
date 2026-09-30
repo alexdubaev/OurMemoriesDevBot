@@ -114,13 +114,13 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: chatId } })
     const update = {
       update_type: 'message_created', timestamp: 1_757_844_123_000,
-      message: { sender: { user_id: Number(actor.subject) }, recipient: { chat_id: Number(chatId), chat_type: 'channel', user_id: null },
+      message: { recipient: { chat_id: Number(chatId), chat_type: 'channel' },
         body: { mid: 'channel-text-1', text: 'MAX live text test', attachments: [] } },
     }
     const first = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(update) })
     expect(first.status).toBe(200)
     const inbox = await prisma.maxInbox.findFirstOrThrow({ include: { source: true, responses: true } })
-    expect(inbox.source).toMatchObject({ senderSubject: actor.subject, recipientId: chatId, messageId: 'channel-text-1' })
+    expect(inbox.source).toMatchObject({ senderSubject: '0', recipientId: chatId, messageId: 'channel-text-1' })
     expect(inbox.responses).toHaveLength(0)
     const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${inbox.id}` } } })
     await expect(createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(task.payload)).resolves.toBe('done')
@@ -132,6 +132,36 @@ maybeDescribe('MAX durable capture', () => {
     expect(duplicate.status).toBe(200)
     expect(await prisma.memory.count()).toBe(1)
     expect(await prisma.maxSource.count()).toBe(1)
+  })
+
+  test('accepts observed senderless channel webhook shape for supported live content types', async () => {
+    const chatId = -79560265048692n
+    const cases = [
+      { label: 'text', attachments: [] },
+      { label: 'photo', attachments: [{ type: 'image', payload: { photo_id: 701, token: 'synthetic-photo-token', url: 'https://i.oneme.ru/synthetic-photo' } }] },
+      { label: 'video', attachments: [{ type: 'video', payload: { id: 702, token: 'synthetic-video-token', url: 'https://v.oneme.ru/synthetic-video', duration: 3, width: 320, height: 240 } }] },
+      { label: 'mixed', attachments: [
+        { type: 'image', payload: { photo_id: 703, token: 'synthetic-mixed-photo-token', url: 'https://i.oneme.ru/synthetic-mixed-photo' } },
+        { type: 'video', payload: { id: 704, token: 'synthetic-mixed-video-token', url: 'https://v.oneme.ru/synthetic-mixed-video', duration: 3, width: 320, height: 240 } },
+      ] },
+      { label: 'voice', attachments: [{ type: 'audio', payload: { id: 'synthetic-voice-id', token: 'synthetic-voice-token', url: 'https://i.oneme.ru/synthetic-voice' } }] },
+    ]
+    for (const [index, fixture] of cases.entries()) {
+      const messageId = `observed-channel-${fixture.label}`
+      const response = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify({
+        update_type: 'message_created', timestamp: 1_757_844_130_000 + index,
+        message: { recipient: { chat_type: 'channel', chat_id: Number(chatId) },
+          body: { mid: messageId, text: `synthetic ${fixture.label}`, attachments: fixture.attachments } },
+      }) })
+      expect(response.status).toBe(200)
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { source: { messageId } }, include: { source: true } })
+      expect(inbox.source).toMatchObject({ senderSubject: '0', recipientId: chatId, messageId })
+      await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: {
+        type: 'max:process', dedupeKey: `max-process:${inbox.id}`,
+      } } })
+    }
+    expect(await prisma.maxInbox.count()).toBe(cases.length)
+    expect(await prisma.maxSource.count()).toBe(cases.length)
   })
 
   test('uses the bound family owner when a channel post omits sender and denies an unbound channel', async () => {

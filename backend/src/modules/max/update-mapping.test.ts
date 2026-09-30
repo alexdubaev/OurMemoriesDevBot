@@ -104,6 +104,17 @@ describe('MAX update mapping', () => {
     })).toMatchObject({ kind: 'message_created', senderId: '0', recipientId: '-79560265048692', isChannel: true })
   })
 
+  test('maps the observed MAX channel post shape without recipient.user_id or sender', () => {
+    expect(normalizeMaxUpdate({
+      update_type: 'message_created', timestamp: 1700000000123,
+      message: {
+        recipient: { chat_type: 'channel', chat_id: -79560265048692 },
+        body: { mid: 'observed-channel-1', text: 'synthetic channel text', attachments: [] },
+      },
+    })).toEqual({ kind: 'message_created', senderId: '0', recipientId: '-79560265048692', messageId: 'observed-channel-1',
+      occurredAt: '2023-11-14T22:13:20.123Z', text: 'synthetic channel text', attachments: [], isChannel: true })
+  })
+
   test('ignores malformed direct-dialog recipient chat ids safely', () => {
     for (const recipient of [
       { chat_type: 'dialog', chat_id: '900', user_id: 99 },
