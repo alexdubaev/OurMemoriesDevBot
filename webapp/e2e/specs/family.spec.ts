@@ -3,11 +3,68 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createPrisma } from '../../../backend/src/db'
+import { Prisma } from '../../../backend/src/generated/prisma/client'
 
 import { jpegImage, pngImage } from '../helpers/images'
 import { expect, test } from '../helpers/test'
 
 type Owner = { context: BrowserContext; page: Page }
+type HeaderGeometry = {
+  avatar: { x: number; y: number; width: number; height: number }
+  copy: { x: number; y: number; width: number; height: number }
+  gap: string
+  age: string
+}
+
+async function assertFamilyHeader(page: Page, label: string, compareTo?: HeaderGeometry, mode: 'feed' | 'family' = 'feed', childName = 'Лиза', hasPhoto = true) {
+  const header = page.locator(`[data-child-header-mode="${mode}"]`)
+  const avatar = header.locator('.child-avatar-wrap')
+  const image = header.locator('[data-slot="child-avatar-image"]')
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect(header).toBeVisible()
+  await expect(header.getByText(childName, { exact: true })).toBeVisible()
+  const age = (await header.locator('.child-age').innerText()).trim()
+  expect(age).not.toBe('')
+  if (hasPhoto) {
+    await expect(image).toHaveAttribute('alt', `Аватар ${childName}`)
+    await expect(image).toHaveAttribute('src', /^blob:/)
+    await expect(image).toHaveJSProperty('complete', true)
+    expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+  } else {
+    await expect(image).toHaveCount(0)
+    await expect(avatar.locator('[data-slot="avatar-letter"]')).toBeVisible()
+  }
+  const geometry = await page.evaluate((headerMode) => {
+    const root = document.querySelector(`[data-child-header-mode="${headerMode}"]`)!
+    const avatarElement = root.querySelector('.child-avatar-wrap')!
+    const copyElement = root.querySelector('.child-copy')!
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect()
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    }
+    return {
+      avatar: box(avatarElement),
+      copy: box(copyElement),
+      gap: getComputedStyle(root.querySelector('.profile-row')!).columnGap,
+    }
+  }, mode)
+  expect(geometry.avatar.width).toBe(76)
+  expect(geometry.avatar.height).toBe(76)
+  expect(geometry.copy.x - geometry.avatar.x - geometry.avatar.width).toBeGreaterThanOrEqual(9.5)
+  const snapshot: HeaderGeometry = { ...geometry, age }
+  if (compareTo) expect(snapshot).toEqual(compareTo)
+  const state = hasPhoto ? childName === 'Лиза' ? 'photo' : 'long-name' : 'fallback'
+  await page.screenshot({ path: resolve(`e2e/.artifacts/family-header-${mode}-${label}-${state}-${page.viewportSize()!.width}.png`), animations: 'disabled' })
+  return snapshot
+}
+
+async function openFeedForMember(page: Page) {
+  const card = page.locator('[data-slot="family-hub"] .family-hub-card')
+  await expect(card).toHaveCount(1)
+  await expect(card).toBeEnabled()
+  await card.click()
+  await expect(page.locator('[data-child-header-mode="feed"]')).toBeVisible()
+}
 
 /**
  * These specs run the Mini App through the real browser host adapter.  The test host supplies
@@ -300,6 +357,100 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   // Leaving clears the active context.  It must not quietly bootstrap another family.
   await expect.poll(() => requests.familyCreations.length).toBe(0)
   await guest.context.close()
+  await owner.context.close()
+})
+
+test('Feed child header uses the same photo and geometry for own, viewer, and full families', async ({ browser, page }) => {
+  const ownerSubject = 82_000_000 + Math.floor(Math.random() * 10_000_000)
+  const prisma = createPrisma(process.env.TEST_DATABASE_URL!)
+  await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject: String(ownerSubject) } })
+  const childPhotoRequests: Record<'owner' | 'viewer' | 'full', string[]> = { owner: [], viewer: [], full: [] }
+  const recordChildPhotoRequest = (role: keyof typeof childPhotoRequests, expectedPath: string) => (request: import('@playwright/test').Request) => {
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'GET' && path === expectedPath) childPhotoRequests[role].push(path)
+  }
+  const owner = await createCompletedOwner(page, ownerSubject)
+  const ownerGeometry = new Map<number, HeaderGeometry>()
+  const identity = await prisma.externalIdentity.findUniqueOrThrow({
+    where: { provider_subject: { provider: 'telegram', subject: String(ownerSubject) } },
+    include: { user: { include: { ownedFamilies: { include: { children: true } } } } },
+  })
+  const ownFamily = identity.user.ownedFamilies[0]!
+  const childAvatarMediaId = ownFamily.children[0]!.avatarMediaId!
+  const expectedChildPhotoPath = `/api/v1/families/${ownFamily.id}/media/${childAvatarMediaId}/content`
+  const ownerPhotoListener = recordChildPhotoRequest('owner', expectedChildPhotoPath)
+  page.on('request', ownerPhotoListener)
+  await owner.page.getByRole('button', { name: 'Лента' }).click()
+  for (const width of [320, 390, 430]) {
+    await owner.page.setViewportSize({ width, height: 844 })
+    ownerGeometry.set(width, await assertFamilyHeader(owner.page, 'owner'))
+  }
+
+  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  const viewerStartParam = await createInvite(owner.page, 'viewer', 'Бабушка Viewer')
+  const viewer = await inviteePage(browser, ownerSubject + 1, viewerStartParam, 'Viewer Header E2E')
+  const viewerPhotoListener = recordChildPhotoRequest('viewer', expectedChildPhotoPath)
+  viewer.page.on('request', viewerPhotoListener)
+  await viewer.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await viewer.page.getByRole('button', { name: 'Лента' }).click()
+  for (const width of [320, 390, 430]) {
+    await viewer.page.setViewportSize({ width, height: 844 })
+    await assertFamilyHeader(viewer.page, 'viewer', ownerGeometry.get(width))
+  }
+  await owner.page.getByRole('button', { name: 'Готово' }).click()
+
+  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  const fullStartParam = await createInvite(owner.page, 'full', 'Дядя Full')
+  const full = await inviteePage(browser, ownerSubject + 2, fullStartParam, 'Full Header E2E')
+  const fullPhotoListener = recordChildPhotoRequest('full', expectedChildPhotoPath)
+  full.page.on('request', fullPhotoListener)
+  await full.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await full.page.getByRole('button', { name: 'Лента' }).click()
+  for (const width of [320, 390, 430]) {
+    await full.page.setViewportSize({ width, height: 844 })
+    await assertFamilyHeader(full.page, 'full', ownerGeometry.get(width))
+  }
+  await owner.page.getByRole('button', { name: 'Готово' }).click()
+  const child = ownFamily.children[0]!
+  const longName = 'Александра Константиновна Длинная Фамилия'
+  await prisma.child.update({ where: { id: child.id }, data: { displayName: longName } })
+  const refreshedViewer = await inviteePage(browser, ownerSubject + 1, '', 'Viewer Header Reload')
+  const refreshedFull = await inviteePage(browser, ownerSubject + 2, '', 'Full Header Reload')
+  const refreshedSessions = [
+    ['owner', owner], ['viewer', refreshedViewer], ['full', refreshedFull],
+  ] as const
+  await owner.page.reload()
+  await openFeedForMember(owner.page)
+  for (const [label, session] of refreshedSessions.slice(1)) {
+    if (label !== 'owner') await openFeedForMember(session.page)
+  }
+  for (const [label, session] of refreshedSessions) {
+    for (const width of [320, 390, 430]) {
+      await session.page.setViewportSize({ width, height: 844 })
+      await assertFamilyHeader(session.page, label, ownerGeometry.get(width), 'feed', longName)
+    }
+  }
+  await prisma.child.update({ where: { id: child.id }, data: { avatarMediaId: null, avatarCrop: Prisma.DbNull } })
+  for (const [label, session] of refreshedSessions) {
+    await session.page.reload()
+    await openFeedForMember(session.page)
+    for (const width of [320, 390, 430]) {
+      await session.page.setViewportSize({ width, height: 844 })
+      await assertFamilyHeader(session.page, label, ownerGeometry.get(width), 'feed', longName, false)
+    }
+  }
+  await prisma.$disconnect()
+  await viewer.context.close()
+  for (const role of ['owner', 'viewer', 'full'] as const) {
+    expect(childPhotoRequests[role].length).toBeGreaterThan(0)
+    expect(childPhotoRequests[role].every((path) => path === expectedChildPhotoPath)).toBe(true)
+  }
+  owner.page.off('request', ownerPhotoListener)
+  viewer.page.off('request', viewerPhotoListener)
+  full.page.off('request', fullPhotoListener)
+  await full.context.close()
+  await refreshedViewer.context.close()
+  await refreshedFull.context.close()
   await owner.context.close()
 })
 
@@ -819,6 +970,8 @@ test('full member and viewer can edit only their own account profile and cannot 
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await full.page.getByRole('button', { name: 'Открыть участника: Полный участник' }).click()
   await expect(full.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
+  await expect(full.page.getByRole('radiogroup', { name: 'Доступ' })).toHaveCount(0)
+  await expect(full.page.getByLabel('Доступ: Полный доступ')).toContainText('Полный доступ')
   await expect(full.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
   const fullProfilePatch = full.page.waitForRequest((request) => request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/users/me')
   await full.page.getByRole('textbox', { name: 'Имя профиля' }).fill('Полный профиль E2E')
@@ -834,6 +987,8 @@ test('full member and viewer can edit only their own account profile and cannot 
   await viewer.page.getByRole('button', { name: 'Семья' }).click()
   await viewer.page.getByRole('button', { name: 'Открыть участника: Участник viewer' }).click()
   await expect(viewer.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
+  await expect(viewer.page.getByRole('radiogroup', { name: 'Доступ' })).toHaveCount(0)
+  await expect(viewer.page.getByLabel('Доступ: Просмотр')).toContainText('Просмотр')
   await expect(viewer.page.getByRole('button', { name: 'Добавить фото' })).toBeVisible()
   await expect(viewer.page.getByRole('textbox', { name: 'Имя в семье' })).toBeDisabled()
   await expect(viewer.page.getByRole('button', { name: 'Сохранить изменения' })).toHaveCount(0)
