@@ -154,24 +154,49 @@ test('an empty photo caption adds no Open footer and the media itself remains th
 })
 
 test('notes keep selectable story text, omit system labels, and keep the like below the panel', () => {
-  for (const body of ['Привет', 'Сегодня гуляли в парке и впервые кормили уток вместе.', 'Утром мы долго собирались. Потом пошли гулять, встретили друзей и провели весь день вместе. Вечером Лиза уснула в машине по дороге домой.']) {
+  for (const body of ['Привет', 'Сегодня гуляли в парке и впервые кормили уток вместе.', 'Утром мы долго собирались. Потом пошли гулять, встретили друзей и провели весь день вместе. Вечером Лиза уснула в машине по дороге домой.', 'Первая строка\n\nВторая строка ❤️ <script>alert("x")</script>']) {
     const markup = renderFeed(feedClientWith([{ ...noteMemory, body }]))
-    const panelIndex = markup.indexOf('note-story-panel')
+    const panelIndex = markup.indexOf('data-memoly-note-gradient')
     const panelEnd = markup.indexOf('</button>', panelIndex)
     const panelMarkup = markup.slice(panelIndex, panelEnd)
-    const bodyIndex = markup.indexOf(body, panelIndex)
+    const escapedBody = body.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+    const bodyIndex = markup.indexOf(escapedBody, panelIndex)
     const likeIndex = markup.indexOf('class="memory-like')
     expect(panelIndex).toBeGreaterThanOrEqual(0)
     expect(bodyIndex).toBeGreaterThan(panelIndex)
     expect(likeIndex).toBeGreaterThan(bodyIndex)
     expect(markup).not.toContain('Заметка')
-    expect(markup).not.toContain('note-story-label')
+    expect(markup).toContain('memoly-note-gradient__text')
     expect(panelMarkup).not.toContain('data-slot="webp-icon"')
-    expect(markup).toContain('note-sun.webp')
-    expect(markup).toContain('note-leaf-sprig.webp')
-    expect(markup).toContain(`aria-label="Открыть заметку: ${body}"`)
+    expect(panelMarkup).not.toContain('<img')
+    if (body.includes('<script>')) {
+      expect(panelMarkup).toContain('&lt;script&gt;')
+      expect(panelMarkup).not.toContain('<script>')
+    }
+    expect(markup).toContain(`aria-label="Открыть заметку: ${escapedBody}"`)
     expect(markup).not.toContain('>Открыть<')
   }
+})
+
+test('note gradient keeps natural text flow, semantic focus, and system typography', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const rules: postcss.Rule[] = []
+  postcss.parse(css).walkRules((rule) => rules.push(rule))
+  const panel = rules.find((rule) => rule.selector === '[data-memoly-feed] [data-memoly-note-gradient]')
+  const declarations = Object.fromEntries(panel?.nodes?.filter((node): node is postcss.Declaration => node.type === 'decl').map(({ prop, value }) => [prop, value]) ?? [])
+  expect(declarations['min-block-size']).toBe('104px')
+  expect(declarations['inline-size']).toBe('100%')
+  expect(declarations['padding']).toBe('26px 24px')
+  expect(declarations['border-radius']).toBe('24px')
+  expect(declarations['box-shadow']).toBe('none')
+  expect(declarations['font-family']).toContain('-apple-system')
+  expect(declarations['font-size']).toBe('20px')
+  expect(declarations['font-weight']).toBe('400')
+  expect(declarations['line-height']).toBe('1.5')
+  expect(declarations['letter-spacing']).toBe('-.15px')
+  expect(declarations['background-image']).toContain('linear-gradient(120deg')
+  expect(css).not.toContain('.note-story-panel')
+  expect(panel?.nodes?.some((node) => node.type === 'decl' && node.value.includes('!important'))).toBe(false)
 })
 
 test('private video controls use accessible icons and keep the timeline without text buttons', () => {
@@ -470,6 +495,35 @@ test('delete preview cards preserve the selected memory while removing interacti
   expect(markup).not.toContain('Действия с воспоминанием')
   expect(markup).not.toContain('Открыть воспоминание')
   expect(markup).toContain('disabled=""')
+})
+
+test('delete preview notes keep seen hooks and render the gradient as noninteractive text', () => {
+  const seenContentRef = { current: null as HTMLDivElement | null }
+  const markup = renderToStaticMarkup(MemoryCardPresentation({
+    actions: null,
+    authorInitials: 'М',
+    authorName: 'Мама',
+    body: 'Заметка для удаления',
+    kind: 'note',
+    liked: false,
+    likeCount: 0,
+    media: null,
+    memoryId,
+    mode: 'delete-preview',
+    occurredTime: '12 мая 2024, 10:24',
+    onLike: () => undefined,
+    onOpen: () => undefined,
+    seenContentRef,
+  }))
+  const noteIndex = markup.indexOf('data-memoly-note-gradient')
+  const noteEnd = markup.indexOf('</div>', noteIndex)
+  const noteMarkup = markup.slice(noteIndex, noteEnd)
+
+  expect(markup).toContain('data-seen-main="" data-seen-ready="true" data-slot="memoly-note-layout"')
+  expect(markup).toContain('memoly-memory-delete-preview')
+  expect(noteIndex).toBeGreaterThanOrEqual(0)
+  expect(noteMarkup).not.toContain('<button')
+  expect(noteMarkup).toContain('Заметка для удаления')
 })
 
 test('video captions remain visible without becoming a separate detail button', () => {
