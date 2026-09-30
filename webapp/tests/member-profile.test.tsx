@@ -92,9 +92,24 @@ test('owner, full member, and viewer can edit only their own account profile', (
     expect(html).toContain('Имя профиля')
     expect(html).toContain('Сохранить имя профиля')
     expect(html).toContain('Добавить фото')
+    expect(html).not.toContain('role="radiogroup"')
+    expect(html).not.toContain('name="member-role-')
     expect(html).toContain('image/jpeg,image/png,image/heic,image/heif')
     if (variation.isOwner) expect(html).toContain('Роль владельца изменить нельзя')
   }
+})
+
+test('a viewer can see their access level but cannot get role controls on their own profile', () => {
+  const self = { ...member, role: 'viewer' as const }
+  const html = renderProfile(self, self.userId, { canEditAlias: false, canManageRole: false, canRemove: false })
+
+  expect(html).toContain('Имя профиля')
+  expect(html).toContain('Сохранить имя профиля')
+  expect(html).toContain('Добавить фото')
+  expect(html).toContain('Доступ: Просмотр')
+  expect(html).not.toContain('role="radiogroup"')
+  expect(html).not.toContain('name="member-role-')
+  expect(html).not.toContain('Сохранить изменения')
 })
 
 test('another member has read-only account details while existing owner controls remain', () => {

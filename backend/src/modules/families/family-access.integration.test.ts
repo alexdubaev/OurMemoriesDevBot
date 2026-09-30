@@ -862,6 +862,69 @@ maybeDescribe('Family access and invitations', () => {
     expect(roleChange.response.status).toBe(403)
   })
 
+  test('only an owner can change a member role and family scope prevents cross-family mutation', async () => {
+    const owner = await admittedUser('Owner', '12231')
+    const viewer = await admittedUser('Viewer', '12232')
+    const otherViewer = await admittedUser('Other viewer', '12233')
+    const otherOwner = await admittedUser('Other owner', '12234')
+    const otherFamilyMember = await admittedUser('Other family member', '12235')
+    const family = await createFamily(owner.token, 'Семья A')
+    const otherFamily = await createFamily(otherOwner.token, 'Семья B')
+
+    async function inviteAndAccept(familyId: string, actorToken: string, inviteeToken: string, role: 'viewer' | 'full') {
+      const invite = await jsonRequest(`/api/v1/families/${familyId}/invites`, actorToken, 'POST', { role })
+      const accepted = await jsonRequest('/api/v1/invites/accept', inviteeToken, 'POST', { token: invite.body.rawToken })
+      return accepted.body.membership
+    }
+
+    const viewerMembership = await inviteAndAccept(family.body.family.id, owner.token, viewer.token, 'viewer')
+    const otherViewerMembership = await inviteAndAccept(family.body.family.id, owner.token, otherViewer.token, 'viewer')
+    const outsideMembership = await inviteAndAccept(otherFamily.body.family.id, otherOwner.token, otherFamilyMember.token, 'viewer')
+    const familyPath = `/api/v1/families/${family.body.family.id}/members`
+
+    const selfEscalation = await jsonRequest(`${familyPath}/${viewer.userId}`, viewer.token, 'PATCH', {
+      role: 'full', expectedVersion: viewerMembership.version,
+    })
+    expect(selfEscalation.response.status).toBe(403)
+    const otherEscalation = await jsonRequest(`${familyPath}/${otherViewer.userId}`, viewer.token, 'PATCH', {
+      role: 'full', expectedVersion: otherViewerMembership.version,
+    })
+    expect(otherEscalation.response.status).toBe(403)
+    const viewerSelfAfter = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } },
+      select: { role: true, version: true },
+    })
+    const otherViewerAfter = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.body.family.id, userId: otherViewer.userId } },
+      select: { role: true, version: true },
+    })
+    expect(viewerSelfAfter).toEqual({ role: 'viewer', version: viewerMembership.version })
+    expect(otherViewerAfter).toEqual({ role: 'viewer', version: otherViewerMembership.version })
+
+    const ownerChange = await jsonRequest(`${familyPath}/${otherViewer.userId}`, owner.token, 'PATCH', {
+      role: 'full', expectedVersion: otherViewerMembership.version,
+    })
+    expect(ownerChange.response.status).toBe(200)
+    expect(ownerChange.body.membership.role).toBe('full')
+
+    const crossFamily = await jsonRequest(`${familyPath}/${otherFamilyMember.userId}`, owner.token, 'PATCH', {
+      role: 'full', expectedVersion: outsideMembership.version,
+    })
+    expect(crossFamily.response.status).toBe(404)
+    const foreignScope = await jsonRequest(
+      `/api/v1/families/${otherFamily.body.family.id}/members/${otherFamilyMember.userId}`,
+      owner.token,
+      'PATCH',
+      { role: 'full', expectedVersion: outsideMembership.version },
+    )
+    expect(foreignScope.response.status).toBe(404)
+    const unchanged = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: otherFamily.body.family.id, userId: otherFamilyMember.userId } },
+      select: { role: true, version: true },
+    })
+    expect(unchanged).toEqual({ role: 'viewer', version: outsideMembership.version })
+  })
+
   test('lets full change only a non-owner family alias', async () => {
     const owner = await admittedUser('Owner', '12201')
     const full = await admittedUser('Full', '12202')
