@@ -4,8 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from './App'
 import { AuthProvider } from './features/auth'
+import { installAppZoomPrevention } from './platform/app-zoom'
 import { createHostBridge } from './platform/telegram'
 import './production.css'
+
+installAppZoomPrevention(document)
 
 const hostBridge = createHostBridge(window, {
   maxBotUsername: import.meta.env.VITE_MAX_BOT_USERNAME,

@@ -104,3 +104,32 @@ test('runtime icon URLs resolve through the canonical asset manifest', () => {
     width: 72,
   })
 })
+
+test('note story decorations are transparent optimized WebP assets mirrored to the public tree', async () => {
+  const sourceDir = path.resolve(import.meta.dir, '../../assets/feed-notes')
+  const publicDir = path.resolve(import.meta.dir, '../public/assets/feed-notes')
+  const expected = [
+    { height: 76, name: 'note-sun.webp', width: 80 },
+    { height: 100, name: 'note-leaf-sprig.webp', width: 76 },
+  ]
+
+  expect((await readdir(sourceDir)).toSorted()).toEqual(expected.map(({ name }) => name).toSorted())
+  expect((await readdir(publicDir)).toSorted()).toEqual(expected.map(({ name }) => name).toSorted())
+
+  for (const asset of expected) {
+    const sourcePath = path.join(sourceDir, asset.name)
+    const publicPath = path.join(publicDir, asset.name)
+    const sourceBytes = await readFile(sourcePath)
+    const manifestEntry = assetManifest.items.find((item) => item.path === `assets/feed-notes/${asset.name}`)
+    const [metadata, file] = await Promise.all([sharp(sourcePath).metadata(), stat(sourcePath)])
+
+    expect(metadata.format).toBe('webp')
+    expect(metadata.width).toBe(asset.width)
+    expect(metadata.height).toBe(asset.height)
+    expect(metadata.hasAlpha).toBe(true)
+    expect(file.size).toBeLessThan(20 * 1024)
+    expect(file.size).toBe(manifestEntry?.bytes)
+    expect(createHash('sha256').update(sourceBytes).digest('hex')).toBe(manifestEntry?.sha256)
+    expect(await readFile(publicPath)).toEqual(sourceBytes)
+  }
+})

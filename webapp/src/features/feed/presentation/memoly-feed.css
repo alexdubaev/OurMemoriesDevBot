@@ -282,10 +282,12 @@
 [data-memoly-feed] .caption-open { width: 100%; min-width: 0; padding: 0; color: inherit; text-align: left; }
 [data-memoly-feed] .caption-open-empty { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border-radius: 22px; }
 [data-memoly-feed] .note-story-slot { padding-top: 3px; }
-[data-memoly-feed] .note-story-panel { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: stretch; gap: 10px; padding: 16px 17px 18px; border: 1px solid color-mix(in srgb, var(--theme-accent) 18%, var(--theme-line)); border-radius: 20px; color: var(--theme-text, var(--memoly-ink)); background: linear-gradient(145deg, color-mix(in srgb, var(--theme-accent-soft) 40%, var(--theme-surface-hi)), var(--theme-surface-lo)); box-shadow: 3px 5px 13px color-mix(in srgb, var(--theme-shadow-soft) 65%, transparent), -3px -3px 9px color-mix(in srgb, var(--theme-glow) 75%, transparent), inset 1px 1px 0 color-mix(in srgb, var(--theme-glow) 72%, transparent); text-align: left; white-space: normal; }
+[data-memoly-feed] .note-story-panel { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 17px 18px; border: 1px solid color-mix(in srgb, var(--theme-accent) 12%, var(--theme-line)); border-radius: 20px; color: var(--theme-text, var(--memoly-ink)); background: linear-gradient(145deg, color-mix(in srgb, var(--theme-accent-soft) 40%, var(--theme-surface-hi)), var(--theme-surface-lo)); box-shadow: 3px 5px 13px color-mix(in srgb, var(--theme-shadow-soft) 65%, transparent), -3px -3px 9px color-mix(in srgb, var(--theme-glow) 75%, transparent), inset 1px 1px 0 color-mix(in srgb, var(--theme-glow) 72%, transparent); text-align: left; white-space: normal; -webkit-user-select: text; user-select: text; }
 [data-memoly-feed] .note-story-panel:focus-visible { outline: 2px solid var(--theme-accent-deep); outline-offset: 3px; }
-[data-memoly-feed] .note-story-label { display: inline-flex; align-items: center; gap: 7px; color: var(--theme-text-muted, var(--memoly-muted)); font-size: 11px; font-weight: 650; letter-spacing: .02em; }
-[data-memoly-feed] .note-story-text { display: block; color: var(--theme-text, var(--memoly-ink)); font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+[data-memoly-feed] .note-story-decoration { display: flex; min-height: 32px; align-items: center; justify-content: flex-end; gap: 3px; pointer-events: none; }
+[data-memoly-feed] .note-story-sun { width: 32px; height: auto; }
+[data-memoly-feed] .note-story-sprig { width: 24px; height: 32px; object-fit: contain; }
+[data-memoly-feed] .note-story-text { display: block; min-width: 0; color: var(--theme-text, var(--memoly-ink)); font-size: 20px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 [data-memoly-feed] .note-story-panel:hover { border-color: color-mix(in srgb, var(--theme-accent) 32%, var(--theme-line)); }
 
 @media (max-width: 355px) {

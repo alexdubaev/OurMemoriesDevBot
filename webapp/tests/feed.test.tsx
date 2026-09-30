@@ -153,16 +153,23 @@ test('an empty photo caption adds no Open footer and the media itself remains th
   expect(markup).not.toContain('caption-open-empty')
 })
 
-test('notes keep all text in a diary panel before the like control', () => {
+test('notes keep selectable story text, omit system labels, and keep the like below the panel', () => {
   for (const body of ['Привет', 'Сегодня гуляли в парке и впервые кормили уток вместе.', 'Утром мы долго собирались. Потом пошли гулять, встретили друзей и провели весь день вместе. Вечером Лиза уснула в машине по дороге домой.']) {
     const markup = renderFeed(feedClientWith([{ ...noteMemory, body }]))
     const panelIndex = markup.indexOf('note-story-panel')
+    const panelEnd = markup.indexOf('</button>', panelIndex)
+    const panelMarkup = markup.slice(panelIndex, panelEnd)
     const bodyIndex = markup.indexOf(body, panelIndex)
     const likeIndex = markup.indexOf('class="memory-like')
     expect(panelIndex).toBeGreaterThanOrEqual(0)
     expect(bodyIndex).toBeGreaterThan(panelIndex)
     expect(likeIndex).toBeGreaterThan(bodyIndex)
-    expect(markup).toContain('>Заметка</span>')
+    expect(markup).not.toContain('Заметка')
+    expect(markup).not.toContain('note-story-label')
+    expect(panelMarkup).not.toContain('data-slot="webp-icon"')
+    expect(markup).toContain('note-sun.webp')
+    expect(markup).toContain('note-leaf-sprig.webp')
+    expect(markup).toContain(`aria-label="Открыть заметку: ${body}"`)
     expect(markup).not.toContain('>Открыть<')
   }
 })
