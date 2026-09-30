@@ -26,23 +26,15 @@ export function NoteStoryPresentation({ body, interactive, onOpen }: NoteStoryPr
     onOpen()
   }
 
-  const contents = (
-    <>
-      <span aria-hidden="true" className="note-story-decoration">
-        <img alt="" className="note-story-sun" height="76" src="/assets/feed-notes/note-sun.webp" width="80" />
-        <img alt="" className="note-story-sprig" height="100" src="/assets/feed-notes/note-leaf-sprig.webp" width="76" />
-      </span>
-      <Typography as="span" className="note-story-text" variant="memoryBody">{body}</Typography>
-    </>
-  )
+  const contents = <Typography as="span" className="memoly-note-gradient__text" variant="memoryBody">{body}</Typography>
 
   if (!interactive) {
-    return <Typography asChild className="note-story-panel" variant="memoryBody"><div>{contents}</div></Typography>
+    return <Typography asChild className="memoly-note-gradient" variant="memoryBody"><div data-memoly-note-gradient="">{contents}</div></Typography>
   }
 
   return (
-    <Typography asChild className="note-story-panel" variant="memoryBody">
-      <button aria-label={`Открыть заметку: ${body}`} onClick={handleOpen} type="button">{contents}</button>
+    <Typography asChild className="memoly-note-gradient" variant="memoryBody">
+      <button aria-label={`Открыть заметку: ${body}`} data-memoly-note-gradient="" onClick={handleOpen} type="button">{contents}</button>
     </Typography>
   )
 }
