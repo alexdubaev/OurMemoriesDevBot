@@ -1,9 +1,11 @@
 import {
   likeResponseSchema,
+  reactionResponseSchema,
   memoryDtoSchema,
   memoryPageSchema,
   telegramVideoOpenResponseSchema,
   type MemoryPage,
+  type MemoryReaction,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -46,6 +48,14 @@ export function setMemoryLike(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}/like`,
     likeResponseSchema,
     { method: 'PUT', body: { liked } },
+  )
+}
+
+export function setMemoryReaction(transport: AuthenticatedTransport, familyId: string, memoryId: string, reaction: MemoryReaction | null) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}/reaction`,
+    reactionResponseSchema,
+    { method: 'PUT', body: { reaction } },
   )
 }
 

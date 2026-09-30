@@ -3,6 +3,7 @@ import { z } from 'zod'
 const uuid = z.uuid()
 
 export const memoryKindSchema = z.enum(['note', 'photo', 'video', 'voice', 'media'])
+export const memoryReactionSchema = z.enum(['heart', 'love', 'laugh', 'touched', 'wow', 'clap'])
 export const memoryStatusSchema = z.enum(['processing', 'published', 'failed', 'deleted'])
 
 const plainTextSchema = z.string().superRefine((value, context) => {
@@ -188,6 +189,8 @@ export const memoryDtoSchema = z.object({
   version: z.number().int().positive(),
   status: memoryStatusSchema,
   attachments: z.array(memoryAttachmentSchema),
+  reactionCounts: z.partialRecord(memoryReactionSchema, z.number().int().positive()),
+  currentUserReaction: memoryReactionSchema.nullable(),
   likes: z.object({ count: z.number().int().nonnegative(), likedByMe: z.boolean() }).strict(),
   capabilities: z.object({ edit: z.boolean(), delete: z.boolean(), like: z.boolean() }).strict(),
 }).strict()
@@ -202,17 +205,27 @@ export const likeResponseSchema = z.object({
   likedByMe: z.boolean(),
 }).strict()
 
+export const reactionResponseSchema = z.object({
+  reactionCounts: z.partialRecord(memoryReactionSchema, z.number().int().positive()),
+  currentUserReaction: memoryReactionSchema.nullable(),
+  likes: z.object({ count: z.number().int().nonnegative(), likedByMe: z.boolean() }).strict(),
+}).strict()
+export const setReactionRequestSchema = z.object({ reaction: memoryReactionSchema.nullable() }).strict()
+
 /** The URL contains only a short-lived opaque navigation pointer, never a Telegram file id. */
 export const telegramVideoOpenResponseSchema = z.object({
   telegramDeepLink: z.string().url().max(512),
 }).strict()
 
 export type MemoryKind = z.infer<typeof memoryKindSchema>
+export type MemoryReaction = z.infer<typeof memoryReactionSchema>
 export type MemoryStatus = z.infer<typeof memoryStatusSchema>
 export type CreateMemoryRequest = z.infer<typeof createMemoryRequestSchema>
 export type UpdateMemoryRequest = z.infer<typeof updateMemoryRequestSchema>
 export type ListMemoriesQuery = z.infer<typeof listMemoriesQuerySchema>
 export type SeenMemoriesRequest = z.infer<typeof seenMemoriesRequestSchema>
+export type SetReactionRequest = z.infer<typeof setReactionRequestSchema>
+export type ReactionResponse = z.infer<typeof reactionResponseSchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
 export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>

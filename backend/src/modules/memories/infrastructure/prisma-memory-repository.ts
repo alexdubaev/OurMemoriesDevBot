@@ -1,6 +1,8 @@
 import type {
   CreateMemoryRequest,
   LikeResponse,
+  MemoryReaction,
+  ReactionResponse,
   MemoryDto,
   MemoryStatus,
   SeenMemoriesRequest,
@@ -288,6 +290,10 @@ export class PrismaMemoryRepository implements MemoryRepository {
   }
 
   setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse> {
+    return this.setReaction(scope, memoryId, liked ? 'heart' : null).then((result) => result.likes)
+  }
+
+  setReaction(scope: FamilyScope, memoryId: string, reaction: MemoryReaction | null): Promise<ReactionResponse> {
     return this.db.$transaction(async (tx) => {
       await lockMember(tx, scope, 'member')
       const lockName = `memory-like:${memoryId}:${scope.principal.userId}`
@@ -299,30 +305,30 @@ export class PrismaMemoryRepository implements MemoryRepository {
         select: { id: true },
       })
       if (!memory) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
-      if (liked) {
+      if (reaction !== null) {
         await tx.memoryLike.upsert({
           where: { memoryId_userId: { memoryId, userId: scope.principal.userId } },
-          update: {},
-          create: { familyId: scope.familyId, memoryId, userId: scope.principal.userId },
+          update: { reaction },
+          create: { familyId: scope.familyId, memoryId, userId: scope.principal.userId, reaction },
         })
       } else {
         await tx.memoryLike.deleteMany({
           where: { familyId: scope.familyId, memoryId, userId: scope.principal.userId },
         })
       }
-      const [count, ownLike] = await Promise.all([
-        tx.memoryLike.count({
-          where: {
-            familyId: scope.familyId,
-            memoryId,
-            member: { revokedAt: null, family: { status: 'active' } },
-          },
-        }),
-        tx.memoryLike.findUnique({
-          where: { memoryId_userId: { memoryId, userId: scope.principal.userId } },
-        }),
-      ])
-      return { count, likedByMe: ownLike !== null }
+      const grouped = await tx.memoryLike.groupBy({
+        by: ['reaction'],
+        where: { familyId: scope.familyId, memoryId,
+          member: { revokedAt: null, family: { status: 'active' } } },
+        _count: { _all: true },
+      })
+      const reactionCounts = Object.fromEntries(grouped.map(({ reaction: kind, _count }) => [kind, _count._all])) as ReactionResponse['reactionCounts']
+      const count = grouped.reduce((total, row) => total + row._count._all, 0)
+      return {
+        reactionCounts,
+        currentUserReaction: reaction,
+        likes: { count, likedByMe: reaction === 'heart' },
+      }
     })
   }
 
@@ -557,7 +563,7 @@ function memoryInclude() {
     } },
     likes: {
       where: { member: { revokedAt: null, family: { status: 'active' as const } } },
-      select: { userId: true },
+      select: { userId: true, reaction: true },
     },
     media: {
       orderBy: { position: 'asc' as const },
@@ -588,7 +594,7 @@ function dto(
     version: number
     status: 'processing' | 'published' | 'failed' | 'deleted'
     author: { displayName: string | null; avatars: Array<{ id: string }>; familyMemberships: Array<{ familyId: string }> }
-    likes: Array<{ userId: string }>
+    likes: Array<{ userId: string; reaction: MemoryReaction }>
     media: Array<{ position: number; asset: {
       id: string
       mediaKind: 'photo' | 'video' | 'voice'
@@ -662,9 +668,14 @@ function dto(
         playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${reference.id}/content`,
       } })),
     ].sort((a, b) => a.position - b.position).map((entry) => entry.attachment),
+    reactionCounts: memory.likes.reduce((counts, like) => {
+      counts[like.reaction] = (counts[like.reaction] ?? 0) + 1
+      return counts
+    }, {} as Record<MemoryReaction, number>),
+    currentUserReaction: memory.likes.find((like) => like.userId === principalUserId)?.reaction ?? null,
     likes: {
       count: memory.likes.length,
-      likedByMe: memory.likes.some((like) => like.userId === principalUserId),
+      likedByMe: memory.likes.some((like) => like.userId === principalUserId && like.reaction === 'heart'),
     },
     capabilities: { edit: role === 'full', delete: role === 'full', like: true },
   }
@@ -690,11 +701,23 @@ async function lockMediaAssets(tx: Pick<PrismaTransactionClient, '$queryRaw'>, f
 
 function memorySnapshot(snapshot: unknown): MemoryDto {
   const normalizedSnapshot = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
-    ? {
-        ...snapshot,
-        ...(!Object.hasOwn(snapshot, 'firstPublishedAt') ? { firstPublishedAt: null } : {}),
-        ...(!Object.hasOwn(snapshot, 'sourcePublishedAt') ? { sourcePublishedAt: null } : {}),
-      }
+    ? (() => {
+        const legacyLikes = 'likes' in snapshot && snapshot.likes && typeof snapshot.likes === 'object'
+          ? snapshot.likes as { count?: unknown; likedByMe?: unknown }
+          : undefined
+        const legacyHeartCount = typeof legacyLikes?.count === 'number' && legacyLikes.count > 0
+          ? { heart: legacyLikes.count }
+          : {}
+        return {
+          ...snapshot,
+          ...(!Object.hasOwn(snapshot, 'firstPublishedAt') ? { firstPublishedAt: null } : {}),
+          ...(!Object.hasOwn(snapshot, 'sourcePublishedAt') ? { sourcePublishedAt: null } : {}),
+          ...(!Object.hasOwn(snapshot, 'reactionCounts') ? { reactionCounts: legacyHeartCount } : {}),
+          ...(!Object.hasOwn(snapshot, 'currentUserReaction')
+            ? { currentUserReaction: legacyLikes?.likedByMe === true ? 'heart' : null }
+            : {}),
+        }
+      })()
     : snapshot
   const parsed = memoryDtoSchema.safeParse(normalizedSnapshot)
   if (!parsed.success) throw new MemoryFailure('conflict', 'Результат запроса больше недоступен')

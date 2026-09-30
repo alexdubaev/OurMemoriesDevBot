@@ -24,10 +24,10 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
   const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))
     .map((entry) => entry.name).sort()
-  expect(migrationNames).toHaveLength(43)
+  expect(migrationNames.length).toBeGreaterThanOrEqual(43)
   expect(migrationNames[38]).toBe(lastPreBackupMigration)
   expect(migrationNames.slice(39, 42)).toEqual(backupMigrations)
-  expect(migrationNames.slice(42)).toEqual([lifecycleMigration])
+  expect(migrationNames[42]).toBe(lifecycleMigration)
 
   const databaseName = `int1_max_upgrade_${process.pid}_${Date.now()}_${randomUUID().slice(0, 8)}`
   const upgradedUrl = new URL(databaseUrl)
@@ -131,9 +131,9 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
       `SELECT migration_name FROM "_prisma_migrations"
        WHERE migration_name > $1 ORDER BY migration_name`, [lastPreBackupMigration],
     )
-    expect(applied.rows.map((row) => row.migration_name)).toEqual([...backupMigrations, lifecycleMigration])
+    expect(applied.rows.map((row) => row.migration_name)).toEqual(migrationNames.slice(39))
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM "_prisma_migrations"`))
-      .rows[0].count).toBe(43)
+      .rows[0].count).toBe(migrationNames.length)
     expect((await database.query(legacySql, [legacyMemoryId])).rows).toEqual(before.rows)
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM max_memory_backups`))
       .rows[0].count).toBe(0)

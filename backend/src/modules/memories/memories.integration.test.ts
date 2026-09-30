@@ -122,7 +122,7 @@ maybeDescribe('Memories API', () => {
     expect(replay.body).toEqual(original)
   })
 
-  test('replays a pre-MM-0 idempotency snapshot with absent temporal fields as null', async () => {
+  test('replays a legacy idempotency snapshot with temporal and reaction fields normalized', async () => {
     const owner = await admittedUser('Владелец', '32002')
     const family = await createFamily(owner.token, 'Семья')
     const key = randomUUID()
@@ -134,11 +134,15 @@ maybeDescribe('Memories API', () => {
     const legacySnapshot = { ...(idempotencyRecord.responseSnapshot as Record<string, unknown>) }
     delete legacySnapshot.firstPublishedAt
     delete legacySnapshot.sourcePublishedAt
+    delete legacySnapshot.reactionCounts
+    delete legacySnapshot.currentUserReaction
+    legacySnapshot.likes = { count: 1, likedByMe: true }
     await prisma.idempotencyRecord.update({ where: { id: idempotencyRecord.id }, data: { responseSnapshot: legacySnapshot as Prisma.InputJsonValue } })
 
     const replay = await request(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', input, key)
     expect(replay.response.status).toBe(200)
-    expect(replay.body).toMatchObject({ firstPublishedAt: null, sourcePublishedAt: null })
+    expect(replay.body).toMatchObject({ firstPublishedAt: null, sourcePublishedAt: null,
+      reactionCounts: { heart: 1 }, currentUserReaction: 'heart' })
     expect(replay.body.id).toBe(created.body.id)
   })
 
@@ -306,6 +310,49 @@ maybeDescribe('Memories API', () => {
     const reactivatedView = await request(`/api/v1/families/${family.body.family.id}/memories/${created.body.id}`,
       owner.token, 'GET', undefined)
     expect(reactivatedView.body.likes).toEqual({ count: 1, likedByMe: false })
+  })
+
+  test('sets, replaces, and removes one typed reaction per member and aggregates sparse counts', async () => {
+    const owner = await admittedUser('Владелец', '37101')
+    const viewer = await admittedUser('Зритель', '37102')
+    const family = await createFamily(owner.token, 'Семья реакций')
+    const invite = await request(`/api/v1/families/${family.body.family.id}/invites`, owner.token, 'POST', { role: 'viewer' }, randomUUID())
+    await request('/api/v1/invites/accept', viewer.token, 'POST', { token: invite.body.rawToken })
+    const memory = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Реакции')
+    const endpoint = `/api/v1/families/${family.body.family.id}/memories/${memory.body.id}/reaction`
+    expect((await request(endpoint, viewer.token, 'PUT', { reaction: 'party' })).response.status).toBe(422)
+    const outsider = await admittedUser('Посторонний', '37103')
+    expect((await request(endpoint, outsider.token, 'PUT', { reaction: 'heart' })).response.status).toBe(404)
+    const heart = await request(endpoint, viewer.token, 'PUT', { reaction: 'heart' })
+    expect(heart.body).toMatchObject({ reactionCounts: { heart: 1 }, currentUserReaction: 'heart', likes: { count: 1, likedByMe: true } })
+    const replaced = await request(endpoint, viewer.token, 'PUT', { reaction: 'laugh' })
+    expect(replaced.body).toMatchObject({ reactionCounts: { laugh: 1 }, currentUserReaction: 'laugh', likes: { count: 1, likedByMe: false } })
+    expect(await prisma.memoryLike.count({ where: { memoryId: memory.body.id, userId: viewer.userId } })).toBe(1)
+    const beforeReplacement = await prisma.memoryLike.findUniqueOrThrow({
+      where: { memoryId_userId: { memoryId: memory.body.id, userId: viewer.userId } },
+    })
+    await request(endpoint, viewer.token, 'PUT', { reaction: 'wow' })
+    const afterReplacement = await prisma.memoryLike.findUniqueOrThrow({
+      where: { memoryId_userId: { memoryId: memory.body.id, userId: viewer.userId } },
+    })
+    expect(afterReplacement.createdAt).toEqual(beforeReplacement.createdAt)
+    const raced = await Promise.all([
+      request(endpoint, viewer.token, 'PUT', { reaction: 'laugh' }),
+      request(endpoint, viewer.token, 'PUT', { reaction: 'clap' }),
+    ])
+    expect(raced.every(({ response }) => response.status === 200)).toBe(true)
+    const afterRace = await prisma.memoryLike.findUniqueOrThrow({
+      where: { memoryId_userId: { memoryId: memory.body.id, userId: viewer.userId } },
+    })
+    expect(['laugh', 'clap']).toContain(afterRace.reaction)
+    expect(await prisma.memoryLike.count({ where: { memoryId: memory.body.id, userId: viewer.userId } })).toBe(1)
+    await request(endpoint, viewer.token, 'PUT', { reaction: 'laugh' })
+    await request(endpoint, owner.token, 'PUT', { reaction: 'love' })
+    const feed = await request(`/api/v1/families/${family.body.family.id}/memories`, viewer.token, 'GET', undefined)
+    expect(feed.body.items[0]).toMatchObject({ reactionCounts: { love: 1, laugh: 1 }, currentUserReaction: 'laugh' })
+    const removed = await request(endpoint, viewer.token, 'PUT', { reaction: null })
+    expect(removed.body).toMatchObject({ reactionCounts: { love: 1 }, currentUserReaction: null, likes: { count: 1, likedByMe: false } })
+    expect(await prisma.memoryLike.findUnique({ where: { memoryId_userId: { memoryId: memory.body.id, userId: viewer.userId } } })).toBeNull()
   })
 
   test('serializes revoke against an in-flight create authorization', async () => {

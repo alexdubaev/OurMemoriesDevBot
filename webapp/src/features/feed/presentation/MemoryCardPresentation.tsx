@@ -1,11 +1,11 @@
 import type { ReactNode, Ref } from 'react'
-import type { MemoryDto } from '@web-app-demo/contracts'
+import type { MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
 
-import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
 import { MemberAvatarImage } from '@/features/avatar'
 import { NoteStoryPresentation } from './NoteStoryPresentation'
+import { MemoryReactions } from './MemoryReactions'
 
 export type MemoryCardPresentationProps = {
   actions: ReactNode
@@ -17,14 +17,14 @@ export type MemoryCardPresentationProps = {
   childAvatarCrop?: ChildAvatarCrop | null
   body: string
   kind: MemoryDto['kind']
-  liked: boolean
-  likeCount: number
+  reactionCounts: MemoryDto['reactionCounts']
+  currentUserReaction: MemoryReaction | null
   media: ReactNode
   memoryId: string
   mode?: 'feed' | 'delete-preview'
   isDeleteSource?: boolean
   occurredTime: string
-  onLike: () => void
+  onReaction: (reaction: MemoryReaction | null) => void
   onOpen: () => void
   seenContentRef?: Ref<HTMLDivElement>
 }
@@ -36,14 +36,14 @@ export function MemoryCardPresentation({
   authorAvatarPath,
   body,
   kind,
-  liked,
-  likeCount,
+  reactionCounts,
+  currentUserReaction,
   media,
   memoryId,
   mode = 'feed',
   isDeleteSource = false,
   occurredTime,
-  onLike,
+  onReaction,
   onOpen,
   seenContentRef,
 }: MemoryCardPresentationProps) {
@@ -64,7 +64,7 @@ export function MemoryCardPresentation({
           ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
           : hasCaption ? <div className="caption"><MemoryOpenButton body={body} interactive={interactive} kind={kind} onOpen={onOpen} /></div> : null}
       <div className="actions">
-        <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
+        <MemoryReactions counts={reactionCounts ?? {}} current={currentUserReaction ?? null} interactive={interactive} onSelect={onReaction} />
       </div>
     </article>
   )
@@ -80,20 +80,4 @@ function MemoryOpenButton({ body, interactive, kind, onOpen }: { body: string; i
   const content = body
   if (!interactive) return <Typography as="div" className="caption-open" variant="memoryCaption">{content}</Typography>
   return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className="caption-open" onClick={onOpen} type="button">{content}</button></Typography>
-}
-
-function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: boolean; liked: boolean; likeCount: number; onLike: () => void }) {
-  return (
-    <button
-      aria-label={liked ? 'Убрать сердечко' : 'Поставить сердечко'}
-      aria-pressed={liked}
-      className={`memory-like${liked ? ' is-liked' : ''}`}
-      disabled={!interactive}
-      onClick={onLike}
-      type="button"
-    >
-      <WebpIcon decorative monochrome name={liked ? 'heart-filled' : 'heart'} size={20} state={liked ? 'active' : 'default'} />
-      {likeCount > 0 ? <Typography as="span" variant="memoryMeta">{likeCount}</Typography> : null}
-    </button>
-  )
 }

@@ -8,7 +8,9 @@ import {
   maxVideoAttachmentSchema,
   maxVideoReadinessSchema,
   memoryDtoSchema,
+  reactionResponseSchema,
   seenMemoriesRequestSchema,
+  setReactionRequestSchema,
   telegramVideoAttachmentSchema,
 } from './memories'
 
@@ -127,10 +129,19 @@ describe('memory contracts', () => {
       author: { id: '018f01d8-0c2a-7c25-bf83-ae68985c7e92', name: 'Автор', avatarPath: null },
       kind: 'media' as const, body: 'Подпись', occurredAt: timestamp, createdAt: timestamp,
       firstPublishedAt: timestamp, sourcePublishedAt: null, version: 1, status: 'published' as const, attachments: [],
+      reactionCounts: {}, currentUserReaction: null,
       likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true },
     }
     expect(memoryDtoSchema.parse(memory)).toEqual(memory)
     expect(() => memoryDtoSchema.parse({ ...memory, sourcePublishedAt: 'not-an-instant' })).toThrow()
+  })
+
+  test('limits reactions to the fixed set and positive sparse counts', () => {
+    expect(setReactionRequestSchema.parse({ reaction: 'touched' })).toEqual({ reaction: 'touched' })
+    expect(setReactionRequestSchema.parse({ reaction: null })).toEqual({ reaction: null })
+    expect(() => setReactionRequestSchema.parse({ reaction: 'party' })).toThrow()
+    expect(() => reactionResponseSchema.parse({ reactionCounts: { heart: 0 }, currentUserReaction: null,
+      likes: { count: 0, likedByMe: false } })).toThrow()
   })
 
   test('accepts only backend API paths in media DTOs', () => {

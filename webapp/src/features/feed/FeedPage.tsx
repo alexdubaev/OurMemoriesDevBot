@@ -20,7 +20,7 @@ import { loadFeed, loadMemory, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
 import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
-import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryLike } from './queries'
+import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryReaction } from './queries'
 import { refreshFromTop, shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { usePlaybackRegistration } from './use-playback-registration'
@@ -103,7 +103,7 @@ export function FeedPage({
   const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
-  const like = useMemoryLike(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
+  const reaction = useMemoryReaction(transport, familyId, accountId, membershipEpoch ?? 0)
   const [actionsMemory, setActionsMemory] = useState<MemoryDto | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MemoryDto | null>(null)
   const [deleteTargetIndex, setDeleteTargetIndex] = useState<number | null>(null)
@@ -332,15 +332,15 @@ export function FeedPage({
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
           body={memory.body}
           kind={memory.kind}
-          liked={memory.likes.likedByMe}
-          likeCount={memory.likes.count}
+          reactionCounts={memory.reactionCounts}
+          currentUserReaction={memory.currentUserReaction}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
             ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           seenContentRef={memory.author.id !== accountId ? registerSeenContent(memory.id, 'feed') : undefined}
           occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
-          onLike={() => like.mutate({ memoryId: memory.id, liked: !memory.likes.likedByMe })}
+          onReaction={(next) => reaction.setReaction(memory.id, next)}
           onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 1)) { const index = mixedIndexes.current.get(memory.id) ?? 0; setMixedViewer({ memory, index, photoUrl: mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) } else setDetail(memory) }}
         />
       }} /> : null}
@@ -588,13 +588,13 @@ function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTime
       authorAvatarPath={memory.author.avatarPath}
       body={memory.body}
       kind={memory.kind}
-      liked={memory.likes.likedByMe}
-      likeCount={memory.likes.count}
+      reactionCounts={memory.reactionCounts}
+      currentUserReaction={memory.currentUserReaction}
       media={primary ? <MemoryDeletePreviewMedia attachment={primary} transport={transport} /> : null}
       memoryId={memory.id}
       mode="delete-preview"
       occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
-      onLike={() => undefined}
+      onReaction={() => undefined}
       onOpen={() => undefined}
     />
   </div>

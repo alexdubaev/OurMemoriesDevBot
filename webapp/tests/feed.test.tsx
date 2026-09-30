@@ -17,10 +17,12 @@ import { FeedShell } from '../src/features/feed/components/FeedShell'
 import { EmptyState, InlineError } from '../src/features/feed/components'
 import { FeedMemoryCard } from '../src/features/memoly-ui/FeedPresentation'
 import { BottomNavigation } from '../src/components/BottomNavigation'
-import { deleteMemory } from '../src/features/feed/api'
+import { deleteMemory, setMemoryReaction } from '../src/features/feed/api'
 import { createSingleFlightTelegramVideoHandoff, navigateToTelegramVideo } from '../src/features/feed/telegram-video-handoff'
-import { feedQueryKeys, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
+import { feedQueryKeys, matchesReactionFeedScope, reconcileReactionCaches, removeMemoryFromCachedFeeds, updateReactionInFeed } from '../src/features/feed/queries'
+import { MemoryReactionQueue, reactionCountsAfterChange } from '../src/features/feed/reaction-queue'
 import { FeedPresentation, MemoryCardPresentation } from '../src/features/feed/presentation'
+import { MemoryReactions } from '../src/features/feed/presentation/MemoryReactions'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HostBridge } from '../src/platform/telegram'
 
@@ -57,6 +59,8 @@ const memory: MemoryDto = {
     waveform,
   }],
   likes: { count: 0, likedByMe: false },
+  reactionCounts: {},
+  currentUserReaction: null,
   capabilities: { edit: true, delete: true, like: true },
 }
 
@@ -393,7 +397,7 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
 
   expect(markup).toContain('data-memory-kind="photo"')
   expect(markup).toContain('data-slot="memoly-author-row"')
-  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
   expect(markup).toContain('data-slot="memoly-photo-layout"')
   expect(markup).toContain('data-slot="memoly-video-layout"')
   expect(markup).toContain('data-slot="memoly-voice-layout"')
@@ -409,12 +413,12 @@ test('video cards remove the standalone open action and collapse when the captio
     authorName: 'Мама',
     body: '',
     kind: 'video',
-    liked: false,
-    likeCount: 0,
+    reactionCounts: {},
+    currentUserReaction: null,
     media: createElement('div', null, 'video'),
     memoryId: 'video-empty-body',
     occurredTime: '12 мая 2024, 10:24',
-    onLike: () => undefined,
+    onReaction: () => undefined,
     onOpen: () => undefined,
   })
 
@@ -422,7 +426,7 @@ test('video cards remove the standalone open action and collapse when the captio
   expect(markup).toContain('data-memory-kind="video"')
   expect(markup).toMatch(/class="memory-media-slot video-wrap(?: |")/)
   expect(markup).not.toContain('Открыть')
-  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
 })
 
 test('video cards treat whitespace-only captions as empty', () => {
@@ -432,12 +436,12 @@ test('video cards treat whitespace-only captions as empty', () => {
     authorName: 'Мама',
     body: '   \n\t',
     kind: 'video',
-    liked: false,
-    likeCount: 0,
+    reactionCounts: {},
+    currentUserReaction: null,
     media: createElement('div', null, 'video'),
     memoryId: 'video-whitespace-body',
     occurredTime: '12 мая 2024, 10:24',
-    onLike: () => undefined,
+    onReaction: () => undefined,
     onOpen: () => undefined,
   }))
 
@@ -446,7 +450,7 @@ test('video cards treat whitespace-only captions as empty', () => {
   expect(markup).not.toContain('class="caption"')
 })
 
-test('memory child details stay out of the card while like state and count remain visible', () => {
+test('memory child details stay out of the card while selected reaction and count remain visible', () => {
   for (const childProps of [
     { childName: 'Лиза', childAvatarUrl: '/child.webp', childAvatarCrop: { x: 0, y: 0, scale: 1 } },
     {},
@@ -458,18 +462,18 @@ test('memory child details stay out of the card while like state and count remai
       ...childProps,
       body: 'Первое слово',
       kind: 'photo',
-      liked: true,
-      likeCount: 3,
+      reactionCounts: { heart: 3 },
+      currentUserReaction: 'heart',
       media: createElement('div', null, 'photo'),
       memoryId: 'child-tag-hidden',
       occurredTime: 'Сегодня, 10:24',
-      onLike: () => undefined,
+      onReaction: () => undefined,
       onOpen: () => undefined,
     }))
 
     expect(markup).not.toContain('memory-child-tag')
     expect(markup).not.toContain('Лиза')
-    expect(markup).toContain('aria-label="Убрать сердечко"')
+    expect(markup).toContain('aria-label="Сердце: 3, выбрано"')
     expect(markup).toContain('aria-pressed="true"')
     expect(markup).toContain('>3</span>')
   }
@@ -482,13 +486,13 @@ test('delete preview cards preserve the selected memory while removing interacti
     authorName: 'Мама',
     body: 'Первое слово',
     kind: 'voice',
-    liked: true,
-    likeCount: 2,
+    reactionCounts: { heart: 2 },
+    currentUserReaction: 'heart',
     media: createElement('div', null, 'static waveform'),
     memoryId: memoryId,
     mode: 'delete-preview',
     occurredTime: '12 мая 2024, 10:24',
-    onLike: () => undefined,
+    onReaction: () => undefined,
     onOpen: () => undefined,
   }))
 
@@ -513,7 +517,7 @@ test('delete preview notes keep seen hooks and render the gradient as noninterac
     memoryId,
     mode: 'delete-preview',
     occurredTime: '12 мая 2024, 10:24',
-    onLike: () => undefined,
+    onReaction: () => undefined,
     onOpen: () => undefined,
     seenContentRef,
   }))
@@ -584,7 +588,7 @@ test('viewer cards keep like enabled while omitting the delete action', () => {
   const markup = renderFeed(feedClientWith([viewerMemory]), 'viewer')
 
   expect(markup).toContain('aria-label="Действия с воспоминанием"')
-  expect(markup).toContain('aria-label="Поставить сердечко"')
+  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
   expect(markup).toContain('aria-pressed="false"')
   expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
 })
@@ -1002,7 +1006,7 @@ test('memory actions menu is available to every role while delete remains capabi
   expect(renderFeed(viewerClient)).toContain('aria-label="Действия с воспоминанием"')
 })
 
-test('memory like exposes a dedicated lightweight control while preserving pressed and count semantics', () => {
+test('memory reaction controls are lightweight and expose selected state without zero pills', () => {
   const props = {
     actions: null,
     authorInitials: 'М',
@@ -1012,18 +1016,133 @@ test('memory like exposes a dedicated lightweight control while preserving press
     media: null,
     memoryId,
     occurredTime: '10:00',
-    onLike: () => undefined,
+    onReaction: () => undefined,
     onOpen: () => undefined,
   }
-  const empty = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, liked: false, likeCount: 0 }))
-  const liked = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, liked: true, likeCount: 12 }))
+  const empty = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, reactionCounts: {}, currentUserReaction: null }))
+  const liked = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, reactionCounts: { heart: 12 }, currentUserReaction: 'heart' }))
 
-  expect(empty).toMatch(/<button[^>]*aria-label="Поставить сердечко"[^>]*aria-pressed="false"[^>]*class="memory-like"/)
-  expect(empty).toMatch(/class="memory-like"[^>]*><span[^>]*data-slot="webp-icon"[^>]*background-color:currentColor/)
+  expect(empty).toMatch(/<button[^>]*aria-label="Поставить реакцию ❤️"[^>]*aria-pressed="false"[^>]*class="memory-like"/)
+  expect(empty).toContain('aria-label="Выбрать реакцию"')
   expect(empty).not.toContain('>0</span>')
-  expect(liked).toMatch(/<button[^>]*aria-label="Убрать сердечко"[^>]*aria-pressed="true"[^>]*class="memory-like is-liked"/)
-  expect(liked).toMatch(/class="memory-like is-liked"[^>]*><span[^>]*data-slot="webp-icon"[^>]*background-color:currentColor/)
+  expect(liked).toMatch(/<button[^>]*aria-label="Сердце: 12, выбрано"[^>]*aria-pressed="true"[^>]*class="reaction-pill is-selected"/)
+  expect(liked).toContain('aria-label="Сердце: 12, выбрано"')
   expect(liked).toContain('>12</span>')
+})
+
+test('reaction row caps used types, exposes hidden selected count, and uses one flat Memory action row', () => {
+  const row = renderToStaticMarkup(createElement(MemoryReactions, {
+    counts: { heart: 123, love: 2, laugh: 1, touched: 3, wow: 4, clap: 1 },
+    current: 'clap',
+    interactive: true,
+    onSelect: () => undefined,
+  }))
+  expect((row.match(/class="reaction-pill/g) ?? []).length).toBe(4)
+  expect(row).toContain('>+2</span>')
+  expect(row).toContain('содержит выбранную реакцию')
+  expect(row).toContain('123')
+  expect(row).not.toContain('>0</span>')
+  for (const kind of ['photoMemory', 'videoMemory', 'mixedMemory', 'noteMemory', 'memory']) {
+    const item = { photoMemory, videoMemory, mixedMemory, noteMemory, memory }[kind]!
+    expect(renderFeed(feedClientWith([item]))).toContain('data-slot="memory-reactions"')
+  }
+})
+
+test('reaction write uses the family-scoped typed endpoint and supports removal', async () => {
+  const calls: Array<{ path: string; options: unknown }> = []
+  const transport = {
+    request: async (path: string, _schema: unknown, options?: unknown) => {
+      calls.push({ path, options })
+      return { reactionCounts: { laugh: 1 }, currentUserReaction: 'laugh', likes: { count: 1, likedByMe: false } }
+    },
+    raw: async () => new Response(),
+  } as unknown as AuthenticatedTransport
+
+  await setMemoryReaction(transport, familyId, memoryId, 'laugh')
+  await setMemoryReaction(transport, familyId, memoryId, null)
+
+  expect(calls).toEqual([
+    { path: `/api/v1/families/${familyId}/memories/${memoryId}/reaction`, options: { method: 'PUT', body: { reaction: 'laugh' } } },
+    { path: `/api/v1/families/${familyId}/memories/${memoryId}/reaction`, options: { method: 'PUT', body: { reaction: null } } },
+  ])
+})
+
+test('rapid reaction taps serialize writes and keep the latest desired reaction', async () => {
+  const responses: Array<(value: { reactionCounts: Record<string, number>; currentUserReaction: 'heart' | 'laugh'; likes: { count: number; likedByMe: boolean } }) => void> = []
+  const written: Array<string | null> = []
+  const changes: Array<{ desired: string | null; counts: Record<string, number>; confirmed: string | null }> = []
+  const queue = new MemoryReactionQueue(null, {}, (reaction) => {
+    written.push(reaction)
+    return new Promise((resolve) => responses.push(resolve))
+  }, (desired, counts, confirmed) => changes.push({ desired, counts: reactionCountsAfterChange(counts, confirmed, desired), confirmed }), () => undefined)
+
+  const first = queue.submit('heart')
+  await Promise.resolve()
+  const latest = queue.submit('laugh')
+  expect(written).toEqual(['heart'])
+  responses.shift()!({ reactionCounts: { heart: 1 }, currentUserReaction: 'heart', likes: { count: 1, likedByMe: true } })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(written).toEqual(['heart', 'laugh'])
+  expect(changes.at(-1)).toEqual({ desired: 'laugh', counts: { laugh: 1 }, confirmed: 'heart' })
+  responses.shift()!({ reactionCounts: { laugh: 1 }, currentUserReaction: 'laugh', likes: { count: 1, likedByMe: false } })
+  await Promise.all([first, latest])
+  expect(changes.at(-1)).toEqual({ desired: 'laugh', counts: { laugh: 1 }, confirmed: 'laugh' })
+})
+
+test('reaction cache updates only the target Memory and exact account membership scope', () => {
+  const other = { ...photoMemory, id: 'other-memory' }
+  const cache = { pages: [{ items: [memory, other], nextCursor: null }], pageParams: [null] }
+  const next = updateReactionInFeed(cache, memory.id, 'laugh')
+  expect(next.pages[0]?.items[0]?.currentUserReaction).toBe('laugh')
+  expect(next.pages[0]?.items[1]).toBe(other)
+  const key = feedQueryKeys.list(familyId, 'all', false, 'account-a', 4)
+  expect(matchesReactionFeedScope(key, familyId, 'account-a', 4)).toBe(true)
+  expect(matchesReactionFeedScope(key, familyId, 'account-b', 4)).toBe(false)
+  expect(matchesReactionFeedScope(key, familyId, 'account-a', 5)).toBe(false)
+})
+
+test('authoritative reaction repair updates unread caches in place and ignores a late repair after newer intent', () => {
+  const other = { ...photoMemory, id: 'other-memory' }
+  const cache = { pages: [{ items: [memory, other], nextCursor: null }], pageParams: [null] }
+  const unreadKey = feedQueryKeys.list(familyId, 'all', true, 'account-a', 4, 1)
+  const otherAccountKey = feedQueryKeys.list(familyId, 'all', true, 'account-b', 4, 1)
+  const repaired = reconcileReactionCaches([[unreadKey, cache], [otherAccountKey, cache]], familyId, 'account-a', 4, memoryId, { reactionCounts: { laugh: 3 }, currentUserReaction: 'laugh' }, 7, 7)
+
+  expect(repaired).toHaveLength(1)
+  expect(repaired[0]?.[0]).toEqual(unreadKey)
+  expect(repaired[0]?.[1]?.pages[0]?.items.map((item) => item.id)).toEqual([memoryId, other.id])
+  expect(repaired[0]?.[1]?.pages[0]?.items[0]?.currentUserReaction).toBe('laugh')
+  expect(repaired[0]?.[1]?.pages[0]?.items[1]).toBe(other)
+  expect(reconcileReactionCaches([[unreadKey, cache]], familyId, 'account-a', 4, memoryId, { reactionCounts: { heart: 1 }, currentUserReaction: 'heart' }, 7, 8)).toEqual([])
+  expect(cache.pages[0]?.items[0]?.currentUserReaction).toBeNull()
+})
+
+test('failed final reaction write rolls back only its Memory and reports one failure', async () => {
+  let failed = 0
+  const states: Array<{ desired: string | null; counts: Record<string, number>; confirmed: string | null }> = []
+  const queue = new MemoryReactionQueue('heart', { heart: 2, laugh: 1 }, async () => { throw new Error('offline') }, (desired, counts, confirmed) => states.push({ desired, counts: reactionCountsAfterChange(counts, confirmed, desired), confirmed }), () => { failed += 1 })
+  await queue.submit('laugh')
+  expect(states).toEqual([
+    { desired: 'laugh', counts: { heart: 1, laugh: 2 }, confirmed: 'heart' },
+    { desired: 'heart', counts: { heart: 2, laugh: 1 }, confirmed: 'heart' },
+  ])
+  expect(failed).toBe(1)
+  expect(reactionCountsAfterChange({ heart: 1 }, 'heart', null)).toEqual({})
+})
+
+test('a superseded uncertain write is followed by an idempotent write for the latest selection', async () => {
+  let rejectFirst!: (error: Error) => void
+  let calls = 0
+  const queue = new MemoryReactionQueue(null, {}, () => {
+    calls += 1
+    if (calls === 1) return new Promise((_resolve, reject) => { rejectFirst = reject })
+    return Promise.resolve({ reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false } })
+  }, () => undefined, () => undefined)
+  const first = queue.submit('heart')
+  const latest = queue.submit(null)
+  rejectFirst(new Error('response lost'))
+  await Promise.all([first, latest])
+  expect(calls).toBe(2)
 })
 
 test('memoLy feed card keeps the media slot and open-memory callback around a private album', () => {

@@ -543,6 +543,7 @@ model MemoryLike {
   familyId  String       @map("family_id") @db.Uuid
   memoryId  String       @map("memory_id") @db.Uuid
   userId    String       @map("user_id") @db.Uuid
+  reaction  MemoryReaction @default(heart) @map("reaction")
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   memory    Memory       @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_likes_memory_id_family_id_fkey")
   member    FamilyMember @relation(fields: [familyId, userId], references: [familyId, userId], onDelete: Restrict, map: "memory_likes_family_id_user_id_fkey")
@@ -818,6 +819,17 @@ enum MemoryKind {
   media
 
   @@map("memory_kind")
+}
+
+enum MemoryReaction {
+  heart
+  love
+  laugh
+  touched
+  wow
+  clap
+
+  @@map("memory_reaction")
 }
 
 enum MemoryStatus {

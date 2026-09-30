@@ -1,6 +1,8 @@
 import type {
   CreateMemoryRequest,
   LikeResponse,
+  ReactionResponse,
+  MemoryReaction,
   MemoryDto,
   SeenMemoriesRequest,
   UpdateMemoryRequest,
@@ -45,5 +47,6 @@ export type MemoryRepository = {
   update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto>
   delete(scope: FamilyScope, memoryId: string, expectedVersion: number, now: Date): Promise<void>
   setLike(scope: FamilyScope, memoryId: string, liked: boolean): Promise<LikeResponse>
+  setReaction(scope: FamilyScope, memoryId: string, reaction: MemoryReaction | null): Promise<ReactionResponse>
   markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void>
 }
