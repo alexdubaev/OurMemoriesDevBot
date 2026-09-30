@@ -3,6 +3,9 @@ import type { MemoryDto } from '@web-app-demo/contracts'
 import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import postcss from 'postcss'
 
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
@@ -140,6 +143,53 @@ test('a single photo uses the same fixed Feed stage without carousel navigation'
   expect(markup).toContain('data-carousel-position="1" data-media-kind="photo"')
   expect(markup).not.toContain('memoly-mixed-controls')
   expect(markup).toContain('Загрузка фотографии')
+})
+
+test('an empty photo caption adds no Open footer and the media itself remains the viewer control', () => {
+  const emptyCaption = { ...photoMemory, body: '' }
+  const markup = renderFeed(feedClientWith([emptyCaption]))
+  expect(markup).toContain('aria-label="Загрузка фотографии"')
+  expect(markup).not.toContain('>Открыть<')
+  expect(markup).not.toContain('caption-open-empty')
+})
+
+test('notes keep all text in a diary panel before the like control', () => {
+  for (const body of ['Привет', 'Сегодня гуляли в парке и впервые кормили уток вместе.', 'Утром мы долго собирались. Потом пошли гулять, встретили друзей и провели весь день вместе. Вечером Лиза уснула в машине по дороге домой.']) {
+    const markup = renderFeed(feedClientWith([{ ...noteMemory, body }]))
+    const panelIndex = markup.indexOf('note-story-panel')
+    const bodyIndex = markup.indexOf(body, panelIndex)
+    const likeIndex = markup.indexOf('class="memory-like')
+    expect(panelIndex).toBeGreaterThanOrEqual(0)
+    expect(bodyIndex).toBeGreaterThan(panelIndex)
+    expect(likeIndex).toBeGreaterThan(bodyIndex)
+    expect(markup).toContain('>Заметка</span>')
+    expect(markup).not.toContain('>Открыть<')
+  }
+})
+
+test('private video controls use accessible icons and keep the timeline without text buttons', () => {
+  const markup = renderFeed(feedClientWith([videoMemory]))
+  expect(markup).toContain('aria-label="Воспроизвести видео"')
+  expect(markup).toContain('aria-label="На весь экран"')
+  expect(markup).toContain('aria-label="Позиция видео"')
+  expect(markup).not.toContain('>Смотреть</button>')
+  expect(markup).not.toContain('>Полный экран</button>')
+  expect(markup).not.toContain('>Открыть<')
+})
+
+test('portrait Feed stages are not height-clipped and video seek targets remain touch-sized', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const rules: postcss.Rule[] = []
+  postcss.parse(css).walkRules((rule) => rules.push(rule))
+  const feedViewport = rules.find((rule) => rule.selector.includes('.memoly-mixed-viewport[data-media-stage='))
+  const soloVideoStage = rules.find((rule) => rule.selector === '[data-memoly-feed] .media-well.video-wrap' && rule.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio'))
+  expect(feedViewport?.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio' && node.value === '4 / 5')).toBe(true)
+  expect(soloVideoStage?.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio' && node.value === '4 / 5')).toBe(true)
+  expect(feedViewport?.nodes?.some((node) => node.type === 'decl' && node.prop === 'max-height')).toBe(false)
+  expect(soloVideoStage?.nodes?.some((node) => node.type === 'decl' && node.prop === 'max-height')).toBe(false)
+  const seekRules = rules.filter((rule) => rule.selector.includes('.memoly-private-video-v2') && rule.selector.includes("input[type='range']"))
+  expect(seekRules.length).toBeGreaterThanOrEqual(2)
+  expect(seekRules.every((rule) => rule.nodes?.some((node) => node.type === 'decl' && node.prop === 'min-height' && Number.parseFloat(node.value) >= 44))).toBe(true)
 })
 
 test('mixed slides use one fixed stage without attachment-specific sizing', () => {
@@ -437,7 +487,7 @@ test('video captions remain visible without becoming a separate detail button', 
   expect(markup).not.toContain('>Открыть<')
 })
 
-test('photo and voice cards keep their caption detail action when the body is empty', () => {
+test('empty photo and voice captions do not create a blank detail footer', () => {
   let opens = 0
   for (const kind of ['photo', 'voice'] as const) {
     const card = MemoryCardPresentation({
@@ -458,14 +508,12 @@ test('photo and voice cards keep their caption detail action when the body is em
     const markup = renderToStaticMarkup(card)
     const openAction = findOpenAction(card)
     expect(markup).toContain(`data-memory-kind="${kind}"`)
-    expect(markup).toContain('Открыть')
-    expect(markup).toContain(`aria-label="Открыть воспоминание ${kind}"`)
-    expect(markup).toContain('caption-open-empty')
-    expect(openAction).not.toBeNull()
-    openAction?.props.onOpen?.()
+    expect(markup).not.toContain('Открыть воспоминание')
+    expect(markup).not.toContain('caption-open-empty')
+    expect(openAction).toBeNull()
   }
 
-  expect(opens).toBe(2)
+  expect(opens).toBe(0)
 })
 
 test('viewer cards keep like enabled while omitting the delete action', () => {
@@ -664,7 +712,7 @@ test('a private feed photo preserves portrait, landscape, and square proportions
   }
 })
 
-test('a MAX video preview embeds native playback and keeps MAX as a secondary action', () => {
+test('a ready MAX video preview embeds native playback without a persistent MAX action', () => {
   for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
     const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
       durationMs: 24_000,
@@ -683,7 +731,7 @@ test('a MAX video preview embeds native playback and keeps MAX as a secondary ac
     expect(markup).toContain('object-contain')
     expect(markup).toContain('Смотреть видео')
     expect(markup).toContain('data-video-viewer-state="ready"')
-    expect(markup).toContain('Открыть в MAX')
+    expect(markup).not.toContain('Открыть в MAX')
     expect(markup).not.toContain('Открыть видео в memoLy')
     expect(markup).not.toContain('aspect-video')
     expect(markup).not.toContain('object-cover')
@@ -804,7 +852,7 @@ test('a MAX video exposes only a numeric media error code for diagnostics', () =
   expect(markup).not.toContain('bearer=')
 })
 
-test('a MAX video without an authenticated source keeps a safe video fallback', () => {
+test('a MAX video without an authenticated source keeps its safe pending state', () => {
   const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
     durationMs: null,
     height: null,
@@ -815,7 +863,7 @@ test('a MAX video without an authenticated source keeps a safe video fallback', 
 
   expect(markup).toContain('Видео')
   expect(markup).toContain('Загружаем видео…')
-  expect(markup).toContain('Открыть в MAX')
+  expect(markup).not.toContain('Открыть в MAX')
   expect(markup).toContain('aspect-ratio:16 / 9')
 })
 

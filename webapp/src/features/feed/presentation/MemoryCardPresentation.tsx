@@ -57,14 +57,14 @@ export function MemoryCardPresentation({
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>
       {kind !== 'note' ? <MemorySlot className={kind === 'video' ? 'media-well surface-inset video-wrap' : 'media-well surface-inset'} contentRef={seenContentRef} slot={`memoly-${kind}-layout`}>{media}</MemorySlot> : null}
+      {kind === 'note'
+        ? <MemorySlot className="caption note-story-slot" contentRef={seenContentRef} ready={hasCaption} slot="memoly-note-layout">{hasCaption ? <NoteStoryPresentation body={body} interactive={interactive} onOpen={onOpen} /> : null}</MemorySlot>
+        : kind === 'video'
+          ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
+          : hasCaption ? <div className="caption"><MemoryOpenButton body={body} interactive={interactive} kind={kind} onOpen={onOpen} /></div> : null}
       <div className="actions">
         <LikeButton interactive={interactive} liked={liked} likeCount={likeCount} onLike={onLike} />
       </div>
-      {kind === 'video'
-        ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
-        : kind === 'note'
-          ? <MemorySlot className="caption" contentRef={seenContentRef} ready={hasCaption} slot="memoly-note-layout">{body ? <MemoryOpenButton body={body} className="note-body" interactive={interactive} kind={kind} onOpen={onOpen} /> : null}</MemorySlot>
-          : <div className="caption"><MemoryOpenButton body={body} className={body ? undefined : 'caption-open-empty'} interactive={interactive} kind={kind} onOpen={onOpen} /></div>}
     </article>
   )
 }
@@ -75,10 +75,16 @@ function MemorySlot({ children, className, contentRef, ready, slot }: { children
   return <div className={className} data-seen-main="" data-seen-ready={ready === undefined ? undefined : String(ready)} data-slot={slot} ref={contentRef}>{children}</div>
 }
 
-function MemoryOpenButton({ body, className, interactive, kind, onOpen }: { body: string; className?: string; interactive: boolean; kind: MemoryDto['kind']; onOpen: () => void }) {
-  const content = className === 'note-body' ? <><WebpIcon decorative name="note" size={27} /><Typography as="span" variant="memoryCaption">{body}</Typography></> : body || <Typography as="span" variant="memoryCaption">Открыть</Typography>
-  if (!interactive) return <Typography as="div" className={`caption-open${className ? ` ${className}` : ''}`} variant="memoryCaption">{content}</Typography>
-  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className={`caption-open${className ? ` ${className}` : ''}`} onClick={onOpen} type="button">{content}</button></Typography>
+function MemoryOpenButton({ body, interactive, kind, onOpen }: { body: string; interactive: boolean; kind: MemoryDto['kind']; onOpen: () => void }) {
+  const content = body
+  if (!interactive) return <Typography as="div" className="caption-open" variant="memoryCaption">{content}</Typography>
+  return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className="caption-open" onClick={onOpen} type="button">{content}</button></Typography>
+}
+
+function NoteStoryPresentation({ body, interactive, onOpen }: { body: string; interactive: boolean; onOpen: () => void }) {
+  const content = <><span className="note-story-label"><WebpIcon decorative name="note" size={18} /><Typography as="span" variant="memoryMeta">Заметка</Typography></span><Typography as="span" className="note-story-text" variant="memoryBody">{body}</Typography></>
+  if (!interactive) return <Typography asChild variant="memoryBody"><div aria-label="Текст заметки" className="note-story-panel">{content}</div></Typography>
+  return <Typography asChild variant="memoryBody"><button aria-label={`Открыть заметку: ${body}`} className="note-story-panel" onClick={onOpen} type="button">{content}</button></Typography>
 }
 
 function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: boolean; liked: boolean; likeCount: number; onLike: () => void }) {
@@ -91,7 +97,7 @@ function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: bo
       onClick={onLike}
       type="button"
     >
-      <WebpIcon decorative monochrome name={liked ? 'heart-filled' : 'heart'} size={24} state={liked ? 'active' : 'default'} />
+      <WebpIcon decorative monochrome name={liked ? 'heart-filled' : 'heart'} size={20} state={liked ? 'active' : 'default'} />
       {likeCount > 0 ? <Typography as="span" variant="memoryMeta">{likeCount}</Typography> : null}
     </button>
   )

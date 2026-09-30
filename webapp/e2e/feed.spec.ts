@@ -371,14 +371,14 @@ test.describe.serial('T07 live feed', () => {
           objectFit: getComputedStyle(element).objectFit,
         }
       })
-      expect(geometry.imageWidth / geometry.imageHeight).toBeCloseTo(4 / 3, 2)
+      expect(geometry.imageWidth / geometry.imageHeight).toBeCloseTo(4 / 5, 2)
       expect(Math.abs(geometry.imageWidth - geometry.frameWidth)).toBeLessThan(2)
       expect(Math.abs(geometry.imageHeight - geometry.frameHeight)).toBeLessThan(2)
       expect(geometry.imageTop).toBeGreaterThanOrEqual(geometry.frameTop - 1)
       expect(geometry.imageBottom).toBeLessThanOrEqual(geometry.frameBottom + 1)
       expect(geometry.wellBottom).toBeLessThanOrEqual(geometry.actionsTop + 1)
       expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1)
-      expect(geometry.objectFit).toBe('cover')
+      expect(geometry.objectFit).toBe('contain')
     }
     await page.screenshot({ path: resolve('e2e/.artifacts/feed-photo-no-crop.png'), fullPage: true })
     await page.locator('[data-memory-id]').filter({ hasText: 'Вертикальное фото E2E' }).getByRole('button', { name: 'Открыть фото' }).click()
@@ -530,8 +530,8 @@ test.describe.serial('T07 live feed', () => {
     await page.reload()
     await openFeed(page)
     const ratios = [
-      ['Фотоальбом E2E', 'img', 4 / 3],
-      ['Одиночное фото E2E', 'img', 4 / 3],
+      ['Фотоальбом E2E', 'img', 4 / 5],
+      ['Одиночное фото E2E', 'img', 4 / 5],
       ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
@@ -546,7 +546,7 @@ test.describe.serial('T07 live feed', () => {
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
       })
       expect(actual.ratio).toBeCloseTo(expected, 2)
-      if (element === 'img') expect(actual.objectFit).toBe('cover')
+      if (element === 'img') expect(actual.objectFit).toBe('contain')
       else expect(actual.objectFit).toBe('contain')
     }
 
@@ -606,6 +606,9 @@ test.describe.serial('T07 live feed', () => {
     await maxVideoCard.getByRole('button', { name: 'Смотреть видео' }).click()
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(false)
     expect(await page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBeUndefined()
+    await expect(maxVideoCard.getByRole('button', { name: 'Открыть в MAX' })).toHaveCount(0)
+    await maxVideo.evaluate((element) => element.dispatchEvent(new Event('error')))
+    await expect(maxVideoCard).toContainText('Не удалось загрузить видео')
     await maxVideoCard.getByRole('button', { name: 'Открыть в MAX' }).click()
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBe('https://max.ru/memoLy')
   })
@@ -1011,7 +1014,27 @@ test.describe.serial('T07 live feed', () => {
     await page.keyboard.press('Shift+Tab')
     expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[data-carousel-active="true"]')))).toBe(true)
     await page.screenshot({ path: resolve('e2e/.artifacts/mm3-card-video.png'), animations: 'disabled' })
-    await card.getByRole('button', { name: 'Смотреть', exact: true }).click()
+    await page.setViewportSize({ width: 390, height: 500 })
+    await card.scrollIntoViewIfNeeded()
+    const shortStage = await viewport.evaluate((element) => {
+      const viewportRect = element.getBoundingClientRect()
+      const slideRect = element.querySelector('[data-carousel-active="true"]')!.getBoundingClientRect()
+      const seek = element.querySelector('[data-carousel-active="true"] input[type="range"]') as HTMLInputElement | null
+      return {
+        ratio: viewportRect.width / viewportRect.height,
+        viewportHeight: viewportRect.height,
+        slideHeight: slideRect.height,
+        seekHeight: seek?.getBoundingClientRect().height ?? 0,
+        seekMinHeight: seek ? Number.parseFloat(getComputedStyle(seek).minHeight) : 0,
+      }
+    })
+    expect(shortStage.ratio).toBeCloseTo(4 / 5, 2)
+    expect(Math.abs(shortStage.viewportHeight - shortStage.slideHeight)).toBeLessThan(2)
+    expect(shortStage.seekHeight).toBeGreaterThanOrEqual(44)
+    expect(shortStage.seekMinHeight).toBeGreaterThanOrEqual(44)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: 'Воспроизвести видео' }).click()
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false)
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     await expect(card).toContainText('3 / 3')
@@ -1218,7 +1241,7 @@ test.describe.serial('T07 live feed', () => {
         const bounds = element.getBoundingClientRect()
         return { ratio: bounds.width / bounds.height, pageWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth }
       })
-      expect(layout.ratio).toBeCloseTo(4 / 3, 2)
+      expect(layout.ratio).toBeCloseTo(4 / 5, 2)
       expect(layout.pageWidth).toBeLessThanOrEqual(width)
       expect(layout.viewportWidth).toBe(width)
       await expect(card).toContainText('2 / 2')
@@ -1252,7 +1275,7 @@ test.describe.serial('T07 live feed', () => {
         const rect = element.getBoundingClientRect()
         return { width: rect.width, height: rect.height }
       })
-      expect(initialStage.width / initialStage.height).toBeCloseTo(4 / 3, 2)
+      expect(initialStage.width / initialStage.height).toBeCloseTo(4 / 5, 2)
       const touch = await page.context().newCDPSession(page)
       try {
         for (let next = 2; next <= 5; next += 1) {
@@ -1432,7 +1455,7 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => voice.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
 
     const videoCard = page.locator('[data-memory-id]').filter({ hasText: 'Legacy video E2E' })
-    await videoCard.getByRole('button', { name: 'Смотреть' }).click()
+    await videoCard.getByRole('button', { name: 'Воспроизвести видео' }).click()
     const legacyVideo = videoCard.locator('video')
     await expect.poll(() => legacyVideo.evaluate((element: HTMLVideoElement) => !element.paused && element.currentTime > 0)).toBe(true)
     expect(responses.some((response) => response.url.includes(fixture.legacyVideoId) && response.range && response.status === 206)).toBe(true)

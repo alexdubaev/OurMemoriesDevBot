@@ -1280,6 +1280,42 @@
       "sha256": "c170ecfcc09276e0c94589bc2c3d365dee0fd46801117fa475890e0424e049eb"
     },
     {
+      "path": "assets/icons/fullscreen-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 352,
+      "sha256": "46dccd1e88f65e032cca492168a7b06223d783619747b08dc47966f58df1165e"
+    },
+    {
+      "path": "assets/icons/fullscreen-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 352,
+      "sha256": "46dccd1e88f65e032cca492168a7b06223d783619747b08dc47966f58df1165e"
+    },
+    {
+      "path": "assets/icons/fullscreen-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 434,
+      "sha256": "ef8afd41eb0cef0cfeeb18fd8e07a3f4265ea8ae581993d5554991e265f4c612"
+    },
+    {
+      "path": "assets/icons/fullscreen-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 434,
+      "sha256": "ef8afd41eb0cef0cfeeb18fd8e07a3f4265ea8ae581993d5554991e265f4c612"
+    },
+    {
       "path": "assets/icons/gear-active@2x.webp",
       "usage": "runtime-icon",
       "width": 48,

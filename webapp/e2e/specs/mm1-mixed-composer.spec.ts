@@ -164,7 +164,7 @@ test.describe('MM-1 mixed media composer', () => {
       const bounds = slide.getBoundingClientRect()
       return { width: bounds.width, height: bounds.height }
     })
-    expect(Math.abs(photoStage390.width / photoStage390.height - 4 / 3)).toBeLessThan(0.02)
+    expect(Math.abs(photoStage390.width / photoStage390.height - 4 / 5)).toBeLessThan(0.02)
     await test.info().attach('mm4-created-feed-card-390.png', { body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png' })
 
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
@@ -175,7 +175,7 @@ test.describe('MM-1 mixed media composer', () => {
         const bounds = slide.getBoundingClientRect()
         return { width: bounds.width, height: bounds.height }
       })
-      expect(Math.abs(stage.width / stage.height - 4 / 3), `video stage at ${width}px`).toBeLessThan(0.02)
+      expect(Math.abs(stage.width / stage.height - 4 / 5), `video stage at ${width}px`).toBeLessThan(0.02)
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `horizontal overflow at ${width}px`).toBeLessThanOrEqual(width)
       if (width === 390) expect(Math.abs(stage.height - photoStage390.height)).toBeLessThan(2)
     }
@@ -332,7 +332,7 @@ test.describe('MM-1 mixed media composer', () => {
         const bounds = slide.getBoundingClientRect()
         return { width: bounds.width, height: bounds.height }
       })
-      expect(Math.abs(stage.width / stage.height - 4 / 3), `photo stage at ${width}px`).toBeLessThan(0.02)
+      expect(Math.abs(stage.width / stage.height - 4 / 5), `photo stage at ${width}px`).toBeLessThan(0.02)
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `horizontal overflow at ${width}px`).toBeLessThanOrEqual(width)
     }
     await page.setViewportSize({ width: 390, height: 844 })
