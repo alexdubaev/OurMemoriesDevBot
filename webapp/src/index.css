@@ -53,6 +53,7 @@
   html {
     @apply bg-background font-sans text-foreground;
     font-feature-settings: "liga" 1, "calt" 1;
+    touch-action: pan-x pan-y;
   }
 
   body {
@@ -60,6 +61,11 @@
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
+    touch-action: pan-x pan-y;
+  }
+
+  #root {
+    touch-action: pan-x pan-y;
   }
 
   button,
@@ -76,5 +82,13 @@
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (hover: none) {
+  input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select {
+    font-size: max(16px, 1em) !important;
   }
 }

@@ -5,6 +5,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
 import { MemberAvatarImage } from '@/features/avatar'
+import { NoteStoryPresentation } from './NoteStoryPresentation'
 
 export type MemoryCardPresentationProps = {
   actions: ReactNode
@@ -79,12 +80,6 @@ function MemoryOpenButton({ body, interactive, kind, onOpen }: { body: string; i
   const content = body
   if (!interactive) return <Typography as="div" className="caption-open" variant="memoryCaption">{content}</Typography>
   return <Typography asChild variant="memoryCaption"><button aria-label={`Открыть воспоминание ${body || kind}`} className="caption-open" onClick={onOpen} type="button">{content}</button></Typography>
-}
-
-function NoteStoryPresentation({ body, interactive, onOpen }: { body: string; interactive: boolean; onOpen: () => void }) {
-  const content = <><span className="note-story-label"><WebpIcon decorative name="note" size={18} /><Typography as="span" variant="memoryMeta">Заметка</Typography></span><Typography as="span" className="note-story-text" variant="memoryBody">{body}</Typography></>
-  if (!interactive) return <Typography asChild variant="memoryBody"><div aria-label="Текст заметки" className="note-story-panel">{content}</div></Typography>
-  return <Typography asChild variant="memoryBody"><button aria-label={`Открыть заметку: ${body}`} className="note-story-panel" onClick={onOpen} type="button">{content}</button></Typography>
 }
 
 function LikeButton({ interactive, liked, likeCount, onLike }: { interactive: boolean; liked: boolean; likeCount: number; onLike: () => void }) {

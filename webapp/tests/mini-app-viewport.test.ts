@@ -17,28 +17,37 @@ test('declares the document light-only before loading styles and at the CSS root
   expect(styles).toMatch(/:root\s*\{\s*color-scheme:\s*only light\s*;/)
 })
 
-test('uses one cover-safe viewport that permits page zoom in the Mini App shell', async () => {
+test('uses one cover-safe viewport that disables page zoom in the Mini App shell', async () => {
   const html = await readFile(resolve(webappRoot, 'index.html'), 'utf8')
   const viewports = html.match(/<meta\s+name=["']viewport["'][^>]*>/gi) ?? []
 
   expect(viewports).toHaveLength(1)
   expect(viewports[0]).toContain('width=device-width')
   expect(viewports[0]).toContain('initial-scale=1')
-  expect(viewports[0]).not.toMatch(/maximum-scale\s*=\s*1(?:\D|$)/i)
-  expect(viewports[0]).not.toMatch(/user-scalable\s*=\s*no/i)
+  expect(viewports[0]).toMatch(/maximum-scale\s*=\s*1(?:\D|$)/i)
+  expect(viewports[0]).toMatch(/user-scalable\s*=\s*no/i)
   expect(viewports[0]).toContain('viewport-fit=cover')
 })
 
-test('keeps PhotoSwipe unblocked and mobile form controls at 16px', async () => {
-  const [feed, styles, select] = await Promise.all([
+test('keeps native media/viewer gestures and page pans while disallowing app zoom', async () => {
+  const [feed, styles, select, main] = await Promise.all([
     readFile(resolve(webappRoot, 'src/features/feed/FeedPage.tsx'), 'utf8'),
     readFile(resolve(webappRoot, 'src/index.css'), 'utf8'),
     readFile(resolve(webappRoot, 'src/components/ui/native-select.tsx'), 'utf8'),
+    readFile(resolve(webappRoot, 'src/main.tsx'), 'utf8'),
   ])
 
   expect(feed).toContain('new PhotoSwipe({ dataSource: slides, index, showHideAnimationType: \'none\' })')
   expect(styles).not.toMatch(/touch-action\s*:\s*none/i)
+  expect(styles).toMatch(/touch-action\s*:\s*pan-x\s+pan-y/i)
   expect(select).toContain('text-base')
+  expect(main).toContain('installAppZoomPrevention(document)')
+})
+
+test('touch text inputs use at least 16px to avoid iOS focus auto-zoom', async () => {
+  const styles = await readFile(resolve(webappRoot, 'src/index.css'), 'utf8')
+  expect(styles).toMatch(/@media\s*\(hover:\s*none\)[\s\S]*?input[\s\S]*?font-size:\s*max\(16px,\s*1em\)/i)
+  expect(styles).toMatch(/textarea[\s\S]*?select[\s\S]*?font-size:\s*max\(16px,\s*1em\)/i)
 })
 
 test('reserves the bottom navigation safe area and preserves the media stacking contract', async () => {

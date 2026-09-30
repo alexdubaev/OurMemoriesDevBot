@@ -1674,6 +1674,24 @@
       "alpha": true,
       "bytes": 230,
       "sha256": "dd1bc46520c5efef1316de9e35a7aadb8aa0a86ec80cc8f0cbe127efd9cd92fe"
+    },
+    {
+      "path": "assets/feed-notes/note-sun.webp",
+      "usage": "runtime-illustration",
+      "width": 80,
+      "height": 76,
+      "alpha": true,
+      "bytes": 3450,
+      "sha256": "67c00a1a14a0ea605afeada24c0bcd187f7b1eab611b09c86d86a6925d62be46"
+    },
+    {
+      "path": "assets/feed-notes/note-leaf-sprig.webp",
+      "usage": "runtime-illustration",
+      "width": 76,
+      "height": 100,
+      "alpha": true,
+      "bytes": 4920,
+      "sha256": "157cbe3cd14f13b92c2651627a50901f5863ffe96c0ce92d103fed300a488e02"
     }
   ]
 }
