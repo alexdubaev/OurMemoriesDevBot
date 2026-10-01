@@ -2629,6 +2629,33 @@ test.describe.serial('T07 live feed', () => {
     }, voiceFreePoint!)
     expect(actualVoiceTarget).toBe(true)
     await hold(voiceSurface, relativeVoicePoint)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    expect(payloads).toHaveLength(2)
+    await expect(voiceCard.locator('[data-reaction="wow"]')).toHaveCount(0)
+
+    const tapVoiceControl = async (button: import('@playwright/test').Locator) => {
+      await button.scrollIntoViewIfNeeded()
+      const bounds = await button.boundingBox()
+      expect(bounds).not.toBeNull()
+      const point = { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 }
+      const isActualButtonTarget = await button.evaluate((element, { x, y }) => document.elementFromPoint(x, y)?.closest('button') === element, point)
+      expect(isActualButtonTarget).toBe(true)
+      await page.mouse.move(point.x, point.y)
+      await page.mouse.down()
+      await page.mouse.up()
+    }
+    const voice = voiceCard.locator('audio')
+    await tapVoiceControl(voiceCard.getByRole('button', { name: 'Слушать', exact: true }))
+    await expect.poll(() => voice.evaluate((element) => !(element as HTMLAudioElement).paused)).toBe(true)
+    await expect(voiceCard.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
+    expect(payloads).toHaveLength(2)
+    await expect(voiceCard.locator('[data-reaction="wow"]')).toHaveCount(0)
+    await tapVoiceControl(voiceCard.getByRole('button', { name: 'Пауза', exact: true }))
+    await expect.poll(() => voice.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
+    expect(payloads).toHaveLength(2)
+
+    await hold(voiceSurface, relativeVoicePoint)
     await page.getByRole('button', { name: 'Удивление', exact: true }).click()
     await expect.poll(() => payloads.length).toBe(3)
     expect(payloads[2]?.reaction).toBe('wow')

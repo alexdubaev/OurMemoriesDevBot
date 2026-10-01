@@ -80,6 +80,13 @@ export function MemoryCardPresentation({
   useEffect(() => {
     pickerOpenRef.current = false
     const cancelOnScroll = () => { cancelPending(); setPickerOpen(false) }
+    const clearReleasedHoldLatch = (event: PointerEvent) => {
+      if (event.isPrimary === false || event.button !== 0 || !holdClickTargetRef.current) return
+      didHoldRef.current = false
+      holdClickTargetRef.current = null
+      recognizedPointerRef.current = null
+      if (holdResetTimerRef.current) { clearTimeout(holdResetTimerRef.current); holdResetTimerRef.current = null }
+    }
     const cancelOtherPointer = (event: PointerEvent) => {
       if (pointerRef.current && event.pointerId !== pointerRef.current.id) cancelPending()
     }
@@ -111,6 +118,7 @@ export function MemoryCardPresentation({
       cancelPending()
     }
     document.addEventListener('scroll', cancelOnScroll, true)
+    document.addEventListener('pointerdown', clearReleasedHoldLatch, true)
     document.addEventListener('pointerdown', cancelOtherPointer, true)
     document.addEventListener('pointermove', cancelOnGlobalMove, true)
     document.addEventListener('pointerup', cancelReleasedPointer, true)
@@ -118,7 +126,7 @@ export function MemoryCardPresentation({
     window.addEventListener('blur', cancelOnScroll)
     document.addEventListener('visibilitychange', cancelOnScroll)
     window.addEventListener('pagehide', cancelOnScroll)
-    return () => { document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current) }
+    return () => { document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current) }
   }, [cancelPending, memoryId, reactionScopeKey, setPickerOpen])
 
   const eligible = (event: ReactPointerEvent<HTMLElement>) => {
