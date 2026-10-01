@@ -481,7 +481,7 @@ maybeDescribe('MAX durable capture', () => {
     const responses = await prisma.maxOutgoingResponse.findMany({ where: { kind: 'welcome' } })
     expect(responses).toHaveLength(2)
     expect(responses.filter((response) => response.text.includes('начать вашу семейную историю.'))).toHaveLength(1)
-    expect(responses.filter((response) => response.text === 'С возвращением в memoLy 💛\nОткройте приложение, чтобы продолжить.')).toHaveLength(1)
+    expect(responses.filter((response) => response.text === 'С возвращением в memoLy ❤️\nОткройте приложение, чтобы продолжить.')).toHaveLength(1)
   })
 
   test('browser approval starts preserve the challenge and do not consume ordinary welcome state', async () => {
@@ -1169,8 +1169,8 @@ maybeDescribe('MAX durable capture', () => {
       { payload: `invite_${usedToken}`, expected: 'Это приглашение уже использовано.' },
       { payload: `invite_${inactiveToken}`, expected: 'Не удалось найти действующее приглашение.' },
       { payload: 'invite_short', expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
-      { payload: 'campaign_abc', expected: 'С возвращением в memoLy 💛' },
-      { payload: null, expected: 'С возвращением в memoLy 💛' },
+      { payload: 'campaign_abc', expected: 'С возвращением в memoLy ❤️' },
+      { payload: null, expected: 'С возвращением в memoLy ❤️' },
     ] as const
     for (const [index, fixture] of cases.entries()) {
       const accepted = await accept({ kind: 'bot_started', chatId: '88', userId: '77', occurredAt: `2026-09-15T10:0${index}:00.000Z`, payload: fixture.payload })
