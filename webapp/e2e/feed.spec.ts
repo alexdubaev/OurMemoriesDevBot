@@ -86,6 +86,166 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   })
 
+  test('unread action and exit stay compact, keyboard accessible, and empty when appropriate', async ({ page }) => {
+    const family = await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId }, select: { unreadTrackingActivatedAt: true, publicationOrdinal: true } })
+    const member = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, select: { unreadBaselineOrdinal: true, membershipEpoch: true } })
+    const baseline = family.publicationOrdinal
+    const ids = Array.from({ length: 3 }, () => randomUUID())
+    const now = Date.now() - 86_400_000
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: baseline } })
+        await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: baseline } })
+      })
+      await page.reload()
+      await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+      await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+      await expect(page.locator('.feed-unread-action, .feed-unread-mode')).toHaveCount(0)
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(page.locator('[data-slot="date-heading"]').first()).toBeVisible()
+      await expect(page.locator('[data-memory-id]').first()).toBeVisible()
+      const emptyGeometry = await page.evaluate(() => {
+        const header = document.querySelector('[data-child-header-mode="feed"]')
+        const date = document.querySelector('[data-slot="date-heading"]')
+        return header && date ? { gap: date.getBoundingClientRect().top - header.getBoundingClientRect().bottom, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth } : null
+      })
+      expect(emptyGeometry).not.toBeNull()
+      expect(emptyGeometry!.gap).toBeGreaterThanOrEqual(0)
+      expect(emptyGeometry!.gap).toBeLessThan(32)
+      expect(emptyGeometry!.scrollWidth).toBeLessThanOrEqual(emptyGeometry!.clientWidth)
+      await page.screenshot({ path: resolve('e2e/.artifacts/feed-unread-390-zero.png'), animations: 'disabled' })
+      for (const width of [320, 430]) {
+        await page.setViewportSize({ width, height: 844 })
+        await expect(page.locator('.feed-unread-action, .feed-unread-mode')).toHaveCount(0)
+        const scroll = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }))
+        expect(scroll.width).toBeLessThanOrEqual(scroll.clientWidth)
+        await page.screenshot({ path: resolve(`e2e/.artifacts/feed-unread-${width}-zero.png`), animations: 'disabled' })
+      }
+
+      await prisma.$transaction(async (tx) => {
+        for (const [index, id] of ids.entries()) {
+          await tx.family.update({ where: { id: fixture.familyId }, data: { publicationOrdinal: baseline + BigInt(index + 1) } })
+          await tx.memory.create({ data: {
+            id, familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId,
+            kind: 'note', body: `Новая синтетическая заметка ${index + 1}\n${'Текст ниже первого экрана. '.repeat(24)}`,
+            occurredAt: new Date(now - index * 60_000), firstPublishedAt: new Date(), firstPublishedOrdinal: baseline + BigInt(index + 1),
+          } })
+        }
+      })
+      await page.reload()
+      await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+      const action = page.locator('.feed-unread-action')
+      await expect(action).toHaveText('3 новых')
+      await expect(action).toHaveAttribute('aria-label', 'Показать 3 непросмотренных воспоминания')
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.screenshot({ path: resolve('e2e/.artifacts/feed-unread-390-three.png'), animations: 'disabled' })
+
+      for (const width of [320, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 })
+        const metrics = await action.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          return { width: rect.width, height: rect.height, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, whiteSpace: style.whiteSpace }
+        })
+        expect(metrics.width).toBeGreaterThanOrEqual(44)
+        expect(metrics.height).toBeGreaterThanOrEqual(44)
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+        expect(metrics.whiteSpace).toBe('nowrap')
+        await page.screenshot({ path: resolve(`e2e/.artifacts/feed-unread-${width}-three.png`), animations: 'disabled' })
+      }
+
+      const themeTextTokens: Record<string, string> = { mint: '#6f7f78', rose: '#876f72', sky: '#6b7f89', lavender: '#7b7488', apricot: '#8a766a', sand: '#777a69' }
+      for (const theme of Object.keys(themeTextTokens)) {
+        const metrics = await action.evaluate((element, name) => {
+          document.documentElement.setAttribute('data-memoly-theme', String(name))
+          document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', String(name))
+          const rect = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          const rootStyle = getComputedStyle(document.documentElement)
+          return { width: rect.width, height: rect.height, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, color: style.color, themeText: rootStyle.getPropertyValue('--theme-text-muted').trim(), canvasTop: rootStyle.getPropertyValue('--theme-canvas-top').trim(), canvasBottom: rootStyle.getPropertyValue('--theme-canvas-bottom').trim(), background: style.backgroundImage, shadow: style.boxShadow }
+        }, theme)
+        expect(metrics.width).toBeGreaterThanOrEqual(44)
+        expect(metrics.height).toBeGreaterThanOrEqual(44)
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+        expect(metrics.color).toBe('rgb(48, 42, 46)')
+        expect(metrics.themeText).toBe(themeTextTokens[theme])
+        expect(metrics.background).toBe('none')
+        expect(metrics.shadow).toBe('none')
+        expect(contrastRatio(metrics.color, metrics.canvasTop)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(metrics.color, metrics.canvasBottom)).toBeGreaterThanOrEqual(4.5)
+      }
+      await page.evaluate(() => { document.documentElement.setAttribute('data-memoly-theme', 'mint'); document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', 'mint') })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await action.focus()
+      await page.keyboard.press('Enter')
+      const mode = page.locator('.feed-unread-mode')
+      await expect(mode.locator('.feed-unread-label').first()).toHaveText('Непросмотренные · 3')
+      const exit = page.getByRole('button', { name: 'Выйти из режима непросмотренных' })
+      const exitSize = await exit.evaluate((element) => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))
+      expect(exitSize.width).toBeGreaterThanOrEqual(44)
+      expect(exitSize.height).toBeGreaterThanOrEqual(44)
+      await exit.focus()
+      const focus = await exit.evaluate((element) => ({ width: getComputedStyle(element).outlineWidth, color: getComputedStyle(element).outlineColor, top: getComputedStyle(document.documentElement).getPropertyValue('--theme-canvas-top').trim(), bottom: getComputedStyle(document.documentElement).getPropertyValue('--theme-canvas-bottom').trim() }))
+      expect(focus.width).toBe('2px')
+      expect(contrastRatio(focus.color, focus.top)).toBeGreaterThanOrEqual(3)
+      expect(contrastRatio(focus.color, focus.bottom)).toBeGreaterThanOrEqual(3)
+      await page.screenshot({ path: resolve('e2e/.artifacts/feed-unread-390-mode.png'), animations: 'disabled' })
+      for (const width of [320, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 })
+        const metrics = await mode.evaluate((element) => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, whiteSpace: getComputedStyle(element.querySelector('.feed-unread-label')!).whiteSpace, exit: element.querySelector('button')!.getBoundingClientRect().toJSON() }))
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+        expect(metrics.whiteSpace).toBe('nowrap')
+        expect(metrics.exit.width).toBeGreaterThanOrEqual(44)
+        expect(metrics.exit.height).toBeGreaterThanOrEqual(44)
+        await page.screenshot({ path: resolve(`e2e/.artifacts/feed-unread-${width}-mode.png`), animations: 'disabled' })
+      }
+      for (const [theme, expectedToken] of Object.entries(themeTextTokens)) {
+        const token = await mode.evaluate((element, name) => {
+          document.documentElement.setAttribute('data-memoly-theme', String(name))
+          document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', String(name))
+          const style = getComputedStyle(document.documentElement)
+          const controlColor = getComputedStyle(element).color
+          return { controlColor, themeText: style.getPropertyValue('--theme-text-muted').trim(), canvasTop: style.getPropertyValue('--theme-canvas-top').trim(), canvasBottom: style.getPropertyValue('--theme-canvas-bottom').trim() }
+        }, theme)
+        expect(token.controlColor).toBe('rgb(48, 42, 46)')
+        expect(token.themeText).toBe(expectedToken)
+        expect(contrastRatio(token.controlColor, token.canvasTop)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(token.controlColor, token.canvasBottom)).toBeGreaterThanOrEqual(4.5)
+      }
+
+      await exit.click()
+      await expect(page.locator('.feed-unread-mode')).toHaveCount(0)
+      await prisma.memorySeen.createMany({ data: ids.slice(1).map((memoryId) => ({ familyId: fixture.familyId, userId: fixture.userId, membershipEpoch: member.membershipEpoch, memoryId })) })
+      await page.reload()
+      await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+      const oneAction = page.locator('.feed-unread-action')
+      await expect(oneAction).toHaveText('1 новое')
+      await expect(oneAction).toHaveAttribute('aria-label', 'Показать 1 непросмотренное воспоминание')
+      for (const width of [320, 390, 430]) {
+        await page.setViewportSize({ width, height: 844 })
+        const metrics = await oneAction.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return { width: rect.width, height: rect.height, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, whiteSpace: getComputedStyle(element).whiteSpace }
+        })
+        expect(metrics.width).toBeGreaterThanOrEqual(44)
+        expect(metrics.height).toBeGreaterThanOrEqual(44)
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+        expect(metrics.whiteSpace).toBe('nowrap')
+        await page.screenshot({ path: resolve(`e2e/.artifacts/feed-unread-${width}-one.png`), animations: 'disabled' })
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.locator('.feed-unread-action').focus()
+      await page.keyboard.press('Space')
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 1')
+      await page.getByRole('button', { name: 'Выйти из режима непросмотренных' }).click()
+    } finally {
+      await prisma.memorySeen.deleteMany({ where: { familyId: fixture.familyId, memoryId: { in: ids } } })
+      await prisma.memory.deleteMany({ where: { id: { in: ids } } })
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: family.unreadTrackingActivatedAt, publicationOrdinal: family.publicationOrdinal } })
+      await prisma.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: member.unreadBaselineOrdinal } })
+    }
+  })
+
   for (const width of [320, 390, 430, 480]) {
     test(`feed is usable at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })
@@ -112,7 +272,7 @@ test.describe.serial('T07 live feed', () => {
           viewportHeight: window.innerHeight,
         }
       })
-      const unreadControl = page.locator('.feed-unread-control')
+      const unreadControl = page.locator('.feed-unread-action, .feed-unread-mode')
 
       expect(metrics).not.toBeNull()
       expect(metrics!.clientWidth).toBe(width)
@@ -1351,7 +1511,7 @@ test.describe.serial('T07 live feed', () => {
       await page.reload()
       await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /1 непросмотренных воспоминаний/)
       await page.locator('.family-hub-card').click()
-      await page.getByRole('button', { name: 'Непросмотренные · 1' }).click()
+      await page.getByRole('button', { name: 'Показать 1 непросмотренное воспоминание' }).click()
       const card = page.locator(`[data-memory-id="${memory.id}"]`)
       await expect(card.getByRole('button', { name: 'Открыть фото' })).toBeVisible()
       expect(seenRequests).toBe(0)
@@ -1696,7 +1856,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.locator('[data-slot="feed-empty"]')).toBeVisible()
   })
 
-  test('compares the canonical photo card and unread-toggle geometry with deterministic visual data', async ({ page }) => {
+  test('compares the canonical photo card and unread-action geometry with deterministic visual data', async ({ page }) => {
     const canonical = readFileSync(resolve('../docs/memoly-final-functional-state-pack.html'))
     expect(createHash('sha256').update(canonical).digest('hex')).toBe('180f8c9b6e60369513cffd5eb9dbb3cb3397649407df996dcf907ab0fa38c5b4')
     const imageBase64 = canonical.toString('utf8').match(/class="media photo" src="data:image\/jpeg;base64,([^"]+)"/)?.[1]
@@ -1708,10 +1868,15 @@ test.describe.serial('T07 live feed', () => {
     const asset = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key, bytes: image, mime: 'image/jpeg', width: 790, height: 450 })
     await prisma.user.update({ where: { id: fixture.ownerUserId }, data: { displayName: 'Мама' } })
     await prisma.child.update({ where: { id: fixture.childId }, data: { displayName: 'София', birthDate: new Date('2024-05-25T00:00:00.000Z') } })
-    const body = 'Моё солнышко утром ☀️\nКак же ты любишь своего зайку 🤍'
-    const memory = await createMemoryWithMedia({ familyId: fixture.familyId, childId: fixture.childId, userId: fixture.ownerUserId, kind: 'photo', body, occurredAt: new Date(Date.now() + 30_000), assets: [asset] })
     const priorUnreadState = await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId }, select: { unreadTrackingActivatedAt: true, publicationOrdinal: true } })
     const priorMemberUnreadState = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, select: { unreadBaselineOrdinal: true } })
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { publicationOrdinal: 1n } })
+    const body = 'Моё солнышко утром ☀️\nКак же ты любишь своего зайку 🤍'
+    const memory = await prisma.memory.create({ data: {
+      familyId: fixture.familyId, childId: fixture.childId, authorId: fixture.ownerUserId, kind: 'photo', body,
+      occurredAt: new Date(Date.now() + 30_000), firstPublishedAt: new Date(), firstPublishedOrdinal: 1n,
+      media: { create: [{ mediaId: asset.id, position: 0 }] },
+    } })
     try {
     await prisma.$transaction(async (tx) => {
       await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: 1n } })
@@ -1740,12 +1905,18 @@ test.describe.serial('T07 live feed', () => {
       await page.evaluate(() => document.fonts.ready)
       await page.locator(`[data-memory-id="${memory.id}"] img`).first().evaluate((image: HTMLImageElement) => image.decode())
       await expect(page.locator('.filters-wrap .filter')).toHaveCount(0)
-      const unreadControl = page.locator('.feed-unread-control')
+      const unreadControl = page.locator('.feed-unread-action')
       await expect(unreadControl).toBeVisible()
-      const controlGeometry = await unreadControl.evaluate((element) => ({ width: element.getBoundingClientRect().width, viewportWidth: document.documentElement.clientWidth, buttonHeights: [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height) }))
+      const controlGeometry = await unreadControl.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return { width: rect.width, height: rect.height, viewportWidth: document.documentElement.clientWidth, background: style.backgroundImage, shadow: style.boxShadow, fontFamily: style.fontFamily }
+      })
       expect(controlGeometry.width).toBeLessThan(controlGeometry.viewportWidth)
-      expect(controlGeometry.buttonHeights).toHaveLength(2)
-      expect(controlGeometry.buttonHeights.every((height) => height >= 44)).toBe(true)
+      expect(controlGeometry.height).toBeGreaterThanOrEqual(44)
+      expect(controlGeometry.background).toBe('none')
+      expect(controlGeometry.shadow).toBe('none')
+      expect(controlGeometry.fontFamily).toMatch(/system-ui/)
       const metrics = await page.evaluate(() => {
         const measure = (selector: string) => {
           const element = document.querySelector<HTMLElement>(selector)!
@@ -1753,7 +1924,7 @@ test.describe.serial('T07 live feed', () => {
           const css = getComputedStyle(element)
           return { x: rect.x, y: rect.y, w: rect.width, h: rect.height, marginTop: css.marginTop, marginBottom: css.marginBottom, padding: css.padding, gap: css.gap, overflowX: css.overflowX, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }
         }
-        return { header: measure('[data-child-header-mode="feed"]'), app: measure('[data-slot="feed-scroll"]'), unreadControl: measure('.feed-unread-control'), card: measure('.memory-card'), cardHeader: measure('.memory-card .memory-header'), media: measure('.memory-card .memory-media-slot'), caption: measure('.memory-card .caption') }
+        return { header: measure('[data-child-header-mode="feed"]'), app: measure('[data-slot="feed-scroll"]'), unreadControl: measure('.feed-unread-action'), card: measure('.memory-card'), cardHeader: measure('.memory-card .memory-header'), media: measure('.memory-card .memory-media-slot'), caption: measure('.memory-card .caption') }
       })
       geometry[name] = metrics
       await page.screenshot({ path: resolve(`e2e/.artifacts/agent-b-react-comparable-${name}.png`), fullPage: true, animations: 'disabled' })
@@ -1777,9 +1948,12 @@ test.describe.serial('T07 live feed', () => {
     await activeLikeButton.click()
     const inactiveLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить реакцию ❤️"]`)
     await expect(inactiveLikeButton).toHaveAttribute('aria-pressed', 'false')
-    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(0)
+    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(1)
+    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveAttribute('aria-hidden', 'true')
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
     } finally {
+      await prisma.memory.deleteMany({ where: { id: memory.id } })
+      await prisma.mediaAsset.deleteMany({ where: { id: asset.id } })
       await prisma.$transaction(async (tx) => {
         await tx.family.update({ where: { id: fixture.familyId }, data: priorUnreadState })
         await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: priorMemberUnreadState })
@@ -1865,7 +2039,7 @@ test.describe.serial('T07 live feed', () => {
       await page.reload()
       await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /1 непросмотренных воспоминаний/)
       await page.locator('.family-hub-card').click()
-      await page.getByRole('button', { name: 'Непросмотренные · 1' }).click()
+      await page.getByRole('button', { name: 'Показать 1 непросмотренное воспоминание' }).click()
       const card = page.locator(`[data-memory-id="${memoryId}"]`)
       await expect(card).toBeVisible()
       await card.scrollIntoViewIfNeeded()
@@ -1885,13 +2059,13 @@ test.describe.serial('T07 live feed', () => {
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
       expect(seenPostStarted).toBe(0)
       await expect(card).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Непросмотренные · 1' })).toBeVisible()
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 1')
       await expect.poll(() => seenPostStarted).toBe(1)
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(0)
-      await expect(page.getByRole('button', { name: 'Непросмотренные · 1' })).toBeVisible()
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 1')
       releaseSeen()
       await expect.poll(() => prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId } })).toBe(1)
-      await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 0')
       await expect(card).toBeVisible()
       await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
       await expect(card.locator('[data-carousel-position="3"]')).toHaveAttribute('aria-hidden', 'true')
@@ -1949,7 +2123,7 @@ test.describe.serial('T07 live feed', () => {
       await page.bringToFront()
       await page.locator('.family-hub-card').click()
       await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
-      await page.getByRole('button', { name: 'Непросмотренные · 7' }).click()
+      await page.getByRole('button', { name: 'Показать 7 непросмотренных воспоминаний' }).click()
       await expect(page.locator('#root [data-memory-id]')).toHaveCount(7)
       await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-seven.png'), animations: 'disabled' })
 
@@ -1975,7 +2149,7 @@ test.describe.serial('T07 live feed', () => {
       }
       const anchor = page.locator(`[data-memory-id="${sevenIds[1]}"]`)
       const anchorTop = await anchor.evaluate((element) => element.getBoundingClientRect().top)
-      await expect(page.getByRole('button', { name: 'Непросмотренные · 5' })).toBeVisible()
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 5')
       expect(await page.locator('#root [data-memory-id]').count()).toBe(7)
       expect(Math.abs((await anchor.evaluate((element) => element.getBoundingClientRect().top)) - anchorTop)).toBeLessThanOrEqual(2)
       await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-five-stable.png'), animations: 'disabled' })
@@ -2006,24 +2180,27 @@ test.describe.serial('T07 live feed', () => {
       await expect(sameAccountPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /5 непросмотренных воспоминаний/)
 
       await page.locator('.family-hub-card').click()
+      await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
       const failedPhotoCard = page.locator(`[data-memory-id="${errorPhoto.id}"]`)
       await failedPhotoCard.scrollIntoViewIfNeeded()
       await expect(failedPhotoCard.getByLabel('Загрузка фотографии')).toBeVisible()
       await page.waitForTimeout(1_200)
       expect(await prisma.memorySeen.count({ where: { familyId: fixture.familyId, userId: fixture.userId, memoryId: errorPhoto.id } })).toBe(0)
 
+      await expect(page.getByRole('button', { name: 'Показать 5 непросмотренных воспоминаний' })).toBeVisible()
+      await page.getByRole('button', { name: 'Показать 5 непросмотренных воспоминаний' }).click()
       const membership = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } } })
       await prisma.memorySeen.createMany({ data: sevenIds.map((memoryId) => ({ familyId: fixture.familyId, userId: fixture.userId, membershipEpoch: membership.membershipEpoch, memoryId })), skipDuplicates: true })
-      await page.getByRole('button', { name: /Непросмотренные/ }).click()
       await page.getByRole('button', { name: 'Обновить список' }).click()
       await expect(page.getByText('Все новые воспоминания просмотрены')).toBeVisible()
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-      await expect(page.getByRole('button', { name: 'Непросмотренные · 0' })).toBeVisible()
+      await expect(page.locator('.feed-unread-mode .feed-unread-label').first()).toHaveText('Непросмотренные · 0')
+      await expect(page.getByRole('button', { name: 'Выйти из режима непросмотренных' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Показать все' })).toHaveCount(0)
       await page.setViewportSize({ width: 390, height: 844 })
       await page.screenshot({ path: resolve('e2e/.artifacts/b6-unread-empty.png'), animations: 'disabled' })
-      await page.getByRole('button', { name: 'Все', exact: true }).click()
-      await page.getByRole('button', { name: 'Непросмотренные · 0' }).click()
-      await expect(page.getByText('Все новые воспоминания просмотрены')).toBeVisible()
+      await page.getByRole('button', { name: 'Выйти из режима непросмотренных' }).click()
+      await expect(page.locator('.feed-unread-action, .feed-unread-mode')).toHaveCount(0)
     } finally {
       await sameAccountContext?.close()
       await secondContext?.close()
@@ -2050,10 +2227,11 @@ test.describe.serial('T07 live feed', () => {
       where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
       data: { revokedAt: new Date() },
     })
-    await page.getByRole('button', { name: /Непросмотренные/ }).click()
+    await voiceCard.getByRole('button', { name: 'Поставить реакцию ❤️' }).click()
 
-    await expect(page.getByText('Доступ к этой семье закрыт.')).toBeVisible()
+    await expect(page.getByText(/^Доступ к этой семье (?:закрыт\.|изменился\. Выберите её снова в списке\.)$/)).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    await expect(page.locator('.family-hub-card')).toHaveCount(0)
     await expect.poll(() => voiceHandle!.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
     await expect(page.locator('[data-memory-id]')).toHaveCount(0)
   })
@@ -2207,6 +2385,26 @@ function signedInitData(id: number, name: string) {
   const secret = createHmac('sha256', 'WebAppData').update('123456:web-e2e-synthetic-token').digest()
   fields.set('hash', createHmac('sha256', secret).update(dataCheckString).digest('hex'))
   return fields.toString()
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const channels = (color: string): [number, number, number] => {
+    const rgb = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i)
+    if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+    const hex = color.match(/^#([\da-f]{6})$/i)?.[1]
+    if (!hex) throw new Error(`Unsupported computed color: ${color}`)
+    const value = Number.parseInt(hex, 16)
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+  }
+  const luminance = (color: string) => {
+    const linear = channels(color).map((channel) => {
+      const normalized = channel / 255
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+    })
+    return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722
+  }
+  const values = [luminance(foreground), luminance(background)].sort((left, right) => right - left)
+  return (values[0]! + 0.05) / (values[1]! + 0.05)
 }
 
 async function installTelegramHost(page: Page, initData: string, insets: { bottom?: number; top?: number } = {}) {
