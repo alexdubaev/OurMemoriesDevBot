@@ -29,6 +29,8 @@ export type HostBridge = {
   openBot(): void
   openTelegramVideo(deepLink: string): boolean
   openInvite(rawToken: string): void
+  /** Opens a caller-built HTTPS URL through the host's supported external-link surface. */
+  openExternalUrl?(url: string): boolean
   getInsets(): TelegramInsets
 }
 

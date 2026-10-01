@@ -19,7 +19,26 @@ type PayloadCrypto = {
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedMediaText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
-const welcomeText = 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.'
+const welcomeText = `Добро пожаловать в memoLy 💛
+
+Здесь живёт история вашей семьи: первые улыбки,
+маленькие открытия и моменты, которые хочется сохранить.
+Фото, видео и заметки о ребёнке — в одном семейном альбоме,
+доступном только его участникам.
+
+🌱 Создаёте семейный альбом?
+Добавляйте воспоминания, приглашайте родных и друзей
+и выбирайте, какой доступ им предоставить.
+
+💛 Вас пригласили близкие?
+Смотрите семейные воспоминания и оставляйте реакции —
+будьте рядом, даже на расстоянии. Возможность добавлять
+свои воспоминания зависит от выданного вам доступа.
+
+Нажмите кнопку ниже, чтобы открыть приложение
+и начать вашу семейную историю.`
+const returningWelcomeText = 'С возвращением в memoLy 💛\nОткройте приложение, чтобы продолжить.'
+const browserApprovalText = 'Откройте memoLy, чтобы подтвердить вход в браузере.'
 const inviteGuidanceText = 'Приглашение получено. Откройте приложение memoLy, чтобы присоединиться.'
 const invalidInviteText = 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.'
 
@@ -71,9 +90,14 @@ export function createMaxTaskProcessor(options: {
 
     if (event.kind === 'bot_started') {
       const token = inviteTokenFromPayload(event.payload)
+      const browserApproval = isBrowserApprovalPayload(event.payload)
       let responseText = welcomeText
       let retainInviteContext = false
-      if (event.payload?.startsWith('invite_')) {
+      let inviteResolution: DetailedInviteStartResolution | null = null
+      if (browserApproval) {
+        responseText = browserApprovalText
+        retainInviteContext = true
+      } else if (event.payload?.startsWith('invite_')) {
         if (!token) responseText = invalidInviteText
         else if (options.resolveInviteStart) {
           const resolution = await resolveInviteStart(token)
@@ -81,11 +105,22 @@ export function createMaxTaskProcessor(options: {
           retainInviteContext = resolution === 'active'
         } else {
           const resolution = await resolveDetailedInviteStart(token, event.userId)
+          inviteResolution = resolution
           responseText = inviteStartText(resolution)
           retainInviteContext = resolution.status === 'valid' || resolution.status === 'already_member'
         }
       }
-      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, responseText, retainInviteContext) ? 'done' : 'skipped'
+      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, inbox.botId.toString(),
+        (hasPriorInteraction) => {
+          if (browserApproval) return { text: responseText, buttons: { kind: 'browser_approval' as const } }
+          if (event.payload?.startsWith('invite_')) {
+            if (inviteResolution?.status !== 'valid') return { text: responseText }
+            return { text: hasPriorInteraction ? inviteReturningText(inviteResolution.familyName) : responseText,
+              buttons: { kind: 'invite_welcome' as const, returning: hasPriorInteraction } }
+          }
+          return { text: hasPriorInteraction ? returningWelcomeText : responseText }
+        },
+        retainInviteContext) ? 'done' : 'skipped'
     }
     if (event.kind === 'family_choice') {
       if (event.payload.startsWith('max_channel:') && options.processChannelCallback &&
@@ -224,15 +259,47 @@ function inviteTokenFromPayload(payload: string | null) {
   return /^[A-Za-z0-9_-]{32,121}$/.test(token) && payload.length <= 128 ? token : null
 }
 
-export function inviteStartText(result: DetailedInviteStartResolution) {
+export function inviteStartText(result: DetailedInviteStartResolution, returning = false) {
   switch (result.status) {
-    case 'valid': return `Вас приглашают в семью «${result.familyName}». Доступ: ${result.role === 'viewer' ? 'просмотр' : 'полный'}. Откройте приглашение, чтобы продолжить.`
+    case 'valid': return returning ? inviteReturningText(result.familyName) : inviteWelcomeText(result.familyName)
     case 'already_member': return 'Вы уже состоите в этой семье. Откройте memoLy.'
     case 'expired': return 'Срок действия приглашения истёк.'
     case 'revoked': return 'Это приглашение больше не действует.'
     case 'used': return 'Это приглашение уже использовано.'
     case 'invalid': return 'Не удалось найти действующее приглашение.'
   }
+}
+
+function inviteWelcomeText(familyName: string) {
+  const safeName = safeFamilyName(familyName)
+  return `Добро пожаловать в memoLy 💛
+
+Здесь живёт история вашей семьи: первые улыбки,
+маленькие открытия и моменты, которые хочется сохранить.
+Фото, видео и заметки о ребёнке — в одном семейном альбоме,
+доступном только его участникам.
+
+🌱 Создаёте семейный альбом?
+Добавляйте воспоминания, приглашайте родных и друзей
+и выбирайте, какой доступ им предоставить.
+
+💛 Вас пригласили близкие?
+Смотрите семейные воспоминания и оставляйте реакции —
+будьте рядом, даже на расстоянии. Возможность добавлять
+свои воспоминания зависит от выданного вам доступа.
+
+Вас пригласили в семью „${safeName}“ 💌
+
+Нажмите кнопку ниже, чтобы посмотреть приглашение
+и присоединиться к семейному альбому.`
+}
+
+function inviteReturningText(familyName: string) {
+  return `Вас пригласили в семью „${safeFamilyName(familyName)}“ 💌\nОткройте приглашение, чтобы продолжить.`
+}
+
+function safeFamilyName(familyName: string) {
+  return familyName.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'вашу семью'
 }
 
 function taskPayload(payload: unknown): string {
@@ -296,18 +363,41 @@ async function terminalInbox(
   inboxId: string,
   kind: 'welcome',
   destinationUserId: string,
-  text: string,
+  botId: string,
+  responseForInteraction: (hasPriorInteraction: boolean) => { text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
   retainInviteContext: boolean,
 ) {
   return db.$transaction(async (tx) => {
+    const browserApproval = responseForInteraction(false).buttons?.kind === 'browser_approval'
+    if (!browserApproval) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-bot-start:${botId}:${destinationUserId}`}, 0))`
+    }
+    const [previous] = browserApproval ? [{ prior: false }] : await tx.$queryRaw<Array<{ prior: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM max_outgoing_responses response
+        JOIN max_inbox inbox ON inbox.id = response.inbox_id
+        WHERE response.destination_user_id = ${BigInt(destinationUserId)}
+          AND response.kind = 'welcome'
+          AND response.buttons IS DISTINCT FROM '{"kind":"browser_approval"}'::jsonb
+          AND inbox.bot_id = ${BigInt(botId)}
+          AND inbox.event_kind = 'bot_started'
+          AND inbox.id <> ${inboxId}::uuid
+      ) AS prior
+    `
     const changed = await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: {
       status: 'processed', processedAt: new Date(),
       ...(!retainInviteContext ? { encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } : {}),
     } })
     if (changed.count !== 1) return false
-    await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text })
+    const selected = responseForInteraction(Boolean(previous?.prior))
+    await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text: selected.text, ...(selected.buttons ? { buttons: selected.buttons } : {}) })
     return true
   })
+}
+
+function isBrowserApprovalPayload(payload: string | null): payload is string {
+  return typeof payload === 'string' && /^browser_\d{24}$/.test(payload)
 }
 
 async function markInboxProcessed(tx: PrismaTransactionClient, inboxId: string) {
@@ -319,12 +409,12 @@ async function markInboxProcessed(tx: PrismaTransactionClient, inboxId: string) 
 
 async function createResponseAndTask(
   tx: PrismaTransactionClient,
-  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string },
+  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
 ) {
   const response = await tx.maxOutgoingResponse.upsert({
     where: { inboxId_kind: { inboxId: input.inboxId, kind: input.kind } },
-    create: { inboxId: input.inboxId, destinationUserId: BigInt(input.destinationUserId), kind: input.kind, text: input.text },
-    update: { destinationUserId: BigInt(input.destinationUserId), text: input.text },
+    create: { inboxId: input.inboxId, destinationUserId: BigInt(input.destinationUserId), kind: input.kind, text: input.text, ...(input.buttons ? { buttons: input.buttons } : {}) },
+    update: { destinationUserId: BigInt(input.destinationUserId), text: input.text, ...(input.buttons ? { buttons: input.buttons } : {}) },
     select: { id: true },
   })
   await tx.taskOutbox.createMany({ data: [{

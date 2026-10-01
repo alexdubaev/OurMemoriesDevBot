@@ -22,7 +22,7 @@ type MaxWebApp = {
 type BrowserHost = {
   WebApp?: unknown
   history?: { back?: unknown }
-  location?: { pathname?: unknown; search?: unknown }
+  location?: { pathname?: unknown; search?: unknown; origin?: unknown }
 }
 
 export type MaxHostBridgeOptions = { maxBotUsername?: string }
@@ -87,6 +87,15 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
       // mini-app startapp links and must not receive an arbitrary direct-chat URL.
       if (!webApp || !isValidMaxBotUsername(options.maxBotUsername) || typeof webApp.openLink !== 'function') return
       webApp.openLink.call(webApp, `https://max.ru/${options.maxBotUsername}`)
+    },
+    openExternalUrl: (url: string) => {
+      if (!webApp || typeof webApp.openLink !== 'function' || !isOwnHttpsUrl(url, browserHost?.location?.origin)) return false
+      try {
+        webApp.openLink.call(webApp, url)
+        return true
+      } catch {
+        return false
+      }
     },
     openTelegramVideo: () => false,
     openInvite: () => undefined,
@@ -263,6 +272,16 @@ function inviteTokenFromStartParam(startParam: string | null) {
 
 function isValidMaxBotUsername(username: string | undefined) {
   return typeof username === 'string' && /^[A-Za-z0-9_]{5,32}$/.test(username)
+}
+
+function isOwnHttpsUrl(value: string, origin: unknown) {
+  if (typeof origin !== 'string') return false
+  try {
+    const expected = new URL(origin)
+    const target = new URL(value)
+    return expected.protocol === 'https:' && target.protocol === 'https:' && target.origin === expected.origin &&
+      !target.username && !target.password
+  } catch { return false }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

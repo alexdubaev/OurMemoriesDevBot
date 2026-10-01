@@ -8,10 +8,10 @@ import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme }
 import type { HostBridge } from '@/platform/host-bridge'
 
 type SettingsView = 'menu' | 'appearance' | 'help' | 'about'
-export type SettingsSheetProps = { hostBridge: Pick<HostBridge, 'onBack'>; open: boolean; onOpenChange: (open: boolean) => void; returnFocusRef?: RefObject<HTMLElement | null>; canManageFamily: boolean; onFamilySettings: () => void; onArchive: () => void }
+export type SettingsSheetProps = { hostBridge: Pick<HostBridge, 'onBack'>; open: boolean; onOpenChange: (open: boolean) => void; returnFocusRef?: RefObject<HTMLElement | null>; canManageFamily: boolean; canOpenInstall?: boolean; installLabel?: string; onOpenInstall?: () => void; onFamilySettings: () => void; onArchive: () => void }
 
 /** Canonical settings sheet. Controllers remain outside this presentation surface. */
-export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, canManageFamily, onFamilySettings, onArchive }: SettingsSheetProps) {
+export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, canManageFamily, canOpenInstall = false, installLabel = 'Установить memoLy', onOpenInstall, onFamilySettings, onArchive }: SettingsSheetProps) {
   const [view, setView] = useState<SettingsView>('menu')
   const { theme, setTheme } = useMemolyTheme()
   const title = view === 'appearance' ? 'Оформление' : view === 'help' ? 'Помощь и приватность' : view === 'about' ? 'О memoLy' : 'Настройки'
@@ -21,7 +21,7 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
     <div className="ml-settings-sheet" data-slot="memoly-settings-sheet" data-view={view}>
       <DrawerTitle className="sr-only">{title}</DrawerTitle>
       <DrawerDescription className="sr-only">Настройки оформления и информация о приватности memoLy</DrawerDescription>
-      {view === 'menu' ? <SettingsMenu canManageFamily={canManageFamily} onAbout={() => setView('about')} onAppearance={() => setView('appearance')} onArchive={() => { close(); onArchive() }} onFamilySettings={() => { close(); onFamilySettings() }} onHelp={() => setView('help')} theme={theme} /> : <div className="ml-settings-subview">
+      {view === 'menu' ? <SettingsMenu canManageFamily={canManageFamily} canOpenInstall={canOpenInstall} installLabel={installLabel} onOpenInstall={() => { close(); onOpenInstall?.() }} onAbout={() => setView('about')} onAppearance={() => setView('appearance')} onArchive={() => { close(); onArchive() }} onFamilySettings={() => { close(); onFamilySettings() }} onHelp={() => setView('help')} theme={theme} /> : <div className="ml-settings-subview">
         <div className="ml-settings-heading"><button aria-label="Назад" className="ml-settings-back" onClick={() => setView('menu')} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button><span className="ml-settings-subview-title">{title}</span><span aria-hidden="true" className="ml-settings-heading-spacer" /></div>
         {view === 'appearance' ? <AppearanceChoices selected={theme} onSelect={setTheme} /> : null}
         {view === 'help' ? <HelpPrivacy /> : null}
@@ -31,13 +31,14 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
   </MemolyBottomSheet>
 }
 
-export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; canManageFamily: boolean; theme: MemolyTheme }) {
+export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, onOpenInstall, canOpenInstall = false, installLabel = 'Установить memoLy', canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; onOpenInstall?: () => void; canOpenInstall?: boolean; installLabel?: string; canManageFamily: boolean; theme: MemolyTheme }) {
   return <div className="ml-settings-list ml-sheet-panel--list">
     <SettingsRow icon="palette" onClick={onAppearance} title="Оформление" subtitle={theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
     <SettingsRow icon="help-circle" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
     <SettingsRow icon="archive-box" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
     {canManageFamily ? <SettingsRow icon="pencil" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
     <SettingsRow icon="circle-info" onClick={onAbout} title="О memoLy" subtitle="Информация о приложении" />
+    {canOpenInstall ? <SettingsRow icon="circle-info" onClick={onOpenInstall ?? (() => undefined)} title={installLabel} subtitle="Открыть приложение в браузере или установить" /> : null}
   </div>
 }
 

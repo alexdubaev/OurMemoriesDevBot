@@ -28,6 +28,9 @@ export function FamilyScreen({
   onFeed,
   onRefresh,
   createInviteLink,
+  canOpenInstall = false,
+  installLabel,
+  onOpenInstall = () => undefined,
 }: {
   childProfileOpen: boolean
   familyResponse: FamilyResponse
@@ -44,6 +47,9 @@ export function FamilyScreen({
   onFeed: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
+  canOpenInstall?: boolean
+  installLabel?: string
+  onOpenInstall?: () => void
 }) {
   const [error, setError] = useState<Error | null>(null)
   const [inviteError, setInviteError] = useState(false)
@@ -97,7 +103,10 @@ export function FamilyScreen({
           canEditChild={isOwner}
           canInvite={canInvite}
           canLeaveFamily={Boolean(current && !isOwner)}
-          canManageFamily={isOwner}
+        canManageFamily={isOwner}
+        canOpenInstall={canOpenInstall}
+        installLabel={installLabel}
+        onOpenInstall={onOpenInstall}
           childProfileOpen={childProfileOpen}
           childAvatarUrl={avatarUrl}
           copyState={copyState}

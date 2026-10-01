@@ -6,9 +6,11 @@ import App from './App'
 import { AuthProvider } from './features/auth'
 import { installAppZoomPrevention } from './platform/app-zoom'
 import { createHostBridge } from './platform/telegram'
+import { installPwaPromptListeners } from './platform/pwa-install'
 import './production.css'
 
 installAppZoomPrevention(document)
+installPwaPromptListeners(window)
 
 const hostBridge = createHostBridge(window, {
   maxBotUsername: import.meta.env.VITE_MAX_BOT_USERNAME,

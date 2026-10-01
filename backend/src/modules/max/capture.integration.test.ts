@@ -465,6 +465,46 @@ maybeDescribe('MAX durable capture', () => {
     expect(completed.encryptedPayload.byteLength).toBe(0)
   })
 
+  test('first and returning bot starts persist one choice even when distinct starts race', async () => {
+    const events = [
+      { ...botStarted, timestamp: 1_757_844_010_001, chat_id: 801 },
+      { ...botStarted, timestamp: 1_757_844_010_002, chat_id: 802 },
+    ]
+    const accepted = await Promise.all(events.map(async (event) => {
+      const result = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(event) })
+      expect(result.status).toBe(200)
+    }))
+    expect(accepted).toHaveLength(2)
+    const tasks = await prisma.taskOutbox.findMany({ where: { type: 'max:process' } })
+    const process = createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })
+    await Promise.all(tasks.map((task) => process(task.payload)))
+    const responses = await prisma.maxOutgoingResponse.findMany({ where: { kind: 'welcome' } })
+    expect(responses).toHaveLength(2)
+    expect(responses.filter((response) => response.text.includes('начать вашу семейную историю.'))).toHaveLength(1)
+    expect(responses.filter((response) => response.text === 'С возвращением в memoLy 💛\nОткройте приложение, чтобы продолжить.')).toHaveLength(1)
+  })
+
+  test('browser approval starts preserve the challenge and do not consume ordinary welcome state', async () => {
+    const browserPayload = `browser_${'7'.repeat(24)}`
+    const browserBody = { ...botStarted, timestamp: 1_757_844_020_001, chat_id: 803, payload: browserPayload }
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(browserBody) })
+    const [browserInbox] = await prisma.maxInbox.findMany({ where: { eventKind: 'bot_started' }, orderBy: { receivedAt: 'asc' } })
+    if (!browserInbox) throw new Error('browser bot_started fixture was not stored')
+    const browserTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${browserInbox.id}` } } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(browserTask.payload)
+    const browserResponse = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: browserInbox.id, kind: 'welcome' } } })
+    expect(browserResponse).toMatchObject({ text: 'Откройте memoLy, чтобы подтвердить вход в браузере.', buttons: { kind: 'browser_approval' } })
+    expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: browserInbox.id } })).encryptedPayload.byteLength).toBeGreaterThan(0)
+
+    const ordinaryBody = { ...botStarted, timestamp: 1_757_844_020_002, chat_id: 804, payload: null }
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(ordinaryBody) })
+    const ordinaryInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_started', id: { not: browserInbox.id } } })
+    const ordinaryTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${ordinaryInbox.id}` } } })
+    await createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })(ordinaryTask.payload)
+    const ordinaryResponse = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: ordinaryInbox.id, kind: 'welcome' } } })
+    expect(ordinaryResponse.text).toContain('начать вашу семейную историю.')
+  })
+
   test('queues only newly accepted lifecycle events and treats identical deliveries as duplicates', async () => {
     const chatId = '9223372036854775807'
     const rawBody = `{"update_type":"bot_added","timestamp":1757844000002,"chat_id":${chatId},"is_channel":true,"user":{"user_id":77}}`
@@ -1123,14 +1163,14 @@ maybeDescribe('MAX durable capture', () => {
       prisma.familyInvite.count(), prisma.familyMember.count(), prisma.user.count(), prisma.externalIdentity.count(),
     ])
     const cases = [
-      { payload: `invite_${activeToken}`, expected: 'Вас приглашают в семью «Family 23001». Доступ: просмотр. Откройте приглашение, чтобы продолжить.' },
+      { payload: `invite_${activeToken}`, expected: 'Вас пригласили в семью „Family 23001“ 💌' },
       { payload: `invite_${expiredToken}`, expected: 'Срок действия приглашения истёк.' },
       { payload: `invite_${revokedToken}`, expected: 'Это приглашение больше не действует.' },
       { payload: `invite_${usedToken}`, expected: 'Это приглашение уже использовано.' },
       { payload: `invite_${inactiveToken}`, expected: 'Не удалось найти действующее приглашение.' },
       { payload: 'invite_short', expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.' },
-      { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.' },
-      { payload: null, expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.' },
+      { payload: 'campaign_abc', expected: 'С возвращением в memoLy 💛' },
+      { payload: null, expected: 'С возвращением в memoLy 💛' },
     ] as const
     for (const [index, fixture] of cases.entries()) {
       const accepted = await accept({ kind: 'bot_started', chatId: '88', userId: '77', occurredAt: `2026-09-15T10:0${index}:00.000Z`, payload: fixture.payload })
@@ -1141,7 +1181,7 @@ maybeDescribe('MAX durable capture', () => {
         resolveDetailedInviteStart: createDetailedInviteStartResolver(prisma, () => fixedNow),
       })(task.payload)
       const processed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId }, include: { responses: true } })
-      expect(processed.responses[0]?.text).toBe(fixture.expected)
+      expect(processed.responses[0]?.text).toContain(fixture.expected)
       expect(processed.responses[0]?.text).not.toContain(activeToken)
       expect(processed.encryptedPayload.byteLength > 0).toBe(fixture.payload === `invite_${activeToken}`)
     }
@@ -1195,7 +1235,12 @@ maybeDescribe('MAX durable capture', () => {
     await createMaxTaskProcessor({
       runtime: { prisma } as unknown as BackendRuntime,
       crypto,
-      resolveInviteStart: async () => { resolverCalls += 1; return 'active' },
+      resolveDetailedInviteStart: async (value, actor) => {
+        resolverCalls += 1
+        expect(value).toBe(rawToken)
+        expect(actor).toBe('77')
+        return { status: 'valid', familyName: 'Family 23011', role: 'viewer' }
+      },
     })(task.payload)
     const response = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: accepted.inboxId, kind: 'welcome' } } })
     let attempts = 0
@@ -1229,9 +1274,9 @@ maybeDescribe('MAX durable capture', () => {
     expect(resolverCalls).toBe(1)
     expect(deliveryResolutions).toBe(2)
     expect(sentInput).toMatchObject({
-      text: 'Вас приглашают в семью «Family 23011». Доступ: просмотр. Откройте приглашение, чтобы продолжить.',
       buttons: [{ type: 'open_app', text: 'Открыть приглашение', webApp: 'OurMemoriesMaxBot', payload: `invite_${rawToken}` }],
     })
+    expect(sentInput?.text).toContain('Вас пригласили в семью „Family 23011“ 💌')
     expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })).encryptedPayload.byteLength).toBe(0)
     const alreadyMember = await maxMember('77', 'viewer')
     await prisma.familyMember.create({ data: { familyId: family.familyId, userId: alreadyMember.userId, role: 'viewer' } })
