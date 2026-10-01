@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
 import { Client } from 'pg'
+import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
@@ -21,6 +22,7 @@ const channelOnboardingMigration = '20261001130000_max_channel_onboarding'
 test('upgrades populated migration 39 through MAX backup and lifecycle migrations without backfilling legacy memories', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
+  assertTaskDatabaseTarget(new URL(databaseUrl))
 
   const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))
@@ -258,10 +260,10 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
 })
 
 function assertTaskDatabaseTarget(url: URL) {
-  const name = url.pathname.slice(1)
-  if (url.hostname !== '127.0.0.1' || url.port !== '55481' ||
-      !name.startsWith('memoly_max_onboarding_resume_20261001_') || !name.endsWith('_test')) {
-    throw new Error('MAX migration test database is outside the verified task target')
+  assertTestDatabaseUrl(url.toString())
+  const name = decodeURIComponent(url.pathname.slice(1))
+  if ((url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') || url.port === '54329' || name === 'web_app_demo') {
+    throw new Error('MAX migration test database is outside the allowed loopback test target')
   }
-  process.stdout.write(`Verified migration DB host=${url.hostname} port=${url.port} db=${name}\n`)
+  process.stdout.write(`Verified migration DB host=${url.hostname} port=${url.port || '(default)'} db=${name}\n`)
 }
