@@ -2097,6 +2097,82 @@ test.describe.serial('T07 live feed', () => {
     await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-bottom-nav.png'), animations: 'disabled' })
     await page.mouse.up()
     await page.keyboard.press('Escape')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const feedSurface = page.locator('[data-memoly-feed]')
+    const browserSafeAreaDefaults = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => style.getPropertyValue(`--reaction-safe-inset-${side}`).trim())
+    })
+    expect(browserSafeAreaDefaults).toEqual(['0px', '0px', '0px', '0px'])
+    await feedSurface.evaluate((surface) => {
+      surface.style.setProperty('--host-inset-top', '44px')
+      surface.style.setProperty('--host-inset-right', '20px')
+      surface.style.setProperty('--host-inset-bottom', '34px')
+      surface.style.setProperty('--host-inset-left', '16px')
+    })
+    const hostInsets = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => style.getPropertyValue(`--host-inset-${side}`).trim())
+    })
+    expect(hostInsets).toEqual(['44px', '20px', '34px', '16px'])
+    await holdImage({ x: 0.04, y: 0.5 })
+    const safeAreaPicker = page.getByRole('group', { name: 'Реакции', exact: true })
+    await expect(safeAreaPicker).toBeVisible()
+    await expect(safeAreaPicker.getByRole('button')).toHaveCount(6)
+    await expect.poll(async () => {
+      const bounds = await safeAreaPicker.boundingBox()
+      if (!bounds) return false
+      return bounds.y >= 56 && bounds.x >= 28 && bounds.x + bounds.width <= 390 - 32 && bounds.y + bounds.height <= 844 - 122
+    }).toBe(true)
+    const safeAreaBounds = await safeAreaPicker.boundingBox()
+    expect(safeAreaBounds).not.toBeNull()
+    expect(safeAreaBounds!.y).toBeGreaterThanOrEqual(56)
+    expect(safeAreaBounds!.x).toBeGreaterThanOrEqual(28)
+    expect(safeAreaBounds!.x + safeAreaBounds!.width).toBeLessThanOrEqual(390 - 32)
+    expect(safeAreaBounds!.y + safeAreaBounds!.height).toBeLessThanOrEqual(844 - 122)
+    await expect.poll(async () => {
+      const heights = await safeAreaPicker.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height))
+      return heights.length === 6 && heights.every((height) => height >= 44)
+    }).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-safe-area.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+
+    await feedSurface.evaluate((surface) => {
+      for (const side of ['top', 'right', 'bottom', 'left']) surface.style.setProperty(`--host-inset-${side}`, '0px')
+      surface.style.setProperty('--reaction-safe-inset-top', '44px')
+      surface.style.setProperty('--reaction-safe-inset-right', '20px')
+      surface.style.setProperty('--reaction-safe-inset-bottom', '34px')
+      surface.style.setProperty('--reaction-safe-inset-left', '16px')
+    })
+    const simulatedSafeAreaInsets = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => ({
+        host: style.getPropertyValue(`--host-inset-${side}`).trim(),
+        safeArea: style.getPropertyValue(`--reaction-safe-inset-${side}`).trim(),
+      }))
+    })
+    expect(simulatedSafeAreaInsets).toEqual([
+      { host: '0px', safeArea: '44px' },
+      { host: '0px', safeArea: '20px' },
+      { host: '0px', safeArea: '34px' },
+      { host: '0px', safeArea: '16px' },
+    ])
+    await holdImage({ x: 0.98, y: 0.03 })
+    await expect(safeAreaPicker).toBeVisible()
+    const envSafeAreaBounds = await safeAreaPicker.boundingBox()
+    expect(envSafeAreaBounds).not.toBeNull()
+    expect(envSafeAreaBounds!.y).toBeGreaterThanOrEqual(56)
+    expect(envSafeAreaBounds!.x).toBeGreaterThanOrEqual(28)
+    expect(envSafeAreaBounds!.x + envSafeAreaBounds!.width).toBeLessThanOrEqual(390 - 32)
+    expect(envSafeAreaBounds!.y + envSafeAreaBounds!.height).toBeLessThanOrEqual(844 - 122)
+    await expect(safeAreaPicker.getByRole('button')).toHaveCount(6)
+    await expect.poll(async () => {
+      const heights = await safeAreaPicker.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height))
+      return heights.length === 6 && heights.every((height) => height >= 44)
+    }).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-safe-area-env.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
   })
 
   test('dragging away after a recognized hold cannot select a reaction or open the photo', async ({ page }) => {

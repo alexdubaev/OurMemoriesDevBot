@@ -46,7 +46,7 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
     </div></div> : null}
     {interactive ? <Popover onOpenChange={onOpenChange} open={open}>
       <PopoverAnchor asChild><span aria-hidden="true" className="reaction-anchor" style={{ left: point.x, top: point.y }} /></PopoverAnchor>
-      <PopoverContent align="center" aria-label="Выбрать реакцию" className="reaction-picker" collisionPadding={{ top: 12, right: 12, bottom: bottomCollisionPadding(), left: 12 }} onCloseAutoFocus={(event) => { event.preventDefault(); if (interactive && returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onEscapeKeyDown={() => onOpenChange(false)} onOpenAutoFocus={(event) => event.preventDefault()} onPointerDownOutside={() => onOpenChange(false)} side="top" sideOffset={14}>
+      <PopoverContent align="center" aria-label="Выбрать реакцию" className="reaction-picker" collisionPadding={collisionPadding()} onCloseAutoFocus={(event) => { event.preventDefault(); if (interactive && returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onEscapeKeyDown={() => onOpenChange(false)} onOpenAutoFocus={(event) => event.preventDefault()} onPointerDownOutside={() => onOpenChange(false)} side="top" sideOffset={14}>
         <div aria-label="Реакции" className="reaction-picker-options" role="group" onKeyDown={(event) => {
           const choices = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')]
           const index = choices.indexOf(event.target as HTMLButtonElement)
@@ -59,9 +59,16 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   </>
 }
 
-function bottomCollisionPadding() {
-  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return 88
-  const raw = getComputedStyle(document.querySelector('[data-memoly-feed]') ?? document.documentElement).getPropertyValue('--host-inset-bottom')
-  const inset = Number.parseFloat(raw)
-  return 88 + (Number.isFinite(inset) ? inset : 0)
+function collisionPadding() {
+  const defaults = { top: 12, right: 12, bottom: 88, left: 12 }
+  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return defaults
+  const surface = document.querySelector('[data-memoly-feed]') ?? document.documentElement
+  const styles = getComputedStyle(surface)
+  const inset = (side: 'top' | 'right' | 'bottom' | 'left') => {
+    const hostInset = Number.parseFloat(styles.getPropertyValue(`--host-inset-${side}`))
+    const safeAreaInset = Number.parseFloat(styles.getPropertyValue(`--reaction-safe-inset-${side}`))
+    const finiteNonnegative = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0
+    return Math.max(finiteNonnegative(hostInset), finiteNonnegative(safeAreaInset))
+  }
+  return { top: defaults.top + inset('top'), right: defaults.right + inset('right'), bottom: defaults.bottom + inset('bottom'), left: defaults.left + inset('left') }
 }
