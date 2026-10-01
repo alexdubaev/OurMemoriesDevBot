@@ -1245,15 +1245,12 @@ test('the feed header renders the memoLy logo above the child profile instead of
   expect(markup.indexOf('data-slot="app-brand"')).toBeLessThan(markup.indexOf('data-slot="child-profile"'))
 })
 
-test('the feed presentation keeps one memory surface and only the unread mode toggle', () => {
+test('the feed presentation keeps one memory surface and omits type filters', () => {
   const markup = renderToStaticMarkup(createElement(FeedPresentation, {
     activeFilter: 'all',
     childName: 'Лиза',
     childSubtitle: '2 года',
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
-    unreadState: 'ready',
-    unreadOnly: false,
-    onUnreadChange: () => undefined,
     onFamily: () => undefined,
     onFeed: () => undefined,
     onFilterChange: () => undefined,
@@ -1278,9 +1275,7 @@ test('the feed presentation keeps one memory surface and only the unread mode to
 
   expect(markup).not.toContain('memoly-filter-rail')
   expect(markup).not.toContain('Фото</span>')
-  expect(markup).toContain('aria-label="Режим ленты"')
-  expect(markup).toContain('>Все</span>')
-  expect(markup).toContain('>Непросмотренные</span>')
+  expect(markup).not.toContain('feed-unread-control')
   expect(markup).toContain('class="feed-section"')
   expect(markup).toContain('class="date-heading"')
   expect(markup).not.toContain('class="date-dot"')
@@ -1290,6 +1285,56 @@ test('the feed presentation keeps one memory surface and only the unread mode to
   expect(markup).not.toContain('surface-inset')
   expect(markup).toContain('class="actions"')
   expect(markup).toMatch(/class="caption(?: |")/)
+})
+
+test('the feed presents unread count as a contextual text action with an explicit exit', () => {
+  const render = (overrides: Partial<Parameters<typeof FeedPresentation>[0]>) => renderToStaticMarkup(createElement(FeedPresentation, {
+    activeFilter: 'all',
+    childName: 'Лиза',
+    childSubtitle: '2 года',
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    unreadState: 'ready',
+    unreadCount: 3,
+    unreadOnly: false,
+    onUnreadChange: () => undefined,
+    onFamily: () => undefined,
+    onFeed: () => undefined,
+    onFilterChange: () => undefined,
+    role: 'full',
+    ...overrides,
+  }, createElement('p', null, 'Лента')))
+
+  const emptyDefault = render({ unreadCount: 0 })
+  expect(emptyDefault).not.toContain('feed-unread-action')
+  expect(emptyDefault).not.toContain('feed-unread-mode')
+  expect(emptyDefault).not.toContain('feed-unread-control')
+
+  const threeNew = render({ unreadCount: 3 })
+  expect(threeNew).toContain('class="feed-unread-action"')
+  expect(threeNew).toContain('aria-label="Показать 3 непросмотренных воспоминания"')
+  expect(threeNew).toContain('3 новых')
+  expect(threeNew).not.toContain('>Все</span>')
+  expect(threeNew).not.toContain('Непросмотренные')
+
+  const oneNew = render({ unreadCount: 1 })
+  expect(oneNew).toContain('aria-label="Показать 1 непросмотренное воспоминание"')
+  expect(oneNew).toContain('1 новое')
+
+  const unreadEmpty = render({ unreadCount: 0, unreadOnly: true })
+  expect(unreadEmpty).toContain('class="feed-unread-mode"')
+  expect(unreadEmpty).toContain('Непросмотренные · 0')
+  expect(unreadEmpty).toContain('aria-label="Выйти из режима непросмотренных"')
+  expect(unreadEmpty).toContain('>×</span>')
+
+  const trackingDisabled = render({ unreadCount: 3, unreadOnly: true, unreadState: 'not_enabled' })
+  expect(trackingDisabled).not.toContain('feed-unread-action')
+  expect(trackingDisabled).not.toContain('feed-unread-mode')
+  expect(trackingDisabled).not.toContain('Непросмотренные')
+
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  expect(css).not.toContain('.feed-unread-control')
+  expect(css).toContain('.feed-unread-action:focus-visible')
+  expect(css).toContain('.feed-unread-mode button:focus-visible')
 })
 
 const telegramAttachment: Extract<MemoryDto['attachments'][number], { source: 'telegram' }> = {

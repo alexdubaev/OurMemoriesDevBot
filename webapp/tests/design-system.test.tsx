@@ -129,7 +129,8 @@ test('memoLy feed presentation composes the child hero and scoped navigation wit
   expect(markup).toContain('data-slot="memoly-child-hero"')
   expect(markup).not.toContain('data-slot="memoly-filter-rail"')
   expect(markup).toContain('data-bottom-navigation-appearance="memoly"')
-  expect(markup).toContain('aria-pressed="true"')
+  expect(markup).not.toContain('aria-pressed=')
+  expect(markup).not.toContain('feed-unread-control')
 })
 
 test('memoLy content rail keeps date groups and cards separated', async () => {

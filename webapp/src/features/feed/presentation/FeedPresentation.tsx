@@ -11,6 +11,17 @@ import './memoly-feed.css'
 
 export type FeedFilter = 'all' | 'photo' | 'video' | 'voice' | 'note'
 
+function unreadCountAnnouncement(count: number) {
+  const remainder10 = count % 10
+  const remainder100 = count % 100
+  const noun = remainder10 === 1 && remainder100 !== 11
+    ? 'непросмотренное воспоминание'
+    : remainder10 >= 2 && remainder10 <= 4 && (remainder100 < 12 || remainder100 > 14)
+      ? 'непросмотренных воспоминания'
+      : 'непросмотренных воспоминаний'
+  return `Показать ${count} ${noun}`
+}
+
 export type FeedPresentationProps = {
   activeFilter: FeedFilter
   addButtonRef?: Ref<HTMLButtonElement>
@@ -50,11 +61,13 @@ export function FeedPresentation(props: FeedPresentationProps) {
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
         {props.onAllFamilies ? <div className="family-context"><button className="family-context-back" onClick={props.onAllFamilies} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><Typography as="span" className="family-context-title" title={props.familyName} variant="memoryMeta">{props.familyName}</Typography></div> : null}
         <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
-        {(props.unreadOnly || props.unreadState === 'ready') && props.onUnreadChange ? (
-          <div className="feed-unread-control" role="group" aria-label="Режим ленты">
-            <button aria-pressed={!props.unreadOnly} className={!props.unreadOnly ? 'active' : ''} onClick={() => props.onUnreadChange?.(false)} type="button"><Typography as="span" variant="memoryFilter">Все</Typography></button>
-            <button aria-pressed={Boolean(props.unreadOnly)} className={props.unreadOnly ? 'active' : ''} onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" variant="memoryFilter">Непросмотренные{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? ` · ${props.unreadCount}` : ''}</Typography></button>
+        {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
+          <div className="feed-unread-mode">
+            <Typography as="span" className="feed-unread-label" variant="memoryMeta">{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? `Непросмотренные · ${props.unreadCount}` : 'Непросмотренные'}</Typography>
+            <button aria-label="Выйти из режима непросмотренных" onClick={() => props.onUnreadChange?.(false)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryMeta">×</Typography></button>
           </div>
+        ) : props.unreadState === 'ready' && (props.unreadCount ?? 0) > 0 && props.onUnreadChange ? (
+          <button aria-label={unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.unreadCount} {props.unreadCount === 1 ? 'новое' : 'новых'}</Typography></button>
         ) : null}
         <div className="feed-content">{children}</div>
       </main>

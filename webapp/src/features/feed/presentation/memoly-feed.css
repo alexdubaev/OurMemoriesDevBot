@@ -105,14 +105,20 @@
 }
 
 [data-memoly-feed] .feed-content { display: flex; min-width: 0; flex-direction: column; gap: 0; }
-[data-memoly-feed] .feed-unread-control { display: flex; gap: 6px; margin: 0 0 12px; padding: 5px; border-radius: 20px; background: var(--memoly-card-lo); }
-[data-memoly-feed] .feed-unread-control button { min-height: 44px; flex: 1; padding: 7px 9px; border-radius: 16px; color: var(--memoly-ink); font-size: 13px; font-weight: 650; }
-[data-memoly-feed] .feed-unread-control button.active { background: var(--memoly-card-hi); box-shadow: var(--memoly-shadow); }
+[data-memoly-feed] .feed-unread-action,
+[data-memoly-feed] .feed-unread-mode { display: flex; min-height: 44px; align-items: center; justify-content: center; margin: 8px auto 12px; color: var(--memoly-ink); font: 500 14px/20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+[data-memoly-feed] .feed-unread-label { color: inherit; font: inherit !important; }
+[data-memoly-feed] .feed-unread-action { min-width: 44px; padding: 0 8px; white-space: nowrap; }
+[data-memoly-feed] .feed-unread-mode { max-width: 100%; gap: 2px; }
+[data-memoly-feed] .feed-unread-mode span { min-width: 0; text-align: right; white-space: nowrap; }
+[data-memoly-feed] .feed-unread-mode button { display: grid; width: 44px; min-width: 44px; height: 44px; flex: 0 0 44px; place-items: center; padding: 0; color: var(--memoly-ink); font: inherit; font-size: 19px; line-height: 1; }
+[data-memoly-feed] .feed-unread-action:focus-visible,
+[data-memoly-feed] .feed-unread-mode button:focus-visible { outline: 2px solid var(--memoly-ink); outline-offset: 1px; }
 [data-memoly-feed] .feed-unread-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px; margin: 0 4px 12px; color: var(--memoly-ink-muted); }
 [data-memoly-feed] .feed-unread-note button { min-height: 44px; flex-shrink: 0; padding: 0 9px; font-size: 12px; }
 [data-memoly-feed] .feed-unread-note > p { flex: 1 1 190px; }
 [data-memoly-feed] .feed-unread-empty, [data-memoly-feed] .feed-unread-restart { display: grid; justify-items: center; gap: 12px; padding: 36px 18px; border-radius: 24px; background: var(--memoly-card-hi); text-align: center; }
-[data-memoly-feed] .feed-unread-empty button, [data-memoly-feed] .feed-unread-restart button { min-height: 44px; padding: 0 18px; border-radius: 16px; background: var(--memoly-accent-soft); color: var(--memoly-ink); }
+[data-memoly-feed] .feed-unread-restart button { min-height: 44px; padding: 0 18px; border-radius: 16px; background: var(--memoly-accent-soft); color: var(--memoly-ink); }
 
 [data-memoly-feed] .feed-section { min-width: 0; }
 [data-memoly-feed] .date-heading { display: flex; align-items: center; gap: 9px; margin: 9px 4px; color: #697582; font-size: 18px; font-weight: 760; line-height: 1.2; }
@@ -338,6 +344,3 @@
 [data-memoly-feed] [data-memoly-note-gradient]::before,
 [data-memoly-feed] [data-memoly-note-gradient]::after { display: none; }
 [data-memoly-feed] [data-memoly-note-gradient]:focus-visible { outline-offset: 0; }
-[data-memoly-feed] .feed-unread-control { width: fit-content; max-width: 100%; gap: 2px; margin: 12px auto 14px; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--memoly-card-lo) 74%, transparent); }
-[data-memoly-feed] .feed-unread-control button { min-height: 44px; flex: initial; padding: 5px 13px; border-radius: 999px; font-size: 12px; }
-[data-memoly-feed] .feed-unread-control button.active { box-shadow: 0 2px 7px rgba(74, 82, 77, .12); }
