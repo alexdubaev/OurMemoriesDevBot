@@ -1,5 +1,5 @@
 import type { BackendRuntime } from '../../runtime'
-import { createInviteStartResolver, createPrismaFamilyAccess } from '../families'
+import { createDetailedInviteStartResolver, createPrismaFamilyAccess } from '../families'
 import { createMaxAcceptUpdate } from './application/accept-update'
 import type { MaxApiPort, MaxBotIdentity } from './application/ports'
 import { createMaxApi } from './infrastructure/max-api'
@@ -20,15 +20,25 @@ import { createAuthModule } from '../auth'
 import { createMaxDirectVideoUploadRoutes } from './transport/direct-video-upload-routes'
 import { disabledEmailDelivery } from '../../email'
 import { createMaxMemoryBackupProcessor, createPrismaMaxMemoryBackupRepository } from './infrastructure/backup-media'
+import { createMaxChannelProvider } from './infrastructure/max-channel-provider'
+import { createMaxChannelOnboarding } from './application/channel-onboarding'
+import { Hono } from 'hono'
+import type { AuthHttpEnv } from '../auth'
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
   identity: MaxBotIdentity
   api?: MaxApiPort
+  channelVerifier?: (chatId: bigint) => Promise<{ title: string | null }>
 }) {
   const env = options.runtime.env
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
   const api = options.api ?? createMaxApi(env.MAX_BOT_TOKEN)
+  const channelProvider = createMaxChannelProvider(env.MAX_BOT_TOKEN)
+  const channelOnboarding = createMaxChannelOnboarding({
+    prisma: options.runtime.prisma,
+    verifyChannel: options.channelVerifier ?? (options.api ? async () => { throw new Error('MAX channel verification is unavailable') } : channelProvider.verifyChannel),
+  })
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
   const access = createPrismaFamilyAccess(options.runtime.prisma)
   const directVideoUploadService = createMaxDirectVideoUploadService({
@@ -54,7 +64,18 @@ export function createMaxModule(options: {
     crypto,
     api,
     ...(media ? { media, download: createMaxMediaDownload() } : {}),
-    resolveInviteStart: createInviteStartResolver(options.runtime.prisma),
+    resolveDetailedInviteStart: createDetailedInviteStartResolver(options.runtime.prisma),
+    processChannelLifecycle: channelOnboarding.processLifecycle,
+    processChannelCallback: channelOnboarding.processCallback,
+  })
+  const requireAuth = createAuthModule({ db: options.runtime.prisma, emailDelivery: options.runtime.emailDelivery ?? disabledEmailDelivery, env }).requireAuth
+  const channelStatusRoutes = new Hono<AuthHttpEnv>()
+  channelStatusRoutes.use('/families/*', requireAuth)
+  channelStatusRoutes.get('/families/:familyId/max-channel', async (c) => {
+    const familyId = c.req.param('familyId')
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(familyId)) return c.json({ error: 'NOT_FOUND' }, 404)
+    try { return c.json(await channelOnboarding.status(familyId, c.var.user.id), 200) }
+    catch { return c.json({ error: 'NOT_FOUND' }, 404) }
   })
   return {
     api,
@@ -65,7 +86,7 @@ export function createMaxModule(options: {
       secret: env.MAX_WEBHOOK_SECRET,
       bodyLimitBytes: env.MAX_WEBHOOK_BODY_LIMIT_BYTES,
       acceptUpdate,
-    }).route('/api/v1', directVideoUploadRoutes),
+    }).route('/api/v1', directVideoUploadRoutes).route('/api/v1', channelStatusRoutes),
   }
 }
 
@@ -75,6 +96,8 @@ export function createMaxTasks(runtime: BackendRuntime) {
     throw new Error('MAX task ran without server-side MAX configuration')
   }
   const api = createMaxApi(env.MAX_BOT_TOKEN)
+  const channelProvider = createMaxChannelProvider(env.MAX_BOT_TOKEN)
+  const channelOnboarding = createMaxChannelOnboarding({ prisma: runtime.prisma, verifyChannel: channelProvider.verifyChannel })
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
   const processTask = createMaxTaskProcessor({
     runtime,
@@ -82,7 +105,9 @@ export function createMaxTasks(runtime: BackendRuntime) {
     api,
     media: createMediaService({ db: runtime.prisma, env, familyAccess: createPrismaFamilyAccess(runtime.prisma), storage: runtime.privateStorage.storage }),
     download: createMaxMediaDownload(),
-    resolveInviteStart: createInviteStartResolver(runtime.prisma),
+    resolveDetailedInviteStart: createDetailedInviteStartResolver(runtime.prisma),
+    processChannelLifecycle: channelOnboarding.processLifecycle,
+    processChannelCallback: channelOnboarding.processCallback,
   })
   const processBackupMedia = createMaxMemoryBackupProcessor({
     repository: createPrismaMaxMemoryBackupRepository(runtime.prisma),
@@ -91,7 +116,13 @@ export function createMaxTasks(runtime: BackendRuntime) {
   })
   return {
     process: (payload: unknown, signal?: AbortSignal) => processTask(payload, signal),
-    deliverResponse: createMaxResponseDelivery({ prisma: runtime.prisma, api }),
+    deliverResponse: createMaxResponseDelivery({
+      prisma: runtime.prisma,
+      api,
+      crypto,
+      maxBotUsername: env.MAX_BOT_EXPECTED_USERNAME,
+      resolveDetailedInviteStart: createDetailedInviteStartResolver(runtime.prisma),
+    }),
     backupMedia: processBackupMedia,
   }
 }

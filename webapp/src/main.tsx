@@ -19,6 +19,11 @@ const root = createRoot(document.getElementById('root')!)
 const queryClient = new QueryClient()
 
 async function renderApplication() {
+  if (import.meta.env.DEV && window.location.pathname === '/__fixtures/family-max-channel') {
+    const { FamilyMaxChannelFixturePage } = await import('./dev/FamilyMaxChannelFixturePage')
+    root.render(<StrictMode><FamilyMaxChannelFixturePage /></StrictMode>)
+    return
+  }
   if (import.meta.env.DEV && window.location.pathname === '/__fixtures/family-hub') {
     const { FamilyHubFixturePage } = await import('./dev/FamilyHubFixturePage')
     root.render(<StrictMode><FamilyHubFixturePage /></StrictMode>)

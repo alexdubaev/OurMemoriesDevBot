@@ -1,9 +1,9 @@
 import 'dotenv/config'
 
 import { createPrisma, type DbClient } from '../src/db'
-import { insertTask } from '../src/outbox/store'
+import { createMaxChannelProvider } from '../src/modules/max/infrastructure/max-channel-provider'
+import { bindMaxChannelAndQueue } from '../src/modules/max/application/channel-onboarding'
 
-const MAX_API_BASE = 'https://platform-api2.max.ru'
 const MAX_INT64_MIN = -9_223_372_036_854_775_808n
 const MAX_INT64_MAX = 9_223_372_036_854_775_807n
 
@@ -19,53 +19,10 @@ export type MaxBackupChannelRepository = {
 }
 
 export function createMaxBackupChannelApi(token: string, options: { fetch?: FetchLike } = {}): MaxBackupChannelApi {
-  if (!token) throw new Error('MAX_BOT_TOKEN is required')
-  const fetcher = options.fetch ?? fetch
-
-  async function get(path: string): Promise<{ value: Record<string, unknown>; raw: string }> {
-    let response: Response
-    try {
-      response = await fetcher(`${MAX_API_BASE}${path}`, {
-        method: 'GET',
-        headers: { Authorization: token },
-        redirect: 'manual',
-        signal: AbortSignal.timeout(10_000),
-      })
-    } catch {
-      throw new Error('MAX verification request failed')
-    }
-    if (!response.ok) throw new Error('MAX verification request failed')
-    let raw: string
-    let value: unknown
-    try {
-      raw = await response.text()
-      value = JSON.parse(raw)
-    } catch { throw new Error('MAX verification response was invalid') }
-    if (!isRecord(value)) throw new Error('MAX verification response was invalid')
-    return { value, raw }
-  }
-
+  const provider = createMaxChannelProvider(token, options)
   return {
-    async verifyBot(expectedUsername) {
-      const { value: bot } = await get('/me')
-      if (bot.is_bot !== true || bot.username !== expectedUsername) {
-        throw new Error('MAX bot identity verification failed')
-      }
-    },
-    async verifyChannel(chatId) {
-      const encodedChatId = chatId.toString()
-      const { value: chat, raw: chatRaw } = await get(`/chats/${encodedChatId}`)
-      if (chat.type !== 'channel' || chat.status !== 'active' || chat.is_public !== false ||
-          readRootInt64(chatRaw, 'chat_id') !== chatId) {
-        throw new Error('MAX target must be an active channel where the bot is a member')
-      }
-      const { value: membership } = await get(`/chats/${encodedChatId}/members/me`)
-      const permissions = membership.permissions
-      if (membership.is_bot !== true || (membership.is_owner !== true && membership.is_admin !== true) ||
-          !Array.isArray(permissions) || !permissions.includes('write')) {
-        throw new Error('MAX bot must be a channel owner or admin with write permission')
-      }
-    },
+    verifyBot: provider.verifyBot,
+    verifyChannel: async (chatId) => { await provider.verifyChannel(chatId) },
   }
 }
 
@@ -73,38 +30,21 @@ export function createPrismaMaxBackupChannelRepository(prisma: DbClient): MaxBac
   return {
     async bindAndQueue(familyId, chatId) {
       return prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7341288911)`
+        const binding = await tx.maxChannelBinding.findUnique({ where: { chatId } })
+        if (binding?.familyId && binding.familyId !== familyId) throw new Error('MAX channel is already bound to another family')
+        await tx.$queryRaw`SELECT id FROM families WHERE id = ${familyId}::uuid FOR UPDATE`
         const family = await tx.family.findUnique({ where: { id: familyId }, select: { maxBackupChatId: true } })
         if (!family) throw new Error('Family does not exist')
-        if (family.maxBackupChatId !== null && family.maxBackupChatId !== chatId) {
-          throw new Error('Family is already bound to a different MAX channel')
-        }
-        const occupied = await tx.family.findFirst({
-          where: { maxBackupChatId: chatId, id: { not: familyId } },
-          select: { id: true },
+        if (family.maxBackupChatId !== null && family.maxBackupChatId !== chatId) throw new Error('Family is already bound to a different MAX channel')
+        const history = await tx.maxChannelBinding.upsert({
+          where: { chatId },
+          create: { chatId, familyId, state: 'connected', version: 1 },
+          update: { familyId, state: 'connected', version: { increment: 1 } },
+          select: { version: true },
         })
-        if (occupied) throw new Error('MAX channel is already bound to another family')
-
-        const update = await tx.family.updateMany({
-          where: { id: familyId, OR: [{ maxBackupChatId: null }, { maxBackupChatId: chatId }] },
-          data: { maxBackupChatId: chatId },
-        })
-        if (update.count !== 1) throw new Error('Family MAX channel binding changed concurrently')
-
-        const backups = await tx.maxMemoryBackup.updateManyAndReturn({
-          where: { familyId, state: 'needs_configuration' },
-          data: { channelChatId: chatId, state: 'pending', lastErrorCode: null },
-          select: { memoryId: true },
-        })
-        if (backups.length) {
-          for (const backup of backups) {
-            await insertTask(tx, {
-              type: 'max:backup-media',
-              dedupeKey: `max-backup-media:${backup.memoryId}`,
-              payload: { memoryId: backup.memoryId },
-            })
-          }
-        }
-        return { queued: backups.length }
+        const update = await bindMaxChannelAndQueue(tx, familyId, chatId, history.version)
+        return { queued: update }
       })
     },
   }
@@ -182,88 +122,6 @@ async function main() {
   } finally {
     await prisma?.$disconnect()
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Read an int64 field from the original JSON so IDs above Number.MAX_SAFE_INTEGER remain exact. */
-function readRootInt64(raw: string, field: string): bigint | null {
-  let index = 0
-  const whitespace = () => { while (/\s/.test(raw[index] ?? '')) index += 1 }
-  const readStringEnd = (start: number) => {
-    let cursor = start + 1
-    while (cursor < raw.length) {
-      if (raw[cursor] === '\\') cursor += 2
-      else if (raw[cursor++] === '"') return cursor
-    }
-    return -1
-  }
-  const skipValue = () => {
-    if (raw[index] === '"') {
-      const end = readStringEnd(index)
-      if (end < 0) return false
-      index = end
-      return true
-    }
-    if (raw[index] === '{' || raw[index] === '[') {
-      const stack = [raw[index++] === '{' ? '}' : ']']
-      while (index < raw.length && stack.length) {
-        if (raw[index] === '"') {
-          const end = readStringEnd(index)
-          if (end < 0) return false
-          index = end
-        } else if (raw[index] === '{' || raw[index] === '[') {
-          stack.push(raw[index++] === '{' ? '}' : ']')
-        } else if (raw[index] === '}' || raw[index] === ']') {
-          if (raw[index++] !== stack.pop()) return false
-        } else index += 1
-      }
-      return stack.length === 0
-    }
-    while (index < raw.length && raw[index] !== ',' && raw[index] !== '}') index += 1
-    return true
-  }
-
-  whitespace()
-  if (raw[index++] !== '{') return null
-  while (index < raw.length) {
-    whitespace()
-    if (raw[index] === '}') return null
-    if (raw[index] !== '"') return null
-    const keyEnd = readStringEnd(index)
-    if (keyEnd < 0) return null
-    let key: unknown
-    try { key = JSON.parse(raw.slice(index, keyEnd)) } catch { return null }
-    index = keyEnd
-    whitespace()
-    if (raw[index++] !== ':') return null
-    whitespace()
-    if (key === field) {
-      if (raw[index] === '"') {
-        const end = readStringEnd(index)
-        if (end < 0) return null
-        let value: unknown
-        try { value = JSON.parse(raw.slice(index, end)) } catch { return null }
-        if (typeof value !== 'string' || !/^-?[1-9][0-9]{0,18}$/.test(value)) return null
-        const id = BigInt(value)
-        return id >= MAX_INT64_MIN && id <= MAX_INT64_MAX ? id : null
-      }
-      const match = /^-?[1-9][0-9]{0,18}/.exec(raw.slice(index))
-      if (!match) return null
-      index += match[0].length
-      whitespace()
-      if (raw[index] !== ',' && raw[index] !== '}') return null
-      const id = BigInt(match[0])
-      return id >= MAX_INT64_MIN && id <= MAX_INT64_MAX ? id : null
-    }
-    if (!skipValue()) return null
-    whitespace()
-    if (raw[index] === ',') index += 1
-    else if (raw[index] !== '}') return null
-  }
-  return null
 }
 
 if (import.meta.main) {

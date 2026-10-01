@@ -6,6 +6,7 @@ import {
   createInviteRequestSchema,
   familyHomeQuerySchema,
   familyHomeResponseSchema,
+  familyMaxChannelStatusSchema,
   familyMeResponseSchema,
   familyRoleSchema,
   idempotencyKeyHeadersSchema,
@@ -16,6 +17,12 @@ import {
 import type { FamilyHomeResponse } from './index'
 
 describe('family contracts', () => {
+  test('exposes compact MAX channel status without provider identifiers', () => {
+    expect(familyMaxChannelStatusSchema.parse({ state: 'connected', title: 'Private memories', canManage: false })).toEqual({
+      state: 'connected', title: 'Private memories', canManage: false,
+    })
+    expect(() => familyMaxChannelStatusSchema.parse({ state: 'connected', title: 'Private memories', canManage: true, chatId: '-123' })).toThrow()
+  })
   test('keeps full and viewer as the only family roles', () => {
     expect(familyRoleSchema.parse('full')).toBe('full')
     expect(familyRoleSchema.parse('viewer')).toBe('viewer')

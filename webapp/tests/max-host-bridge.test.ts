@@ -17,8 +17,9 @@ describe('MAX HostBridge', () => {
     const token = 'A'.repeat(32)
     const bridge = createMaxHostBridge({ WebApp: { initData: 'query_id=signed' } }, { maxBotUsername: 'OurMemoriesMaxBot' })
 
-    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
-    expect(bridge.inviteLink('A'.repeat(128))).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${'A'.repeat(128)}`)
+    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${token}`)
+    expect(bridge.inviteLink('A'.repeat(121))).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${'A'.repeat(121)}`)
+    expect(bridge.inviteLink('A'.repeat(122))).toBeNull()
     expect(bridge.inviteLink('A'.repeat(31))).toBeNull()
     expect(bridge.inviteLink('A'.repeat(129))).toBeNull()
     expect(bridge.inviteLink('A'.repeat(31) + '.')).toBeNull()

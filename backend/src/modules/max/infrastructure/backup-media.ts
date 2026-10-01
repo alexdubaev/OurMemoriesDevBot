@@ -44,6 +44,7 @@ type Backup = {
   providerMessageId: string | null
   sendIntentAt: Date | null
   family: { maxBackupChatId: bigint | null }
+  channelState?: string | null
   memory: { familyId: string; status: string; deletedAt: Date | null }
   attachments: BackupAttachment[]
 }
@@ -74,7 +75,8 @@ export function createMaxMemoryBackupProcessor(options: {
     // this durable intent; provider outcomes are ambiguous until that worker records its result.
     if (backup.state === 'send_intent' || backup.sendIntentAt) return
 
-    if (!backup.family.maxBackupChatId || backup.channelChatId !== backup.family.maxBackupChatId) {
+    if (!backup.family.maxBackupChatId || backup.channelChatId !== backup.family.maxBackupChatId ||
+        (backup.channelState !== undefined && backup.channelState !== 'connected')) {
       await options.repository.updateState(backup, 'needs_configuration', { lastErrorCode: 'backup_channel_not_configured' })
       throw new TerminalTaskError('MAX backup channel is not configured for this family')
     }
@@ -88,7 +90,7 @@ export function createMaxMemoryBackupProcessor(options: {
       throw new TerminalTaskError('MAX backup must contain 1 to 10 attachments')
     }
     try {
-      await options.repository.updateState(backup, 'uploading')
+      if (!await options.repository.updateState(backup, 'uploading')) return
 
       for (const attachment of backup.attachments) {
         if (attachment.uploadToken) continue
@@ -150,6 +152,7 @@ export function createMaxMemoryBackupProcessor(options: {
       }
       throw error
     }
+    const pacedChannelChatId = backup.channelChatId
     try {
       const waitMs = await options.repository.reserveChannelSendDelay(backup)
       if (waitMs === null) {
@@ -165,6 +168,7 @@ export function createMaxMemoryBackupProcessor(options: {
     }
     backup = await options.repository.load(memoryId)
     if (!backup || backup.state === 'sent' || backup.state === 'ambiguous' || backup.state === 'send_intent') return
+    if (backup.channelChatId !== pacedChannelChatId) return
     if (backup.family.maxBackupChatId !== backup.channelChatId || !backup.channelChatId || backup.memory.status !== 'published' || backup.memory.deletedAt) {
       await options.repository.updateState(backup, 'failed', { lastErrorCode: 'backup_precondition_changed' })
       throw new TerminalTaskError('MAX backup preconditions changed before send')
@@ -218,14 +222,19 @@ export function createMaxMemoryBackupProcessor(options: {
 export function createPrismaMaxMemoryBackupRepository(prisma: DbClient): MaxMemoryBackupRepository {
   return {
     async load(memoryId) {
-      return prisma.maxMemoryBackup.findUnique({
+      const backup = await prisma.maxMemoryBackup.findUnique({
         where: { memoryId },
         include: {
           family: { select: { maxBackupChatId: true } },
           memory: { select: { familyId: true, status: true, deletedAt: true } },
           attachments: { orderBy: { position: 'asc' }, include: { media: true, uploadSession: true } },
         },
-      }) as Promise<Backup | null>
+      })
+      if (!backup) return null
+      const binding = backup.channelChatId === null ? null : await prisma.maxChannelBinding.findUnique({
+        where: { chatId: backup.channelChatId }, select: { state: true },
+      })
+      return { ...backup, channelState: binding?.state ?? null } as Backup
     },
     async persistUploadToken(backup, attachment, token) {
       const result = await prisma.maxMemoryBackupAttachment.updateMany({
@@ -240,6 +249,7 @@ export function createPrismaMaxMemoryBackupRepository(prisma: DbClient): MaxMemo
           UPDATE families
           SET max_backup_next_send_at = GREATEST(COALESCE(max_backup_next_send_at, clock_timestamp()), clock_timestamp()) + interval '550 milliseconds'
           WHERE id = ${backup.familyId}::uuid AND max_backup_chat_id = ${backup.channelChatId}
+            AND EXISTS (SELECT 1 FROM max_channel_bindings b WHERE b.chat_id = ${backup.channelChatId} AND b.state = 'connected' AND b.family_id = ${backup.familyId}::uuid)
           RETURNING max_backup_next_send_at
         )
         SELECT GREATEST(0, CEIL(EXTRACT(EPOCH FROM (slot.max_backup_next_send_at - interval '550 milliseconds' - clock_timestamp())) * 1000))::integer AS wait_ms
@@ -252,16 +262,35 @@ export function createPrismaMaxMemoryBackupRepository(prisma: DbClient): MaxMemo
       const allowed: MaxMemoryBackupState[] = state === 'send_intent'
         ? ['pending', 'uploading']
         : state === 'sent' || state === 'ambiguous' || releasingSendIntent ? ['send_intent'] : ['pending', 'uploading']
-      const result = await prisma.maxMemoryBackup.updateMany({
-        where: {
-          id: backup.id,
-          familyId: backup.familyId,
-          state: { in: allowed },
-          ...(state === 'send_intent' ? { sendIntentAt: null } : {}),
-          ...(releasingSendIntent ? { sendIntentAt: backup.sendIntentAt } : {}),
-        },
-        data: { state, ...patch },
-      })
+      const where = {
+        id: backup.id,
+        familyId: backup.familyId,
+        channelChatId: backup.channelChatId,
+        state: { in: allowed },
+        ...(state === 'send_intent' ? { sendIntentAt: null, providerMessageId: null } : {}),
+        ...(releasingSendIntent ? { sendIntentAt: backup.sendIntentAt } : {}),
+      }
+      if (state === 'send_intent') {
+        const channelChatId = backup.channelChatId
+        if (channelChatId === null) return false
+        return prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(7341288911)`
+          await tx.$queryRaw`SELECT id FROM families WHERE id = ${backup.familyId}::uuid FOR UPDATE`
+          const family = await tx.family.findUnique({ where: { id: backup.familyId }, select: { maxBackupChatId: true, status: true } })
+          if (family?.status !== 'active' || family.maxBackupChatId !== channelChatId) return false
+          const binding = await tx.maxChannelBinding.findUnique({
+            where: { chatId: channelChatId }, select: { familyId: true, state: true },
+          })
+          if (binding?.familyId !== backup.familyId || binding.state !== 'connected') return false
+          const memory = await tx.memory.findUnique({
+            where: { id: backup.memoryId }, select: { familyId: true, status: true, deletedAt: true },
+          })
+          if (memory?.familyId !== backup.familyId || memory.status !== 'published' || memory.deletedAt !== null) return false
+          const result = await tx.maxMemoryBackup.updateMany({ where, data: { state, ...patch } })
+          return result.count === 1
+        })
+      }
+      const result = await prisma.maxMemoryBackup.updateMany({ where, data: { state, ...patch } })
       return result.count === 1
     },
   }

@@ -35,6 +35,7 @@ maybeDescribe('MAX durable photo backup', () => {
         ownerUserId: user.id, name: 'Synthetic MAX pacing test', timezone: 'UTC', maxBackupChatId: -88_002n,
       } })
       await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      await tx.maxChannelBinding.create({ data: { chatId: -88_002n, familyId: created.id, state: 'connected' } })
       return created
     })
     fixtures.add({ familyId: family.id, userId: user.id })
@@ -57,6 +58,7 @@ maybeDescribe('MAX durable photo backup', () => {
         data: { ownerUserId: user.id, name: 'Synthetic MAX backup test', timezone: 'UTC', maxBackupChatId: -88_001n },
       })
       await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      await tx.maxChannelBinding.create({ data: { chatId: -88_001n, familyId: created.id, state: 'connected' } })
       return created
     })
     fixtures.add({ familyId: family.id, userId: user.id })
@@ -162,5 +164,68 @@ maybeDescribe('MAX durable photo backup', () => {
     }])
     expect(await prisma.memoryMedia.count({ where: { memoryId: memory.id } })).toBe(2)
     expect(await prisma.mediaAsset.count({ where: { id: { in: assets.map(({ id }) => id) }, originalStatus: 'stored', deletedAt: null, storageDeletedAt: null } })).toBe(2)
+  })
+
+  test('does not send to the old channel when Family switches between final load and send-intent CAS', async () => {
+    const user = await prisma.user.create({ data: { displayName: 'Synthetic MAX send race' } })
+    const oldChatId = -88_003n
+    const newChatId = -88_004n
+    const family = await prisma.$transaction(async (tx) => {
+      const created = await tx.family.create({ data: {
+        ownerUserId: user.id, name: 'Synthetic MAX send race', timezone: 'UTC', maxBackupChatId: oldChatId,
+      } })
+      await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+      await tx.maxChannelBinding.create({ data: { chatId: oldChatId, familyId: created.id, state: 'connected' } })
+      return created
+    })
+    fixtures.add({ familyId: family.id, userId: user.id })
+    const child = await prisma.child.create({ data: { familyId: family.id, displayName: 'Synthetic child' } })
+    const asset = await prisma.mediaAsset.create({ data: {
+      familyId: family.id, uploaderId: user.id, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/max-send-race/${randomUUID()}.png`, declaredMime: 'image/png', verifiedMime: 'image/png',
+      sha256: randomUUID().replaceAll('-', '').repeat(2), byteSize: BigInt(png.byteLength), originalStatus: 'stored',
+    } })
+    const memory = await prisma.memory.create({ data: {
+      familyId: family.id, childId: child.id, authorId: user.id, kind: 'photo', body: 'Synthetic send race',
+      occurredAt: new Date('2026-01-02T03:04:05.000Z'), status: 'published', firstPublishedAt: new Date('2026-01-02T03:04:05.000Z'),
+      media: { create: { position: 0, asset: { connect: { id: asset.id } } } },
+    } })
+    await prisma.maxMemoryBackup.create({ data: {
+      familyId: family.id, memoryId: memory.id, body: memory.body, state: 'pending', channelChatId: oldChatId,
+      attachments: { create: { position: 0, kind: 'image', family: { connect: { id: family.id } }, media: { connect: { id_familyId: { id: asset.id, familyId: family.id } } } } },
+    } })
+    const repository = createPrismaMaxMemoryBackupRepository(prisma)
+    let switched = false
+    let sendCalls = 0
+    const racingRepository = {
+      load: repository.load,
+      persistUploadToken: repository.persistUploadToken,
+      reserveChannelSendDelay: repository.reserveChannelSendDelay,
+      async updateState(backup: Parameters<typeof repository.updateState>[0], state: Parameters<typeof repository.updateState>[1], patch?: Parameters<typeof repository.updateState>[2]) {
+        if (state === 'send_intent' && !switched) {
+          switched = true
+          await prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(7341288911)`
+            await tx.$queryRaw`SELECT id FROM families WHERE id = ${family.id}::uuid FOR UPDATE`
+            await tx.maxChannelBinding.create({ data: { chatId: newChatId, familyId: family.id, state: 'connected' } })
+            await tx.maxChannelBinding.update({ where: { chatId: oldChatId }, data: { state: 'replaced', version: { increment: 1 } } })
+            await tx.family.update({ where: { id: family.id }, data: { maxBackupChatId: newChatId } })
+            await tx.maxMemoryBackup.update({ where: { memoryId: memory.id }, data: { channelChatId: newChatId, state: 'pending' } })
+          })
+        }
+        return repository.updateState(backup, state, patch)
+      },
+    }
+    const process = createMaxMemoryBackupProcessor({
+      repository: racingRepository,
+      storage: { async readObject({ key }: { key: string }) { return { key, contentLength: png.byteLength, contentType: 'image/png', body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(png); controller.close() } }) } } } as unknown as PrivateStorage,
+      api: { async uploadImage() { return { token: 'synthetic-upload-token' } }, async sendMediaMessage() { sendCalls += 1; return { messageId: 'unexpected-send' } } },
+    })
+
+    await process({ memoryId: memory.id })
+    const persisted = await prisma.maxMemoryBackup.findUniqueOrThrow({ where: { memoryId: memory.id } })
+    expect(switched).toBe(true)
+    expect(sendCalls).toBe(0)
+    expect(persisted).toMatchObject({ channelChatId: newChatId, state: 'pending', sendIntentAt: null, providerMessageId: null })
   })
 })

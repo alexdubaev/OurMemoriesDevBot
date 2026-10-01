@@ -1,4 +1,5 @@
 import type { MaxAcceptedEvent } from '../application/ports'
+import { readMaxInt64AtPath, readMaxStringAtPath } from '../application/channel-protocol'
 
 export type MaxMappedUpdate = MaxAcceptedEvent | { kind: 'ignored' }
 
@@ -11,12 +12,14 @@ export function normalizeMaxUpdate(input: unknown, rawBody?: string): MaxMappedU
     if (!isRecord(rawUpdate) || rawUpdate.update_type !== input.update_type || !isNonNegativeSafeInteger(input.timestamp)) {
       throw new Error('Invalid MAX lifecycle update envelope')
     }
+    const rawChatId = readRawTopLevelInteger(rawBody, 'chat_id')
+    if (rawChatId === null || !isInt64(rawChatId)) throw new Error('Invalid MAX lifecycle chat ID')
     if (input.update_type === 'bot_added' || input.update_type === 'bot_removed') {
       const chatId = readRawTopLevelInteger(rawBody, 'chat_id')
       const rawUser = readRawTopLevelObject(rawBody, 'user')
       const userId = rawUser === null ? null : readRawTopLevelInteger(rawUser, 'user_id')
       if (chatId === null || !isInt64(chatId) || !isRecord(input.user) || userId === null || !isInt64(userId) ||
-          typeof input.is_channel !== 'boolean') {
+          input.is_channel !== true) {
         throw new Error('Invalid MAX bot_added update')
       }
     }
@@ -28,7 +31,7 @@ export function normalizeMaxUpdate(input: unknown, rawBody?: string): MaxMappedU
   const occurredAt = new Date(timestamp).toISOString()
   if (input.update_type === 'bot_started') return normalizeBotStarted(input, occurredAt)
   if (input.update_type === 'message_callback') return normalizeChoiceCallback(input, occurredAt)
-  return normalizeMessage(input, occurredAt)
+  return normalizeMessage(input, occurredAt, rawBody)
 }
 
 function readRawTopLevelInteger(json: string, targetKey: string): string | null {
@@ -175,7 +178,7 @@ function normalizeBotStarted(input: Record<string, unknown>, occurredAt: string)
   }
 }
 
-function normalizeMessage(input: Record<string, unknown>, occurredAt: string): MaxMappedUpdate {
+function normalizeMessage(input: Record<string, unknown>, occurredAt: string, rawBody?: string): MaxMappedUpdate {
   if (!isRecord(input.message)) throw new Error('Invalid MAX message')
   const message = input.message
   if (message.body === null || message.body === undefined) return { kind: 'ignored' }
@@ -186,8 +189,20 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
   const isChannel = message.recipient.chat_type === 'channel'
   const isDialog = message.recipient.chat_type === 'dialog'
   if (isDialog && !Object.hasOwn(message.recipient, 'user_id')) throw new Error('Invalid MAX recipient')
+  let channelChatId: string | null = null
+  if (isChannel) {
+    if (rawBody !== undefined) {
+      const rawType = readMaxStringAtPath(rawBody, ['message', 'recipient', 'chat_type'])
+      const rawId = readMaxInt64AtPath(rawBody, ['message', 'recipient', 'chat_id'])
+      if (rawType !== 'channel' || rawId === null || rawId === 0n) return { kind: 'ignored' }
+      channelChatId = rawId.toString()
+    } else {
+      if (!isInt64Number(message.recipient.chat_id) || message.recipient.chat_id === 0) return { kind: 'ignored' }
+      channelChatId = String(message.recipient.chat_id)
+    }
+  }
   if ((!isChannel && !isDialog) ||
-      (message.recipient.chat_id !== null && (isChannel ? !isInt64Number(message.recipient.chat_id) || message.recipient.chat_id === 0 : !isPositiveSafeInteger(message.recipient.chat_id)))) return { kind: 'ignored' }
+      (isDialog && message.recipient.chat_id !== null && !isPositiveSafeInteger(message.recipient.chat_id))) return { kind: 'ignored' }
   if (isDialog && !isPositiveSafeInteger(message.recipient.user_id)) return { kind: 'ignored' }
   if (sender === null && !isChannel) return { kind: 'ignored' }
   if (sender !== null && !isPositiveSafeInteger(sender.user_id)) throw new Error('Invalid MAX message identifiers')
@@ -205,7 +220,7 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string): M
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
   if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
-    kind: 'message_created', senderId: sender ? String(sender.user_id) : '0', recipientId: String(isChannel ? message.recipient.chat_id : message.recipient.user_id),
+    kind: 'message_created', senderId: sender ? String(sender.user_id) : '0', recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
     messageId, occurredAt, text, attachments, ...(isChannel ? { isChannel: true } : {}),
   }
 }

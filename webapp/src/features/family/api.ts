@@ -6,6 +6,7 @@ import {
   familyMeResponseSchema,
   familyHomeResponseSchema,
   familyMembersResponseSchema,
+  familyMaxChannelStatusSchema,
   familyResponseSchema,
   finalizeMediaUploadResponseSchema,
   reserveMediaUploadRequestSchema,
@@ -85,6 +86,14 @@ export function loadFamilyInvites(transport: AuthenticatedTransport, familyId: s
 
 export function loadFamilyUsage(transport: AuthenticatedTransport, familyId: string) {
   return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}/usage`, familyUsageSchema)
+}
+
+export function loadFamilyMaxChannelStatus(transport: AuthenticatedTransport, familyId: string, signal?: AbortSignal) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/max-channel`,
+    familyMaxChannelStatusSchema,
+    { signal },
+  )
 }
 
 export function completeChildProfile(

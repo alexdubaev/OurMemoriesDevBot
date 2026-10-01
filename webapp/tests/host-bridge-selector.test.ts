@@ -16,7 +16,7 @@ test('host selector deterministically prefers a meaningful MAX surface', () => {
 test('passes the configured MAX username through the host selector', () => {
   const token = 'A'.repeat(32)
   const bridge = createHostBridge({ WebApp: { initData: maxInitData, ready: () => undefined } }, { maxBotUsername: 'OurMemoriesMaxBot' })
-  expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+  expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${token}`)
 })
 
 test('passes the configured MAX username to the ordinary browser invite flow', () => {
@@ -26,7 +26,7 @@ test('passes the configured MAX username to the ordinary browser invite flow', (
     { maxBotUsername: 'OurMemoriesMaxBot' },
   )
   expect(bridge.kind).toBe('browser')
-  expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+  expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${token}`)
 })
 
 test('host selector chooses Telegram when MAX is absent and browser otherwise', () => {

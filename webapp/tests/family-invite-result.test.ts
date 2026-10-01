@@ -21,7 +21,7 @@ describe('family invite result hotfix', () => {
       refresh: async () => undefined,
     })
 
-    expect(result.url).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+    expect(result.url).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${token}`)
   })
 
   test('keeps the successful URL result when the following refresh rejects', async () => {

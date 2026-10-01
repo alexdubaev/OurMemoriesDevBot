@@ -8,9 +8,11 @@ import type {
   MaxVideoResolution,
   MaxVideoUploadCapability,
   MaxSendVideoMessageInput,
+  MaxSendMessageInput,
   MaxImageUploadInput,
   MaxSendMediaMessageInput,
 } from '../application/ports'
+import { readMaxInt64AtPath, readMaxStringAtPath } from '../application/channel-protocol'
 
 const MAX_API_BASE = 'https://platform-api2.max.ru'
 const REQUEST_TIMEOUT_MS = 10_000
@@ -37,7 +39,7 @@ export class MaxProviderError extends Error {
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export function createMaxApi(token: string, options: { fetch?: FetchLike } = {}): MaxApiPort {
-  const requestUrl = async (url: string, init: RequestInit, callerSignal?: AbortSignal): Promise<unknown> => {
+  const requestUrl = async (url: string, init: RequestInit, callerSignal?: AbortSignal, includeRawBody = false): Promise<unknown> => {
     const controller = new AbortController()
     const onCallerAbort = () => controller.abort()
     callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
@@ -59,7 +61,9 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         )
       }
       try {
-        return await response.json()
+        const rawBody = await response.text()
+        const value: unknown = JSON.parse(rawBody)
+        return includeRawBody ? { value, rawBody } : value
       } catch {
         throw new MaxProviderError()
       }
@@ -102,7 +106,9 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: input.text, ...(input.buttons?.length ? { attachments: [{ type: 'inline_keyboard', payload: {
-          buttons: input.buttons.map((button) => [{ type: 'callback', text: button.text, payload: button.payload }]),
+          buttons: input.buttons.map((button) => button.type === 'open_app'
+            ? [{ type: 'open_app', text: button.text, web_app: button.webApp, ...(button.payload ? { payload: button.payload } : {}) }]
+            : [{ type: 'callback', text: button.text, payload: button.payload }]),
         } }] } : {}) }),
       }, signal)
       if (!isRecord(value) || !isRecord(value.message)) throw new MaxProviderError()
@@ -149,7 +155,9 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
     async getMessage(messageId, signal) {
       // TODO(post-MVP MAX history import): Add history listing only after provider validation proves no-gap pagination and a durable checkpoint; see docs/mvp/plans/mixed-media-max-import/POST_MVP_MAX_HISTORICAL_IMPORT.md.
       if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 512) throw new MaxProviderError()
-      return normalizeMessageLookup(await request(`/messages?${new URLSearchParams({ message_ids: messageId }).toString()}`, { method: 'GET' }, signal), messageId)
+      const result = await requestUrl(`${MAX_API_BASE}/messages?${new URLSearchParams({ message_ids: messageId }).toString()}`, { method: 'GET' }, signal, true)
+      if (!isRecord(result) || typeof result.rawBody !== 'string' || !Object.hasOwn(result, 'value')) throw new MaxProviderError()
+      return normalizeMessageLookup(result.value, messageId, result.rawBody)
     },
     async getVideo(videoToken, signal) {
       // TODO(post-MVP MAX history import): Re-resolve historical media tokens before transfer; never persist a temporary provider URL as the durable media source.
@@ -159,10 +167,12 @@ export function createMaxApi(token: string, options: { fetch?: FetchLike } = {})
   }
 }
 
-function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxResolvedMessage {
+function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBody: string): MaxResolvedMessage {
   if (isRecord(value) && Array.isArray(value.messages) && value.messages.length === 0) {
     throw new MaxProviderError(undefined, false, 404, 'message_not_found')
   }
+  const path: Array<string | number> = isRecord(value) && Array.isArray(value.messages) ? ['messages', 0] :
+    isRecord(value) && isRecord(value.message) ? ['message'] : []
   const candidate = isRecord(value) && Array.isArray(value.messages) ? value.messages[0] :
     isRecord(value) && isRecord(value.message) ? value.message : value
   if (!isRecord(candidate) || !isRecord(candidate.recipient) || !isRecord(candidate.body) ||
@@ -174,13 +184,28 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string): MaxR
       typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
       !Array.isArray(candidate.body.attachments)) throw new MaxProviderError()
   const attachments = candidate.body.attachments.map(normalizeResolvedAttachment)
+  const recipientId = candidate.recipient.chat_type === 'channel'
+    ? exactRawChannelRecipientId(rawBody, [...path, 'recipient', 'chat_id'], [...path, 'recipient', 'chat_type'], candidate.recipient.chat_id)
+    : String(candidate.recipient.user_id)
+  if (recipientId === null) throw new MaxProviderError()
   return { messageId: expectedMessageId,
     senderId: candidate.recipient.chat_type === 'channel' && !isRecord(candidate.sender) ? '0' : String((candidate.sender as Record<string, unknown>).user_id),
-    recipientId: candidate.recipient.chat_type === 'channel' ? String(candidate.recipient.chat_id) : String(candidate.recipient.user_id), attachments }
+    recipientId, attachments }
+}
+
+function exactRawChannelRecipientId(rawBody: string, idPath: Array<string | number>, typePath: Array<string | number>, parsedId: unknown): string | null {
+  if (readMaxStringAtPath(rawBody, typePath) !== 'channel') return null
+  const exactId = readMaxInt64AtPath(rawBody, idPath, true)
+  if (exactId === null || exactId === 0n) return null
+  if (typeof parsedId === 'number') {
+    if (!Number.isFinite(parsedId) || !Number.isInteger(parsedId) || Number(exactId) !== parsedId) return null
+  } else if (typeof parsedId !== 'string' || parsedId !== exactId.toString()) return null
+  return exactId.toString()
 }
 
 function isInt64Id(value: unknown): value is number | string {
-  if (typeof value === 'number') return Number.isSafeInteger(value)
+  // Raw JSON validation below supplies the exact value for unsafe numbers.
+  if (typeof value === 'number') return Number.isFinite(value) && Number.isInteger(value)
   if (typeof value !== 'string' || !/^-?(?:0|[1-9][0-9]*)$/.test(value)) return false
   try { const parsed = BigInt(value); return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n }
   catch { return false }
@@ -309,14 +334,20 @@ function validateSubscriptionInput(input: MaxSubscriptionInput) {
   }
 }
 
-function validateSendMessageInput(input: { userId: string; text: string; buttons?: Array<{ text: string; payload: string }> }) {
+function validateSendMessageInput(input: MaxSendMessageInput) {
   if (typeof input.userId !== 'string' || !/^[1-9][0-9]*$/.test(input.userId) ||
       typeof input.text !== 'string' || input.text.length === 0 || [...input.text].length > 4_000) {
     throw new MaxProviderError()
   }
-  if (input.buttons && (!Array.isArray(input.buttons) || input.buttons.length > 210 || input.buttons.some((button) =>
-    typeof button.text !== 'string' || button.text.length === 0 || [...button.text].length > 80 ||
-    typeof button.payload !== 'string' || button.payload.length === 0 || button.payload.length > 512))) throw new MaxProviderError()
+  if (input.buttons && (!Array.isArray(input.buttons) || input.buttons.length > 30 || input.buttons.some((button) => {
+    if (typeof button.text !== 'string' || button.text.length === 0 || [...button.text].length > 80) return true
+    if (button.type === 'open_app') {
+      return typeof button.webApp !== 'string' || !/^[A-Za-z0-9_]{5,32}$/.test(button.webApp) ||
+        (button.payload !== undefined && (typeof button.payload !== 'string' || button.payload.length > 512 || !/^[A-Za-z0-9_-]*$/.test(button.payload)))
+    }
+    return (button.type !== undefined && button.type !== 'callback') || typeof button.payload !== 'string' ||
+      button.payload.length === 0 || button.payload.length > 512
+  }))) throw new MaxProviderError()
 }
 
 function validateSendVideoMessageInput(input: MaxSendVideoMessageInput) {

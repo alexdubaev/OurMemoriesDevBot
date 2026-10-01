@@ -156,7 +156,7 @@ describe('MAX backup channel configuration CLI', () => {
       maxMemoryBackup: {
         updateManyAndReturn: async (input: unknown) => {
           expect(input).toMatchObject({
-            where: { familyId, state: 'needs_configuration' },
+            where: { familyId, state: { in: ['needs_configuration', 'pending', 'uploading'] }, sendIntentAt: null, providerMessageId: null },
             data: { channelChatId: 88001n, state: 'pending', lastErrorCode: null },
           })
           return [{ memoryId: 'memory-one' }, { memoryId: 'memory-two' }]
@@ -166,13 +166,18 @@ describe('MAX backup channel configuration CLI', () => {
         createMany: async ({ data }: { data: typeof queued }) => { queued.push(...data); return { count: data.length } },
         findUniqueOrThrow: async ({ where }: { where: { type_dedupeKey: { dedupeKey: string } } }) => ({ id: where.type_dedupeKey.dedupeKey }),
       },
+      maxChannelBinding: {
+        findUnique: async () => null,
+        upsert: async () => ({ version: 1 }),
+      },
     }
+    Object.assign(tx, { $executeRaw: async () => 1, $queryRaw: async () => [] })
     const prisma = { $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx) } as unknown as DbClient
     const result = await createPrismaMaxBackupChannelRepository(prisma).bindAndQueue(familyId, 88001n)
     expect(result).toEqual({ queued: 2 })
     expect(queued).toEqual([
-      { type: 'max:backup-media', dedupeKey: 'max-backup-media:memory-one', payload: { memoryId: 'memory-one' } },
-      { type: 'max:backup-media', dedupeKey: 'max-backup-media:memory-two', payload: { memoryId: 'memory-two' } },
+      { type: 'max:backup-media', dedupeKey: 'max-backup-media:memory-one:channel:88001:1', payload: { memoryId: 'memory-one' } },
+      { type: 'max:backup-media', dedupeKey: 'max-backup-media:memory-two:channel:88001:1', payload: { memoryId: 'memory-two' } },
     ])
   })
 })

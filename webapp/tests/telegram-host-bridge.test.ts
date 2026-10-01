@@ -173,7 +173,7 @@ describe('Telegram HostBridge', () => {
       { location: { origin: 'https://app.memoly.ru', search: `?invite=${token}` } },
     )
 
-    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?startapp=invite_${token}`)
+    expect(bridge.inviteLink(token)).toBe(`https://max.ru/OurMemoriesMaxBot?start=invite_${token}`)
     expect(bridge.inviteLink(token)).not.toContain('app.memoly.ru')
     expect(bridge.inviteToken()).toBe(token)
     expect(bridge.inviteLink(token)).not.toMatch(/familyId|userId|childId|role/)

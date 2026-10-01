@@ -13,7 +13,7 @@ describe('MAX task processor payload boundary', () => {
       { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', resolution: null, resolverCalls: 0 },
       { payload: `invite_${'A'.repeat(32)}`, expected: 'Приглашение получено. Откройте приложение memoLy, чтобы присоединиться.', resolution: 'active' as const, resolverCalls: 1 },
       { payload: `invite_${'B'.repeat(32)}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.', resolution: 'invalid' as const, resolverCalls: 1 },
-      { payload: 'invite_short', expected: 'Добро пожаловать в memoLy. Откройте приложение, чтобы продолжить.', resolution: null, resolverCalls: 0 },
+      { payload: 'invite_short', expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.', resolution: null, resolverCalls: 0 },
     ]
 
     for (const fixture of cases) {
@@ -58,6 +58,34 @@ describe('MAX task processor payload boundary', () => {
     })
 
     expect(await process({ inboxId })).toBe('skipped')
+  })
+
+  test('terminally denies malformed MAX channel callback UUIDs without querying a decision', async () => {
+    let callbackLookups = 0
+    let inboxFinished = 0
+    let callbackAnswer = ''
+    const prisma = {
+      maxInbox: {
+        findUnique: async () => ({
+          id: inboxId, status: 'accepted', processedAt: null,
+          encryptedPayload: new Uint8Array([1]), encryptionIv: new Uint8Array([2]), encryptionAuthTag: new Uint8Array([3]), source: null,
+        }),
+        updateMany: async () => { inboxFinished += 1; return { count: 1 } },
+      },
+      $transaction: async (callback: (tx: any) => Promise<unknown>) => callback({ maxInbox: {
+        updateMany: async () => { inboxFinished += 1; return { count: 1 } },
+      } }),
+    }
+    const process = createMaxTaskProcessor({
+      runtime: { prisma } as unknown as BackendRuntime,
+      crypto: { decrypt: () => ({ kind: 'family_choice', payload: `max_channel:${'-'.repeat(36)}:select:0`, userId: '77', callbackId: 'malformed' }) } as never,
+      processChannelCallback: async () => { callbackLookups += 1; return false },
+      api: { answerCallback: async (_id: string, text: string) => { callbackAnswer = text } } as never,
+    })
+    expect(await process({ inboxId })).toBe('done')
+    expect(callbackLookups).toBe(1)
+    expect(inboxFinished).toBe(1)
+    expect(callbackAnswer).toBe('Этот выбор недоступен.')
   })
 
   test('denies an ambiguous two-family admission without invoking publication', async () => {
