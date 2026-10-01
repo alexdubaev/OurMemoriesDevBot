@@ -290,7 +290,10 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   const guest = await inviteePage(browser, 81000012, startParam, 'Приглашённая E2E', requests)
 
   await expect(guest.page.locator('[data-slot="welcome-splash"]')).toBeVisible()
-  await expect(guest.page.locator('[data-slot="welcome-splash"] button')).toHaveCount(0)
+  await expect(guest.page.locator('[data-slot="welcome-splash"] .continue-button')).toBeVisible()
+  await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toHaveCount(0)
+  await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toHaveCount(0)
+  await guest.page.locator('[data-slot="welcome-splash"] .continue-button').click({ timeout: 8_000 })
   await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
   await expect(guest.page.getByText('Наша семья')).toBeVisible()
   await expect(guest.page.getByText('Лиза', { exact: true })).toHaveCount(0)

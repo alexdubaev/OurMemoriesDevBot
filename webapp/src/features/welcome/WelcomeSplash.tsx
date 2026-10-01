@@ -1,5 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- The frozen welcome source's exact DOM and text CSS are preserved. */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import './welcome-splash.css'
 
@@ -11,7 +11,9 @@ export const WELCOME_FALLBACK_MS = WELCOME_INTRO_MS + 250
 export const WELCOME_REDUCED_DWELL_MS = 180
 
 export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
-  const finishRef = useRef<() => void>(() => undefined)
+  const finishIntroRef = useRef<() => void>(() => undefined)
+  const completedRef = useRef(false)
+  const [introFinished, setIntroFinished] = useState(false)
 
   useEffect(() => {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -27,21 +29,21 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
     let timer: number | undefined
     let startedAt = 0
     let remaining = motion.matches ? WELCOME_REDUCED_DWELL_MS : WELCOME_FALLBACK_MS
-    let pendingFinish = false
-    let finished = false
-    const finish = () => {
-      if (finished) return
-      if (document.visibilityState === 'hidden') { pendingFinish = true; return }
-      finished = true
+    let pendingIntro = false
+    let introIsFinished = false
+    const finishIntro = () => {
+      if (introIsFinished) return
+      if (document.visibilityState === 'hidden') { pendingIntro = true; return }
+      introIsFinished = true
       window.clearTimeout(timer)
-      onComplete()
+      setIntroFinished(true)
     }
-    finishRef.current = finish
+    finishIntroRef.current = finishIntro
     const schedule = () => {
-      if (finished || document.visibilityState === 'hidden') return
-      if (pendingFinish) { finish(); return }
+      if (introIsFinished || document.visibilityState === 'hidden') return
+      if (pendingIntro) { finishIntro(); return }
       startedAt = performance.now()
-      timer = window.setTimeout(finish, Math.max(0, remaining))
+      timer = window.setTimeout(finishIntro, Math.max(0, remaining))
     }
     const visibilityChanged = () => {
       if (document.visibilityState === 'hidden') {
@@ -58,8 +60,8 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
     motion.addEventListener('change', motionChanged)
     schedule()
     return () => {
-      finished = true
-      finishRef.current = () => undefined
+      introIsFinished = true
+      finishIntroRef.current = () => undefined
       window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', visibilityChanged)
       motion.removeEventListener('change', motionChanged)
@@ -68,7 +70,13 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
       document.body.style.overscrollBehavior = bodyOverscroll
       document.documentElement.style.overscrollBehavior = rootOverscroll
     }
-  }, [onComplete])
+  }, [])
+
+  const complete = () => {
+    if (completedRef.current) return
+    completedRef.current = true
+    onComplete()
+  }
 
   return <div className="memolyWelcome" data-slot="welcome-splash">
     <div className="app">
@@ -99,8 +107,9 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
         <div className="feature-desc">Сохраняйте любимые фотографии и возвращайтесь к ним всей семьёй.</div>
         <div className="privacy">🔒 Личная история, которой делятся только с близкими</div>
         <div className="footer" onAnimationEnd={(event) => {
-          if (event.target === event.currentTarget && event.animationName === 'copyIn') finishRef.current()
+          if (event.target === event.currentTarget && event.animationName === 'copyIn') finishIntroRef.current()
         }}>Создано с теплом <span style={{ color: '#e58cab' }}>♥</span> для самых близких</div>
+        <button aria-hidden={!introFinished} className={`continue-button${introFinished ? ' is-visible' : ''}`} disabled={!introFinished} onClick={complete} tabIndex={introFinished ? 0 : -1} type="button">Продолжить</button>
       </section>
     </div>
   </div>
