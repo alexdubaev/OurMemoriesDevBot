@@ -425,7 +425,9 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
       if (cancelled) return
       setWelcomeClaimError(false)
-      if (showWelcome && !welcomeSeen.current) {
+      // TEMP_OWNER_WELCOME_ALWAYS_ON — Remove after first-run onboarding acceptance.
+      const TEMP_OWNER_WELCOME_ALWAYS_ON = true
+      if ((showWelcome || TEMP_OWNER_WELCOME_ALWAYS_ON) && !welcomeSeen.current) {
         await new Promise<void>((resolve) => {
           welcomeResolve.current = resolve
           setWelcomeVisible(true)
