@@ -43,13 +43,13 @@ test('keeps all production CSS selectors inside the welcome root', () => {
   })
 })
 
-test('renders source composition without any interactive controls', () => {
+test('renders the explicit continuation control after the welcome copy', () => {
   const markup = renderToStaticMarkup(createElement(WelcomeSplash, { onComplete: () => undefined }))
   expect(markup).toContain('data-slot="welcome-splash"')
   expect(markup).toContain('Большая история.')
   expect(markup).toContain('class="footer"')
-  expect(markup).not.toContain('<button')
-  expect(markup).not.toContain('Начать нашу историю')
+  expect(markup).toContain('Продолжить')
+  expect(markup).toContain('class="continue-button"')
   expect(markup).not.toContain('pause')
   expect(WELCOME_INTRO_MS).toBe(4_250)
 })

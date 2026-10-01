@@ -9,8 +9,8 @@ const inboxId = '019c0000-0000-7000-8000-000000000001'
 describe('MAX task processor payload boundary', () => {
   test('routes bot_started payloads only after classifying a complete invite token', async () => {
     const cases = [
-      { payload: null, expected: 'Добро пожаловать в memoLy 💛', resolution: null, resolverCalls: 0 },
-      { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy 💛', resolution: null, resolverCalls: 0 },
+      { payload: null, expected: 'Добро пожаловать в memoLy ❤️', resolution: null, resolverCalls: 0 },
+      { payload: 'campaign_abc', expected: 'Добро пожаловать в memoLy ❤️', resolution: null, resolverCalls: 0 },
       { payload: `invite_${'A'.repeat(32)}`, expected: 'Приглашение получено.', resolution: 'active' as const, resolverCalls: 1 },
       { payload: `invite_${'B'.repeat(32)}`, expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.', resolution: 'invalid' as const, resolverCalls: 1 },
       { payload: 'invite_short', expected: 'Это приглашение недействительно или устарело. Откройте приложение memoLy, чтобы продолжить.', resolution: null, resolverCalls: 0 },
@@ -40,26 +40,25 @@ describe('MAX task processor payload boundary', () => {
 
   test('persists first versus returning copy under the per-subject interaction lock', async () => {
     const first = await processStarted(null, false)
-    expect(first.text).toBe(`Добро пожаловать в memoLy 💛
+    expect(first.text).toBe(`Добро пожаловать в memoLy ❤️
 
 Здесь живёт история вашей семьи: первые улыбки,
 маленькие открытия и моменты, которые хочется сохранить.
-Фото, видео и заметки о ребёнке — в одном семейном альбоме,
+📸 Фото, видео и заметки о ребёнке — в одном семейном альбоме,
 доступном только его участникам.
 
 🌱 Создаёте семейный альбом?
 Добавляйте воспоминания, приглашайте родных и друзей
 и выбирайте, какой доступ им предоставить.
 
-💛 Вас пригласили близкие?
+❤️ Вас пригласили близкие?
 Смотрите семейные воспоминания и оставляйте реакции —
-будьте рядом, даже на расстоянии. Возможность добавлять
-свои воспоминания зависит от выданного вам доступа.
+будьте рядом, даже на расстоянии.
 
 Нажмите кнопку ниже, чтобы открыть приложение
 и начать вашу семейную историю.`)
     const returning = await processStarted(null, true)
-    expect(returning.text).toBe('С возвращением в memoLy 💛\nОткройте приложение, чтобы продолжить.')
+    expect(returning.text).toBe('С возвращением в memoLy ❤️\nОткройте приложение, чтобы продолжить.')
     expect(returning.lockCalls).toBe(1)
     expect(returning.priorQueries).toBe(1)
   })
