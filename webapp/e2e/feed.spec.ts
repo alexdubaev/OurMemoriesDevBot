@@ -57,6 +57,7 @@ test.describe.serial('T07 live feed', () => {
     await prisma.telegramVideoReference.deleteMany({ where: { familyId: fixture.familyId } })
     await prisma.telegramSource.deleteMany({ where: { familyId: fixture.familyId } })
     await prisma.telegramInbox.deleteMany({ where: { botId: fixture.botId } })
+    await prisma.memoryLike.deleteMany({ where: { familyId: fixture.familyId } })
     await prisma.family.delete({ where: { id: fixture.familyId } })
     await prisma.externalIdentity.deleteMany({ where: { userId: fixture.userId } })
     await prisma.authSession.deleteMany({ where: { userId: fixture.userId } })
@@ -69,7 +70,7 @@ test.describe.serial('T07 live feed', () => {
   test.beforeEach(async ({ page }, testInfo) => {
     const initData = signedInitData(Number(subject), 'Лента E2E')
     const responsiveWidth = testInfo.title.match(/feed is usable at (\d+)px$/)?.[1]
-    if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot') {
+    if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot' || testInfo.title.startsWith('MAX reaction haptic')) {
       await installMaxHost(page, initData)
       await installMaxAuthRoute(page)
     } else {
@@ -291,61 +292,31 @@ test.describe.serial('T07 live feed', () => {
   test('memory reactions stay lightweight, keyboard accessible, and theme-aware across phone sizes', async ({ page }) => {
     await openFeed(page)
     const card = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Фотоальбом E2E' })
-    const like = card.getByRole('button', { name: 'Поставить реакцию ❤️' })
-
+    await expect(card.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
+    await expect(card.locator('.memory-like, .reaction-picker-trigger, .reaction-more')).toHaveCount(0)
+    await expect(card.locator('.actions')).toHaveCount(0)
     for (const [width, height] of [[320, 568], [390, 844], [430, 932]]) {
       await page.setViewportSize({ width, height })
-      await like.scrollIntoViewIfNeeded()
-      const geometry = await like.evaluate((button) => {
-        const rect = button.getBoundingClientRect()
-        const style = getComputedStyle(button)
-        return { width: rect.width, height: rect.height, background: style.backgroundImage, shadow: style.boxShadow }
-      })
-      expect(geometry.width).toBeGreaterThanOrEqual(44)
-      expect(geometry.height).toBeGreaterThanOrEqual(44)
-      expect(geometry.background).toBe('none')
-      expect(geometry.shadow).toBe('none')
-      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-reaction-${width}x${height}.png`), animations: 'disabled' })
+      await card.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: resolve(`e2e/.artifacts/reactions-${width}x${height}.png`), animations: 'disabled' })
     }
-
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(like).toHaveAttribute('aria-pressed', 'false')
-    await expect(like).toHaveText('❤️')
-    await like.focus()
-    await page.keyboard.press('Tab')
-    await page.keyboard.press('Shift+Tab')
-    await expect(like).toBeFocused()
-    await expect(like).toHaveCSS('outline-style', 'solid')
-    await like.hover()
-    await expect(like).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-    await like.click()
-    const unlike = card.getByRole('button', { name: /Сердце: .*выбрано/ })
-    await expect(unlike).toHaveAttribute('aria-pressed', 'true')
-    await expect(unlike).toContainText('1')
-    await unlike.evaluate((button) => (button as HTMLElement).blur())
-    await page.mouse.move(0, 0)
-    await page.screenshot({ path: resolve('e2e/.artifacts/memory-reaction-liked-count-390.png'), animations: 'disabled' })
-
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
       await page.evaluate((name) => {
         document.documentElement.setAttribute('data-memoly-theme', name)
         document.querySelector('.memoly-app-root')?.setAttribute('data-memoly-theme', name)
       }, theme)
-      await expect(unlike).not.toHaveCSS('box-shadow', 'none')
-      const colors = await unlike.evaluate((button) => {
-        const token = getComputedStyle(document.documentElement).getPropertyValue('--theme-accent-text').trim()
-        const hex = Number.parseInt(token.slice(1), 16)
-        return {
-          button: getComputedStyle(button).color,
-          expected: `rgb(${(hex >> 16) & 255}, ${(hex >> 8) & 255}, ${hex & 255})`,
-        }
-      })
-      expect(colors.button).toBe(colors.expected)
-      await page.screenshot({ path: resolve(`e2e/.artifacts/memory-reaction-selected-${theme}-390.png`), animations: 'disabled' })
+      await expect(card.locator('.memory-card')).toHaveCount(0)
+      await page.screenshot({ path: resolve(`e2e/.artifacts/reactions-${theme}-390.png`), animations: 'disabled' })
     }
-    await unlike.click()
-    await expect(like).toHaveAttribute('aria-pressed', 'false')
-    await expect(like).toHaveText('❤️')
+    await page.keyboard.press('Tab')
+    await card.focus()
+    await expect(card).toHaveCSS('outline-style', 'solid')
+    await page.keyboard.press('Shift+F10')
+    await expect(page.locator('.reaction-picker-options')).toBeVisible()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.reaction-picker-options')).toHaveCount(0)
   })
 
   for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
@@ -668,7 +639,8 @@ test.describe.serial('T07 live feed', () => {
     const ratios = [
       ['Фотоальбом E2E', 'img', 4 / 5],
       ['Одиночное фото E2E', 'img', 4 / 5],
-      ...maxVideos.map((video) => [video.body, 'video', video.decodedWidth / video.decodedHeight] as const),
+      // MAX videos stay in the canonical 4:5 Feed stage; the intrinsic frame is contained inside it.
+      ...maxVideos.map((video) => [video.body, 'video', 4 / 5] as const),
     ] as const
     for (const [body, element, expected] of ratios) {
       const card = page.locator('[data-memory-id]').filter({ hasText: body })
@@ -726,9 +698,10 @@ test.describe.serial('T07 live feed', () => {
     expect(await maxVideo.evaluate((entry) => entry.muted)).toBe(false)
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть', exact: true })).toHaveCount(0)
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    const like = maxVideoCard.getByRole('button', { name: 'Поставить реакцию ❤️' })
-    await like.click()
-    await expect(maxVideoCard.getByRole('button', { name: 'Сердце: 1, выбрано' })).toHaveAttribute('aria-pressed', 'true')
+    await maxVideoCard.focus()
+    await page.keyboard.press('Shift+F10')
+    await page.getByRole('button', { name: 'Сердце', exact: true }).click()
+    await expect(maxVideoCard.locator('[data-reaction="heart"]')).toContainText('1')
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
     await page.setViewportSize({ width: 390, height: 844 })
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
@@ -794,11 +767,18 @@ test.describe.serial('T07 live feed', () => {
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic like failure' } }),
     }))
     const albumCard = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' })
-    await expect(albumCard.getByRole('button', { name: /реакцию ❤️/i })).toBeEnabled()
+    await expect(albumCard.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
     await expect(albumCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    const like = albumCard.getByRole('button', { name: /реакцию ❤️/i })
-    await like.click()
-    await expect(like).toHaveAttribute('aria-pressed', 'false')
+    const image = albumCard.locator('.memory-media-slot img').first()
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.locator('.reaction-picker-options')).toBeVisible()
+    await page.mouse.up()
+    await page.getByRole('button', { name: 'Сердце' }).click()
+    await expect(albumCard.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
     await expect(albumCard).toContainText('Фотоальбом E2E')
   })
 
@@ -1896,9 +1876,8 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toHaveCount(0)
-    const likeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить реакцию ❤️"]`)
-    await expect(likeButton).toBeVisible()
-    await expect(likeButton).toHaveAttribute('aria-pressed', 'false')
+    const reactionSummary = page.locator(`[data-memory-id="${memory.id}"] [data-slot="memory-reactions"]`)
+    await expect(reactionSummary).toHaveCount(0)
 
     const geometry: Record<string, unknown> = {}
     const capture = async (name: string) => {
@@ -1941,15 +1920,15 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
       await capture(`${theme}-390`)
     }
-    await likeButton.click()
-    const activeLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Сердце: 1, выбрано"]`)
-    await expect(activeLikeButton).toHaveAttribute('aria-pressed', 'true')
-    await expect(activeLikeButton).toContainText('1')
-    await activeLikeButton.click()
-    const inactiveLikeButton = page.locator(`[data-memory-id="${memory.id}"] button[aria-label="Поставить реакцию ❤️"]`)
-    await expect(inactiveLikeButton).toHaveAttribute('aria-pressed', 'false')
-    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveCount(1)
-    await expect(inactiveLikeButton.locator('[data-slot="typography"]')).toHaveAttribute('aria-hidden', 'true')
+    const reactionCard = page.locator(`[data-memory-id="${memory.id}"]`)
+    await reactionCard.focus()
+    await page.keyboard.press('Shift+F10')
+    await page.getByRole('button', { name: 'Сердце', exact: true }).click()
+    await expect(reactionSummary.locator('[data-reaction="heart"]')).toContainText('1')
+    await reactionCard.focus()
+    await page.keyboard.press('Shift+F10')
+    await page.getByRole('button', { name: 'Сердце, выбрана', exact: true }).click()
+    await expect(reactionSummary).toHaveCount(0)
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
     } finally {
       await prisma.memory.deleteMany({ where: { id: memory.id } })
@@ -1961,48 +1940,760 @@ test.describe.serial('T07 live feed', () => {
     }
   })
 
-  test('fixed reaction picker selects, replaces, removes, and fits small screens', async ({ page }) => {
+  test('reaction picker opens only on a hold, survives release, and selects in a separate tap', async ({ page }) => {
     await openFeed(page)
-    const card = page.locator('[data-memory-id]').first()
+    const image = page.locator('.memory-media-slot img').first()
+    const card = image.locator('xpath=ancestor::article[@data-memory-id]')
     await expect(card).toBeVisible()
+    await expect(image).toBeVisible()
+    await expect(card.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-none.png'), animations: 'disabled' })
     let current: string | null = null
-    const counts: Record<string, number> = {}
+    let writes = 0
+    const payloads: Array<string | null> = []
+    const reactionRequests: Array<{ url: string; method: string; body: string | null }> = []
+    const counts: Record<string, number> = { heart: 12_345, love: 2_345, touched: 345, wow: 456, clap: 567 }
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.endsWith('/reaction')) reactionRequests.push({ url: request.url(), method: request.method(), body: request.postData() })
+    })
     await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      writes += 1
       const payload = route.request().postDataJSON() as { reaction: string | null }
+      payloads.push(payload.reaction)
       if (current) counts[current] = Math.max(0, (counts[current] ?? 0) - 1)
       if (current && counts[current] === 0) delete counts[current]
       current = payload.reaction
       if (current) counts[current] = (counts[current] ?? 0) + 1
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reactionCounts: counts, currentUserReaction: current, likes: { count: Object.values(counts).reduce((total, count) => total + count, 0), likedByMe: current === 'heart' } }) })
     })
-    const quickHeart = card.getByRole('button', { name: 'Поставить реакцию ❤️' })
-    await expect(quickHeart).toBeVisible()
-    await quickHeart.click()
-    await expect(card.getByRole('button', { name: /Сердце: .*выбрано/ })).toBeVisible()
-    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
-    await expect(page.getByRole('group', { name: 'Реакции' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Смех' })).toBeVisible()
+    const memoryId = await card.getAttribute('data-memory-id')
+    const holdImage = async (point = { x: 0.5, y: 0.5 }) => {
+      await image.scrollIntoViewIfNeeded()
+      const bounds = await image.boundingBox()
+      expect(bounds).not.toBeNull()
+      expect(await card.getAttribute('data-memory-id')).toBe(memoryId)
+      const x = bounds!.x + bounds!.width * point.x
+      const y = bounds!.y + bounds!.height * point.y
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.waitForTimeout(550)
+      await expect(page.locator('.reaction-picker')).toBeVisible()
+      await page.mouse.up()
+    }
+    await holdImage()
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    expect(writes).toBe(0)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-open.png'), animations: 'disabled' })
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Смех' }).click()
-    await expect(card.getByRole('button', { name: /Смех: .*выбрано/ })).toBeVisible()
-    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('group', { name: 'Реакции' })).toHaveCount(0)
-    await card.getByRole('button', { name: /Смех: .*выбрано/ }).click()
-    await expect(card.getByRole('button', { name: 'Поставить реакцию ❤️' })).toBeVisible()
+    await expect(card.locator('[data-reaction="laugh"]')).toContainText('1')
+    await page.waitForTimeout(1_000)
+    const postClickState = await page.evaluate(() => ({
+      pickerOpen: Boolean(document.querySelector('[role="group"][aria-label="Реакции"]')),
+      activeMemoryId: (document.activeElement?.closest('[data-memory-id]') as HTMLElement | null)?.dataset.memoryId ?? null,
+      visibleResult: Array.from(document.querySelectorAll('[data-reaction]')).map((element) => ({ value: element.getAttribute('data-reaction'), text: element.textContent })),
+      viewerOpen: Boolean(document.querySelector('.pswp')),
+    }))
+    expect(writes, JSON.stringify({ reactionRequests, postClickState })).toBe(1)
+    await card.locator('[data-slot="memory-reactions"]').scrollIntoViewIfNeeded()
+    const resultTypography = await card.locator('[data-reaction="laugh"]').evaluate((result) => ({
+      background: getComputedStyle(result).backgroundColor,
+      borderWidth: getComputedStyle(result).borderWidth,
+      radius: getComputedStyle(result).borderRadius,
+      emojiSize: getComputedStyle(result.querySelector('.reaction-result-emoji')!).fontSize,
+      countSize: getComputedStyle(result.querySelector('.reaction-result-count')!).fontSize,
+    }))
+    expect(resultTypography).toEqual({ background: 'rgba(0, 0, 0, 0)', borderWidth: '0px', radius: '0px', emojiSize: '21px', countSize: '14px' })
+    await expect(card.locator('[data-reaction]')).toHaveCount(6)
+    const passiveSummary = card.locator('[data-slot="memory-reactions"]')
+    await passiveSummary.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+    const passiveSummaryBounds = await passiveSummary.boundingBox()
+    const passiveNavBounds = await page.getByTestId('bottom-navigation').boundingBox()
+    expect(passiveSummaryBounds).not.toBeNull()
+    expect(passiveNavBounds).not.toBeNull()
+    expect(passiveSummaryBounds!.y).toBeGreaterThanOrEqual(0)
+    expect(passiveSummaryBounds!.y + passiveSummaryBounds!.height).toBeLessThanOrEqual(passiveNavBounds!.y)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-passive-result.png'), animations: 'disabled' })
+    expect(await card.getAttribute('data-memory-id')).toBe(memoryId)
+    expect(payloads).toEqual(['laugh'])
+    expect(writes).toBe(1)
+    await card.locator('[data-reaction="laugh"]').click()
+    expect(writes).toBe(1)
+    await holdImage()
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Смех' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Смех, выбрана' })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: 'Смех' }).click()
+    await expect.poll(() => writes).toBe(2)
+    expect(payloads).toEqual(['laugh', null])
+    await expect(card.locator('[data-slot="memory-reactions"]')).toHaveCount(1)
+    await expect(card.locator('[data-reaction]')).toHaveCount(5)
+    expect(writes).toBe(2)
     for (const width of [320, 390, 430]) {
       await page.setViewportSize({ width, height: 844 })
       const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
       expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
     }
     await page.setViewportSize({ width: 320, height: 844 })
-    await card.getByRole('button', { name: 'Выбрать реакцию' }).click()
-    const picker = page.getByRole('group', { name: 'Реакции' })
+    await page.locator('[data-slot="feed-scroll"]').evaluate((element) => { element.scrollTop += 120 })
+    await holdImage()
+    const picker = page.getByRole('group', { name: 'Реакции', exact: true })
     await expect(picker).toBeVisible()
-    const bounds = await picker.boundingBox()
+    const pickerBounds = await picker.boundingBox()
+    expect(pickerBounds).not.toBeNull()
+    expect(pickerBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(pickerBounds!.x + pickerBounds!.width).toBeLessThanOrEqual(320)
+    const navBounds = await page.getByTestId('bottom-navigation').boundingBox()
+    expect(navBounds).not.toBeNull()
+    expect(pickerBounds!.y + pickerBounds!.height).toBeLessThanOrEqual(navBounds!.y)
+    await expect(picker.getByRole('button')).toHaveCount(6)
+    await expect.poll(async () => {
+      const heights = await picker.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height))
+      return heights.length === 6 && heights.every((height) => height >= 44)
+    }).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-320.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await holdImage({ x: 0.98, y: 0.03 })
+    const edgePicker = await picker.boundingBox()
+    expect(edgePicker).not.toBeNull()
+    expect(edgePicker!.x).toBeGreaterThanOrEqual(0)
+    expect(edgePicker!.x + edgePicker!.width).toBeLessThanOrEqual(320)
+    expect(edgePicker!.y).toBeGreaterThanOrEqual(0)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-top-side.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+
+    await page.setViewportSize({ width: 320, height: 568 })
+    await page.evaluate(() => {
+      const nav = document.querySelector('[data-testid="bottom-navigation"]')!.getBoundingClientRect()
+      const img = document.querySelector('.memory-media-slot img')!.getBoundingClientRect()
+      const image = document.querySelector('.memory-media-slot img')!
+      const ancestors: HTMLElement[] = []
+      for (let parent = image.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
+      const documentScroller = document.scrollingElement as HTMLElement | null
+      const scrollTarget = [...ancestors, ...(documentScroller ? [documentScroller] : [])].find((element) => element.scrollHeight > element.clientHeight + 1)
+      if (!scrollTarget) throw new Error('No scrollable ancestor can position the image above bottom navigation')
+      scrollTarget.scrollTop += img.bottom - (nav.top - 6)
+    })
+    await expect.poll(async () => {
+      const imageBounds = await image.boundingBox()
+      const navigationBounds = await page.getByTestId('bottom-navigation').boundingBox()
+      return imageBounds && navigationBounds ? Math.abs(imageBounds.y + imageBounds.height - (navigationBounds.y - 6)) < 2 : false
+    }).toBe(true)
+    const lowerImageBounds = await image.boundingBox()
+    const lowerNavBounds = await page.getByTestId('bottom-navigation').boundingBox()
+    expect(lowerImageBounds).not.toBeNull()
+    expect(lowerNavBounds).not.toBeNull()
+    const lowerPoint = { x: lowerImageBounds!.x + lowerImageBounds!.width / 2, y: lowerNavBounds!.y - 12 }
+    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.memory-media-slot img')), lowerPoint)).toBe(true)
+    await page.mouse.move(lowerPoint.x, lowerPoint.y)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(picker).toBeVisible()
+    const lowerPickerBounds = await picker.boundingBox()
+    const settledNavBounds = await page.getByTestId('bottom-navigation').boundingBox()
+    expect(lowerPickerBounds).not.toBeNull()
+    expect(settledNavBounds).not.toBeNull()
+    expect(lowerPickerBounds!.y + lowerPickerBounds!.height).toBeLessThanOrEqual(settledNavBounds!.y)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-bottom-nav.png'), animations: 'disabled' })
+    await page.mouse.up()
+    await page.keyboard.press('Escape')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const feedSurface = page.locator('[data-memoly-feed]')
+    const browserSafeAreaDefaults = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => style.getPropertyValue(`--reaction-safe-inset-${side}`).trim())
+    })
+    expect(browserSafeAreaDefaults).toEqual(['0px', '0px', '0px', '0px'])
+    await feedSurface.evaluate((surface) => {
+      surface.style.setProperty('--host-inset-top', '44px')
+      surface.style.setProperty('--host-inset-right', '20px')
+      surface.style.setProperty('--host-inset-bottom', '34px')
+      surface.style.setProperty('--host-inset-left', '16px')
+    })
+    const hostInsets = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => style.getPropertyValue(`--host-inset-${side}`).trim())
+    })
+    expect(hostInsets).toEqual(['44px', '20px', '34px', '16px'])
+    await holdImage({ x: 0.04, y: 0.5 })
+    const safeAreaPicker = page.getByRole('group', { name: 'Реакции', exact: true })
+    await expect(safeAreaPicker).toBeVisible()
+    await expect(safeAreaPicker.getByRole('button')).toHaveCount(6)
+    await expect.poll(async () => {
+      const bounds = await safeAreaPicker.boundingBox()
+      if (!bounds) return false
+      return bounds.y >= 56 && bounds.x >= 28 && bounds.x + bounds.width <= 390 - 32 && bounds.y + bounds.height <= 844 - 122
+    }).toBe(true)
+    const safeAreaBounds = await safeAreaPicker.boundingBox()
+    expect(safeAreaBounds).not.toBeNull()
+    expect(safeAreaBounds!.y).toBeGreaterThanOrEqual(56)
+    expect(safeAreaBounds!.x).toBeGreaterThanOrEqual(28)
+    expect(safeAreaBounds!.x + safeAreaBounds!.width).toBeLessThanOrEqual(390 - 32)
+    expect(safeAreaBounds!.y + safeAreaBounds!.height).toBeLessThanOrEqual(844 - 122)
+    await expect.poll(async () => {
+      const heights = await safeAreaPicker.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height))
+      return heights.length === 6 && heights.every((height) => height >= 44)
+    }).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-safe-area.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+
+    await feedSurface.evaluate((surface) => {
+      for (const side of ['top', 'right', 'bottom', 'left']) surface.style.setProperty(`--host-inset-${side}`, '0px')
+      surface.style.setProperty('--reaction-safe-inset-top', '44px')
+      surface.style.setProperty('--reaction-safe-inset-right', '20px')
+      surface.style.setProperty('--reaction-safe-inset-bottom', '34px')
+      surface.style.setProperty('--reaction-safe-inset-left', '16px')
+    })
+    const simulatedSafeAreaInsets = await feedSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface)
+      return ['top', 'right', 'bottom', 'left'].map((side) => ({
+        host: style.getPropertyValue(`--host-inset-${side}`).trim(),
+        safeArea: style.getPropertyValue(`--reaction-safe-inset-${side}`).trim(),
+      }))
+    })
+    expect(simulatedSafeAreaInsets).toEqual([
+      { host: '0px', safeArea: '44px' },
+      { host: '0px', safeArea: '20px' },
+      { host: '0px', safeArea: '34px' },
+      { host: '0px', safeArea: '16px' },
+    ])
+    await holdImage({ x: 0.98, y: 0.03 })
+    await expect(safeAreaPicker).toBeVisible()
+    const envSafeAreaBounds = await safeAreaPicker.boundingBox()
+    expect(envSafeAreaBounds).not.toBeNull()
+    expect(envSafeAreaBounds!.y).toBeGreaterThanOrEqual(56)
+    expect(envSafeAreaBounds!.x).toBeGreaterThanOrEqual(28)
+    expect(envSafeAreaBounds!.x + envSafeAreaBounds!.width).toBeLessThanOrEqual(390 - 32)
+    expect(envSafeAreaBounds!.y + envSafeAreaBounds!.height).toBeLessThanOrEqual(844 - 122)
+    await expect(safeAreaPicker.getByRole('button')).toHaveCount(6)
+    await expect.poll(async () => {
+      const heights = await safeAreaPicker.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height))
+      return heights.length === 6 && heights.every((height) => height >= 44)
+    }).toBe(true)
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-picker-safe-area-env.png'), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+  })
+
+  test('dragging away after a recognized hold cannot select a reaction or open the photo', async ({ page }) => {
+    await openFeed(page)
+    const image = page.locator('.memory-media-slot img').first()
+    const card = image.locator('xpath=ancestor::article[@data-memory-id]')
+    await image.scrollIntoViewIfNeeded()
+    const bounds = await image.boundingBox()
     expect(bounds).not.toBeNull()
-    expect(bounds!.x).toBeGreaterThanOrEqual(0)
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320)
-    await page.screenshot({ path: resolve('e2e/.artifacts/memory-reaction-picker-320.png'), fullPage: true })
+    let writes = 0
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      writes += 1
+      await route.continue()
+    })
+
+    const x = bounds!.x + bounds!.width / 2
+    const y = bounds!.y + bounds!.height / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    const picker = page.getByRole('group', { name: 'Реакции', exact: true })
+    await expect(picker).toBeVisible()
+    const laugh = page.getByRole('button', { name: 'Смех' })
+    const laughBounds = await laugh.boundingBox()
+    expect(laughBounds).not.toBeNull()
+    await page.mouse.move(laughBounds!.x + laughBounds!.width / 2, laughBounds!.y + laughBounds!.height / 2)
+    await page.mouse.up()
+
+    await expect(picker).toBeVisible()
+    await expect(card.locator('.pswp')).toHaveCount(0)
+    expect(writes).toBe(0)
+    await expect(card.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
+  })
+
+  test('a held standalone photo moved away and back cannot open PhotoSwipe or mutate', async ({ page }) => {
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Одиночное фото E2E' })
+    const image = card.locator('.memory-media-slot img').first()
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+    await image.evaluate(async (element: HTMLImageElement) => element.decode())
+    await image.scrollIntoViewIfNeeded()
+    await page.evaluate(() => new Promise<void>((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))))
+    const initialBounds = await image.boundingBox()
+    expect(initialBounds).not.toBeNull()
+    await page.mouse.move(initialBounds!.x + initialBounds!.width / 2, initialBounds!.y + initialBounds!.height / 2)
+    await page.evaluate(() => new Promise<void>((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))))
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    let writes = 0
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => { writes += 1; await route.continue() })
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+    await page.evaluate(() => new Promise<void>((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))))
+    const pressBounds = await image.boundingBox()
+    expect(pressBounds).not.toBeNull()
+    const pressPoint = { x: pressBounds!.x + pressBounds!.width / 2, y: pressBounds!.y + pressBounds!.height / 2 }
+    const x = pressPoint.x
+    const y = pressPoint.y
+    await page.mouse.move(pressPoint.x, pressPoint.y)
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, pressPoint)).toBe(true)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.mouse.move(x + 24, y)
+    await page.mouse.move(x, y)
+    await page.mouse.up()
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.waitForTimeout(600)
+    await expect(page.locator('.pswp')).toHaveCount(0)
+    expect(writes).toBe(0)
+    await page.keyboard.press('Escape')
+    await image.click()
+    await expect(page.locator('.pswp')).toBeVisible()
+    await page.locator('.pswp__button--close').click()
+  })
+
+  test('keyboard selection and last-reaction removal return focus to the Memory card', async ({ page }) => {
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Фотоальбом E2E' }).first()
+    await card.focus()
+    let selected: string | null = null
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      selected = (route.request().postDataJSON() as { reaction: string | null }).reaction
+      const reactionCounts = selected ? { laugh: 1 } : {}
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reactionCounts, currentUserReaction: selected, likes: { count: selected ? 1 : 0, likedByMe: false } }) })
+    })
+
+    await page.keyboard.press('Shift+F10')
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Смех', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => selected).toBe('laugh')
+    await expect.poll(() => card.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+
+    await page.keyboard.press('Shift+F10')
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Смех, выбрана', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => selected).toBeNull()
+    await expect.poll(() => card.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+  })
+
+  test('Chromium touch hold opens once after release and note text holds stay selectable', async ({ page }) => {
+    await openFeed(page)
+    const image = page.locator('.memory-media-slot img').first()
+    await image.scrollIntoViewIfNeeded()
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    const x = Math.round(bounds!.x + bounds!.width / 2)
+    const y = Math.round(bounds!.y + bounds!.height / 2)
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await expect(page.locator('.pswp')).toHaveCount(0)
+    await cdp.detach()
+
+    await page.keyboard.press('Escape')
+    const noteText = page.locator('[data-memory-kind="note"] [data-memoly-note-gradient]').first()
+    await expect(noteText).toBeVisible()
+    const noteBounds = await noteText.boundingBox()
+    expect(noteBounds).not.toBeNull()
+    await page.mouse.move(noteBounds!.x + noteBounds!.width / 2, noteBounds!.y + noteBounds!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+  })
+
+  test('MAX reaction haptics fire only for recognized holds and accepted choices', async ({ page }) => {
+    await openFeed(page)
+    await page.route('**/api/v1/families/*/memories/*/reaction', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ reactionCounts: { laugh: 1 }, currentUserReaction: 'laugh', likes: { count: 1, likedByMe: false } }),
+    }))
+    const calls = await page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])
+    expect(calls).toEqual([])
+    const image = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Одиночное фото E2E' }).locator('.memory-media-slot img').first()
+    const card = image.locator('xpath=ancestor::article[@data-memory-id]')
+    await image.scrollIntoViewIfNeeded()
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    const startX = bounds!.x + bounds!.width / 2
+    const startY = bounds!.y + bounds!.height / 2
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x: startX, y: startY })).toBe(true)
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    await page.waitForTimeout(100)
+    await page.mouse.move(startX + 24, startY)
+    await page.waitForTimeout(550)
+    await page.mouse.up()
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    expect(await page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual([])
+    await image.scrollIntoViewIfNeeded()
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
+    const recognizedBounds = await image.boundingBox()
+    expect(recognizedBounds).not.toBeNull()
+    const recognizedPoint = { x: recognizedBounds!.x + recognizedBounds!.width / 2, y: recognizedBounds!.y + recognizedBounds!.height / 2 }
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, recognizedPoint)).toBe(true)
+    await page.mouse.move(recognizedPoint.x, recognizedPoint.y)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light'])
+    await page.waitForTimeout(650)
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light'])
+    await page.mouse.up()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light'])
+    const reopenPoint = await page.evaluate(({ memoryId }) => {
+      const image = document.querySelector(`[data-memory-id="${memoryId}"] .memory-media-slot img`)
+      if (!image) return null
+      const bounds = image.getBoundingClientRect()
+      for (const [xRatio, yRatio] of [[0.08, 0.08], [0.92, 0.08], [0.08, 0.92], [0.92, 0.92], [0.5, 0.08], [0.5, 0.92]]) {
+        const point = { x: bounds.x + bounds.width * xRatio, y: bounds.y + bounds.height * yRatio }
+        const target = document.elementFromPoint(point.x, point.y)
+        if (target === image && !target.closest('.reaction-picker')) return point
+      }
+      return null
+    }, { memoryId: await card.getAttribute('data-memory-id') })
+    expect(reopenPoint).not.toBeNull()
+    await page.evaluate(() => {
+      type TraceEntry = { elapsedMs: number; state: string; className: string; present: boolean }
+      const testWindow = window as typeof window & { __reactionPickerTrace?: TraceEntry[]; __reactionPickerObserver?: MutationObserver }
+      const trace: TraceEntry[] = []
+      let previous = ''
+      const record = () => {
+        const picker = document.querySelector<HTMLElement>('.reaction-picker')
+          ?? document.querySelector<HTMLElement>('[role="group"][aria-label="Реакции"]')
+        const state = picker?.getAttribute('data-state') ?? 'no-data-state'
+        const className = typeof picker?.className === 'string' ? picker.className : ''
+        const signature = `${picker ? 'present' : 'removed'}:${state}:${className}`
+        if (signature !== previous) {
+          trace.push({ elapsedMs: Math.round(performance.now()), state, className, present: Boolean(picker) })
+          previous = signature
+        }
+      }
+      testWindow.__reactionPickerTrace = trace
+      record()
+      const observer = new MutationObserver(record)
+      observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-state'], childList: true, subtree: true })
+      testWindow.__reactionPickerObserver = observer
+    })
+    await page.mouse.move(reopenPoint!.x, reopenPoint!.y)
+    await page.mouse.down()
+    const picker = page.getByRole('group', { name: 'Реакции', exact: true })
+    await page.waitForTimeout(100)
+    const pickerAfterOutsidePointerDown = await page.evaluate(() => {
+      const picker = document.querySelector<HTMLElement>('.reaction-picker')
+        ?? document.querySelector<HTMLElement>('[role="group"][aria-label="Реакции"]')
+      return { count: picker ? 1 : 0, visible: Boolean(picker && picker.getBoundingClientRect().width > 0 && picker.getBoundingClientRect().height > 0), state: picker?.getAttribute('data-state') ?? null }
+    })
+    const hapticsAfterOutsidePointerDown = await page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])
+    await page.waitForTimeout(450)
+    await expect(picker).toBeVisible()
+    const hapticsAfterHold = await page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])
+    const pickerAfterHold = await page.evaluate(() => {
+      const picker = document.querySelector<HTMLElement>('.reaction-picker')
+        ?? document.querySelector<HTMLElement>('[role="group"][aria-label="Реакции"]')
+      return { count: picker ? 1 : 0, visible: Boolean(picker && picker.getBoundingClientRect().width > 0 && picker.getBoundingClientRect().height > 0), state: picker?.getAttribute('data-state') ?? null, trace: (window as typeof window & { __reactionPickerTrace?: unknown[] }).__reactionPickerTrace ?? [] }
+    })
+    expect(pickerAfterOutsidePointerDown.state).toBe('open')
+    expect(pickerAfterHold.state).toBe('open')
+    expect(hapticsAfterOutsidePointerDown).toEqual(['light'])
+    expect(hapticsAfterHold).toEqual(['light'])
+    await page.mouse.up()
+    const outsideClickPoint = await page.evaluate(() => {
+      const candidates = [{ x: 8, y: Math.floor(innerHeight / 2) }, { x: innerWidth - 8, y: Math.floor(innerHeight / 2) }, { x: 8, y: 8 }]
+      for (const point of candidates) {
+        const target = document.elementFromPoint(point.x, point.y)
+        if (target && !target.closest('.reaction-picker, article, button, input, a, [role="button"]')) return { ...point, target: target.tagName.toLowerCase() }
+      }
+      return null
+    })
+    expect(outsideClickPoint).not.toBeNull()
+    await page.mouse.click(outsideClickPoint!.x, outsideClickPoint!.y)
+    await expect(picker).toHaveCount(0)
+    const closeTrace = await page.evaluate(() => {
+      const testWindow = window as typeof window & { __reactionPickerTrace?: Array<{ state: string; present: boolean }>; __reactionPickerObserver?: MutationObserver }
+      testWindow.__reactionPickerObserver?.disconnect()
+      return testWindow.__reactionPickerTrace ?? []
+    })
+    console.log('[MAX picker outside hold]', JSON.stringify({ outsideClickPoint, pickerAfterOutsidePointerDown, hapticsAfterOutsidePointerDown, pickerAfterHold, hapticsAfterHold, closeTrace }))
+    await image.scrollIntoViewIfNeeded()
+    const nextOpenBounds = await image.boundingBox()
+    expect(nextOpenBounds).not.toBeNull()
+    const nextOpenPoint = { x: nextOpenBounds!.x + nextOpenBounds!.width / 2, y: nextOpenBounds!.y + nextOpenBounds!.height / 2 }
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, nextOpenPoint)).toBe(true)
+    await page.mouse.move(nextOpenPoint.x, nextOpenPoint.y)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(picker).toBeVisible()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light', 'light'])
+    await page.mouse.up()
+    await page.getByRole('button', { name: 'Смех', exact: true }).click()
+    await expect(card.locator('[data-reaction="laugh"]')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light', 'light', 'soft'])
+  })
+
+  test('MAX reaction haptic throws and rejections do not interrupt hold or reaction selection', async ({ page }) => {
+    await openFeed(page)
+    const pageErrors: string[] = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ reactionCounts: { laugh: 1 }, currentUserReaction: 'laugh', likes: { count: 1, likedByMe: false } }),
+    }))
+    await page.evaluate(() => { (window as typeof window & { __maxHapticBehavior?: unknown }).__maxHapticBehavior = { throwOn: 'light', rejectOn: 'soft' } })
+    const noteText = page.locator('[data-memory-kind="note"] .caption').first()
+    await noteText.scrollIntoViewIfNeeded()
+    const noteBounds = await noteText.boundingBox()
+    expect(noteBounds).not.toBeNull()
+    await page.mouse.move(noteBounds!.x + 4, noteBounds!.y + noteBounds!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(noteBounds!.x + noteBounds!.width - 4, noteBounds!.y + noteBounds!.height / 2, { steps: 6 })
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual([])
+    if (await page.getByRole('dialog', { name: 'Воспоминание' }).count()) await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'Воспоминание' })).toHaveCount(0)
+
+    const image = page.locator('[data-memory-kind="photo"]').filter({ hasText: 'Одиночное фото E2E' }).locator('.memory-media-slot img').first()
+    await image.scrollIntoViewIfNeeded()
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 })).toBe(true)
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light'])
+    await page.mouse.up()
+    await page.getByRole('button', { name: 'Смех', exact: true }).click()
+    await expect(page.locator('[data-reaction="laugh"]')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxHapticCalls?: string[] }).__maxHapticCalls ?? [])).toEqual(['light', 'soft'])
+    expect(pageErrors).toEqual([])
+  })
+
+  test('movement, pointer cancellation, and a second touch cancel recognition without opening a viewer', async ({ page }) => {
+    await openFeed(page)
+    const image = page.locator('.memory-media-slot img').first()
+    await image.scrollIntoViewIfNeeded()
+    const bounds = await image.boundingBox()
+    expect(bounds).not.toBeNull()
+    const x = Math.round(bounds!.x + bounds!.width / 2)
+    const y = Math.round(bounds!.y + bounds!.height / 2)
+    const cdp = await page.context().newCDPSession(page)
+
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.waitForTimeout(100)
+    await page.mouse.move(x + 24, y)
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+    await expect(page.locator('.pswp')).toHaveCount(0)
+
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
+    await page.waitForTimeout(100)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }, { id: 2, x: x + 15, y: y + 15, radiusX: 1, radiusY: 1, force: 1 }] })
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await expect(page.locator('.pswp')).toHaveCount(0)
+    await cdp.detach()
+  })
+
+  test('note text remains selectable and cannot open the reaction picker', async ({ page }) => {
+    await openFeed(page)
+    const note = page.locator('[data-memory-kind="note"] [data-memoly-note-gradient]').first()
+    await expect(note).toBeVisible()
+    const bounds = await note.boundingBox()
+    expect(bounds).not.toBeNull()
+    await page.mouse.move(bounds!.x + 4, bounds!.y + bounds!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(bounds!.x + bounds!.width - 4, bounds!.y + bounds!.height / 2, { steps: 6 })
+    await page.mouse.up()
+    expect(await page.evaluate(() => window.getSelection()?.toString().trim().length ?? 0)).toBeGreaterThan(0)
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+
+    await note.scrollIntoViewIfNeeded()
+    const paddingBounds = await note.boundingBox()
+    expect(paddingBounds).not.toBeNull()
+    const paddingX = paddingBounds!.x + 2
+    const paddingY = paddingBounds!.y + 2
+    await page.mouse.move(paddingX, paddingY)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.screenshot({ path: resolve('e2e/.artifacts/reactions-note-padding-picker.png'), animations: 'disabled' })
+    await page.mouse.up()
+  })
+
+  test('mixed Memory keeps one reaction target across photo and video surfaces while seek controls are excluded', async ({ page }) => {
+    await openFeed(page)
+    const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    await card.scrollIntoViewIfNeeded()
+    const memoryId = await card.getAttribute('data-memory-id')
+    const payloads: Array<{ url: string; reaction: string }> = []
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      payloads.push({ url: route.request().url(), reaction: (route.request().postDataJSON() as { reaction: string }).reaction })
+      const reactionCounts = { laugh: 1, love: 1, wow: 1 }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reactionCounts, currentUserReaction: payloads.at(-1)!.reaction, likes: { count: Object.values(reactionCounts).reduce((total, count) => total + count, 0), likedByMe: false } }) })
+    })
+
+    const hold = async (surface: import('@playwright/test').Locator, point = { x: 0.5, y: 0.5 }) => {
+      await surface.scrollIntoViewIfNeeded()
+      const rect = await surface.boundingBox()
+      expect(rect).not.toBeNull()
+      await page.mouse.move(rect!.x + rect!.width * point.x, rect!.y + rect!.height * point.y)
+      await page.mouse.down()
+      await page.waitForTimeout(1_050)
+      await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+      await page.mouse.up()
+    }
+    const photo = card.locator('[data-carousel-active="true"] img')
+    await hold(photo)
+    await page.getByRole('button', { name: 'Смех', exact: true }).click()
+    await expect.poll(() => payloads.length).toBe(1)
+    await expect(card.locator('[data-reaction="laugh"]')).toBeVisible()
+    await expect.poll(() => card.getAttribute('data-memory-id')).toBe(memoryId)
+
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    const video = card.locator('[data-carousel-active="true"] video')
+    await expect(video).toBeVisible()
+    const seek = card.locator('[data-carousel-active="true"] .memoly-private-video-v2-controls input[type="range"]').first()
+    await seek.scrollIntoViewIfNeeded()
+    await expect(seek).toBeVisible()
+    const seekRect = await seek.boundingBox()
+    expect(seekRect).not.toBeNull()
+    expect(await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y)
+      const controls = document.querySelector('[data-carousel-active="true"] .memoly-private-video-v2-controls')
+      const seekInput = controls?.querySelector('input[type="range"]')
+      return Boolean(target && controls?.contains(target) && seekInput && getComputedStyle(seekInput).visibility !== 'hidden')
+    }, { x: seekRect!.x + seekRect!.width / 2, y: seekRect!.y + seekRect!.height / 2 })).toBe(true)
+    await page.mouse.move(seekRect!.x + seekRect!.width / 2, seekRect!.y + seekRect!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+    await hold(video, { x: 0.08, y: 0.08 })
+    await page.getByRole('button', { name: 'Влюблённость', exact: true }).click()
+    await expect.poll(() => payloads.length).toBe(2)
+    expect(payloads.map((entry) => entry.reaction)).toEqual(['laugh', 'love'])
+    expect(payloads.every(({ url }) => url.endsWith(`/memories/${memoryId}/reaction`))).toBe(true)
+    await expect(card.locator('[data-reaction="love"]')).toBeVisible()
+
+    const voiceCard = page.locator('[data-memory-kind="voice"]').filter({ hasText: 'Голос E2E' }).first()
+    const voiceId = await voiceCard.getAttribute('data-memory-id')
+    const waveform = voiceCard.locator('[data-slot="voice-waveform"]')
+    await expect(waveform).toBeVisible()
+    await waveform.scrollIntoViewIfNeeded()
+    const waveformBounds = await waveform.boundingBox()
+    expect(waveformBounds).not.toBeNull()
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-slot="voice-waveform"]') !== null, { x: waveformBounds!.x + waveformBounds!.width / 2, y: waveformBounds!.y + waveformBounds!.height / 2 })).toBe(true)
+    await page.mouse.move(waveformBounds!.x + waveformBounds!.width / 2, waveformBounds!.y + waveformBounds!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    await page.mouse.up()
+
+    const voiceSurface = voiceCard.locator('.ml-audio')
+    await voiceSurface.scrollIntoViewIfNeeded()
+    const voiceSurfaceBounds = await voiceSurface.boundingBox()
+    expect(voiceSurfaceBounds).not.toBeNull()
+    const voiceFreePoint = await page.evaluate(({ x, y, width, height }) => {
+      for (let row = 1; row < 20; row += 1) {
+        for (let column = 1; column < 20; column += 1) {
+          const point = { x: x + width * column / 20, y: y + height * row / 20 }
+          const target = document.elementFromPoint(point.x, point.y)
+          if (target?.closest('.ml-audio') && !target.closest('button, input, audio, [data-slot="voice-waveform"]')) return point
+        }
+      }
+      return null
+    }, { x: voiceSurfaceBounds!.x, y: voiceSurfaceBounds!.y, width: voiceSurfaceBounds!.width, height: voiceSurfaceBounds!.height })
+    expect(voiceFreePoint).not.toBeNull()
+    const relativeVoicePoint = { x: (voiceFreePoint!.x - voiceSurfaceBounds!.x) / voiceSurfaceBounds!.width, y: (voiceFreePoint!.y - voiceSurfaceBounds!.y) / voiceSurfaceBounds!.height }
+    const actualVoiceTarget = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y)
+      return Boolean(target && target.closest('.ml-audio') && !target.closest('button, input, audio, [data-slot="voice-waveform"]'))
+    }, voiceFreePoint!)
+    expect(actualVoiceTarget).toBe(true)
+    await hold(voiceSurface, relativeVoicePoint)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+    expect(payloads).toHaveLength(2)
+    await expect(voiceCard.locator('[data-reaction="wow"]')).toHaveCount(0)
+
+    const tapVoiceControl = async (button: import('@playwright/test').Locator) => {
+      await button.scrollIntoViewIfNeeded()
+      const bounds = await button.boundingBox()
+      expect(bounds).not.toBeNull()
+      const point = { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 }
+      const isActualButtonTarget = await button.evaluate((element, { x, y }) => document.elementFromPoint(x, y)?.closest('button') === element, point)
+      expect(isActualButtonTarget).toBe(true)
+      await page.mouse.move(point.x, point.y)
+      await page.mouse.down()
+      await page.mouse.up()
+    }
+    const voice = voiceCard.locator('audio')
+    await tapVoiceControl(voiceCard.getByRole('button', { name: 'Слушать', exact: true }))
+    await expect.poll(() => voice.evaluate((element) => !(element as HTMLAudioElement).paused)).toBe(true)
+    await expect(voiceCard.getByRole('button', { name: 'Пауза', exact: true })).toBeVisible()
+    expect(payloads).toHaveLength(2)
+    await expect(voiceCard.locator('[data-reaction="wow"]')).toHaveCount(0)
+    await tapVoiceControl(voiceCard.getByRole('button', { name: 'Пауза', exact: true }))
+    await expect.poll(() => voice.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
+    expect(payloads).toHaveLength(2)
+
+    await hold(voiceSurface, relativeVoicePoint)
+    await page.getByRole('button', { name: 'Удивление', exact: true }).click()
+    await expect.poll(() => payloads.length).toBe(3)
+    expect(payloads[2]?.reaction).toBe('wow')
+    expect(payloads[2]?.url.endsWith(`/memories/${voiceId}/reaction`)).toBe(true)
+  })
+
+  test('leaving the family while a hold is pending cancels it and closes an open picker', async ({ page }) => {
+    await openFeed(page)
+    const image = page.locator('.memory-media-slot img').first()
+    await image.scrollIntoViewIfNeeded()
+    const rect = await image.boundingBox()
+    expect(rect).not.toBeNull()
+    const x = Math.round(rect!.x + rect!.width / 2)
+    const y = Math.round(rect!.y + rect!.height / 2)
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
+    await page.waitForTimeout(100)
+    await page.getByRole('button', { name: '‹ Все семьи' }).evaluate((button) => (button as HTMLButtonElement).click())
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
+
+    await cdp.detach()
+    await page.reload()
+    await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
+    await openFeed(page)
+    await image.scrollIntoViewIfNeeded()
+    const openRect = await image.boundingBox()
+    expect(openRect).not.toBeNull()
+    await page.mouse.move(openRect!.x + openRect!.width / 2, openRect!.y + openRect!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(550)
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.mouse.up()
+    await page.getByRole('button', { name: '‹ Все семьи' }).click()
+    await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
   })
 
   test('mixed unread Memory waits for active readiness, resets dwell on slide change, and stays until seen ack', async ({ page }) => {
@@ -2227,7 +2918,9 @@ test.describe.serial('T07 live feed', () => {
       where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } },
       data: { revokedAt: new Date() },
     })
-    await voiceCard.getByRole('button', { name: 'Поставить реакцию ❤️' }).click()
+    await voiceCard.focus()
+    await page.keyboard.press('Shift+F10')
+    await page.getByRole('button', { name: 'Сердце', exact: true }).click()
 
     await expect(page.getByText(/^Доступ к этой семье (?:закрыт\.|изменился\. Выберите её снова в списке\.)$/)).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
@@ -2245,6 +2938,7 @@ async function seedFeed() {
   })
   if (prior) {
     const priorFamilies = await prisma.familyMember.findMany({ where: { userId: prior.userId }, select: { familyId: true, family: { select: { ownerUserId: true } } } })
+    await prisma.memoryLike.deleteMany({ where: { familyId: { in: priorFamilies.map(({ familyId }) => familyId) } } })
     await prisma.family.deleteMany({ where: { id: { in: priorFamilies.map(({ familyId }) => familyId) } } })
     await prisma.user.delete({ where: { id: prior.userId } })
     const orphanedOwners = priorFamilies.map(({ family }) => family.ownerUserId).filter((userId) => userId !== prior.userId)
@@ -2439,9 +3133,18 @@ async function installTelegramHost(page: Page, initData: string, insets: { botto
 async function installMaxHost(page: Page, initData: string) {
   await page.addInitScript(({ initData: signedData }) => {
     const testWindow = window as typeof window & { __openedMaxLink?: string }
+    const testWindowWithHaptics = testWindow as typeof testWindow & { __maxHapticCalls?: string[]; __maxHapticBehavior?: { throwOn?: string; rejectOn?: string } }
+    testWindowWithHaptics.__maxHapticCalls = []
     const webApp = {
       initData: signedData,
       version: '1.0',
+      platform: 'ios',
+      HapticFeedback: { impactOccurred(style: string) {
+        testWindowWithHaptics.__maxHapticCalls?.push(style)
+        if (testWindowWithHaptics.__maxHapticBehavior?.throwOn === style) throw new Error('Synthetic MAX haptic throw')
+        if (testWindowWithHaptics.__maxHapticBehavior?.rejectOn === style) return Promise.reject(new Error('Synthetic MAX haptic rejection'))
+        return undefined
+      } },
       ready() {},
       openLink(url: string) { testWindow.__openedMaxLink = url },
     }

@@ -166,10 +166,10 @@ test('notes keep selectable text in the memory surface and omit system labels', 
     const panelMarkup = markup.slice(panelIndex, panelEnd)
     const escapedBody = body.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
     const bodyIndex = markup.indexOf(escapedBody, panelIndex)
-    const likeIndex = markup.indexOf('class="memory-like')
+    const reactionHelpIndex = markup.indexOf('Shift+F10')
     expect(panelIndex).toBeGreaterThanOrEqual(0)
     expect(bodyIndex).toBeGreaterThan(panelIndex)
-    expect(likeIndex).toBeGreaterThan(bodyIndex)
+    expect(reactionHelpIndex).toBeGreaterThanOrEqual(0)
     expect(markup).not.toContain('Заметка')
     expect(markup).toContain('memoly-note-gradient__text')
     expect(panelMarkup).not.toContain('data-slot="webp-icon"')
@@ -397,7 +397,7 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
 
   expect(markup).toContain('data-memory-kind="photo"')
   expect(markup).toContain('data-slot="memoly-author-row"')
-  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
+  expect(markup).not.toContain('Поставить реакцию ❤️')
   expect(markup).toContain('data-slot="memoly-photo-layout"')
   expect(markup).toContain('data-slot="memoly-video-layout"')
   expect(markup).toContain('data-slot="memoly-voice-layout"')
@@ -407,7 +407,7 @@ test('real memory DTOs map to explicit memoLy card layouts without demo media', 
 })
 
 test('video cards remove the standalone open action and collapse when the caption is empty', () => {
-  const card = MemoryCardPresentation({
+  const card = createElement(MemoryCardPresentation, {
     actions: null,
     authorInitials: 'М',
     authorName: 'Мама',
@@ -426,11 +426,11 @@ test('video cards remove the standalone open action and collapse when the captio
   expect(markup).toContain('data-memory-kind="video"')
   expect(markup).toMatch(/class="memory-media-slot video-wrap(?: |")/)
   expect(markup).not.toContain('Открыть')
-  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
+  expect(markup).not.toContain('Поставить реакцию ❤️')
 })
 
 test('video cards treat whitespace-only captions as empty', () => {
-  const markup = renderToStaticMarkup(MemoryCardPresentation({
+  const markup = renderToStaticMarkup(createElement(MemoryCardPresentation, {
     actions: null,
     authorInitials: 'М',
     authorName: 'Мама',
@@ -455,7 +455,7 @@ test('memory child details stay out of the card while selected reaction and coun
     { childName: 'Лиза', childAvatarUrl: '/child.webp', childAvatarCrop: { x: 0, y: 0, scale: 1 } },
     {},
   ]) {
-    const markup = renderToStaticMarkup(MemoryCardPresentation({
+    const markup = renderToStaticMarkup(createElement(MemoryCardPresentation, {
       actions: null,
       authorInitials: 'М',
       authorName: 'Мама',
@@ -473,14 +473,15 @@ test('memory child details stay out of the card while selected reaction and coun
 
     expect(markup).not.toContain('memory-child-tag')
     expect(markup).not.toContain('Лиза')
-    expect(markup).toContain('aria-label="Сердце: 3, выбрано"')
-    expect(markup).toContain('aria-pressed="true"')
-    expect(markup).toContain('>3</span>')
+    expect(markup).toContain('aria-label="Реакции: Сердце 3, ваша реакция"')
+    expect(markup).toContain('reaction-result is-mine')
+    expect(markup).not.toContain('class="reaction-pill')
+    expect(markup).toContain('reaction-result-count">3')
   }
 })
 
 test('delete preview cards preserve the selected memory while removing interactive actions', () => {
-  const markup = renderToStaticMarkup(MemoryCardPresentation({
+  const markup = renderToStaticMarkup(createElement(MemoryCardPresentation, {
     actions: createElement('button', { 'aria-label': 'Действия с воспоминанием' }, '...'),
     authorInitials: 'М',
     authorName: 'Мама',
@@ -500,12 +501,13 @@ test('delete preview cards preserve the selected memory while removing interacti
   expect(markup).toContain('memoly-memory-delete-preview')
   expect(markup).not.toContain('Действия с воспоминанием')
   expect(markup).not.toContain('Открыть воспоминание')
-  expect(markup).toContain('disabled=""')
+  expect(markup).toContain('reaction-result is-mine')
+  expect(markup).not.toContain('<button')
 })
 
 test('delete preview notes keep seen hooks and render the gradient as noninteractive text', () => {
   const seenContentRef = { current: null as HTMLDivElement | null }
-  const markup = renderToStaticMarkup(MemoryCardPresentation({
+  const markup = renderToStaticMarkup(createElement(MemoryCardPresentation, {
     actions: null,
     authorInitials: 'М',
     authorName: 'Мама',
@@ -533,7 +535,7 @@ test('delete preview notes keep seen hooks and render the gradient as noninterac
 })
 
 test('video captions remain visible without becoming a separate detail button', () => {
-  const markup = renderToStaticMarkup(MemoryCardPresentation({
+  const markup = renderToStaticMarkup(createElement(MemoryCardPresentation, {
     actions: null,
     authorInitials: 'М',
     authorName: 'Мама',
@@ -557,7 +559,7 @@ test('video captions remain visible without becoming a separate detail button', 
 test('empty photo and voice captions do not create a blank detail footer', () => {
   let opens = 0
   for (const kind of ['photo', 'voice'] as const) {
-    const card = MemoryCardPresentation({
+    const card = createElement(MemoryCardPresentation, {
       actions: null,
       authorInitials: 'М',
       authorName: 'Мама',
@@ -583,13 +585,13 @@ test('empty photo and voice captions do not create a blank detail footer', () =>
   expect(opens).toBe(0)
 })
 
-test('viewer cards keep like enabled while omitting the delete action', () => {
+test('viewer cards keep details available while omitting the delete action and quick reactions', () => {
   const viewerMemory = { ...memory, capabilities: { ...memory.capabilities, delete: false } }
   const markup = renderFeed(feedClientWith([viewerMemory]), 'viewer')
 
   expect(markup).toContain('aria-label="Действия с воспоминанием"')
-  expect(markup).toContain('aria-label="Поставить реакцию ❤️"')
-  expect(markup).toContain('aria-pressed="false"')
+  expect(markup).not.toContain('Поставить реакцию ❤️')
+  expect(markup).not.toContain('aria-pressed="false"')
   expect(markup).not.toMatch(/aria-label="Поставить сердечко"[^>]*disabled=""/)
 })
 
@@ -1006,7 +1008,7 @@ test('memory actions menu is available to every role while delete remains capabi
   expect(renderFeed(viewerClient)).toContain('aria-label="Действия с воспоминанием"')
 })
 
-test('memory reaction controls are lightweight and expose selected state without zero pills', () => {
+test('memory reaction results show only non-zero reactions as passive text', () => {
   const props = {
     actions: null,
     authorInitials: 'М',
@@ -1022,29 +1024,36 @@ test('memory reaction controls are lightweight and expose selected state without
   const empty = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, reactionCounts: {}, currentUserReaction: null }))
   const liked = renderToStaticMarkup(createElement(MemoryCardPresentation, { ...props, reactionCounts: { heart: 12 }, currentUserReaction: 'heart' }))
 
-  expect(empty).toMatch(/<button[^>]*aria-label="Поставить реакцию ❤️"[^>]*aria-pressed="false"[^>]*class="memory-like"/)
-  expect(empty).toContain('aria-label="Выбрать реакцию"')
+  expect(empty).not.toContain('data-slot="memory-reactions"')
+  expect(empty).not.toContain('memory-like')
+  expect(empty).not.toContain('reaction-picker-trigger')
   expect(empty).not.toContain('>0</span>')
-  expect(liked).toMatch(/<button[^>]*aria-label="Сердце: 12, выбрано"[^>]*aria-pressed="true"[^>]*class="reaction-pill is-selected"/)
-  expect(liked).toContain('aria-label="Сердце: 12, выбрано"')
-  expect(liked).toContain('>12</span>')
+  expect(liked).toContain('aria-label="Реакции: Сердце 12, ваша реакция"')
+  expect(liked).toMatch(/<span class="reaction-result is-mine"/)
+  expect(liked).not.toContain('reaction-pill')
+  expect(liked).toContain('reaction-result-count">12')
 })
 
-test('reaction row caps used types, exposes hidden selected count, and uses one flat Memory action row', () => {
+test('reaction row shows all used types in canonical order without capsules or overflow', () => {
   const row = renderToStaticMarkup(createElement(MemoryReactions, {
     counts: { heart: 123, love: 2, laugh: 1, touched: 3, wow: 4, clap: 1 },
     current: 'clap',
     interactive: true,
     onSelect: () => undefined,
+    open: false,
+    point: { x: 0, y: 0 },
+    onOpenChange: () => undefined,
+    returnFocusRef: { current: null },
   }))
-  expect((row.match(/class="reaction-pill/g) ?? []).length).toBe(4)
-  expect(row).toContain('>+2</span>')
-  expect(row).toContain('содержит выбранную реакцию')
+  expect((row.match(/data-reaction-result=""/g) ?? []).length).toBe(6)
+  expect(row).not.toContain('+2')
+  expect(row).not.toContain('class="reaction-pill')
   expect(row).toContain('123')
   expect(row).not.toContain('>0</span>')
   for (const kind of ['photoMemory', 'videoMemory', 'mixedMemory', 'noteMemory', 'memory']) {
     const item = { photoMemory, videoMemory, mixedMemory, noteMemory, memory }[kind]!
-    expect(renderFeed(feedClientWith([item]))).toContain('data-slot="memory-reactions"')
+    const hasReactions = Object.values(item.reactionCounts ?? {}).some((count) => count > 0)
+    expect(renderFeed(feedClientWith([item])).includes('data-slot="memory-reactions"')).toBe(hasReactions)
   }
 })
 
@@ -1283,7 +1292,7 @@ test('the feed presentation keeps one memory surface and omits type filters', ()
   expect(markup).toContain('class="memory-header"')
   expect(markup).toContain('class="memory-media-slot"')
   expect(markup).not.toContain('surface-inset')
-  expect(markup).toContain('class="actions"')
+  expect(markup).not.toContain('class="actions"')
   expect(markup).toMatch(/class="caption(?: |")/)
 })
 
