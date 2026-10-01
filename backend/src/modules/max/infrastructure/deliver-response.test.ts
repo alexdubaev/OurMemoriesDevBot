@@ -70,6 +70,33 @@ describe('MAX response delivery', () => {
     expect(row.updates()).toBe(1)
   })
 
+  test('delivers the full welcome with the official memoLy open_app button', async () => {
+    let sent: unknown
+    const text = `Добро пожаловать в memoLy 💛
+
+Здесь живёт история вашей семьи: первые улыбки,
+маленькие открытия и моменты, которые хочется сохранить.
+Фото, видео и заметки о ребёнке — в одном семейном альбоме,
+доступном только его участникам.
+
+🌱 Создаёте семейный альбом?
+Добавляйте воспоминания, приглашайте родных и друзей
+и выбирайте, какой доступ им предоставить.
+
+💛 Вас пригласили близкие?
+Смотрите семейные воспоминания и оставляйте реакции —
+будьте рядом, даже на расстоянии. Возможность добавлять
+свои воспоминания зависит от выданного вам доступа.
+
+Нажмите кнопку ниже, чтобы открыть приложение
+и начать вашу семейную историю.`
+    const row = fakePrisma({ id: responseId, destinationUserId: 77n, kind: 'welcome', text, buttons: null, deliveredAt: null,
+      inbox: { encryptedPayload: new Uint8Array(), encryptionIv: new Uint8Array(), encryptionAuthTag: new Uint8Array(), source: null }, channelDecision: null })
+    const deliver = createMaxResponseDelivery({ prisma: row.prisma, maxBotUsername: 'OurMemoriesMaxBot', api: api({ sendMessage: async (input) => { sent = input } }) })
+    await expect(deliver({ responseId })).resolves.toBe('done')
+    expect(sent).toEqual({ userId: '77', text, buttons: [{ type: 'open_app', text: 'Открыть memoLy', webApp: 'OurMemoriesMaxBot' }] })
+  })
+
   test('batches channel choices in groups of 30 without renumbering persisted callback indexes', async () => {
     const sent: Array<{ buttons: Array<{ text: string; payload: string }> }> = []
     const buttons = Array.from({ length: 31 }, (_, index) => ({ text: `Family ${index}`, payload: `max_channel:${responseId}:select:${index}` }))

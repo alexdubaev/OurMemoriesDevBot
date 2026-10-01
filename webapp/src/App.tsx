@@ -35,6 +35,7 @@ import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/
 import { ThemeProvider } from '@/features/theme'
 import { claimWelcome, WelcomeSplash } from '@/features/welcome'
 import { memberAvatarUpdatedEvent } from '@/features/avatar'
+import { readPwaInstallIntent, setPwaInstallDismissed } from '@/platform/pwa-install'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -168,6 +169,7 @@ function yesNo(value: boolean) {
 }
 
 function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
+  const installIntent = useMemo(() => hostBridge.kind === 'browser' ? readPwaInstallIntent(window.location) : null, [hostBridge.kind])
   const [home, setHome] = useState<FamilyHomeResponse | null>(null)
   const homeRef = useRef<FamilyHomeResponse | null>(null)
   const [homeLoading, setHomeLoading] = useState(true)
@@ -468,6 +470,19 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
       const result = await refreshHome(true)
       if (cancelled) return
+      if (installIntent?.familyId && result) {
+        let page = result
+        let familyAvailable = page.items.some((item) => item.familyId === installIntent.familyId)
+        while (!familyAvailable && page.nextCursor) {
+          page = await loadFamilyHome(transport, page.nextCursor)
+          if (cancelled) return
+          familyAvailable = page.items.some((item) => item.familyId === installIntent.familyId)
+        }
+        if (familyAvailable) {
+          void selectFamily(installIntent.familyId)
+          return
+        }
+      }
       if (!cancelled && maxVideoUploadAcceptance && result?.items.length === 1 && !result.nextCursor) {
         void selectFamily(result.items[0]!.familyId)
       } else if (!cancelled && maxVideoUploadAcceptance && result?.items.length) {
@@ -481,7 +496,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       welcomeResolve.current = null
       resolve?.()
     }
-  }, [currentUserId, hostBridge.kind, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
+  }, [currentUserId, hostBridge.kind, installIntent, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
 
   const loadMore = async () => {
     if (!home?.nextCursor || loadingMore) return
@@ -560,7 +575,18 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
   if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.') }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div>
-  return <div style={insetsStyle}><button className="family-context-back" onClick={() => returnHome()} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><FamilyScreen childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onRefresh={refreshSelected} transport={transport} /></div>
+  return <div style={insetsStyle}><button className="family-context-back" onClick={() => returnHome()} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><FamilyScreen canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); setScreen('feed') }} onRefresh={refreshSelected} transport={transport} /></div>
+}
+
+function isInstallOfferSupported(hostBridge: HostBridge) {
+  const platform = hostBridge.metadata()?.platform.toLowerCase() ?? ''
+  return (hostBridge.kind === 'max' && ['android', 'ios', 'iphone', 'ipad'].includes(platform)) ||
+    (hostBridge.kind === 'browser' && /android/i.test(navigator.userAgent))
+}
+
+function isMaxIos(hostBridge: HostBridge) {
+  const platform = hostBridge.metadata()?.platform.toLowerCase() ?? ''
+  return hostBridge.kind === 'max' && ['ios', 'iphone', 'ipad'].includes(platform)
 }
 
 function BrowserLinkLogin({ style }: { style: CSSProperties }) {

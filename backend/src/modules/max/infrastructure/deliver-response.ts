@@ -47,18 +47,26 @@ export function createMaxResponseDelivery(options: {
     } else {
       const inviteContext = response.kind === 'welcome'
         ? readInviteContext(response.inbox, response.destinationUserId.toString(), options) : null
-      if (inviteContext && options.resolveDetailedInviteStart && options.maxBotUsername) {
+      const browserApproval = response.kind === 'welcome'
+        ? readBrowserApprovalContext(response.inbox, response.destinationUserId.toString(), response.buttons, options) : null
+      const inviteWelcome = readInviteWelcomeMarker(response.buttons)
+      const openButton = options.maxBotUsername && /^[A-Za-z0-9_]{5,32}$/.test(options.maxBotUsername)
+        ? { type: 'open_app' as const, text: 'Открыть memoLy', webApp: options.maxBotUsername } : null
+      if (browserApproval && openButton) {
+        await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text, buttons: [{ ...openButton, payload: browserApproval.payload }] }, signal)
+      } else if (inviteContext && options.resolveDetailedInviteStart && openButton) {
         const state = await options.resolveDetailedInviteStart(inviteContext.token, inviteContext.actorId)
         const button = state.status === 'valid'
-          ? { type: 'open_app' as const, text: 'Открыть приглашение', webApp: options.maxBotUsername, payload: `invite_${inviteContext.token}` }
+          ? { type: 'open_app' as const, text: 'Открыть приглашение', webApp: openButton.webApp, payload: `invite_${inviteContext.token}` }
           : state.status === 'already_member'
-            ? { type: 'open_app' as const, text: 'Открыть memoLy', webApp: options.maxBotUsername }
-            : undefined
+            ? openButton : undefined
         await options.api.sendMessage({
           userId: response.destinationUserId.toString(),
-          text: inviteStartText(state),
+          text: state.status === 'valid' ? inviteWelcome ? inviteStartText(state, inviteWelcome.returning) : response.text : inviteStartText(state),
           ...(button ? { buttons: [button] } : {}),
         }, signal)
+      } else if (response.kind === 'welcome' && openButton) {
+        await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text, buttons: [openButton] }, signal)
       } else {
         await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text }, signal)
       }
@@ -118,6 +126,34 @@ function readInviteContext(
       !/^[A-Za-z0-9_-]{32,121}$/.test(event.payload.slice('invite_'.length)) ||
       event.userId !== destinationUserId) return null
   return { token: event.payload.slice('invite_'.length), actorId: event.userId }
+}
+
+function readBrowserApprovalContext(
+  inbox: { encryptedPayload: Uint8Array; encryptionIv: Uint8Array; encryptionAuthTag: Uint8Array },
+  destinationUserId: string,
+  buttons: unknown,
+  options: { crypto?: PayloadCrypto },
+) {
+  if (!options.crypto || inbox.encryptedPayload.byteLength === 0 || !isWelcomeMarker(buttons, 'browser_approval')) return null
+  const event = options.crypto.decrypt<MaxInboundEvent>({
+    ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag,
+  })
+  return event.kind === 'bot_started' && event.userId === destinationUserId &&
+    typeof event.payload === 'string' && /^browser_\d{24}$/.test(event.payload)
+    ? { payload: event.payload } : null
+}
+
+function readInviteWelcomeMarker(value: unknown): { returning: boolean } | null {
+  if (!isRecord(value) || value.kind !== 'invite_welcome' || typeof value.returning !== 'boolean') return null
+  return { returning: value.returning }
+}
+
+function isWelcomeMarker(value: unknown, kind: string): boolean {
+  return isRecord(value) && value.kind === kind
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function responsePayload(payload: unknown): string {

@@ -49,6 +49,27 @@ describe('MAX HostBridge', () => {
     expect(opened).toEqual(['https://max.ru/memoLy'])
   })
 
+  test('opens only same-origin HTTPS URLs through MAX openLink on explicit calls', () => {
+    const opened: string[] = []
+    const bridge = createMaxHostBridge({
+      location: { origin: 'https://memoly.example' },
+      WebApp: { openLink: (url: string) => { opened.push(url) } },
+    })
+    expect(bridge.openExternalUrl?.('https://memoly.example/?install=1')).toBe(true)
+    expect(bridge.openExternalUrl?.('https://evil.example/?install=1')).toBe(false)
+    expect(bridge.openExternalUrl?.('http://memoly.example/?install=1')).toBe(false)
+    expect(createMaxHostBridge({ location: { origin: 'https://memoly.example' }, WebApp: {} }).openExternalUrl?.('https://memoly.example/')).toBe(false)
+    expect(opened).toEqual(['https://memoly.example/?install=1'])
+  })
+
+  test('reports an unavailable external-link bridge without throwing', () => {
+    const bridge = createMaxHostBridge({
+      location: { origin: 'https://memoly.example' },
+      WebApp: { openLink: () => { throw new Error('bridge unavailable') } },
+    })
+    expect(bridge.openExternalUrl?.('https://memoly.example/?install=1')).toBe(false)
+  })
+
   test('fails closed for a missing or invalid MAX bot username', () => {
     const opened: string[] = []
     const host = { WebApp: { initData: 'query_id=signed', openLink: (url: string) => { opened.push(url) } } }

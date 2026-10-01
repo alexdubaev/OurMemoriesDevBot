@@ -1,0 +1,22 @@
+.pwa-install-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 2px 10px rgba(48, 42, 46, .045);
+}
+
+.pwa-install-copy { min-width: 0; display: grid; gap: 4px; }
+.pwa-install-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.pwa-install-actions button { min-height: 44px; }
+
+@media (max-width: 520px) {
+  .pwa-install-prompt { align-items: stretch; flex-direction: column; gap: 10px; }
+  .pwa-install-actions { width: 100%; }
+  .pwa-install-actions button:first-child { flex: 1; }
+}

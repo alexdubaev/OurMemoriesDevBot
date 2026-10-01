@@ -28,6 +28,7 @@ import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
 import { useChildAvatar } from '@/features/family'
+import { PwaInstallPrompt } from '@/features/pwa-install'
 import { MemoryEditor, NoteComposer, PhotoComposer } from '@/features/composer'
 import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
@@ -311,6 +312,7 @@ export function FeedPage({
       onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
       role={role} unreadCount={unreadCount} unreadOnly={unreadOnly} unreadState={unreadState}>
+      {isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}
       {unreadOnly ? <div className="feed-unread-note"><Typography as="p" variant="memoryMeta">Просмотренные карточки останутся на месте до обновления списка.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'auto' }); setUnreadCycle((value) => value + 1) }} type="button" variant="outline">Обновить список</Button></div> : null}
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
