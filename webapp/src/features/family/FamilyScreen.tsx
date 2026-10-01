@@ -8,6 +8,7 @@ import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
 import { createInviteResult } from './invite-result'
 import { useChildAvatar } from './useChildAvatar'
+import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamilyMaxChannelStatus'
 
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
@@ -55,6 +56,8 @@ export function FamilyScreen({
   const isOwner = current?.isOwner === true
   const child = familyResponse.child
   const canInvite = (isOwner || current?.role === 'full') && child?.isComplete === true
+  const maxChannel = useFamilyMaxChannelStatus(transport, familyResponse.family.id, currentUserId, current?.role ?? null)
+  const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
   const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
 
   const refreshUsage = () => void loadFamilyUsage(transport, familyResponse.family.id).then((next) => {
@@ -107,6 +110,11 @@ export function FamilyScreen({
           invites={invites}
           memberActions={memberActions}
           members={members}
+          maxChannelStatus={maxChannel.status}
+          maxChannelLoading={maxChannel.loading}
+          maxChannelError={maxChannel.error}
+          canManageMaxChannel={canManageMaxChannel}
+          onRetryMaxChannel={maxChannel.retry}
           onCloseInvite={() => { setInviteReady(null); setCopyState('idle') }}
           onCopyInvite={async () => {
             if (!inviteReady) return

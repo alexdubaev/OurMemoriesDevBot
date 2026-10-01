@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
-import { createInviteStartResolver } from './application/invite-start'
+import { createDetailedInviteStartResolver, createInviteStartResolver } from './application/invite-start'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -13,6 +13,8 @@ maybeDescribe('families invite-start resolver', () => {
 
   beforeEach(async () => {
     await prisma.familyInvite.deleteMany()
+    await prisma.memoryMedia.deleteMany()
+    await prisma.memory.deleteMany()
     await prisma.child.deleteMany()
     await prisma.family.deleteMany()
     await prisma.externalIdentity.deleteMany()
@@ -59,6 +61,37 @@ maybeDescribe('families invite-start resolver', () => {
       prisma.externalIdentity.count(), prisma.child.count(),
     ])).toEqual(before)
     expect((await prisma.familyInvite.findUniqueOrThrow({ where: { tokenHash: hash(activeToken) } })).acceptedAt).toBeNull()
+  })
+
+  test('classifies personal MAX invite states without creating identity or membership', async () => {
+    const owner = await prisma.user.create({ data: { displayName: 'MAX resolver owner' } })
+    const acceptedUser = await prisma.user.create({ data: { displayName: 'MAX resolver member' } })
+    const activeFamily = await createFamily(owner.id, 'Тёплый дом')
+    const activeToken = token('max-active')
+    const expiredToken = token('max-expired')
+    const revokedToken = token('max-revoked')
+    const usedToken = token('max-used')
+    const acceptedToken = token('max-accepted')
+    await prisma.familyMember.create({ data: { familyId: activeFamily.id, userId: acceptedUser.id, role: 'viewer' } })
+    await prisma.externalIdentity.create({ data: { userId: acceptedUser.id, provider: 'max', subject: '77123' } })
+    await prisma.familyInvite.createMany({ data: [
+      invite(activeFamily.id, owner.id, activeToken, { role: 'viewer' }),
+      invite(activeFamily.id, owner.id, expiredToken, { expiresAt: new Date('2026-09-14T10:00:00.000Z') }),
+      invite(activeFamily.id, owner.id, revokedToken, { revokedAt: fixedNow }),
+      invite(activeFamily.id, owner.id, usedToken, { acceptedAt: fixedNow, acceptedBy: owner.id }),
+      invite(activeFamily.id, owner.id, acceptedToken, { acceptedAt: fixedNow, acceptedBy: owner.id }),
+    ] })
+    const resolve = createDetailedInviteStartResolver(prisma, () => fixedNow)
+    const before = await Promise.all([prisma.familyMember.count(), prisma.user.count(), prisma.externalIdentity.count()])
+
+    await expect(resolve(activeToken, '99123')).resolves.toEqual({ status: 'valid', familyName: 'Тёплый дом', role: 'viewer' })
+    await expect(resolve(expiredToken, '99123')).resolves.toEqual({ status: 'expired' })
+    await expect(resolve(revokedToken, '99123')).resolves.toEqual({ status: 'revoked' })
+    await expect(resolve(usedToken, '99123')).resolves.toEqual({ status: 'used' })
+    await expect(resolve(acceptedToken, '99123')).resolves.toEqual({ status: 'used' })
+    await expect(resolve(acceptedToken, '77123')).resolves.toEqual({ status: 'already_member' })
+    await expect(resolve(token('max-missing'), '99123')).resolves.toEqual({ status: 'invalid' })
+    expect(await Promise.all([prisma.familyMember.count(), prisma.user.count(), prisma.externalIdentity.count()])).toEqual(before)
   })
 
   async function createFamily(ownerUserId: string, name: string) {

@@ -217,6 +217,39 @@ describe('MAX API client', () => {
     })
   })
 
+  test('preserves an unsafe signed channel id from raw provider JSON for the expected message', async () => {
+    const raw = '{"messages":[{"recipient":{"chat_id":9007199254740993,"chat_type":"channel","user_id":null},"body":{"mid":"requested-mid","attachments":[]}},{"recipient":{"chat_id":77,"chat_type":"channel"},"body":{"mid":"other-mid","attachments":[]}}]}'
+    const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
+    await expect(api.getMessage('requested-mid')).resolves.toEqual({
+      messageId: 'requested-mid', senderId: '0', recipientId: '9007199254740993', attachments: [],
+    })
+  })
+
+  test('preserves signed int64 boundaries and the documented decimal-string provider form', async () => {
+    for (const chatId of ['9223372036854775807', '-9223372036854775808', '9007199254740993']) {
+      const raw = `{"message":{"recipient":{"chat_id":${chatId},"chat_type":"channel"},"body":{"mid":"boundary-${chatId}","attachments":[]}}}`
+      const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
+      await expect(api.getMessage(`boundary-${chatId}`)).resolves.toMatchObject({ recipientId: chatId })
+    }
+    const rawString = '{"message":{"recipient":{"chat_id":"9007199254740993","chat_type":"channel"},"body":{"mid":"string-id","attachments":[]}}}'
+    const stringApi = createMaxApi(token, { fetch: async () => new Response(rawString, { headers: { 'content-type': 'application/json' } }) })
+    await expect(stringApi.getMessage('string-id')).resolves.toMatchObject({ recipientId: '9007199254740993' })
+  })
+
+  test('rejects ambiguous and out-of-range raw provider channel ids', async () => {
+    for (const raw of [
+      '{"messages":[{"recipient":{"chat_id":9223372036854775808,"chat_type":"channel"},"body":{"mid":"raw-bound","attachments":[]}}]}',
+      '{"messages":[{"recipient":{"chat_id":-9223372036854775809,"chat_type":"channel"},"body":{"mid":"raw-bound-low","attachments":[]}}]}',
+      '{"messages":[{"recipient":{"chat_id":1e3,"chat_type":"channel"},"body":{"mid":"raw-exponent","attachments":[]}}]}',
+      '{"messages":[{"recipient":{"chat_id":1,"chat_id":2,"chat_type":"channel"},"body":{"mid":"raw-duplicate","attachments":[]}}]}',
+    ]) {
+      const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
+      const mid = raw.includes('raw-bound-low') ? 'raw-bound-low' : raw.includes('raw-exponent') ? 'raw-exponent' :
+        raw.includes('raw-bound') ? 'raw-bound' : 'raw-duplicate'
+      await expect(api.getMessage(mid)).rejects.toBeInstanceOf(MaxProviderError)
+    }
+  })
+
   test('rejects truly unknown subscription update types before calling the provider', async () => {
     let fetchCalls = 0
     const api = createMaxApi(token, { fetch: async () => { fetchCalls++; return response({ success: true }) } })
@@ -291,6 +324,27 @@ describe('MAX API client', () => {
     expect(await requests[1]!.json()).toEqual({ message: { text: 'Выбрано', attachments: [] } })
   })
 
+  test('sends a typed MAX open_app button with the unchanged invite start payload', async () => {
+    let request: Request | undefined
+    const api = createMaxApi(token, { fetch: async (input, init) => {
+      request = new Request(input, init)
+      return response({ message: {} })
+    } })
+    const rawToken = 'a'.repeat(64)
+    await api.sendMessage({ userId: '77', text: 'Вас приглашают в семью «Тёплый дом».', buttons: [
+      { type: 'open_app', text: 'Открыть приглашение', webApp: 'OurMemoriesMaxBot', payload: `invite_${rawToken}` },
+    ] })
+    expect(await request!.json()).toEqual({ text: 'Вас приглашают в семью «Тёплый дом».', attachments: [{ type: 'inline_keyboard', payload: {
+      buttons: [[{ type: 'open_app', text: 'Открыть приглашение', web_app: 'OurMemoriesMaxBot', payload: `invite_${rawToken}` }]],
+    } }] })
+  })
+
+  test('rejects MAX keyboards that exceed thirty rows', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ message: {} }) })
+    await expect(api.sendMessage({ userId: '77', text: 'Выберите семью', buttons: Array.from({ length: 31 }, (_, index) => ({
+      text: `Семья ${index}`, payload: `family:source-a:${index}`,
+    })) })).rejects.toThrow()
+  })
   test('sends a bot-authenticated video attachment message and returns its provider identity', async () => {
     let request: Request | undefined
     const api = createMaxApi(token, {

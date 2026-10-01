@@ -78,6 +78,7 @@ maybeDescribe('app media to MAX backup and Feed', () => {
           ownerUserId: user.id, name: `Synthetic ${scenario.label}`, timezone: 'UTC', maxBackupChatId: channelChatId,
         } })
         await tx.familyMember.create({ data: { familyId: created.id, userId: user.id, role: 'full' } })
+        await tx.maxChannelBinding.create({ data: { chatId: channelChatId, familyId: created.id, state: 'connected' } })
         return created
       })
       fixture.familyId = family.id

@@ -26,4 +26,32 @@ describe('Prisma MAX repository channel loop guard', () => {
     expect(backupLookups).toBe(1)
     expect(inboxWrites).toBe(0)
   })
+
+  test('durably accepts senderless channel updates while correlation is unresolved', async () => {
+    let inboxWrites = 0
+    let sourceWrites = 0
+    let taskWrites = 0
+    const tx = {
+      maxMemoryBackup: { findFirst: async (input: unknown) => {
+        expect(input).toEqual({ where: { channelChatId: -79560265048692n, providerMessageId: 'early-backup-webhook' }, select: { id: true } })
+        return null
+      } },
+      maxInbox: {
+        createMany: async () => { inboxWrites += 1; return { count: 1 } },
+      },
+      maxSource: { create: async () => { sourceWrites += 1; return { id: 'source' } } },
+      taskOutbox: { create: async () => { taskWrites += 1 } },
+    }
+    const repository = new PrismaMaxRepository({ $transaction: async (callback: (value: typeof tx) => unknown) => callback(tx) } as never)
+    await expect(repository.accept({
+      botId: '900',
+      event: { kind: 'message_created', isChannel: true, senderId: '0', recipientId: '-79560265048692',
+        messageId: 'early-backup-webhook', occurredAt: '2026-09-30T10:00:00.000Z', text: 'a memory', attachments: [] },
+      eventKey: 'max:channel:early-backup', encrypted: { ciphertext: new Uint8Array(), iv: new Uint8Array(), authTag: new Uint8Array() },
+      response: null, now: new Date('2026-09-30T10:00:00.000Z'),
+    })).resolves.toMatchObject({ duplicate: false, inboxId: expect.any(String) })
+    expect(inboxWrites).toBe(1)
+    expect(sourceWrites).toBe(1)
+    expect(taskWrites).toBe(1)
+  })
 })

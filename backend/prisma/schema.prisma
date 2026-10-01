@@ -32,6 +32,7 @@ model User {
   telegramVideoDeliveryTargets TelegramVideoDeliveryTarget[]
   maxVideoUploadSessions      MaxVideoUploadSession[]        @relation("MaxVideoUploadAuthor")
   browserLoginChallenges      BrowserLoginChallenge[]        @relation("BrowserLoginApprovedUser")
+  maxChannelDecisions        MaxChannelDecision[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -108,6 +109,7 @@ model MaxInbox {
   processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
   source            MaxSource?
   responses         MaxOutgoingResponse[]
+  channelDecision   MaxChannelDecision?
 
   @@index([status, receivedAt], map: "max_inbox_processing_idx")
   @@map("max_inbox")
@@ -246,6 +248,8 @@ model MaxVideoReference {
 model MaxOutgoingResponse {
   id                 String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   inboxId            String                    @map("inbox_id") @db.Uuid
+  channelDecisionId  String?                   @map("channel_decision_id") @db.Uuid
+  buttons            Json?
   destinationUserId  BigInt                    @map("destination_user_id")
   kind               MaxOutgoingResponseKind
   text               String
@@ -253,6 +257,7 @@ model MaxOutgoingResponse {
   createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   inbox              MaxInbox                  @relation(fields: [inboxId], references: [id], onDelete: Cascade, map: "max_outgoing_responses_inbox_id_fkey")
+  channelDecision    MaxChannelDecision?       @relation(fields: [channelDecisionId], references: [id], onDelete: Cascade, map: "max_outgoing_responses_channel_decision_id_fkey")
 
   @@unique([inboxId, kind], map: "max_outgoing_responses_inbox_kind_key")
   @@index([deliveredAt, createdAt], map: "max_outgoing_responses_pending_delivery_idx")
@@ -399,6 +404,7 @@ model Family {
   maxOutboundSources   MaxOutboundSource[]
   maxMemoryBackups     MaxMemoryBackup[]
   maxBackupAttachments MaxMemoryBackupAttachment[]
+  maxChannelBindings MaxChannelBinding[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -608,6 +614,46 @@ model MaxMemoryBackupAttachment {
   @@index([familyId, mediaId], map: "max_memory_backup_attachments_family_media_idx")
   @@index([familyId, uploadSessionId], map: "max_memory_backup_attachments_family_session_idx")
   @@map("max_memory_backup_attachments")
+}
+
+model MaxChannelBinding {
+  chatId             BigInt   @id @map("chat_id")
+  familyId           String?  @map("family_id") @db.Uuid
+  title              String?
+  state              String   @default("disconnected")
+  version            Int      @default(1)
+  lastLifecycleAt    DateTime? @map("last_lifecycle_at") @db.Timestamptz(6)
+  lastProviderCheckAt DateTime? @map("last_provider_check_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family             Family?  @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "max_channel_bindings_family_id_fkey")
+
+  @@index([familyId, state], map: "max_channel_bindings_family_state_idx")
+  @@map("max_channel_bindings")
+}
+
+model MaxChannelDecision {
+  id                    String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  originInboxId         String   @unique(map: "max_channel_decisions_origin_inbox_id_key") @map("origin_inbox_id") @db.Uuid
+  actorSubject          String   @map("actor_subject")
+  actorUserId           String?  @map("actor_user_id") @db.Uuid
+  chatId                BigInt   @map("chat_id")
+  candidateFamilyIds    Json     @map("candidate_family_ids")
+  phase                 String   @default("select_family")
+  selectedFamilyId      String?  @map("selected_family_id") @db.Uuid
+  expectedActiveChatId  BigInt?  @map("expected_active_chat_id")
+  expectedActiveVersion Int      @map("expected_active_version")
+  expectedChannelVersion Int     @map("expected_channel_version")
+  status                String   @default("pending")
+  expiresAt             DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  originInbox           MaxInbox @relation(fields: [originInboxId], references: [id], onDelete: Cascade, map: "max_channel_decisions_origin_inbox_id_fkey")
+  actorUser             User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull, map: "max_channel_decisions_actor_user_id_fkey")
+  responses             MaxOutgoingResponse[]
+
+  @@index([actorSubject, status, expiresAt], map: "max_channel_decisions_actor_status_expiry_idx")
+  @@map("max_channel_decisions")
 }
 
 model MediaAsset {

@@ -21,7 +21,10 @@ export type MaxSubscriptionResult = { success: boolean }
 export type MaxSendMessageInput = {
   userId: string
   text: string
-  buttons?: Array<{ text: string; payload: string }>
+  buttons?: Array<
+    | { type?: 'callback'; text: string; payload: string }
+    | { type: 'open_app'; text: string; webApp: string; payload?: string }
+  >
 }
 
 export type MaxVideoUploadCapability = {

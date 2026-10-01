@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
 import { Client } from 'pg'
+import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
@@ -16,20 +17,23 @@ const backupMigrations = [
   '20260929210000_pace_max_backup_channel_sends',
 ]
 const lifecycleMigration = '20260929220000_max_channel_lifecycle_events'
+const channelOnboardingMigration = '20261001130000_max_channel_onboarding'
 
 test('upgrades populated migration 39 through MAX backup and lifecycle migrations without backfilling legacy memories', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
+  assertTaskDatabaseTarget(new URL(databaseUrl))
 
   const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))
     .map((entry) => entry.name).sort()
-  expect(migrationNames.length).toBeGreaterThanOrEqual(43)
+  expect(migrationNames.length).toBeGreaterThanOrEqual(45)
   expect(migrationNames[38]).toBe(lastPreBackupMigration)
   expect(migrationNames.slice(39, 42)).toEqual(backupMigrations)
   expect(migrationNames[42]).toBe(lifecycleMigration)
+  expect(migrationNames[44]).toBe(channelOnboardingMigration)
 
-  const databaseName = `int1_max_upgrade_${process.pid}_${Date.now()}_${randomUUID().slice(0, 8)}`
+  const databaseName = `memoly_max_onboarding_resume_20261001_${process.pid.toString(36)}_${Date.now().toString(36)}_${randomUUID().slice(0, 4)}_test`
   const upgradedUrl = new URL(databaseUrl)
   upgradedUrl.pathname = `/${databaseName}`
   const admin = new Client({ connectionString: databaseUrl })
@@ -81,6 +85,7 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
       `INSERT INTO children (id, family_id, display_name, created_at, updated_at)
        VALUES ($1, $2, 'INT-1 synthetic child', now(), now())`, [childId, familyId],
     )
+    const legacyChannelId = '9223372036854775807'
     await database.query('COMMIT')
     await database.query(
       `INSERT INTO memories
@@ -117,11 +122,26 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM "_prisma_migrations"`))
       .rows[0].count).toBe(39)
 
+    // Stage through the previous head so the final migration sees a routable signed
+    // pointer already present, while this fixture still starts from populated v39.
+    for (const migrationName of migrationNames.slice(39, 44)) {
+      const sql = await readFile(resolve(migrationsRoot, migrationName, 'migration.sql'), 'utf8')
+      await database.query(sql)
+      await database.query(
+        `INSERT INTO "_prisma_migrations"
+          (id, checksum, finished_at, migration_name, started_at, applied_steps_count)
+         VALUES ($1, $2, now(), $3, now(), 1)`,
+        [randomUUID(), createHash('sha256').update(sql).digest('hex'), migrationName],
+      )
+    }
+    await database.query('UPDATE families SET max_backup_chat_id = $2 WHERE id = $1', [familyId, legacyChannelId])
+
     await database.end()
     database = undefined
+    assertTaskDatabaseTarget(upgradedUrl)
     const deploy = spawnSync('bun', ['run', 'prisma:deploy'], {
       cwd: backendRoot,
-      env: { ...process.env, DATABASE_URL: upgradedUrl.toString() },
+      env: { ...process.env, DATABASE_URL: upgradedUrl.toString(), TEST_DATABASE_URL: upgradedUrl.toString(), TEST_SKIP_DOCKER: '1' },
       encoding: 'utf8',
     })
     if (deploy.status !== 0) throw new Error(`Prisma migration deploy failed: ${deploy.stderr || deploy.stdout}`)
@@ -139,6 +159,9 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
       .rows[0].count).toBe(0)
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM max_memory_backup_attachments`))
       .rows[0].count).toBe(0)
+    expect((await database.query(
+      `SELECT chat_id::text, family_id, state FROM max_channel_bindings WHERE chat_id = $1`, [legacyChannelId],
+    )).rows).toEqual([{ chat_id: legacyChannelId, family_id: familyId, state: 'connected' }])
 
     const channelChatId = '-1001234567890'
     const nextSendAt = '2026-10-01T12:34:56.789Z'
@@ -198,6 +221,31 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
     expect((await database.query(legacySql, [legacyMemoryId])).rows).toEqual(before.rows)
     expect((await database.query(`SELECT COUNT(*)::int AS count FROM max_memory_backups WHERE memory_id = $1`,
       [legacyMemoryId])).rows[0].count).toBe(0)
+
+    const freshName = `memoly_max_onboarding_resume_20261001_${process.pid.toString(36)}_${Date.now().toString(36)}_${randomUUID().slice(0, 4)}_test`
+    const freshUrl = new URL(databaseUrl)
+    freshUrl.pathname = `/${freshName}`
+    await admin.query(`CREATE DATABASE "${freshName}"`)
+    try {
+      assertTaskDatabaseTarget(freshUrl)
+      const freshDeploy = spawnSync('bun', ['run', 'prisma:deploy'], {
+        cwd: backendRoot,
+        env: { ...process.env, DATABASE_URL: freshUrl.toString(), TEST_DATABASE_URL: freshUrl.toString(), TEST_SKIP_DOCKER: '1' },
+        encoding: 'utf8',
+      })
+      if (freshDeploy.status !== 0) throw new Error(`Fresh Prisma migration deploy failed: ${freshDeploy.stderr || freshDeploy.stdout}`)
+      const fresh = new Client({ connectionString: freshUrl.toString() })
+      await fresh.connect()
+      try {
+        expect((await fresh.query(`SELECT COUNT(*)::int AS count FROM "_prisma_migrations"`)).rows[0].count)
+          .toBe(migrationNames.length)
+        expect((await fresh.query(`SELECT to_regclass('public.max_channel_bindings') AS table_name`)).rows[0].table_name)
+          .toBe('max_channel_bindings')
+      } finally { await fresh.end() }
+    } finally {
+      await admin.query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, [freshName])
+      await admin.query(`DROP DATABASE IF EXISTS "${freshName}"`)
+    }
   } finally {
     await database?.end()
     if (created) {
@@ -210,3 +258,12 @@ test('upgrades populated migration 39 through MAX backup and lifecycle migration
     await admin.end()
   }
 })
+
+function assertTaskDatabaseTarget(url: URL) {
+  assertTestDatabaseUrl(url.toString())
+  const name = decodeURIComponent(url.pathname.slice(1))
+  if ((url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') || url.port === '54329' || name === 'web_app_demo') {
+    throw new Error('MAX migration test database is outside the allowed loopback test target')
+  }
+  process.stdout.write(`Verified migration DB host=${url.hostname} port=${url.port || '(default)'} db=${name}\n`)
+}

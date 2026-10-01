@@ -8,11 +8,17 @@ const responseId = '019c0000-0000-7000-8000-000000000001'
 
 function fakePrisma(response: unknown) {
   let updates = 0
+  const updateMany = async (input: unknown) => { updates += 1; return { count: 1, input } }
+  const responseDelegate = {
+    findUnique: async () => response,
+    updateMany,
+  }
   const prisma = {
-    maxOutgoingResponse: {
-      findUnique: async () => response,
-      updateMany: async (input: unknown) => { updates += 1; return { count: 1, input } },
-    },
+    maxOutgoingResponse: responseDelegate,
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      maxOutgoingResponse: responseDelegate,
+      maxInbox: { updateMany: async () => ({ count: 1 }) },
+    }),
   }
   return { prisma: prisma as never, updates: () => updates }
 }
@@ -61,6 +67,24 @@ describe('MAX response delivery', () => {
 
     await expect(deliver({ responseId })).resolves.toBe('done')
     expect(sent).toEqual({ userId: '77', text: 'Сохранено.' })
+    expect(row.updates()).toBe(1)
+  })
+
+  test('batches channel choices in groups of 30 without renumbering persisted callback indexes', async () => {
+    const sent: Array<{ buttons: Array<{ text: string; payload: string }> }> = []
+    const buttons = Array.from({ length: 31 }, (_, index) => ({ text: `Family ${index}`, payload: `max_channel:${responseId}:select:${index}` }))
+    const row = fakePrisma({ id: responseId, destinationUserId: 77n, kind: 'family_choice', deliveredAt: null,
+      channelDecisionId: responseId, channelDecision: { status: 'pending', expiresAt: new Date('2026-10-01T11:00:00.000Z') },
+      buttons })
+    const deliver = createMaxResponseDelivery({
+      prisma: row.prisma,
+      now: () => new Date('2026-10-01T10:00:00.000Z'),
+      api: api({ sendMessage: async (input) => { sent.push(input as typeof sent[number]) } }),
+    })
+    await expect(deliver({ responseId })).resolves.toBe('done')
+    expect(sent.map((message) => message.buttons.length)).toEqual([30, 1])
+    expect(sent[0]!.buttons[29]!.payload).toBe(`max_channel:${responseId}:select:29`)
+    expect(sent[1]!.buttons[0]!.payload).toBe(`max_channel:${responseId}:select:30`)
     expect(row.updates()).toBe(1)
   })
 

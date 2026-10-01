@@ -16,6 +16,8 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
 
   async accept(input: Parameters<MaxAcceptRepository['accept']>[0]): Promise<MaxAcceptResult> {
     return this.db.$transaction(async (tx) => {
+      // Suppress only a positively correlated echo. Senderless updates with an unknown
+      // provider identity must be durably captured and deferred by the worker.
       if (input.event.kind === 'message_created' && input.event.isChannel) {
         const selfBackup = await tx.maxMemoryBackup.findFirst({ where: {
           channelChatId: BigInt(input.event.recipientId), providerMessageId: input.event.messageId,
@@ -42,9 +44,12 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
         return { inboxId: existing.id, duplicate: true }
       }
 
-      // Channel lifecycle updates are retained for a later explicit workflow. They must not enter
-      // message processing, which expects a MaxSource and can create Memories or responses.
-      if (isLifecycleEvent(input.event)) return { inboxId, duplicate: false }
+      // Newly accepted lifecycle updates use the same durable worker boundary, where they are
+      // interpreted as channel state only. Existing captured rows have no task and are never replayed.
+      if (isLifecycleEvent(input.event)) {
+        await queue(tx, 'max:process', `max-process:${inboxId}`, { inboxId }, input.now)
+        return { inboxId, duplicate: false }
+      }
 
       if (input.event.kind === 'message_created') {
         const source = await tx.maxSource.create({

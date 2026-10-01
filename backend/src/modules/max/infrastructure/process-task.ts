@@ -3,9 +3,9 @@ import type { DbClient } from '../../../db'
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
-import { createInviteStartResolver, createPrismaFamilyAccess, type FamilyScope } from '../../families'
+import { createDetailedInviteStartResolver, createInviteStartResolver, createPrismaFamilyAccess, type DetailedInviteStartResolution, type FamilyScope } from '../../families'
 import { createSourceMemoryPublisher } from '../../memories'
-import type { MaxApiPort, MaxInboundEvent } from '../application/ports'
+import type { MaxAcceptedEvent, MaxApiPort, MaxInboundEvent } from '../application/ports'
 import { createMaxImageProcessor } from './process-image'
 import { createMaxVideoProcessor } from './process-video'
 import { createMaxVoiceProcessor } from './process-voice'
@@ -27,13 +27,17 @@ export function createMaxTaskProcessor(options: {
   runtime: BackendRuntime
   crypto: PayloadCrypto
   resolveInviteStart?: (rawToken: string) => Promise<'active' | 'invalid'>
+  resolveDetailedInviteStart?: (rawToken: string, maxSubject: string) => Promise<DetailedInviteStartResolution>
   api?: MaxApiPort
   media?: ReturnType<typeof import('../../media').createMediaService>
   download?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxDownloadedMedia>
   videoDownload?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
+  processChannelLifecycle?: (inboxId: string, event: Extract<MaxAcceptedEvent, { kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed' }>) => Promise<void>
+  processChannelCallback?: (inboxId: string, event: Extract<MaxInboundEvent, { kind: 'family_choice' }>) => Promise<boolean>
 }): (payload: unknown, signal?: AbortSignal) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
+  const resolveDetailedInviteStart = options.resolveDetailedInviteStart ?? createDetailedInviteStartResolver(prisma)
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
   const imageProcessor = options.api && options.media && options.download
@@ -53,20 +57,42 @@ export function createMaxTaskProcessor(options: {
       return 'skipped'
     }
 
-    const event = options.crypto.decrypt<MaxInboundEvent>({
+    const event = options.crypto.decrypt<MaxAcceptedEvent>({
       ciphertext: inbox.encryptedPayload,
       iv: inbox.encryptionIv,
       authTag: inbox.encryptionAuthTag,
     })
 
+    if (event.kind === 'bot_added' || event.kind === 'bot_removed' || event.kind === 'bot_admin_permissions_changed') {
+      if (options.processChannelLifecycle) await options.processChannelLifecycle(inbox.id, event)
+      else await prisma.maxInbox.updateMany({ where: { id: inbox.id, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      return 'done'
+    }
+
     if (event.kind === 'bot_started') {
       const token = inviteTokenFromPayload(event.payload)
-      const responseText = token
-        ? (await resolveInviteStart(token)) === 'active' ? inviteGuidanceText : invalidInviteText
-        : welcomeText
-      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, responseText) ? 'done' : 'skipped'
+      let responseText = welcomeText
+      let retainInviteContext = false
+      if (event.payload?.startsWith('invite_')) {
+        if (!token) responseText = invalidInviteText
+        else if (options.resolveInviteStart) {
+          const resolution = await resolveInviteStart(token)
+          responseText = resolution === 'active' ? inviteGuidanceText : invalidInviteText
+          retainInviteContext = resolution === 'active'
+        } else {
+          const resolution = await resolveDetailedInviteStart(token, event.userId)
+          responseText = inviteStartText(resolution)
+          retainInviteContext = resolution.status === 'valid' || resolution.status === 'already_member'
+        }
+      }
+      return await terminalInbox(prisma, inbox.id, 'welcome', event.userId, responseText, retainInviteContext) ? 'done' : 'skipped'
     }
     if (event.kind === 'family_choice') {
+      if (event.payload.startsWith('max_channel:') && options.processChannelCallback &&
+          await options.processChannelCallback(inbox.id, event)) {
+        await options.api?.answerCallback?.(event.callbackId, 'Проверяем настройку канала…')
+        return 'done'
+      }
       const parsed = parseChoicePayload(event.payload)
       const result = parsed ? await chooseMaxTarget(prisma, parsed.sourceId, parsed.index, event.userId) : 'denied'
       await options.api?.answerCallback?.(event.callbackId, result === 'chosen' ? 'Семья выбрана. Сохраняем…' :
@@ -76,6 +102,27 @@ export function createMaxTaskProcessor(options: {
         status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
       } })
       return 'done'
+    }
+
+    if (event.kind === 'message_created' && event.isChannel && event.senderId === '0') {
+      const channelChatId = BigInt(event.recipientId)
+      const ownBackup = await prisma.maxMemoryBackup.findFirst({ where: {
+        channelChatId, providerMessageId: event.messageId,
+      }, select: { id: true } })
+      if (ownBackup) {
+        // The webhook arrived before the provider response was persisted. It is now
+        // provably our own echo, so close the source without publishing a Memory.
+        if (inbox.source) await suppressCorrelatedChannelEcho(prisma, inbox.id, inbox.source.id)
+        return 'done'
+      }
+      const unresolvedBackup = await prisma.maxMemoryBackup.findFirst({ where: {
+        channelChatId, state: { in: ['send_intent', 'ambiguous'] }, providerMessageId: null,
+      }, select: { id: true } })
+      if (unresolvedBackup) {
+        // Preserve encrypted payload and accepted source. The outbox task retries after
+        // send correlation is saved; no ambiguous message is attributed as an owner post.
+        throw new Error('MAX channel message awaits outbound provider correlation')
+      }
     }
 
     const source = inbox.source
@@ -151,6 +198,15 @@ export function createMaxTaskProcessor(options: {
   }
 }
 
+async function suppressCorrelatedChannelEcho(db: DbClient, inboxId: string, sourceId: string) {
+  await db.$transaction(async (tx) => {
+    const changed = await tx.maxSource.updateMany({ where: { id: sourceId, inboxId, status: 'accepted' }, data: {
+      status: 'denied', rejectionCode: 'self_loop',
+    } })
+    if (changed.count === 1) await markInboxProcessed(tx, inboxId)
+  })
+}
+
 async function retryTerminalSourceCleanup(
   db: DbClient,
   media: ReturnType<typeof import('../../media').createMediaService> | undefined,
@@ -165,7 +221,18 @@ async function retryTerminalSourceCleanup(
 function inviteTokenFromPayload(payload: string | null) {
   if (!payload?.startsWith('invite_')) return null
   const token = payload.slice('invite_'.length)
-  return /^[A-Za-z0-9_-]{32,128}$/.test(token) && payload.length <= 512 ? token : null
+  return /^[A-Za-z0-9_-]{32,121}$/.test(token) && payload.length <= 128 ? token : null
+}
+
+export function inviteStartText(result: DetailedInviteStartResolution) {
+  switch (result.status) {
+    case 'valid': return `Вас приглашают в семью «${result.familyName}». Доступ: ${result.role === 'viewer' ? 'просмотр' : 'полный'}. Откройте приглашение, чтобы продолжить.`
+    case 'already_member': return 'Вы уже состоите в этой семье. Откройте memoLy.'
+    case 'expired': return 'Срок действия приглашения истёк.'
+    case 'revoked': return 'Это приглашение больше не действует.'
+    case 'used': return 'Это приглашение уже использовано.'
+    case 'invalid': return 'Не удалось найти действующее приглашение.'
+  }
 }
 
 function taskPayload(payload: unknown): string {
@@ -224,9 +291,20 @@ async function terminalSource(db: DbClient, source: MaxSource, kind: 'unsupporte
   })
 }
 
-async function terminalInbox(db: DbClient, inboxId: string, kind: 'welcome', destinationUserId: string, text: string) {
+async function terminalInbox(
+  db: DbClient,
+  inboxId: string,
+  kind: 'welcome',
+  destinationUserId: string,
+  text: string,
+  retainInviteContext: boolean,
+) {
   return db.$transaction(async (tx) => {
-    if (!(await markInboxProcessed(tx, inboxId))) return false
+    const changed = await tx.maxInbox.updateMany({ where: { id: inboxId, status: 'accepted' }, data: {
+      status: 'processed', processedAt: new Date(),
+      ...(!retainInviteContext ? { encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } : {}),
+    } })
+    if (changed.count !== 1) return false
     await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text })
     return true
   })

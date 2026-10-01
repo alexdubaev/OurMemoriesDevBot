@@ -159,6 +159,13 @@ export const childSchema = z.object({
 
 export const familyUsageSchema = z.object({ usedBytes: z.number().int().nonnegative(), quotaBytes: z.number().int().positive().nullable() }).strict()
 
+export const familyMaxChannelStatusSchema = z.object({
+  state: z.enum(['unconfigured', 'connected', 'disconnected', 'permission_problem']),
+  title: z.string().nullable(),
+  canManage: z.boolean(),
+}).strict()
+export type FamilyMaxChannelStatus = z.infer<typeof familyMaxChannelStatusSchema>
+
 export const familyResponseSchema = z.object({
   family: familySchema,
   child: childSchema.nullable(),

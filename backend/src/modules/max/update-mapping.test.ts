@@ -115,6 +115,29 @@ describe('MAX update mapping', () => {
       occurredAt: '2023-11-14T22:13:20.123Z', text: 'synthetic channel text', attachments: [], isChannel: true })
   })
 
+  test('preserves exact signed int64 channel recipient ids from the raw webhook JSON', () => {
+    for (const chatId of ['9007199254740993', '-9007199254740993', '9223372036854775807', '-9223372036854775808']) {
+      const rawBody = `{"update_type":"message_created","timestamp":1700000000123,"message":{"recipient":{"chat_type":"channel","chat_id":${chatId}},"body":{"mid":"raw-${chatId}","text":"signed","attachments":[]}}}`
+      expect(normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toMatchObject({
+        kind: 'message_created', recipientId: chatId, isChannel: true,
+      })
+    }
+  })
+
+  test('fails closed on ambiguous or out-of-range raw channel recipient paths', () => {
+    for (const rawBody of [
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":9223372036854775808},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":-9223372036854775809},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":1e3},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":1,"chat_id":2},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":1},"recipient":{"chat_type":"channel","chat_id":2},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+      '{"update_type":"message_created","timestamp":1,"message":{"recipient":{"chat_type":"channel","chat_id":0},"body":{"mid":"ambiguous","text":"x","attachments":[]}}}',
+    ]) expect(normalizeMaxUpdate(JSON.parse(rawBody), rawBody)).toEqual({ kind: 'ignored' })
+    expect(normalizeMaxUpdate({ update_type: 'message_created', timestamp: 1, message: {
+      recipient: { chat_type: 'channel', chat_id: 9007199254740992 }, body: { mid: 'unsafe-without-raw', attachments: [] },
+    } })).toEqual({ kind: 'ignored' })
+  })
+
   test('ignores malformed direct-dialog recipient chat ids safely', () => {
     for (const recipient of [
       { chat_type: 'dialog', chat_id: '900', user_id: 99 },
