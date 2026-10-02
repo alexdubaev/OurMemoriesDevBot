@@ -21,6 +21,7 @@ export function FamilyScreen({
   hostBridge,
   currentUserId,
   onAdd,
+  onAllFamilies,
   onEditChild,
   onChangeChildPhoto,
   onOpenChild,
@@ -40,6 +41,7 @@ export function FamilyScreen({
   hostBridge: Pick<HostBridge, 'onBack'>
   currentUserId: string
   onAdd: () => void
+  onAllFamilies?: () => void
   onEditChild: () => void
   onChangeChildPhoto: () => void
   onOpenChild: () => void
@@ -125,6 +127,7 @@ export function FamilyScreen({
           canManageMaxChannel={canManageMaxChannel}
           onRetryMaxChannel={maxChannel.retry}
           onCloseInvite={() => { setInviteReady(null); setCopyState('idle') }}
+          onAllFamilies={onAllFamilies}
           onCopyInvite={async () => {
             if (!inviteReady) return
             try {

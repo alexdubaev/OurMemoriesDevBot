@@ -159,13 +159,16 @@ test('memoLy shell keeps horizontal host insets at the narrow breakpoint and con
     ),
   )
   const css = await readFile(path.resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const headerCss = await readFile(path.resolve(import.meta.dir, '../src/components/ChildHeader.css'), 'utf8')
   const sharedTokens = await readFile(path.resolve(import.meta.dir, '../src/styles/tokens.css'), 'utf8')
 
   expect(markup).toContain('--host-inset-left:11px')
   expect(markup).toContain('--host-inset-right:13px')
   expect(markup).toContain('class="app"')
   expect(markup).not.toContain('class="filters-wrap surface-inset"')
-  expect(css).toContain('padding: max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)) 14px calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);')
+  expect(css).toContain('padding: 0 0 calc(var(--memoly-nav-height) + max(22px, var(--host-inset-bottom)) + 30px);')
+  expect(css).toContain('padding-inline: max(14px, var(--host-inset-left, 0px)) max(14px, var(--host-inset-right, 0px))')
+  expect(headerCss).toContain('padding:max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)) max(14px, var(--host-inset-right, 0px)) 0 max(14px, var(--host-inset-left, 0px))')
   expect(css).not.toContain('padding: max(12px, var(--host-inset-top))')
   expect(css).toContain('.memory-media-slot .ml-media-button')
   expect(sharedTokens).toContain('padding: 8px calc(16px + var(--host-inset-right)) 8px calc(16px + var(--host-inset-left))')
