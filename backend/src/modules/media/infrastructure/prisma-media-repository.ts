@@ -256,11 +256,11 @@ export class PrismaMediaRepository implements MediaRepository {
     })
     if (!asset) return null
     if (variant === 'original') {
-      return { objectKey: asset.originalKey, contentType: asset.verifiedMime!, contentLength: Number(asset.byteSize) }
+      return { objectKey: asset.originalKey, contentType: asset.verifiedMime!, contentLength: Number(asset.byteSize), etag: asset.sha256 ?? undefined }
     }
     const stored = asset.variants.find((candidate) => candidate.variant === variant)
     return stored
-      ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize) }
+      ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize), etag: stored.sha256 }
       : null
   }
 
@@ -276,9 +276,9 @@ export class PrismaMediaRepository implements MediaRepository {
           family: { status: 'active' },
         } } },
       },
-      select: { objectKey: true, contentType: true, byteSize: true },
+      select: { id: true, objectKey: true, contentType: true, byteSize: true },
     })
-    return avatar ? { objectKey: avatar.objectKey, contentType: avatar.contentType, contentLength: avatar.byteSize } : null
+    return avatar ? { objectKey: avatar.objectKey, contentType: avatar.contentType, contentLength: avatar.byteSize, etag: avatar.id } : null
   }
 }
 

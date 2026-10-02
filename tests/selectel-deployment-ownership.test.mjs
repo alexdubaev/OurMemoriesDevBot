@@ -99,6 +99,10 @@ test('edge and static Caddy templates preserve routing ownership', () => {
   assert.doesNotMatch(edge, /\/max-video-upload\//)
   assert.match(statik, /root\s+\*\s+\/srv/)
   assert.match(statik, /try_files\s+\{path\}\s+\/index\.html/)
+  assert.match(statik, /header\s+Cache-Control\s+"no-cache"/)
+  assert.match(statik, /@fingerprintedAssets\s*\{\s*file\s+path_regexp fingerprinted \^\/assets\//)
+  assert.match(statik, /header\s+@fingerprintedAssets Cache-Control "public, max-age=31536000, immutable"/)
+  assert.match(statik, /\[A-Za-z0-9_-\]\{8,\}/)
 })
 
 test('redeploy script fails closed and exposes safe promotion phases', () => {

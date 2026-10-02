@@ -14,6 +14,7 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { AuthApi } from './api'
+import { activatePrivateCacheIdentity, clearAllPrivateCache, clearPrivateUserCache } from '@/platform/persistence/private-cache'
 
 export const sessionQueryKeys = {
   all: ['session'] as const,
@@ -112,7 +113,10 @@ export function applyAuthenticatedSession(
   setAccessToken: (accessToken: string | null) => void,
   response: CookieAuthResponse,
 ) {
+  const previousUserId = queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id
+  activatePrivateCacheIdentity(response.user.id)
   queryClient.removeQueries({ queryKey: sessionQueryKeys.all })
+  if (previousUserId && previousUserId !== response.user.id) void clearPrivateUserCache(previousUserId).catch(() => undefined)
   setAccessToken(response.accessToken)
   queryClient.setQueryData(authQueryKeys.me(), { user: response.user } satisfies MeResponse)
 }
@@ -121,6 +125,14 @@ export async function clearAuthenticatedSession(
   queryClient: QueryClient,
   setAccessToken: (accessToken: string | null) => void,
 ) {
+  const userId = queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id
+  activatePrivateCacheIdentity(null)
   setAccessToken(null)
   queryClient.removeQueries({ queryKey: sessionQueryKeys.all })
+  try {
+    if (userId) await clearPrivateUserCache(userId)
+    else await clearAllPrivateCache()
+  } catch {
+    // If browser storage is unavailable, hydration also fails closed and the app continues without it.
+  }
 }

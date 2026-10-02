@@ -71,6 +71,47 @@ describe('MAX guarded video transport', () => {
     ])).toMatchObject({ height: 720, width: 1280 })
   })
 
+  test('downloads only bounded raster thumbnails through the existing image-host policy', async () => {
+    const reference = {
+      id: 'ref', familyId: 'family', attachmentPosition: 0, providerAttachmentId: 'video-id',
+      source: { familyId: 'family', memoryId: 'memory', senderSubject: 'sender', recipientId: 123n, messageId: 'message' },
+      outboundSource: null, memory: { id: 'memory', familyId: 'family', status: 'published', deletedAt: null },
+    }
+    const createPlayback = (contentType: string, thumbnailUrl = 'https://i.oneme.ru/poster.jpg?sig=opaque') => createMaxVideoPlayback({
+      runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
+        familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
+        maxVideoReference: { findFirst: async () => reference },
+      } } as never,
+      api: {
+        getMessage: async () => ({ messageId: 'message', senderId: 'sender', recipientId: '123', attachments: [{
+          kind: 'video', providerAttachmentId: 'video-id', currentToken: 'token', inboundDurationSeconds: null, width: null, height: null,
+        }] }),
+        getVideo: async () => ({ width: null, height: null, durationMs: 1000, thumbnailUrl, renditions: [{
+          url: 'https://maxvd1.okcdn.ru/video.mp4', width: 1280, height: 720, contentLength: 2,
+        }] }),
+      } as never,
+    })
+    const scope = { familyId: 'family', principal: { userId: 'viewer', sessionId: 'session' } }
+    const originalFetch = globalThis.fetch
+    const requests: string[] = []
+    let fetchCalls = 0
+    let responseType = 'image/png'
+    globalThis.fetch = (async (input) => {
+      fetchCalls += 1
+      requests.push(String(input))
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': responseType, 'content-length': '3' } })
+    }) as typeof fetch
+    try {
+      const poster = await createPlayback('image/png').poster(scope, 'ref')
+      expect(poster).toMatchObject({ contentType: 'image/png', contentLength: 3 })
+      expect(poster!.etag).toMatch(/^"[a-f0-9]{64}"$/)
+      expect(await new Response(poster!.body.slice().buffer).arrayBuffer()).toHaveLength(3)
+      expect(requests).toEqual(['https://i.oneme.ru/poster.jpg?sig=opaque'])
+      responseType = 'image/gif'
+      await expect(createPlayback('image/gif').poster(scope, 'ref')).rejects.toMatchObject({ kind: 'unsupported_media' })
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test('accepts extensionless signed MAX CDN URLs while keeping the host allowlist', () => {
     expect(selectRendition([
       { url: 'https://maxvd123.okcdn.ru/3f8e5c?sig=opaque', width: 1280, height: 720, contentLength: 1 },

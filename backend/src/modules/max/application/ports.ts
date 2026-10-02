@@ -98,6 +98,7 @@ export type MaxVideoResolution = {
   height: number | null
   renditions: MaxVideoRendition[]
   durationMs: number | null
+  thumbnailUrl?: string | null
 }
 
 /** Events currently routed into MAX message processing. */

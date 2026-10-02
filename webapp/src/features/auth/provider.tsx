@@ -39,13 +39,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const bootstrapGeneration = useRef(0)
 
   useEffect(() => {
-    syncPrivateMediaAccessToken(null)
+    syncPrivateMediaAccessToken(null, null)
   }, [])
 
   const setAccessToken = useCallback(
     (nextAccessToken: string | null) => {
       setAccessTokenState(nextAccessToken)
-      syncPrivateMediaAccessToken(nextAccessToken)
+      syncPrivateMediaAccessToken(nextAccessToken, null)
     },
     [],
   )
@@ -122,6 +122,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     api,
     enabled: !isRestoringSession && Boolean(accessToken),
   })
+
+  useEffect(() => {
+    syncPrivateMediaAccessToken(accessToken, meQuery.data?.user.id ?? null)
+  }, [accessToken, meQuery.data?.user.id])
   const { mutateAsync: registerAsync } = useRegisterMutation({ api, setAccessToken })
   const { mutateAsync: loginAsync } = useLoginMutation({ api, setAccessToken })
   const { mutateAsync: logoutAsync } = useLogoutMutation({ api, setAccessToken })

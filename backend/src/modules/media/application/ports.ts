@@ -39,6 +39,7 @@ export type ContentObject = {
   objectKey: string
   contentType: string
   contentLength: number
+  etag?: string
 }
 
 export type MaxVideoPlayback = {
@@ -50,6 +51,12 @@ export type MaxVideoPlayback = {
     bodyLength: number
     range: { start: number; end: number; total: number } | null
   }>
+  poster?(scope: FamilyScope, referenceId: string, signal?: AbortSignal): Promise<{
+    body: Uint8Array
+    contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+    contentLength: number
+    etag: string
+  } | null>
 }
 
 export type FinalizePreparation =

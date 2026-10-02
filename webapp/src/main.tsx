@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from './App'
-import { AuthProvider } from './features/auth'
+import { AuthProvider, PrivateCacheGate } from './features/auth'
+import { BootPreloader } from './features/app'
 import { installAppZoomPrevention } from './platform/app-zoom'
 import { createHostBridge } from './platform/telegram'
 import { installPwaPromptListeners } from './platform/pwa-install'
@@ -45,7 +46,9 @@ async function renderApplication() {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <App hostBridge={hostBridge} />
+          <PrivateCacheGate fallback={<BootPreloader />}>
+            <App hostBridge={hostBridge} />
+          </PrivateCacheGate>
         </AuthProvider>
       </QueryClientProvider>
     </StrictMode>,

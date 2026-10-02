@@ -1,8 +1,10 @@
 let currentAccessToken: string | null = null
+let currentUserId: string | null = null
 let registrationPromise: Promise<ServiceWorkerRegistration | null> | null = null
 
-export function syncPrivateMediaAccessToken(accessToken: string | null) {
+export function syncPrivateMediaAccessToken(accessToken: string | null, userId: string | null = currentUserId) {
   currentAccessToken = accessToken
+  currentUserId = userId
   void ensurePrivateMediaAccess()
 }
 
@@ -17,7 +19,7 @@ async function ensurePrivateMediaAccess() {
     registrationPromise ??= registerPrivateMediaWorker()
     const registration = await registrationPromise
     if (!registration) return null
-    await sendToken(registration, currentAccessToken)
+    await sendToken(registration, currentAccessToken, currentUserId)
     return registration
   } catch {
     return null
@@ -37,7 +39,7 @@ async function registerPrivateMediaWorker() {
   return registration
 }
 
-async function sendToken(registration: ServiceWorkerRegistration, token: string | null) {
+async function sendToken(registration: ServiceWorkerRegistration, token: string | null, userId: string | null) {
   const workers = new Set([navigator.serviceWorker.controller, registration.active].filter((worker): worker is ServiceWorker => Boolean(worker)))
   await Promise.all([...workers].map((worker) => new Promise<void>((resolve) => {
     const channel = new MessageChannel()
@@ -46,7 +48,7 @@ async function sendToken(registration: ServiceWorkerRegistration, token: string 
       window.clearTimeout(timeout)
       resolve()
     }
-    worker.postMessage({ type: 'private-media-token', token }, [channel.port2])
+    worker.postMessage({ type: 'private-media-token', token, userId }, [channel.port2])
   })))
 }
 
