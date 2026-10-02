@@ -138,7 +138,7 @@
 [data-memoly-feed] .author-avatar > .author-initials { font-size: inherit; line-height: inherit; }
 [data-memoly-feed] img.author-avatar { display: block; object-fit: cover; }
 [data-memoly-feed] .author-meta { min-width: 0; }
-[data-memoly-feed] .author-name { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--memoly-ink); font-size: 18px; font-weight: 750; line-height: 1.05; white-space: nowrap; }
+[data-memoly-feed] .author-name { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--memoly-ink); font-size: 18px; font-weight: 500; line-height: 1.05; white-space: nowrap; }
 [data-memoly-feed] .author-time { display: block; margin-top: 4px; color: var(--memoly-muted); font-size: 14px; }
 [data-memoly-feed] .memory-header > [aria-label="Действия с воспоминанием"] { width: 44px; height: 44px; min-width: 44px; margin-left: auto; padding: 8px 3px 8px 12px; }
 
