@@ -1,5 +1,5 @@
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
@@ -13,6 +13,7 @@ import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamil
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
 export function FamilyScreen({
+  active = true,
   childProfileOpen,
   familyResponse,
   invites,
@@ -33,6 +34,7 @@ export function FamilyScreen({
   installLabel,
   onOpenInstall = () => undefined,
 }: {
+  active?: boolean
   childProfileOpen: boolean
   familyResponse: FamilyResponse
   invites: FamilyInviteDto[]
@@ -68,12 +70,12 @@ export function FamilyScreen({
   const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
   const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
 
-  const refreshUsage = () => void loadFamilyUsage(transport, familyResponse.family.id).then((next) => {
+  const refreshUsage = useCallback(() => void loadFamilyUsage(transport, familyResponse.family.id).then((next) => {
     setUsage(next)
     setUsageFailed(false)
-  }).catch(() => setUsageFailed(true))
+  }).catch(() => setUsageFailed(true)), [familyResponse.family.id, transport])
 
-  useEffect(refreshUsage, [familyResponse.family.id, transport])
+  useEffect(() => { if (active) refreshUsage() }, [active, refreshUsage])
 
   async function run(action: () => Promise<unknown>, throwOnError = false) {
     setBusy(true)
@@ -101,6 +103,7 @@ export function FamilyScreen({
   return (
     <div className="ml-page">
       <FamilyPresentation
+          active={active}
           busy={busy}
           canEditChild={isOwner}
           canInvite={canInvite}

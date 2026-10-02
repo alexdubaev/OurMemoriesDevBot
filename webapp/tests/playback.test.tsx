@@ -50,6 +50,34 @@ test('unmounting an authenticated feed pauses every mounted local player before 
   browser.restore()
 })
 
+test('deactivating a warm feed pauses registered media and reactivation never resumes it', async () => {
+  const browser = installBrowser()
+  const video = mediaElement()
+  const root = createRoot(detachedContainer(browser.window))
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, { active: true },
+      createElement(PlayerProbe, { id: 'warm-video', media: video }),
+    ))
+  })
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, { active: false },
+      createElement(PlayerProbe, { id: 'warm-video', media: video }),
+    ))
+  })
+  expect(video.pauseCalls).toBe(1)
+
+  await act(async () => {
+    root.render(createElement(MediaPlaybackCoordinator, { active: true },
+      createElement(PlayerProbe, { id: 'warm-video', media: video }),
+    ))
+  })
+  expect(video.playCalls).toBe(0)
+
+  await act(async () => root.unmount())
+  browser.restore()
+})
+
 test('card and detail players for the same media pause each other as separate mounted instances', async () => {
   const browser = installBrowser()
   const card = mediaElement()
