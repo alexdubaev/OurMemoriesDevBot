@@ -390,4 +390,41 @@ describe('MAX guarded video transport', () => {
       expect(videoCalls).toBe(2)
     } finally { globalThis.fetch = originalFetch }
   })
+
+  test('resolves forwarded video playback from the persisted original message and channel identity', async () => {
+    let requestedMid = ''
+    let recipientId = '-9007199254740993'
+    let videoCalls = 0
+    const playback = createMaxVideoPlayback({
+      runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
+        familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
+        maxVideoReference: { findFirst: async () => ({
+          id: 'reference-id', familyId: 'family-id', attachmentPosition: 0, providerAttachmentId: 'original-video',
+          source: { messageId: 'outer-forward-mid', senderSubject: 'actor-77', recipientId: 900n,
+            originalMessageId: 'original-mid', originalChannelId: -9007199254740993n,
+            familyId: 'family-id', memoryId: 'memory-id' },
+          outboundSource: null,
+          memory: { id: 'memory-id', familyId: 'family-id', status: 'published', deletedAt: null },
+        }) },
+      } } as never,
+      api: {
+        getMessage: async (messageId: string) => {
+          requestedMid = messageId
+          return { messageId, senderId: 'arbitrary-original-author', recipientId, recipientType: 'channel', text: 'caption', timestamp: 1,
+            attachments: [{ kind: 'video', providerAttachmentId: 'original-video', currentToken: 'rotating-original-token', inboundDurationSeconds: 1, width: 640, height: 360 }] }
+        },
+        getVideo: async () => { videoCalls += 1; return { width: 640, height: 360, durationMs: 1_000, renditions: [
+          { url: 'https://maxvd1.okcdn.ru/forward.mp4?sig=opaque', width: 640, height: 360, contentLength: 10 },
+        ] } },
+      } as never,
+    })
+    const scope = { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } }
+    await expect(playback.readiness(scope, 'reference-id')).resolves.toEqual({ state: 'ready', recheckable: false })
+    expect(requestedMid).toBe('original-mid')
+    expect(videoCalls).toBe(1)
+    recipientId = '-123'
+    await expect(playback.readiness(scope, 'reference-id')).rejects.toMatchObject({ kind: 'not_found' })
+    expect(requestedMid).toBe('original-mid')
+    expect(videoCalls).toBe(1)
+  })
 })

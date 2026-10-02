@@ -83,6 +83,9 @@ export type MaxResolvedMessage = {
   messageId: string
   senderId: string
   recipientId: string
+  recipientType?: 'dialog' | 'channel'
+  text?: string | null
+  timestamp?: number
   attachments: MaxResolvedAttachment[]
 }
 
@@ -109,6 +112,8 @@ export type MaxInboundEvent =
       recipientId: string
       /** Present only for posts addressed to a MAX channel; recipientId is its signed chat_id. */
       isChannel?: true
+      /** Present only for a user-forwarded original that must be fetched and verified server-side. */
+      forwardedFrom?: { messageId: string }
       messageId: string
       occurredAt: string
       text: string | null
