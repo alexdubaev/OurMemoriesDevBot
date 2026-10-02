@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { AuthContext } from '../src/features/auth'
 import type { AuthContextValue } from '../src/features/auth'
 import { CurrentUserAvatarControls } from '../src/features/avatar/CurrentUserAvatarControls'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import { activatePrivateCacheIdentity } from '../src/platform/persistence/private-cache'
+import { sessionQueryKeys } from '../src/features/auth'
 import '../src/index.css'
 
 const userId = '11111111-1111-4111-8111-111111111111'
@@ -12,6 +13,8 @@ const avatarId = '22222222-2222-4222-8222-222222222222'
 let avatar: Record<string, unknown> | null = new URLSearchParams(location.search).has('existing') ? { id: avatarId, avatarCrop: { x: 0.2, y: 0.1, width: 0.6, height: 0.6 }, contentType: 'image/png', byteSize: 80, updatedAt: '2026-10-02T10:00:00.000Z', downloadUrl: 'http://local.test/original' } : null
 const calls: Array<{ path: string; options: unknown }> = []
 Object.assign(window, { __adultAvatarCalls: calls })
+const feedInvalidationReleases: Array<() => void> = []
+Object.assign(window, { __releaseAdultFeedInvalidation: () => feedInvalidationReleases.splice(0).forEach((release) => release()) })
 let finalizeFailures = 0
 const canvas = document.createElement('canvas')
 canvas.width = 128; canvas.height = 96
@@ -40,4 +43,15 @@ const auth = { user, externalIdentityProvider: null, isBootstrapping: false, isA
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 activatePrivateCacheIdentity(userId)
 queryClient.setQueryData(['session', 'auth', 'me'], { user })
-createRoot(document.getElementById('root')!).render(<AuthContext.Provider value={auth}><QueryClientProvider client={queryClient}><CurrentUserAvatarControls compact displayName="Adult Test" /></QueryClientProvider></AuthContext.Provider>)
+
+export function DelayedFeedInvalidation() {
+  const enabled = new URLSearchParams(location.search).has('slow-invalidation')
+  useQuery({
+    queryKey: [...sessionQueryKeys.all, 'feed', 'avatar-test'],
+    enabled,
+    queryFn: () => new Promise<null>((resolve) => { feedInvalidationReleases.push(() => resolve(null)) }),
+  })
+  return null
+}
+
+createRoot(document.getElementById('root')!).render(<AuthContext.Provider value={auth}><QueryClientProvider client={queryClient}><DelayedFeedInvalidation /><CurrentUserAvatarControls compact displayName="Adult Test" /></QueryClientProvider></AuthContext.Provider>)

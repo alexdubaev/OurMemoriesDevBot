@@ -55,6 +55,25 @@ test('adult existing avatar uses the shared editor to recrop without selecting a
   expect((await calls(page)).filter((call) => call.path === '/api/uploads/avatar' && call.options.method === 'POST')).toHaveLength(0)
 })
 
+test('adult recrop keeps its editor image alive while feed cache reconciliation is pending', async ({ page }) => {
+  await page.goto('/e2e/adult-avatar.html?existing&slow-invalidation')
+  await page.getByRole('button', { name: 'Изменить кадрирование' }).click()
+  const editor = page.getByRole('dialog', { name: 'Редактирование фотографии' })
+  await expect(editor).toBeVisible()
+  const editorImageUrl = await editor.locator('img').getAttribute('src')
+  expect(editorImageUrl).toMatch(/^blob:/)
+
+  await editor.getByRole('button', { name: 'Готово' }).click()
+  await expect.poll(async () => (await calls(page)).some((call) => call.path === '/api/uploads/avatar/crop')).toBe(true)
+  await expect(editor).toBeVisible()
+  expect(await page.evaluate(async (url) => {
+    try { return (await fetch(url)).ok } catch { return false }
+  }, editorImageUrl)).toBe(true)
+
+  await page.evaluate(() => (window as Window & { __releaseAdultFeedInvalidation: () => void }).__releaseAdultFeedInvalidation())
+  await expect(editor).toBeHidden()
+})
+
 test('adult failed finalize keeps the selected file and crop for retry', async ({ page }) => {
   await page.route('**/signed-avatar', (route) => route.fulfill({ status: 200 }))
   await page.goto('/e2e/adult-avatar.html?retry')

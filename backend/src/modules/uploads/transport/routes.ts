@@ -96,11 +96,12 @@ export function createUploadsRoutes({ requireAuth, service }: CreateUploadsRoute
     const bytes = new Uint8Array(await c.req.arrayBuffer())
     if (bytes.byteLength < 64 || bytes.byteLength > 20_000_000) return c.json(errorResponse('UPLOAD_REJECTED', 'Размер фотографии не подходит', requestIdFrom(c)), 422)
     try {
-      const normalized = await service.normalizePreview(bytes, declared)
-      c.header('Content-Type', 'image/jpeg')
-      c.header('Cache-Control', 'private, no-store')
-      c.header('X-Content-Type-Options', 'nosniff')
-      return c.body(normalized, 200)
+      const preview = await service.normalizePreview(bytes, declared)
+      return new Response(preview.bytes.slice().buffer as ArrayBuffer, { status: 200, headers: {
+        'Content-Type': preview.contentType,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      } })
     } catch {
       return c.json(errorResponse('UPLOAD_REJECTED', 'Фотографию не удалось открыть', requestIdFrom(c)), 422)
     }
@@ -108,10 +109,12 @@ export function createUploadsRoutes({ requireAuth, service }: CreateUploadsRoute
 
   routes.get('/avatar/content', async (c) => {
     const result = await executeUploads(() => service.currentAvatarContent(c.var.user.id))
-    c.header('Content-Type', 'image/jpeg')
-    c.header('Cache-Control', 'private, no-store')
-    c.header('X-Content-Type-Options', 'nosniff')
-    return c.body(result, 200)
+    return new Response(result.bytes.slice().buffer as ArrayBuffer, { status: 200, headers: {
+      'Content-Type': result.contentType,
+      'Content-Length': String(result.bytes.byteLength),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    } })
   })
 
   routes.openapi(createAvatarUploadRoute, async (c) => {

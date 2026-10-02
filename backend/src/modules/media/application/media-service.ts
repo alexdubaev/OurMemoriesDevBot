@@ -11,7 +11,7 @@ import type { ReserveMediaUploadRequest } from '@web-app-demo/contracts'
 import { createStorageObjectKey, StorageError, type PrivateStorage } from '../../../storage'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MediaFailure } from '../domain/errors'
-import { normalizeAvatarImage } from '../../../storage/normalize-avatar-image'
+import { avatarImageForDisplay } from '../../../storage/normalize-avatar-image'
 import { detectDeclaredMedia, detectPhotoMime, parseSingleRange } from '../domain/media-policy'
 import type { MediaProbe, MediaRepository, PendingMediaUpload, PhotoProcessor, StoredVariant } from './ports'
 
@@ -345,17 +345,15 @@ export class MediaService {
     if (!object) throw new MediaFailure('not_found', 'Аватар не найден')
     const etag = object.etag ? quoteEtag(object.etag) : null
     const cacheable = Boolean(etag)
-    if (!head && cacheable && etag && matchesIfNoneMatch(ifNoneMatch, etag)) {
-      return { contentType: 'image/jpeg', contentLength: object.contentLength, body: null, etag, cacheable: true, notModified: true }
-    }
     const stored = await this.storage.readObject({ key: object.objectKey }).catch((error) => { throw storageFailure(error) })
     if (!stored) throw new MediaFailure('not_found', 'Аватар не найден')
     if (object.contentLength > 5 * 1024 * 1024) throw new MediaFailure('invalid_file', 'Фото профиля превышает допустимый размер')
     const original = new Uint8Array(await new Response(stored.body).arrayBuffer())
-    let normalized: Uint8Array
-    try { normalized = await normalizeAvatarImage(original, object.contentType) }
-    catch { throw new MediaFailure('invalid_file', 'Фото профиля не удалось открыть') }
-    return { contentType: 'image/jpeg', contentLength: normalized.byteLength, body: head ? null : new Blob([normalized.slice().buffer as ArrayBuffer]).stream(), etag, cacheable, notModified: false }
+    const display = await avatarImageForDisplay(original, object.contentType)
+    if (!head && cacheable && etag && matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return { contentType: display.contentType, contentLength: display.bytes.byteLength, body: null, etag, cacheable: true, notModified: true }
+    }
+    return { contentType: display.contentType, contentLength: display.bytes.byteLength, body: head ? null : new Blob([display.bytes.slice().buffer as ArrayBuffer]).stream(), etag, cacheable, notModified: false }
   }
 
   async authorizePlaybackSession(scope: FamilyScope) {

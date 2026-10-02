@@ -20,7 +20,7 @@ export function CurrentUserAvatarControls({ displayName, email, compact = false 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [editorImage, setEditorImage] = useState<string | null>(null)
   const [editingReplacement, setEditingReplacement] = useState(false)
-  const [editTarget, setEditTarget] = useState<{ id: string; updatedAt: string } | null>(null)
+  const [editTarget, setEditTarget] = useState<{ id: string; updatedAt: string; avatarCrop: AvatarCrop } | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const auth = useAuth()
@@ -64,6 +64,29 @@ export function CurrentUserAvatarControls({ displayName, email, compact = false 
     } finally { if (previewController.current === controller) { previewController.current = null; setPreviewing(false) } }
   }
 
+  async function editCurrentCrop() {
+    if (!imageUrl || !avatar?.id || !avatar.updatedAt || busy) return
+    const target = { id: avatar.id, updatedAt: avatar.updatedAt, avatarCrop: avatar.avatarCrop ?? fullAvatarCrop }
+    setPreviewError(null)
+    setPreviewing(true)
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
+    try {
+      const response = await fetch(imageUrl, { signal: controller.signal })
+      if (!response.ok) throw new Error('Не удалось открыть фото профиля. Попробуйте ещё раз.')
+      const ownedImageUrl = URL.createObjectURL(await response.blob())
+      if (controller.signal.aborted) { URL.revokeObjectURL(ownedImageUrl); return }
+      setPreviewUrl(ownedImageUrl)
+      setEditTarget(target)
+      setEditingReplacement(false)
+      setEditorImage(ownedImageUrl)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setPreviewError(error instanceof Error ? error.message : 'Не удалось открыть фото профиля. Попробуйте ещё раз.')
+    } finally { if (previewController.current === controller) { previewController.current = null; setPreviewing(false) } }
+  }
+
   async function confirm(crop: AvatarCrop) {
     if (selectedFile && editingReplacement) {
       await upload.mutateAsync({ file: selectedFile, crop })
@@ -82,7 +105,7 @@ export function CurrentUserAvatarControls({ displayName, email, compact = false 
   const hasAvatar = Boolean(avatar)
   const title = compact ? 'Фото профиля' : 'Profile photo'
   return <>
-    {editorImage ? <AvatarEditor key={editorImage} busy={busy} image={editorImage} initialCrop={editingReplacement ? fullAvatarCrop : avatar?.avatarCrop ?? fullAvatarCrop}
+    {editorImage ? <AvatarEditor key={editorImage} busy={busy} image={editorImage} initialCrop={editingReplacement ? fullAvatarCrop : editTarget?.avatarCrop ?? avatar?.avatarCrop ?? fullAvatarCrop}
       onCancel={() => { setEditorImage(null); setSelectedFile(null); setPreviewUrl(null); setEditingReplacement(false); setEditTarget(null) }}
               onChooseAnother={() => fileInput.current?.click()} onConfirm={confirm} /> : null}
     <div aria-label={title} className={compact ? 'grid gap-3' : 'grid gap-5'}>
@@ -94,7 +117,7 @@ export function CurrentUserAvatarControls({ displayName, email, compact = false 
         <div className="grid gap-2">
           <div className="member-account-avatar-actions">
             {hasAvatar ? <>
-              <Button disabled={busy || !imageUrl || !avatar?.id || !avatar.updatedAt} onClick={() => { if (imageUrl && avatar?.id && avatar.updatedAt) { setEditTarget({ id: avatar.id, updatedAt: avatar.updatedAt }); setEditorImage(imageUrl) } }} type="button" variant="outline"><Typography variant="memoryButton">Изменить кадрирование</Typography></Button>
+              <Button disabled={busy || !imageUrl || !avatar?.id || !avatar.updatedAt} onClick={() => void editCurrentCrop()} type="button" variant="outline"><Typography variant="memoryButton">Изменить кадрирование</Typography></Button>
               <Button disabled={busy} onClick={() => fileInput.current?.click()} type="button" variant="outline"><Typography variant="memoryButton">Заменить фотографию</Typography></Button>
               <Button disabled={busy} onClick={() => remove.mutate()} type="button" variant="outline"><Typography variant="memoryButton">{remove.isPending ? 'Удаляем…' : 'Удалить фотографию'}</Typography></Button>
             </> : <Button disabled={busy} onClick={() => fileInput.current?.click()} type="button"><Typography variant="memoryButton">Добавить фотографию</Typography></Button>}

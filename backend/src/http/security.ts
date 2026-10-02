@@ -46,7 +46,7 @@ export function createAuthSecurity(options: AuthSecurityOptions): MiddlewareHand
         await next()
         return
       }
-      await requestBodyLimit(c, next)
+      return requestBodyLimit(c, next)
     },
     createAuthRateLimit(options),
   ]

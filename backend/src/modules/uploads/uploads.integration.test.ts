@@ -124,6 +124,27 @@ maybeDescribe('avatar upload API integration', () => {
       headers: authenticated(session.accessToken),
     })
     expect((await current.json()).avatar.downloadUrl).toBeTruthy()
+
+    const original = await app.request('/api/uploads/avatar/content', { headers: authenticated(session.accessToken) })
+    expect(original.status).toBe(200)
+    expect(original.headers.get('content-type')).toContain('image/png')
+    expect(Number(original.headers.get('content-length'))).toBe(pngFixture.byteLength)
+    expect(new Uint8Array(await original.arrayBuffer())).toEqual(new Uint8Array(pngFixture))
+  })
+
+  test('serves a compressed 48MP JPEG original without the preview decoder pixel cap', async () => {
+    const session = await register('large-avatar@example.com')
+    const largeJpeg = await sharp({ create: { width: 8_000, height: 6_000, channels: 3, background: '#abc' } }).jpeg({ quality: 35 }).toBuffer()
+    expect(largeJpeg.byteLength).toBeLessThan(5 * 1024 * 1024)
+    const ticket = await requestTicket(session.accessToken, largeJpeg, 'image/jpeg')
+    expect((await transfer(ticket, largeJpeg)).status).toBe(200)
+    expect((await finalize(session.accessToken, ticket.uploadId)).status).toBe(200)
+
+    const response = await app.request('/api/uploads/avatar/content', { headers: authenticated(session.accessToken) })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('image/jpeg')
+    expect(Number(response.headers.get('content-length'))).toBe(largeJpeg.byteLength)
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(largeJpeg)
   })
 
   test('reports no avatar for a user who has not uploaded one', async () => {
@@ -158,7 +179,7 @@ maybeDescribe('avatar upload API integration', () => {
     }
   })
 
-  test('preview normalizes locally supplied bytes without creating upload rows or storage objects', async () => {
+  test('preview validates locally supplied bytes without changing raster bytes or creating storage objects', async () => {
     const session = await register('preview@example.com')
     const beforeRows = await prisma.userAvatar.count()
     const beforeObjects = await storage.listObjects('avatars')
@@ -167,8 +188,8 @@ maybeDescribe('avatar upload API integration', () => {
       body: new Uint8Array(pngFixture),
     })
     expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toContain('image/jpeg')
-    expect(new Uint8Array(await response.arrayBuffer()).subarray(0, 3)).toEqual(new Uint8Array([0xff, 0xd8, 0xff]))
+    expect(response.headers.get('content-type')).toContain('image/png')
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(pngFixture))
     expect(await prisma.userAvatar.count()).toBe(beforeRows)
     expect(await storage.listObjects('avatars')).toEqual(beforeObjects)
 

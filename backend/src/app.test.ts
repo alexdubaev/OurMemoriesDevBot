@@ -202,6 +202,13 @@ test('account mutations reject oversized bodies before authentication', async ()
   expect((await request('/api/users/me')).status).toBe(413)
   expect((await request('/api/admin/users/0196f6f8-6600-7000-8000-000000000001/role')).status)
     .toBe(413)
+  expect((await request('/api/uploads/avatar/crop')).status).toBe(413)
+  const preview = await app.request('/api/uploads/avatar/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/png' },
+    body: 'x'.repeat(64),
+  })
+  expect(preview.status).toBe(401)
 })
 
 test('account mutations share bounded write-rate protection', async () => {

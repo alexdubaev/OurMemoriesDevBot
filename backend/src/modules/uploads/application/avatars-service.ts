@@ -18,7 +18,7 @@ import type {
   ObjectKeyFactory,
   PrivateStorage,
 } from './ports'
-import { normalizeAvatarImage } from '../../../storage/normalize-avatar-image'
+import { avatarImageForDisplay, normalizeAvatarImage } from '../../../storage/normalize-avatar-image'
 
 type AvatarsServiceDependencies = {
   clock: Clock
@@ -157,7 +157,7 @@ export class AvatarsService {
     const object = await this.dependencies.storage.readObject({ key: avatar.objectKey })
     if (!object) throw new UploadsFailure('not_found', 'Avatar not found')
     const original = new Uint8Array(await new Response(object.body).arrayBuffer())
-    return normalizeAvatarImage(original, avatar.contentType)
+    return avatarImageForDisplay(original, avatar.contentType)
   }
 
   /** Idempotent: removing an avatar that is not there is a success, not a 404. */

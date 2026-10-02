@@ -1,6 +1,6 @@
 # UNIFIED-AVATAR-CROPPER-REACT-EASY-CROP
 
-Status: IN_PROGRESS. Owner authorizes implementation, PR, squash merge, canonical deployment and read-only runtime verification. Physical device acceptance remains with the owner.
+Status: REVIEW. Owner authorizes implementation, PR, squash merge, canonical deployment and read-only runtime verification. Physical device acceptance remains with the owner.
 
 - Base: `329d6b9ccb7616adc6c5c75d2781db62400a5f32`, fetched from canonical origin on 2026-10-02.
 - Branch: `feat/unified-avatar-cropper`.
@@ -14,7 +14,7 @@ Status: IN_PROGRESS. Owner authorizes implementation, PR, squash merge, canonica
 2. Replace the child manual crop engine and arrows with a thin adapter. Keep original media, square validation, expectedVersion and VERSION_CONFLICT authoritative. Support editing an existing full image without selecting a file. Cancel must leave server state unchanged; retain editor state on failed confirmation.
 3. Reuse one self-avatar flow for AvatarPanel and MemberProfile. Add nullable crop JSON to the existing UserAvatar, with an additive migration and own-user crop endpoint protected against replacement races. Publish the original and crop together on confirmed upload. Keep existing remove behavior.
 4. Use a shared exact normalized-rectangle renderer for child and adult surfaces. Carry crop through family/member and memory-author contracts. Null adult metadata retains the legacy presentation. Keep the existing query/event/private-image architecture and refresh crop metadata immediately without a page reload.
-5. Preserve existing formats and size limits (child 20 MB; adult 5 MiB). Verify HEIC/HEIF decoding; if necessary use existing server image dependencies for bounded, transient normalization without storage reservations or persisted writes before confirm. Preserve original bytes. Apply EXIF orientation once.
+5. Preserve existing formats and size limits (child 20 MB; adult 5 MiB). JPEG/PNG/WebP are displayed as original bytes, retaining PNG alpha and browser-native EXIF orientation. HEIC/HEIF selection probes native browser decoding, then falls back to existing bounded server normalization (40MP) without storage reservations or persisted writes before confirm. Existing HEIC delivery retains an original native-browser fallback if normalization is unavailable. Preserve original bytes; do not claim unsupported native/mobile runtimes have passed.
 
 ## Ownership and scope
 
@@ -54,4 +54,27 @@ Final report records actual counts, exit codes, review findings, SHA values, scr
 - Three focused full-stack cases: own account add/replace/recrop/remove 1/1; participant row/profile/memory-author crop 1/1; child recrop/CAS/hub/replacement-cancel 1/1. Exit 0. Browser artifacts remain ignored under `webapp/e2e/.artifacts/`.
 - Worker backend typecheck: exit 0. Upload integration: 17/17; member-avatar DTO/ACL integration: 1/1, exit 0. Warm private-cache browser regression: passed, exit 0.
 
-Independent review, required CI and release evidence are recorded when completed. Physical iPhone and Android MAX acceptance remains pending.
+## Reconciliation and independent review
+
+Fresh main `4b5760ed1f5b7215b8241384142d9ed3c4e562d1` was merged without conflicts. Reconciled head: `26e817ddc589f78cf803425d3dccd0a7ee8f5169`. Backend typecheck, architecture (793 source files), template and whole-diff whitespace checks passed, exit 0. Migration directories after reconciliation: 47.
+
+PR: https://github.com/alexdubaev/OurMemoriesDevBot/pull/148 (draft while gates are running).
+
+One fresh read-only GPT-6 Luna reviewer inspected the whole active avatar diff. P0: 0; P1: 0; P2: 2, accepted by lead for bounded fixes:
+
+1. `backend/src/http/security.ts`: return the body-limit middleware Response instead of discarding it. Required CI run 37070312448 had 600 backend unit tests pass and 3 fail: oversized auth/account bodies returned 500 rather than 413.
+2. `backend/src/storage/normalize-avatar-image.ts`: valid adult originals beyond the new 40MP cap could finalize but become undisplayable. Review reproduced a 48MP JPEG of 281,517 bytes under the existing 5MiB limit. Preserve compatible original delivery and native preview support without unbounded server decoding.
+
+The same reviewer will perform a narrow closure check after fixes; no second fresh review loop. Required CI and release evidence are recorded when completed. Physical iPhone and Android MAX acceptance remains pending.
+
+## Review fixes verified by lead
+
+- The body-limit Response is returned; existing auth/account size tests now produce 413. The avatar preview exemption remains exact method/path only.
+- Adult JPEG/PNG/WebP delivery returns original MIME and bytes. The 48MP JPEG can finalize and return 200 unchanged; PNG alpha is retained. HEIC normalization remains bounded, with original-byte delivery fallback for native-supported existing photos. Selection probes native HEIC first and releases the probe URL on success, failure and abort.
+- Lead additionally verified an editor URL ownership race: an existing adult crop now snapshots original preview, crop and CAS identity into an adapter-owned URL, so private-cache reconciliation cannot revoke an image still shown in the editor. The general cache hook is unchanged.
+- Lead focused backend check: 32 pass, 0 fail, 143 assertions across 6 files, exit 0. Worker upload integration: 18 pass, 0 fail, 114 expectations, exit 0.
+- Lead crop/preview unit check: 6 pass, 0 fail, 21 assertions across 2 files, exit 0. Worker focused adult existing-recrops and slow-invalidation lifecycle browser cases: 4/4 across Chromium and WebKit, exit 0.
+- Webapp/backend typecheck and webapp lint: exit 0. Lead final webapp build: exit 0.
+- Lead browser-native EXIF orientation=6 check: Chromium and WebKit both return oriented 80x120 dimensions and correct red/blue pixel direction from a 120x80 JPEG, exit 0. This verifies browser correction once, not physical phone acceptance.
+
+Fixes are ready for the same reviewer's narrow closure check and a new required CI run.
