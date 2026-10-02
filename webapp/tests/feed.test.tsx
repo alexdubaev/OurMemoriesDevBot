@@ -1296,6 +1296,28 @@ test('the feed presentation keeps one memory surface and omits type filters', ()
   expect(markup).toMatch(/class="caption(?: |")/)
 })
 
+test('the all-families action lives inside the child header and the family title is omitted', () => {
+  const markup = renderToStaticMarkup(createElement(FeedPresentation, {
+    activeFilter: 'all',
+    childName: 'Лилия',
+    childSubtitle: '2 года 8 месяцев',
+    familyName: 'Наша семья',
+    insets: { top: 24, right: 0, bottom: 18, left: 0 },
+    onAllFamilies: () => undefined,
+    onFamily: () => undefined,
+    onFeed: () => undefined,
+    onFilterChange: () => undefined,
+    role: 'full',
+  }, createElement('p', null, 'Лента')))
+
+  expect(markup).toContain('class="child-header-back"')
+  expect(markup).toContain('‹ Все семьи')
+  expect(markup.indexOf('child-header-back')).toBeGreaterThan(markup.indexOf('memoly-child-header'))
+  expect(markup).not.toContain('family-context')
+  expect(markup).not.toContain('Наша семья')
+  expect(markup).toContain('--host-inset-top:24px')
+})
+
 test('the feed presents unread count as a contextual text action with an explicit exit', () => {
   const render = (overrides: Partial<Parameters<typeof FeedPresentation>[0]>) => renderToStaticMarkup(createElement(FeedPresentation, {
     activeFilter: 'all',

@@ -59,8 +59,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
     <div data-memoly-feed="true" style={style}>
       <main className="app" data-slot="feed-scroll">
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
-        {props.onAllFamilies ? <div className="family-context"><button className="family-context-back" onClick={props.onAllFamilies} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button><Typography as="span" className="family-context-title" title={props.familyName} variant="memoryMeta">{props.familyName}</Typography></div> : null}
-        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" theme={theme} />
+        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} theme={theme} />
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
           <div className="feed-unread-mode">
             <Typography as="span" className="feed-unread-label" variant="memoryMeta">{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? `Непросмотренные · ${props.unreadCount}` : 'Непросмотренные'}</Typography>

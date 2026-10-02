@@ -17,6 +17,7 @@ export type ChildHeaderProps = {
   childAvatarCrop?: ChildAvatarCrop | null
   theme: MemolyTheme
   mode: 'feed' | 'family'
+  onAllFamilies?: () => void
   onOpenChild?: () => void
   onOpenSettings?: () => void
 }
@@ -28,6 +29,7 @@ export function ChildHeader({
   childName,
   childSubtitle,
   mode,
+  onAllFamilies,
   onOpenChild,
   onOpenSettings,
   theme,
@@ -38,6 +40,7 @@ export function ChildHeader({
 
   return (
     <section aria-label="Профиль ребёнка" className="top-card surface-raised memoly-child-header" data-child-header-mode={mode} data-slot="memoly-child-hero" data-theme={theme} style={artStyle}>
+      {mode === 'feed' && onAllFamilies ? <button className="child-header-back" onClick={onAllFamilies} type="button"><Typography as="span" variant="memoryMeta">‹ Все семьи</Typography></button> : null}
       <div className="brand-block">
         <BrandLogo className="brand" />
         <Typography as="div" className="tagline" variant="memoryMeta">Маленькие моменты<br />большое счастье</Typography>
