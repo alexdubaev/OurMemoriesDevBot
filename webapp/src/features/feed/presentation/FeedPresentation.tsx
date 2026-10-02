@@ -60,6 +60,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
       <main className="app" data-slot="feed-scroll">
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
         <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} theme={theme} />
+        <div className="feed-rest">
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
           <div className="feed-unread-mode">
             <Typography as="span" className="feed-unread-label" variant="memoryMeta">{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? `Непросмотренные · ${props.unreadCount}` : 'Непросмотренные'}</Typography>
@@ -69,6 +70,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
           <button aria-label={unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.unreadCount} {props.unreadCount === 1 ? 'новое' : 'новых'}</Typography></button>
         ) : null}
         <div className="feed-content">{children}</div>
+        </div>
       </main>
       <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />
     </div>

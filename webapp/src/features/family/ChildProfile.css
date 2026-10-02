@@ -7,7 +7,7 @@
   --ds-fs-body: 14px;
   --ds-fs-row: 13px;
   --ds-fw-page: 800;
-  --ds-fw-entity: 780;
+  --ds-fw-entity: var(--memory-name-weight, 500);
   --ds-fw-body: 500;
   --ds-fw-row: 740;
   --ds-space-2: 8px;
