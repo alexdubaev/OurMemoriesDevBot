@@ -25,7 +25,7 @@ writeFileSync(new URL('SCREEN_MATRIX.md', docs), intro + catalog.map(e => `| ${e
 - Permission rules reproduce current UI: owner edits child/family and roles/removes; full can invite/edit alias/create memories; viewer reads/reacts; owner cannot leave.
 - Incoming invite exposes no private photo before explicit Join.
 - Installed/dismissed PWA cases have no production prompt; Lab renders an explanatory preview of its absence.
-- Six themes are presentation-only variants with identical geometry.
+- One fixed palette and replaceable raster profile covers (latest owner decision).
 `)
 writeFileSync(new URL('../../src/dev/ui-v2/tokens/design-tokens.json', import.meta.url), JSON.stringify(tokens, null, 2) + '\n')
 console.log(`Inventory: ${catalog.length} states registered (NO until verification).`)

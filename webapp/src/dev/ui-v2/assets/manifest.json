@@ -31,5 +31,16 @@
     "alpha": false,
     "bytes": 97298,
     "sha256": "6bb0aac0daa515653fe489846b8f8d78ead9702ca46fbbe1b0b1b88f7d4d4e47"
+  },
+  {
+    "path": "father-daughter.webp",
+    "usage": "synthetic-demo-only",
+    "generator": "built-in image_gen",
+    "prompt": "Fictional father kissing his laughing three-year-old daughter, golden-hour lakeside candid photograph. No UI or real identities.",
+    "width": 1200,
+    "height": 900,
+    "alpha": false,
+    "bytes": 111834,
+    "sha256": "64a5b508f48689e8e5245b09adff8742e84b2dad6f56545fef1eb50346e61f94"
   }
 ]

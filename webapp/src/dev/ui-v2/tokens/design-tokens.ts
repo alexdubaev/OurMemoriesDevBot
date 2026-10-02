@@ -1,28 +1,23 @@
 export const themes = {
-  mint: { label: 'Мята', accent: '#346653', tint: '#e5eee7', wash: '#f1f5ef', detail: '#abc6b3' },
-  rose: { label: 'Роза', accent: '#914e60', tint: '#f5e4e8', wash: '#fcf1f2', detail: '#dbb2bc' },
-  sky: { label: 'Небо', accent: '#3d6481', tint: '#e4edf5', wash: '#f0f5fa', detail: '#abc5da' },
-  lavender: { label: 'Лаванда', accent: '#6a568c', tint: '#eee7f5', wash: '#f6f2fa', detail: '#c0b0d5' },
-  apricot: { label: 'Абрикос', accent: '#8c5736', tint: '#f6e8d9', wash: '#fcf5ec', detail: '#dfbd99' },
-  sand: { label: 'Песок', accent: '#776344', tint: '#efe8db', wash: '#f7f4ee', detail: '#cebea4' },
+  mint: { label: 'memoLy', accent: '#486d5e', tint: '#e5ede5', wash: '#f2f5ee', detail: '#a1b6a3' },
 } as const
 export type Theme = keyof typeof themes
 export const tokens = {
-  colors: { milk: '#fbf9f5', paper: '#fffefa', ink: '#30372f', secondary: '#626b61', line: '#e3e5dc', danger: '#a33f3b', dangerTint: '#f9e9e6', viewer: '#202620', white: '#ffffff' },
+  colors: { milk: '#f7f2eb', paper: '#fffcf7', ink: '#504e49', secondary: '#706e67', line: '#ebe6de', danger: '#a33f3b', dangerTint: '#f9e9e6', viewer: '#202620', white: '#ffffff', portraitMat: '#f7e3cc', note: '#faf0d9' },
   semantic: { canvas: 'milk', surface: 'paper', text: 'ink', muted: 'secondary', border: 'line', destructive: 'danger' },
   themes,
   spacing: { micro: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, '2xl': 32, '3xl': 48, '4xl': 64 },
-  radii: { small: 8, field: 12, surface: 20, sheet: 28, pill: 999 },
-  typography: { family: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', caption: 12, meta: 13, body: 16, person: 15, section: 19, title: 26, display: 34, code: 28 },
+  radii: { small: 8, field: 12, surface: 24, sheet: 24, pill: 999 },
+  typography: { family: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', caption: 12, meta: 13, body: 16, person: 15, section: 19, title: 26, display: 28, code: 28 },
   weights: { regular: 400, medium: 500, strong: 600 },
   lineHeights: { compact: 1.2, title: 1.3, body: 1.55 },
-  shadows: { surface: '0 4px 24px #30372f08', overlay: '0 12px 48px #20262024' },
+  shadows: { surface: '0 4px 20px #665a4510', overlay: '0 12px 48px #20262024' },
   icons: { small: 20, standard: 24, large: 32, feedback: 48 },
   targets: { minimum: 44, primary: 48 },
   motion: { press: 100, fast: 160, normal: 220, hold: 450, easing: 'cubic-bezier(.2,.8,.2,1)' },
   safeAreas: { top: 0, bottom: 0, hostTop: 0, hostBottom: 0 },
   layers: { content: 0, navigation: 10, backdrop: 20, overlay: 30, toast: 40 },
-  layout: { page: 20, narrowPage: 16, contentMax: 560, navHeight: 76, heroAvatar: 68, avatar: 40, previewHeight: 844, sheetMax: 560 },
+  layout: { page: 20, narrowPage: 16, contentMax: 560, navHeight: 82, heroAvatar: 84, avatar: 40, previewHeight: 844, sheetMax: 560, feedMediaMax: 300, feedInset: 12 },
 } as const
 
 export function tokenVariables(theme: Theme): Record<string, string | number> {

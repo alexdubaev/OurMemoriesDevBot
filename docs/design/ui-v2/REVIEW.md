@@ -18,3 +18,9 @@ review round. No unresolved P0/P1/P2 findings remain from that review.
 
 Technical review is not GitHub approval or owner design approval. Visual corrections can follow
 owner review. Real playback/login/install/share/native implementations remain outside the Lab.
+
+## Subsequent owner design revision
+
+The owner rejected the visual direction after this technical review. The later composition/token
+revision is documented in REFINEMENT_PLAN.md and verified by the lead with the existing browser suite.
+This original independent review does not claim to review that later visual diff.

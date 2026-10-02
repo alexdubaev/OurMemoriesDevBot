@@ -249,12 +249,7 @@ UI Lab states model presentation, never backend/provider execution.
 | components:memory-card | New Lab only: webapp/src/dev/ui-v2/screens/Components.tsx | Проверка единого component system | owner/full/viewer | memory-card | Buttons, fields, feedback, sheets, dialog, reactions | YES |
 | components:navigation | New Lab only: webapp/src/dev/ui-v2/screens/Components.tsx | Проверка единого component system | owner/full/viewer | navigation | Buttons, fields, feedback, sheets, dialog, reactions | YES |
 | components:overlays | New Lab only: webapp/src/dev/ui-v2/screens/Components.tsx | Проверка единого component system | owner/full/viewer | overlays | Buttons, fields, feedback, sheets, dialog, reactions | YES |
-| themes:mint | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | mint | Выбрать тему, открыть Feed/Family | YES |
-| themes:rose | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | rose | Выбрать тему, открыть Feed/Family | YES |
-| themes:sky | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | sky | Выбрать тему, открыть Feed/Family | YES |
-| themes:lavender | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | lavender | Выбрать тему, открыть Feed/Family | YES |
-| themes:apricot | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | apricot | Выбрать тему, открыть Feed/Family | YES |
-| themes:sand | webapp/src/features/theme/ThemeProvider.tsx (theme directions only) | Одна геометрия, шесть палитр | owner/full/viewer | sand | Выбрать тему, открыть Feed/Family | YES |
+| themes:mint | UI v2 FamilyHero | Единая палитра, сменная шапка профиля | owner/full/viewer | mint | Открыть Feed/Family | YES |
 
 ## Intentional exclusions and boundary decisions
 
@@ -266,4 +261,4 @@ UI Lab states model presentation, never backend/provider execution.
 - Permission rules reproduce current UI: owner edits child/family and roles/removes; full can invite/edit alias/create memories; viewer reads/reacts; owner cannot leave.
 - Incoming invite exposes no private photo before explicit Join.
 - Installed/dismissed PWA cases have no production prompt; Lab renders an explanatory preview of its absence.
-- Six themes are presentation-only variants with identical geometry.
+- Latest owner decision: one palette and replaceable raster covers. Five color-only entries removed; 243 states remain.

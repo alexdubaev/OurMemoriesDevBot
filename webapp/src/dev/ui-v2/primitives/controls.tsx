@@ -29,7 +29,7 @@ export function Button({ children, tone = 'primary', ...props }: PressableProps 
 export type IconName = 'back' | 'close' | 'family' | 'feed' | 'plus' | 'more' | 'gear' | 'photo' | 'note' | 'voice' | 'video' | 'play' | 'pause' | 'chevron' | 'heart' | 'lock' | 'warning' | 'check' | 'edit' | 'copy' | 'user' | 'fullscreen'
 export function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
   // Reuse licensed repository WebP RGBA assets. No new icon library or SVG.
-  const mapped = name === 'feed' ? 'photo' : name
+  const mapped = name === 'feed' ? 'home' : name
   const source = name === 'back' ? backIcon : name === 'check' ? checkIcon : '/assets/icons/' + mapped + '-default@3x.webp'
   return <img alt="" aria-hidden="true" className="v2-icon" src={source} width={size} height={size} />
 }

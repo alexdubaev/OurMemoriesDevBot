@@ -25,7 +25,7 @@ const definitions: Definition[] = [
   { group: '10 States', screen: 'archive', source: 'features/memoly-ui/FamilyArchivePage.tsx', purpose: 'Использование приватного хранилища', interaction: 'Повторить, назад', states: ['ready', 'no-quota', 'loading', 'error'] },
   { group: '10 States', screen: 'overlay', source: 'features/memoly-ui/AddSheetPresentation.tsx; features/feed/FeedPage.tsx; MemoryDeleteSpotlight.tsx; MemoryReactions.tsx; MemberProfile.tsx', purpose: 'Общие модальные действия и feedback', interaction: 'Открыть/закрыть, select, confirm/cancel, Escape и возврат focus', states: ['add', 'voice-video', 'voice-handoff', 'memory-actions', 'reactions', 'delete', 'deleting', 'delete-error', 'member-actions', 'remove-member', 'revoke-invite', 'cancel-composer', 'invite-result', 'error-banner', 'toast'] },
   { group: '11 Components', screen: 'components', source: 'UI v2 canonical components (new presentation only)', purpose: 'Проверка единого component system', interaction: 'Buttons, fields, feedback, sheets, dialog, reactions', states: ['primitives', 'typography', 'buttons', 'forms', 'feedback', 'family-hero', 'memory-card', 'navigation', 'overlays'] },
-  { group: '12 Themes', screen: 'themes', source: 'features/theme/ThemeProvider.tsx (theme directions only)', purpose: 'Одна геометрия, шесть палитр', interaction: 'Выбрать тему, открыть Feed/Family', states: ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'] },
+  { group: '12 Profile covers', screen: 'themes', source: 'UI v2 FamilyHero (owner-supplied cover images)', purpose: 'Единая палитра, сменная шапка профиля', interaction: 'Открыть Feed/Family', states: ['mint'] },
 ]
 export const catalog: CatalogEntry[] = definitions.flatMap((definition) => definition.states.map((state) => ({
   id: definition.screen + ':' + state, group: definition.group, screen: definition.screen,
@@ -39,6 +39,6 @@ export const screenLabels: Record<ScreenKey, string> = {
   viewer: 'Просмотр', composer: 'Добавление', family: 'Семья', child: 'Профиль ребёнка',
   member: 'Участник', invite: 'Приглашение', 'invite-create': 'Пригласить', invites: 'Активные приглашения',
   channel: 'Канал MAX', install: 'Установка', settings: 'Настройки', archive: 'Семейный архив',
-  overlay: 'Overlays', components: 'Компоненты', themes: 'Темы',
+  overlay: 'Overlays', components: 'Компоненты', themes: 'Шапки профиля',
 }
 export function getEntry(id: string | null) { return catalog.find((entry) => entry.id === id) ?? catalog[0] }

@@ -36,3 +36,7 @@ Safe areas use max(environment inset, host inset), avoiding double-counting. And
 and MAX host area are explicit external inputs; iOS has the same top/bottom model.
 Motion is opacity, translation and scale with short durations. No clip paths, masks, blends,
 hover-only actions or measurement-based layout.
+The shared header uses an optional raster ImageBackground with live logo, text and controls.
+Map cover to ImageBackground/Image with resizeMode cover; the circular avatar has a fixed border.
+Cover swaps do not change semantic colors. The Lab file picker/object URLs are web tooling only;
+a future production cover selector is outside this isolated prototype's scope.

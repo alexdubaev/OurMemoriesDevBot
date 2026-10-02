@@ -4,21 +4,20 @@ import { Button, Badge, Icon, Pressable } from '../primitives/controls'
 import { TextField, Field } from '../primitives/forms'
 import { Typography } from '../primitives/Typography'
 import { EmptyState, ErrorState, InlineNotice, LoadingState } from '../components/Feedback'
-import { themes } from '../tokens/design-tokens'
 import { PageContent, TopBar } from './common'
 import type { ScreenProps } from './types'
-export function ThemeChoices({ theme, actions }: Pick<ScreenProps, 'theme' | 'actions'>) {
-  return <div className="v2-theme-choices" role="group" aria-label="Настроение альбома">{Object.entries(themes).map(([key, palette]) => <Pressable key={key} aria-pressed={theme === key} onPress={() => actions.onTheme(key as keyof typeof themes)}><span className="v2-theme-swatch" style={{ background: palette.tint, borderColor: palette.accent }} /><Typography as="span" variant="person">{palette.label}</Typography><Typography as="span" variant="caption">{theme === key ? 'Выбрано' : 'Выбрать'}</Typography></Pressable>)}</div>
+export function CoverPreview({ family }: Pick<ScreenProps, 'family'>) {
+  return <div className="v2-cover-preview">{family.cover ? <img src={family.cover} alt="Обложка профиля" /> : <Typography variant="meta">Без иллюстрации</Typography>}</div>
 }
-export function Settings({ entry, family, role, theme, actions }: ScreenProps) {
+export function Settings({ entry, family, role, actions }: ScreenProps) {
   const state = entry.state
   const [name, setName] = useState(family.familyName)
   const [zone, setZone] = useState(family.timezone ?? 'Europe/Moscow')
   const [saved, setSaved] = useState(state === 'saved')
-  const menu = [['appearance', 'Оформление', 'Настроение вашего альбома'], ['privacy', 'Приватность и помощь', 'Кто видит ваши воспоминания'], ['about', 'О memoLy', 'Личный семейный альбом'], ['install-entry', 'Установить memoLy', 'Всегда под рукой']] as const
-  return <><TopBar title={state === 'appearance' ? 'Настроение альбома' : state === 'family' ? 'Настройки семьи' : 'Настройки'} onBack={() => actions.go('family:' + role)} /><PageContent>
+  const menu = [['appearance', 'Обложка профиля', 'Иллюстрация вашей семейной истории'], ['privacy', 'Приватность и помощь', 'Кто видит ваши воспоминания'], ['about', 'О memoLy', 'Личный семейный альбом'], ['install-entry', 'Установить memoLy', 'Всегда под рукой']] as const
+  return <><TopBar title={state === 'appearance' ? 'Обложка профиля' : state === 'family' ? 'Настройки семьи' : 'Настройки'} onBack={() => actions.go('family:' + role)} /><PageContent>
     {state === 'menu' ? <>{menu.map(([key, title, copy]) => <Pressable className="v2-settings-row" key={key} onPress={() => actions.go('settings:' + key)}><span className="v2-stack v2-grow"><Typography as="span" variant="person">{title}</Typography><Typography as="span" variant="meta">{copy}</Typography></span><Icon name="chevron" size={20} /></Pressable>)}<Button tone="secondary" onPress={() => actions.go('member:self')}>Мой профиль</Button>{role === 'owner' && <Button tone="quiet" onPress={() => actions.go('settings:family')}>Настройки семьи</Button>}<Button tone="quiet" onPress={() => actions.go('archive:ready')}>Семейный архив</Button>{role !== 'viewer' && <Button tone="quiet" onPress={() => actions.go('invites:active')}>Активные приглашения</Button>}</> :
-      state === 'appearance' ? <><Typography>Шесть тихих оттенков для одной большой истории.</Typography><ThemeChoices theme={theme} actions={actions} /></> :
+      state === 'appearance' ? <><CoverPreview family={family} /></> :
       state === 'privacy' || state === 'about' ? <><Typography as="h1" variant="title">{state === 'privacy' ? 'Только для ваших близких' : 'Моменты, к которым хочется возвращаться'}</Typography><Typography>memoLy — приватный семейный альбом. Фотографии, видео, голосовые и слова доступны только участникам вашей семьи.</Typography><Typography>Просмотр позволяет открывать воспоминания и оставлять реакции. Полный доступ позволяет добавлять и изменять записи.</Typography><Typography>Вы сами выбираете, кого пригласить. Публичной ленты и комментариев здесь нет.</Typography></> :
       state === 'install-entry' ? <EmptyState title="Ваш альбом под рукой" body="Добавьте memoLy на главный экран, чтобы открывать его одним касанием." action="Как установить" onPress={() => actions.go('install:available')} /> :
       role !== 'owner' ? <InlineNotice>Настройки семьи меняет владелец.</InlineNotice> : <form className="v2-stack" onSubmit={e => { e.preventDefault(); actions.onSaveFamily(name.trim(), zone); setSaved(true) }}><TextField label="Название семьи" value={name} required maxLength={80} onChange={e => { setName(e.target.value); setSaved(false) }} /><Field label="Часовой пояс"><select value={zone} onChange={e => setZone(e.target.value)}>{['Europe/Moscow', 'Europe/Riga', 'Europe/Amsterdam', 'UTC'].map(value => <option key={value}>{value}</option>)}</select></Field><Typography variant="meta">По этому часовому поясу считаются даты и возраст ребёнка.</Typography>{state === 'error' && <InlineNotice error>Не удалось сохранить настройки. Данные остались в форме.</InlineNotice>}{state === 'saving' && <LoadingState label="Сохраняем настройки…" />}{saved && <InlineNotice>Настройки семьи сохранены</InlineNotice>}<Button type="submit" disabled={state === 'saving'}>Сохранить</Button></form>}

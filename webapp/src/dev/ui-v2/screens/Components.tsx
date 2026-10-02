@@ -6,14 +6,14 @@ import { FamilyHero } from '../components/FamilyHero'
 import { MemoryCard, ReactionPicker } from '../components/MemoryCard'
 import { InlineNotice, LoadingState, EmptyState } from '../components/Feedback'
 import { BottomTabs } from '../components/BottomTabs'
-import { ThemeChoices } from './Settings'
+import { CoverPreview } from './Settings'
 import { PageContent } from './common'
 import type { ScreenProps } from './types'
 import { memories as initialMemories } from '../fixtures/data'
 export function Components(props: ScreenProps) {
-  const { entry, family, role, theme, memories, actions } = props
+  const { entry, family, role, memories, actions } = props
   const memory = memories[0] ?? initialMemories[0]
-  if (entry.screen === 'themes') return <><FamilyHero model={family} onAllFamilies={() => actions.go('families:multiple')} onOpenChild={() => actions.go('child:complete')} /><PageContent><Typography as="h1" variant="title">Настроение вашей истории</Typography><ThemeChoices theme={theme} actions={actions} /><Button onPress={() => actions.go('feed:photo')}>Посмотреть ленту</Button><Button tone="secondary" onPress={() => actions.go('family:' + role)}>Посмотреть семью</Button></PageContent></>
+  if (entry.screen === 'themes') return <><FamilyHero model={family} onAllFamilies={() => actions.go('families:multiple')} onOpenChild={() => actions.go('child:complete')} /><PageContent><Typography as="h1" variant="title">Шапка профиля</Typography><CoverPreview family={family} /><Button onPress={() => actions.go('feed:photo')}>Посмотреть ленту</Button><Button tone="secondary" onPress={() => actions.go('family:' + role)}>Посмотреть семью</Button></PageContent></>
   return <PageContent><Typography as="h1" variant="title">Одна система. Одна история.</Typography><Typography variant="meta">{entry.state}</Typography>
     {['family-hero', 'primitives'].includes(entry.state) && <FamilyHero model={family} onAllFamilies={() => actions.go('families:multiple')} onOpenChild={() => actions.go('child:complete')} />}
     {entry.state === 'typography' && <><Typography as="h1" variant="display">История Лилии</Typography><Typography as="h2" variant="title">Самые дорогие моменты</Typography><Typography as="h3" variant="section">Близкие рядом</Typography><PersonName>Бабушка</PersonName><Typography>Сохранить воспоминание — значит однажды вернуться в этот день.</Typography><Typography variant="meta">2 октября · 10:24</Typography><Typography variant="caption">Только для близких</Typography></>}

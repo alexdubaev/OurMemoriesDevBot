@@ -1,48 +1,45 @@
 # Verification — MEMOLY-UI-V2-REACT-LAB
 
-Base: `329d6b9ccb7616adc6c5c75d2781db62400a5f32`.
-Branch: `design/ui-v2-react-lab`.
-Task worktree: `D:/codex/TG_OurMemoriesDevBot/OurMemoriesDevBot/.worktrees/ui-v2-react-lab`.
+Date: 2 October 2026. Implementation model: GPT-6 (Codex).
+Task base: 329d6b9ccb7616adc6c5c75d2781db62400a5f32.
+Revision base: d9b1182f271fb40849f35eb4a922b1864b09c15c.
+Branch: design/ui-v2-react-lab.
+Worktree: D:/codex/TG_OurMemoriesDevBot/OurMemoriesDevBot/.worktrees/ui-v2-react-lab.
+Current commit is recorded in the Draft PR. Status: owner cover artwork/visual approval pending.
 
-Final verification completed on 2 October 2026 after resolving both review findings.
-Implementation model: GPT-6 (Codex); independent scoped reviewer: GPT-6-luna/high.
-The committed final head is recorded in the Draft PR and owner handoff; `git rev-parse HEAD` identifies it locally.
-
-| Command | Result | Exit |
+| Check | Result | Exit |
 |---|---|---|
-| `bun run --cwd webapp typecheck` | TypeScript project build passed; also repeated inside final build | 0 |
-| `bun run --cwd webapp lint` | ESLint passed after review fixes | 0 |
-| `bun run --cwd webapp build` | Production build passed, 696 modules; Lab not bundled | 0 |
-| `bun run architecture:check` | 764 source files passed | 0 |
-| `bun run template:check` | Tracked documentation links/template checks passed | 0 |
-| `bunx playwright test --config e2e/ui-v2/playwright.config.ts` (webapp) | 23/23 passed, 1.7 minutes | 0 |
-| Review regression subset | 5/5 passed; both new regressions first reproduced failure before fixes | 0 |
-| Final screenshot subset (`--grep screenshot`) | 6/6 passed, 9 seconds; animations fast-forwarded for settled visual evidence | 0 |
-| `git diff --cached --check` | No whitespace errors | 0 |
+| bun run --cwd webapp typecheck | Passed after final object-URL lifecycle change | 0 |
+| bun run --cwd webapp lint | Passed after moving state updates out of the effect | 0 |
+| bun run --cwd webapp build | 696 modules, Lab excluded; same production output | 0 |
+| bun run architecture:check | 764 source files passed | 0 |
+| bun run template:check | Tracked documentation/template check passed | 0 |
+| git diff --cached --check | No whitespace errors | 0 |
+| Playwright full suite | 24/24 passed, 1.4 minutes | 0 |
+| Final cover/catalog/hero subset | 3/3 passed after object-URL lifecycle refinement | 0 |
 
-The browser suite mounts all 248 registered states with no uncaught runtime exception, broken image
-or horizontal overflow at 390px. It checks 12 groups, all six themes, shared hero geometry, role gates,
-navigation, carousel, one active reaction, long press, note publishing/cancellation, selected memory
-editing/deletion, selected participant role/alias updates, child identity/date consistency, invite
-privacy/retry, overlay focus/restore, reduced motion and primary-action contrast (at least 4.5:1).
-Feed/Family/Composer are checked at 320/360/390/430/768px. 26 loaded-image screenshots are committed.
-Visual inspection covers photo Feed, Family, welcome and composer; screenshots remain available for owner judgement.
+The full suite mounts all 243 current catalog states without runtime errors, broken images or
+horizontal overflow at 390px. Five color-only entries were removed by explicit owner direction.
+It checks 12 groups, roles, child/profile edits, selected memory edits/deletion, reactions, viewers,
+invite privacy/retry, overlay focus/restore, touch targets, reduced motion and primary contrast.
+Responsive checks cover Feed/Family/Composer at 320/360/390/430/768px. 28 settled screenshots.
+All browser cases assert zero page API requests. Source and dist guards check Lab isolation.
+Four synthetic demo photographs fit the 180KB/photo budget; the new father/daughter image is 111834 bytes.
 
-All 23 browser tests record zero page requests to `/api`; interception fails any attempted API use.
-The dedicated server has no API proxy and rejects API/storage paths. A source guard rejects transport,
-production feature/platform imports and host sharing/clipboard APIs. The production dist guard proves
-no imported Lab assets or Lab runtime/CSS sentinels are present. Existing production output is unchanged.
-No new dependency or existing production file is changed. JSON tokens and three demo-photo budgets are checked.
+New cover test: local image changes artwork but not header dimensions/palette; survives Feed/Family
+navigation; removing it restores the plain header. Local blobs are revoked on replacement/unmount.
+The catalog file remains local to the tab; it is not uploaded and does not carry into a new clean-preview tab.
+The full suite passed before the lifecycle lint fix; the affected 3-test subset then passed on the final code.
+An initial geometry assertion compared page coordinates after auto-scroll; corrected to component dimensions.
+The lint failure was fixed rather than suppressed.
 
-Earlier failures were resolved rather than reported as passes: modal Escape/focus, button text contrast,
-an overly broad dist-path assertion, a select locator and screenshots captured before image decoding.
-The dedicated server ignores Playwright trace HTML to prevent test artifacts triggering page reloads.
+Visual comparison: [design-qa](design-qa.md). The shared header is currently plain cream because
+the owner is generating its artwork. Exact cover crop/text contrast remains pending those files.
+This is not a claim that the blank header matches the supplied watercolor reference.
+Prior independent review: [REVIEW](REVIEW.md); it does not cover this later visual revision.
+No new review loop was started, following the owner's one-reviewer limit.
 
-Independent review and resolutions: [REVIEW](REVIEW.md). Technical review is not owner design approval.
-
-Only the allowed Lab source, dedicated entry/config, tests and design documentation are changed.
-No production runtime, backend, schema, contract, dependency or existing public asset is modified.
-Synthetic fixtures reset on reload; external actions are simulated and do not mutate production data.
-
-The age fixture uses 2 October 2026, matching the synthetic album date, for reproducible screenshots.
-Chromium checks validate local browser presentation. Native implementations and provider engines are outside this review.
+Changed boundaries: Lab source/assets, Lab tests and docs/design/ui-v2 only.
+No production code/dependency/public asset, API contract, auth/cache, database schema or migration changes.
+Private reference photos are not copied into Git. Generated pictures are fictional demo-only material.
+PR #146 remains draft. No merge or deployment.

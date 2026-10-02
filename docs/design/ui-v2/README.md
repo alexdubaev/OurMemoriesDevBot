@@ -12,10 +12,15 @@ bun run dev -- --config ui-v2.vite.config.ts
 ```
 
 Open [catalog](http://127.0.0.1:4197/__fixtures/ui-v2).
-Select SCREEN, STATE, ROLE, THEME, VIEWPORT. All 248 states have OPEN buttons in twelve groups.
+Select SCREEN, STATE, ROLE, VIEWPORT. All 243 states have OPEN buttons in twelve groups.
 The narrow preview has its own scroll surface; catalog scrolling does not scroll the app.
 The catalog's “Чистый preview” link opens the selected state without tooling.
 Example: [clean photo Feed](http://127.0.0.1:4197/__fixtures/ui-v2?entry=feed:photo&role=owner&theme=mint&width=390&preview=1).
+The interface uses one cream/sage palette. Only the profile-cover artwork changes.
+Use the catalog field «Шапка профиля» to preview a local PNG/JPEG/WebP, or «Убрать шапку» to clear it.
+The image stays in memory across Feed/Family navigation, is never uploaded, and resets on reload.
+The clean-preview link opens a separate state and does not carry an in-memory local cover.
+Final cover assets are pending the owner’s files.
 In clean mode the browser width is the actual viewport, capped at 560px on a wide browser.
 
 No backend, .env, credentials, host SDK, QueryClient or production bootstrap is needed.
@@ -23,7 +28,7 @@ The separate dev server rejects API/storage paths and has no proxy.
 Normal production entry, routing, configuration and public assets remain unchanged.
 Run this config explicitly; the ordinary production/dev app never imports Lab.
 
-Fixtures contain fictional Russian family names and three synthetic local photographs.
+Fixtures contain fictional Russian family names and four synthetic local photographs.
 Memory edits, reactions, profile changes and deletion live in React state and reset on reload.
 Playback, copy/share, installation, login and provider readiness simulate UI outcomes.
 No sound recording, actual playback engine, clipboard mutation, sharing, host login or real invites.

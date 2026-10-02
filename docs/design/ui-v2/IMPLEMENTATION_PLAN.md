@@ -14,7 +14,7 @@ Existing untracked files in the primary checkout belong to earlier work; untouch
    BottomTabs, feedback, forms and overlays before assembling screens.
 3. Assemble all screen families with fixture state transitions. Dedicated Vite HTML entry;
    no production main imports, providers, SDKs, API proxy or remote media. Each state has a clean preview URL.
-4. Targeted browser checks: catalog coverage, roles/themes, navigation, carousel, reactions,
+4. Targeted browser checks: catalog coverage, roles/shared palette, navigation, carousel, reactions,
    form success/error/cancel, modal focus, no API, widths 320/360/390/430 and tablet.
    Run webapp typecheck/lint/build, architecture/template checks and prove production output excludes Lab.
 5. Reconcile visual consistency using screenshots; independent scoped review; fix confirmed findings.
@@ -24,7 +24,7 @@ Visual direction: Modern family storybook / cozy scrapbook minimal. Warm milk ca
 sage base accent, one pastel accent system. System sans throughout; 400 body, 500 names, 600 headings.
 Signature: a consistent album opening with official memoLy logo, child portrait and “Все семьи”
 inside one FamilyHero; edge-to-edge large photographs below quiet author rows.
-No separate Feed/Family hero CSS. One component geometry across six themes.
+No separate Feed/Family hero CSS. One component geometry across profile covers; one fixed palette (latest owner decision).
 
 Stop: unexpected origin, secret exposure, production mutation, API dependency or scope expansion.
 Playback and sharing are explicit fixture simulations; no recorder or provider integration.

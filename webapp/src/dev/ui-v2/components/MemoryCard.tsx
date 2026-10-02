@@ -53,7 +53,7 @@ export function MemoryCard({ model, onOpen, onActions, onReactions, onReact, voi
 }) {
   const [expanded, setExpanded] = useState(false)
   return <article className="v2-memory" data-component="MemoryCard" data-memory={model.id}>
-    <header className="v2-memory-header"><Avatar name={model.author.name} /><div className="v2-stack v2-memory-author"><PersonName>{model.author.name}</PersonName><Typography variant="caption">{model.date}{model.unread ? ' · Новое' : ''}</Typography></div><IconButton name="more" label="Действия с воспоминанием" onPress={onActions} /></header>
+    <header className="v2-memory-header"><Avatar name={model.author.name} src={model.author.avatar} /><div className="v2-stack v2-memory-author"><PersonName>{model.author.name}</PersonName><Typography variant="caption">{model.date}{model.unread ? ' · Новое' : ''}</Typography></div><IconButton name="more" label="Действия с воспоминанием" onPress={onActions} /></header>
     {model.kind === 'media' && <Carousel media={model.media} onOpen={onOpen} />}
     {model.kind === 'note' && <div className={'v2-note' + (expanded ? ' expanded' : '')}><Typography>{model.body}</Typography>{model.body.length > 280 && <Button tone="quiet" onPress={() => setExpanded(!expanded)}>{expanded ? 'Свернуть' : 'Читать полностью'}</Button>}</div>}
     {model.kind === 'voice' && model.voice && <VoiceSurface model={model.voice} initialPlaying={voicePlaying} error={voiceError} />}

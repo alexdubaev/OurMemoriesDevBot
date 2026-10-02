@@ -39,7 +39,7 @@ test('all catalog entries mount without exceptions or broken assets', async ({ p
   }
   expect(errors).toEqual([])
 })
-test('catalog controls, state switching, six themes and viewport presets', async ({ page }) => {
+test('catalog controls, state switching, one palette and viewport presets', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1000 })
   await page.goto('/__fixtures/ui-v2')
   await expect(page.getByRole('heading', { name: 'MEMOLY UI V2 LAB' })).toBeVisible()
@@ -48,11 +48,9 @@ test('catalog controls, state switching, six themes and viewport presets', async
   await page.getByLabel('SCREEN', { exact: true }).selectOption('feed')
   await page.getByLabel('STATE', { exact: true }).selectOption('feed:note')
   await expect(page.locator('.v2-note')).toContainText('обнять дерево')
-  for (const theme of Object.keys(themes)) {
-    await page.getByLabel('THEME', { exact: true }).selectOption(theme)
-    await expect(page.locator('.v2-root')).toHaveAttribute('data-theme', theme)
-    expect(await page.locator('.v2-root').evaluate(el => getComputedStyle(el).getPropertyValue('--v2-accent').trim())).toBe(themes[theme as keyof typeof themes].accent)
-  }
+  await expect(page.getByLabel('THEME', { exact: true })).toHaveCount(0)
+  expect(Object.keys(themes)).toEqual(['mint'])
+  await expect(page.locator('.v2-root')).toHaveAttribute('data-theme', 'mint')
   for (const width of [320, 360, 390, 430]) {
     await page.getByLabel('VIEWPORT', { exact: true }).selectOption(String(width))
     expect(Math.round(await page.locator('.lab-preview').evaluate(el => el.getBoundingClientRect().width))).toBe(width)
@@ -75,7 +73,7 @@ test('feed family hub, child and participant navigation uses local state', async
   await page.getByRole('button', { name: 'Все семьи' }).click()
   await expect(page.locator('[data-entry="families:multiple"]')).toBeVisible()
 })
-test('shared FamilyHero geometry matches feed/family for all themes', async ({ page }) => {
+test('shared FamilyHero geometry matches feed/family for the shared palette', async ({ page }) => {
   for (const theme of Object.keys(themes)) {
     await open(page, 'feed:photo', 390, 'owner', theme)
     const feed = await page.locator('[data-component="FamilyHero"]').boundingBox()
@@ -190,6 +188,11 @@ test('390 screenshot matrix and all required state presentations', async ({ page
     await open(page,id,390,role)
     await page.screenshot({ path: screenshots + '/' + id.replace(':','-') + '-390.png', animations: 'disabled' })
   }
+  for (const width of [320, 430]) {
+    await open(page, 'feed:photo', width)
+    await noOverflow(page)
+    await page.screenshot({ path: screenshots + '/feed-photo-' + width + '.png', animations: 'disabled' })
+  }
 })
 test('source isolation, tokens export, media budgets and production output excludes Lab', async () => {
   const app = fileURLToPath(new URL('../..', import.meta.url))
@@ -200,7 +203,7 @@ test('source isolation, tokens export, media budgets and production output exclu
   const text = files.filter(f => /\.(ts|tsx)$/.test(f)).map(f => readFileSync(f,'utf8')).join('\n')
   expect(text).not.toMatch(/(?:fetch\s*\(|XMLHttpRequest|navigator\.share|navigator\.clipboard|from ['"]@\/|from ['"].*features\/|from ['"].*platform\/)/)
   const manifest = JSON.parse(readFileSync(source+'/assets/manifest.json','utf8'))
-  expect(manifest).toHaveLength(3)
+  expect(manifest).toHaveLength(4)
   expect(manifest.every((m: {bytes:number}) => m.bytes <= 180_000)).toBe(true)
   expect(JSON.parse(readFileSync(source+'/tokens/design-tokens.json','utf8')).themes).toHaveProperty('mint')
   const output: string[] = []
@@ -238,7 +241,7 @@ test('edits target the selected memory and deleting all memories reaches empty',
   }
   await expect(page.getByRole('heading', { name: 'Первый момент — за вами' })).toBeVisible()
 })
-test('primary button contrast across all themes', async ({ page }) => {
+test('primary button contrast in the shared palette', async ({ page }) => {
   function luminance(hex: string) { const values = hex.replace('#','').match(/../g)!.map(value => parseInt(value,16)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4); return values[0]*.2126+values[1]*.7152+values[2]*.0722 }
   for (const [key, value] of Object.entries(themes)) {
     expect((1.05)/(luminance(value.accent)+.05), key).toBeGreaterThanOrEqual(4.5)
@@ -283,4 +286,27 @@ test('invite retry renders pending before simulated success', async ({ page }) =
   await expect(page.getByText('Присоединяемся к семье…', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Присоединиться', exact: true })).toBeDisabled()
   await expect(page.getByRole('heading', { name: 'Теперь вы в семье' })).toBeVisible()
+})
+
+
+test('profile cover changes only artwork and persists between feed and family', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto('/__fixtures/ui-v2?entry=feed:photo')
+  const hero = page.locator('[data-component="FamilyHero"]')
+  const before = await hero.boundingBox()
+  const colors = () => page.locator('.v2-root').evaluate(el => ['--v2-accent', '--v2-colors-milk', '--v2-colors-paper'].map(v => getComputedStyle(el).getPropertyValue(v)))
+  const palette = await colors()
+  await page.getByLabel('Шапка профиля', { exact: true }).setInputFiles(fileURLToPath(new URL('../../src/dev/ui-v2/assets/painting.webp', import.meta.url)))
+  await expect(page.locator('.v2-hero-cover')).toHaveAttribute('src', /^blob:/)
+  await expect.poll(() => page.locator('.v2-hero-cover').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
+  expect(await hero.evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))).toEqual({ width: before!.width, height: before!.height })
+  expect(await colors()).toEqual(palette)
+  const source = await page.locator('.v2-hero-cover').getAttribute('src')
+  await page.getByRole('button', { name: 'Семья', exact: true }).click()
+  await expect(page.locator('.v2-hero-cover')).toHaveAttribute('src', source!)
+  expect(await hero.evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))).toEqual({ width: before!.width, height: before!.height })
+  expect(await colors()).toEqual(palette)
+  await page.getByRole('button', { name: 'Убрать шапку', exact: true }).click()
+  await expect(page.locator('.v2-hero-cover')).toHaveCount(0)
+  expect(await colors()).toEqual(palette)
 })
