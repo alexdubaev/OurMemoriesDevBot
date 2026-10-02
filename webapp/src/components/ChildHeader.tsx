@@ -5,6 +5,8 @@ import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
 import { ChildAvatar } from '@/features/family'
 import { getMemolyThemeConfig, type MemolyTheme } from '@/features/theme'
+import { readUiVersion, type UiVersion } from '@/features/ui-version'
+import { ChildHeaderV2 } from '@/components/ui-v2/ChildHeaderV2'
 
 import './ChildHeader.css'
 
@@ -16,6 +18,7 @@ export type ChildHeaderProps = {
   childAvatarUrl?: string | null
   childAvatarCrop?: ChildAvatarCrop | null
   theme: MemolyTheme
+  uiVersion?: UiVersion
   mode: 'feed' | 'family'
   onAllFamilies?: () => void
   onOpenChild?: () => void
@@ -33,7 +36,12 @@ export function ChildHeader({
   onOpenChild,
   onOpenSettings,
   theme,
+  uiVersion = readUiVersion(),
 }: ChildHeaderProps) {
+  if (uiVersion === 'v2') {
+    return <ChildHeaderV2 childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} mode={mode} onAllFamilies={onAllFamilies} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} theme={theme} />
+  }
+
   const artStyle = {
     '--theme-header-art': `url(${getMemolyThemeConfig(theme).headerArtUrl})`,
   } as CSSProperties
