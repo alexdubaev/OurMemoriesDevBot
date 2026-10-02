@@ -11,6 +11,7 @@ import { MaxProviderError } from './max-api'
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
 import { claimMaxSourceAttachment, assertSourcePublicationTransition, waitForMaxAttachmentPoll } from './process-image'
+import { assertMaxForwardBinding } from './forward-import'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const attachmentWaitTimeoutMs = 30_000
@@ -24,7 +25,8 @@ export function createMaxVoiceProcessor(options: {
   const prisma = options.runtime.prisma
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
-  return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
+  return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal;
+    verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>; verifiedChannelId?: bigint }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const attachment = input.event.attachments?.length === 1 ? input.event.attachments[0] : undefined
@@ -40,7 +42,7 @@ export function createMaxVoiceProcessor(options: {
 
     let current: Extract<Awaited<ReturnType<typeof resolveMaxVoiceSource>>, { kind: 'voice' }>
     try {
-      current = await resolveMaxVoiceSource(options.api, input.event, input.signal)
+      current = await resolveMaxVoiceSource(options.api, input.event, input.signal, input.verifiedMessage, input.verifiedChannelId)
     } catch (error) {
       if (error instanceof MaxProviderError && error.code === 'message_identity_mismatch') {
         return terminalDenied(prisma, source.id, input.inboxId, responseActor(input.event))
@@ -59,6 +61,7 @@ export function createMaxVoiceProcessor(options: {
         id: source.plannedMemoryId, childId: admission.childId, kind: 'voice', body: input.event.text ?? '',
         occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds: [mediaId],
       }, async (tx, memoryId) => {
+        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)
         await tx.maxSource.update({ where: { id: source.id }, data: {
@@ -90,13 +93,18 @@ export async function resolveMaxVoiceSource(
   api: MaxApiPort,
   event: Extract<MaxInboundEvent, { kind: 'message_created' }>,
   signal?: AbortSignal,
+  verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>,
+  verifiedChannelId?: bigint,
 ) {
   const attachment = event.attachments?.length === 1 ? event.attachments[0] : undefined
   if (!attachment || attachment.kind !== 'voice') throw new MaxProviderError()
   try {
-    const resolved = await api.getMessage(event.messageId, signal)
+    const resolved = verifiedMessage ?? await api.getMessage(event.messageId, signal)
     const current = resolved.attachments[0]
-    if (resolved.messageId !== event.messageId || (!event.isChannel && resolved.senderId !== event.senderId) || resolved.recipientId !== event.recipientId ||
+    const identityMatches = event.forwardedFrom
+      ? resolved.messageId === event.forwardedFrom.messageId && resolved.recipientType === 'channel' && resolved.recipientId === String(verifiedChannelId)
+      : resolved.messageId === event.messageId && (event.isChannel || resolved.senderId === event.senderId) && resolved.recipientId === event.recipientId
+    if (!identityMatches ||
         resolved.attachments.length !== 1 || current?.kind !== 'voice' || current.providerAttachmentId !== attachment.providerAttachmentId) {
         throw new MaxProviderError(undefined, false, 400, 'message_identity_mismatch')
     }

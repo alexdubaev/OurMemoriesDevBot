@@ -182,15 +182,20 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBo
         isRecord(candidate.sender) && !isPositiveSafeInteger(candidate.sender.user_id))) ||
       (candidate.recipient.chat_type === 'dialog' && candidate.recipient.chat_id !== null && !isPositiveSafeInteger(candidate.recipient.chat_id)) ||
       typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
-      !Array.isArray(candidate.body.attachments)) throw new MaxProviderError()
-  const attachments = candidate.body.attachments.map(normalizeResolvedAttachment)
+      candidate.body.attachments !== undefined && candidate.body.attachments !== null && !Array.isArray(candidate.body.attachments) ||
+      candidate.body.text !== undefined && candidate.body.text !== null && typeof candidate.body.text !== 'string') throw new MaxProviderError()
+  const attachments = Array.isArray(candidate.body.attachments) ? candidate.body.attachments.map(normalizeResolvedAttachment) : []
   const recipientId = candidate.recipient.chat_type === 'channel'
     ? exactRawChannelRecipientId(rawBody, [...path, 'recipient', 'chat_id'], [...path, 'recipient', 'chat_type'], candidate.recipient.chat_id)
     : String(candidate.recipient.user_id)
   if (recipientId === null) throw new MaxProviderError()
+  const timestamp = candidate.timestamp
+  if (timestamp !== undefined && timestamp !== null && (!Number.isSafeInteger(timestamp) || (timestamp as number) < 0)) throw new MaxProviderError()
   return { messageId: expectedMessageId,
     senderId: candidate.recipient.chat_type === 'channel' && !isRecord(candidate.sender) ? '0' : String((candidate.sender as Record<string, unknown>).user_id),
-    recipientId, attachments }
+    recipientId, recipientType: candidate.recipient.chat_type,
+    ...(typeof candidate.body.text === 'string' ? { text: candidate.body.text } : { text: null }),
+    ...(timestamp === undefined || timestamp === null ? {} : { timestamp: timestamp as number }), attachments }
 }
 
 function exactRawChannelRecipientId(rawBody: string, idPath: Array<string | number>, typePath: Array<string | number>, parsedId: unknown): string | null {
