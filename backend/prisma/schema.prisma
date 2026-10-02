@@ -122,6 +122,8 @@ model MaxSource {
   senderSubject   String           @map("sender_subject")
   recipientId     BigInt           @map("recipient_id")
   messageId       String           @map("message_id")
+  originalMessageId String?        @map("original_message_id")
+  originalChannelId BigInt?        @map("original_channel_id")
   status          MaxSourceStatus  @default(accepted)
   plannedMemoryId String           @map("planned_memory_id") @db.Uuid
   memoryId        String?          @map("memory_id") @db.Uuid
@@ -138,6 +140,7 @@ model MaxSource {
   videoReference  MaxVideoReference?
 
   @@unique([botId, recipientId, messageId], map: "max_sources_bot_recipient_message_key")
+  @@unique([familyId, originalChannelId, originalMessageId], map: "max_sources_family_original_channel_message_key")
   @@unique([id, familyId], map: "max_sources_id_family_id_key")
   @@index([status, updatedAt], map: "max_sources_status_idx")
   @@map("max_sources")

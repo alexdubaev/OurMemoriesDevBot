@@ -20,7 +20,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       await familyAccess.requireMember(scope)
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
         id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
-        source: { select: { messageId: true, senderSubject: true, recipientId: true, familyId: true, memoryId: true } },
+        source: { select: { messageId: true, senderSubject: true, recipientId: true, originalMessageId: true, originalChannelId: true, familyId: true, memoryId: true } },
         outboundSource: { select: { messageId: true, recipientId: true, familyId: true } },
         memory: { select: { id: true, familyId: true, status: true, deletedAt: true } },
       } })
@@ -29,24 +29,30 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         (reference.source && reference.source.memoryId !== reference.memory.id) || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
-      let expectedSenderId: string
-      try {
-        expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
-      } catch (error) {
-        if (signal?.aborted) throw error
-        return { readiness: { state: 'unknown', recheckable: true } }
+      const isForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId !== null)
+      let expectedSenderId: string | null = null
+      if (!isForward) {
+        try {
+          expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          return { readiness: { state: 'unknown', recheckable: true } }
+        }
       }
 
       let resolved
       try {
-        resolved = await options.api.getMessage(source.messageId, signal)
+        resolved = await options.api.getMessage(isForward ? reference.source!.originalMessageId! : source.messageId, signal)
       } catch (error) {
         if (signal?.aborted) throw error
         return { readiness: { state: 'unknown', recheckable: true } }
       }
       const providerPosition = reference.source ? reference.attachmentPosition : 0
       const current = resolved.attachments[providerPosition]
-      if (resolved.messageId !== source.messageId || resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId)) throw new MediaFailure('not_found', 'Медиа не найдено')
+      const expectedMessageId = isForward ? reference.source!.originalMessageId! : source.messageId
+      const expectedRecipientId = isForward ? String(reference.source!.originalChannelId) : String(source.recipientId)
+      if (resolved.messageId !== expectedMessageId || resolved.recipientId !== expectedRecipientId ||
+          (isForward ? resolved.recipientType !== 'channel' : resolved.senderId !== expectedSenderId)) throw new MediaFailure('not_found', 'Медиа не найдено')
       if (!current || current.kind !== 'video' || current.providerAttachmentId !== reference.providerAttachmentId) {
         throw new MediaFailure('not_found', 'Медиа не найдено')
       }

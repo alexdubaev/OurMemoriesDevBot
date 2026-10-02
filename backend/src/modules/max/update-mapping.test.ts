@@ -174,7 +174,10 @@ describe('MAX update mapping', () => {
     expect(normalizeMaxUpdate({ update_type: 'message_edited', secret: 'raw' })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, recipient: { chat_id: 5, chat_type: 'chat', user_id: null } } })).toEqual({ kind: 'ignored' })
     expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: null } })).toEqual({ kind: 'ignored' })
-    expect(normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, body: { mid: 'mid-2', link: { type: 'forward' } } } })).toEqual({ kind: 'ignored' })
+    expect(() => normalizeMaxUpdate({
+      ...messageFixture,
+      message: { ...messageFixture.message, body: { mid: 'mid-2', link: { type: 'forward' } } },
+    })).toThrow()
     expect(normalizeMaxUpdate({
       ...messageFixture,
       message: {
@@ -182,7 +185,36 @@ describe('MAX update mapping', () => {
         link: { type: 'forward', message: { mid: 'forwarded-mid' } },
         body: { mid: 'mid-3', text: null, attachments: [] },
       },
-    })).toEqual({ kind: 'ignored' })
+    })).toMatchObject({ kind: 'message_created', senderId: '42', recipientId: '99', messageId: 'mid-3', text: null, attachments: [],
+      forwardedFrom: { messageId: 'forwarded-mid' } })
+  })
+
+  test('recognizes body.link forwards, leaves non-forward links alone, and rejects ambiguous original IDs', () => {
+    const bodyForward = normalizeMaxUpdate({ ...messageFixture, message: {
+      ...messageFixture.message,
+      body: { mid: 'outer-body-link', text: 'untrusted outer comment', attachments: [], link: {
+        type: 'forward', message: { mid: 'original-body-link', text: 'untrusted nested text', attachments: [] },
+      } },
+    } })
+    expect(bodyForward).toMatchObject({ kind: 'message_created', messageId: 'outer-body-link', text: null, attachments: [],
+      forwardedFrom: { messageId: 'original-body-link' } })
+
+    const directWithOtherLink = normalizeMaxUpdate({ ...messageFixture, message: {
+      ...messageFixture.message, link: { type: 'reply', message: { mid: 'quoted' } },
+    } })
+    expect(directWithOtherLink).toMatchObject({ kind: 'message_created', messageId: 'mid-1', text: 'hello',
+      attachments: [{ kind: 'image', providerAttachmentId: '1' }] })
+
+    for (const mid of ['has,comma', 'has space', 'has\tcontrol', 'x'.repeat(513), '', null]) {
+      expect(() => normalizeMaxUpdate({ ...messageFixture, message: { ...messageFixture.message, link: {
+        type: 'forward', message: { mid },
+      } } })).toThrow()
+    }
+    expect(() => normalizeMaxUpdate({ ...messageFixture, message: {
+      ...messageFixture.message,
+      link: { type: 'forward', message: { mid: 'outer-link-original' } },
+      body: { ...messageFixture.message.body, link: { type: 'forward', message: { mid: 'body-link-original' } } },
+    } })).toThrow()
   })
 
   test('rejects malformed supported identities, timestamps, and payloads', () => {

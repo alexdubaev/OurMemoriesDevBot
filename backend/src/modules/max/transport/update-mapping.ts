@@ -210,6 +210,19 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string, ra
   if (!isRecord(message.body)) throw new Error('Invalid MAX message body')
   if (typeof message.body.mid !== 'string' || message.body.mid.length === 0) throw new Error('Invalid MAX message id')
   const body = message.body
+  const forwardLink = forwardLinkOf(message, body)
+  if (forwardLink) {
+    const original = forwardLink.message
+    const originalMessageId = isRecord(original) ? original.mid : null
+    if (!isForwardMessageId(originalMessageId)) throw new Error('Invalid MAX forward identity')
+    return {
+      kind: 'message_created', senderId: sender ? String(sender.user_id) : '0',
+      recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
+      messageId: body.mid as string, occurredAt, text: null, attachments: [],
+      forwardedFrom: { messageId: originalMessageId },
+      ...(isChannel ? { isChannel: true } : {}),
+    }
+  }
   const messageId = body.mid as string
   if (body.attachments !== undefined && body.attachments !== null && !Array.isArray(body.attachments)) {
     throw new Error('Invalid MAX message attachments')
@@ -218,7 +231,6 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string, ra
   const attachments = Array.isArray(body.attachments) ? body.attachments.map(normalizeAttachment) : []
   const text = body.text === null || body.text === undefined ? null :
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
-  if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
     kind: 'message_created', senderId: sender ? String(sender.user_id) : '0', recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
     messageId, occurredAt, text, attachments, ...(isChannel ? { isChannel: true } : {}),
@@ -275,9 +287,15 @@ function normalizeFileAttachmentId(value: unknown) {
   return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 
-function isForwardOnly(message: Record<string, unknown>, body: Record<string, unknown>) {
-  return (isRecord(message.link) && message.link.type === 'forward') ||
-    (isRecord(body.link) && body.link.type === 'forward')
+function forwardLinkOf(message: Record<string, unknown>, body: Record<string, unknown>) {
+  const messageLink = isRecord(message.link) && message.link.type === 'forward' ? message.link : null
+  const bodyLink = isRecord(body.link) && body.link.type === 'forward' ? body.link : null
+  if (messageLink && bodyLink) throw new Error('Ambiguous MAX forward identity')
+  return messageLink ?? bodyLink
+}
+
+function isForwardMessageId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\s,\u0000-\u001f\u007f-\u009f]/u.test(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
