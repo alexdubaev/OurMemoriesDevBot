@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoReadiness } from '@web-app-demo/contracts'
 
 import type { BackendRuntime } from '../../../runtime'
@@ -5,14 +6,17 @@ import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { MediaFailure } from '../../media'
 import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
 import { MaxProviderError } from './max-api'
+import { createMaxMediaDownload } from './media-download'
 
 const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
 const maxHeight = 720
+const maxPosterBytes = 2 * 1024 * 1024
+const posterMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
   const familyAccess = createPrismaFamilyAccess(options.runtime.prisma)
-  const resolve = async (scope: FamilyScope, referenceId: string, signal?: AbortSignal): Promise<{ readiness: MaxVideoReadiness; url?: string }> => {
+  const resolve = async (scope: FamilyScope, referenceId: string, signal?: AbortSignal): Promise<{ readiness: MaxVideoReadiness; url?: string; thumbnailUrl?: string | null }> => {
       await familyAccess.requireMember(scope)
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
         id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
@@ -57,7 +61,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       }
       const rendition = selectRendition(video.renditions)
       if (!rendition) return { readiness: { state: 'unknown', recheckable: true } }
-      return { readiness: { state: 'ready', recheckable: false }, url: rendition.url }
+      return { readiness: { state: 'ready', recheckable: false }, url: rendition.url, thumbnailUrl: video.thumbnailUrl ?? null }
   }
   return {
     async readiness(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
@@ -69,6 +73,20 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       if (result.readiness.state === 'unknown') throw new MediaFailure('video_readiness_unknown', 'Готовность видео пока неизвестна')
       if (result.readiness.state === 'unavailable') throw new MediaFailure('video_unavailable', 'Медиа недоступно')
       return fetchCdnVideo(result.url!, rangeHeader, method, maxBytes, signal)
+    },
+    async poster(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
+      const result = await resolve(scope, referenceId, signal)
+      if (result.readiness.state !== 'ready' || !result.thumbnailUrl) return null
+      const image = await createMaxMediaDownload()(result.thumbnailUrl, maxPosterBytes, signal)
+      const contentType = image.contentType?.split(';', 1)[0]?.trim().toLowerCase()
+      if (!contentType || !posterMimeTypes.has(contentType)) throw new MediaFailure('unsupported_media', 'Превью видео недоступно')
+      const bytes = image.bytes
+      return {
+        body: bytes,
+        contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp',
+        contentLength: bytes.byteLength,
+        etag: `"${createHash('sha256').update(bytes).digest('hex')}"`,
+      }
     },
   }
 }

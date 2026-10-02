@@ -793,7 +793,7 @@ test('a ready MAX video preview embeds native playback without a persistent MAX 
 
     expect(markup).toContain('<video')
     expect(markup).toContain('controls=""')
-    expect(markup).toContain('preload="metadata"')
+    expect(markup).toContain('preload="none"')
     expect(markup).toContain('playsInline=""')
     expect(markup).not.toContain('#t=0.001')
     expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
@@ -872,7 +872,7 @@ test('an aborted queued MAX readiness check never starts a request', async () =>
   expect(started).toBe(3)
 })
 
-test('a MAX video source is assigned and loaded once per distinct source', () => {
+test('a MAX video source is assigned once without eager loading, then reset on removal', () => {
   const loads: string[] = []
   const video = {
     src: '',
@@ -887,7 +887,7 @@ test('a MAX video source is assigned and loaded once per distinct source', () =>
   assigned = loadMaxVideoSourceOnce(video, null, assigned)
   assigned = loadMaxVideoSourceOnce(video, null, assigned)
 
-  expect(loads).toEqual(['/video-a.mp4', '/video-b.mp4', ''])
+  expect(loads).toEqual([''])
   expect(assigned).toBeNull()
 })
 

@@ -36,6 +36,50 @@ test('finalize preserves a committed ready asset when temporary cleanup fails', 
   expect(warnings).toEqual(['Error'])
 })
 
+test('private image ETag returns 304 only after family membership and metadata authorization', async () => {
+  let reads = 0
+  let lookups = 0
+  let membershipChecks = 0
+  const service = createService({
+    commit: async () => ({ kind: 'ready', asset }),
+    requireMember: async () => { membershipChecks += 1 },
+    resolveContent: async () => {
+      lookups += 1
+      return { objectKey: 'private/image', contentType: 'image/jpeg', contentLength: 4, etag: 'abc' }
+    },
+    readObject: async () => { reads += 1; return null },
+  })
+
+  await expect(service.content(scope, asset.id, 'display', undefined, '"abc"')).resolves.toMatchObject({
+    body: null, cacheable: true, notModified: true, etag: '"abc"',
+  })
+  expect(membershipChecks).toBe(1)
+  expect(lookups).toBe(1)
+  expect(reads).toBe(0)
+})
+
+test('private image validators never bypass membership and Range stays no-store', async () => {
+  let reads = 0
+  let deniedLookups = 0
+  const denied = createService({
+    commit: async () => ({ kind: 'ready', asset }),
+    requireMember: async () => { throw new MediaFailure('forbidden', 'denied') },
+    resolveContent: async () => { deniedLookups += 1; return { objectKey: 'private/image', contentType: 'image/jpeg', contentLength: 4, etag: 'abc' } },
+  })
+  await expect(denied.content(scope, asset.id, 'display', undefined, '"abc"')).rejects.toThrow('denied')
+  expect(deniedLookups).toBe(0)
+
+  const ranged = createService({
+    commit: async () => ({ kind: 'ready', asset }),
+    resolveContent: async () => ({ objectKey: 'private/image', contentType: 'image/jpeg', contentLength: 4, etag: 'abc' }),
+    readObject: async () => { reads += 1; return { key: 'private/image', body: new Blob([new Uint8Array([1, 2])]).stream(), contentLength: 2, contentType: 'image/jpeg' } },
+  })
+  await expect(ranged.content(scope, asset.id, 'display', 'bytes=0-1', '"abc"')).resolves.toMatchObject({
+    cacheable: false, notModified: false, range: { start: 0, end: 1 },
+  })
+  expect(reads).toBe(1)
+})
+
 test('finalize still rejects a processing error before commit', async () => {
   let committed = false
   const service = createService({
@@ -130,6 +174,9 @@ test('does not replay an idempotency key for changed photo metadata', async () =
 
 function createService(options: {
   commit: MediaRepository['commitFinalization']
+  requireMember?: () => Promise<void>
+  resolveContent?: MediaRepository['resolveContent']
+  readObject?: PrivateStorage['readObject']
   cleanup?: (directory: string) => Promise<void>
   headObject?: () => Promise<Awaited<ReturnType<PrivateStorage['headObject']>>>
   processPhoto?: PhotoProcessor
@@ -140,7 +187,7 @@ function createService(options: {
   const storage = {
     headObject: options.headObject ?? (async () => ({ contentLength: bytes.byteLength, contentType: 'image/jpeg' })),
     readRange: async () => bytes,
-    readObject: async () => ({ body: new Blob([bytes]).stream(), contentLength: bytes.byteLength, contentType: 'image/jpeg' }),
+    readObject: options.readObject ?? (async () => ({ body: new Blob([bytes]).stream(), contentLength: bytes.byteLength, contentType: 'image/jpeg' })),
     writeObject: async () => undefined,
   } as unknown as PrivateStorage
   const repository: MediaRepository = {
@@ -154,7 +201,7 @@ function createService(options: {
     rejectUpload: options.reject ?? (async () => undefined),
     commitFinalization: options.commit,
     readyForMemory: async () => false,
-    resolveContent: async () => null,
+    resolveContent: options.resolveContent ?? (async () => null),
     resolveMemberAvatarContent: async () => null,
   }
   const processPhoto: PhotoProcessor = options.processPhoto ?? (async () => ({
@@ -163,7 +210,7 @@ function createService(options: {
     preview: { bytes: new Uint8Array([2]), sha256: 'preview', width: 600, height: 800 },
   }))
   return new (MediaService as any)(
-    {} as never, repository, storage, { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
+    { requireMember: options.requireMember ?? (async () => undefined) } as never, repository, storage, { familyQuotaBytes: 1_000_000, maxPendingUploads: 5, reservationTtlSeconds: 900, uploadUrlTtlSeconds: 300 },
     processPhoto, async () => ({ width: null, height: null, durationMs: 1 }), () => new Date('2026-09-11T00:00:00.000Z'),
     options.cleanup, options.warn,
   ) as MediaService

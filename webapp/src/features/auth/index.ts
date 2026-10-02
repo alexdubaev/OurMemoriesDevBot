@@ -11,6 +11,7 @@ export {
   readPasswordResetToken,
 } from './password-reset-location'
 export { AuthProvider } from './provider'
+export { PrivateCacheGate } from './private-cache-gate'
 export { AuthContext } from './context'
 export { hostAuthAttemptKey, shouldKeepHostAuthPreloader, shouldStartHostAuth, useHostAuthHandoff } from './host-auth-handoff'
 export { authQueryKeys, sessionQueryKeys } from './queries'

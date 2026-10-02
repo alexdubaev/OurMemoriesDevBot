@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import type { BrowserLinkStartResponse, FamilyHomeResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -29,6 +29,7 @@ import {
 } from '@/features/family'
 import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
+import { useQueryClient } from '@tanstack/react-query'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
@@ -36,6 +37,7 @@ import { ThemeProvider } from '@/features/theme'
 import { claimWelcome, WelcomeSplash } from '@/features/welcome'
 import { memberAvatarUpdatedEvent } from '@/features/avatar'
 import { readPwaInstallIntent, setPwaInstallDismissed } from '@/platform/pwa-install'
+import { allowPrivateFamilyCache, persistentUiQueryKey, privateFamilyAccessRevokedEvent, removePrivateFamilyCache, type PersistentFamilyPresentation } from '@/platform/persistence/private-cache'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -169,31 +171,36 @@ function yesNo(value: boolean) {
 }
 
 function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
+  const queryClient = useQueryClient()
+  const savedPresentation = inviteToken ? undefined : queryClient.getQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(currentUserId))
+  const hasCachedHome = Boolean(savedPresentation?.home)
   const installIntent = useMemo(() => hostBridge.kind === 'browser' ? readPwaInstallIntent(window.location) : null, [hostBridge.kind])
-  const [home, setHome] = useState<FamilyHomeResponse | null>(null)
-  const homeRef = useRef<FamilyHomeResponse | null>(null)
-  const [homeLoading, setHomeLoading] = useState(true)
+  const [home, setHome] = useState<FamilyHomeResponse | null>(() => savedPresentation?.home as FamilyHomeResponse | null ?? null)
+  const homeRef = useRef<FamilyHomeResponse | null>(home)
+  const [homeLoading, setHomeLoading] = useState(!hasCachedHome)
   const [homeError, setHomeError] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [familyResponse, setFamilyResponse] = useState<FamilyResponse | null>(null)
-  const [members, setMembers] = useState<FamilyMemberDto[]>([])
+  const [familyResponse, setFamilyResponse] = useState<FamilyResponse | null>(() => savedPresentation?.family as FamilyResponse | null ?? null)
+  const familyResponseRef = useRef(familyResponse)
+  useEffect(() => { familyResponseRef.current = familyResponse }, [familyResponse])
+  const [members, setMembers] = useState<FamilyMemberDto[]>(() => savedPresentation?.members as FamilyMemberDto[] ?? [])
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
   const [editingChild, setEditingChild] = useState(false)
   const [editingChildPhoto, setEditingChildPhoto] = useState(false)
   const [viewingChild, setViewingChild] = useState(false)
-  const [screen, setScreen] = useState<'hub' | 'family' | 'feed'>('hub')
+  const [screen, setScreen] = useState<'hub' | 'family' | 'feed'>(() => savedPresentation?.screen ?? 'hub')
   const [openAddFromFamily, setOpenAddFromFamily] = useState(false)
-  const [filter, setFilter] = useState<FeedFilter>('all')
-  const [selectedMembershipEpoch, setSelectedMembershipEpoch] = useState<number | null>(null)
+  const [filter, setFilter] = useState<FeedFilter>(() => savedPresentation?.filter ?? 'all')
+  const [selectedMembershipEpoch, setSelectedMembershipEpoch] = useState<number | null>(() => savedPresentation?.membershipEpoch ?? null)
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
   const maxVideoPendingRef = useRef(maxVideoUploadAcceptance)
   const selectionVersion = useRef(0)
-  const selectedFamilyIdRef = useRef<string | null>(null)
+  const selectedFamilyIdRef = useRef<string | null>(savedPresentation?.selectedFamilyId ?? null)
   const homeRefreshVersion = useRef(0)
   const homeRefreshInFlight = useRef<Promise<FamilyHomeResponse> | null>(null)
   const createKey = useRef<string | null>(null)
@@ -207,6 +214,20 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [welcomeClaimError, setWelcomeClaimError] = useState(false)
   const [welcomeClaimRetry, setWelcomeClaimRetry] = useState(0)
 
+  useEffect(() => {
+    if (inviteToken) return
+    const presentation: PersistentFamilyPresentation = {
+      home,
+      family: familyResponse,
+      members,
+      screen,
+      selectedFamilyId: selectedFamilyIdRef.current,
+      membershipEpoch: selectedMembershipEpoch,
+      filter,
+    }
+    queryClient.setQueryData(persistentUiQueryKey(currentUserId), presentation)
+  }, [currentUserId, familyResponse, filter, home, inviteToken, members, queryClient, screen, selectedMembershipEpoch])
+
   const finishWelcome = useCallback(() => {
     if (!welcomeResolve.current) return
     welcomeSeen.current = true
@@ -219,7 +240,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
 
   const refreshHome = useCallback(async (initial = false) => {
     const version = ++homeRefreshVersion.current
-    if (initial) setHomeLoading(true)
+    if (initial && !homeRef.current) setHomeLoading(true)
     setHomeError(null)
     try {
       if (homeRefreshInFlight.current) await homeRefreshInFlight.current.catch(() => undefined)
@@ -293,6 +314,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setFilter('all')
     setOpenAddFromFamily(false)
     setViewingChild(false)
+    selectedFamilyIdRef.current = null
     try {
       const response = await loadFamily(transport, familyId)
       if (version !== selectionVersion.current) return
@@ -328,6 +350,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         setScreen('hub')
         return
       }
+      allowPrivateFamilyCache(currentUserId, familyId)
       setFamilyResponse(response)
       selectedFamilyIdRef.current = familyId
       setSelectedMembershipEpoch(summary.membershipEpoch)
@@ -336,7 +359,13 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       setScreen(response.child ? 'feed' : 'family')
     } catch (reason) {
       if (version !== selectionVersion.current) return
-      setNotice(reason instanceof ApiRequestError && [403, 404].includes(reason.status)
+      const denied = reason instanceof ApiRequestError && [403, 404].includes(reason.status)
+      if (denied) {
+        const updated = homeRef.current && { ...homeRef.current, items: homeRef.current.items.filter((item) => item.familyId !== familyId) }
+        if (updated) { homeRef.current = updated; setHome(updated) }
+        void removePrivateFamilyCache(queryClient, currentUserId, familyId)
+      }
+      setNotice(denied
         ? 'Доступ к этой семье закрыт.'
         : 'Не удалось открыть семью. Повторите попытку.')
       setScreen('hub')
@@ -344,9 +373,14 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     } finally {
       if (version === selectionVersion.current) setBusy(false)
     }
-  }, [currentUserId, refreshHome, transport])
+  }, [currentUserId, queryClient, refreshHome, transport])
 
-  const returnHome = useCallback((message?: string) => {
+  const returnHome = useCallback((message?: string, revokedFamilyId?: string) => {
+    if (revokedFamilyId) {
+      const updated = homeRef.current && { ...homeRef.current, items: homeRef.current.items.filter((item) => item.familyId !== revokedFamilyId) }
+      if (updated) { homeRef.current = updated; setHome(updated) }
+      void removePrivateFamilyCache(queryClient, currentUserId, revokedFamilyId)
+    }
     selectionVersion.current += 1
     selectedFamilyIdRef.current = null
     setSelectedMembershipEpoch(null)
@@ -362,16 +396,28 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setBusy(false)
     setNotice(message ?? null)
     void refreshHome()
-  }, [refreshHome])
+  }, [currentUserId, queryClient, refreshHome])
 
   useEffect(() => {
-    const familyId = selectedFamilyIdRef.current
-    if (!familyId || !home || selectedMembershipEpoch === null) return
-    const item = home.items.find((entry) => entry.familyId === familyId)
-    if (item && item.membershipEpoch === selectedMembershipEpoch) return
-    seenQueueRef.current?.cancelFamily(familyId)
-    returnHome('Доступ к этой семье изменился. Выберите её снова в списке.')
-  }, [home, returnHome, selectedMembershipEpoch])
+    const onFamilyAccessRevoked = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; familyId?: string }>).detail
+      if (detail?.userId !== currentUserId || !detail.familyId) return
+      const familyId = detail.familyId
+      if (selectedFamilyIdRef.current === familyId) {
+        returnHome('Доступ к этой семье закрыт.', familyId)
+        return
+      }
+      const current = homeRef.current
+      if (current) {
+        const updated = { ...current, items: current.items.filter((item) => item.familyId !== familyId) }
+        homeRef.current = updated
+        setHome(updated)
+      }
+      void removePrivateFamilyCache(queryClient, currentUserId, familyId)
+    }
+    window.addEventListener(privateFamilyAccessRevokedEvent, onFamilyAccessRevoked)
+    return () => window.removeEventListener(privateFamilyAccessRevokedEvent, onFamilyAccessRevoked)
+  }, [currentUserId, queryClient, returnHome])
 
   const refreshSelected = useCallback(async () => {
     const familyId = familyResponse?.family.id
@@ -392,10 +438,25 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
     } catch (reason) {
       if (version !== selectionVersion.current) return
-      if (reason instanceof ApiRequestError && [403, 404].includes(reason.status)) returnHome('Доступ к этой семье закрыт.')
+      if (reason instanceof ApiRequestError && [403, 404].includes(reason.status)) returnHome('Доступ к этой семье закрыт.', familyId)
       else setNotice('Не удалось обновить семью. Повторите попытку.')
     }
   }, [familyResponse?.family.id, returnHome, transport])
+
+  const refreshSelectedEvent = useEffectEvent(refreshSelected)
+
+  useEffect(() => {
+    const familyId = selectedFamilyIdRef.current
+    if (!familyId || !home || selectedMembershipEpoch === null) return
+    const item = home.items.find((entry) => entry.familyId === familyId)
+    if (!item) {
+      void refreshSelectedEvent()
+      return
+    }
+    if (item.membershipEpoch === selectedMembershipEpoch) return
+    seenQueueRef.current?.cancelFamily(familyId)
+    returnHome('Доступ к этой семье изменился. Выберите её снова в списке.', familyId)
+  }, [home, returnHome, selectedMembershipEpoch])
 
   useEffect(() => {
     const onAvatarUpdated = (event: Event) => {
@@ -472,6 +533,10 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       }
       const result = await refreshHome(true)
       if (cancelled) return
+      if (selectedFamilyIdRef.current && familyResponseRef.current) {
+        void refreshSelectedEvent()
+        return
+      }
       if (installIntent?.familyId && result) {
         let page = result
         let familyAvailable = page.items.some((item) => item.familyId === installIntent.familyId)
@@ -576,7 +641,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     else if (!editingChildPhoto) { setEditingChild(false); setEditingChildPhoto(false) }
   }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
-  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.') }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div>
+  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div>
   return <div style={insetsStyle}><FamilyScreen canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onAllFamilies={() => returnHome()} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); setScreen('feed') }} onRefresh={refreshSelected} transport={transport} /></div>
 }
 

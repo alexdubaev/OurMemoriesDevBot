@@ -176,7 +176,7 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
     headers: {
       Origin: 'http://localhost:5173',
       'Access-Control-Request-Method': 'PATCH',
-      'Access-Control-Request-Headers': 'authorization,if-match',
+      'Access-Control-Request-Headers': 'authorization,if-match,x-private-media-purpose',
     },
   })
 
@@ -185,6 +185,8 @@ test('CORS preflight allows the standard mutation methods exposed by the client 
   expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('if-match')
   expect(response.headers.get('access-control-allow-headers')?.toLowerCase())
     .toContain('idempotency-key')
+  expect(response.headers.get('access-control-allow-headers')?.toLowerCase())
+    .toContain('x-private-media-purpose')
 })
 test('account mutations reject oversized bodies before authentication', async () => {
   const app = createApp({

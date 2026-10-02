@@ -84,7 +84,275 @@ test.describe.serial('T07 live feed', () => {
       })
     }
     await page.goto('/')
+    if (testInfo.title.startsWith('restores the authenticated family presentation') ||
+        testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot') {
+      const continueButton = page.getByRole('button', { name: 'Продолжить' })
+      await expect(continueButton).toBeVisible()
+      await continueButton.click()
+    }
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  })
+
+  test('restores the authenticated family presentation from IndexedDB after a page restart', async ({ page }) => {
+    await openFeed(page)
+    await expect.poll(() => page.evaluate(async (expectedFamilyId: string) => {
+      const request = indexedDB.open('memoly-private-cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result ?? null)
+        request.onerror = () => reject(request.error)
+      })
+      const count = await new Promise<number>((resolve, reject) => {
+        const transaction = db.transaction('entries', 'readonly')
+        const cursor = transaction.objectStore('entries').openCursor()
+        let found = false
+        cursor.onsuccess = () => {
+          const current = cursor.result
+          if (!current) return resolve(found ? 1 : 0)
+          const value = current.value as { kind?: string; data?: { queries?: Array<{ queryKey?: unknown[]; data?: { screen?: string; selectedFamilyId?: string | null } }> } }
+          found ||= value.kind === 'queries' && Boolean(value.data?.queries?.some((query) =>
+            query.queryKey?.[1] === 'persistent-ui' && query.data?.screen === 'feed' && query.data.selectedFamilyId === expectedFamilyId))
+          current.continue()
+        }
+        cursor.onerror = () => reject(cursor.error)
+      })
+      db.close()
+      return count
+    }, fixture.familyId)).toBe(1)
+    const savedPresentation = await page.evaluate(async (userId) => {
+      const request = indexedDB.open('memoly-private-cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const value = await new Promise<{ screen?: string; selectedFamilyId?: string | null } | null>((resolve, reject) => {
+        const request = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${userId}:queries:state`)
+        request.onsuccess = () => {
+          const entry = request.result as { data?: { queries?: Array<{ queryKey: unknown[]; data: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined
+          resolve(entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null)
+        }
+        request.onerror = () => reject(request.error)
+      })
+      db.close()
+      return value
+    }, fixture.userId)
+    if (savedPresentation?.screen !== 'feed' || savedPresentation.selectedFamilyId !== fixture.familyId) {
+      throw new Error(JSON.stringify({ savedPresentation, visibleText: await page.locator('body').innerText() }))
+    }
+    let releaseFamilyHome!: () => void
+    let markFamilyHomeStarted!: () => void
+    const familyHomeHold = new Promise<void>((resolve) => { releaseFamilyHome = resolve })
+    const familyHomeStarted = new Promise<void>((resolve) => { markFamilyHomeStarted = resolve })
+    let releaseFamilyDetail!: () => void
+    let markFamilyDetailStarted!: () => void
+    const familyDetailHold = new Promise<void>((resolve) => { releaseFamilyDetail = resolve })
+    const familyDetailStarted = new Promise<void>((resolve) => { markFamilyDetailStarted = resolve })
+    await page.route('**/api/v1/me/families*', async (route) => {
+      markFamilyHomeStarted()
+      await familyHomeHold
+      await route.continue()
+    })
+    await page.route(`**/api/v1/families/${fixture.familyId}`, async (route) => {
+      markFamilyDetailStarted()
+      await familyDetailHold
+      const response = await route.fetch()
+      const payload = await response.json() as { child: { name: string } }
+      payload.child.name = 'Обновлено E2E'
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await page.reload()
+    const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(welcomeContinue).toBeVisible()
+    await welcomeContinue.click()
+    await familyHomeStarted
+    await expect(page.getByRole('heading', { name: 'Лента воспоминаний' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toHaveCount(0)
+    await page.screenshot({ path: resolve('e2e/.artifacts/persistent-cache-restored-feed.png'), animations: 'disabled' })
+    releaseFamilyHome()
+    await familyDetailStarted
+    await expect(page.getByRole('heading', { name: 'Лента воспоминаний' })).toBeVisible()
+    await expect(page.getByText('Лиза', { exact: true })).toBeVisible()
+    releaseFamilyDetail()
+    await expect(page.getByText('Обновлено E2E')).toBeVisible()
+    await page.unroute('**/api/v1/me/families*')
+    await page.unroute(`**/api/v1/families/${fixture.familyId}`)
+
+    const otherFamilyId = randomUUID()
+    const cleanup = await page.evaluate(async ({ userId, familyId, otherFamilyId, imageBase64 }) => {
+      const cache = await import('/src/platform/persistence/private-cache.ts')
+      const { QueryClient } = await import('/node_modules/.vite/deps/@tanstack_react-query.js')
+      const restoredForA = new QueryClient()
+      const userAGenerationForQueries = cache.activatePrivateCacheIdentity(userId)
+      await cache.restorePrivateQueryCache(restoredForA, userId, userAGenerationForQueries)
+      const restoredPresentation = restoredForA.getQueryData<{ screen?: string; selectedFamilyId?: string | null }>(cache.persistentUiQueryKey(userId))
+      const restoredFeedCount = restoredForA.getQueryCache().getAll().filter((query) => query.queryKey[1] === 'feed').length
+      const isolatedUserId = `${userId}-other-account`
+      const restoredForB = new QueryClient()
+      const userBGenerationForQueries = cache.activatePrivateCacheIdentity(isolatedUserId)
+      await cache.restorePrivateQueryCache(restoredForB, isolatedUserId, userBGenerationForQueries)
+      const otherUserQueries = restoredForB.getQueryCache().getAll().length
+      const sourceFeedData = restoredForA.getQueryCache().getAll().find((query) => query.queryKey[1] === 'feed')?.state.data
+      const boundedUserId = `${userId}-bounded`
+      const boundedClient = new QueryClient()
+      boundedClient.setQueryData(cache.persistentUiQueryKey(boundedUserId), restoredPresentation)
+      for (let i = 0; i < 120; i++) {
+        boundedClient.setQueryData(['session', 'feed', familyId, 'all', false, null, null, { page: i }], { pages: [{ items: [], nextCursor: null }], pageParams: [null] }, { updatedAt: i })
+      }
+      const boundedGeneration = cache.activatePrivateCacheIdentity(boundedUserId)
+      await cache.persistPrivateQueryCache(boundedClient, boundedUserId, boundedGeneration)
+      const boundDbRequest = indexedDB.open('memoly-private-cache')
+      const boundDb = await new Promise<IDBDatabase>((resolve, reject) => { boundDbRequest.onsuccess = () => resolve(boundDbRequest.result); boundDbRequest.onerror = () => reject(boundDbRequest.error) })
+      const boundedSnapshot = await new Promise<{ queries: Array<{ queryKey: unknown[] }> } | null>((resolve, reject) => {
+        const request = boundDb.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${boundedUserId}:queries:state`)
+        request.onsuccess = () => resolve((request.result as { data?: { queries?: Array<{ queryKey: unknown[] }> } } | undefined)?.data as { queries: Array<{ queryKey: unknown[] }> } | undefined ?? null)
+        request.onerror = () => reject(request.error)
+      })
+      boundDb.close()
+      const boundedQueryCount = boundedSnapshot?.queries.length ?? 0
+      const boundedByteSize = new TextEncoder().encode(JSON.stringify(boundedSnapshot)).byteLength
+      const keptPresentation = boundedSnapshot?.queries.some((query) => query.queryKey[1] === 'persistent-ui') ?? false
+      const byteBoundedUserId = `${userId}-byte-bounded`
+      const byteBoundedClient = new QueryClient()
+      byteBoundedClient.setQueryData(cache.persistentUiQueryKey(byteBoundedUserId), restoredPresentation)
+      const largeFeedData = structuredClone(sourceFeedData) as { pages: Array<{ items: Array<{ body: string }> }>; pageParams: unknown[] } | undefined
+      if (largeFeedData?.pages[0]?.items[0]) largeFeedData.pages[0].items[0].body = 'x'.repeat(30_000)
+      for (let i = 0; i < 120; i++) byteBoundedClient.setQueryData(['session', 'feed', familyId, 'all', false, null, null, { page: i }], largeFeedData, { updatedAt: i })
+      const byteBoundedGeneration = cache.activatePrivateCacheIdentity(byteBoundedUserId)
+      await cache.persistPrivateQueryCache(byteBoundedClient, byteBoundedUserId, byteBoundedGeneration)
+      const byteBoundedDbRequest = indexedDB.open('memoly-private-cache')
+      const byteBoundedDb = await new Promise<IDBDatabase>((resolve, reject) => { byteBoundedDbRequest.onsuccess = () => resolve(byteBoundedDbRequest.result); byteBoundedDbRequest.onerror = () => reject(byteBoundedDbRequest.error) })
+      const byteBoundedSnapshot = await new Promise<{ queries: Array<{ queryKey: unknown[] }> } | null>((resolve, reject) => {
+        const request = byteBoundedDb.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${byteBoundedUserId}:queries:state`)
+        request.onsuccess = () => resolve((request.result as { data?: { queries?: Array<{ queryKey: unknown[] }> } } | undefined)?.data as { queries: Array<{ queryKey: unknown[] }> } | undefined ?? null)
+        request.onerror = () => reject(request.error)
+      })
+      byteBoundedDb.close()
+      const byteBoundedSize = new TextEncoder().encode(JSON.stringify(byteBoundedSnapshot)).byteLength
+      const byteBoundedPresentationKept = byteBoundedSnapshot?.queries.some((query) => query.queryKey[1] === 'persistent-ui') ?? false
+      const generation = cache.activatePrivateCacheIdentity(userId)
+      cache.allowPrivateFamilyCache(userId, familyId)
+      cache.allowPrivateFamilyCache(userId, otherFamilyId)
+      const bytes = Uint8Array.from(atob(imageBase64), (char) => char.charCodeAt(0))
+      const familyPath = `/api/v1/families/${familyId}/media/11111111-1111-4111-8111-111111111111/content?variant=display`
+      const otherPath = `/api/v1/families/${otherFamilyId}/media/22222222-2222-4222-8222-222222222222/content?variant=display`
+      await cache.cachePrivateImageResponse(userId, familyPath, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), generation)
+      await cache.cachePrivateImageResponse(userId, otherPath, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), generation)
+      const avatarUserId = crypto.randomUUID()
+      const avatarPath = `/api/v1/families/${familyId}/media/avatars/${avatarUserId}/${crypto.randomUUID()}/content`
+      const changedAvatarPath = `/api/v1/families/${familyId}/media/avatars/${avatarUserId}/${crypto.randomUUID()}/content`
+      const posterPath = `/api/v1/families/${familyId}/media/max-videos/${crypto.randomUUID()}/poster`
+      const avatarStored = await cache.cachePrivateImageResponse(userId, avatarPath, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), generation)
+      const posterStored = await cache.cachePrivateImageResponse(userId, posterPath, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), generation)
+      const rejectedVideo = await cache.cachePrivateImageResponse(userId, `/api/v1/families/${familyId}/media/max-videos/${crypto.randomUUID()}/content`, new Response(bytes, { headers: { 'Content-Type': 'video/mp4' } }), generation)
+      const rejectedPartial = await cache.cachePrivateImageResponse(userId, familyPath, new Response(bytes, { status: 206, headers: { 'Content-Type': 'image/png' } }), generation)
+      const changedAvatarMiss = await cache.readPrivateImage(userId, changedAvatarPath)
+      const avatarHit = avatarStored && (await cache.readPrivateImage(userId, avatarPath))?.size === bytes.length
+      const posterHit = posterStored && (await cache.readPrivateImage(userId, posterPath))?.size === bytes.length
+      const queryClient = { removeQueries() {}, setQueryData() {}, getQueryCache: () => ({ getAll: () => [] }) }
+      await cache.removePrivateFamilyCache(queryClient as never, userId, familyId)
+      const removed = await cache.readPrivateImage(userId, familyPath)
+      const retained = await cache.readPrivateImage(userId, otherPath)
+      await cache.clearPrivateUserCache(userId)
+      const afterLogout = await cache.readPrivateImage(userId, otherPath)
+      const isolatedUserA = `${userId}-cache-a`
+      const isolatedUserB = `${userId}-cache-b`
+      const isolatedPath = `/api/v1/families/${familyId}/media/33333333-3333-4333-8333-333333333333/content?variant=display`
+      const blueBytes = Uint8Array.from([0, 1, 2, 255])
+      const userAGeneration = cache.activatePrivateCacheIdentity(isolatedUserA)
+      cache.allowPrivateFamilyCache(isolatedUserA, familyId)
+      await cache.cachePrivateImageResponse(isolatedUserA, isolatedPath, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), userAGeneration)
+      const userBGeneration = cache.activatePrivateCacheIdentity(isolatedUserB)
+      cache.allowPrivateFamilyCache(isolatedUserB, familyId)
+      await cache.cachePrivateImageResponse(isolatedUserB, isolatedPath, new Response(blueBytes, { headers: { 'Content-Type': 'image/png' } }), userBGeneration)
+      const userAImage = await cache.readPrivateImage(isolatedUserA, isolatedPath)
+      const userBImage = await cache.readPrivateImage(isolatedUserB, isolatedPath)
+      const lateGeneration = cache.activatePrivateCacheIdentity(isolatedUserA)
+      cache.allowPrivateFamilyCache(isolatedUserA, familyId)
+      const lateFamilyGeneration = cache.privateFamilyCacheGeneration(isolatedUserA, familyId)
+      cache.activatePrivateCacheIdentity(isolatedUserB)
+      const lateWrite = await cache.cachePrivateImageResponse(isolatedUserA, isolatedPath, new Response(blueBytes, { headers: { 'Content-Type': 'image/png' } }), lateGeneration, lateFamilyGeneration)
+
+      const malformedUser = `${userId}-old-schema`
+      const dbRequest = indexedDB.open('memoly-private-cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { dbRequest.onsuccess = () => resolve(dbRequest.result); dbRequest.onerror = () => reject(dbRequest.error) })
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('entries', 'readwrite')
+        transaction.objectStore('entries').put({ id: `memoLy:1:${malformedUser}:image:old`, userId: malformedUser, schema: 0, kind: 'image', key: 'old', size: 1, lastAccess: Date.now(), blob: new Blob([bytes]) })
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(transaction.error)
+      })
+      db.close()
+      cache.activatePrivateCacheIdentity(malformedUser)
+      const malformedGeneration = cache.privateCacheIdentityGeneration()
+      await cache.restorePrivateQueryCache({ removeQueries() {}, setQueryData() {}, getQueryCache: () => ({ getAll: () => [] }) } as never, malformedUser, malformedGeneration)
+      const staleDbRequest = indexedDB.open('memoly-private-cache')
+      const staleDb = await new Promise<IDBDatabase>((resolve, reject) => { staleDbRequest.onsuccess = () => resolve(staleDbRequest.result); staleDbRequest.onerror = () => reject(staleDbRequest.error) })
+      const staleSchema = await new Promise<unknown>((resolve, reject) => {
+        const request = staleDb.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${malformedUser}:image:old`)
+        request.onsuccess = () => resolve(request.result ?? null)
+        request.onerror = () => reject(request.error)
+      })
+      staleDb.close()
+
+      const evictionUser = `${userId}-eviction`
+      const evictionGeneration = cache.activatePrivateCacheIdentity(evictionUser)
+      cache.allowPrivateFamilyCache(evictionUser, familyId)
+      const paths = Array.from({ length: 101 }, (_, i) => `/api/v1/families/${familyId}/media/${`${i}`.padStart(8, '0')}-1111-4111-8111-111111111111/content?variant=display`)
+      for (const path of paths) await cache.cachePrivateImageResponse(evictionUser, path, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }), evictionGeneration)
+      const evictionDbRequest = indexedDB.open('memoly-private-cache')
+      const evictionDb = await new Promise<IDBDatabase>((resolve, reject) => { evictionDbRequest.onsuccess = () => resolve(evictionDbRequest.result); evictionDbRequest.onerror = () => reject(evictionDbRequest.error) })
+      const evictionCount = await new Promise<number>((resolve, reject) => {
+        let count = 0
+        const request = evictionDb.transaction('entries', 'readonly').objectStore('entries').index('userId').openCursor(IDBKeyRange.only(evictionUser))
+        request.onsuccess = () => { const cursor = request.result; if (!cursor) return resolve(count); if ((cursor.value as { kind?: string }).kind === 'image') count++; cursor.continue() }
+        request.onerror = () => reject(request.error)
+      })
+      evictionDb.close()
+      const ageDbRequest = indexedDB.open('memoly-private-cache')
+      const ageDb = await new Promise<IDBDatabase>((resolve, reject) => { ageDbRequest.onsuccess = () => resolve(ageDbRequest.result); ageDbRequest.onerror = () => reject(ageDbRequest.error) })
+      await new Promise<void>((resolve, reject) => {
+        const transaction = ageDb.transaction('entries', 'readwrite')
+        const request = transaction.objectStore('entries').index('userId').openCursor(IDBKeyRange.only(evictionUser))
+        request.onsuccess = () => {
+          const cursor = request.result
+          if (!cursor) return
+          const entry = cursor.value as { kind?: string; key?: string; lastAccess?: number }
+          if (entry.kind === 'image' && entry.key === paths[100]) cursor.update({ ...cursor.value, lastAccess: Date.now() - 31 * 24 * 60 * 60 * 1000 })
+          cursor.continue()
+        }
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(transaction.error)
+      })
+      ageDb.close()
+      cache.activatePrivateCacheIdentity(evictionUser)
+      const agedImage = await cache.readPrivateImage(evictionUser, paths[100]!)
+      return {
+        familyRemoved: removed === null,
+        otherFamilyRetained: retained?.size === bytes.length,
+        avatarImageHit: avatarHit,
+        posterImageHit: posterHit,
+        changedAvatarIdMiss: changedAvatarMiss === null,
+        rejectsVideoAndPartial: rejectedVideo === false && rejectedPartial === false,
+        logoutCleared: afterLogout === null,
+        usersIsolated: userAImage?.size === bytes.length && userBImage?.size === blueBytes.length,
+        lateWriteRejected: lateWrite === false,
+        staleSchemaDiscarded: staleSchema === null,
+        imageEvictionBounded: evictionCount <= 100,
+        expiredImagePruned: agedImage === null,
+        queryRestoreForOwner: restoredPresentation?.screen === 'feed' && restoredPresentation.selectedFamilyId === familyId && restoredFeedCount > 0,
+        queryIsolationForOtherUser: otherUserQueries === 0,
+        queryCountBounded: boundedQueryCount <= 100 && keptPresentation,
+        queryBytesBounded: byteBoundedSize <= 2 * 1024 * 1024 && byteBoundedPresentationKept,
+        querySnapshotBytesBounded: boundedByteSize <= 2 * 1024 * 1024,
+      }
+    }, { userId: fixture.userId, familyId: fixture.familyId, otherFamilyId, imageBase64: pngImage.buffer.toString('base64') })
+    expect(cleanup).toEqual({ familyRemoved: true, otherFamilyRetained: true, avatarImageHit: true, posterImageHit: true, changedAvatarIdMiss: true, rejectsVideoAndPartial: true, logoutCleared: true, usersIsolated: true, lateWriteRejected: true, staleSchemaDiscarded: true, imageEvictionBounded: true, expiredImagePruned: true, queryRestoreForOwner: true, queryIsolationForOtherUser: true, queryCountBounded: true, queryBytesBounded: true, querySnapshotBytesBounded: true })
+    await page.evaluate(async ({ userId, familyId }) => {
+      const cache = await import('/src/platform/persistence/private-cache.ts')
+      cache.activatePrivateCacheIdentity(userId)
+      window.dispatchEvent(new CustomEvent(cache.privateFamilyAccessRevokedEvent, { detail: { userId, familyId } }))
+    }, { userId: fixture.userId, familyId: fixture.familyId })
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Лента воспоминаний' })).toHaveCount(0)
   })
 
   test('unread action and exit stay compact, keyboard accessible, and empty when appropriate', async ({ page }) => {
@@ -529,10 +797,23 @@ test.describe.serial('T07 live feed', () => {
     const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
     const maxVideoLikedByMe = new Map(maxVideos.map((video) => [video.id, false]))
     const maxVideoRequests: string[] = []
-
+    const maxPosterRequests: Array<{ method: string; origin: string | null }> = []
     page.on('request', (request) => {
       const url = request.url()
       if (url.includes('/media/max-videos/') && url.endsWith('/content')) maxVideoRequests.push(url)
+    })
+
+    await page.route('**/api/v1/families/*/media/max-videos/*/poster', async (route) => {
+      maxPosterRequests.push({ method: route.request().method(), origin: route.request().headers().origin ?? null })
+      const origin = route.request().headers().origin ?? '*'
+      const corsHeaders = {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Authorization, X-Private-Media-Purpose',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      }
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: corsHeaders })
+      await route.fulfill({ body: pngImage.buffer, contentType: pngImage.mimeType, headers: { ...corsHeaders, 'Cache-Control': 'private, no-cache', ETag: '"synthetic-poster"' } })
     })
 
     await page.route('**/api/v1/families/*/media/max-videos/*/content', async (route) => {
@@ -635,6 +916,11 @@ test.describe.serial('T07 live feed', () => {
       })
     })
     await page.reload()
+    const maxWelcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(maxWelcomeContinue).toBeVisible()
+    await expect(maxWelcomeContinue).toBeEnabled()
+    await maxWelcomeContinue.click()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
     await openFeed(page)
     const ratios = [
       ['Фотоальбом E2E', 'img', 4 / 5],
@@ -673,25 +959,17 @@ test.describe.serial('T07 live feed', () => {
 
     const maxVideoCard = page.locator('[data-memory-id]').filter({ hasText: maxVideos[0]!.body })
     const maxVideo = maxVideoCard.locator('video').first()
-    await expect(maxVideo).toHaveAttribute('preload', 'metadata')
+    await maxVideoCard.scrollIntoViewIfNeeded()
+    await expect.poll(() => maxPosterRequests.length).toBeGreaterThanOrEqual(maxVideos.length)
+    await expect(maxVideo).toHaveAttribute('preload', 'none')
     await expect(maxVideo).toHaveAttribute('src', /\/media\/max-videos\/[^#]+\/content$/)
     expect(await maxVideo.evaluate((entry) => entry.src.includes('#'))).toBe(false)
-    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxVideoExplicitLoadCalls?: number }).__maxVideoExplicitLoadCalls ?? 0)).toBe(maxVideos.length)
+    await expect(maxVideo).toHaveAttribute('poster', /^blob:/)
+    await expect(maxVideoCard.locator('[data-video-viewer-state="ready"]')).toHaveAttribute('data-seen-ready', 'true')
+    await page.screenshot({ path: resolve('e2e/.artifacts/max-poster-before-play.png'), animations: 'disabled' })
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxVideoExplicitLoadCalls?: number }).__maxVideoExplicitLoadCalls ?? 0)).toBe(0)
     expect(await page.evaluate(() => (window as typeof window & { __maxVideoSourceAssignments?: number }).__maxVideoSourceAssignments ?? 0)).toBe(maxVideos.length)
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.readyState)).toBeGreaterThanOrEqual(2)
-    expect(maxVideoRequests.length).toBeGreaterThan(0)
-    expect(maxVideoRequests.every((url) => !url.includes('#'))).toBe(true)
-    const previewPixel = await maxVideo.evaluate((entry) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 1
-      canvas.height = 1
-      const context = canvas.getContext('2d')
-      if (!context) return null
-      context.drawImage(entry, 0, 0, 1, 1)
-      return [...context.getImageData(0, 0, 1, 1).data]
-    })
-    expect(previewPixel).not.toBeNull()
-    expect(previewPixel!.slice(0, 3)).not.toEqual([0, 0, 0])
+    expect(maxVideoRequests).toHaveLength(0)
     await expect(maxVideo).toHaveAttribute('controls', '')
     await expect(maxVideo).toHaveAttribute('playsinline', '')
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
@@ -714,6 +992,9 @@ test.describe.serial('T07 live feed', () => {
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toBeFocused()
     await maxVideoCard.getByRole('button', { name: 'Смотреть видео' }).click()
     await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(false)
+    await expect.poll(() => maxVideo.evaluate((entry) => entry.readyState)).toBeGreaterThanOrEqual(2)
+    expect(maxVideoRequests.length).toBeGreaterThan(0)
+    expect(maxVideoRequests.every((url) => !url.includes('#'))).toBe(true)
     expect(await page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBeUndefined()
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть в MAX' })).toHaveCount(0)
     await maxVideo.evaluate((element) => element.dispatchEvent(new Event('error')))

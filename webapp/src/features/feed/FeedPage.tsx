@@ -12,8 +12,10 @@ import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
+import { AuthContext } from '@/features/auth'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
+import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { toggleMediaPlayback } from '@/platform/media/playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
@@ -34,7 +36,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
-import { maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
+import { maxVideoPosterPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
@@ -657,6 +659,7 @@ function MaxVideo({ attachment, hostBridge, transport }: {
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const queryClient = useQueryClient()
   const readinessPath = maxVideoReadinessPath(attachment.playbackPath)
+  const posterUrl = usePrivateObjectUrl(maxVideoPosterPath(attachment.playbackPath), transport, nearViewport)
   const readinessKey = [...feedQueryKeys.all, 'max-video-readiness', accountId, membershipEpoch, readinessPath] as const
   const cachedReadiness = queryClient.getQueryState<MaxVideoReadiness>(readinessKey)
   const checkInterval = cachedReadiness ? maxVideoReadinessInterval(cachedReadiness) : 0
@@ -683,7 +686,7 @@ function MaxVideo({ attachment, hostBridge, transport }: {
   })
   const readinessState = !readinessPath ? 'unknown' : readiness.data?.state ?? (readiness.isError ? 'check-error' : 'checking')
   const source = useMaxVideoSource(readinessState === 'ready' ? attachment.playbackPath : null)
-  return <div className="memoly-max-video-readiness" ref={root}><MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onCheckReadiness={readinessPath ? () => void readiness.refetch() : undefined} onOpen={() => hostBridge.openBot()} onRetry={readinessState === 'ready' ? source.retry : undefined} readinessState={readinessState} sourceStatus={readinessState === 'ready' ? source.status : 'loading'} src={readinessState === 'ready' ? source.url : null} width={attachment.width} /></div>
+  return <div className="memoly-max-video-readiness" ref={root}><MaxVideoPreview durationMs={attachment.durationMs} height={attachment.height} onCheckReadiness={readinessPath ? () => void readiness.refetch() : undefined} onOpen={() => hostBridge.openBot()} onRetry={readinessState === 'ready' ? source.retry : undefined} poster={posterUrl ?? undefined} readinessState={readinessState} sourceStatus={readinessState === 'ready' ? source.status : 'loading'} src={readinessState === 'ready' ? source.url : null} width={attachment.width} /></div>
 }
 
 type MaxVideoPreviewProps = {
@@ -692,6 +695,7 @@ type MaxVideoPreviewProps = {
   onOpen: () => void
   onCheckReadiness?: () => void
   onRetry?: () => void
+  poster?: string
   readinessState?: MaxVideoReadiness['state'] | 'checking' | 'check-error'
   sourceStatus?: 'loading' | 'ready' | 'error'
   src: string | null
@@ -702,12 +706,13 @@ export function MaxVideoPreview(props: MaxVideoPreviewProps) {
   return <MaxVideoPreviewContent key={props.src ?? 'missing'} {...props} />
 }
 
-function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, onRetry, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
+function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, onRetry, poster, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
+  const [decodedPosterUrl, setDecodedPosterUrl] = useState<string | null>(null)
   const [mediaErrorCode, setMediaErrorCode] = useState(0)
   const [intrinsicDimensions, setIntrinsicDimensions] = useState<{ width: number; height: number } | null>(null)
   const loadedSource = useRef<string | null>(null)
@@ -718,10 +723,19 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
   const frameDimensions = intrinsicDimensions ?? { width, height }
   const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
   useEffect(() => {
+    let current = true
+    if (poster) {
+      const image = new Image()
+      image.src = poster
+      void image.decode().then(() => { if (current) setDecodedPosterUrl(poster) }).catch(() => undefined)
+    }
+    return () => { current = false }
+  }, [poster])
+  useEffect(() => {
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
-  return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady })} data-video-started={started} data-video-viewer-state={viewerState}>
+  return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady: previewReady || decodedPosterUrl === poster })} data-video-started={started} data-video-viewer-state={viewerState}>
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
       <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
         const element = event.currentTarget
@@ -729,10 +743,10 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
           setIntrinsicDimensions({ width: element.videoWidth, height: element.videoHeight })
         }
         const seekableEnd = element.seekable.length > 0 ? element.seekable.end(element.seekable.length - 1) : 0
-        if ((Number.isFinite(element.duration) && element.duration > 0.001) || seekableEnd > 0.001) {
+        if (started && ((Number.isFinite(element.duration) && element.duration > 0.001) || seekableEnd > 0.001)) {
           try { element.currentTime = 0.001 } catch { /* Some WebViews reject a seek before the first frame is buffered. */ }
         }
-      }} onPlay={() => { activate(); setStarted(true) }} preload="metadata" playsInline ref={video} />
+      }} onPlay={() => { activate(); setStarted(true) }} poster={poster} preload="none" playsInline ref={video} />
       {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
@@ -930,20 +944,10 @@ function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, registerSee
   </DialogPrimitive.Root>
 }
 
-function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true) {
-  const [loaded, setLoaded] = useState<{ path: string; url: string | null } | null>(null)
-  useEffect(() => {
-    if (!path || !transport || !enabled) return
-    const controller = new AbortController()
-    let objectUrl: string | null = null
-    void transport.raw(path, { signal: controller.signal }).then(async (response) => {
-      objectUrl = await responseToPrivateImageObjectUrl(response)
-      if (controller.signal.aborted) URL.revokeObjectURL(objectUrl)
-      else setLoaded({ path, url: objectUrl })
-    }).catch(() => { if (!controller.signal.aborted) setLoaded({ path, url: null }) })
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [enabled, path, transport])
-  return enabled && loaded?.path === path ? loaded.url : null
+function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void) {
+  const auth = useContext(AuthContext)
+  const mediaTransport = transport ?? auth?.transport
+  return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled)
 }
 
 function usePrivateMediaSource(path: string | null) {

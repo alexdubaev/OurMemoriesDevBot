@@ -323,28 +323,38 @@ export class MediaService {
     }
   }
 
-  async content(scope: FamilyScope, mediaId: string, variant: 'preview' | 'display' | 'playback' | 'original', rangeHeader?: string) {
+  async content(scope: FamilyScope, mediaId: string, variant: 'preview' | 'display' | 'playback' | 'original', rangeHeader?: string, ifNoneMatch?: string) {
     await this.access.requireMember(scope)
     const object = await this.repository.resolveContent(scope, mediaId, variant)
     if (!object) throw new MediaFailure('not_found', 'Медиа не найдено')
+    const etag = object.etag ? quoteEtag(object.etag) : null
+    const cacheable = !rangeHeader && (variant === 'preview' || variant === 'display') && isPrivateImageMime(object.contentType) && Boolean(etag)
+    if (cacheable && etag && matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return { ...object, body: null, range: undefined, etag, cacheable: true, notModified: true }
+    }
     const range = rangeHeader ? parseSingleRange(rangeHeader, object.contentLength) : undefined
     const stored = await this.storage.readObject({ key: object.objectKey, range }).catch((error) => { throw storageFailure(error) })
     if (!stored) throw new MediaFailure('not_found', 'Медиа не найдено')
-    return { ...object, body: stored.body, range }
+    return { ...object, body: stored.body, range, etag, cacheable, notModified: false }
   }
 
-  async memberAvatarContent(scope: FamilyScope, userId: string, avatarId: string, head = false) {
+  async memberAvatarContent(scope: FamilyScope, userId: string, avatarId: string, head = false, ifNoneMatch?: string) {
     await this.access.requireMember(scope)
     const object = await this.repository.resolveMemberAvatarContent(scope, userId, avatarId)
     if (!object) throw new MediaFailure('not_found', 'Аватар не найден')
+    const etag = object.etag ? quoteEtag(object.etag) : null
+    const cacheable = isPrivateImageMime(object.contentType) && Boolean(etag)
+    if (!head && cacheable && etag && matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return { contentType: object.contentType, contentLength: object.contentLength, body: null, etag, cacheable: true, notModified: true }
+    }
     if (head) {
       const stored = await this.storage.headObject(object.objectKey).catch((error) => { throw storageFailure(error) })
       if (!stored) throw new MediaFailure('not_found', 'Аватар не найден')
-      return { contentType: object.contentType, contentLength: object.contentLength, body: null }
+      return { contentType: object.contentType, contentLength: object.contentLength, body: null, etag, cacheable, notModified: false }
     }
     const stored = await this.storage.readObject({ key: object.objectKey }).catch((error) => { throw storageFailure(error) })
     if (!stored) throw new MediaFailure('not_found', 'Аватар не найден')
-    return { contentType: object.contentType, contentLength: object.contentLength, body: stored.body }
+    return { contentType: object.contentType, contentLength: object.contentLength, body: stored.body, etag, cacheable, notModified: false }
   }
 
   async authorizePlaybackSession(scope: FamilyScope) {
@@ -378,6 +388,23 @@ function storageFailure(error: unknown) {
 
 function isUniqueConstraint(error: unknown) {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002'
+}
+
+function isPrivateImageMime(value: string) {
+  return ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/heic'].includes(value.split(';', 1)[0]!.trim().toLowerCase())
+}
+
+function quoteEtag(value: string) {
+  const safe = value.replace(/["\\\r\n]/g, '')
+  return `"${safe}"`
+}
+
+function matchesIfNoneMatch(header: string | undefined, etag: string) {
+  if (!header) return false
+  return header.split(',').some((candidate) => {
+    const trimmed = candidate.trim()
+    return trimmed === '*' || trimmed.replace(/^W\//i, '') === etag
+  })
 }
 
 function deterministicUuid(namespace: string, scope: FamilyScope, key: string) {

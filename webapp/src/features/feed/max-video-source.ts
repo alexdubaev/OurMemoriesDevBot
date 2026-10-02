@@ -6,6 +6,5 @@ export function loadMaxVideoSourceOnce(video: Pick<HTMLMediaElement, 'src' | 'lo
     return null
   }
   video.src = src
-  video.load()
   return src
 }

@@ -10,6 +10,11 @@ export function maxVideoReadinessPath(playbackPath: string): string | null {
   return playbackPath.replace(/\/content$/, '/readiness')
 }
 
+export function maxVideoPosterPath(playbackPath: string): string | null {
+  if (!backendMediaPathSchema.safeParse(playbackPath).success || !maxVideoContentPath.test(playbackPath)) return null
+  return playbackPath.replace(/\/content$/, '/poster')
+}
+
 export function maxVideoReadinessInterval(state: { data?: MaxVideoReadiness; dataUpdateCount: number; errorUpdateCount: number }) {
   if (state.data && !state.data.recheckable) return false
   if (state.dataUpdateCount >= MAX_SUCCESSFUL_CHECKS || state.errorUpdateCount >= MAX_FAILED_CHECKS) return false

@@ -540,13 +540,15 @@ describe('MAX API client', () => {
       if (requests.length === 1) return response({ messages: [{ sender: { user_id: 42 }, recipient: { chat_id: null, chat_type: 'dialog', user_id: 99 }, body: {
         mid: 'm.dotted', attachments: [{ type: 'video', payload: { id: 123, token: 'rotating/token', url: 'https://v.oneme.ru/current', duration: 7, width: 1280, height: 720 } }],
       } }] })
-      return response({ width: 720, height: 1_280, videos: [{ url: 'https://maxvd123.okcdn.ru/video.mp4?sig=opaque', width: 1280, height: 720, duration: 7000, size: 12_345 }] })
+      return response({ width: 720, height: 1_280, thumbnail: { url: 'https://i.oneme.ru/thumb.jpg?sig=private', photo_id: 987654321, token: 'thumbnail-secret' }, videos: [{ url: 'https://maxvd123.okcdn.ru/video.mp4?sig=opaque', width: 1280, height: 720, duration: 7000, size: 12_345 }] })
     } })
 
     const message = await api.getMessage('m.dotted')
     expect(message.attachments).toEqual([{ kind: 'video', providerAttachmentId: '123', currentToken: 'rotating/token', inboundDurationSeconds: 7, width: 1280, height: 720 }])
     const video = await api.getVideo!('rotating/token')
-    expect(video).toMatchObject({ width: 720, height: 1_280 })
+    expect(video).toMatchObject({ width: 720, height: 1_280, thumbnailUrl: 'https://i.oneme.ru/thumb.jpg?sig=private' })
+    expect(JSON.stringify(video)).not.toContain('thumbnail-secret')
+    expect(JSON.stringify(video)).not.toContain('987654321')
     expect(video.renditions[0]).toMatchObject({ url: 'https://maxvd123.okcdn.ru/video.mp4?sig=opaque', height: 720 })
     expect(requests[0]!.url).toBe('https://platform-api2.max.ru/messages?message_ids=m.dotted')
     expect(requests[1]!.url).toBe('https://platform-api2.max.ru/videos/rotating%2Ftoken')
@@ -566,6 +568,7 @@ describe('MAX API client', () => {
       width: null,
       height: null,
       durationMs: 7000,
+      thumbnailUrl: null,
       renditions: [
         { url: 'https://maxvd123.okcdn.ru/video-1080.mp4?sig=opaque', width: null, height: 1080, contentLength: null },
         { url: 'https://maxvd123.okcdn.ru/video-720.mp4?sig=opaque', width: null, height: 720, contentLength: null },

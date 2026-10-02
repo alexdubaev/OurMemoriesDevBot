@@ -64,12 +64,14 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
     const params = mediaContentParamsSchema.parse(c.req.param())
     const query = mediaContentQuerySchema.parse(c.req.query())
     try {
-      const result = await executeMedia(() => service.content(scope(c), params.mediaId, query.variant, c.req.header('Range')))
+      const result = await executeMedia(() => service.content(scope(c), params.mediaId, query.variant, c.req.header('Range'), c.req.header('If-None-Match')))
       c.header('Content-Type', result.contentType)
       c.header('Accept-Ranges', 'bytes')
-      c.header('Cache-Control', 'private, no-store')
+      c.header('Cache-Control', result.cacheable ? 'private, no-cache' : 'private, no-store')
+      if (result.etag) c.header('ETag', result.etag)
       c.header('Cross-Origin-Resource-Policy', 'same-origin')
       c.header('Referrer-Policy', 'no-referrer')
+      if (result.notModified) return c.body(null, 304)
       if (result.range) {
         c.header('Content-Range', `bytes ${result.range.start}-${result.range.end}/${result.contentLength}`)
         c.header('Content-Length', String(result.range.end - result.range.start + 1))
@@ -117,14 +119,30 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
     c.header('Cache-Control', 'private, no-store')
     return c.json(maxVideoReadinessSchema.parse(readiness))
   })
-  const memberAvatarContent = async (c: any, head: boolean) => {
-    const params = z.object({ familyId: z.uuid(), userId: z.uuid(), avatarId: z.uuid() }).strict().parse(c.req.param())
-    const result = await executeMedia(() => service.memberAvatarContent(scope(c), params.userId, params.avatarId, head))
+  routes.get('/families/:familyId/media/max-videos/:referenceId/poster', async (c) => {
+    if (!maxVideoPlayback?.poster) return c.json({ error: { code: 'NOT_FOUND', message: 'Превью недоступно' } }, 404)
+    const params = maxVideoContentParamsSchema.parse(c.req.param())
+    const result = await executeMedia(() => maxVideoPlayback.poster!({ ...scope(c), familyId: params.familyId }, params.referenceId, c.req.raw.signal))
+    if (!result) return c.json({ error: { code: 'NOT_FOUND', message: 'Превью недоступно' } }, 404)
     c.header('Content-Type', result.contentType)
-    c.header('Content-Length', String(result.contentLength))
-    c.header('Cache-Control', 'private, no-store')
+    c.header('Cache-Control', 'private, no-cache')
+    c.header('ETag', result.etag)
     c.header('Cross-Origin-Resource-Policy', 'same-origin')
     c.header('Referrer-Policy', 'no-referrer')
+    if (matchesIfNoneMatch(c.req.header('If-None-Match'), result.etag)) return c.body(null, 304)
+    c.header('Content-Length', String(result.contentLength))
+    return c.body(new Uint8Array(result.body), 200)
+  })
+  const memberAvatarContent = async (c: any, head: boolean) => {
+    const params = z.object({ familyId: z.uuid(), userId: z.uuid(), avatarId: z.uuid() }).strict().parse(c.req.param())
+    const result = await executeMedia(() => service.memberAvatarContent(scope(c), params.userId, params.avatarId, head, c.req.header('If-None-Match')))
+    c.header('Content-Type', result.contentType)
+    c.header('Cache-Control', result.cacheable ? 'private, no-cache' : 'private, no-store')
+    if (result.etag) c.header('ETag', result.etag)
+    c.header('Cross-Origin-Resource-Policy', 'same-origin')
+    c.header('Referrer-Policy', 'no-referrer')
+    if (result.notModified) return c.body(null, 304)
+    c.header('Content-Length', String(result.contentLength))
     return c.body(result.body, 200)
   }
   routes.get('/families/:familyId/media/avatars/:userId/:avatarId/content', (c) => memberAvatarContent(c, false))
@@ -151,7 +169,15 @@ function bearerToken(authorization: string | undefined) {
 
 function isContentPath(path: string) {
   return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i.test(path) ||
+    /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/poster$/i.test(path) ||
     /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/readiness$/i.test(path)
+}
+
+function matchesIfNoneMatch(header: string | undefined, etag: string) {
+  return Boolean(header?.split(',').some((candidate) => {
+    const value = candidate.trim()
+    return value === '*' || value.replace(/^W\//i, '') === etag
+  }))
 }
 
 function scope(c: any) { return { principal: { userId: c.var.user.id, sessionId: c.var.user.sessionId }, familyId: c.req.param('familyId') } }
