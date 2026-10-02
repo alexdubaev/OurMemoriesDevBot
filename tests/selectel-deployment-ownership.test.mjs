@@ -102,7 +102,25 @@ test('edge and static Caddy templates preserve routing ownership', () => {
   assert.match(statik, /header\s+Cache-Control\s+"no-cache"/)
   assert.match(statik, /@fingerprintedAssets\s*\{\s*file\s+path_regexp fingerprinted \^\/assets\//)
   assert.match(statik, /header\s+@fingerprintedAssets Cache-Control "public, max-age=31536000, immutable"/)
-  assert.match(statik, /\[A-Za-z0-9_-\]\{8,\}/)
+  assert.match(statik, /\[A-Za-z0-9_-\]\{8\}/)
+})
+
+test('Selectel immutable caching matches only existing root Vite-hashed assets', () => {
+  const statik = read('deploy/selectel/Caddyfile.static.template')
+  const pattern = statik.match(/path_regexp fingerprinted (\S+)/)?.[1]
+  assert.ok(pattern, 'fingerprinted matcher must expose its path expression')
+  assert.match(statik, /@fingerprintedAssets\s*\{\s*file\s+path_regexp fingerprinted/)
+  const fingerprinted = new RegExp(pattern)
+  const isImmutable = (path, exists) => exists && fingerprinted.test(path)
+
+  assert.equal(isImmutable('/assets/index-n4mXuxiB.js', true), true)
+  assert.equal(isImmutable('/assets/index-DBKU-IBN.css', true), true)
+  assert.equal(isImmutable('/assets/brand/pwa-memoly-192.webp', true), false)
+  assert.equal(isImmutable('/assets/artwork/cover.webp', true), false)
+  assert.equal(isImmutable('/assets/pwa-memoly-192.webp', true), false)
+  assert.equal(isImmutable('/private-media-sw.js', true), false)
+  assert.equal(fingerprinted.test('/assets/missing-12345678.js'), true)
+  assert.equal(isImmutable('/assets/missing-12345678.js', false), false, 'SPA fallback must not make a missing asset immutable')
 })
 
 test('redeploy script fails closed and exposes safe promotion phases', () => {

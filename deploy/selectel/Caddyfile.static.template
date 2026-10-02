@@ -5,7 +5,7 @@
 		header Cache-Control "no-cache"
 		@fingerprintedAssets {
 			file
-			path_regexp fingerprinted ^/assets/.+-[A-Za-z0-9_-]{8,}\.(?:js|css|webp|png|jpg|jpeg|avif|woff2)$
+			path_regexp fingerprinted ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css|webp|png|jpg|jpeg|avif|woff2)$
 		}
 		header @fingerprintedAssets Cache-Control "public, max-age=31536000, immutable"
 		try_files {path} /index.html
