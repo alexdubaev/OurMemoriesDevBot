@@ -963,6 +963,7 @@ model UserAvatar {
   objectKey   String          @unique(map: "user_avatars_object_key_key") @map("object_key")
   contentType String          @map("content_type")
   byteSize    Int             @map("byte_size")
+  avatarCrop  Json?           @map("avatar_crop")
   /// When the signed upload URL stops working, which is also when a pending row becomes junk.
   expiresAt   DateTime        @map("expires_at")
   readyAt     DateTime?       @map("ready_at")

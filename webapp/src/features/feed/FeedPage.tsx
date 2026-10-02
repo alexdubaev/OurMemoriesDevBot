@@ -353,6 +353,7 @@ export function FeedPage({
           authorInitials={initials(memory.author.name)}
           authorName={memory.author.name}
           authorAvatarPath={memory.author.avatarPath}
+          authorAvatarCrop={memory.author.avatarCrop}
           childName={memory.childId === childId ? childName : undefined}
           childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
@@ -621,6 +622,7 @@ function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTime
       authorInitials={initials(memory.author.name)}
       authorName={memory.author.name}
       authorAvatarPath={memory.author.avatarPath}
+      authorAvatarCrop={memory.author.avatarCrop}
       body={memory.body}
       kind={memory.kind}
       reactionCounts={memory.reactionCounts}

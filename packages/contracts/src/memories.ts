@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { avatarCropSchema } from './avatar-crop'
 
 const uuid = z.uuid()
 
@@ -179,7 +180,7 @@ export const memoryDtoSchema = z.object({
   id: uuid,
   familyId: uuid,
   childId: uuid,
-  author: z.object({ id: uuid, name: z.string(), avatarPath: backendMediaPathSchema.nullable() }).strict(),
+  author: z.object({ id: uuid, name: z.string(), avatarPath: backendMediaPathSchema.nullable(), avatarCrop: avatarCropSchema.nullable().optional() }).strict(),
   kind: memoryKindSchema,
   body: z.string(),
   occurredAt: z.string().datetime(),

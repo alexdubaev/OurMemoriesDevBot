@@ -11,6 +11,7 @@ import { privateStorageConfigFromEnv, type FilesystemStorageConfig } from '../..
 import { createFilesystemStorageRoutes } from '../../storage/filesystem-routes'
 import { FilesystemPrivateStorage } from '../../storage/filesystem-storage'
 import { pngFixture } from '../../storage/storage-contract'
+import sharp from 'sharp'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -141,6 +142,9 @@ maybeDescribe('avatar upload API integration', () => {
       ['/api/uploads/avatar', 'GET'],
       ['/api/uploads/avatar', 'POST'],
       ['/api/uploads/avatar', 'DELETE'],
+      ['/api/uploads/avatar/crop', 'POST'],
+      ['/api/uploads/avatar/preview', 'POST'],
+      ['/api/uploads/avatar/content', 'GET'],
       ['/api/uploads/avatar/019c0000-0000-7000-8000-000000000001/finalize', 'POST'],
     ] as const) {
       const response = await app.request(path, {
@@ -152,6 +156,77 @@ maybeDescribe('avatar upload API integration', () => {
       })
       expect(response.status).toBe(401)
     }
+  })
+
+  test('preview normalizes locally supplied bytes without creating upload rows or storage objects', async () => {
+    const session = await register('preview@example.com')
+    const beforeRows = await prisma.userAvatar.count()
+    const beforeObjects = await storage.listObjects('avatars')
+    const response = await app.request('/api/uploads/avatar/preview', {
+      method: 'POST', headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'image/png' },
+      body: new Uint8Array(pngFixture),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('image/jpeg')
+    expect(new Uint8Array(await response.arrayBuffer()).subarray(0, 3)).toEqual(new Uint8Array([0xff, 0xd8, 0xff]))
+    expect(await prisma.userAvatar.count()).toBe(beforeRows)
+    expect(await storage.listObjects('avatars')).toEqual(beforeObjects)
+
+    const invalid = await app.request('/api/uploads/avatar/preview', {
+      method: 'POST', headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'image/png' }, body: new Uint8Array(128),
+    })
+    expect(invalid.status).toBe(422)
+    expect(await prisma.userAvatar.count()).toBe(beforeRows)
+    const oversized = await app.request('/api/uploads/avatar/preview', {
+      method: 'POST', headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'image/png' }, body: new Uint8Array(20_000_001),
+    })
+    expect(oversized.status).toBe(422)
+    expect(await prisma.userAvatar.count()).toBe(beforeRows)
+  })
+
+  test('publishes original bytes with crop and restricts crop edits to the current owner and avatar version', async () => {
+    const owner = await register('crop-owner@example.com')
+    const stranger = await register('crop-stranger@example.com')
+    const ticket = await requestTicket(owner.accessToken, pngFixture, 'image/png')
+    expect((await transfer(ticket, pngFixture)).status).toBe(200)
+    const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.6 }
+    const finalized = await app.request(`/api/uploads/avatar/${ticket.uploadId}/finalize`, {
+      method: 'POST', headers: authenticated(owner.accessToken), body: JSON.stringify({ avatarCrop: crop }),
+    })
+    expect(finalized.status).toBe(200)
+    const original = (await finalized.json()).avatar
+    expect(original.avatarCrop).toEqual(crop)
+    const download = await app.request(original.downloadUrl)
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(pngFixture)
+
+    const updatedCrop = { x: 0, y: 0, width: 1, height: 1 }
+    const update = (accessToken: string, expectedUpdatedAt: string) => app.request('/api/uploads/avatar/crop', {
+      method: 'POST', headers: authenticated(accessToken),
+      body: JSON.stringify({ avatarId: ticket.uploadId, expectedUpdatedAt, avatarCrop: updatedCrop }),
+    })
+    const forbidden = await update(stranger.accessToken, original.updatedAt)
+    expect(forbidden.status).toBe(409)
+    const edited = await update(owner.accessToken, original.updatedAt)
+    expect(edited.status).toBe(200)
+    const current = (await edited.json()).avatar
+    expect(current.avatarCrop).toEqual(updatedCrop)
+    expect(current.id).toBe(original.id)
+    expect((await update(owner.accessToken, original.updatedAt)).status).toBe(409)
+    const after = await app.request(current.downloadUrl)
+    expect(Buffer.from(await after.arrayBuffer())).toEqual(pngFixture)
+  })
+
+  test('accepts and preserves WebP original bytes through the adult avatar flow', async () => {
+    const session = await register('webp-avatar@example.com')
+    const webp = await sharp(pngFixture).webp().toBuffer()
+    const ticket = await requestTicket(session.accessToken, webp, 'image/webp')
+    expect((await transfer(ticket, webp)).status).toBe(200)
+    const finalized = await finalize(session.accessToken, ticket.uploadId)
+    expect(finalized.status).toBe(200)
+    const body = await finalized.json()
+    expect(body.avatar).toMatchObject({ contentType: 'image/webp', byteSize: webp.byteLength })
+    const original = await app.request(body.avatar.downloadUrl)
+    expect(Buffer.from(await original.arrayBuffer())).toEqual(webp)
   })
 
   test('refuses to finalize an upload that never completed, then accepts the retry', async () => {

@@ -3,12 +3,41 @@ import { afterEach, expect, test } from 'bun:test'
 import { AuthApi } from '../src/features/auth/api'
 import { bootstrapAuthSession } from '../src/features/auth/bootstrap'
 import { publishBrowserSessionState } from '../src/features/auth/session-coordinator'
-import { ApiRequestError } from '../src/platform/api'
+import { ApiRequestError, HttpClient } from '../src/platform/api'
 
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+test('HTTP transport forwards a binary preview body with normal credentials and leaves multipart headers to the browser', async () => {
+  const client = new HttpClient('https://api.example.test')
+  const form = new FormData()
+  form.append('photo', new Blob(['synthetic']), 'photo.jpg')
+  let captured: { body: BodyInit | null | undefined; headers: Headers; credentials: RequestCredentials | undefined } | null = null
+  globalThis.fetch = async (_input, init) => {
+    captured = { body: init?.body, headers: new Headers(init?.headers), credentials: init?.credentials }
+    return new Response(new Blob(['preview'], { type: 'image/jpeg' }), { status: 200 })
+  }
+  const response = await client.raw('/api/uploads/avatar/preview', { method: 'POST', rawBody: form })
+  expect((await response.blob()).type).toBe('image/jpeg')
+  expect(captured?.body).toBe(form)
+  expect(captured?.headers.has('Content-Type')).toBe(false)
+  expect(captured?.credentials).toBe('include')
+})
+
+test('HTTP transport keeps JSON encoding intact and rejects ambiguous raw and JSON bodies', async () => {
+  const client = new HttpClient('https://api.example.test')
+  let captured: { body: BodyInit | null | undefined; headers: Headers } | null = null
+  globalThis.fetch = async (_input, init) => {
+    captured = { body: init?.body, headers: new Headers(init?.headers) }
+    return new Response('{}', { status: 200 })
+  }
+  await client.raw('/api/test', { method: 'POST', body: { crop: true } })
+  expect(captured?.body).toBe('{"crop":true}')
+  expect(captured?.headers.get('Content-Type')).toBe('application/json')
+  expect(() => client.raw('/api/test', { method: 'POST', body: {}, rawBody: new Blob() })).toThrow(TypeError)
 })
 
 test('AuthApi refreshes and retries authenticated requests with the new access token', async () => {

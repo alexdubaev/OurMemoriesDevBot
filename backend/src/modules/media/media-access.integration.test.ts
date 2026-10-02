@@ -394,13 +394,15 @@ maybeDescribe('Private media API', () => {
       key, body: new Blob([pngFixture.slice().buffer as ArrayBuffer]).stream(),
       contentLength: pngFixture.byteLength, contentType: 'image/png',
     })
+    const sharedCrop = { x: 0.17, y: 0.08, width: 0.62, height: 0.62 }
     const avatar = await prisma.userAvatar.create({ data: {
       userId: owner.userId, state: 'ready', objectKey: key, contentType: 'image/png',
-      byteSize: pngFixture.byteLength, expiresAt: new Date(Date.now() + 60_000), readyAt: new Date(),
+      byteSize: pngFixture.byteLength, expiresAt: new Date(Date.now() + 60_000), readyAt: new Date(), avatarCrop: sharedCrop,
     } })
     const path = `/api/v1/families/${family.body.family.id}/media/avatars/${owner.userId}/${avatar.id}/content`
     const members = await jsonRequest(`/api/v1/families/${family.body.family.id}/members`, viewer.token, 'GET')
     expect(members.body.items.find((item: { userId: string }) => item.userId === owner.userId).avatarPath).toBe(path)
+    expect(members.body.items.find((item: { userId: string }) => item.userId === owner.userId).avatarCrop).toEqual(sharedCrop)
     expect(members.body.items.find((item: { userId: string }) => item.userId === viewer.userId).avatarPath).toBeNull()
     const note = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
       kind: 'note', childId: family.body.child.id, body: 'Воспоминание', occurredAt: new Date().toISOString(),
@@ -408,6 +410,7 @@ maybeDescribe('Private media API', () => {
     expect(note.response.status).toBe(201)
     const feed = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, viewer.token, 'GET')
     expect(feed.body.items[0].author.avatarPath).toBe(path)
+    expect(feed.body.items[0].author.avatarCrop).toEqual(sharedCrop)
     expect((await app.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })).status).toBe(200)
     expect((await app.request(path, { method: 'HEAD', headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(200)
     expect((await app.request(path)).status).toBe(401)

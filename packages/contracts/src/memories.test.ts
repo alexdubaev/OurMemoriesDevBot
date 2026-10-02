@@ -133,6 +133,8 @@ describe('memory contracts', () => {
       likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true },
     }
     expect(memoryDtoSchema.parse(memory)).toEqual(memory)
+    const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.6 }
+    expect(memoryDtoSchema.parse({ ...memory, author: { ...memory.author, avatarCrop: crop } }).author.avatarCrop).toEqual(crop)
     expect(() => memoryDtoSchema.parse({ ...memory, sourcePublishedAt: 'not-an-instant' })).toThrow()
   })
 

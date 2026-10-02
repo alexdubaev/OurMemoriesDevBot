@@ -4,6 +4,8 @@ import {
   AVATAR_MAX_BYTES,
   AVATAR_MIN_BYTES,
   avatarResponseSchema,
+  avatarCropSchema,
+  updateAvatarCropRequestSchema,
   createAvatarUploadRequestSchema,
   createAvatarUploadResponseSchema,
   uploadTicketSchema,
@@ -105,6 +107,15 @@ describe('avatar upload contracts', () => {
     expect(avatarResponseSchema.parse({ avatar: null }).avatar).toBeNull()
     expect(avatarResponseSchema.parse({ avatar }).avatar).toEqual(avatar)
     expect(() => avatarResponseSchema.parse({})).toThrow()
+  })
+
+  test('validates normalized crop bounds and avatar identity preconditions', () => {
+    const crop = { x: 0.2, y: 0.1, width: 0.5, height: 0.6 }
+    expect(avatarCropSchema.parse(crop)).toEqual(crop)
+    expect(() => avatarCropSchema.parse({ ...crop, width: 0.9 })).toThrow()
+    expect(() => avatarCropSchema.parse({ ...crop, x: -0.01 })).toThrow()
+    expect(() => updateAvatarCropRequestSchema.parse({ avatarId: ticket.uploadId, expectedUpdatedAt: '2026-08-09T00:15:00.000Z', avatarCrop: crop })).not.toThrow()
+    expect(() => updateAvatarCropRequestSchema.parse({ avatarId: 'not-a-uuid', expectedUpdatedAt: 'bad', avatarCrop: crop })).toThrow()
   })
 
 })

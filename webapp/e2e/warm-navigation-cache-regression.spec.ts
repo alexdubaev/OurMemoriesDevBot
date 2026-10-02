@@ -221,7 +221,7 @@ test('warm navigation preserves family and feed state through ten round trips an
   expect(await activeSlide.boundingBox()).not.toBeNull()
   expect(await carouselViewport.boundingBox()).not.toBeNull()
   await expect.poll(() => photo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
-  const memberAvatar = page.locator('img.family-member-avatar')
+  const memberAvatar = page.locator('.family-member-avatar img')
   await expect.poll(() => memberAvatar.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
   const initialSrc = await photo.getAttribute('src')
   const playbackStarted = await page.evaluate(async () => {

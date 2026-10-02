@@ -3,6 +3,8 @@ import {
   createAvatarUploadRequestSchema,
   createAvatarUploadResponseSchema,
   type CreateAvatarUploadRequest,
+  type AvatarCrop,
+  type UpdateAvatarCropRequest,
 } from '@web-app-demo/contracts'
 
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -17,12 +19,26 @@ export function createAvatarUpload(
   })
 }
 
-export function finalizeAvatarUpload(transport: AuthenticatedTransport, uploadId: string) {
+export function finalizeAvatarUpload(transport: AuthenticatedTransport, uploadId: string, avatarCrop?: AvatarCrop) {
   return transport.request(
     `/api/uploads/avatar/${encodeURIComponent(uploadId)}/finalize`,
     avatarResponseSchema,
-    { method: 'POST' },
+    { method: 'POST', ...(avatarCrop ? { body: { avatarCrop } } : {}) },
   )
+}
+
+export function updateAvatarCrop(transport: AuthenticatedTransport, input: UpdateAvatarCropRequest) {
+  return transport.request('/api/uploads/avatar/crop', avatarResponseSchema, { method: 'POST', body: input })
+}
+
+export async function createAvatarPreview(transport: AuthenticatedTransport, file: File, contentType: string, signal?: AbortSignal) {
+  const response = await transport.raw('/api/uploads/avatar/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': contentType },
+    rawBody: file,
+    signal,
+  })
+  return response.blob()
 }
 
 export function fetchAvatar(

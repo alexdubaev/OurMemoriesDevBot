@@ -9,6 +9,7 @@ const defaultApiBaseUrl = (import.meta.env?.VITE_API_URL ?? '').replace(/\/$/, '
 export type HttpRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
+  rawBody?: BodyInit
   headers?: HeadersInit
   credentials?: RequestCredentials
   /**
@@ -57,8 +58,9 @@ export class HttpClient {
   }
 
   async raw(path: string, options: HttpRequestOptions = {}): Promise<Response> {
+    if (options.body !== undefined && options.rawBody !== undefined) throw new TypeError('body and rawBody cannot be used together')
     const headers = new Headers(options.headers)
-    if (options.body !== undefined) {
+    if (options.body !== undefined && options.rawBody === undefined) {
       headers.set('Content-Type', 'application/json')
     }
 
@@ -67,7 +69,7 @@ export class HttpClient {
       credentials: options.credentials ?? 'include',
       headers,
       signal: options.signal,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
     })
 
     if (!response.ok) {

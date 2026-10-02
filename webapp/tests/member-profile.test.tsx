@@ -94,7 +94,7 @@ test('owner, full member, and viewer can edit only their own account profile', (
     expect(html).toContain('Добавить фото')
     expect(html).not.toContain('role="radiogroup"')
     expect(html).not.toContain('name="member-role-')
-    expect(html).toContain('image/jpeg,image/png,image/heic,image/heif')
+    expect(html).toContain('image/jpeg,image/png,image/webp,image/heic,image/heif')
     if (variation.isOwner) expect(html).toContain('Роль владельца изменить нельзя')
   }
 })

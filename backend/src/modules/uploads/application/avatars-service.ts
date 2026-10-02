@@ -2,6 +2,7 @@ import type {
   AvatarResponse,
   CreateAvatarUploadRequest,
   CreateAvatarUploadResponse,
+  UpdateAvatarCropRequest,
 } from '@web-app-demo/contracts'
 
 import { UploadsFailure } from '../domain/errors'
@@ -17,6 +18,7 @@ import type {
   ObjectKeyFactory,
   PrivateStorage,
 } from './ports'
+import { normalizeAvatarImage } from '../../../storage/normalize-avatar-image'
 
 type AvatarsServiceDependencies = {
   clock: Clock
@@ -78,7 +80,7 @@ export class AvatarsService {
    * failures instead of one generic conflict: the transfer never landed, the window closed, or
    * the bytes are not the image they claimed to be.
    */
-  async finalizeUpload(userId: string, uploadId: string): Promise<AvatarResponse> {
+  async finalizeUpload(userId: string, uploadId: string, avatarCrop?: UpdateAvatarCropRequest['avatarCrop']): Promise<AvatarResponse> {
     const pending = await this.dependencies.repository.findPending(userId, uploadId)
     if (!pending) throw new UploadsFailure('not_found', 'Upload not found')
 
@@ -116,6 +118,7 @@ export class AvatarsService {
       userId,
       uploadId,
       readyAt: this.dependencies.clock.now(),
+      avatarCrop,
     })
     // Another finalize of the same upload won the race and already published it. Reporting "not
     // found" matches what a second finalize gets sequentially, and avoids the alternative:
@@ -130,6 +133,31 @@ export class AvatarsService {
   async getAvatar(userId: string): Promise<AvatarResponse> {
     const avatar = await this.dependencies.repository.findReady(userId)
     return { avatar: avatar ? await this.avatarDto(avatar) : null }
+  }
+
+  async updateCrop(userId: string, input: UpdateAvatarCropRequest): Promise<AvatarResponse> {
+    const updated = await this.dependencies.repository.updateCrop({
+      userId,
+      avatarId: input.avatarId,
+      expectedUpdatedAt: new Date(input.expectedUpdatedAt),
+      avatarCrop: input.avatarCrop,
+    })
+    if (!updated) throw new UploadsFailure('conflict', 'Avatar changed while it was being edited')
+    return { avatar: await this.avatarDto(updated) }
+  }
+
+  async normalizePreview(bytes: Uint8Array, contentType: string) {
+    return normalizeAvatarImage(bytes, contentType)
+  }
+
+  async currentAvatarContent(userId: string) {
+    const avatar = await this.dependencies.repository.findReady(userId)
+    if (!avatar) throw new UploadsFailure('not_found', 'Avatar not found')
+    if (avatar.byteSize > 5 * 1024 * 1024) throw new UploadsFailure('rejected', 'Avatar exceeds the allowed size')
+    const object = await this.dependencies.storage.readObject({ key: avatar.objectKey })
+    if (!object) throw new UploadsFailure('not_found', 'Avatar not found')
+    const original = new Uint8Array(await new Response(object.body).arrayBuffer())
+    return normalizeAvatarImage(original, avatar.contentType)
   }
 
   /** Idempotent: removing an avatar that is not there is a success, not a 404. */
@@ -150,6 +178,8 @@ export class AvatarsService {
     const download = await this.dependencies.storage.createDownloadUrl({ key: avatar.objectKey })
 
     return {
+      id: avatar.id,
+      avatarCrop: avatar.avatarCrop,
       contentType: avatar.contentType,
       byteSize: avatar.byteSize,
       updatedAt: avatar.updatedAt.toISOString(),

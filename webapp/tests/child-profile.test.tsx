@@ -7,7 +7,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { ChildProfile } from '../src/features/family/ChildProfile'
 import { FamilyOnboarding } from '../src/features/family/FamilyOnboarding'
 import type { AuthenticatedTransport } from '../src/platform/api'
-import { ApiRequestError } from '../src/platform/api'
 
 const child: NonNullable<FamilyResponse['child']> = {
   id: '33333333-3333-4333-8333-333333333333',
@@ -209,181 +208,45 @@ test('child profile editor disables the title back action while saving', async (
   }
 })
 
-test('photo crop uses a dedicated accessible screen and saves only the child photo fields', async () => {
+test('child avatar selection opens the shared editor and cancel performs no server mutation', async () => {
   const browser = installInteractiveDom()
-  const requests: Array<{ path: string; input: unknown }> = []
-  let completedCount = 0
-  let cancelCount = 0
+  const requests: string[] = []
   const transport: AuthenticatedTransport = {
-    request: async (path, _schema, input) => {
-      requests.push({ path, input })
-      if (path.endsWith('/uploads')) return {
-        assetId: '66666666-6666-4666-8666-666666666666',
-        upload: {
-          uploadId: '77777777-7777-4777-8777-777777777777',
-          method: 'PUT', url: 'https://storage.test/avatar',
-          headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128,
-          expiresAt: '2026-09-22T00:00:00.000Z',
-        },
-        reservationExpiresAt: '2026-09-22T00:05:00.000Z',
-      } as never
-      if (path.includes('/finalize')) return { asset: { id: '66666666-6666-4666-8666-666666666666' } } as never
-      return {} as never
-    },
+    request: async (path) => { requests.push(path); return {} as never },
     raw: async () => new Response(null, { status: 404 }),
   }
-  const originalFetch = globalThis.fetch
   const createObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
   const revokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:test-avatar' })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined })
-  globalThis.fetch = async () => new Response(null, { status: 200 })
   const root = createRoot(browser.container)
-
   try {
     await act(async () => root.render(createElement(FamilyOnboarding, {
-      familyId: '11111111-1111-4111-8111-111111111111',
-      familyTimezone: 'Europe/Moscow',
-      initialChild: child,
-      photoOnly: true,
-      transport,
-      onCancel: () => { cancelCount += 1 },
-      onCompleted: async () => { completedCount += 1 },
-    })))
-
-    const choose = () => {
-      const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-      fileInput.files = [new File([new Uint8Array(128)], 'child.jpg', { type: 'image/jpeg' })]
-      return act(async () => invoke(fileInput, 'onChange'))
-    }
-    await choose()
-    await act(async () => invoke(findOne(browser.container, (node) => node.tagName === 'BUTTON' && node.attributes['aria-label'] === 'Отменить кадрирование'), 'onClick'))
-    expect(findAll(browser.container, (node) => node.attributes['data-slot'] === 'child-photo-crop')).toHaveLength(0)
-    await choose()
-    expect(findOne(browser.container, (node) => node.attributes['data-slot'] === 'child-photo-crop')).toBeTruthy()
-    expect(textOf(browser.container)).toContain('Использовать это фото')
-    expect(textOf(browser.container)).toContain('Выбрать другое фото')
-    expect(textOf(browser.container)).toContain('JPEG, PNG, WebP или HEIC · до 20 МБ')
-    expect(findAll(browser.container, (node) => node.attributes.class?.includes('child-crop-v2-ring'))).toHaveLength(1)
-    expect(findAll(browser.container, (node) => node.attributes.class?.includes('child-crop-v2-pan'))).toHaveLength(1)
-
-    const cropImage = findOne(browser.container, (node) => node.tagName === 'IMG' && node.attributes.alt === 'Предпросмотр кадрирования') as InteractiveNode & { naturalWidth: number; naturalHeight: number }
-    cropImage.naturalWidth = 1
-    cropImage.naturalHeight = 1
-    await act(async () => invoke(cropImage, 'onLoad'))
-    await act(async () => invoke(findButton(browser.container, 'Использовать это фото'), 'onClick'))
-    expect(findAll(browser.container, (node) => node.attributes['data-slot'] === 'child-photo-crop')).toHaveLength(0)
-    expect(findButton(browser.container, 'Сохранить фото').disabled).toBe(false)
-    await act(async () => { await invoke(findButton(browser.container, 'Сохранить фото'), 'onClick'); await flushInteractive() })
-
-    expect(completedCount).toBe(1)
-    const patch = requests.find(({ path }) => path.endsWith('/families/11111111-1111-4111-8111-111111111111'))
-    expect(patch?.input).toMatchObject({ method: 'PATCH', body: {
-      child: {
-        avatarMediaId: '66666666-6666-4666-8666-666666666666',
-        avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
-        expectedVersion: child.version,
-      },
-    } })
-    expect(patch?.input).not.toHaveProperty('body.child.name')
-    expect(patch?.input).not.toHaveProperty('body.child.birthDate')
-    expect(textOf(browser.container)).toContain('Фото обновлено!')
-    await act(async () => invoke(findButton(browser.container, 'Перейти в профиль'), 'onClick'))
-    expect(cancelCount).toBe(1)
-  } finally {
-    await act(async () => root.unmount())
-    browser.restore()
-    globalThis.fetch = originalFetch
-    if (createObjectUrlDescriptor) Object.defineProperty(URL, 'createObjectURL', createObjectUrlDescriptor)
-    else Reflect.deleteProperty(URL, 'createObjectURL')
-    if (revokeObjectUrlDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeObjectUrlDescriptor)
-    else Reflect.deleteProperty(URL, 'revokeObjectURL')
-  }
-})
-
-test('photo version conflict notice stays visible after another photo is chosen and cancel stays available', async () => {
-  const browser = installInteractiveDom()
-  const familyId = '11111111-1111-4111-8111-111111111111'
-  let cancelCount = 0
-  let patchCount = 0
-  const transport: AuthenticatedTransport = {
-    request: async (path) => {
-      if (path.endsWith('/uploads')) return {
-        assetId: '66666666-6666-4666-8666-666666666666',
-        upload: {
-          uploadId: '77777777-7777-4777-8777-777777777777',
-          method: 'PUT', url: 'https://storage.test/avatar',
-          headers: { 'Content-Type': 'image/jpeg' }, contentLength: 128,
-          expiresAt: '2026-09-22T00:00:00.000Z',
-        },
-        reservationExpiresAt: '2026-09-22T00:05:00.000Z',
-      } as never
-      if (path.includes('/finalize')) return { asset: { id: '66666666-6666-4666-8666-666666666666' } } as never
-      patchCount += 1
-      throw new ApiRequestError(409, 'VERSION_CONFLICT', 'conflict')
-    },
-    raw: async () => new Response(null, { status: 404 }),
-  }
-  const originalFetch = globalThis.fetch
-  const createObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
-  const revokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
-  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:test-avatar' })
-  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined })
-  globalThis.fetch = async () => new Response(null, { status: 200 })
-  const root = createRoot(browser.container)
-
-  try {
-    await act(async () => root.render(createElement(FamilyOnboarding, {
-      familyId,
-      familyTimezone: 'Europe/Moscow',
-      initialChild: child,
-      photoOnly: true,
-      transport,
-      onCancel: () => { cancelCount += 1 },
+      familyId: '11111111-1111-4111-8111-111111111111', familyTimezone: 'Europe/Moscow',
+      initialChild: { ...child, avatarMediaId: null }, photoOnly: true, transport,
       onCompleted: async () => undefined,
     })))
-
-    const selectPhoto = (name: string) => {
-      const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
-      fileInput.files = [new File([new Uint8Array(128)], name, { type: 'image/jpeg' })]
-      return act(async () => invoke(fileInput, 'onChange'))
-    }
-    await selectPhoto('first.jpg')
-    const cropImage = findOne(browser.container, (node) => node.tagName === 'IMG' && node.attributes.alt === 'Предпросмотр кадрирования') as InteractiveNode & { naturalWidth: number; naturalHeight: number }
-    cropImage.naturalWidth = 1
-    cropImage.naturalHeight = 1
-    await act(async () => invoke(cropImage, 'onLoad'))
-    await act(async () => invoke(findButton(browser.container, 'Использовать это фото'), 'onClick'))
-    await act(async () => { await invoke(findButton(browser.container, 'Сохранить фото'), 'onClick'); await flushInteractive() })
-
-    const conflictMessage = 'Профиль ребёнка уже изменился. Отмените смену фото, вернитесь в профиль и откройте её снова.'
-    expect(patchCount).toBe(1)
-    expect(textOf(browser.container)).toContain(conflictMessage)
-    expect(findButton(browser.container, 'Сохранить фото').disabled).toBe(true)
-
-    await selectPhoto('second.jpg')
-    const secondCropImage = findOne(browser.container, (node) => node.tagName === 'IMG' && node.attributes.alt === 'Предпросмотр кадрирования') as InteractiveNode & { naturalWidth: number; naturalHeight: number }
-    secondCropImage.naturalWidth = 1
-    secondCropImage.naturalHeight = 1
-    await act(async () => invoke(secondCropImage, 'onLoad'))
-    await act(async () => invoke(findButton(browser.container, 'Использовать это фото'), 'onClick'))
-    expect(textOf(browser.container)).toContain(conflictMessage)
-    expect(findButton(browser.container, 'Сохранить фото').disabled).toBe(true)
-    const cancelButtons = findAll(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Отмена')
-    await act(async () => invoke(cancelButtons[cancelButtons.length - 1]!, 'onClick'))
-    expect(cancelCount).toBe(1)
-    expect(findAll(browser.container, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Повторить')).toHaveLength(0)
+    const fileInput = findOne(browser.container, (node) => node.tagName === 'INPUT' && node.type === 'file')
+    fileInput.files = [new File([new Uint8Array(128)], 'child.jpg', { type: 'image/jpeg' })]
+    await act(async () => invoke(fileInput, 'onChange'))
+    const editor = findOne(browser.container, (node) => node.attributes.role === 'dialog' && node.attributes['aria-label'] === 'Редактирование фотографии')
+    expect(editor).toBeTruthy()
+    expect(textOf(editor)).toContain('Масштаб')
+    expect(textOf(editor)).toContain('Сбросить')
+    expect(textOf(editor)).toContain('Выбрать другое')
+    const cancel = findOne(editor, (node) => node.tagName === 'BUTTON' && textOf(node) === 'Отмена')
+    await act(async () => invoke(cancel, 'onClick'))
+    expect(findAll(browser.container, (node) => node.attributes.role === 'dialog')).toHaveLength(0)
+    expect(requests).toEqual([])
   } finally {
     await act(async () => root.unmount())
     browser.restore()
-    globalThis.fetch = originalFetch
     if (createObjectUrlDescriptor) Object.defineProperty(URL, 'createObjectURL', createObjectUrlDescriptor)
     else Reflect.deleteProperty(URL, 'createObjectURL')
     if (revokeObjectUrlDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeObjectUrlDescriptor)
     else Reflect.deleteProperty(URL, 'revokeObjectURL')
   }
 })
-
 type InteractiveNode = {
   nodeType: number
   nodeName: string

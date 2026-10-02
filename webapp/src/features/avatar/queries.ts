@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { authQueryKeys, sessionQueryKeys, useAuth } from '@/features/auth'
 import type { MeResponse } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload } from './api'
+import { createAvatarUpload, deleteAvatar, fetchAvatar, finalizeAvatarUpload, updateAvatarCrop } from './api'
+import type { AvatarCrop } from './avatar-crop'
 import { AvatarUploadError, describeAvatarFile, uploadAvatarObject } from './upload'
 import { memberAvatarUpdatedEvent, reconcileMemberAvatarCache } from './member-avatar-query'
 
@@ -42,7 +43,9 @@ export function useUploadAvatarMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (input: File | { file: File; crop: AvatarCrop }) => {
+      const file = input instanceof File ? input : input.file
+      const crop = input instanceof File ? undefined : input.crop
       const described = describeAvatarFile(file)
       if (!described.ok) {
         throw new AvatarUploadError('unsupported-file', describeRejection(described.reason))
@@ -54,8 +57,22 @@ export function useUploadAvatarMutation() {
       })
       await uploadAvatarObject(upload, file)
 
-      return finalizeAvatarUpload(auth.transport, upload.uploadId)
+      return finalizeAvatarUpload(auth.transport, upload.uploadId, crop)
     },
+    onSuccess: async (response) => {
+      if (!auth.user?.id || queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id !== auth.user.id) return
+      queryClient.setQueryData(avatarQueryKeys.current(), response)
+      await reconcileMemberAvatarCache(queryClient)
+      window.dispatchEvent(new CustomEvent(memberAvatarUpdatedEvent, { detail: { accountId: auth.user.id } }))
+    },
+  })
+}
+
+export function useUpdateAvatarCropMutation() {
+  const auth = useAuth()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { avatarId: string; expectedUpdatedAt: string; avatarCrop: AvatarCrop }) => updateAvatarCrop(auth.transport, input),
     onSuccess: async (response) => {
       if (!auth.user?.id || queryClient.getQueryData<MeResponse>(authQueryKeys.me())?.user.id !== auth.user.id) return
       queryClient.setQueryData(avatarQueryKeys.current(), response)
