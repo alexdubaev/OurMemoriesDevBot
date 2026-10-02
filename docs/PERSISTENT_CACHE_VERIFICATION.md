@@ -50,3 +50,13 @@ Synthetic screenshots, excluded from Git:
 Owner welcome-always-on flag and UI design preserved. Native MAX player keeps its canonical URL and explicit retry; source reset still aborts its old resource. Automatic `video.load()` for a newly assigned source was removed because the real browser proved that it fetched bytes before Play despite `preload=none`. Poster decode supplies the existing seen-ready input without changing observer thresholds or the seen queue.
 
 Required CI and release results belong to the PR and final release handoff after publication. No migration or public DTO changes are introduced. Private authenticated production header checks require an authorized session; do not mint an impersonated session or create production fixtures to obtain one.
+
+## Production header follow-up
+
+PR #143 passed `verify-required` on `b368601bb67a67de3c7cbb1e3ee2cdd73fa09705`, then squash-merged as `41f44afc0d1b70c3aa4efbd2b095e7aa8703d67e`. Canonical Selectel release succeeded with no migrations; all four application containers matched that SHA, with zero restarts/startup-failure markers and healthy public live/ready probes.
+
+Real HTTP verification confirmed HTML/SW revalidation and JS/CSS immutable caching, but found the unversioned PWA icon incorrectly immutable. The initial regex could backtrack across filename hyphens. A fresh follow-up branch from accepted main restricts the matcher to existing root `/assets/` files with exactly eight Vite hash characters, keeping nested public artwork/icons on `no-cache`.
+
+Lead follow-up verification: 13 static deployment tests pass, exit 0. The actual production Caddy binary adapts the corrected template successfully without loading it into live configuration (exit 0; formatting warning only). The same independent read-only reviewer confirmed the correction, no outstanding findings. Final follow-up CI/deployment/header results are recorded in its PR and release handoff.
+
+Unauthenticated production synthetic photo/avatar/poster/video-Range probes all returned 401 without public immutable policy. Positive 200/304/206 private-media production headers still require an authorized owner session; local/backend/browser tests cover those policies without reading or creating real production family data.
