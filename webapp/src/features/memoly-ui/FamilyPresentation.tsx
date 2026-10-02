@@ -21,6 +21,7 @@ import './family-management.css'
 
 export type FamilyMemberActions = { canEditAlias: boolean; canManageRole: boolean; canRemove: boolean }
 export type FamilyPresentationProps = {
+  active?: boolean
   familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null
   currentUserId: string
   maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void
@@ -36,7 +37,7 @@ export type FamilyPresentationProps = {
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'family-settings' | 'archive' | 'invites' | 'leave-confirm'
 
-export function FamilyPresentation({ familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall }: FamilyPresentationProps) {
+export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [inviteReturnView, setInviteReturnView] = useState<'overview' | 'invites'>('overview')
@@ -45,6 +46,12 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
   const [selfNameOverride, setSelfNameOverride] = useState<SelfNameOverride | null>(null)
   const settingsTriggerRef = useRef<HTMLElement | null>(null)
   const { theme } = useMemolyTheme()
+  useEffect(() => {
+    if (active) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Close the portal as soon as its kept-alive surface becomes inactive.
+    setSettingsOpen(false)
+    setAgeDetailsOpen(false)
+  }, [active])
   const child = familyResponse.child
   const liveSelf = members.find((member) => member.userId === currentUserId)
   const presentedMembers = presentSelfNameOverride(members, currentUserId, selfNameOverride)
@@ -58,7 +65,7 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
   const goOverview = () => { setView('overview'); setSelectedMember(null) }
   const goInviteSource = () => setView(inviteReturnView)
   useEffect(() => {
-    if (view === 'overview' && !childProfileOpen) return undefined
+    if (!active || view === 'overview' && !childProfileOpen) return undefined
     return hostBridge.onBack(() => {
       if (childProfileOpen) {
         if (ageDetailsOpen) setAgeDetailsOpen(false)
@@ -70,7 +77,7 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
       else if (view === 'family-settings' || view === 'archive') { goOverview(); setSettingsOpen(true) }
       else goOverview()
     })
-  }, [ageDetailsOpen, childProfileOpen, hostBridge, inviteReturnView, onCloseChild, onCloseInvite, view])
+  }, [active, ageDetailsOpen, childProfileOpen, hostBridge, inviteReturnView, onCloseChild, onCloseInvite, view])
   return <main className={`ml-family-content family-screen${childProfileOpen ? ' child-screen' : ''}`} data-slot="family-presentation">
     <h1 className="sr-only">{childProfileOpen ? 'Профиль ребёнка' : 'Семья'}</h1>
     <div className={childProfileOpen ? 'child-shell' : view === 'overview' ? 'family-overview-host' : 'family-shell'}>
@@ -84,7 +91,7 @@ export function FamilyPresentation({ familyResponse, hostBridge, invites, member
       {!childProfileOpen && view === 'invite' ? <InviteFlow busy={busy} errorMessage={inviteError ? 'Не удалось создать приглашение. Попробуйте ещё раз.' : null} hasError={hasError} onBack={goInviteSource} onCreate={async (role, inviteeDisplayName) => { try { await onCreateInvite({ role, inviteeDisplayName }); setView('invite-ready') } catch { /* FamilyScreen exposes the actionable error state. */ } }} onRefresh={onRefresh} /> : null}
       {!childProfileOpen && view === 'invite-ready' && inviteReady ? <InviteReady busy={busy} copyState={copyState} invite={inviteReady} onBack={() => setView('invite')} onClose={() => { onCloseInvite(); goInviteSource() }} onCopy={onCopyInvite} onShare={onShareInvite} /> : null}
     </div>
-    <SettingsSheet canManageFamily={canManageFamily} canOpenInstall={canOpenInstall} installLabel={installLabel} hostBridge={hostBridge} onArchive={() => setView('archive')} onFamilySettings={() => setView('family-settings')} onOpenChange={setSettingsOpen} onOpenInstall={onOpenInstall} open={settingsOpen} returnFocusRef={settingsTriggerRef} />
+    <SettingsSheet canManageFamily={canManageFamily} canOpenInstall={canOpenInstall} installLabel={installLabel} hostBridge={hostBridge} onArchive={() => setView('archive')} onFamilySettings={() => setView('family-settings')} onOpenChange={setSettingsOpen} onOpenInstall={onOpenInstall} open={active && settingsOpen} returnFocusRef={active ? settingsTriggerRef : undefined} />
     {canLeaveFamily && view === 'overview' && !childProfileOpen ? <button className="family-leave-action" disabled={busy} onClick={() => setView('leave-confirm')} type="button">Выйти из семьи</button> : null}
   </main>
 }

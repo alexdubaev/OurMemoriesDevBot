@@ -1,6 +1,6 @@
 import { maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import 'photoswipe/style.css'
 import { Dialog as DialogPrimitive } from 'radix-ui'
@@ -43,6 +43,7 @@ import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { mediaCardSeenReady } from './seen-visibility'
 
 type Props = {
+  active?: boolean
   childId?: string
   childName: string
   childSubtitle: string
@@ -62,6 +63,7 @@ type Props = {
   isAppBootstrapped?: boolean
   maxVideoUploadAcceptance?: boolean
   onMaxVideoLaunchHandled?: () => void
+  onAddRequestHandled?: () => void
   onFamily: () => void
   onAllFamilies: () => void
   onFilterChange: (filter: FeedFilter) => void
@@ -94,8 +96,8 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 }
 
 export function FeedPage({
-  accountId = '', childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
-  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAccessLost, onFilterChange, role, transport,
+  active = true, accountId = '', childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
+  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, role, transport,
   openAddInitially = false,
 }: Props) {
   // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
@@ -104,7 +106,7 @@ export function FeedPage({
   const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [unreadCycle, setUnreadCycle] = useState(0)
-  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0)
+  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
   const reaction = useMemoryReaction(transport, familyId, accountId, membershipEpoch ?? 0)
@@ -123,7 +125,7 @@ export function FeedPage({
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
   const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
-  const registerSeenContent = useMemorySeenObserver(Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget), (id) => onSeenCandidate?.(id))
+  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle }), [familyId, unreadOnly, unreadCycle])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
@@ -144,6 +146,7 @@ export function FeedPage({
   }, [feed.data])
   const [nearbyPendingVideoIds, setNearbyPendingVideoIds] = useState<string[]>([])
   useEffect(() => {
+    if (!active) return
     const pending = new Set(items.filter(hasPendingPrivateVideo).map((memory) => memory.id))
     if (pending.size === 0 || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver((entries) => {
@@ -162,7 +165,7 @@ export function FeedPage({
       if (pending.has(card.dataset.memoryId ?? '')) observer.observe(card)
     })
     return () => observer.disconnect()
-  }, [items])
+  }, [active, items])
   const openedPendingMemories = [detail, mixedViewer?.memory].filter((memory): memory is MemoryDto => Boolean(memory))
   const pendingCandidates = new Set([...items.filter(hasPendingPrivateVideo), ...openedPendingMemories.filter(hasPendingPrivateVideo)].map((memory) => memory.id))
   const retiredPendingIds = new Set([...pendingCandidates].filter((id) => {
@@ -173,7 +176,7 @@ export function FeedPage({
   useQueries({ queries: pendingVideoIds.map((memoryId) => ({
     queryKey: pendingVideoQueryKey(familyId, accountId, membershipEpoch ?? 0, memoryId),
     queryFn: ({ signal }: { signal: AbortSignal }) => loadMemory(transport, familyId, memoryId, signal),
-    enabled: isAppBootstrapped,
+    enabled: active && isAppBootstrapped,
     retry: false,
     refetchInterval: (query: { state: { data: MemoryDto | undefined; dataUpdateCount: number; errorUpdateCount: number } }) => {
       if (query.state.data && !hasPendingPrivateVideo(query.state.data)) return false
@@ -220,6 +223,7 @@ export function FeedPage({
   }, [familyId, feed.error, onAccessLost, queryClient])
 
   useEffect(() => {
+    if (!active) return
     let checking = false
     let rerunRequested = false
     let disposed = false
@@ -254,9 +258,26 @@ export function FeedPage({
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [familyId, feedScope, refetch, transport, unreadOnly])
+  }, [active, familyId, feedScope, refetch, transport, unreadOnly])
 
   useEffect(() => {
+    if (active) return
+    document.querySelectorAll<HTMLMediaElement>('[data-memoly-feed] audio, [data-memoly-feed] video').forEach((element) => element.pause())
+    document.dispatchEvent(new Event('memoly:feed-inactive'))
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset transients after deactivation so they cannot reopen with the warm surface.
+    setAddSheetOpen(false)
+    setComposer(null)
+    setEditingMemory(null)
+    setDetail(null)
+    setMixedViewer(null)
+    setActionsMemory(null)
+    setDeleteTarget(null)
+    setDeleteTargetIndex(null)
+    setDeleteError(null)
+  }, [active])
+
+  useEffect(() => {
+    if (!active) return
     const target = sentinel.current
     if (!target || !hasNextPage) return
     const observer = new IntersectionObserver(([entry]) => {
@@ -264,7 +285,7 @@ export function FeedPage({
     }, { rootMargin: '320px' })
     observer.observe(target)
     return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
+  }, [active, fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
 
   const closeComposerAfterRefresh = async () => {
     try { await refetch() } finally { setComposer(null); setEditingMemory(null) }
@@ -279,42 +300,42 @@ export function FeedPage({
   }, [deletion.isPending])
 
   useEffect(() => {
-    if (!deleteTarget) return undefined
+    if (!active || !deleteTarget) return undefined
     return hostBridge.onBack(() => {
       if (!deletion.isPending) cancelDelete()
     })
-  }, [cancelDelete, deleteTarget, deletion.isPending, hostBridge])
+  }, [active, cancelDelete, deleteTarget, deletion.isPending, hostBridge])
 
   useEffect(() => {
-    if (!actionsMemory) return undefined
+    if (!active || !actionsMemory) return undefined
     return hostBridge.onBack(() => setActionsMemory(null))
-  }, [actionsMemory, hostBridge])
+  }, [active, actionsMemory, hostBridge])
 
-  if (composer === 'video' && childId) {
+  if (active && composer === 'video' && childId) {
     return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => { setComposer(null); onMaxVideoLaunchHandled?.() }} onSuccess={async () => { await closeComposerAfterRefresh(); onMaxVideoLaunchHandled?.() }} transport={transport} />
   }
 
-  if (composer === 'photo' && childId) {
+  if (active && composer === 'photo' && childId) {
     return <PhotoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
-  if (composer === 'note' && childId) {
+  if (active && composer === 'note' && childId) {
     return <NoteComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
-  if (editingMemory) {
+  if (active && editingMemory) {
     return <MemoryEditor familyTimezone={familyTimezone} memory={editingMemory} onCancel={() => setEditingMemory(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
-    <MediaPlaybackCoordinator>
+    <MediaPlaybackCoordinator active={active}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
       role={role} unreadCount={unreadCount} unreadOnly={unreadOnly} unreadState={unreadState}>
-      {isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}
+      {active && isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}
       {unreadOnly ? <div className="feed-unread-note"><Typography as="p" variant="memoryMeta">Просмотренные карточки останутся на месте до обновления списка.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'auto' }); setUnreadCycle((value) => value + 1) }} type="button" variant="outline">Обновить список</Button></div> : null}
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
@@ -340,7 +361,7 @@ export function FeedPage({
           reactionCounts={memory.reactionCounts}
           currentUserReaction={memory.currentUserReaction}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
-            ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
+            ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           reactionScopeKey={`${familyId}:${accountId}:${membershipEpoch ?? 0}`}
@@ -356,22 +377,22 @@ export function FeedPage({
       {feed.isFetchNextPageError && items.length > 0 ? unreadOnly && feed.error instanceof ApiRequestError && feed.error.status === 409
         ? <div className="feed-unread-restart" role="status"><Typography as="p" variant="memoryMeta">Список изменился. Обновите непросмотренные, чтобы продолжить.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'instant' }); setUnreadCycle((value) => value + 1) }} type="button">Обновить список</Button></div>
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
-      {currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
-      {currentMixedViewer ? <MixedMediaViewer hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {active && currentMixedViewer ? <MixedMediaViewer hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
       onNote={() => { const next = composerModeForAdd('note', childId); if (next) setComposer(next) }}
-      onOpenChange={setAddSheetOpen}
+      onOpenChange={(open) => { setAddSheetOpen(open); if (!open) onAddRequestHandled?.() }}
       onPhoto={() => { const next = composerModeForAdd('photo', childId); if (next) setComposer(next) }}
       onVideo={() => { const next = composerModeForAdd('video', childId); if (next) setComposer(next) }}
-      open={addSheetOpen}
+      open={active && (addSheetOpen || openAddInitially && role === 'full')}
       returnFocusRef={addButtonRef}
       role={role}
     />
     <MemolyBottomSheet
       onOpenChange={(open) => { if (!open) setActionsMemory(null) }}
-      open={actionsMemory !== null}
+      open={active && actionsMemory !== null}
       returnFocusRef={actionTriggerRef}
     >
       {actionsMemory ? (
@@ -390,7 +411,7 @@ export function FeedPage({
     </MemolyBottomSheet>
     <MemoryDeleteSpotlight
       error={deleteError}
-      memory={deleteTarget}
+      memory={active ? deleteTarget : null}
       onCancel={cancelDelete}
       onConfirm={() => {
         if (!deleteTarget || deletion.isPending) return
@@ -399,7 +420,7 @@ export function FeedPage({
           .then(() => { setDeleteTarget(null); setDeleteTargetIndex(null); setDeleteError(null) })
           .catch(() => { setDeleteError('Не удалось удалить воспоминание. Попробуйте ещё раз.') })
       }}
-      open={deleteTarget !== null}
+      open={active && deleteTarget !== null}
       preview={deleteTarget ? <MemoryDeletePreview familyTimezone={familyTimezone} memory={deleteTarget} transport={transport} /> : null}
       submitting={deletion.isPending}
     />
@@ -417,7 +438,14 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
   registerFullscreen?: (element: HTMLElement | null) => void
   transport: AuthenticatedTransport
 }) {
-  const [viewportRef, embla] = useEmblaCarousel({ align: 'start', containScroll: 'trimSnaps' })
+  const [viewportRef, embla] = useEmblaCarousel({
+    align: 'start',
+    containScroll: 'trimSnaps',
+    watchResize: (_api, entries) => entries.every((entry) => {
+      const element = entry.target
+      return element.getClientRects().length > 0 && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0
+    }),
+  })
   const [index, setIndex] = useState(0)
   const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
@@ -821,11 +849,17 @@ function PrivateImage({ attachment, borrowedUrl, hostBridge, photoAlbum, photoIn
   const url = borrowedUrl ?? ownedUrl
   const [readyUrl, setReadyUrl] = useState<string | null>(null)
   const viewerSession = useRef<AbortController | null>(null)
+  const notifyUrlChange = useEffectEvent((nextUrl: string | null) => onUrlChange?.(attachment.id, nextUrl))
   useEffect(() => () => { viewerSession.current?.abort() }, [])
   useEffect(() => {
-    onUrlChange?.(attachment.id, ownedUrl)
-    return () => onUrlChange?.(attachment.id, null)
-  }, [attachment.id, onUrlChange, ownedUrl])
+    const closeViewer = () => viewerSession.current?.abort()
+    document.addEventListener('memoly:feed-inactive', closeViewer)
+    return () => document.removeEventListener('memoly:feed-inactive', closeViewer)
+  }, [])
+  useLayoutEffect(() => {
+    notifyUrlChange(ownedUrl)
+    return () => notifyUrlChange(null)
+  }, [attachment.id, ownedUrl])
   if (!url) return <div aria-label="Загрузка фотографии" className="w-full bg-muted" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }} />
   const onImageLoad: React.ReactEventHandler<HTMLImageElement> = (event) => { const loadedImage = event.currentTarget; void loadedImage.decode().then(() => setReadyUrl(url)).catch(() => setReadyUrl(null)) }
   if (!interactive) return <div className="ml-media-button block w-full" data-seen-ready={readyUrl === url}><PhotoImage alt="Воспоминание" height={attachment.height} onError={() => setReadyUrl(null)} onLoad={onImageLoad} src={url} width={attachment.width} /></div>

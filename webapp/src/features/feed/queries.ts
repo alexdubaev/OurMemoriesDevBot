@@ -15,14 +15,14 @@ export const feedQueryKeys = {
     [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle] as const,
 }
 
-export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) {
+export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true) {
   return useInfiniteQuery({
     queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle),
     queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: unreadOnly ? Infinity : 20_000,
-    refetchOnWindowFocus: !unreadOnly,
+    refetchOnWindowFocus: active && !unreadOnly,
   })
 }
 

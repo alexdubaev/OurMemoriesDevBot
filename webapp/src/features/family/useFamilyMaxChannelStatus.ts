@@ -1,7 +1,7 @@
 import type { FamilyMaxChannelStatus } from '@web-app-demo/contracts'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { loadFamilyMaxChannelStatus } from './api'
 
 type ChannelState = { key: string; transport: AuthenticatedTransport; status: FamilyMaxChannelStatus | null; loading: boolean; error: boolean }
@@ -30,14 +30,14 @@ export function useFamilyMaxChannelStatus(
       const controller = new AbortController()
       currentController = controller
       const thisRequest = ++requestId
-      setState((previous) => previous.key === key && previous.transport === transport
-        ? { ...previous, loading: true, error: false }
+      setState((previous) => previous.key === key
+        ? { ...previous, transport, loading: previous.status === null, error: false }
         : { key, transport, status: null, loading: true, error: false })
       try {
         const status = await loadFamilyMaxChannelStatus(transport, familyId, controller.signal)
         if (active && thisRequest === requestId) setState({ key, transport, status, loading: false, error: false })
-      } catch {
-        if (active && thisRequest === requestId) setState({ key, transport, status: null, loading: false, error: true })
+      } catch (error) {
+        if (active && thisRequest === requestId) setState((previous) => ({ key, transport, status: error instanceof ApiRequestError && [401, 403, 404].includes(error.status) ? null : previous.key === key ? previous.status : null, loading: false, error: true }))
       }
     }
     const refreshOnReturn = () => {
@@ -55,6 +55,6 @@ export function useFamilyMaxChannelStatus(
     }
   }, [familyId, key, refreshToken, transport])
 
-  const current = state.key === key && state.transport === transport ? state : { key, transport, status: null, loading: true, error: false }
+  const current = state.key === key ? state : { key, transport, status: null, loading: true, error: false }
   return { ...current, retry }
 }

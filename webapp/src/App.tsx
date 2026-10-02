@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { BrowserLinkStartResponse, FamilyHomeResponse, FamilyInviteDto, FamilyMemberDto, FamilyResponse, InvitePreviewResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
@@ -191,6 +191,16 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [editingChildPhoto, setEditingChildPhoto] = useState(false)
   const [viewingChild, setViewingChild] = useState(false)
   const [screen, setScreen] = useState<'hub' | 'family' | 'feed'>(() => savedPresentation?.screen ?? 'hub')
+  const [visitedSurfaces, setVisitedSurfaces] = useState<Set<'family' | 'feed'>>(() => new Set(savedPresentation?.screen === 'feed' ? ['feed'] : savedPresentation?.screen === 'family' ? ['family'] : []))
+  const surfaceScroll = useRef({ feed: 0, family: 0 })
+  const switchSurface = useCallback((next: 'family' | 'feed') => {
+    if (screen === 'feed' || screen === 'family') surfaceScroll.current[screen] = window.scrollY
+    setVisitedSurfaces((current) => new Set([...current, next]))
+    setScreen(next)
+  }, [screen])
+  useLayoutEffect(() => {
+    if (screen === 'feed' || screen === 'family') window.scrollTo(0, surfaceScroll.current[screen])
+  }, [screen, familyResponse?.family.id])
   const [openAddFromFamily, setOpenAddFromFamily] = useState(false)
   const [filter, setFilter] = useState<FeedFilter>(() => savedPresentation?.filter ?? 'all')
   const [selectedMembershipEpoch, setSelectedMembershipEpoch] = useState<number | null>(() => savedPresentation?.membershipEpoch ?? null)
@@ -351,6 +361,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         return
       }
       allowPrivateFamilyCache(currentUserId, familyId)
+      setVisitedSurfaces(new Set(response.child ? ['feed'] : ['family']))
+      surfaceScroll.current = { feed: 0, family: 0 }
       setFamilyResponse(response)
       selectedFamilyIdRef.current = familyId
       setSelectedMembershipEpoch(summary.membershipEpoch)
@@ -382,6 +394,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       void removePrivateFamilyCache(queryClient, currentUserId, revokedFamilyId)
     }
     selectionVersion.current += 1
+    setVisitedSurfaces(new Set())
+    surfaceScroll.current = { feed: 0, family: 0 }
     selectedFamilyIdRef.current = null
     setSelectedMembershipEpoch(null)
     setFamilyResponse(null)
@@ -641,8 +655,14 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     else if (!editingChildPhoto) { setEditingChild(false); setEditingChildPhoto(false) }
   }} transport={transport} /></div>
   const current = members.find((member) => member.userId === currentUserId)
-  if (screen === 'feed') return <div style={insetsStyle}><FeedPage key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); setScreen('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div>
-  return <div style={insetsStyle}><FamilyScreen canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); setScreen('feed') }} onAllFamilies={() => returnHome()} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); setScreen('feed') }} onOpenChild={() => setViewingChild(true)} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); setScreen('feed') }} onRefresh={refreshSelected} transport={transport} /></div>
+  const feedActive = screen === 'feed'
+  const familyActive = screen === 'family'
+  const feedMounted = visitedSurfaces.has('feed') || screen === 'feed'
+  const familyMounted = visitedSurfaces.has('family') || screen === 'family'
+  return <>
+    {feedMounted ? <div aria-hidden={!feedActive} data-navigation-surface="feed" hidden={!feedActive} style={insetsStyle}><FeedPage active={feedActive} key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onAddRequestHandled={() => setOpenAddFromFamily(false)} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAllFamilies={() => returnHome()} onFamily={() => { setOpenAddFromFamily(false); switchSurface('family') }} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div> : null}
+    {familyMounted ? <div aria-hidden={!familyActive} data-navigation-surface="family" hidden={!familyActive} style={insetsStyle}><FamilyScreen active={familyActive} canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} childProfileOpen={viewingChild} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => { setViewingChild(false); setOpenAddFromFamily(true); switchSurface('feed') }} onAllFamilies={() => returnHome()} onCloseChild={() => setViewingChild(false)} onEditChild={() => { setEditingChildPhoto(false); setEditingChild(true) }} onChangeChildPhoto={() => { setEditingChildPhoto(true); setEditingChild(true) }} onFeed={() => { setViewingChild(false); setOpenAddFromFamily(false); switchSurface('feed') }} onOpenChild={() => setViewingChild(true)} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); switchSurface('feed') }} onRefresh={refreshSelected} transport={transport} /></div> : null}
+  </>
 }
 
 function isInstallOfferSupported(hostBridge: HostBridge) {

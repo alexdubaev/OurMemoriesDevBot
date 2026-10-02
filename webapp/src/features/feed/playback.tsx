@@ -4,7 +4,7 @@ import type { PropsWithChildren } from 'react'
 import { PlaybackContext, type PlaybackCoordinator } from './playback-context'
 
 /** One feed-scoped owner prevents two HTMLMediaElements from playing at the same time. */
-export function MediaPlaybackCoordinator({ children }: PropsWithChildren) {
+export function MediaPlaybackCoordinator({ active = true, children }: PropsWithChildren<{ active?: boolean }>) {
   const players = useRef(new Map<symbol, () => void>())
   const activeToken = useRef<symbol | null>(null)
   const value = useMemo<PlaybackCoordinator>(() => ({
@@ -18,6 +18,9 @@ export function MediaPlaybackCoordinator({ children }: PropsWithChildren) {
     },
     register(token, pause) { players.current.set(token, pause); return () => { players.current.delete(token) } },
   }), [])
+  useEffect(() => {
+    if (!active) value.pauseAll()
+  }, [active, value])
   useEffect(() => {
     const pauseWhenHidden = () => { if (document.hidden) value.pauseAll() }
     document.addEventListener('visibilitychange', pauseWhenHidden)
