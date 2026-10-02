@@ -7,6 +7,7 @@ import { errorResponse, requestIdFrom } from './errors'
 
 type AuthSecurityOptions = {
   bodyLimitBytes: number
+  bodyLimitExemptions?: Array<{ method: string; path: string }>
   rateLimitMax: number
   rateLimitWindowSeconds: number
   trustProxy: boolean
@@ -31,15 +32,22 @@ type FixedWindowRateLimitOptions<E extends Env> = {
 const maxTrackedKeys = 10_000
 
 export function createAuthSecurity(options: AuthSecurityOptions): MiddlewareHandler[] {
+  const requestBodyLimit = bodyLimit({
+    maxSize: options.bodyLimitBytes,
+    onError: (c) => c.json(errorResponse(
+      'PAYLOAD_TOO_LARGE',
+      'Размер запроса превышает допустимый',
+      requestIdFrom(c),
+    ), 413),
+  })
   return [
-    bodyLimit({
-      maxSize: options.bodyLimitBytes,
-      onError: (c) => c.json(errorResponse(
-        'PAYLOAD_TOO_LARGE',
-        'Размер запроса превышает допустимый',
-        requestIdFrom(c),
-      ), 413),
-    }),
+    async (c, next) => {
+      if (options.bodyLimitExemptions?.some((entry) => c.req.method === entry.method && c.req.path === entry.path)) {
+        await next()
+        return
+      }
+      return requestBodyLimit(c, next)
+    },
     createAuthRateLimit(options),
   ]
 }

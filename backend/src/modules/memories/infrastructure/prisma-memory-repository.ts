@@ -558,7 +558,7 @@ function memoryInclude() {
   return {
     author: { select: {
       displayName: true,
-      avatars: { where: { state: 'ready' as const }, select: { id: true }, take: 1 },
+      avatars: { where: { state: 'ready' as const }, select: { id: true, avatarCrop: true }, take: 1 },
       familyMemberships: { where: { revokedAt: null, family: { status: 'active' as const } }, select: { familyId: true } },
     } },
     likes: {
@@ -593,7 +593,7 @@ function dto(
     createdAt: Date
     version: number
     status: 'processing' | 'published' | 'failed' | 'deleted'
-    author: { displayName: string | null; avatars: Array<{ id: string }>; familyMemberships: Array<{ familyId: string }> }
+    author: { displayName: string | null; avatars: Array<{ id: string; avatarCrop: unknown }>; familyMemberships: Array<{ familyId: string }> }
     likes: Array<{ userId: string; reaction: MemoryReaction }>
     media: Array<{ position: number; asset: {
       id: string
@@ -618,7 +618,8 @@ function dto(
     author: { id: memory.authorId, name: memory.author.displayName ?? 'Участник семьи',
       avatarPath: memory.author.familyMemberships.some(({ familyId }) => familyId === memory.familyId) && memory.author.avatars[0]
         ? `/api/v1/families/${memory.familyId}/media/avatars/${memory.authorId}/${memory.author.avatars[0].id}/content`
-        : null },
+        : null,
+      avatarCrop: isAvatarCrop(memory.author.avatars[0]?.avatarCrop) ? memory.author.avatars[0]!.avatarCrop : null },
     kind: memory.kind,
     body: memory.body,
     occurredAt: memory.occurredAt.toISOString(),
@@ -679,6 +680,14 @@ function dto(
     },
     capabilities: { edit: role === 'full', delete: role === 'full', like: true },
   }
+}
+
+function isAvatarCrop(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object') return false
+  const crop = value as Record<string, unknown>
+  return ['x', 'y', 'width', 'height'].every((key) => typeof crop[key] === 'number')
+    && (crop.x as number) >= 0 && (crop.y as number) >= 0 && (crop.width as number) > 0 && (crop.height as number) > 0
+    && (crop.x as number) + (crop.width as number) <= 1 && (crop.y as number) + (crop.height as number) <= 1
 }
 
 function measuredWaveform(value: unknown) {

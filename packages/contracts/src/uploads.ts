@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { avatarCropSchema, type AvatarCrop } from './avatar-crop'
 
 /**
  * Avatar upload contracts.
@@ -20,6 +21,7 @@ export const AVATAR_MAX_BYTES = 5 * 1024 * 1024
 export const avatarContentTypeSchema = z.enum([
   'image/jpeg',
   'image/png',
+  'image/webp',
   'image/heic',
   'image/heif',
 ])
@@ -76,6 +78,8 @@ export const avatarUploadParamsSchema = z
 
 export const avatarSchema = z
   .object({
+    id: z.uuid().optional(),
+    avatarCrop: avatarCropSchema.nullable().optional(),
     contentType: avatarContentTypeSchema,
     byteSize: z.number().int().positive(),
     updatedAt: z.string().datetime(),
@@ -90,6 +94,16 @@ export const avatarResponseSchema = z
   })
   .strict()
 
+export const updateAvatarCropRequestSchema = z.object({
+  avatarId: z.uuid(),
+  expectedUpdatedAt: z.string().datetime(),
+  avatarCrop: avatarCropSchema,
+}).strict()
+
+export const finalizeAvatarUploadRequestSchema = z.object({
+  avatarCrop: avatarCropSchema.optional(),
+}).strict()
+
 export type AvatarContentType = z.infer<typeof avatarContentTypeSchema>
 export type CreateAvatarUploadRequest = z.infer<typeof createAvatarUploadRequestSchema>
 export type UploadTicket = z.infer<typeof uploadTicketSchema>
@@ -97,3 +111,5 @@ export type CreateAvatarUploadResponse = z.infer<typeof createAvatarUploadRespon
 export type AvatarUploadParams = z.infer<typeof avatarUploadParamsSchema>
 export type Avatar = z.infer<typeof avatarSchema>
 export type AvatarResponse = z.infer<typeof avatarResponseSchema>
+export type UpdateAvatarCropRequest = z.infer<typeof updateAvatarCropRequestSchema>
+export type { AvatarCrop }

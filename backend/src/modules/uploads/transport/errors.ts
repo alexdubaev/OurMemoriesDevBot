@@ -26,6 +26,7 @@ export function toUploadsAppError(error: unknown) {
   if (error.kind === 'not_completed') {
     return new AppError(409, 'UPLOAD_NOT_COMPLETED', 'Загрузка ещё не завершена', error.message)
   }
+  if (error.kind === 'conflict') return new AppError(409, 'VERSION_CONFLICT', 'Фото профиля изменилось. Обновите данные и попробуйте снова', error.message)
   return new AppError(409, 'UPLOAD_REJECTED', 'Файл не прошёл проверку', error.message)
 }
 

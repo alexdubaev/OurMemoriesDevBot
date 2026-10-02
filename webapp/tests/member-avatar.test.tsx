@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { MemberAvatarImage } from '../src/features/avatar/member-avatar'
+import { AvatarPhoto } from '../src/features/avatar/AvatarPhoto'
 import { memberAvatarQueryKeys, memberAvatarQueryOptions, reconcileMemberAvatarCache } from '../src/features/avatar/member-avatar-query'
 import type { AuthenticatedTransport } from '../src/platform/api'
 
@@ -28,6 +29,16 @@ test('member avatar has initials fallback when there is no image', () => {
   expect(html).toContain('family-member-avatar')
   expect(html).toContain('Д')
   expect(html).not.toContain('<img')
+})
+
+test('the canonical crop renderer applies identical normalized image bounds and leaves legacy null crops unchanged', () => {
+  const crop = { x: 0.25, y: 0.1, width: 0.5, height: 0.8 }
+  const current = renderToStaticMarkup(createElement(AvatarPhoto, { src: '/avatar', crop, className: 'avatar' }))
+  const legacy = renderToStaticMarkup(createElement(AvatarPhoto, { src: '/avatar', crop: null, className: 'avatar' }))
+  expect(current).toContain('width:200%;height:125%;left:-50%;top:-12.5%')
+  expect(current).toContain('object-fit:fill')
+  expect(legacy).not.toContain('width:200%')
+  expect(legacy).toContain('object-cover')
 })
 
 test('avatar mutation discards old bytes and invalidates feed data for replacement or deletion', async () => {

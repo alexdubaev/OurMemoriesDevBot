@@ -111,6 +111,7 @@ function createFakeRepository() {
         objectKey: input.objectKey,
         contentType: input.contentType,
         byteSize: input.byteSize,
+        avatarCrop: null,
         expiresAt: input.expiresAt,
         readyAt: null,
         updatedAt: new Date(),
@@ -126,14 +127,21 @@ function createFakeRepository() {
     async findReady(id) {
       return forUser(id, 'ready')
     },
-    async promoteToReady({ userId: id, uploadId, readyAt }) {
+    async updateCrop({ userId: id, avatarId, expectedUpdatedAt, avatarCrop }) {
+      const current = rows.get(avatarId)
+      if (!current || current.userId !== id || current.state !== 'ready' || current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return null
+      const updated = { ...current, avatarCrop, updatedAt: new Date(current.updatedAt.getTime() + 1) }
+      rows.set(updated.id, updated)
+      return updated
+    },
+    async promoteToReady({ userId: id, uploadId, readyAt, avatarCrop }) {
       const pending = rows.get(uploadId)
       if (!pending || pending.userId !== id || pending.state !== 'pending') return null
 
       const previous = forUser(id, 'ready')
       if (previous) rows.delete(previous.id)
 
-      const avatar: AvatarRecord = { ...pending, state: 'ready', readyAt, updatedAt: readyAt }
+      const avatar: AvatarRecord = { ...pending, state: 'ready', readyAt, updatedAt: readyAt, avatarCrop: avatarCrop ?? null }
       rows.set(avatar.id, avatar)
 
       return { avatar, replacedObjectKey: previous?.objectKey ?? null }
@@ -238,6 +246,20 @@ describe('AvatarsService', () => {
     })
     await Promise.resolve()
     expect(deleted).toContain(pending.objectKey)
+  })
+
+  test('publishes crop metadata atomically with the original upload and rejects stale crop edits', async () => {
+    const upload = await uploadPng()
+    const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.6 }
+    const published = await service.finalizeUpload(userId, upload.uploadId, crop)
+    expect(published.avatar).toMatchObject({ id: upload.uploadId, avatarCrop: crop })
+    expect(fakeStorage.objects.get(fakeRepository.rows.get(upload.uploadId)!.objectKey)?.bytes).toEqual(new Uint8Array(pngFixture))
+
+    const expectedUpdatedAt = published.avatar!.updatedAt!
+    const edited = await service.updateCrop(userId, { avatarId: upload.uploadId, expectedUpdatedAt, avatarCrop: { x: 0, y: 0, width: 1, height: 1 } })
+    expect(edited.avatar?.avatarCrop).toEqual({ x: 0, y: 0, width: 1, height: 1 })
+    await expect(service.updateCrop(userId, { avatarId: upload.uploadId, expectedUpdatedAt, avatarCrop: crop })).rejects.toMatchObject({ kind: 'conflict' })
+    await expect(service.updateCrop('019c0000-0000-7000-8000-0000000000bb', { avatarId: upload.uploadId, expectedUpdatedAt: edited.avatar!.updatedAt!, avatarCrop: crop })).rejects.toMatchObject({ kind: 'conflict' })
   })
 
 })

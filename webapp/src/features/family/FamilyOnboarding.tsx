@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
-import { resolveAvatarContentType } from '@/features/avatar'
+import { AvatarEditor, avatarCropStyle, createAvatarPreview, fullAvatarCrop, resolveAvatarContentType } from '@/features/avatar'
+import type { AvatarCrop } from '@/features/avatar'
 import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { completeChildProfile, updateFamily, uploadChildAvatar } from './api'
@@ -16,7 +17,7 @@ import {
 } from './model'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
-type Crop = { x: number; y: number; width: number; height: number }
+type Crop = AvatarCrop
 
 export function FamilyOnboarding({
   familyId,
@@ -45,22 +46,26 @@ export function FamilyOnboarding({
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
   const [cropFile, setCropFile] = useState<File | null>(null)
   const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null)
-  const [zoom, setZoom] = useState(1)
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const [aspect, setAspect] = useState(1)
-  const [cropImageLoaded, setCropImageLoaded] = useState(false)
+  const [cropPreviewBlob, setCropPreviewBlob] = useState<Blob | null>(null)
+  const [restoreConfirmedCrop, setRestoreConfirmedCrop] = useState(false)
   const [confirmedCrop, setConfirmedCrop] = useState<Crop>(
-    initialChild?.avatarCrop ?? { x: 0, y: 0, width: 1, height: 1 },
+    initialChild?.avatarCrop ?? fullAvatarCrop,
   )
+  const [cropDirty, setCropDirty] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const finalizedAvatar = useRef<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [photoSaved, setPhotoSaved] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [requestError, setRequestError] = useState<Error | null>(null)
+  const submitError = useRef<Error | null>(null)
   const [childVersionConflict, setChildVersionConflict] = useState(false)
+  const filePicker = useRef<HTMLInputElement>(null)
+  const previewController = useRef<AbortController | null>(null)
+  const ownedCropUrls = useRef(new Set<string>())
 
   const requestCancel = () => {
-    const unsaved = !photoSaved && (name !== (initialChild?.name ?? '') || birthDate !== (initialChild?.birthDate ?? '') || sex !== (initialChild?.sex ?? null) || file !== null || cropFile !== null)
+    const unsaved = !photoSaved && (name !== (initialChild?.name ?? '') || birthDate !== (initialChild?.birthDate ?? '') || sex !== (initialChild?.sex ?? null) || file !== null || cropFile !== null || cropDirty)
     if (unsaved && typeof window.confirm === 'function' && !window.confirm('Удалить несохранённые изменения?')) return
     onCancel?.()
   }
@@ -70,7 +75,8 @@ export function FamilyOnboarding({
   }, [previewUrl])
 
   useEffect(() => () => {
-    if (cropPreviewUrl) URL.revokeObjectURL(cropPreviewUrl)
+    previewController.current?.abort()
+    if (cropPreviewUrl && ownedCropUrls.current.delete(cropPreviewUrl)) URL.revokeObjectURL(cropPreviewUrl)
   }, [cropPreviewUrl])
 
   useEffect(() => {
@@ -83,6 +89,7 @@ export function FamilyOnboarding({
       if (!response.ok) return
       objectUrl = URL.createObjectURL(await response.blob())
       if (!cancelled) setCurrentAvatarUrl(objectUrl)
+      else URL.revokeObjectURL(objectUrl)
     }).catch(() => undefined)
     return () => {
       cancelled = true
@@ -90,19 +97,13 @@ export function FamilyOnboarding({
     }
   }, [familyId, initialChild?.avatarMediaId, transport])
 
-  const crop = useMemo<Crop>(() => {
-    if (!cropFile) return confirmedCrop
-    const width = Math.min(1, 1 / aspect) / zoom
-    const height = Math.min(1, aspect) / zoom
-    return { x: Math.min(Math.max(0, position.x), 1 - width), y: Math.min(Math.max(0, position.y), 1 - height), width, height }
-  }, [aspect, confirmedCrop, cropFile, position, zoom])
   const age = formatChildAge(birthDate, familyTimezone)
   const maximumBirthDate = familyCalendarDate(familyTimezone)
   const displayAvatarUrl = previewUrl ?? currentAvatarUrl
   const photoVersionConflict = photoOnly && childVersionConflict
   const isChildEdit = Boolean(initialChild && !photoOnly)
 
-  function chooseFile(next: File | null) {
+  async function chooseFile(next: File | null) {
     setRequestError(null)
     if (!next) {
       setCropFile(null)
@@ -114,43 +115,82 @@ export function FamilyOnboarding({
       setFormErrors((errors) => ({ ...errors, avatar: 'Выберите фотографию до 20 МБ в формате JPEG, PNG, WebP или HEIC.' }))
       return
     }
-    setCropFile(next)
-    setCropPreviewUrl(URL.createObjectURL(next))
-    setCropImageLoaded(false)
-    setZoom(1)
-    setPosition({ x: 0, y: 0 })
-    setAspect(1)
+    finalizedAvatar.current = null
+    setRestoreConfirmedCrop(false)
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
+    setPreviewing(true)
+    try {
+      const normalized = contentType === 'image/heic' || contentType === 'image/heif'
+        ? await createAvatarPreview(transport, next, contentType, controller.signal)
+        : next
+      if (controller.signal.aborted) return
+      setCropFile(next)
+      const blob = normalized instanceof Blob ? normalized : new Blob([normalized])
+      const url = URL.createObjectURL(blob)
+      ownedCropUrls.current.add(url)
+      setCropPreviewBlob(blob)
+      setCropPreviewUrl(url)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setRequestError(error instanceof Error ? error : new Error('Не удалось открыть фотографию. Выберите другое фото.'))
+      return
+    } finally { if (previewController.current === controller) { previewController.current = null; setPreviewing(false) } }
     setFormErrors((errors) => ({ ...errors, avatar: '' }))
   }
 
   function cancelCrop() {
     setCropFile(null)
+    setCropPreviewBlob(null)
     setCropPreviewUrl(null)
-    setZoom(1)
-    setPosition({ x: 0, y: 0 })
   }
 
-  function useCrop() {
-    if (!cropFile) return
-    setFile(cropFile)
-    setPreviewUrl(URL.createObjectURL(cropFile))
+  function openDisplayedAvatarCrop() {
+    if (file && previewUrl) {
+      setCropFile(file)
+      setCropPreviewBlob(null)
+      setRestoreConfirmedCrop(true)
+      setCropPreviewUrl(previewUrl)
+      return
+    }
+    if (currentAvatarUrl) {
+      setCropFile(null)
+      setCropPreviewBlob(null)
+      setRestoreConfirmedCrop(true)
+      setCropPreviewUrl(currentAvatarUrl)
+    }
+  }
+
+  async function useCrop(crop: Crop) {
+    if (photoOnly) {
+      submitError.current = null
+      const saved = await submit({ file: cropFile, crop })
+      if (!saved) {
+        const error = submitError.current as Error | null
+        throw new Error(error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT'
+          ? 'Профиль ребёнка уже изменился. Отмените редактор и откройте его снова.'
+          : error?.message ?? 'Не удалось сохранить фото. Проверьте соединение и повторите попытку.')
+      }
+      setFile(cropFile)
+      if (cropFile && cropPreviewBlob) setPreviewUrl(URL.createObjectURL(cropPreviewBlob))
+    }
+    else {
+      setFile(cropFile)
+      if (cropFile && cropPreviewBlob) setPreviewUrl(URL.createObjectURL(cropPreviewBlob))
+    }
     setConfirmedCrop(crop)
-    finalizedAvatar.current = null
+    setCropDirty(true)
     cancelCrop()
   }
 
-  function moveCrop(deltaX: number, deltaY: number) {
-    setPosition((current) => ({
-      x: Math.min(Math.max(0, current.x + deltaX), 1 - crop.width),
-      y: Math.min(Math.max(0, current.y + deltaY), 1 - crop.height),
-    }))
-  }
-
-  async function submit() {
+  async function submit(override?: { file: File | null; crop: Crop }): Promise<boolean> {
+    const submittedFile = override ? override.file : file
+    const submittedCrop = override?.crop ?? confirmedCrop
     const errors: Record<string, string> = {}
     if (photoOnly) {
       if (!initialChild) errors.avatar = 'Не удалось загрузить профиль ребёнка.'
-      else if (!file) errors.avatar = 'Выберите и подтвердите новую фотографию.'
+      else if (!submittedFile && !initialChild.avatarMediaId) errors.avatar = 'Добавьте фотографию ребёнка.'
     } else {
       if (!file && !initialChild?.avatarMediaId) errors.avatar = 'Добавьте фотографию ребёнка.'
       if (!name.trim()) errors.name = 'Укажите имя ребёнка.'
@@ -162,55 +202,55 @@ export function FamilyOnboarding({
     setFormErrors(errors)
     setRequestError(null)
     if (Object.keys(errors).length > 0
-      || (!photoOnly && ((!file && !initialChild?.avatarMediaId) || !sex || age === null))) return
+      || (!photoOnly && ((!submittedFile && !initialChild?.avatarMediaId) || !sex || age === null))) return false
 
     setSubmitting(true)
     try {
-      const contentType = file ? resolveAvatarContentType(file) : null
-      if (file && !contentType) return
+      const contentType = submittedFile ? resolveAvatarContentType(submittedFile) : null
+      if (submittedFile && !contentType) return false
       let avatarMediaId = initialChild?.avatarMediaId ?? null
-      if (file && contentType) {
-        avatarMediaId = finalizedAvatar.current ?? await uploadChildAvatar(transport, familyId, file, contentType)
+      if (submittedFile && contentType) {
+        avatarMediaId = finalizedAvatar.current ?? await uploadChildAvatar(transport, familyId, submittedFile, contentType)
         finalizedAvatar.current = avatarMediaId
       }
       if (!avatarMediaId) throw new Error('Не удалось подготовить фотографию ребёнка.')
       if (photoOnly) {
         if (!initialChild) throw new Error('Не удалось загрузить профиль ребёнка.')
         await updateFamily(transport, familyId, { child: {
-          avatarMediaId, avatarCrop: confirmedCrop, expectedVersion: initialChild.version,
+          avatarMediaId, avatarCrop: submittedCrop, expectedVersion: initialChild.version,
         } })
       } else {
         await completeChildProfile(transport, familyId, {
-          name: name.trim(), birthDate, sex: sex!, avatarMediaId, avatarCrop: confirmedCrop,
+          name: name.trim(), birthDate, sex: sex!, avatarMediaId, avatarCrop: submittedCrop,
           expectedVersion: initialChild?.version ?? null,
         })
       }
       await onCompleted()
       if (photoOnly) setPhotoSaved(true)
+      return true
     } catch (error) {
+      submitError.current = error instanceof Error ? error : new Error('Не удалось сохранить профиль ребёнка.')
       if (photoOnly && error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT') {
         finalizedAvatar.current = null
         setChildVersionConflict(true)
       }
       setRequestError(error instanceof Error ? error : new Error('Не удалось сохранить профиль ребёнка.'))
+      return false
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <main className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
-      {cropPreviewUrl || photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
+    <>
+    <main hidden={Boolean(cropPreviewUrl)} className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
+      {photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
         <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
         <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
-      <section aria-labelledby={cropPreviewUrl || photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={cropPreviewUrl ? 'child-edit-v2-shell' : photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !cropPreviewUrl && !photoSaved ? 'child-profile-editor' : undefined}>
-        {cropPreviewUrl ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
-          <button aria-label="Отменить кадрирование" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={cancelCrop} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
-          <Typography aria-level={1} className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" role="heading" variant="memoryScreen">Фотография ребёнка</Typography>
-          <span aria-hidden="true" className="child-title-action" />
-        </div> : photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
+      <section aria-labelledby={photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !photoSaved ? 'child-profile-editor' : undefined}>
+        {photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
           <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
           <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen" />
           <span aria-hidden="true" className="child-title-action" />
@@ -221,33 +261,35 @@ export function FamilyOnboarding({
           <Typography as="p" variant="memoryBody">Новое фото профиля сохранено.</Typography>
           <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={requestCancel} type="button">Перейти в профиль</Button>
         </div> : <>
-        {!isChildEdit && !cropPreviewUrl ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
-        {!isChildEdit && !cropPreviewUrl ? <Typography className="mt-2" tone="muted" variant="memoryBody">
+        {!isChildEdit ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
+        {!isChildEdit ? <Typography className="mt-2" tone="muted" variant="memoryBody">
           {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : 'Это поможет сделать семейную ленту вашей.'}
         </Typography> : null}
 
-        {cropPreviewUrl ? null : isChildEdit ? <div className="child-edit-v2-intro">
+        {isChildEdit ? <div className="child-edit-v2-intro">
           <label className="child-edit-v2-avatar-control" htmlFor="child-avatar">
             <span className="child-edit-v2-avatar">
-            <span className="child-edit-v2-avatar-image">
+            <span className="child-edit-v2-avatar-image relative overflow-hidden">
               {displayAvatarUrl ? (
                 <img
                   alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
                   className="size-full object-cover"
                   src={displayAvatarUrl}
-                  style={cropStyle(confirmedCrop)}
+                  style={avatarCropStyle(confirmedCrop)}
                 />
               ) : <Typography variant="memoryChild">Фото</Typography>}
             </span>
             <span aria-hidden="true" className="child-edit-v2-camera"><WebpIcon decorative name="photo" size={19} /></span>
             </span>
-            <Typography className="child-edit-v2-photo-link" tone="primary" variant="memoryButton">Заменить фотографию</Typography>
+            <span className="grid gap-2"><Typography className="child-edit-v2-photo-link" tone="primary" variant="memoryButton">Заменить фотографию</Typography>{displayAvatarUrl ? <Button onClick={(event) => { event.preventDefault(); event.stopPropagation(); openDisplayedAvatarCrop() }} type="button" variant="ghost">Изменить кадрирование</Button> : null}</span>
             <input
               aria-label="Заменить фотографию ребёнка"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
               className="sr-only"
+              data-testid="child-avatar-file"
               id="child-avatar"
               onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+              ref={filePicker}
               type="file"
             />
           </label>
@@ -259,7 +301,7 @@ export function FamilyOnboarding({
                 alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
                 className="size-full object-cover"
                 src={displayAvatarUrl}
-                style={cropStyle(confirmedCrop)}
+                style={avatarCropStyle(confirmedCrop)}
               />
             ) : (
               <Typography variant="memoryChild">Фото</Typography>
@@ -269,48 +311,17 @@ export function FamilyOnboarding({
           <input
             accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
             className="sr-only"
+            data-testid="child-avatar-file"
             id="child-avatar"
             onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+            ref={filePicker}
             type="file"
           />
         </label>}
-        {cropPreviewUrl ? (
-          <section aria-label="Кадрирование фотографии" className="child-crop-v2" data-slot="child-photo-crop">
-            <Typography as="p" variant="memoryBody">Переместите фото и настройте масштаб.</Typography>
-            <div className="child-crop-v2-frame surface-inset">
-              <img
-                alt="Предпросмотр кадрирования"
-                onLoad={(event) => {
-                  setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight || 1)
-                  setCropImageLoaded(true)
-                }}
-                src={cropPreviewUrl}
-                style={cropStyle(crop)}
-              />
-              <span aria-hidden="true" className="child-crop-v2-ring" />
-            </div>
-            <div className="child-crop-v2-zoom">
-              <Typography aria-hidden="true" as="span" style={{ font: 'inherit' }} variant="memoryMeta">−</Typography>
-              <input aria-label="Масштаб" id="avatar-crop" max="2.5" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="0.1" type="range" value={zoom} />
-              <Typography aria-hidden="true" as="span" style={{ font: 'inherit' }} variant="memoryMeta">＋</Typography>
-            </div>
-            <div aria-label="Положение фотографии" className="child-crop-v2-pan" role="group">
-              <button aria-label="Сдвинуть влево" className="ds-icon-tile" onClick={() => moveCrop(-0.05, 0)} type="button"><Typography as="span" style={{ font: 'inherit' }} variant="memoryMeta">←</Typography></button>
-              <button aria-label="Сдвинуть вверх" className="ds-icon-tile" onClick={() => moveCrop(0, -0.05)} type="button"><Typography as="span" style={{ font: 'inherit' }} variant="memoryMeta">↑</Typography></button>
-              <button aria-label="Сдвинуть вниз" className="ds-icon-tile" onClick={() => moveCrop(0, 0.05)} type="button"><Typography as="span" style={{ font: 'inherit' }} variant="memoryMeta">↓</Typography></button>
-              <button aria-label="Сдвинуть вправо" className="ds-icon-tile" onClick={() => moveCrop(0.05, 0)} type="button"><Typography as="span" style={{ font: 'inherit' }} variant="memoryMeta">→</Typography></button>
-            </div>
-            <Button className="ui-btn ui-btn-primary ds-btn ds-btn--primary" disabled={!cropImageLoaded} onClick={useCrop} type="button">Использовать это фото</Button>
-            <label className="ui-btn ui-btn-secondary child-crop-v2-file ds-btn ds-btn--secondary">
-              <Typography as="span" variant="memoryButton">Выбрать другое фото</Typography>
-              <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" className="sr-only" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} type="file" />
-            </label>
-            <Typography as="p" className="child-crop-v2-limit" variant="memoryMeta">JPEG, PNG, WebP или HEIC · до 20 МБ</Typography>
-          </section>
-        ) : null}
+        {photoOnly && displayAvatarUrl ? <Button className="mt-3" onClick={openDisplayedAvatarCrop} type="button" variant="outline">Изменить кадрирование</Button> : null}
         <FieldError message={formErrors.avatar} />
 
-        {isChildEdit && !cropPreviewUrl ? <div className="child-edit-v2-form">
+        {isChildEdit ? <div className="child-edit-v2-form">
           <section className="child-edit-v2-card surface-raised ds-card ds-card--standard">
             <label className="child-edit-v2-label ds-label" htmlFor="child-name"><Typography as="span" style={{ font: 'inherit' }} variant="label">Имя ребёнка</Typography></label>
             <div className="child-edit-v2-field surface-inset">
@@ -336,7 +347,7 @@ export function FamilyOnboarding({
               <FieldError message={formErrors.sex} />
             </div>
           </fieldset>
-        </div> : !photoOnly && !cropPreviewUrl ? <div>
+        </div> : !photoOnly ? <div>
           <div className="mt-6">
             <label className="flex flex-col gap-2" htmlFor="child-name">
               <Typography variant="memoryBody">Имя ребёнка</Typography>
@@ -386,13 +397,16 @@ export function FamilyOnboarding({
           </Typography>
           {!photoVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
         </section> : null}
-        {!cropPreviewUrl ? <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!file || photoVersionConflict))} onClick={() => void submit()} type="button">
+        <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!(file || cropDirty) || photoVersionConflict))} onClick={() => void submit()} type="button">
           <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
-        </Button> : null}
-        {onCancel && !cropPreviewUrl && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={requestCancel} type="button" variant="outline"><Typography variant="memoryButton">{cancelLabel}</Typography></Button> : null}
+        </Button>
+        {onCancel && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={requestCancel} type="button" variant="outline"><Typography variant="memoryButton">{cancelLabel}</Typography></Button> : null}
         </>}
       </section>
     </main>
+    {cropPreviewUrl ? <AvatarEditor key={cropPreviewUrl} busy={submitting || previewing} canConfirm={!childVersionConflict} image={cropPreviewUrl} initialCrop={cropFile && !restoreConfirmedCrop ? fullAvatarCrop : confirmedCrop}
+      onCancel={cancelCrop} onConfirm={useCrop} onChooseAnother={() => filePicker.current?.click()} /> : null}
+    </>
   )
 }
 
@@ -408,12 +422,4 @@ function Segment({ active, label, onClick }: { active: boolean; label: string; o
 
 function FieldError({ message }: { message?: string }) {
   return message ? <Typography className="mt-1 text-destructive" role="alert" variant="memoryMeta">{message}</Typography> : null
-}
-
-function cropStyle(crop: Crop) {
-  return {
-    objectFit: 'cover' as const,
-    objectPosition: `${(crop.x + crop.width / 2) * 100}% ${(crop.y + crop.height / 2) * 100}%`,
-    transform: `scale(${1 / Math.min(crop.width, crop.height)})`,
-  }
 }

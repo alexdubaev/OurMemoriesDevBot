@@ -33,6 +33,8 @@ export function detectImageFormat(bytes: Uint8Array): AvatarContentType | null {
     return 'image/png'
   }
 
+  if (bytes.length >= 12 && asciiAt(bytes, 0, 4) === 'RIFF' && asciiAt(bytes, 8, 4) === 'WEBP') return 'image/webp'
+
   // ISO base media format: a `ftyp` box at offset 4, then a four-character brand.
   if (bytes.length >= imageSignatureByteLength && asciiAt(bytes, 4, 4) === 'ftyp') {
     return heifBrands.has(asciiAt(bytes, 8, 4)) ? 'image/heic' : null

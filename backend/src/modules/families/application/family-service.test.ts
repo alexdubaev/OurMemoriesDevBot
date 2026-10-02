@@ -27,7 +27,11 @@ test('a failed unread count leaves the family list available with an unavailable
       role: 'full', familyDisplayName: null, membershipEpoch: 1,
       family: {
         id: familyId, name: 'Наша семья', ownerUserId: userId,
-        unreadTrackingActivatedAt: new Date(), children: [],
+        unreadTrackingActivatedAt: new Date(), children: [{
+          displayName: 'Лиза', birthDate: new Date('2020-02-02T00:00:00.000Z'), sex: 'girl',
+          avatarMediaId: '00000000-0000-4000-8000-000000000003',
+          avatarCrop: { x: 0.2, y: 0.1, width: 0.6, height: 0.6 },
+        }],
       },
     }] },
     family: { findFirst: async () => ({ id: familyId, status: 'active' }) },
@@ -40,5 +44,9 @@ test('a failed unread count leaves the family list available with an unavailable
     () => new Date(), 'on')
   const response = await service.getFamilies({ userId, sessionId: 'synthetic-session', externalIdentity: null }, { limit: 20 })
   expect(response.items).toHaveLength(1)
-  expect(response.items[0]).toMatchObject({ familyId, unreadCount: null, unreadState: 'unavailable' })
+  expect(response.items[0]).toMatchObject({
+    familyId, unreadCount: null, unreadState: 'unavailable',
+    childAvatarMediaId: '00000000-0000-4000-8000-000000000003',
+    childAvatarCrop: { x: 0.2, y: 0.1, width: 0.6, height: 0.6 },
+  })
 })
