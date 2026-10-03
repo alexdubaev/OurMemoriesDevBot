@@ -431,6 +431,38 @@ maybeDescribe('MAX forward import integration', () => {
       .toBe('Не удалось сохранить это сообщение в memoLy.')
   })
 
+  test('uses only provider-confirmed outer media for an accessible private-dialog original', async () => {
+    const fixture = await familyFixture('7024', 'forward-envelope-private-dialog')
+    const accepted = await accept(forwardEvent('7024', 'outer-private-dialog', 'private-dialog-original'))
+    const lookups: string[] = []
+    const originalVideo = { kind: 'video' as const, providerAttachmentId: 'private-original-video', currentToken: 'private-original-token',
+      inboundDurationSeconds: null, width: null, height: null }
+    const envelopeVideo = { kind: 'video' as const, providerAttachmentId: 'confirmed-envelope-video', currentToken: 'confirmed-envelope-token',
+      inboundDurationSeconds: null, width: null, height: null }
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
+      lookups.push(messageId)
+      return messageId === 'private-dialog-original'
+        ? { messageId, senderId: '8033', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(), attachments: [originalVideo] }
+        : { messageId, senderId: '7024', recipientId: '900', recipientType: 'dialog',
+            forwardedFrom: { messageId: 'private-dialog-original' }, attachments: [],
+            forwardedAttachments: [envelopeVideo] }
+    }, { getVideo: async (token) => {
+      expect(token).toBe('confirmed-envelope-token')
+      return { width: 320, height: 240, durationMs: 1_000,
+        renditions: [{ url: 'https://maxvd123.okcdn.ru/private-dialog-envelope.mp4', width: 320, height: 240, contentLength: 4 }] }
+    } }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(lookups).toEqual(['private-dialog-original', 'outer-private-dialog'])
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+    expect(source).toMatchObject({ status: 'published', senderSubject: '7024', originalChannelId: null,
+      originalMessageId: 'private-dialog-original' })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video' })
+    expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({
+      providerAttachmentId: 'confirmed-envelope-video',
+    })
+  })
+
   test('fails safely when the confirmed outer video token cannot resolve to validated media', async () => {
     const fixture = await familyFixture('7021', 'forward-envelope-unusable-video')
     const accepted = await accept(forwardEvent('7021', 'outer-envelope-unusable-video', 'private-video-unusable'))
