@@ -41,6 +41,7 @@ import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { mediaCardSeenReady } from './seen-visibility'
+import { VideoPlaybackControls } from './video-presentation'
 
 type Props = {
   active?: boolean
@@ -759,8 +760,12 @@ export function MaxVideoPreview(props: MaxVideoPreviewProps) {
 
 function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, onRetry, poster, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
+  const stage = useRef<HTMLDivElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
   const [started, setStarted] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [current, setCurrent] = useState(0)
+  const [duration, setDuration] = useState(durationMs ? durationMs / 1_000 : 0)
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
   const [decodedPosterUrl, setDecodedPosterUrl] = useState<string | null>(null)
@@ -779,8 +784,9 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
   return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady: previewReady || decodedPosterUrl === poster })} data-video-started={started} data-video-viewer-state={viewerState}>
-    <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
-      <video aria-label="Предпросмотр видео" className="absolute inset-0 z-10 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
+    <div className="relative isolate max-h-[75dvh] w-full overflow-hidden memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" ref={stage} style={frameStyle}>
+      <video aria-label="Предпросмотр видео" className="absolute inset-0 z-10 size-full object-contain" onEnded={(event) => { setCurrent(event.currentTarget.currentTime); setPlaying(false) }} onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
+        if (Number.isFinite(event.currentTarget.duration) && event.currentTarget.duration > 0) setDuration(event.currentTarget.duration)
         const element = event.currentTarget
         if (Number.isFinite(element.videoWidth) && Number.isFinite(element.videoHeight) && element.videoWidth > 0 && element.videoHeight > 0) {
           setIntrinsicDimensions({ width: element.videoWidth, height: element.videoHeight })
@@ -789,7 +795,7 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
         if (started && ((Number.isFinite(element.duration) && element.duration > 0.001) || seekableEnd > 0.001)) {
           try { element.currentTime = 0.001 } catch { /* Some WebViews reject a seek before the first frame is buffered. */ }
         }
-      }} onPlay={() => { activate(); setStarted(true) }} poster={poster} preload="none" playsInline ref={video} />
+      }} onPause={(event) => { setCurrent(event.currentTarget.currentTime); setPlaying(false) }} onPlay={() => { activate(); setStarted(true); setPlaying(true) }} onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)} poster={started ? undefined : poster} preload="none" playsInline ref={video} />
       {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-20 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
@@ -798,11 +804,12 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
         <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
       </button> : null}
       {viewerState !== 'ready' && !hasDecodedPoster ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
-      {poster && !previewReady ? <img alt="Кадр видео" className="pointer-events-none absolute inset-0 z-0 size-full object-contain" onLoad={(event) => {
+      {!started && poster && !previewReady ? <img alt="Кадр видео" className="pointer-events-none absolute inset-0 z-0 size-full object-contain" onLoad={(event) => {
         const image = event.currentTarget
         void image.decode().then(() => setDecodedPosterUrl(poster)).catch(() => undefined)
       }} src={poster} /> : null}
-      <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
+      {!started ? <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography> : null}
+      {started && viewerState === 'ready' ? <VideoPlaybackControls available={Boolean(src)} current={current} duration={duration} onSeek={(position) => { if (video.current) video.current.currentTime = position; setCurrent(position) }} onToggle={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} playing={playing} stageRef={stage} videoRef={video} /> : null}
     </div>
     {viewerState === 'loading' || viewerState === 'checking' || viewerState === 'processing' || viewerState === 'unknown' || viewerState === 'check-error' ? <div className="memoly-video-viewer-v2-status" role="status">{viewerState !== 'unknown' && viewerState !== 'check-error' ? <span className="memoly-video-viewer-v2-spinner" aria-hidden="true" /> : null}<Typography as="span" variant="memoryMeta">{viewerState === 'processing' ? 'Видео обрабатывается…' : viewerState === 'unknown' ? 'Готовность видео пока неизвестна' : viewerState === 'check-error' ? 'Не удалось проверить готовность видео' : viewerState === 'checking' ? 'Проверяем готовность видео…' : 'Загружаем видео…'}</Typography></div> : null}
     {viewerState === 'unavailable' ? <div className="memoly-video-viewer-v2-error" role="alert"><Typography as="strong" variant="memoryBodyMedium">Видео недоступно</Typography></div> : null}
@@ -952,30 +959,23 @@ function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<M
   const posterPath = effective.displayPath ?? effective.previewPath
   const posterUrl = usePrivateObjectUrl(posterPath, transport)
   const video = useRef<HTMLVideoElement | null>(null)
+  const stage = useRef<HTMLDivElement | null>(null)
   const activate = usePlaybackRegistration(`video:${path ?? 'missing'}`, video)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(effective.durationMs ? effective.durationMs / 1_000 : 0)
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
-  const [hasPlayed, setHasPlayed] = useState(false)
-  const canFullscreen = typeof HTMLVideoElement !== 'undefined' && 'requestFullscreen' in HTMLVideoElement.prototype
+  const [started, setStarted] = useState(false)
   const viewerState = renditionStatus === 'pending' ? 'loading' : renditionStatus === 'failed' || failed || source.status === 'error' ? 'error' : source.status
-  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'}><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => { setCurrent(e.currentTarget.currentTime); if (!e.currentTarget.paused && e.currentTarget.currentTime > 0) setHasPlayed(true) }} playsInline poster={posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
-    {!hasPlayed ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : null}</div> : null}
-    {!hasPlayed && viewerState !== 'error' ? <button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-private-video-v2-play" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={24} state="white" /></button> : null}
-    {!hasPlayed ? <Typography as="span" className="memoly-private-video-v2-duration" variant="memoryMeta">{formatDuration(effective.durationMs)}</Typography> : null}
+  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'} ref={stage} style={videoFrameStyle(effective.width, effective.height)}><video aria-label="Видео воспоминания" className="h-full w-full" onEnded={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onError={() => { setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onPlay={() => { setFailed(false); setStarted(true); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline poster={started ? undefined : posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
+    {!started ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : null}</div> : null}
+    {!started && viewerState !== 'error' ? <button aria-label="Воспроизвести видео" className="memoly-private-video-v2-play" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; try { await element.play() } catch { setFailed(true) } })()} type="button"><WebpIcon decorative name="play" size={24} state="white" /></button> : null}
+    {!started ? <Typography as="span" className="memoly-private-video-v2-duration" variant="memoryMeta">{formatDuration(effective.durationMs)}</Typography> : null}
     {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Загружаем видео…'}</Typography> : null}
-    {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
-    <div className="memoly-private-video-v2-controls">
-      {renditionStatus === 'pending' ? <div className="px-3 pt-3"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
-      <div className="memoly-video-control-row">
-        <button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-video-control" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} title={playing ? 'Пауза' : 'Воспроизвести'} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={20} state="white" /></button>
-        <Typography className="flex-1 text-right text-white" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography>
-        <button aria-label="На весь экран" className="memoly-video-control" disabled={!url || !canFullscreen} onClick={() => void video.current?.requestFullscreen?.()} title="На весь экран" type="button"><WebpIcon decorative monochrome name="fullscreen" size={18} /></button>
-      </div>
-      <input aria-label="Позиция видео" disabled={!url} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(e) => { if (video.current) video.current.currentTime = Number(e.target.value) }} step="0.1" type="range" value={current} />
-    </div>
+    {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}
+    {started && viewerState !== 'error' ? <VideoPlaybackControls available={Boolean(url)} current={current} duration={duration} onSeek={(position) => { if (video.current) video.current.currentTime = position; setCurrent(position) }} onToggle={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} playing={playing} stageRef={stage} videoRef={video} /> : null}</div>
+    {renditionStatus === 'pending' ? <div className="memoly-private-video-v2-readiness"><Button disabled={rendition.isFetching} onClick={() => void rendition.refetch()} type="button" variant="outline">{rendition.isFetching ? 'Проверяем…' : 'Проверить готовность'}</Button>{rendition.isError ? <Typography as="p" role="alert" variant="memoryMeta">Не удалось проверить видео. Попробуйте ещё раз.</Typography> : null}</div> : null}
   </div>
 }
 

@@ -59,11 +59,12 @@ const privateMediaFixture: Plugin = {
       if (!url.pathname.endsWith('/content')) return next()
       let body: Buffer
       let contentType: string
+      const mediaId = /\/media\/([0-9a-f-]{36})\/content$/i.exec(url.pathname)?.[1]
       if (url.searchParams.get('variant') === 'playback') {
-        body = readFileSync(resolve(artifacts, 'private-video-poster-synthetic.mp4'))
+        body = readFileSync(resolve(artifacts, mediaId?.endsWith('5555') || mediaId?.endsWith('5552') ? 'private-video-poster-portrait-synthetic.mp4' : 'private-video-poster-synthetic.mp4'))
         contentType = 'video/mp4'
       } else if (['preview', 'display'].includes(url.searchParams.get('variant') ?? '')) {
-        body = readFileSync(resolve(artifacts, 'private-video-poster-synthetic.png'))
+        body = readFileSync(resolve(artifacts, mediaId?.endsWith('5555') || mediaId?.endsWith('5552') ? 'private-video-poster-portrait-synthetic.png' : 'private-video-poster-synthetic.png'))
         contentType = 'image/png'
       } else return next()
       response.setHeader('accept-ranges', 'bytes')
