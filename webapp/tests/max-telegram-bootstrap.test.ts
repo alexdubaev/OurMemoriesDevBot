@@ -32,83 +32,95 @@ function runConditionalBootstrap({
   navigationName?: string
   sessionStorage?: unknown
 } = {}) {
-  const written: string[] = []
+  const requested: string[] = []
+  let timerId = 0
   const window = {
     WebApp: webApp,
     Telegram: telegramWebApp === undefined ? undefined : { WebApp: telegramWebApp },
-    location: { hash },
     performance: navigationName
       ? { getEntriesByType: () => [{ name: navigationName }] }
       : undefined,
     sessionStorage,
+    setTimeout: () => ++timerId,
+    clearTimeout: () => undefined,
+    addEventListener: () => undefined,
+    location: { hash, reload: () => undefined },
   }
   vm.runInNewContext(conditionalBootstrapSource(), {
     window,
-    document: { write: (value: string) => written.push(value) },
+    document: {
+      getElementById: () => null,
+      createElement: () => ({ setAttribute: () => undefined, addEventListener: () => undefined }),
+      head: { append: (script: { src: string }) => requested.push(script.src) },
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    HTMLScriptElement: class {},
+    ErrorEvent: class {},
+    console: { error: () => undefined },
   })
-  return { window, written }
+  return { window, requested }
 }
 
 test('ordinary browser does not request either host SDK before memoLy module', () => {
-  const { window, written } = runConditionalBootstrap()
+  const { window, requested } = runConditionalBootstrap()
 
-  expect(written).toEqual([])
+  expect(requested).toEqual([])
   expect(createHostBridge(window).kind).toBe('browser')
 })
 
 test('MAX launch markers request MAX SDK with precedence over Telegram markers', () => {
-  const { written } = runConditionalBootstrap({
+  const { requested } = runConditionalBootstrap({
     hash: '#WebAppData=query_id=max-signed&WebAppPlatform=ios&tgWebAppData=query_id=telegram-signed',
   })
 
-  expect(written).toEqual([`<script src="${maxSdk}"></script>`])
+  expect(requested).toEqual([maxSdk])
 })
 
 test('Telegram launch markers synchronously request Telegram SDK', () => {
-  const { written } = runConditionalBootstrap({ hash: '#tgWebAppData=query_id=telegram-signed&tgWebAppPlatform=ios' })
+  const { requested } = runConditionalBootstrap({ hash: '#tgWebAppData=query_id=telegram-signed&tgWebAppPlatform=ios' })
 
-  expect(written).toEqual([`<script src="${telegramSdk}"></script>`])
-  expect(written[0]).not.toContain('\\/')
+  expect(requested).toEqual([telegramSdk])
+  expect(requested[0]).not.toContain('\\/')
 })
 
 test('MAX launch markers from the navigation entry restore MAX SDK bootstrap', () => {
-  const { written } = runConditionalBootstrap({
+  const { requested } = runConditionalBootstrap({
     navigationName: 'https://memo.ly/#WebAppData=query_id=max-signed&WebAppVersion=1.0',
   })
 
-  expect(written).toEqual([`<script src="${maxSdk}"></script>`])
+  expect(requested).toEqual([maxSdk])
 })
 
 test('an explicit Telegram URL takes precedence over a MAX navigation fallback', () => {
-  const { written } = runConditionalBootstrap({
+  const { requested } = runConditionalBootstrap({
     hash: '#tgWebAppData=query_id=telegram-signed&tgWebAppVersion=8.0',
     navigationName: 'https://memo.ly/#WebAppData=query_id=max-signed',
     sessionStorage: { getItem: () => 'query_id=persisted-max' },
   })
 
-  expect(written).toEqual([`<script src="${telegramSdk}"></script>`])
+  expect(requested).toEqual([telegramSdk])
 })
 
 test('meaningful injected host globals remain available without a second SDK request', () => {
   const max = runConditionalBootstrap({
     webApp: { initData: 'query_id=max-signed', ready: () => undefined },
   })
-  expect(max.written).toEqual([])
+  expect(max.requested).toEqual([])
   expect(createHostBridge(max.window).kind).toBe('max')
 
   const telegram = runConditionalBootstrap({
     telegramWebApp: { initData: 'query_id=telegram-signed' },
   })
-  expect(telegram.written).toEqual([])
+  expect(telegram.requested).toEqual([])
   expect(createHostBridge(telegram.window).kind).toBe('telegram')
 })
 
 test('persisted SDK markers alone do not request a host SDK in an ordinary browser', () => {
-  const { written } = runConditionalBootstrap({
+  const { requested } = runConditionalBootstrap({
     sessionStorage: { getItem: () => 'query_id=persisted' },
   })
 
-  expect(written).toEqual([])
+  expect(requested).toEqual([])
 })
 
 test('parser contract keeps host SDKs conditional and parses the fallback before the module', () => {
@@ -117,7 +129,8 @@ test('parser contract keeps host SDKs conditional and parses the fallback before
     .filter((attributes) => attributes.includes('src=') && !attributes.includes('type="module"'))
 
   expect(blockingExternalScripts).toEqual([])
-  expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf('<script>'))
+  expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<div id="root">'))
+  expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf('<script type="module"'))
   expect(html.indexOf(maxSdk)).toBeLessThan(html.indexOf('<script type="module"'))
   expect(html).toContain(telegramSdk)
 })

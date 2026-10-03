@@ -19,6 +19,8 @@ export type HttpRequestOptions = {
    * lets a superseded query cancel its request instead of leaving it in flight.
    */
   signal?: AbortSignal
+  /** Bounds only callers that explicitly opt in; media transfers remain unbounded here. */
+  timeoutMs?: number
 }
 
 export class ApiRequestError extends Error {
@@ -53,11 +55,17 @@ export class HttpClient {
     schema: TSchema,
     options: HttpRequestOptions = {},
   ): Promise<z.infer<TSchema>> {
-    const response = await this.raw(path, options)
-    return schema.parse(await response.json())
+    return withDeadline(options, async (signal) => {
+      const response = await this.rawWithSignal(path, options, signal)
+      return schema.parse(await response.json())
+    })
   }
 
   async raw(path: string, options: HttpRequestOptions = {}): Promise<Response> {
+    return withDeadline(options, (signal) => this.rawWithSignal(path, options, signal))
+  }
+
+  private async rawWithSignal(path: string, options: HttpRequestOptions, signal: AbortSignal): Promise<Response> {
     if (options.body !== undefined && options.rawBody !== undefined) throw new TypeError('body and rawBody cannot be used together')
     const headers = new Headers(options.headers)
     if (options.body !== undefined && options.rawBody === undefined) {
@@ -68,15 +76,45 @@ export class HttpClient {
       method: options.method ?? 'GET',
       credentials: options.credentials ?? 'include',
       headers,
-      signal: options.signal,
+      signal,
       body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
     })
 
     if (!response.ok) {
-      throw await toApiError(response, options.signal)
+      throw await toApiError(response, signal)
     }
 
     return response
+  }
+}
+
+async function withDeadline<T>(options: HttpRequestOptions, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+  if (options.timeoutMs === undefined) return operation(options.signal ?? new AbortController().signal)
+  const controller = new AbortController()
+  const timeoutError = new Error('Request timed out')
+  timeoutError.name = 'TimeoutError'
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let rejectCallerAbort!: (reason?: unknown) => void
+  const callerAbort = new Promise<never>((_resolve, reject) => { rejectCallerAbort = reject })
+  const abortFromCaller = () => {
+    const reason = options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError')
+    controller.abort(reason)
+    rejectCallerAbort(reason)
+  }
+  if (options.signal?.aborted) abortFromCaller()
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort(timeoutError)
+      reject(timeoutError)
+    }, options.timeoutMs)
+  })
+  try {
+    return await Promise.race([operation(controller.signal), deadline, callerAbort])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abortFromCaller)
   }
 }
 

@@ -9,6 +9,7 @@ import { AuthProvider } from '../src/features/auth/provider'
 import { useAuth } from '../src/features/auth/use-auth'
 
 type SessionSnapshot = Pick<AuthContextValue, 'isBootstrapping' | 'sessionError' | 'user'>
+const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; window?: unknown }
 
 const user: UserDto = {
   id: 'user_1',
@@ -20,7 +21,10 @@ const user: UserDto = {
 const restoredAccessToken = accessTokenFor('user_1')
 
 const originalFetch = globalThis.fetch
+const originalWindow = actEnvironment.window
+const originalActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
 const mountedRoots: Root[] = []
+const mountedClients: QueryClient[] = []
 
 beforeEach(() => {
   installBrowserShim()
@@ -30,6 +34,14 @@ afterEach(async () => {
   for (const root of mountedRoots.splice(0)) {
     await act(async () => root.unmount())
   }
+  for (const queryClient of mountedClients.splice(0)) queryClient.clear()
+  // Query notifyManager uses a scheduled callback even after its observers unmount. Drain it
+  // while the simulated browser globals are still installed, before restoring the test process.
+  await act(async () => {
+    for (let tick = 0; tick < 3; tick += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+  })
   globalThis.fetch = originalFetch
   removeBrowserShim()
 })
@@ -94,10 +106,27 @@ test('a failed session restore surfaces the error instead of an unknown session'
   expect(requests).not.toContain('GET /api/v1/auth/me')
 })
 
+test('verified MAX authentication clears an obsolete cookie bootstrap error', async () => {
+  installFakeBackend({
+    refresh: () => json({ error: { code: 'INTERNAL_ERROR', message: 'Refresh failed', requestId: '01993b24-7e7d-7000-8000-000000000205' } }, 500),
+    me: () => json({ user }, 200),
+    max: () => json({ accessToken: restoredAccessToken, user }, 200),
+  })
+  const mounted = await mountAuthProvider()
+  await flushUntil(() => !mounted.session().isBootstrapping)
+  expect(mounted.session().sessionError?.message).toBe('Refresh failed')
+
+  await act(async () => { await mounted.authenticateMax('synthetic-init-data') })
+  await flushUntil(() => mounted.session().sessionError === null)
+  expect(mounted.session()).toEqual({ isBootstrapping: false, sessionError: null, user })
+})
+
 async function mountAuthProvider() {
   const snapshots: SessionSnapshot[] = []
+  let currentAuth: AuthContextValue | null = null
   function SessionProbe() {
     const auth = useAuth()
+    currentAuth = auth
     snapshots.push({
       isBootstrapping: auth.isBootstrapping,
       sessionError: auth.sessionError,
@@ -107,6 +136,7 @@ async function mountAuthProvider() {
   }
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  mountedClients.push(queryClient)
   const root = createRoot(createDetachedContainer())
   mountedRoots.push(root)
 
@@ -122,6 +152,10 @@ async function mountAuthProvider() {
 
   return {
     snapshots,
+    authenticateMax: async (payload: string) => {
+      if (!currentAuth) throw new Error('AuthProvider has not rendered its consumer yet')
+      await currentAuth.authenticateMax(payload)
+    },
     session: () => {
       const latest = snapshots[snapshots.length - 1]
       if (!latest) throw new Error('AuthProvider has not rendered its consumer yet')
@@ -143,6 +177,7 @@ async function flushUntil(predicate: () => boolean) {
 function installFakeBackend(backend: {
   refresh: () => Response | Promise<Response>
   me: () => Response | Promise<Response>
+  max?: () => Response | Promise<Response>
 }) {
   const requests: string[] = []
   globalThis.fetch = async (input, init) => {
@@ -150,6 +185,7 @@ function installFakeBackend(backend: {
     requests.push(`${init?.method ?? 'GET'} ${path}`)
     if (path === '/api/v1/auth/refresh') return backend.refresh()
     if (path === '/api/v1/auth/me') return backend.me()
+    if (path === '/api/v1/auth/max' && backend.max) return backend.max()
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
   }
   return requests
@@ -165,16 +201,16 @@ const browserShim = {
   addEventListener() {},
   removeEventListener() {},
 }
-const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; window?: unknown }
-
 function installBrowserShim() {
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
   actEnvironment.window = browserShim
 }
 
 function removeBrowserShim() {
-  delete actEnvironment.IS_REACT_ACT_ENVIRONMENT
-  delete actEnvironment.window
+  if (originalActEnvironment === undefined) delete actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  else actEnvironment.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
+  if (originalWindow === undefined) delete actEnvironment.window
+  else actEnvironment.window = originalWindow
 }
 
 function createDetachedContainer() {

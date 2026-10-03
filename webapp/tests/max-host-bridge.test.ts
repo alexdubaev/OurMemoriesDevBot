@@ -87,7 +87,7 @@ describe('MAX HostBridge', () => {
     const maxSdk = 'https://st.max.ru/js/max-web-app.js'
     expect(html).toContain(maxSdk)
     expect(html).toContain('WebAppData')
-    expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf(maxSdk))
+    expect(html.indexOf(maxSdk)).toBeLessThan(html.indexOf('<div id="root">'))
     expect(html.indexOf(maxSdk)).toBeLessThan(html.indexOf('/src/main.tsx'))
     expect(html).not.toContain(`<script src="${maxSdk}"></script>`)
   })

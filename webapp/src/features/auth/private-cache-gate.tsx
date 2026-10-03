@@ -27,12 +27,19 @@ export function PrivateCacheGate({ children, fallback }: PropsWithChildren<{ fal
     }
 
     let cancelled = false
+    let cacheAbandoned = false
     let timer: number | undefined
     let unsubscribe: (() => void) | undefined
-    void restorePrivateQueryCache(queryClient, userId, generation)
+    const hydrate = restorePrivateQueryCache(queryClient, userId, generation, () => !cancelled && !cacheAbandoned)
       .catch(() => false)
-      .then(() => {
+    const deadline = new Promise<'timeout'>((resolve) => {
+      timer = window.setTimeout(() => resolve('timeout'), 5000)
+    })
+    void Promise.race([hydrate, deadline])
+      .then((result) => {
         if (cancelled) return
+        if (timer !== undefined) window.clearTimeout(timer)
+        if (result === 'timeout') cacheAbandoned = true
         unsubscribe = queryClient.getQueryCache().subscribe(() => {
           if (timer !== undefined) window.clearTimeout(timer)
           timer = window.setTimeout(() => {

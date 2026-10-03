@@ -28,17 +28,19 @@ import {
 
 import type { AuthenticatedTransport } from '@/platform/api'
 
+const startupRequest = { timeoutMs: 15000 } as const
+
 function idempotencyHeaders() {
   return { 'Idempotency-Key': crypto.randomUUID() }
 }
 
 export function loadFamilyMe(transport: AuthenticatedTransport) {
-  return transport.request('/api/v1/me', familyMeResponseSchema)
+  return transport.request('/api/v1/me', familyMeResponseSchema, startupRequest)
 }
 
 export function loadFamilyHome(transport: AuthenticatedTransport, cursor?: string) {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-  return transport.request(`/api/v1/me/families${query}`, familyHomeResponseSchema)
+  return transport.request(`/api/v1/me/families${query}`, familyHomeResponseSchema, startupRequest)
 }
 
 export function createFamilyBootstrap(transport: AuthenticatedTransport, timezone: string, idempotencyKey: string = crypto.randomUUID()) {
@@ -57,12 +59,12 @@ export function acceptInvite(transport: AuthenticatedTransport, token: string) {
 
 export function previewInvite(transport: AuthenticatedTransport, token: string) {
   return transport.request('/api/v1/invites/preview', invitePreviewResponseSchema, {
-    method: 'POST', body: invitePreviewRequestSchema.parse({ token }),
+    method: 'POST', body: invitePreviewRequestSchema.parse({ token }), ...startupRequest,
   })
 }
 
 export function loadFamily(transport: AuthenticatedTransport, familyId: string) {
-  return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema)
+  return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema, startupRequest)
 }
 
 export function updateFamily(transport: AuthenticatedTransport, familyId: string, input: UpdateFamilyRequest) {
@@ -74,13 +76,13 @@ export function updateFamily(transport: AuthenticatedTransport, familyId: string
 
 export function loadFamilyMembers(transport: AuthenticatedTransport, familyId: string) {
   return transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/members`, familyMembersResponseSchema,
+    `/api/v1/families/${encodeURIComponent(familyId)}/members`, familyMembersResponseSchema, startupRequest,
   )
 }
 
 export function loadFamilyInvites(transport: AuthenticatedTransport, familyId: string) {
   return transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/invites`, familyInvitesResponseSchema,
+    `/api/v1/families/${encodeURIComponent(familyId)}/invites`, familyInvitesResponseSchema, startupRequest,
   )
 }
 

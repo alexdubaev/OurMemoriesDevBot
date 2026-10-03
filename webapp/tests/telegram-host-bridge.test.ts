@@ -17,7 +17,7 @@ describe('Telegram HostBridge', () => {
 
     expect(html).toContain(telegramSdk)
     expect(html).toContain('tgWebAppData')
-    expect(html.indexOf('<div id="root">')).toBeLessThan(html.indexOf(telegramSdk))
+    expect(html.indexOf(telegramSdk)).toBeLessThan(html.indexOf('<div id="root">'))
     expect(html.indexOf(telegramSdk)).toBeLessThan(html.indexOf(reactBootstrap))
     expect(html).not.toContain(`<script src="${telegramSdk}"></script>`)
   })

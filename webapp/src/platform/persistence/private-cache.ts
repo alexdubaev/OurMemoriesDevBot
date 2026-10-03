@@ -9,6 +9,7 @@ export const PRIVATE_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000
 export const privateFamilyAccessRevokedEvent = 'memoly:private-family-access-revoked'
 const PRIVATE_QUERY_LIMIT_ENTRIES = 100
 const PRIVATE_QUERY_LIMIT_BYTES = 2 * 1024 * 1024
+const IDB_OPERATION_DEADLINE_MS = 3000
 
 const DATABASE_NAME = 'memoly-private-cache'
 const DATABASE_VERSION = 1
@@ -72,16 +73,17 @@ export function privateFamilyCacheGeneration(userId: string, familyId: string) {
   return familyCacheGeneration.get(familyCacheScopeKey(userId, familyId)) ?? 0
 }
 
-export async function restorePrivateQueryCache(queryClient: QueryClient, userId: string, generation: number) {
+export async function restorePrivateQueryCache(queryClient: QueryClient, userId: string, generation: number, shouldContinue: () => boolean = () => true) {
   const state = await readEntry<PersistedState>(userId, 'queries', 'state')
-  if (!isActivePrivateCacheIdentity(userId, generation)) return false
+  if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
   await discardOtherSchemas(userId)
-  if (!isActivePrivateCacheIdentity(userId, generation)) return false
+  if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
   if (!state || estimateSize(state) > PRIVATE_QUERY_LIMIT_BYTES || !validatePersistedState(state, userId)) {
     if (state) await removeEntry(userId, 'queries', 'state')
     return true
   }
   for (const query of state.queries) {
+    if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
     if (isPersistableQueryKey(query.queryKey)) queryClient.setQueryData(query.queryKey, query.data, { updatedAt: 0 })
   }
   return isActivePrivateCacheIdentity(userId, generation)
@@ -420,29 +422,75 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION)
+    let settled = false
+    const timer = setTimeout(() => {
+      settled = true
+      reject(new Error('Private cache operation timed out'))
+    }, IDB_OPERATION_DEADLINE_MS)
     request.onupgradeneeded = () => {
       const store = request.result.objectStoreNames.contains(STORE_NAME)
         ? request.transaction!.objectStore(STORE_NAME)
         : request.result.createObjectStore(STORE_NAME, { keyPath: 'id' })
       if (!store.indexNames.contains('userId')) store.createIndex('userId', 'userId', { unique: false })
     }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Unable to open private cache'))
-    request.onblocked = () => reject(new Error('Private cache database upgrade is blocked'))
+    request.onsuccess = () => {
+      if (settled) { request.result.close(); return }
+      settled = true
+      clearTimeout(timer)
+      resolve(request.result)
+    }
+    request.onerror = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(request.error ?? new Error('Unable to open private cache'))
+    }
+    request.onblocked = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(new Error('Private cache database upgrade is blocked'))
+    }
   })
 }
 
 function requestDone<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Private cache request failed'))
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(request.result)
+    }
+    const timer = setTimeout(() => {
+      const source = request.source
+      const transaction = source && 'transaction' in source ? source.transaction : undefined
+      try { transaction?.abort() } catch { /* a completed transaction cannot be aborted */ }
+      finish(new Error('Private cache operation timed out'))
+    }, IDB_OPERATION_DEADLINE_MS)
+    request.onsuccess = () => finish()
+    request.onerror = () => finish(request.error ?? new Error('Private cache request failed'))
   })
 }
 
 function transactionDone(transaction: IDBTransaction) {
   return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve()
-    transaction.onabort = () => reject(transaction.error ?? new Error('Private cache transaction aborted'))
-    transaction.onerror = () => reject(transaction.error ?? new Error('Private cache transaction failed'))
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => {
+      try { transaction.abort() } catch { /* a completed transaction cannot be aborted */ }
+      finish(new Error('Private cache operation timed out'))
+    }, IDB_OPERATION_DEADLINE_MS)
+    transaction.oncomplete = () => finish()
+    transaction.onabort = () => finish(transaction.error ?? new Error('Private cache transaction aborted'))
+    transaction.onerror = () => finish(transaction.error ?? new Error('Private cache transaction failed'))
   })
 }
