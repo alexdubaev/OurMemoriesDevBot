@@ -598,4 +598,16 @@ describe('MAX API client', () => {
       ],
     })
   })
+
+  test('normalizes an isolated 1080 rendition and preserves unknown height for unparseable keys', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ urls: {
+      mp4_1080: 'https://maxvd123.okcdn.ru/video-1080.mp4?sig=opaque',
+      delivery_profile: 'https://maxvd123.okcdn.ru/video-unknown.mp4?sig=opaque',
+    } }) })
+    const result = await api.getVideo!('synthetic-token')
+    expect(result.renditions).toEqual([
+      { url: 'https://maxvd123.okcdn.ru/video-1080.mp4?sig=opaque', width: null, height: 1080, contentLength: null },
+      { url: 'https://maxvd123.okcdn.ru/video-unknown.mp4?sig=opaque', width: null, height: null, contentLength: null },
+    ])
+  })
 })

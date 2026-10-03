@@ -15,6 +15,8 @@ import { createMaxVideoStreamDownload, MaxMediaDownloadError } from './media-dow
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
 import { assertMaxForwardBinding } from './forward-import'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { selectMaxVideoRendition } from './video-rendition'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
@@ -223,10 +225,8 @@ async function ensureVideoStored(input: {
           }
           throw error
         })
-        const rendition = video.renditions
-          .filter((candidate) => candidate.height !== null && candidate.height > 0 && candidate.height <= 720 && isAllowedVideoUrl(candidate.url))
-          .sort((a, b) => b.height! - a.height! || (b.width ?? 0) - (a.width ?? 0))[0]
-        if (!rendition || rendition.contentLength !== null && rendition.contentLength > input.maxBytes) throw new MaxMediaDownloadError()
+        const rendition = selectMaxVideoRendition(video.renditions, input.maxBytes ?? MAX_DIRECT_VIDEO_MAX_BYTES)
+        if (!rendition) throw new MaxMediaDownloadError()
         const downloaded = await input.download(rendition.url, input.maxBytes, input.signal)
         if (rendition.contentLength !== null && rendition.contentLength !== downloaded.contentLength) {
           void downloaded.body.cancel().catch(() => undefined)
@@ -253,13 +253,6 @@ async function ensureVideoStored(input: {
       throw error
     }
   }
-}
-
-function isAllowedVideoUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.port && !url.username && !url.password && /^maxvd[0-9]+\.okcdn\.ru$/i.test(url.hostname)
-  } catch { return false }
 }
 
 export async function waitForMaxAttachmentPoll(signal?: AbortSignal) {
