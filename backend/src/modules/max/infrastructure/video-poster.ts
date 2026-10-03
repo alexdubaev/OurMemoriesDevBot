@@ -60,6 +60,7 @@ export function createMaxVideoPosterProcessor(options: {
     if (!existing) {
       if (typeof options.api.getVideo !== 'function') throw new MaxProviderError(undefined, true)
       const isForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId !== null)
+      const isEnvelopeForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId === null)
       const expectedMessageId = isForward ? reference.source!.originalMessageId! : source.messageId
       const expectedRecipientId = isForward ? String(reference.source!.originalChannelId) : String(source.recipientId)
       let expectedSenderId: string | null = null
@@ -71,8 +72,10 @@ export function createMaxVideoPosterProcessor(options: {
       }
       const message = await options.api.getMessage(expectedMessageId, signal)
       const identityMatches = message.messageId === expectedMessageId && message.recipientId === expectedRecipientId &&
-        (isForward ? message.recipientType === 'channel' : message.senderId === expectedSenderId)
-      const attachment = message.attachments[reference.source ? reference.attachmentPosition : 0]
+        (isForward ? message.recipientType === 'channel' : message.senderId === expectedSenderId) &&
+        (!isEnvelopeForward || message.forwardedFrom?.messageId === reference.source!.originalMessageId)
+      const attachments = isEnvelopeForward ? message.forwardedAttachments : message.attachments
+      const attachment = attachments?.[reference.source ? reference.attachmentPosition : 0]
       if (!identityMatches || !attachment || attachment.kind !== 'video' || attachment.providerAttachmentId !== reference.providerAttachmentId) return 'skipped'
       const video = await options.api.getVideo(attachment.currentToken, signal)
       if (!video.thumbnailUrl) throw new MaxProviderError(undefined, true)

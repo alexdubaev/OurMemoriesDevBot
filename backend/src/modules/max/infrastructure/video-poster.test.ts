@@ -4,12 +4,13 @@ import { createMaxVideoPosterProcessor, maxVideoPosterMediaId } from './video-po
 
 const referenceId = '2c1d61dd-c524-4f29-a18b-3b57cb7248e1'
 
-function posterFixture(linkCount = 1, resumeResult: unknown | null = null) {
+function posterFixture(linkCount = 1, resumeResult: unknown | null = null, envelopeForward = false, confirmEnvelope = true) {
   const reference = {
     id: referenceId, familyId: 'family', memoryId: 'memory', attachmentPosition: 0,
     providerAttachmentId: 'provider-video', thumbnailMediaId: null as string | null,
     source: { id: 'source', status: 'published', familyId: 'family', memoryId: 'memory', userId: 'author',
-      messageId: 'original-message', senderSubject: 'sender', recipientId: 456n, originalMessageId: 'original-message', originalChannelId: 456n },
+      messageId: envelopeForward ? 'outer-message' : 'original-message', senderSubject: 'sender', recipientId: 456n,
+      originalMessageId: envelopeForward ? 'private-original' : 'original-message', originalChannelId: envelopeForward ? null : 456n },
     outboundSource: null,
     memory: { id: 'memory', familyId: 'family', authorId: 'author', status: 'published', deletedAt: null },
   }
@@ -40,9 +41,12 @@ function posterFixture(linkCount = 1, resumeResult: unknown | null = null) {
     familyAccess: { requireFull: async () => undefined } as never,
     media: media as never,
     api: {
-      getMessage: async () => { providerCalls++; return { messageId: 'original-message', recipientId: '456', recipientType: 'channel', senderId: 'other', attachments: [
-        { kind: 'video', providerAttachmentId: 'provider-video', currentToken: 'current-token', inboundDurationSeconds: 66, width: 1280, height: 720 },
-      ] } },
+      getMessage: async () => { providerCalls++; return envelopeForward ? { messageId: 'outer-message', recipientId: '456', recipientType: 'dialog', senderId: 'sender',
+        forwardedFrom: { messageId: confirmEnvelope ? 'private-original' : 'mismatched-original' }, attachments: [], forwardedAttachments: [
+          { kind: 'video', providerAttachmentId: 'provider-video', currentToken: 'current-token', inboundDurationSeconds: 66, width: 1280, height: 720 },
+        ] } : { messageId: 'original-message', recipientId: '456', recipientType: 'channel', senderId: 'other', attachments: [
+          { kind: 'video', providerAttachmentId: 'provider-video', currentToken: 'current-token', inboundDurationSeconds: 66, width: 1280, height: 720 },
+        ] } },
       getVideo: async () => { providerCalls++; return { width: 1280, height: 720, durationMs: 66_000, thumbnailUrl: 'https://pimg.mycdn.me/poster.jpg?sig=opaque', renditions: [] } },
     } as never,
     download: async (url: string) => { downloaded.push(url); return { bytes: Uint8Array.of(1, 2, 3), contentLength: 3, contentType: 'image/jpeg' } },
@@ -79,5 +83,20 @@ describe('durable MAX video poster task', () => {
     expect(fixture.downloaded).toHaveLength(0)
     expect(fixture.ingested).toHaveLength(0)
     expect(fixture.linked).toHaveLength(1)
+  })
+
+  test('uses provider-confirmed envelope video identity for forwarded poster capture', async () => {
+    const fixture = posterFixture(1, null, true)
+    await expect(fixture.process({ referenceId })).resolves.toBe('done')
+    expect(fixture.downloaded).toEqual(['https://pimg.mycdn.me/poster.jpg?sig=opaque'])
+    expect(fixture.ingested).toHaveLength(1)
+  })
+
+  test('skips envelope video poster capture when the forwarded identity does not match', async () => {
+    const fixture = posterFixture(1, null, true, false)
+    await expect(fixture.process({ referenceId })).resolves.toBe('skipped')
+    expect(fixture.downloaded).toHaveLength(0)
+    expect(fixture.ingested).toHaveLength(0)
+    expect(fixture.linked).toHaveLength(0)
   })
 })
