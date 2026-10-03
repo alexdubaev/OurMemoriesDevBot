@@ -11,12 +11,11 @@ import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
 import { assertMaxForwardBinding } from './forward-import'
 import { enqueueMaxVideoPoster } from './video-poster'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { selectMaxVideoRendition } from './video-rendition'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
-const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
-const maxHeight = 720
-
 export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const { prisma } = options.runtime
   const access = createPrismaFamilyAccess(prisma)
@@ -62,9 +61,8 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
       throw error
     }
-    const rendition = video.renditions
-      .filter((candidate) => isAllowedCdnUrl(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
-      .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0]
+    const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
+    const rendition = selectMaxVideoRendition(video.renditions, maxBytes)
     if (!rendition) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
 
     const durationMs = normalizeVideoDurationMs(attachment.inboundDurationSeconds, video.durationMs)
@@ -118,13 +116,6 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       throw error
     }
   }
-}
-
-function isAllowedCdnUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname)
-  } catch { return false }
 }
 
 function positiveOrNull(value: number | null) {
