@@ -15,7 +15,7 @@ import { createMaxTaskProcessor } from './infrastructure/process-task'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { normalizeMaxUpdate } from './transport/update-mapping'
 import { pngFixture } from '../../storage/storage-contract'
-import { MaxProviderError } from './infrastructure/max-api'
+import { createMaxApi, MaxProviderError } from './infrastructure/max-api'
 import { chooseMaxTarget } from './infrastructure/source-target'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
 import { createMaxResponseDelivery } from './infrastructure/deliver-response'
@@ -441,19 +441,30 @@ maybeDescribe('MAX forward import integration', () => {
     expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
   })
 
-  test('keeps the already-bound forwarded video import path working', async () => {
+  test('imports an already-bound forwarded 1080-only video and deduplicates retries', async () => {
     const fixture = await familyFixture('7005', 'forward-bound-video')
     const originalDate = Date.parse('2026-05-16T12:13:14.000Z')
     const original: MaxResolvedMessage = { messageId: 'bound-video-original', senderId: '0', recipientId: channelId.toString(),
       recipientType: 'channel', text: 'Bound video caption', timestamp: originalDate,
-      attachments: [{ kind: 'video', providerAttachmentId: 'bound-456', currentToken: 'bound-token', inboundDurationSeconds: 12, width: 640, height: 360 }] }
+      attachments: [{ kind: 'video', providerAttachmentId: 'bound-456', currentToken: 'bound-token', inboundDurationSeconds: 12, width: 1920, height: 1080 }] }
     const accepted = await accept(forwardEvent('7005', 'bound-video-forward', 'bound-video-original'))
-    const api = apiFor(async () => original, { getVideo: async () => ({ width: 640, height: 360, durationMs: 12_000, renditions: [
-      { url: 'https://maxvd123.okcdn.ru/bound.mp4', width: 640, height: 360, contentLength: 4 },
-    ] }) })
+    const videoApi = createMaxApi('synthetic-max-api-token', { fetch: async () => new Response(JSON.stringify({
+      urls: { mp4_1080: 'https://maxvd123.okcdn.ru/bound.mp4?sig=synthetic' }, duration: 12_000,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }) })
+    const api = apiFor(async () => original, { getVideo: videoApi.getVideo })
     await expect(createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })({ inboxId: accepted.inboxId })).resolves.toBe('done')
     const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
     expect(source).toMatchObject({ status: 'published', originalMessageId: 'bound-video-original', originalChannelId: channelId })
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate) } })).toBe(1)
+    expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({ width: 1920, height: 1080, durationMs: 12_000 })
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'saved' } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, kind: 'saved' } })).toMatchObject({ text: expect.stringContaining('Сохранено в семейную ленту') })
+
+    const duplicate = await accept(forwardEvent('7005', 'bound-video-duplicate-forward', 'bound-video-original'))
+    await expect(createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })({ inboxId: duplicate.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: duplicate.inboxId } })).toMatchObject({ rejectionCode: 'duplicate' })
     expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate) } })).toBe(1)
   })
 

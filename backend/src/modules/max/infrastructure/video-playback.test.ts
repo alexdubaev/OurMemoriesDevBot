@@ -62,6 +62,11 @@ describe('MAX guarded video transport', () => {
     expect(await playback.readiness(scope, 'ref')).toEqual({ state: 'unknown', recheckable: true })
     expect(sends).toBe(0)
   })
+
+  test('selects high and unknown MAX renditions when no rendition is at or below 720p', () => {
+    expect(selectRendition([{ url: 'https://maxvd1.okcdn.ru/1080.mp4', width: null, height: 1080, contentLength: null }])?.height).toBe(1080)
+    expect(selectRendition([{ url: 'https://maxvd1.okcdn.ru/unknown.mp4', width: null, height: null, contentLength: null }])?.height).toBeNull()
+  })
   test('selects the highest MP4 rendition at or below 720p and rejects unsafe hosts', () => {
     expect(selectRendition([
       { url: 'https://maxvd1.okcdn.ru/1080.mp4?sig=x', width: 1920, height: 1080, contentLength: 1 },
@@ -392,9 +397,13 @@ describe('MAX guarded video transport', () => {
   })
 
   test('resolves forwarded video playback from the persisted original message and channel identity', async () => {
+    const originalFetch = globalThis.fetch
     let requestedMid = ''
     let recipientId = '-9007199254740993'
     let videoCalls = 0
+    globalThis.fetch = (async () => new Response(new Uint8Array([7]), { status: 206, headers: {
+      'content-type': 'video/mp4', 'content-length': '1', 'content-range': 'bytes 0-0/2',
+    } })) as unknown as typeof fetch
     const playback = createMaxVideoPlayback({
       runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
         familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
@@ -413,18 +422,23 @@ describe('MAX guarded video transport', () => {
           return { messageId, senderId: 'arbitrary-original-author', recipientId, recipientType: 'channel', text: 'caption', timestamp: 1,
             attachments: [{ kind: 'video', providerAttachmentId: 'original-video', currentToken: 'rotating-original-token', inboundDurationSeconds: 1, width: 640, height: 360 }] }
         },
-        getVideo: async () => { videoCalls += 1; return { width: 640, height: 360, durationMs: 1_000, renditions: [
-          { url: 'https://maxvd1.okcdn.ru/forward.mp4?sig=opaque', width: 640, height: 360, contentLength: 10 },
+        getVideo: async () => { videoCalls += 1; return { width: null, height: null, durationMs: 1_000, renditions: [
+          { url: 'https://maxvd1.okcdn.ru/forward.mp4?sig=opaque', width: null, height: 1080, contentLength: 10 },
         ] } },
       } as never,
     })
     const scope = { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } }
-    await expect(playback.readiness(scope, 'reference-id')).resolves.toEqual({ state: 'ready', recheckable: false })
-    expect(requestedMid).toBe('original-mid')
-    expect(videoCalls).toBe(1)
-    recipientId = '-123'
-    await expect(playback.readiness(scope, 'reference-id')).rejects.toMatchObject({ kind: 'not_found' })
-    expect(requestedMid).toBe('original-mid')
-    expect(videoCalls).toBe(1)
+    try {
+      await expect(playback.readiness(scope, 'reference-id')).resolves.toEqual({ state: 'ready', recheckable: false })
+      const ranged = await playback.content(scope, 'reference-id', 'bytes=0-0', 'GET')
+      expect(ranged.range).toEqual({ start: 0, end: 0, total: 2 })
+      expect(await new Response(ranged.body).arrayBuffer()).toHaveLength(1)
+      expect(requestedMid).toBe('original-mid')
+      expect(videoCalls).toBe(2)
+      recipientId = '-123'
+      await expect(playback.readiness(scope, 'reference-id')).rejects.toMatchObject({ kind: 'not_found' })
+      expect(requestedMid).toBe('original-mid')
+      expect(videoCalls).toBe(2)
+    } finally { globalThis.fetch = originalFetch }
   })
 })
