@@ -1,5 +1,8 @@
 /* eslint-disable typographyPolicy/use-typography-component -- The frozen welcome source's exact DOM and text CSS are preserved. */
 import { useEffect, useRef, useState } from 'react'
+import '@fontsource/nunito/cyrillic-800.css'
+import '@fontsource/nunito/latin-800.css'
+import { Button } from '@/components/ui/button'
 
 import './welcome-splash.css'
 
@@ -96,7 +99,7 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
       </section>
       <section className="copy">
         <div className="kicker">Добро пожаловать в memoLy</div>
-        <h1>Маленькие моменты.<span>Большая история.</span></h1>
+        <h1><span className="headline-pink">Маленькие моменты.</span><span>Большая история.</span></h1>
         <p>Фото, видео, любимый голос и первые слова. Сохраните детство в уютном альбоме для всей семьи.</p>
         <div aria-label="Что можно сохранить" className="features">
           <div className="feat active"><img alt="" className="ico" src={asset('photo')} /><span>Фото</span></div>
@@ -109,7 +112,7 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
         <div className="footer" onAnimationEnd={(event) => {
           if (event.target === event.currentTarget && event.animationName === 'copyIn') finishIntroRef.current()
         }}>Создано с теплом <span style={{ color: '#e58cab' }}>♥</span> для самых близких</div>
-        <button aria-hidden={!introFinished} className={`continue-button${introFinished ? ' is-visible' : ''}`} disabled={!introFinished} onClick={complete} tabIndex={introFinished ? 0 : -1} type="button">Продолжить</button>
+        <Button aria-hidden={!introFinished} className={`continue-button${introFinished ? ' is-visible' : ''}`} disabled={!introFinished} onClick={complete} tabIndex={introFinished ? 0 : -1} type="button">Продолжить</Button>
       </section>
     </div>
   </div>
