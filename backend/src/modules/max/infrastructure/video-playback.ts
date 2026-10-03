@@ -29,6 +29,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
       const isForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId !== null)
+      const isEnvelopeForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId === null)
       let expectedSenderId: string | null = null
       if (!isForward) {
         try {
@@ -47,11 +48,12 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         return { readiness: { state: 'unknown', recheckable: true } }
       }
       const providerPosition = reference.source ? reference.attachmentPosition : 0
-      const current = resolved.attachments[providerPosition]
+      const current = (isEnvelopeForward ? resolved.forwardedAttachments : resolved.attachments)?.[providerPosition]
       const expectedMessageId = isForward ? reference.source!.originalMessageId! : source.messageId
       const expectedRecipientId = isForward ? String(reference.source!.originalChannelId) : String(source.recipientId)
       if (resolved.messageId !== expectedMessageId || resolved.recipientId !== expectedRecipientId ||
-          (isForward ? resolved.recipientType !== 'channel' : resolved.senderId !== expectedSenderId)) throw new MediaFailure('not_found', 'Медиа не найдено')
+          (isForward ? resolved.recipientType !== 'channel' : resolved.senderId !== expectedSenderId) ||
+          (isEnvelopeForward && resolved.forwardedFrom?.messageId !== reference.source!.originalMessageId)) throw new MediaFailure('not_found', 'Медиа не найдено')
       if (!current || current.kind !== 'video' || current.providerAttachmentId !== reference.providerAttachmentId) {
         throw new MediaFailure('not_found', 'Медиа не найдено')
       }

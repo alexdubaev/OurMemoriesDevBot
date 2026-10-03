@@ -115,7 +115,7 @@ maybeDescribe('MAX forward import integration', () => {
     const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: retry.inboxId } })
     const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
     const reference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })
-    expect(messageLookups).toEqual(['original-mid-synthetic', 'original-mid-synthetic', 'original-mid-synthetic'])
+    expect(messageLookups).toEqual(['original-mid-synthetic', 'outer-mid-synthetic', 'original-mid-synthetic', 'original-mid-synthetic'])
     expect(videoTokens).toEqual(['original-rotating-token'])
     expect(source).toMatchObject({ status: 'published', senderSubject: '7001', messageId: 'outer-mid-retry',
       originalMessageId: 'original-mid-synthetic', originalChannelId: channelId, familyId: fixture.familyId })
@@ -317,7 +317,10 @@ maybeDescribe('MAX forward import integration', () => {
     const viewer = await prisma.user.create({ data: { displayName: 'Synthetic viewer' } })
     await prisma.externalIdentity.create({ data: { userId: viewer.id, provider: 'max', subject: '7009' } })
     await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: viewer.id, role: 'viewer' } })
-    const viewOnly = await accept(forwardEvent('7009', 'outer-viewer-forward', 'original-viewer-forward'))
+    const viewOnlyEvent = forwardEvent('7009', 'outer-viewer-forward', 'original-viewer-forward')
+    viewOnlyEvent.forwardedFrom = { messageId: 'original-viewer-forward', attachments: [{ kind: 'video', providerAttachmentId: 'synthetic-envelope-video',
+      durationSeconds: null, width: null, height: null }] }
+    const viewOnly = await accept(viewOnlyEvent)
     let lookups = 0
     const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async () => {
       lookups += 1
@@ -330,7 +333,10 @@ maybeDescribe('MAX forward import integration', () => {
     const revoked = await prisma.user.create({ data: { displayName: 'Synthetic revoked member' } })
     await prisma.externalIdentity.create({ data: { userId: revoked.id, provider: 'max', subject: '7012' } })
     await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: revoked.id, role: 'full', revokedAt: new Date() } })
-    const revokedForward = await accept(forwardEvent('7012', 'outer-revoked-forward', 'original-revoked-forward'))
+    const revokedEvent = forwardEvent('7012', 'outer-revoked-forward', 'original-revoked-forward')
+    revokedEvent.forwardedFrom = { messageId: 'original-revoked-forward', attachments: [{ kind: 'video', providerAttachmentId: 'synthetic-envelope-video',
+      durationSeconds: null, width: null, height: null }] }
+    const revokedForward = await accept(revokedEvent)
     await expect(processor({ inboxId: revokedForward.inboxId })).resolves.toBe('done')
     expect(lookups).toBe(0)
   })
@@ -343,10 +349,207 @@ maybeDescribe('MAX forward import integration', () => {
     }) })
     await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
     const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, kind: 'denied' } })
-    expect(response.text).toContain('Не удалось получить исходную публикацию из MAX.')
+    expect(response.text).toBe('Не удалось сохранить это сообщение в memoLy.')
     expect(response.text).not.toContain('message_not_found')
     expect(response.text).not.toContain('original-unavailable')
     expect(await prisma.memory.count()).toBe(0)
+  })
+
+  test('imports video from a provider-confirmed outer forward envelope when the private original is unavailable', async () => {
+    const fixture = await familyFixture('7018', 'forward-envelope-video')
+    const accepted = await accept(forwardEvent('7018', 'outer-envelope-video', 'private-original-404'))
+    const sourceTime = Date.parse('2025-06-07T08:09:10.000Z')
+    const media = { kind: 'video' as const, providerAttachmentId: 'envelope-video-id', currentToken: 'confirmed-envelope-token',
+      inboundDurationSeconds: 2, width: 320, height: 240 }
+    const calls: string[] = []
+    const api = apiFor(async (messageId) => {
+      calls.push(messageId)
+      if (messageId === 'private-original-404') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId, senderId: '7018', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(),
+        forwardedFrom: { messageId: 'private-original-404', timestamp: sourceTime }, attachments: [], forwardedAttachments: [media] }
+    }, { getVideo: async (token) => {
+      expect(token).toBe('confirmed-envelope-token')
+      return { width: 320, height: 240, durationMs: 2_000,
+        renditions: [{ url: 'https://maxvd123.okcdn.ru/envelope-video.mp4', width: 320, height: 240, contentLength: 4 }] }
+    } })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+    expect(source).toMatchObject({ status: 'published', senderSubject: '7018', userId: fixture.userId, familyId: fixture.familyId,
+      originalMessageId: 'private-original-404', originalChannelId: null })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video',
+      occurredAt: new Date(sourceTime), sourcePublishedAt: new Date(sourceTime) })
+    expect(calls).toEqual(['private-original-404', 'outer-envelope-video'])
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'saved' } })).toBe(1)
+    const repeated = await accept(forwardEvent('7018', 'outer-envelope-video-again', 'private-original-404'))
+    await expect(processor({ inboxId: repeated.inboxId })).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: repeated.inboxId } })).toMatchObject({ status: 'denied', rejectionCode: 'duplicate' })
+  })
+
+  test('imports outer-envelope images as the authenticated sender and deduplicates repeated forwards', async () => {
+    const fixture = await familyFixture('7019', 'forward-envelope-image')
+    const photo = { kind: 'image' as const, providerAttachmentId: 'envelope-photo-id', url: 'https://i.oneme.ru/envelope-photo' }
+    const api = apiFor(async (messageId) => {
+      if (messageId === 'private-image-original') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId, senderId: '7019', recipientId: '900', recipientType: 'dialog',
+        forwardedFrom: { messageId: 'private-image-original', timestamp: Date.now() + 10 * 60_000 }, attachments: [], forwardedAttachments: [photo] }
+    })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media,
+      download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }) })
+    const first = await accept(forwardEvent('7019', 'outer-envelope-image', 'private-image-original'))
+    await expect(processor({ inboxId: first.inboxId })).resolves.toBe('done')
+    const duplicate = await accept(forwardEvent('7019', 'outer-envelope-image-again', 'private-image-original'))
+    await expect(processor({ inboxId: duplicate.inboxId })).resolves.toBe('done')
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: first.inboxId } })
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+    const inbox = await prisma.maxInbox.findUniqueOrThrow({ where: { id: first.inboxId } })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'photo' })
+    expect(memory.occurredAt).toEqual(inbox.receivedAt)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: duplicate.inboxId } })).toMatchObject({ status: 'denied', rejectionCode: 'duplicate' })
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
+  })
+
+  test('rejects envelope media when provider re-fetch does not confirm the authenticated forward identity', async () => {
+    const fixture = await familyFixture('7020', 'forward-envelope-forged')
+    const accepted = await accept(forwardEvent('7020', 'outer-envelope-forged', 'private-original-expected'))
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
+      if (messageId === 'private-original-expected') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId, senderId: '9999', recipientId: '900', recipientType: 'dialog',
+        forwardedFrom: { messageId: 'some-other-original' }, attachments: [],
+        forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'forged-id', currentToken: 'forged-token', inboundDurationSeconds: null, width: null, height: null }] }
+    }, { getVideo: async () => { throw new Error('unconfirmed envelope must not fetch media') } }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
+    expect((await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, kind: 'denied' } })).text)
+      .toBe('Не удалось сохранить это сообщение в memoLy.')
+  })
+
+  test('uses only provider-confirmed outer media for an accessible private-dialog original', async () => {
+    const fixture = await familyFixture('7024', 'forward-envelope-private-dialog')
+    const accepted = await accept(forwardEvent('7024', 'outer-private-dialog', 'private-dialog-original'))
+    const lookups: string[] = []
+    const originalVideo = { kind: 'video' as const, providerAttachmentId: 'private-original-video', currentToken: 'private-original-token',
+      inboundDurationSeconds: null, width: null, height: null }
+    const envelopeVideo = { kind: 'video' as const, providerAttachmentId: 'confirmed-envelope-video', currentToken: 'confirmed-envelope-token',
+      inboundDurationSeconds: null, width: null, height: null }
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
+      lookups.push(messageId)
+      return messageId === 'private-dialog-original'
+        ? { messageId, senderId: '8033', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(), attachments: [originalVideo] }
+        : { messageId, senderId: '7024', recipientId: '900', recipientType: 'dialog',
+            forwardedFrom: { messageId: 'private-dialog-original' }, attachments: [],
+            forwardedAttachments: [envelopeVideo] }
+    }, { getVideo: async (token) => {
+      expect(token).toBe('confirmed-envelope-token')
+      return { width: 320, height: 240, durationMs: 1_000,
+        renditions: [{ url: 'https://maxvd123.okcdn.ru/private-dialog-envelope.mp4', width: 320, height: 240, contentLength: 4 }] }
+    } }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(lookups).toEqual(['private-dialog-original', 'outer-private-dialog'])
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+    expect(source).toMatchObject({ status: 'published', senderSubject: '7024', originalChannelId: null,
+      originalMessageId: 'private-dialog-original' })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video' })
+    expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({
+      providerAttachmentId: 'confirmed-envelope-video',
+    })
+  })
+
+  test('fails safely when the confirmed outer video token cannot resolve to validated media', async () => {
+    const fixture = await familyFixture('7021', 'forward-envelope-unusable-video')
+    const accepted = await accept(forwardEvent('7021', 'outer-envelope-unusable-video', 'private-video-unusable'))
+    const video = { kind: 'video' as const, providerAttachmentId: 'unusable-video-id', currentToken: 'unusable-token',
+      inboundDurationSeconds: null, width: null, height: null }
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
+      if (messageId === 'private-video-unusable') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId, senderId: '7021', recipientId: '900', recipientType: 'dialog',
+        forwardedFrom: { messageId: 'private-video-unusable' }, attachments: [], forwardedAttachments: [video] }
+    }, { getVideo: async () => { throw new MaxProviderError(undefined, false, 404, 'video_not_found') } }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'unsupported_media' })
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+
+    const invalidRendition = await accept(forwardEvent('7021', 'outer-envelope-invalid-rendition', 'private-video-invalid-rendition'))
+    const invalidApi = apiFor(async (messageId) => messageId === 'private-video-invalid-rendition'
+      ? Promise.reject(new MaxProviderError(undefined, false, 404, 'message_not_found'))
+      : { messageId, senderId: '7021', recipientId: '900', recipientType: 'dialog',
+        forwardedFrom: { messageId: 'private-video-invalid-rendition' }, attachments: [], forwardedAttachments: [video] },
+    { getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000,
+      renditions: [{ url: 'https://evil.example.invalid/video.mp4', width: 320, height: 240, contentLength: 4 }] }) })
+    await expect(createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: invalidApi })({ inboxId: invalidRendition.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: invalidRendition.inboxId } })).toMatchObject({ status: 'unsupported_media' })
+    expect(await prisma.memory.count()).toBe(0)
+  })
+
+  test('uses envelope media when an accessible original belongs to an unbound foreign channel', async () => {
+    const fixture = await familyFixture('7022', 'forward-envelope-foreign-channel')
+    const accepted = await accept(forwardEvent('7022', 'outer-envelope-foreign', 'foreign-channel-original'))
+    const outerVideo = { kind: 'video' as const, providerAttachmentId: 'foreign-envelope-video', currentToken: 'foreign-envelope-token',
+      inboundDurationSeconds: 1, width: 320, height: 240 }
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => messageId === 'foreign-channel-original'
+      ? { messageId, senderId: '0', recipientId: '-123987', recipientType: 'channel', timestamp: Date.now(), attachments: [] }
+      : { messageId, senderId: '7022', recipientId: '900', recipientType: 'dialog', forwardedFrom: { messageId: 'foreign-channel-original' },
+        attachments: [], forwardedAttachments: [outerVideo] }, { getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000,
+      renditions: [{ url: 'https://maxvd123.okcdn.ru/foreign-envelope.mp4', width: 320, height: 240, contentLength: 4 }] }) }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+    expect(source).toMatchObject({ status: 'published', originalMessageId: 'foreign-channel-original', originalChannelId: null })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video' })
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+  })
+
+  test('serializes concurrent repeated envelope forwards into one Memory', async () => {
+    const fixture = await familyFixture('7023', 'forward-envelope-race')
+    const media = { kind: 'image' as const, providerAttachmentId: 'race-envelope-photo', url: 'https://i.oneme.ru/race-envelope-photo' }
+    const api = apiFor(async (messageId) => {
+      if (messageId === 'race-private-original') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId, senderId: '7023', recipientId: '900', recipientType: 'dialog',
+        forwardedFrom: { messageId: 'race-private-original' }, attachments: [], forwardedAttachments: [media] }
+    })
+    const first = await accept(forwardEvent('7023', 'race-outer-one', 'race-private-original'))
+    const second = await accept(forwardEvent('7023', 'race-outer-two', 'race-private-original'))
+    let downloadStarted!: () => void
+    let releaseDownload!: () => void
+    const started = new Promise<void>((resolve) => { downloadStarted = resolve })
+    const gate = new Promise<void>((resolve) => { releaseDownload = resolve })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media, download: async () => {
+      downloadStarted()
+      await gate
+      return { bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }
+    } })
+    const running = processor({ inboxId: first.inboxId })
+    const firstStatus = running.then(() => 'completed' as const, () => 'failed' as const)
+    let concurrent: Promise<'done' | 'skipped'> | undefined
+    let startStatus: 'download-started' | 'completed' | 'failed' | 'timed-out' = 'timed-out'
+    let concurrentResult: unknown = 'not-started'
+    try {
+      startStatus = await Promise.race([started.then(() => 'download-started' as const), firstStatus,
+        Bun.sleep(5_000).then(() => 'timed-out' as const)])
+      if (startStatus === 'download-started') {
+        concurrent = processor({ inboxId: second.inboxId })
+        concurrentResult = await Promise.race([concurrent.then(() => 'completed' as const, (error) => error),
+          Bun.sleep(5_000).then(() => 'timed-out' as const)])
+      }
+    } finally {
+      releaseDownload()
+      await Promise.allSettled([running, ...(concurrent ? [concurrent] : [])])
+    }
+    expect(startStatus).toBe('download-started')
+    expect(concurrentResult).toMatchObject({ retryable: true, code: 'envelope_claim_pending' })
+    await expect(running).resolves.toBe('done')
+    await expect(processor({ inboxId: second.inboxId })).resolves.toBe('done')
+    expect(await prisma.memory.count()).toBe(1)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: second.inboxId } })).toMatchObject({ status: 'denied', rejectionCode: 'duplicate' })
   })
 
   test('keeps distinct original message IDs independent within the same Family and channel', async () => {
