@@ -210,8 +210,9 @@
 [data-memoly-feed] .memoly-private-video-v2-play { position: absolute; z-index: 2; top: 50%; left: 50%; display: grid; width: 56px; height: 56px; place-items: center; transform: translate(-50%, -50%); border-radius: 50%; color: white; background: rgb(24 22 25 / 68%); }
 [data-memoly-feed] .memoly-private-video-v2-play:disabled { opacity: .5; }
 [data-memoly-feed] .memoly-private-video-v2-play:focus-visible { outline: 2px solid var(--memory-accent-strong); outline-offset: 3px; }
-[data-memoly-feed] .memoly-private-video-v2-duration { position: absolute; z-index: 2; right: 10px; bottom: 10px; padding: 4px 7px; border-radius: 4px; color: white; background: rgb(24 22 25 / 72%); }
-[data-memoly-feed] .memoly-private-video-v2-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin: 0; padding: 16px; text-align: center; color: #fff; background: rgb(21 19 21 / 88%); }
+[data-memoly-feed] .memoly-private-video-v2-duration { position: absolute; z-index: 4; right: 10px; bottom: 10px; padding: 4px 7px; border-radius: 4px; color: white; background: rgb(24 22 25 / 72%); }
+[data-memoly-feed] .memoly-private-video-v2-state { position: absolute; inset: auto 10px 10px; z-index: 3; display: block; width: fit-content; max-width: calc(100% - 20px); margin: 0; padding: 8px 12px; border-radius: 12px; text-align: center; color: #fff; background: rgb(21 19 21 / 76%); text-shadow: 0 1px 3px rgb(0 0 0 / 70%); }
+[data-memoly-feed] .memoly-private-video-v2-state[role='alert'] { inset: 0; display: flex; width: auto; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; border-radius: 0; background: rgb(21 19 21 / 54%); text-shadow: 0 1px 3px rgb(0 0 0 / 85%); }
 [data-memoly-feed] .memoly-private-video-v2-state p { margin: 0; }
 [data-memoly-feed] .memoly-private-video-v2-state button { min-height: 44px; }
 [data-memoly-feed] .memoly-video-control-row { display: flex; min-height: 44px; align-items: center; gap: 12px; }

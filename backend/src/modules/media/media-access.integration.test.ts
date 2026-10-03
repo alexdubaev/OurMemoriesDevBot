@@ -426,6 +426,63 @@ maybeDescribe('Private media API', () => {
       await tasks.deleteAsset({ mediaId: raceId })
       expect(await privateStorage.storage.headObject(racePosterKey)).toBeNull()
       expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: raceId } })).storageDeletedAt).not.toBeNull()
+
+      const abortedId = randomUUID()
+      const abortedOriginalKey = `media-originals/${abortedId}.mp4`
+      const abortedPosterKey = videoPosterObjectKey(abortedOriginalKey)
+      await privateStorage.storage.writeObject({ key: abortedOriginalKey, body: new Blob([videoBytes]).stream(),
+        contentLength: videoBytes.byteLength, contentType: 'video/mp4' })
+      await prisma.mediaAsset.create({ data: {
+        id: abortedId, familyId: family.body.family.id, uploaderId: owner.userId, sourceKind: 'upload',
+        purpose: 'memory', mediaKind: 'video', originalKey: abortedOriginalKey,
+        declaredMime: 'video/mp4', verifiedMime: 'video/mp4', sha256: 'e'.repeat(64),
+        byteSize: BigInt(videoBytes.byteLength), width: 320, height: 240, durationMs: 1_000,
+        originalStatus: 'stored', renditionStatus: 'pending',
+      } })
+      await prisma.family.update({ where: { id: family.body.family.id }, data: { storageUsedBytes: { increment: BigInt(videoBytes.byteLength) } } })
+      let releaseAbortedWrite!: () => void
+      let startAbortedWrite!: () => void
+      let finishAbortedWriteCleanup!: () => void
+      let hasReleasedAbortedWrite = false
+      const abortedWriteStarted = new Promise<void>((resolveStart) => { startAbortedWrite = resolveStart })
+      const abortedWriteBlocked = new Promise<void>((resolveRelease) => { releaseAbortedWrite = resolveRelease })
+      const abortedWriteCleanup = new Promise<void>((resolveCleanup) => { finishAbortedWriteCleanup = resolveCleanup })
+      const abortedStorage = new Proxy(privateStorage.storage, {
+        get(target, property) {
+          if (property === 'writeObject') return async (input: Parameters<typeof target.writeObject>[0]) => {
+            if (input.key === abortedPosterKey) { startAbortedWrite(); await abortedWriteBlocked }
+            return target.writeObject(input)
+          }
+          if (property === 'deleteObject') return async (key: string) => {
+            await target.deleteObject(key)
+            if (key === abortedPosterKey && hasReleasedAbortedWrite) finishAbortedWriteCleanup()
+          }
+          const value = Reflect.get(target, property, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+      const abortController = new AbortController()
+      const abortedTasks = createMediaTasks({ prisma, privateStorage: { ...privateStorage, storage: abortedStorage } as never, env })
+      const abortedPosterTask = abortedTasks.createVideoPoster({ mediaId: abortedId, signal: abortController.signal })
+      await abortedWriteStarted
+      abortController.abort()
+      await expect(abortedPosterTask).rejects.toThrow()
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM families WHERE id = ${family.body.family.id}::uuid FOR UPDATE`)
+        await tx.mediaAsset.update({ where: { id: abortedId }, data: { deletedAt: new Date() } })
+      })
+      await abortedTasks.deleteAsset({ mediaId: abortedId })
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: abortedId } })).storageDeletedAt).not.toBeNull()
+      hasReleasedAbortedWrite = true
+      releaseAbortedWrite()
+      const cleanupObserved = await new Promise<boolean>((resolveCleanup) => {
+        const timer = setTimeout(() => resolveCleanup(false), 5_000)
+        void abortedWriteCleanup.then(() => { clearTimeout(timer); resolveCleanup(true) })
+      })
+      expect(cleanupObserved).toBe(true)
+      expect(await privateStorage.storage.headObject(abortedPosterKey)).toBeNull()
+      expect(await prisma.mediaVariant.count({ where: { mediaId: abortedId, variant: 'preview' } })).toBe(0)
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: abortedId } })).storageDeletedAt).not.toBeNull()
     } finally {
       await rm(sourceRoot, { recursive: true, force: true })
     }

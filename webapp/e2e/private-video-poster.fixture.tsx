@@ -45,9 +45,14 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false,
 const generation = activatePrivateCacheIdentity(userId)
 allowPrivateFamilyCache(userId, familyId)
 syncPrivateMediaAccessToken('synthetic-private-media-token', userId)
-const seededMemories = new URLSearchParams(window.location.search).has('poster-processing')
-  ? memories.map((item) => ({ ...item, attachments: item.attachments.map((attachment) => attachment.kind === 'video' ? { ...attachment, previewPath: null, displayPath: null } : attachment) }))
-  : memories
+const fixtureSearch = new URLSearchParams(window.location.search)
+const seededMemories = fixtureSearch.has('playback-failed')
+  ? memories.map((item) => ({ ...item, attachments: item.attachments.map((attachment) => attachment.kind === 'video'
+    ? { ...attachment, renditionStatus: 'failed' as const, previewPath: null, displayPath: null, playbackPath: null }
+    : attachment) }))
+  : fixtureSearch.has('poster-processing')
+    ? memories.map((item) => ({ ...item, attachments: item.attachments.map((attachment) => attachment.kind === 'video' ? { ...attachment, previewPath: null, displayPath: null } : attachment) }))
+    : memories
 queryClient.setQueryData(feedQueryKeys.list(familyId, 'all', false, userId, 1, 0), { pages: [{ items: seededMemories, nextCursor: null }], pageParams: [null] })
 
 const transport: AuthenticatedTransport = {

@@ -117,6 +117,35 @@ test('a private poster becoming ready refreshes in place without a page reload',
   await card.screenshot({ path: join(artifacts, `${testInfo.project.name}-private-video-poster-ready.png`) })
 })
 
+test('a failed private video keeps polling for its poster and shows it under readable error feedback', async ({ page }) => {
+  await page.request.post('/__fixture__/poster-reset?playback-failed=1')
+  let mainFrameNavigations = 0
+  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) mainFrameNavigations += 1 })
+  await page.goto('/e2e/private-video-poster.fixture.html?playback-failed=1')
+  const card = page.locator('[data-memory-id="77777777-7777-4777-8777-777777777771"]')
+  await card.scrollIntoViewIfNeeded()
+  const frame = card.locator('.memoly-private-video-v2-frame')
+  await expect(card.locator('[data-video-viewer-state="error"]')).toBeVisible()
+  await expect(frame).toHaveAttribute('data-video-poster-state', 'pending')
+  await expect(card.locator('[data-slot="private-video-poster"] img')).toHaveCount(0)
+  await expect(card.getByRole('alert')).toContainText('Не удалось загрузить видео')
+  await expect(card.locator('.memoly-private-video-v2-play')).toHaveCount(0)
+  await expect(card.locator('.memoly-private-video-v2-duration')).toContainText('0:02')
+  await expect(card.locator('.memoly-video-control').first()).toBeDisabled()
+
+  await page.request.post('/__fixture__/poster-ready')
+  const poster = card.locator('[data-slot="private-video-poster"] img')
+  await expect(frame).toHaveAttribute('data-video-poster-state', 'ready', { timeout: 15_000 })
+  await expect(poster).toBeVisible()
+  await expect.poll(() => poster.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+  await expect(card.locator('[data-video-viewer-state="error"]')).toBeVisible()
+  await expect(card.getByRole('alert')).toContainText('Не удалось загрузить видео')
+  await expect(card.locator('.memoly-private-video-v2-play')).toHaveCount(0)
+  await expect(card.locator('.memoly-private-video-v2-duration')).toContainText('0:02')
+  await expect(card.locator('.memoly-video-control').first()).toBeDisabled()
+  expect(mainFrameNavigations).toBe(1)
+})
+
 function fixtureMemories(): MemoryDto[] {
   const path = (id: string, variant: string) => `/api/v1/families/${familyId}/media/${id}/content?variant=${variant}`
   const video = (id: string) => ({ id, source: 'private_storage' as const, kind: 'video' as const, width: 320, height: 180, durationMs: 2_400, renditionStatus: 'ready' as const, previewPath: path(id, 'preview'), displayPath: null, playbackPath: path(id, 'playback'), originalDownloadPath: path(id, 'original'), waveform: null })

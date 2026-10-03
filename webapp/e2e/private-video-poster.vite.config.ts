@@ -8,6 +8,7 @@ const artifacts = fileURLToPath(new URL('.artifacts/', import.meta.url))
 const familyId = '22222222-2222-4222-8222-222222222222'
 let rangedPlaybackRequests = 0
 let posterRenditionReady = false
+let failedPlaybackMode = false
 
 const privateMediaFixture: Plugin = {
   name: 'private-video-poster-fixture-media',
@@ -27,6 +28,7 @@ const privateMediaFixture: Plugin = {
       }
       if (url.pathname === '/__fixture__/poster-reset' && request.method === 'POST') {
         posterRenditionReady = false
+        failedPlaybackMode = url.searchParams.has('playback-failed')
         response.statusCode = 204
         response.end()
         return
@@ -43,7 +45,11 @@ const privateMediaFixture: Plugin = {
           const memories = JSON.parse(readFileSync(resolve(artifacts, 'private-video-poster-memories.json'), 'utf8')) as Array<{ id: string; attachments: Array<Record<string, unknown>> }>
           const memory = memories.find((item) => item.id === memoryMatch[1])
           if (memory) {
-            const refreshed = posterRenditionReady ? memory : { ...memory, attachments: memory.attachments.map((item) => item.kind === 'video' ? { ...item, previewPath: null, displayPath: null } : item) }
+            const refreshed = failedPlaybackMode
+              ? { ...memory, attachments: memory.attachments.map((item) => item.kind === 'video'
+                ? { ...item, renditionStatus: 'failed', playbackPath: null, previewPath: posterRenditionReady ? `/api/v1/families/${familyId}/media/${item.id}/content?variant=preview` : null, displayPath: null }
+                : item) }
+              : posterRenditionReady ? memory : { ...memory, attachments: memory.attachments.map((item) => item.kind === 'video' ? { ...item, previewPath: null, displayPath: null } : item) }
             response.setHeader('content-type', 'application/json')
             response.end(JSON.stringify(refreshed))
             return

@@ -216,7 +216,11 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
             await waitWithSignal(() => runtime.privateStorage.storage.writeObject({
               key: objectKey, body: Readable.toWeb(Readable.from([poster.bytes])) as unknown as ReadableStream<Uint8Array>,
               contentLength: poster.bytes.byteLength, contentType: poster.mime,
-            }), operationSignal)
+            }), operationSignal, () => {
+              void removeLatePosterIfInactive(runtime, asset.familyId, mediaId, objectKey).catch(() => {
+                console.warn('Late private video poster cleanup failed; orphan reconciliation will retry')
+              })
+            })
           }
           operationSignal.throwIfAborted()
           await tx.mediaVariant.create({ data: {
@@ -224,7 +228,7 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
             byteSize: BigInt(poster.bytes.byteLength), mime: poster.mime, width: poster.width,
             height: poster.height, durationMs: null, codec: null,
           } })
-        })
+        }, { timeout: 90_000 })
       } finally { await rm(directory, { recursive: true, force: true }) }
     },
   }
@@ -241,6 +245,28 @@ function hasExistingPoster(variants: Array<{ variant: 'preview' | 'display' | 'p
 function cancelStorageRead(value: StorageObjectRead | null) {
   if (!value) return
   void value.body.cancel().catch(() => undefined)
+}
+
+async function removeLatePosterIfInactive(
+  runtime: { prisma: DbClient; privateStorage: { storage: PrivateStorage } },
+  familyId: string,
+  mediaId: string,
+  objectKey: string,
+) {
+  const cleanupSignal = AbortSignal.timeout(10_000)
+  await runtime.prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM families WHERE id = ${familyId}::uuid FOR UPDATE
+    `)
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM media_assets
+       WHERE id = ${mediaId}::uuid AND family_id = ${familyId}::uuid
+       FOR UPDATE
+    `)
+    const current = await tx.mediaAsset.findUnique({ where: { id: mediaId } })
+    if (current && !current.deletedAt && !current.storageDeletedAt) return
+    await waitWithSignal(() => runtime.privateStorage.storage.deleteObject(objectKey), cleanupSignal)
+  }, { timeout: 15_000 })
 }
 
 function waitWithSignal<T>(operation: () => Promise<T>, signal: AbortSignal, onLateValue?: (value: T) => void): Promise<T> {
