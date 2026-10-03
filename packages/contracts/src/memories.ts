@@ -140,7 +140,18 @@ export const maxVideoAttachmentSchema = z.object({
   height: z.number().int().positive().nullable(),
   durationMs: z.number().int().positive().nullable(),
   playbackPath: backendMediaPathSchema,
-}).strict()
+  posterState: z.enum(['pending', 'ready', 'failed']).optional(),
+  posterPath: backendMediaPathSchema.nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.posterState === 'ready' && !value.posterPath) context.addIssue({ code: 'custom', path: ['posterPath'], message: 'Ready MAX video posters require a private media path' })
+  if (value.posterState !== undefined && value.posterState !== 'ready' && value.posterPath) context.addIssue({ code: 'custom', path: ['posterPath'], message: 'MAX video poster paths are only exposed when ready' })
+})
+
+export const maxVideoPosterReadinessSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('pending') }).strict(),
+  z.object({ state: z.literal('ready'), posterPath: backendMediaPathSchema }).strict(),
+  z.object({ state: z.literal('failed') }).strict(),
+])
 
 /** Readiness is a fresh provider check; processing and unknown can be checked again. */
 export const maxVideoReadinessSchema = z.discriminatedUnion('state', [
@@ -230,6 +241,7 @@ export type ReactionResponse = z.infer<typeof reactionResponseSchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
 export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>
+export type MaxVideoPosterReadiness = z.infer<typeof maxVideoPosterReadinessSchema>
 export type MaxVideoReadiness = z.infer<typeof maxVideoReadinessSchema>
 export type TelegramVideoAttachment = z.infer<typeof telegramVideoAttachmentSchema>
 export type MemoryAttachment = z.infer<typeof memoryAttachmentSchema>

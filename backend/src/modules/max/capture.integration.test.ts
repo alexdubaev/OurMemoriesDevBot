@@ -27,6 +27,8 @@ import { MemoryService, PrismaMemoryRepository, createSourceMemoryPublisher } fr
 import { createPrismaIdempotencyExecutor } from '../../idempotency'
 import { choicePayload, readCandidates } from '../../bot-family-target'
 import { expireMaxTarget, resolveMaxTarget } from './infrastructure/source-target'
+import { createMaxVideoPosterProcessor } from './infrastructure/video-poster'
+import { runBackgroundJob } from '../../jobs'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -2616,6 +2618,7 @@ maybeDescribe('MAX durable capture', () => {
 
   test('publishes one MAX video reference without private media and makes retries idempotent', async () => {
     const fixture = await imageFixture('77145', 'video-reference')
+    let foreignFixture: Awaited<ReturnType<typeof imageFixture>> | undefined
     try {
       const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
         kind: 'message_created', senderId: '77145', recipientId: '900', messageId: 'max-video-one',
@@ -2640,12 +2643,50 @@ maybeDescribe('MAX durable capture', () => {
       expect(await prisma.memoryMedia.count()).toBe(0)
       expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
 
+      const posterTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: {
+        type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}`,
+      } } })
+      expect(posterTask.payload).toEqual({ referenceId: reference.id })
+      const posterProcessor = createMaxVideoPosterProcessor({ prisma, familyAccess: createPrismaFamilyAccess(prisma),
+        api: { ...api, getVideo: async () => ({ width: 1280, height: 720, durationMs: 7000,
+          thumbnailUrl: 'https://pimg.mycdn.me/synthetic-poster.jpg?sig=opaque', renditions: [] }) },
+        media: fixture.media, download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+      })
+      await expect(posterProcessor(posterTask.payload)).resolves.toBe('done')
+      await expect(posterProcessor(posterTask.payload)).resolves.toBe('done')
+      const persistedReference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { id: reference.id }, include: { thumbnailMedia: { include: { variants: true } } } })
+      expect(persistedReference.thumbnailMedia).toMatchObject({ originalStatus: 'stored', renditionStatus: 'ready', deletedAt: null })
+      expect(persistedReference.thumbnailMedia!.variants.map(({ variant }) => variant)).toContain('display')
+      expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max' } })).toBe(1)
+      const scope = { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max-poster-check' } }
+      const memoryRepository = new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma))
+      const memoryDto = await memoryRepository.get(scope, memory.id)
+      expect(memoryDto.attachments[0]).toMatchObject({ posterState: 'ready', posterPath: `/api/v1/families/${fixture.familyId}/media/${persistedReference.thumbnailMedia!.id}/content?variant=display` })
+      const privatePoster = await fixture.media.content(scope, persistedReference.thumbnailMedia!.id, 'display')
+      const persistedPosterBytes = new Uint8Array(await new Response(privatePoster.body).arrayBuffer())
+      expect(new TextDecoder().decode(persistedPosterBytes.slice(0, 4))).toBe('RIFF')
+      expect(new TextDecoder().decode(persistedPosterBytes.slice(8, 12))).toBe('WEBP')
+      const viewer = await prisma.user.create({ data: { displayName: 'Synthetic poster viewer' } })
+      await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: viewer.id, role: 'viewer' } })
+      const viewerPoster = await fixture.media.content({ familyId: fixture.familyId, principal: { userId: viewer.id, sessionId: 'poster-viewer' } }, persistedReference.thumbnailMedia!.id, 'display')
+      expect(new Uint8Array(await new Response(viewerPoster.body).arrayBuffer())).toEqual(persistedPosterBytes)
+      foreignFixture = await imageFixture('77299', 'foreign-poster')
+      await expect(foreignFixture.media.content({ familyId: foreignFixture.familyId,
+        principal: { userId: foreignFixture.userId, sessionId: 'foreign-poster' } }, persistedReference.thumbnailMedia!.id, 'display'))
+        .rejects.toMatchObject({ kind: 'not_found' })
+      await runBackgroundJob('media:pending:cleanup', fixture.runtime, new Date(Date.now() + 25 * 60 * 60 * 1_000))
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: persistedReference.thumbnailMedia!.id } })).deletedAt).toBeNull()
+      await memoryRepository.delete(scope, memory.id, memory.version, new Date())
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: persistedReference.thumbnailMedia!.id } })).deletedAt).not.toBeNull()
+      await expect(fixture.media.content(scope, persistedReference.thumbnailMedia!.id, 'display')).rejects.toMatchObject({ kind: 'not_found' })
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:delete', dedupeKey: `media-delete:${persistedReference.thumbnailMedia!.id}` } })).toBe(1)
+
       await expect(process(task.payload)).resolves.toBe('skipped')
       expect(resolverCalls).toBe(1)
       expect(await prisma.memory.count()).toBe(1)
       expect(await prisma.maxVideoReference.count()).toBe(1)
       expect(await prisma.maxOutgoingResponse.count({ where: { kind: 'saved' } })).toBe(1)
-    } finally { await fixture.cleanup() }
+    } finally { await foreignFixture?.cleanup(); await fixture.cleanup() }
   })
 
   test('publishes alternating photos and videos as one ordered private media Memory', async () => {

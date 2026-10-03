@@ -43,6 +43,15 @@ export const taskHandlers = {
       return createMaxTasks(runtime).backupMedia(payload, signal, finalAttempt)
     },
   },
+  'max:video-poster': {
+    maxAttempts: 5,
+    deadlineMs: 90_000,
+    retryDelayMs: providerRetryDelay,
+    run: async ({ payload, signal }, runtime) => {
+      const { createMaxTasks } = await import('../modules/max')
+      return createMaxTasks(runtime).videoPoster(payload, signal)
+    },
+  },
   'telegram:process': {
     maxAttempts: 5,
     deadlineMs: 90_000,

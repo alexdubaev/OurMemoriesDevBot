@@ -22,8 +22,11 @@ import { disabledEmailDelivery } from '../../email'
 import { createMaxMemoryBackupProcessor, createPrismaMaxMemoryBackupRepository } from './infrastructure/backup-media'
 import { createMaxChannelProvider } from './infrastructure/max-channel-provider'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
+import { createMaxVideoPosterProcessor, enqueueMaxVideoPoster } from './infrastructure/video-poster'
 import { Hono } from 'hono'
 import type { AuthHttpEnv } from '../auth'
+
+export { createMaxVideoPlayback }
 
 export function createMaxModule(options: {
   runtime: BackendRuntime
@@ -49,6 +52,7 @@ export function createMaxModule(options: {
     repository: new PrismaMaxDirectUploadRepository(options.runtime.prisma),
     publisher: createSourceMemoryPublisher(options.runtime.prisma, access),
     memoryReader: new PrismaMemoryRepository(options.runtime.prisma, createPrismaIdempotencyExecutor(options.runtime.prisma)),
+    enqueueVideoPoster: enqueueMaxVideoPoster,
   })
   const directVideoUploadRoutes = createMaxDirectVideoUploadRoutes({
     requireAuth: createAuthModule({ db: options.runtime.prisma, emailDelivery: options.runtime.emailDelivery ?? disabledEmailDelivery, env }).requireAuth,
@@ -119,6 +123,12 @@ export function createMaxTasks(runtime: BackendRuntime) {
     storage: runtime.privateStorage.storage,
     api,
   })
+  const videoPoster = createMaxVideoPosterProcessor({
+    prisma: runtime.prisma,
+    familyAccess: createPrismaFamilyAccess(runtime.prisma),
+    api,
+    media: createMediaService({ db: runtime.prisma, env: runtime.env, familyAccess: createPrismaFamilyAccess(runtime.prisma), storage: runtime.privateStorage.storage }),
+  })
   return {
     process: (payload: unknown, signal?: AbortSignal) => processTask(payload, signal),
     deliverResponse: createMaxResponseDelivery({
@@ -129,6 +139,7 @@ export function createMaxTasks(runtime: BackendRuntime) {
       resolveDetailedInviteStart: createDetailedInviteStartResolver(runtime.prisma),
     }),
     backupMedia: processBackupMedia,
+    videoPoster,
   }
 }
 

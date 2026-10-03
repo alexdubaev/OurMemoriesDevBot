@@ -10,6 +10,7 @@ import { MaxProviderError } from './max-api'
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
 import { assertMaxForwardBinding } from './forward-import'
+import { enqueueMaxVideoPoster } from './video-poster'
 import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
 import { selectMaxVideoRendition } from './video-rendition'
 
@@ -86,7 +87,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         if (!currentSource || currentSource.familyId !== admission.familyId || currentSource.status !== 'published' || !currentSource.memoryId || (changed.count !== 1 && currentSource.memoryId !== memoryId)) {
           throw new Error('MAX source publication state changed')
         }
-        await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
+        const reference = await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
           memoryId: currentSource.memoryId, familyId: admission.familyId, attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
           ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         }, create: {
@@ -94,6 +95,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
           attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
           ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         } })
+        await enqueueMaxVideoPoster(tx, reference.id)
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
         } })

@@ -1,5 +1,5 @@
 import {
-  apiErrorSchema, finalizeMediaUploadResponseSchema, idempotencyKeyHeadersSchema, maxVideoReadinessSchema, mediaContentParamsSchema,
+  apiErrorSchema, finalizeMediaUploadResponseSchema, idempotencyKeyHeadersSchema, maxVideoPosterReadinessSchema, maxVideoReadinessSchema, mediaContentParamsSchema,
   mediaContentQuerySchema, mediaFamilyParamsSchema, mediaUploadParamsSchema,
   reserveMediaUploadRequestSchema, reserveMediaUploadResponseSchema,
 } from '@web-app-demo/contracts'
@@ -119,6 +119,13 @@ export function createMediaRoutes({ authenticateMediaAccess, cookieSecure, requi
     c.header('Cache-Control', 'private, no-store')
     return c.json(maxVideoReadinessSchema.parse(readiness))
   })
+  routes.get('/families/:familyId/media/max-videos/:referenceId/poster-readiness', async (c) => {
+    if (!maxVideoPlayback?.posterReadiness) return c.json({ error: { code: 'NOT_FOUND', message: 'Превью недоступно' } }, 404)
+    const params = maxVideoContentParamsSchema.parse(c.req.param())
+    const readiness = await executeMedia(() => maxVideoPlayback.posterReadiness!({ ...scope(c), familyId: params.familyId }, params.referenceId))
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(maxVideoPosterReadinessSchema.parse(readiness))
+  })
   routes.get('/families/:familyId/media/max-videos/:referenceId/poster', async (c) => {
     if (!maxVideoPlayback?.poster) return c.json({ error: { code: 'NOT_FOUND', message: 'Превью недоступно' } }, 404)
     const params = maxVideoContentParamsSchema.parse(c.req.param())
@@ -170,6 +177,7 @@ function bearerToken(authorization: string | undefined) {
 function isContentPath(path: string) {
   return /^\/api\/v1\/families\/[0-9a-f-]+\/media\/(?:[0-9a-f-]+|max-videos\/[0-9a-f-]+|avatars\/[0-9a-f-]+\/[0-9a-f-]+)\/content$/i.test(path) ||
     /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/poster$/i.test(path) ||
+    /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/poster-readiness$/i.test(path) ||
     /^\/api\/v1\/families\/[0-9a-f-]+\/media\/max-videos\/[0-9a-f-]+\/readiness$/i.test(path)
 }
 

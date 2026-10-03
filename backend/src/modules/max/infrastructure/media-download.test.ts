@@ -1,9 +1,31 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createMaxMediaDownload, createMaxVideoStreamDownload, MaxMediaDownloadError } from './media-download'
+import { createMaxMediaDownload, createMaxPosterDownload, createMaxVideoStreamDownload, MaxMediaDownloadError } from './media-download'
 import { MaxProviderError } from './max-api'
 
 describe('MAX credential-free media download', () => {
+  test('downloads the exact pimg.mycdn.me JPEG thumbnail under a poster-only host policy', async () => {
+    let request: Request | undefined
+    const bytes = Uint8Array.of(0xff, 0xd8, 0xff, 0xd9)
+    const download = createMaxPosterDownload({ fetch: async (input, init) => {
+      request = new Request(input, init)
+      return new Response(bytes, { headers: { 'content-type': 'image/jpeg', 'content-length': String(bytes.byteLength) } })
+    } })
+    for (const url of ['https://pimg.mycdn.me/some/path?sig=opaque', 'https://i.oneme.ru/old.jpg', 'https://fd.oneme.ru/old.jpg', 'https://a.oneme.ru/old.jpg']) {
+      await expect(download(url, 64)).resolves.toMatchObject({ bytes, contentLength: 4, contentType: 'image/jpeg' })
+    }
+    expect(request?.redirect).toBe('manual')
+    expect(request?.headers.get('authorization')).toBeNull()
+    expect(request?.headers.get('cookie')).toBeNull()
+  })
+
+  test('poster download rejects redirects, other hosts, and oversized response bytes', async () => {
+    const reject = createMaxPosterDownload({ fetch: async () => new Response(null, { status: 302, headers: { location: 'https://pimg.mycdn.me/next' } }) })
+    await expect(reject('https://pimg.mycdn.me/a', 64)).rejects.toBeInstanceOf(MaxMediaDownloadError)
+    await expect(reject('https://pimg.mycdn.me.evil.test/a', 64)).rejects.toBeInstanceOf(MaxMediaDownloadError)
+    const oversized = createMaxPosterDownload({ fetch: async () => new Response(Uint8Array.of(1, 2, 3), { headers: { 'content-type': 'image/jpeg', 'content-length': '3' } }) })
+    await expect(oversized('https://pimg.mycdn.me/a', 2)).rejects.toBeInstanceOf(MaxMediaDownloadError)
+  })
   test('allows only the three observed exact HTTPS hosts and returns exact bytes', async () => {
     const bytes = Uint8Array.of(1, 2, 3)
     let request: Request | undefined

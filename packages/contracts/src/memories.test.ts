@@ -7,6 +7,7 @@ import {
   mediaDtoSchema,
   maxVideoAttachmentSchema,
   maxVideoReadinessSchema,
+  maxVideoPosterReadinessSchema,
   memoryDtoSchema,
   reactionResponseSchema,
   seenMemoriesRequestSchema,
@@ -23,6 +24,25 @@ describe('memory contracts', () => {
       expect(maxVideoReadinessSchema.parse(JSON.parse(JSON.stringify({ state, recheckable })))).toMatchObject({ state, recheckable })
       expect(maxVideoReadinessSchema.safeParse({ state, recheckable: !recheckable }).success).toBe(false)
     }
+  })
+  test('MAX poster lifecycle is additive and exposes only authenticated private media paths', () => {
+    const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
+    const referenceId = '018f01d8-0c2a-7c25-bf83-ae68985c7e91'
+    const mediaId = '018f01d8-0c2a-7c25-bf83-ae68985c7e92'
+    const playbackPath = `/api/v1/families/${familyId}/media/max-videos/${referenceId}/content`
+    expect(maxVideoAttachmentSchema.parse({ id: referenceId, source: 'max', kind: 'video', width: null, height: null, durationMs: null, playbackPath }))
+      .not.toHaveProperty('posterState')
+    expect(maxVideoAttachmentSchema.parse({ id: referenceId, source: 'max', kind: 'video', width: null, height: null, durationMs: null,
+      playbackPath, posterState: 'pending', posterPath: null })).toMatchObject({ posterState: 'pending', posterPath: null })
+    const readyPath = `/api/v1/families/${familyId}/media/${mediaId}/content?variant=display`
+    expect(maxVideoAttachmentSchema.parse({ id: referenceId, source: 'max', kind: 'video', width: null, height: null, durationMs: null,
+      playbackPath, posterState: 'ready', posterPath: readyPath })).toMatchObject({ posterState: 'ready', posterPath: readyPath })
+    expect(maxVideoAttachmentSchema.safeParse({ id: referenceId, source: 'max', kind: 'video', width: null, height: null, durationMs: null,
+      playbackPath, posterState: 'ready', posterPath: 'https://pimg.mycdn.me/poster.jpg' }).success).toBe(false)
+    expect(maxVideoPosterReadinessSchema.parse({ state: 'pending' })).toEqual({ state: 'pending' })
+    expect(maxVideoPosterReadinessSchema.parse({ state: 'ready', posterPath: readyPath })).toEqual({ state: 'ready', posterPath: readyPath })
+    expect(maxVideoPosterReadinessSchema.parse({ state: 'failed' })).toEqual({ state: 'failed' })
+    expect(maxVideoPosterReadinessSchema.safeParse({ state: 'pending', posterPath: readyPath }).success).toBe(false)
   })
   test('accepts only a versioned family-scoped member avatar content path', () => {
     const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
