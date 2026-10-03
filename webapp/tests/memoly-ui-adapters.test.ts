@@ -59,6 +59,22 @@ test('uses the display or preview path when a private photo has no playback path
   ])
 })
 
+test('uses a private video poster variant and never treats playback MP4 as an image', () => {
+  const privateVideo = { ...memory.attachments[0]!, kind: 'video' as const, durationMs: 2_400, waveform: null }
+  const withPreview: MemoryDto = { ...memory, kind: 'video', attachments: [privateVideo] }
+  expect(toMemoryPresentation(withPreview, 'UTC').posterPath).toBe(privateVideo.previewPath)
+
+  const withoutPoster: MemoryDto = { ...withPreview, attachments: [{ ...privateVideo, previewPath: null, displayPath: null }] }
+  expect(toMemoryPresentation(withoutPoster, 'UTC').posterPath).toBeNull()
+
+  const maxVideo: MemoryDto = {
+    ...memory,
+    kind: 'video',
+    attachments: [{ id: mediaId, source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_400, playbackPath: `/api/v1/families/${familyId}/media/max-videos/${mediaId}/content` }],
+  }
+  expect(toMemoryPresentation(maxVideo, 'UTC').posterPath).toBe(maxVideo.attachments[0]!.source === 'max' ? maxVideo.attachments[0]!.playbackPath : null)
+})
+
 test('maps date labels using the family timezone', () => {
   const presentation = toMemoryPresentation(memory, 'Europe/Moscow')
 

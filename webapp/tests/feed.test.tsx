@@ -98,7 +98,7 @@ const videoMemory: MemoryDto = {
     height: 1_080,
     durationMs: 24_000,
     renditionStatus: 'ready',
-    previewPath: null,
+    previewPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=preview`,
     displayPath: null,
     playbackPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=playback`,
     originalDownloadPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=original`,
@@ -202,6 +202,26 @@ test('note content stays unboxed with natural text flow and semantic focus', () 
   expect(panel?.nodes?.some((node) => node.type === 'decl' && node.value.includes('!important'))).toBe(false)
 })
 
+test('private-video loading stays compact while error feedback layers transparently over its poster', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const rules: postcss.Rule[] = []
+  postcss.parse(css).walkRules((rule) => rules.push(rule))
+  const declarationsFor = (selector: string) => Object.fromEntries(
+    rules.filter((rule) => rule.selector === selector).at(-1)?.nodes
+      ?.filter((node): node is postcss.Declaration => node.type === 'decl')
+      .map(({ prop, value }) => [prop, value]) ?? [],
+  )
+  const state = declarationsFor('[data-memoly-feed] .memoly-private-video-v2-state')
+  const alert = declarationsFor("[data-memoly-feed] .memoly-private-video-v2-state[role='alert']")
+  const duration = declarationsFor('[data-memoly-feed] .memoly-private-video-v2-duration')
+  expect(state['inset']).toBe('auto 10px 10px')
+  expect(state['width']).toBe('fit-content')
+  expect(state['z-index']).toBe('3')
+  expect(alert['inset']).toBe('0')
+  expect(alert['background']).toBe('rgb(21 19 21 / 54%)')
+  expect(duration['z-index']).toBe('4')
+})
+
 test('private video controls use accessible icons and keep the timeline without text buttons', () => {
   const markup = renderFeed(feedClientWith([videoMemory]))
   expect(markup).toContain('aria-label="Воспроизвести видео"')
@@ -241,6 +261,23 @@ test('automatic rendition checks prioritize an opened Memory and nearby pending 
   expect(selectPendingPrivateVideoIds(items, [], ['far-ready', 'near-a'], 3)).toEqual(['near-a'])
   expect(selectPendingPrivateVideoIds(items, [], ['near-a', 'near-b', 'near-c', 'near-d'], 3, new Set(['near-a']))).toEqual(['near-b', 'near-c', 'near-d'])
   expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3, new Set(['far', 'near-a']))).toEqual(['near-b', 'near-c'])
+})
+
+test('bounded video refresh includes ready playback while its persistent poster is missing', () => {
+  const withoutPoster: MemoryDto = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0]!, previewPath: null, displayPath: null }] }
+  const single = { ...withoutPoster, id: 'poster-single' }
+  const mixed = { ...mixedMemory, id: 'poster-mixed', attachments: [photoMemory.attachments[0]!, withoutPoster.attachments[0]!] }
+  const four = { ...videoMemory, id: 'poster-four', attachments: Array.from({ length: 4 }, (_, index) => ({ ...withoutPoster.attachments[0]!, id: `poster-four-video-${index + 1}` })) }
+  const twoVideos = { ...videoMemory, id: 'poster-two-videos', kind: 'media' as const, attachments: [withoutPoster.attachments[0]!, { ...withoutPoster.attachments[0]!, id: 'another-video' }] }
+  expect(selectPendingPrivateVideoIds([single, mixed, four, twoVideos], [], ['poster-single', 'poster-mixed', 'poster-four', 'poster-two-videos'], 3)).toEqual(['poster-single', 'poster-mixed', 'poster-four'])
+  expect(selectPendingPrivateVideoIds([single, mixed, four], [{ ...single, attachments: [{ ...withoutPoster.attachments[0]!, previewPath: videoMemory.attachments[0]!.previewPath }] }], ['poster-mixed'], 3)).toEqual(['poster-mixed'])
+})
+
+test('bounded video refresh tracks a missing poster independently of failed playback', () => {
+  const failedMissingPoster: MemoryDto = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0]!, renditionStatus: 'failed', previewPath: null, displayPath: null, playbackPath: null }] }
+  const failedWithPoster: MemoryDto = { ...failedMissingPoster, attachments: [{ ...failedMissingPoster.attachments[0]!, previewPath: videoMemory.attachments[0]!.previewPath }] }
+  expect(selectPendingPrivateVideoIds([failedMissingPoster], [], [failedMissingPoster.id], 3)).toEqual([failedMissingPoster.id])
+  expect(selectPendingPrivateVideoIds([failedWithPoster], [], [failedWithPoster.id], 3)).toEqual([])
 })
 
 test('mixed memory renders one card with ordered slides and lazily mounts video', () => {
@@ -290,8 +327,20 @@ test('a published private video still preparing its rendition shows pending stat
   expect(markup).toContain('Подготавливаем видео')
   expect(markup).toContain('data-video-viewer-state="loading"')
   expect(markup).toContain('data-seen-ready="false"')
+  expect(markup).toContain('class="memoly-private-video-v2-play"')
+  expect(markup).toContain('0:24')
+  expect(markup.match(/Подготавливаем видео/g)).toHaveLength(1)
   expect(markup).not.toContain('Не удалось загрузить видео')
   expect(markup).not.toContain('role="alert"')
+})
+
+test('private videos render persistent private-storage poster paths, play overlay and saved duration', () => {
+  const markup = renderFeed(feedClientWith([videoMemory]))
+  expect(markup).toContain('data-video-poster-state="pending"')
+  expect(markup).toContain('data-slot="private-video-poster"')
+  expect(markup).toContain('aria-label="Воспроизвести видео"')
+  expect(markup).toContain('0:24')
+  expect(markup).not.toContain('data-media-source="max"')
 })
 
 test('a pending video becomes ready from its detail response without replacing or refetching the feed list', () => {
@@ -331,6 +380,17 @@ test('failed and unusable ready private videos retain a visible error', () => {
     expect(markup).toContain('Не удалось загрузить видео')
     expect(markup).toContain('data-seen-ready="false"')
   }
+})
+
+test('a failed private video keeps its arrived poster, readable error, duration, and disabled playback', () => {
+  const failedWithPoster = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0]!, renditionStatus: 'failed' as const, playbackPath: null }] }
+  const markup = renderFeed(feedClientWith([failedWithPoster]))
+  expect(markup).toContain('data-video-viewer-state="error"')
+  expect(markup).toContain('data-slot="private-video-poster"')
+  expect(markup).toContain('Не удалось загрузить видео')
+  expect(markup).not.toContain('class="memoly-private-video-v2-play"')
+  expect(markup).toContain('0:24')
+  expect(markup).toContain('disabled=""')
 })
 
 test('a next-page error keeps already displayed memories on screen', () => {

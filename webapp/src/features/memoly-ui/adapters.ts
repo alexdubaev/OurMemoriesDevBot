@@ -108,7 +108,7 @@ export function toFamilyPresentation(
 }
 
 function videoPosterPath(attachment: VideoAttachment) {
-  if (attachment.source === 'private_storage') return attachment.previewPath ?? attachment.displayPath ?? attachment.playbackPath
+  if (attachment.source === 'private_storage') return attachment.previewPath ?? attachment.displayPath
   return attachment.source === 'telegram' ? attachment.thumbnailPath : attachment.playbackPath
 }
 

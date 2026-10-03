@@ -57,6 +57,7 @@ function requireCapability(output: string, pattern: RegExp, capability: string) 
 
 function runProcess(file: string, args: string[], options: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) return reject(new Error('Media process aborted'))
     const timeoutMs = options.timeoutMs ?? 5 * 60_000
     const maxOutputBytes = options.maxOutputBytes ?? 2 * 1024 * 1024
     const child = spawn(file, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -71,6 +72,7 @@ function runProcess(file: string, args: string[], options: ProcessOptions = {}):
     const timeout = setTimeout(() => terminate(new Error(`Media process exceeded ${timeoutMs}ms`)), timeoutMs)
     const abort = () => terminate(new Error('Media process aborted'))
     options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
     const collect = (target: Buffer[]) => (chunk: Buffer) => {
       outputBytes += chunk.byteLength
       if (outputBytes > maxOutputBytes) return terminate(new Error('Media process exceeded output limit'))
