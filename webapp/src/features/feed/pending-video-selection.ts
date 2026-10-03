@@ -1,7 +1,10 @@
 import type { MemoryDto } from '@web-app-demo/contracts'
 
 export function hasPendingPrivateVideo(memory: MemoryDto) {
-  return memory.attachments.some((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video' && attachment.renditionStatus === 'pending')
+  return memory.attachments.some((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video' && (
+    attachment.renditionStatus === 'pending' ||
+    attachment.renditionStatus === 'ready' && Boolean(attachment.playbackPath) && !attachment.previewPath && !attachment.displayPath
+  ))
 }
 
 export function selectPendingPrivateVideoIds(items: MemoryDto[], opened: MemoryDto[], nearbyIds: string[], limit: number, excludedIds: ReadonlySet<string> = new Set()) {

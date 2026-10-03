@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { SignJWT } from 'jose'
@@ -8,12 +9,16 @@ import sharp from 'sharp'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
+import { Prisma } from '../../generated/prisma/client'
 import { loadEnv } from '../../env'
 import { createPrivateStorage } from '../../storage'
 import { runBackgroundJob } from '../../jobs'
 import { pngFixture } from '../../storage/storage-contract'
 import { signAccessToken } from '../auth'
 import { createMaxVideoPlayback } from '../max'
+import { createMediaTasks } from '.'
+import { createFfmpegRunner } from './infrastructure/ffmpeg-runner'
+import { videoPosterObjectKey } from './infrastructure/video-poster'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -243,6 +248,188 @@ maybeDescribe('Private media API', () => {
     expect(await prisma.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.reserved.body.assetId}` } })).toBe(1)
     expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
   })
+
+  test('finalized private videos enqueue and publish one authenticated poster without mutating playback state', async () => {
+    const owner = await admittedUser('Video poster owner', '43020')
+    const outsider = await admittedUser('Video poster outsider', '43021')
+    const family = await createFamily(owner.token, 'Video poster family')
+    const foreignFamily = await createFamily(outsider.token, 'Other video poster family')
+    const videoApp = createApp({ env: { ...env, MEDIA_FAMILY_QUOTA_BYTES: 1_000_000 }, prisma, privateStorage })
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'video-poster-upload-'))
+    try {
+      const sourcePath = join(sourceRoot, 'source.mp4')
+      const generated = await createFfmpegRunner({}).run('ffmpeg', [
+        '-nostdin', '-v', 'error', '-threads', '1', '-filter_threads', '1',
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=10:duration=1',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', sourcePath,
+      ])
+      expect(generated.exitCode).toBe(0)
+      const videoBytes = new Uint8Array(await Bun.file(sourcePath).arrayBuffer())
+      const reservedResponse = await videoApp.request(`/api/v1/families/${family.body.family.id}/uploads`, {
+        method: 'POST', headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purpose: 'memory', kind: 'video', contentType: 'video/mp4', byteSize: videoBytes.byteLength }),
+      })
+      const reserved = await reservedResponse.json() as any
+      expect(reservedResponse.status).toBe(201)
+      const put = await videoApp.request(reserved.upload.url, {
+        method: 'PUT', headers: reserved.upload.headers, body: videoBytes as unknown as BodyInit,
+      })
+      expect(put.status).toBe(200)
+      const finalizedResponse = await videoApp.request(
+        `/api/v1/families/${family.body.family.id}/uploads/${reserved.upload.uploadId}/finalize`,
+        { method: 'POST', headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json' }, body: '{}' },
+      )
+      expect(finalizedResponse.status).toBe(200)
+
+      const mediaId = reserved.assetId as string
+      const posterTask = await prisma.taskOutbox.findUniqueOrThrow({
+        where: { type_dedupeKey: { type: 'media:video-poster', dedupeKey: `media-video-poster:v1:${mediaId}` } },
+      })
+      expect(posterTask.payload).toEqual({ mediaId })
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:video-poster', dedupeKey: `media-video-poster:v1:${mediaId}` } })).toBe(1)
+      expect(await prisma.taskOutbox.count({ where: { type: 'media:prepare', dedupeKey: `media-prepare:${mediaId}` } })).toBe(1)
+
+      const memoryResponse = await videoApp.request(`/api/v1/families/${family.body.family.id}/memories`, {
+        method: 'POST', headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+        body: JSON.stringify({ kind: 'video', childId: family.body.child.id, body: '', occurredAt: new Date().toISOString(), mediaIds: [mediaId] }),
+      })
+      expect(memoryResponse.status).toBe(201)
+      const createdMemory = await memoryResponse.json() as { id: string }
+      const before = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })
+      const tasks = createMediaTasks({ prisma, privateStorage, env })
+      await Promise.all([
+        tasks.createVideoPoster({ mediaId }),
+        tasks.createVideoPoster({ mediaId }),
+      ])
+      const after = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })
+      expect(after.updatedAt).toEqual(before.updatedAt)
+      expect(after).toMatchObject({ renditionStatus: 'pending', durationMs: before.durationMs, width: before.width, height: before.height })
+      expect(await prisma.mediaVariant.count({ where: { mediaId, variant: 'preview' } })).toBe(1)
+      const preview = await prisma.mediaVariant.findUniqueOrThrow({ where: { mediaId_variant: { mediaId, variant: 'preview' } } })
+      expect(preview).toMatchObject({ objectKey: videoPosterObjectKey(before.originalKey), mime: 'image/jpeg' })
+      await prisma.mediaVariant.delete({ where: { mediaId_variant: { mediaId, variant: 'preview' } } })
+      await tasks.createVideoPoster({ mediaId })
+      const adopted = await prisma.mediaVariant.findUniqueOrThrow({ where: { mediaId_variant: { mediaId, variant: 'preview' } } })
+      expect(adopted).toMatchObject({ objectKey: preview.objectKey, sha256: preview.sha256, byteSize: preview.byteSize })
+      await expect(createMediaTasks({ prisma, privateStorage, env: { ...env, FFMPEG_PATH: 'video-poster-command-must-not-run' } })
+        .createVideoPoster({ mediaId })).resolves.toBeUndefined()
+
+      const path = `/api/v1/families/${family.body.family.id}/media/${mediaId}/content?variant=preview`
+      expect((await videoApp.request(path)).status).toBe(401)
+      const privateImage = await videoApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })
+      expect(privateImage.status).toBe(200)
+      expect(privateImage.headers.get('content-type')).toContain('image/jpeg')
+      expect(Buffer.from(await privateImage.arrayBuffer())).toEqual(Buffer.from(await Bun.file(resolve(storageRoot, 'objects', preview.objectKey)).arrayBuffer()))
+      expect((await videoApp.request(path.replace(family.body.family.id, foreignFamily.body.family.id), {
+        headers: { Authorization: `Bearer ${outsider.token}` },
+      })).status).toBe(404)
+
+      await tasks.prepareAsset({ mediaId })
+      const playbackBeforeFailure = await prisma.mediaVariant.findUniqueOrThrow({
+        where: { mediaId_variant: { mediaId, variant: 'playback' } },
+      })
+      const memoryDetailResponse = await videoApp.request(
+        `/api/v1/families/${family.body.family.id}/memories/${createdMemory.id}`,
+        { headers: { Authorization: `Bearer ${owner.token}` } },
+      )
+      expect(memoryDetailResponse.status).toBe(200)
+      const memoryDetail = await memoryDetailResponse.json() as {
+        attachments: Array<{
+          id: string
+          source: string
+          previewPath?: string | null
+          playbackPath?: string | null
+          renditionStatus?: string
+        }>
+      }
+      expect(memoryDetail.attachments).toHaveLength(1)
+      expect(memoryDetail.attachments[0]).toMatchObject({
+        id: mediaId,
+        source: 'private_storage',
+        previewPath: path,
+        playbackPath: `/api/v1/families/${family.body.family.id}/media/${mediaId}/content?variant=playback`,
+        renditionStatus: 'ready',
+      })
+      await prisma.mediaVariant.delete({ where: { mediaId_variant: { mediaId, variant: 'preview' } } })
+      const sourceBeforeFailure = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })
+      await expect(createMediaTasks({ prisma, privateStorage, env: { ...env, FFMPEG_PATH: 'video-poster-extractor-does-not-exist' } })
+        .createVideoPoster({ mediaId })).rejects.toThrow()
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })).toEqual(sourceBeforeFailure)
+      expect(await prisma.mediaVariant.findUniqueOrThrow({
+        where: { mediaId_variant: { mediaId, variant: 'playback' } },
+      })).toEqual(playbackBeforeFailure)
+      const playbackSession = await videoApp.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
+        method: 'POST', headers: { Authorization: `Bearer ${owner.token}` },
+      })
+      const playbackCookie = playbackSession.headers.get('set-cookie')?.split(';', 1)[0]
+      expect(playbackSession.status).toBe(204)
+      const playbackResponse = await videoApp.request(path.replace('variant=preview', 'variant=playback'), {
+        headers: { Cookie: playbackCookie!, Range: 'bytes=0-15' },
+      })
+      expect(playbackResponse.status).toBe(206)
+      expect(playbackResponse.headers.get('content-type')).toContain('video/mp4')
+      expect((await playbackResponse.arrayBuffer()).byteLength).toBe(16)
+
+      const failedId = randomUUID()
+      const failed = await prisma.mediaAsset.create({ data: {
+        id: failedId, familyId: family.body.family.id, uploaderId: owner.userId, sourceKind: 'upload',
+        purpose: 'memory', mediaKind: 'video', originalKey: `media-originals/${failedId}.mp4`,
+        declaredMime: 'video/mp4', verifiedMime: 'video/mp4', sha256: 'c'.repeat(64),
+        byteSize: BigInt(videoBytes.byteLength), width: 320, height: 240, durationMs: 1_000,
+        originalStatus: 'stored', renditionStatus: 'pending',
+      } })
+      await expect(tasks.createVideoPoster({ mediaId: failed.id })).rejects.toThrow('missing')
+      const failedAfter = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: failed.id } })
+      expect(failedAfter).toMatchObject({ renditionStatus: 'pending', durationMs: 1_000, width: 320, height: 240 })
+      expect(await prisma.mediaVariant.count({ where: { mediaId: failed.id, variant: 'preview' } })).toBe(0)
+
+      const raceId = randomUUID()
+      const raceOriginalKey = `media-originals/${raceId}.mp4`
+      const racePosterKey = videoPosterObjectKey(raceOriginalKey)
+      await privateStorage.storage.writeObject({ key: raceOriginalKey, body: new Blob([videoBytes]).stream(),
+        contentLength: videoBytes.byteLength, contentType: 'video/mp4' })
+      await prisma.mediaAsset.create({ data: {
+        id: raceId, familyId: family.body.family.id, uploaderId: owner.userId, sourceKind: 'upload',
+        purpose: 'memory', mediaKind: 'video', originalKey: raceOriginalKey,
+        declaredMime: 'video/mp4', verifiedMime: 'video/mp4', sha256: 'd'.repeat(64),
+        byteSize: BigInt(videoBytes.byteLength), width: 320, height: 240, durationMs: 1_000,
+        originalStatus: 'stored', renditionStatus: 'pending',
+      } })
+      await prisma.family.update({ where: { id: family.body.family.id }, data: { storageUsedBytes: { increment: BigInt(videoBytes.byteLength) } } })
+      let releaseWrite!: () => void
+      let startWrite!: () => void
+      const writeStarted = new Promise<void>((resolveStart) => { startWrite = resolveStart })
+      const writeBlocked = new Promise<void>((resolveRelease) => { releaseWrite = resolveRelease })
+      const raceStorage = new Proxy(privateStorage.storage, {
+        get(target, property) {
+          if (property === 'writeObject') return async (input: Parameters<typeof target.writeObject>[0]) => {
+            if (input.key === racePosterKey) { startWrite(); await writeBlocked }
+            return target.writeObject(input)
+          }
+          const value = Reflect.get(target, property, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+      const raceTasks = createMediaTasks({ prisma, privateStorage: { ...privateStorage, storage: raceStorage } as never, env })
+      const posterInFlight = raceTasks.createVideoPoster({ mediaId: raceId })
+      await writeStarted
+      let requestDeleteLock!: () => void
+      const deleteLockRequested = new Promise<void>((resolveRequest) => { requestDeleteLock = resolveRequest })
+      const deletion = prisma.$transaction(async (tx) => {
+        requestDeleteLock()
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM families WHERE id = ${family.body.family.id}::uuid FOR UPDATE`)
+        await tx.mediaAsset.update({ where: { id: raceId }, data: { deletedAt: new Date() } })
+      })
+      await deleteLockRequested
+      releaseWrite()
+      await Promise.all([posterInFlight, deletion])
+      await tasks.deleteAsset({ mediaId: raceId })
+      expect(await privateStorage.storage.headObject(racePosterKey)).toBeNull()
+      expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: raceId } })).storageDeletedAt).not.toBeNull()
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   test('serializes quota reservations and viewers cannot reserve uploads', async () => {
     const owner = await admittedUser('Владелец', '43101')

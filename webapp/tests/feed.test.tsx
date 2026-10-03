@@ -98,7 +98,7 @@ const videoMemory: MemoryDto = {
     height: 1_080,
     durationMs: 24_000,
     renditionStatus: 'ready',
-    previewPath: null,
+    previewPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=preview`,
     displayPath: null,
     playbackPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=playback`,
     originalDownloadPath: `/api/v1/families/${familyId}/media/99999999-9999-4999-8999-999999999999/content?variant=original`,
@@ -243,6 +243,16 @@ test('automatic rendition checks prioritize an opened Memory and nearby pending 
   expect(selectPendingPrivateVideoIds(items, [items[0]!], ['near-a', 'near-b', 'near-c'], 3, new Set(['far', 'near-a']))).toEqual(['near-b', 'near-c'])
 })
 
+test('bounded video refresh includes ready playback while its persistent poster is missing', () => {
+  const withoutPoster: MemoryDto = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0]!, previewPath: null, displayPath: null }] }
+  const single = { ...withoutPoster, id: 'poster-single' }
+  const mixed = { ...mixedMemory, id: 'poster-mixed', attachments: [photoMemory.attachments[0]!, withoutPoster.attachments[0]!] }
+  const four = { ...videoMemory, id: 'poster-four', attachments: Array.from({ length: 4 }, (_, index) => ({ ...withoutPoster.attachments[0]!, id: `poster-four-video-${index + 1}` })) }
+  const twoVideos = { ...videoMemory, id: 'poster-two-videos', kind: 'media' as const, attachments: [withoutPoster.attachments[0]!, { ...withoutPoster.attachments[0]!, id: 'another-video' }] }
+  expect(selectPendingPrivateVideoIds([single, mixed, four, twoVideos], [], ['poster-single', 'poster-mixed', 'poster-four', 'poster-two-videos'], 3)).toEqual(['poster-single', 'poster-mixed', 'poster-four'])
+  expect(selectPendingPrivateVideoIds([single, mixed, four], [{ ...single, attachments: [{ ...withoutPoster.attachments[0]!, previewPath: videoMemory.attachments[0]!.previewPath }] }], ['poster-mixed'], 3)).toEqual(['poster-mixed'])
+})
+
 test('mixed memory renders one card with ordered slides and lazily mounts video', () => {
   const markup = renderFeed(feedClientWith([mixedMemory]))
   expect(markup.match(/data-memory-id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"/g)?.length).toBe(1)
@@ -292,6 +302,15 @@ test('a published private video still preparing its rendition shows pending stat
   expect(markup).toContain('data-seen-ready="false"')
   expect(markup).not.toContain('Не удалось загрузить видео')
   expect(markup).not.toContain('role="alert"')
+})
+
+test('private videos render persistent private-storage poster paths, play overlay and saved duration', () => {
+  const markup = renderFeed(feedClientWith([videoMemory]))
+  expect(markup).toContain('data-video-poster-state="pending"')
+  expect(markup).toContain('data-slot="private-video-poster"')
+  expect(markup).toContain('aria-label="Воспроизвести видео"')
+  expect(markup).toContain('0:24')
+  expect(markup).not.toContain('data-media-source="max"')
 })
 
 test('a pending video becomes ready from its detail response without replacing or refetching the feed list', () => {

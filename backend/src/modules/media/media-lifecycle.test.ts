@@ -29,6 +29,50 @@ describe('media durable lifecycle', () => {
     expect(marked).toBe(1)
   })
 
+  test('deletes the deterministic private video poster key even if its variant relation was never committed', async () => {
+    const deletedKeys: string[] = []
+    const asset = {
+      id: '019c0000-0000-7000-8000-000000000002', familyId: 'family',
+      originalKey: 'media-originals/2026/09/video.mp4', mediaKind: 'video',
+      originalStatus: 'stored', byteSize: 80n, deletedAt: new Date(), storageDeletedAt: null,
+      variants: [],
+    }
+    const runtime: any = {
+      privateStorage: { storage: { async deleteObject(key: string) { deletedKeys.push(key) } } },
+      prisma: {
+        mediaAsset: { findUnique: async () => asset },
+        $transaction: async (run: any) => run({
+          $queryRaw: async () => [],
+          mediaAsset: { findUnique: async () => asset, updateMany: async () => ({ count: 1 }) },
+          family: { update: async () => ({}) },
+        }),
+      },
+    }
+    await createMediaTasks(runtime).deleteAsset({ mediaId: asset.id })
+    expect(deletedKeys).toContain('media-preview/2026/09/video.mp4.poster-v1.jpg')
+  })
+
+  test('poster extraction failure leaves the source playback state untouched', async () => {
+    const asset = {
+      id: '019c0000-0000-7000-8000-000000000003', familyId: 'family', uploaderId: 'user',
+      originalKey: 'media-originals/2026/09/video.mp4', mediaKind: 'video', purpose: 'memory',
+      originalStatus: 'stored', renditionStatus: 'pending', storageDeletedAt: null, deletedAt: null,
+      byteSize: 80n, variants: [], durationMs: null, width: null, height: null,
+    }
+    let transactions = 0
+    const runtime: any = {
+      privateStorage: { storage: { readObject: async () => null } },
+      prisma: {
+        mediaAsset: { findUnique: async () => asset, updateMany: async () => ({ count: 1 }) },
+        $transaction: async () => { transactions += 1 },
+      },
+      env: { FFMPEG_PATH: undefined, FFPROBE_PATH: undefined, PRIVATE_STORAGE_UPLOAD_MAX_BYTES: 100 },
+    }
+    await expect(createMediaTasks(runtime).createVideoPoster({ mediaId: asset.id })).rejects.toThrow('missing')
+    expect(transactions).toBe(0)
+    expect(asset).toMatchObject({ renditionStatus: 'pending', durationMs: null, width: null, height: null })
+  })
+
   test('daily reconciliation deletes only old objects with no database reference', async () => {
     const deleted: string[] = []
     const old = new Date('2026-09-01T00:00:00Z')

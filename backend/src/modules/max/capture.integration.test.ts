@@ -2868,6 +2868,23 @@ maybeDescribe('MAX durable capture', () => {
         occurredAt: new Date(occurredAt), sourcePublishedAt: new Date(occurredAt),
       })
       expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(['photo', 'video', 'photo', 'video', 'photo', 'video', 'photo', 'photo'])
+      const privateVideoIds = memory.media
+        .filter(({ asset }) => asset.mediaKind === 'video' && asset.sourceKind === 'max' && asset.originalStatus === 'stored')
+        .map(({ mediaId }) => mediaId)
+      expect(privateVideoIds).toHaveLength(3)
+      expect(await prisma.taskOutbox.count({
+        where: { type: 'media:video-poster', dedupeKey: { in: privateVideoIds.map((mediaId) => `media-video-poster:v1:${mediaId}`) } },
+      })).toBe(3)
+      const videoRowsBeforePoster = await prisma.mediaAsset.findMany({ where: { id: { in: privateVideoIds } }, orderBy: { id: 'asc' } })
+      const mediaTasks = createMediaTasks(fixture.runtime as never)
+      await Promise.all(privateVideoIds.flatMap((mediaId) => [
+        mediaTasks.createVideoPoster({ mediaId }),
+        mediaId === privateVideoIds[0] ? mediaTasks.createVideoPoster({ mediaId }) : Promise.resolve(),
+      ]))
+      expect(await prisma.mediaVariant.count({ where: { mediaId: { in: privateVideoIds }, variant: 'preview' } })).toBe(3)
+      const videoRowsAfterPoster = await prisma.mediaAsset.findMany({ where: { id: { in: privateVideoIds } }, orderBy: { id: 'asc' } })
+      expect(videoRowsAfterPoster.map(({ updatedAt, renditionStatus, durationMs, width, height }) => ({ updatedAt, renditionStatus, durationMs, width, height })))
+        .toEqual(videoRowsBeforePoster.map(({ updatedAt, renditionStatus, durationMs, width, height }) => ({ updatedAt, renditionStatus, durationMs, width, height })))
       const feed = await memories.list(
         { familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: 'max-live-mixed-feed' } },
         { limit: 20 },

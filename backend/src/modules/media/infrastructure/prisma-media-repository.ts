@@ -214,6 +214,12 @@ export class PrismaMediaRepository implements MediaRepository {
           storageUsedBytes: { increment: reservation.bytes },
         },
       })
+      if (reservation.asset.mediaKind === 'video') {
+        await insertTask(tx, {
+          type: 'media:video-poster', dedupeKey: `media-video-poster:v1:${reservation.mediaId}`,
+          payload: { mediaId: reservation.mediaId }, scheduledFor: input.now,
+        })
+      }
       if (reservation.asset.mediaKind === 'voice' || reservation.asset.mediaKind === 'video') {
         await insertTask(tx, {
           type: 'media:prepare', dedupeKey: `media-prepare:${reservation.mediaId}`,

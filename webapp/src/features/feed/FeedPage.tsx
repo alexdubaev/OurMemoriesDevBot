@@ -86,11 +86,16 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
   const latest = new Map(current.attachments.filter((attachment) => attachment.source === 'private_storage' && attachment.kind === 'video').map((attachment) => [attachment.id, attachment]))
   let changed = false
   const attachments = memory.attachments.map((attachment) => {
-    if (attachment.source !== 'private_storage' || attachment.kind !== 'video' || attachment.renditionStatus !== 'pending') return attachment
+    if (attachment.source !== 'private_storage' || attachment.kind !== 'video') return attachment
     const update = latest.get(attachment.id)
-    if (!update || update.source !== 'private_storage' || update.kind !== 'video' || update.renditionStatus === 'pending') return attachment
+    if (!update || update.source !== 'private_storage' || update.kind !== 'video') return attachment
+    const renditionStatus = update.renditionStatus !== 'pending' ? update.renditionStatus : attachment.renditionStatus
+    const previewPath = update.previewPath ?? attachment.previewPath
+    const displayPath = update.displayPath ?? attachment.displayPath
+    const playbackPath = update.playbackPath ?? attachment.playbackPath
+    if (renditionStatus === attachment.renditionStatus && previewPath === attachment.previewPath && displayPath === attachment.displayPath && playbackPath === attachment.playbackPath) return attachment
     changed = true
-    return { ...attachment, renditionStatus: update.renditionStatus, playbackPath: update.playbackPath }
+    return { ...attachment, renditionStatus, previewPath, displayPath, playbackPath }
   })
   return changed ? { ...memory, attachments } : memory
 }
@@ -941,16 +946,21 @@ function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<M
   const playablePath = renditionStatus === 'ready' ? path : null
   const source = usePrivateMediaSource(playablePath)
   const url = source.url
+  const posterPath = effective.displayPath ?? effective.previewPath
+  const posterUrl = usePrivateObjectUrl(posterPath, transport)
   const video = useRef<HTMLVideoElement | null>(null)
   const activate = usePlaybackRegistration(`video:${path ?? 'missing'}`, video)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
-  const [duration, setDuration] = useState(0)
+  const [duration, setDuration] = useState(effective.durationMs ? effective.durationMs / 1_000 : 0)
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
+  const [hasPlayed, setHasPlayed] = useState(false)
   const canFullscreen = typeof HTMLVideoElement !== 'undefined' && 'requestFullscreen' in HTMLVideoElement.prototype
   const viewerState = renditionStatus === 'pending' ? 'loading' : renditionStatus === 'failed' || failed || source.status === 'error' ? 'error' : source.status
-  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame"><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline preload="metadata" ref={video} src={url ?? undefined} />
+  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'}><video aria-label="Видео воспоминания" className="aspect-video w-full" onEnded={() => setPlaying(false)} onError={() => { setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={() => setPlaying(false)} onPlay={() => { setFailed(false); activate(); setPlaying(true) }} onTimeUpdate={(e) => { setCurrent(e.currentTarget.currentTime); if (!e.currentTarget.paused && e.currentTarget.currentTime > 0) setHasPlayed(true) }} playsInline poster={posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
+    {!hasPlayed && viewerState !== 'error' ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : <Typography as="span" tone="muted" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Кадр видео готовится…'}</Typography>}</div> : null}
+    {!hasPlayed ? <><button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-private-video-v2-play" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={24} state="white" /></button><Typography as="span" className="memoly-private-video-v2-duration" variant="memoryMeta">{formatDuration(effective.durationMs)}</Typography></> : null}
     {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Загружаем видео…'}</Typography> : null}
     {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}</div>
     <div className="memoly-private-video-v2-controls">
