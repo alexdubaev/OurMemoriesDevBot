@@ -184,7 +184,14 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBo
       typeof candidate.body.mid !== 'string' || candidate.body.mid !== expectedMessageId ||
       candidate.body.attachments !== undefined && candidate.body.attachments !== null && !Array.isArray(candidate.body.attachments) ||
       candidate.body.text !== undefined && candidate.body.text !== null && typeof candidate.body.text !== 'string') throw new MaxProviderError()
-  const attachments = Array.isArray(candidate.body.attachments) ? candidate.body.attachments.map(normalizeResolvedAttachment) : []
+  const messageLink = isRecord(candidate.link) && candidate.link.type === 'forward' ? candidate.link : null
+  const bodyLink = isRecord(candidate.body.link) && candidate.body.link.type === 'forward' ? candidate.body.link : null
+  if (messageLink && bodyLink) throw new MaxProviderError()
+  const linkedLink = messageLink ?? bodyLink
+  const linkedMessage = linkedLink && isRecord(linkedLink.message) ? linkedLink.message : null
+  const attachments = Array.isArray(candidate.body.attachments) ? candidate.body.attachments.map((attachment) => normalizeResolvedAttachment(attachment)) : []
+  const forwardedAttachments = linkedMessage && Array.isArray(linkedMessage.attachments)
+    ? linkedMessage.attachments.map((attachment) => normalizeResolvedAttachment(attachment, true)) : undefined
   const recipientId = candidate.recipient.chat_type === 'channel'
     ? exactRawChannelRecipientId(rawBody, [...path, 'recipient', 'chat_id'], [...path, 'recipient', 'chat_type'], candidate.recipient.chat_id)
     : String(candidate.recipient.user_id)
@@ -195,7 +202,10 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBo
     senderId: candidate.recipient.chat_type === 'channel' && !isRecord(candidate.sender) ? '0' : String((candidate.sender as Record<string, unknown>).user_id),
     recipientId, recipientType: candidate.recipient.chat_type,
     ...(typeof candidate.body.text === 'string' ? { text: candidate.body.text } : { text: null }),
-    ...(timestamp === undefined || timestamp === null ? {} : { timestamp: timestamp as number }), attachments }
+    ...(timestamp === undefined || timestamp === null ? {} : { timestamp: timestamp as number }), attachments,
+    ...(linkedMessage && typeof linkedMessage.mid === 'string' ? { forwardedFrom: { messageId: linkedMessage.mid,
+      ...(Number.isSafeInteger(linkedMessage.timestamp) && (linkedMessage.timestamp as number) >= 0 ? { timestamp: linkedMessage.timestamp as number } : {}) } } : {}),
+    ...(forwardedAttachments ? { forwardedAttachments } : {}) }
 }
 
 function exactRawChannelRecipientId(rawBody: string, idPath: Array<string | number>, typePath: Array<string | number>, parsedId: unknown): string | null {
@@ -216,16 +226,18 @@ function isInt64Id(value: unknown): value is number | string {
   catch { return false }
 }
 
-function normalizeResolvedAttachment(value: unknown) {
+function normalizeResolvedAttachment(value: unknown, allowTokenOnlyVideo = false) {
   if (!isRecord(value) || (value.type !== 'image' && value.type !== 'file' && value.type !== 'video' && value.type !== 'audio') || !isRecord(value.payload)) throw new MaxProviderError()
   const payload = value.payload
   const rawId = value.type === 'image' ? payload.photo_id : value.type === 'file' ? payload.fileId : payload.id
+  const tokenOnlyVideo = allowTokenOnlyVideo && value.type === 'video' && (rawId === undefined || rawId === null) && typeof payload.token === 'string'
+  const idValue = tokenOnlyVideo ? 'token-only-video' : rawId
   const id = value.type === 'file' || value.type === 'audio'
     ? normalizeFileAttachmentId(rawId)
-    : normalizeProviderAttachmentId(rawId, true)
+    : tokenOnlyVideo ? idValue as string : normalizeProviderAttachmentId(idValue, true)
   if (!id || typeof payload.token !== 'string' || payload.token.length === 0 ||
-      typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) throw new MaxProviderError()
-  if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url }
+      (value.type !== 'video' && (typeof payload.url !== 'string' || !isHttpsUrl(payload.url)))) throw new MaxProviderError()
+  if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId: id, url: payload.url as string }
   if (value.type === 'video') {
     const duration = value.duration ?? payload.duration
     const width = value.width ?? payload.width
@@ -235,12 +247,12 @@ function normalizeResolvedAttachment(value: unknown) {
     if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new MaxProviderError()
     return { kind: 'video' as const, providerAttachmentId: id, currentToken: payload.token, inboundDurationSeconds: duration ?? null, width: width ?? null, height: height ?? null }
   }
-  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId: id, url: payload.url }
+  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId: id, url: payload.url as string }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   const declaredSize = value.size === undefined || value.size === null ? null : value.size
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new MaxProviderError()
   if (declaredSize !== null && (!isNonNegativeSafeInteger(declaredSize) || declaredSize === 0)) throw new MaxProviderError()
-  return { kind: 'file' as const, providerAttachmentId: id, filename, declaredSize, url: payload.url }
+  return { kind: 'file' as const, providerAttachmentId: id, filename, declaredSize, url: payload.url as string }
 }
 
 function normalizeVideo(value: unknown): MaxVideoResolution {

@@ -208,6 +208,21 @@ describe('MAX API client', () => {
     })
   })
 
+  test('resolves supported media from the direct forwarded envelope without requiring a video URL', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 }, timestamp: 1_790_000_000_000,
+      body: { mid: 'outer-forward', attachments: [] },
+      link: { type: 'forward', message: { mid: 'private-original', timestamp: 1_789_000_000_000,
+        attachments: [{ type: 'video', payload: { token: 'provider-confirmed-token', duration: 4 } }] } },
+    }] }) })
+
+    await expect(api.getMessage('outer-forward')).resolves.toMatchObject({
+      messageId: 'outer-forward', senderId: '42', recipientId: '99', recipientType: 'dialog',
+      forwardedFrom: { messageId: 'private-original', timestamp: 1_789_000_000_000 },
+      attachments: [], forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'token-only-video', currentToken: 'provider-confirmed-token' }],
+    })
+  })
+
   test('returns a text-only channel original when attachments are omitted and preserves its timestamp', async () => {
     const timestamp = 1_702_000_000_123
     const raw = `{"messages":[{"recipient":{"chat_id":-9007199254740993,"chat_type":"channel","user_id":null},"timestamp":${timestamp},"body":{"mid":"text-only-original","text":"Original channel text"}}]}`
