@@ -7,9 +7,8 @@ import { MediaFailure } from '../../media'
 import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
 import { MaxProviderError } from './max-api'
 import { createMaxMediaDownload } from './media-download'
+import { isAllowedMaxVideoUrl, selectMaxVideoRendition } from './video-rendition'
 
-const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
-const maxHeight = 720
 const maxPosterBytes = 2 * 1024 * 1024
 const posterMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
@@ -67,7 +66,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         if (signal?.aborted) throw error
         return { readiness: isVideoProcessing(error) ? { state: 'processing', recheckable: true } : { state: 'unknown', recheckable: true } }
       }
-      const rendition = selectRendition(video.renditions)
+      const rendition = selectRendition(video.renditions, maxBytes)
       if (!rendition) return { readiness: { state: 'unknown', recheckable: true } }
       return { readiness: { state: 'ready', recheckable: false }, url: rendition.url, thumbnailUrl: video.thumbnailUrl ?? null }
   }
@@ -113,14 +112,12 @@ async function resolveOutboundSender(api: MaxApiPort, signal?: AbortSignal) {
   return String(identity.userId)
 }
 
-export function selectRendition(renditions: MaxVideoRendition[]) {
-  return renditions
-    .filter((item) => isAllowedCdnUrl(item.url) && item.height !== null && item.height > 0 && item.height <= maxHeight)
-    .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0] ?? null
+export function selectRendition(renditions: MaxVideoRendition[], maxBytes = MAX_DIRECT_VIDEO_MAX_BYTES) {
+  return selectMaxVideoRendition(renditions, maxBytes)
 }
 
 export async function fetchCdnVideo(url: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', maxBytes: number, signal?: AbortSignal) {
-  if (!isAllowedCdnUrl(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  if (!isAllowedMaxVideoUrl(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
   const range = rangeHeader === undefined ? null : parseRangeHeader(rangeHeader)
   let response: Response
   try {
@@ -260,10 +257,6 @@ function parseLength(value: string | null) {
   if (!value || !/^\d+$/.test(value)) return null
   const length = Number(value)
   return Number.isSafeInteger(length) && length > 0 ? length : null
-}
-
-function isAllowedCdnUrl(value: string) {
-  try { const url = new URL(value); return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname) } catch { return false }
 }
 
 function isVideoProcessing(error: unknown) {
