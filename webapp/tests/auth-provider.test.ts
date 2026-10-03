@@ -9,6 +9,7 @@ import { AuthProvider } from '../src/features/auth/provider'
 import { useAuth } from '../src/features/auth/use-auth'
 
 type SessionSnapshot = Pick<AuthContextValue, 'isBootstrapping' | 'sessionError' | 'user'>
+const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; window?: unknown }
 
 const user: UserDto = {
   id: 'user_1',
@@ -20,7 +21,10 @@ const user: UserDto = {
 const restoredAccessToken = accessTokenFor('user_1')
 
 const originalFetch = globalThis.fetch
+const originalWindow = actEnvironment.window
+const originalActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
 const mountedRoots: Root[] = []
+const mountedClients: QueryClient[] = []
 
 beforeEach(() => {
   installBrowserShim()
@@ -30,6 +34,14 @@ afterEach(async () => {
   for (const root of mountedRoots.splice(0)) {
     await act(async () => root.unmount())
   }
+  for (const queryClient of mountedClients.splice(0)) queryClient.clear()
+  // Query notifyManager uses a scheduled callback even after its observers unmount. Drain it
+  // while the simulated browser globals are still installed, before restoring the test process.
+  await act(async () => {
+    for (let tick = 0; tick < 3; tick += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+  })
   globalThis.fetch = originalFetch
   removeBrowserShim()
 })
@@ -124,6 +136,7 @@ async function mountAuthProvider() {
   }
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  mountedClients.push(queryClient)
   const root = createRoot(createDetachedContainer())
   mountedRoots.push(root)
 
@@ -188,16 +201,16 @@ const browserShim = {
   addEventListener() {},
   removeEventListener() {},
 }
-const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; window?: unknown }
-
 function installBrowserShim() {
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
   actEnvironment.window = browserShim
 }
 
 function removeBrowserShim() {
-  delete actEnvironment.IS_REACT_ACT_ENVIRONMENT
-  delete actEnvironment.window
+  if (originalActEnvironment === undefined) delete actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  else actEnvironment.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
+  if (originalWindow === undefined) delete actEnvironment.window
+  else actEnvironment.window = originalWindow
 }
 
 function createDetachedContainer() {
