@@ -130,3 +130,222 @@ Release tag annotated, неизменяемый, указывает на про�
 ## 12. Завершение задачи
 В отчёт: task ID; model; branch/worktree; base/head SHA; changed paths; тесты с числами и exit code; скриншоты; review findings; миграции; изменения контрактов; остаточные риски; PR link либо «не опубликовано». См. `templates/review/BLOCK_REPORT.md`.
 Статусы: NOT_STARTED → IN_PROGRESS → REVIEW → APPROVED → MERGED. BLOCKED — отдельный статус. «Готово» нельзя писать, если обязательные проверки не выполнены. После блока остановиться; не запускать следующую задачу или production-деплой без очередного назначения.
+
+## Selectel staging — доступ и выкладка
+
+### Окружение
+
+- Публичный адрес: `https://app.memoly.ru`
+- Selectel-сервер: `136.234.5.56`
+- Hostname: `memoly-staging`
+- SSH-пользователь: `root`
+- Репозиторий: `alexdubaev/OurMemoriesDevBot`
+- Локальный SSH-ключ на рабочей машине: `%USERPROFILE%\.ssh\id_ed25519`
+
+Подключение из PowerShell:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519" root@136.234.5.56
+```
+
+Никогда не выводить, не копировать в чат и не коммитить:
+
+- содержимое приватного SSH-ключа;
+- значения файлов из `/opt/memoly/secrets`;
+- токены и пароли из `/opt/memoly/env`;
+- подписанные URL и provider credentials.
+
+### Серверные пути
+
+```text
+/opt/memoly/app          — checkout Git-репозитория
+/opt/memoly/compose.yml  — Docker Compose staging
+/opt/memoly/env          — конфигурация окружения
+/opt/memoly/secrets      — серверные секреты
+```
+
+Checkout `/opt/memoly/app` принадлежит системному пользователю `memoly`.
+Git-команды выполнять от его имени.
+
+### Проверка состояния перед выкладкой
+
+Всю последовательность выполнять в одной SSH-сессии. Перед первой проверкой захватить
+эксклюзивную блокировку и держать дескриптор открытым до конца выкладки или отката:
+
+```bash
+exec 9>/run/lock/memoly-staging-deploy.lock
+flock -n 9 || { echo 'another staging deployment is already running'; exit 1; }
+set -euo pipefail
+```
+
+```bash
+cd /opt/memoly
+
+docker compose -f compose.yml ps
+docker compose -f compose.yml images
+
+test -z "$(git -C /opt/memoly/app status --porcelain)" || {
+  echo 'staging checkout is dirty'; exit 1;
+}
+git -C /opt/memoly/app rev-parse HEAD
+origin="$(git -C /opt/memoly/app remote get-url origin)" || exit 1
+case "$origin" in
+  git@github.com:alexdubaev/OurMemoriesDevBot.git|https://github.com/alexdubaev/OurMemoriesDevBot.git) ;;
+  *) echo 'unexpected origin'; exit 1 ;;
+esac
+```
+
+Не продолжать автоматически, если:
+
+- checkout содержит неизвестные изменения;
+- `origin` не указывает на `alexdubaev/OurMemoriesDevBot`;
+- новый SHA не находится в актуальном `origin/main`;
+- Docker Compose configuration validation завершается ошибкой;
+- миграционная проверка сообщает о проблеме.
+
+### Правила выкладки
+
+Выкладка выполняется из GitHub по конкретному полному Git SHA.
+
+Запрещено:
+
+- загружать файлы приложения через FTP вручную;
+- использовать Docker-тег `latest`;
+- выводить секреты в терминал или логи;
+- выполнять `git reset --hard`, `git clean` или force-push;
+- изменять staging БД вручную без отдельной задачи;
+- редактировать уже применённые миграции.
+
+Последовательность:
+
+1. Убедиться, что PR слит в `main`, required CI зелёный.
+2. Получить полный merge SHA.
+3. Сохранить резервную копию `compose.yml`.
+4. Fetch `origin/main`.
+5. Переключить серверный checkout на точный SHA в detached HEAD.
+6. Собрать backend и webapp с immutable-тегом SHA.
+7. Проверить Docker Compose configuration.
+8. Выполнить предусмотренную проектом проверку миграций.
+9. Применить миграции только штатной командой проекта.
+10. Пересоздать сервисы.
+11. Проверить контейнеры и публичные health endpoints.
+12. Зафиксировать реально установленный SHA.
+
+### Обновление checkout
+
+```bash
+sudo -u memoly git -C /opt/memoly/app fetch origin --prune
+TARGET_SHA='<FULL_GIT_SHA>'
+if [ "${#TARGET_SHA}" -ne 40 ]; then
+  echo 'TARGET_SHA must be exactly 40 hexadecimal characters'; exit 1
+fi
+case "$TARGET_SHA" in
+  *[!0-9a-fA-F]*) echo 'TARGET_SHA must be exactly 40 hexadecimal characters'; exit 1 ;;
+esac
+TARGET_SHA_NORMALIZED="$(printf '%s' "$TARGET_SHA" | tr '[:upper:]' '[:lower:]')"
+RESOLVED_TARGET_SHA="$(sudo -u memoly git -C /opt/memoly/app rev-parse --verify "${TARGET_SHA_NORMALIZED}^{commit}")" || {
+  echo 'target SHA is not a commit in the staging checkout'; exit 1;
+}
+[ "$RESOLVED_TARGET_SHA" = "$TARGET_SHA_NORMALIZED" ] || {
+  echo 'target SHA did not resolve to the requested commit'; exit 1;
+}
+ORIGIN_MAIN_SHA="$(sudo -u memoly git -C /opt/memoly/app rev-parse --verify origin/main^{commit})"
+sudo -u memoly git -C /opt/memoly/app merge-base --is-ancestor "$RESOLVED_TARGET_SHA" "$ORIGIN_MAIN_SHA" || {
+  echo 'target SHA is not reachable from origin/main'; exit 1;
+}
+sudo -u memoly git -C /opt/memoly/app checkout --detach "$RESOLVED_TARGET_SHA"
+CHECKED_OUT_SHA="$(sudo -u memoly git -C /opt/memoly/app rev-parse HEAD)"
+[ "$CHECKED_OUT_SHA" = "$RESOLVED_TARGET_SHA" ] || {
+  echo 'checked out SHA does not match the requested commit'; exit 1;
+}
+```
+
+Полученный HEAD должен точно совпадать с `<FULL_GIT_SHA>`.
+
+### Резервная копия Compose-конфигурации
+
+```bash
+cp -a \
+  /opt/memoly/compose.yml \
+  /opt/memoly/compose.yml.before-<FULL_GIT_SHA>
+```
+
+Перед изменением тегов убедиться, что новый `compose.yml` использует конкретный SHA для всех собираемых образов.
+
+### Проверка и запуск
+
+Команды сборки и миграций брать из актуальной документации репозитория и `compose.yml`. Базовая последовательность:
+
+```bash
+cd /opt/memoly
+
+docker compose -f compose.yml config --quiet
+docker compose -f compose.yml build
+docker compose -f compose.yml run --rm backend bun run db:deploy
+docker compose -f compose.yml up -d
+docker compose -f compose.yml ps
+docker compose -f compose.yml images
+```
+
+Не считать выкладку успешной только потому, что команда `up -d` завершилась без ошибки.
+
+### Обязательная проверка после выкладки
+
+```bash
+git -C /opt/memoly/app rev-parse HEAD
+
+test "$(curl -fsS -o /dev/null -w '%{http_code}' https://app.memoly.ru/)" = 200
+test "$(curl -fsS -o /dev/null -w '%{http_code}' https://app.memoly.ru/health/ready)" = 200
+```
+
+Ожидаемый результат:
+
+- checkout соответствует целевому SHA;
+- backend, worker, scheduler и webapp запущены;
+- backend healthy;
+- все образы используют целевой immutable SHA;
+- главная страница отвечает HTTP 200;
+- `/health/ready` отвечает HTTP 200.
+
+### Откат
+
+Если smoke-проверка не прошла:
+
+1. Не изменять и не удалять данные вручную.
+2. Сохранить логи проблемного релиза.
+3. Завершить явную проверку совместимости предыдущей версии кода со всеми уже применёнными миграциями.
+4. Если совместимость не подтверждена, остановиться и не запускать предыдущие контейнеры.
+5. Только после подтверждения совместимости вернуть предыдущую сохранённую версию `compose.yml`.
+6. Запустить предыдущие immutable Docker-образы.
+7. Повторить `ps`, image verification и публичные health-checks.
+
+Пример восстановления Compose-файла:
+
+```bash
+if [ "${ROLLBACK_SCHEMA_COMPATIBLE:-}" != 'true' ]; then
+  echo 'rollback stopped: schema compatibility was not explicitly confirmed'; exit 1
+fi
+
+cp -a \
+  /opt/memoly/compose.yml.before-<FAILED_SHA> \
+  /opt/memoly/compose.yml
+
+cd /opt/memoly
+docker compose -f compose.yml config --quiet
+docker compose -f compose.yml up -d
+```
+
+Откат кода не означает автоматический откат базы данных.
+
+### Текущая конфигурация платформ
+
+```text
+MAX_ENABLED=true
+TELEGRAM_ENABLED=false
+```
+
+### Доступ к Selectel
+
+Для обычной staging-выкладки используется SSH-доступ к серверу.
+
+Данные панели управления Selectel и API-ключ Selectel в проектном runbook не хранятся. Если для задачи потребуется управление инфраструктурой через панель или API Selectel, запросить доступ у владельца отдельно.
