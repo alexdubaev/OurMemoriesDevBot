@@ -70,7 +70,7 @@ test.describe.serial('T07 live feed', () => {
   test.beforeEach(async ({ page }, testInfo) => {
     const initData = signedInitData(Number(subject), 'Лента E2E')
     const responsiveWidth = testInfo.title.match(/feed is usable at (\d+)px$/)?.[1]
-    if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot' || testInfo.title.startsWith('MAX reaction haptic')) {
+    if (testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot' || testInfo.title.startsWith('MAX reaction haptic') || testInfo.title.startsWith('MAX poster lifecycle')) {
       await installMaxHost(page, initData)
       await installMaxAuthRoute(page)
     } else {
@@ -85,7 +85,9 @@ test.describe.serial('T07 live feed', () => {
     }
     await page.goto('/')
     if (testInfo.title.startsWith('restores the authenticated family presentation') ||
-        testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot') {
+        testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot' ||
+        testInfo.title.startsWith('MAX poster lifecycle') ||
+        testInfo.title === 'streams voice and legacy video on demand after legacy metadata, seeks with Range/206, and pauses on hide') {
       const continueButton = page.getByRole('button', { name: 'Продолжить' })
       await expect(continueButton).toBeVisible()
       await continueButton.click()
@@ -793,7 +795,7 @@ test.describe.serial('T07 live feed', () => {
       { body: 'MAX portrait video UX E2E', width: null, height: 720, decodedWidth: 720, decodedHeight: 1_280, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=orange:s=720x1280:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
       { body: 'MAX landscape video UX E2E', width: 1_280, height: 720, decodedWidth: 1_280, decodedHeight: 720, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=1280x720:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
       { body: 'MAX square video UX E2E', width: 900, height: 900, decodedWidth: 900, decodedHeight: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=900x900:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
-    ].map((video) => ({ ...video, id: randomUUID() }))
+    ].map((video) => ({ ...video, id: randomUUID(), posterMediaId: randomUUID() }))
     const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
     const maxVideoLikedByMe = new Map(maxVideos.map((video) => [video.id, false]))
     const maxVideoRequests: string[] = []
@@ -803,18 +805,12 @@ test.describe.serial('T07 live feed', () => {
       if (url.includes('/media/max-videos/') && url.endsWith('/content')) maxVideoRequests.push(url)
     })
 
-    await page.route('**/api/v1/families/*/media/max-videos/*/poster', async (route) => {
-      maxPosterRequests.push({ method: route.request().method(), origin: route.request().headers().origin ?? null })
-      const origin = route.request().headers().origin ?? '*'
-      const corsHeaders = {
-        'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Allow-Headers': 'Authorization, X-Private-Media-Purpose',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      }
-      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: corsHeaders })
-      await route.fulfill({ body: pngImage.buffer, contentType: pngImage.mimeType, headers: { ...corsHeaders, 'Cache-Control': 'private, no-cache', ETag: '"synthetic-poster"' } })
-    })
+    for (const video of maxVideos) {
+      await page.context().route(`**/media/${video.posterMediaId}/content*`, async (route) => {
+        maxPosterRequests.push({ method: route.request().method(), origin: route.request().headers().origin ?? null })
+        await route.fulfill({ body: pngImage.buffer, contentType: pngImage.mimeType, headers: { 'Cache-Control': 'private, no-cache', ETag: '"synthetic-poster"' } })
+      })
+    }
 
     await page.route('**/api/v1/families/*/media/max-videos/*/content', async (route) => {
       const segments = new URL(route.request().url()).pathname.split('/')
@@ -850,6 +846,7 @@ test.describe.serial('T07 live feed', () => {
           attachments: [{
             id: randomUUID(), source: 'max', kind: 'video', width: video.width, height: video.height,
             durationMs: 2_000, playbackPath: `/api/v1/families/${first.familyId}/media/max-videos/${video.id}/content`,
+            posterState: 'ready', posterPath: `/api/v1/families/${first.familyId}/media/${video.posterMediaId}/content?variant=display`,
           }],
         })),
         ...payload.items.map((item) => {
@@ -931,10 +928,12 @@ test.describe.serial('T07 live feed', () => {
     for (const [body, element, expected] of ratios) {
       const card = page.locator('[data-memory-id]').filter({ hasText: body })
       await expect(card).toBeVisible()
+      await card.scrollIntoViewIfNeeded()
       const media = element === 'img'
         ? card.locator('[data-slot="memoly-photo-layout"] img').first()
         : card.locator('video').first()
       await expect(media).toBeVisible()
+      if (element === 'video') await expect(media).toHaveAttribute('poster', /^blob:/)
       const actual = await media.evaluate((entry) => {
         const rect = entry.getBoundingClientRect()
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
@@ -942,6 +941,17 @@ test.describe.serial('T07 live feed', () => {
       expect(actual.ratio).toBeCloseTo(expected, 2)
       if (element === 'img') expect(actual.objectFit).toBe('contain')
       else expect(actual.objectFit).toBe('contain')
+      if (element === 'video') {
+        const posterUrl = await media.getAttribute('poster')
+        expect(posterUrl).toMatch(/^blob:/)
+        const decodedPoster = await page.evaluate(async (src) => {
+          const image = new Image()
+          image.src = src
+          await image.decode()
+          return { width: image.naturalWidth, height: image.naturalHeight }
+        }, posterUrl!)
+        expect(decodedPoster).toMatchObject({ width: 1, height: 1 })
+      }
     }
 
     await page.screenshot({ path: resolve('e2e/.artifacts/t07-feed-media-ux.png'), fullPage: true })
@@ -1566,6 +1576,142 @@ test.describe.serial('T07 live feed', () => {
     await test.info().attach('int1-max-video-ready-card.png', {
       body: await card.screenshot({ animations: 'disabled' }), contentType: 'image/png',
     })
+  })
+
+  test('MAX poster lifecycle shows the generated poster in place while playback stays untouched', async ({ page }) => {
+    const referenceId = randomUUID()
+    const posterMediaId = randomUUID()
+    const contentPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/content`
+    const readinessPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/readiness`
+    const posterReadinessPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/poster-readiness`
+    const posterPath = `/api/v1/families/${fixture.familyId}/media/${posterMediaId}/content?variant=display`
+    let posterChecks = 0
+    const playbackRequests: string[] = []
+    const posterMediaRequests: string[] = []
+    page.on('request', (request) => {
+      if (request.url().includes(contentPath)) playbackRequests.push(request.url())
+      if (request.url().includes(`/media/${posterMediaId}/content`)) posterMediaRequests.push(new URL(request.url()).pathname + new URL(request.url()).search)
+    })
+    await page.route(`**${readinessPath}`, (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'processing', recheckable: true }) }))
+    await page.route(`**${posterReadinessPath}`, async (route) => {
+      posterChecks += 1
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(posterChecks < 2 ? { state: 'pending' } : { state: 'ready', posterPath }) })
+    })
+    await page.context().route(`**/media/${posterMediaId}/content*`, (route) => route.fulfill({
+      body: pngImage.buffer, contentType: pngImage.mimeType, headers: { 'Cache-Control': 'private, no-cache' },
+    }))
+    await page.route('**/api/v1/families/*/memories**', async (route) => {
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+      payload.items = payload.items.map((item) => item.body === 'Смешанное воспоминание E2E'
+        ? { ...item, attachments: item.attachments.map((attachment, index) => index === 1
+          ? { id: randomUUID(), source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath, posterState: 'pending', posterPath: null }
+          : attachment) }
+        : item)
+      await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await openFeed(page)
+    let mainFrameNavigations = 0
+    page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) mainFrameNavigations += 1 })
+    const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    const cardHandle = await card.elementHandle()
+    if (!cardHandle) throw new Error('mixed MAX memory card is missing')
+    await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: 'Следующий элемент' }).click()
+    await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
+    await expect.poll(() => posterChecks, { timeout: 3_000 }).toBe(1)
+    await expect(card.locator('video')).not.toHaveAttribute('poster', /^blob:/)
+    expect(playbackRequests).toHaveLength(0)
+    await expect.poll(() => posterChecks, { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+    const video = card.locator('[data-carousel-active="true"] video')
+    await expect(video).toHaveAttribute('poster', /^blob:/)
+    const posterImage = card.locator('[data-carousel-active="true"] img[alt="Кадр видео"]')
+    await expect(posterImage).toBeVisible()
+    await expect.poll(() => posterImage.evaluate((image: HTMLImageElement) => ({ complete: image.complete, width: image.naturalWidth }))).toMatchObject({ complete: true, width: 1 })
+    expect(posterMediaRequests.length).toBeGreaterThan(0)
+    expect(posterMediaRequests.every((path) => path === posterPath)).toBe(true)
+    expect(await video.evaluate((element: HTMLVideoElement) => ({ controls: element.controls, paused: element.paused, durationIsNaN: Number.isNaN(element.duration) }))).toEqual({ controls: true, paused: true, durationIsNaN: true })
+    expect(playbackRequests).toHaveLength(0)
+    expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
+    expect(mainFrameNavigations).toBe(0)
+    let releaseFamilyHome!: () => void
+    let markFamilyHomeStarted!: () => void
+    const familyHomeHold = new Promise<void>((resolve) => { releaseFamilyHome = resolve })
+    const familyHomeStarted = new Promise<void>((resolve) => { markFamilyHomeStarted = resolve })
+    await page.route('**/api/v1/me/families*', async (route) => {
+      markFamilyHomeStarted()
+      await familyHomeHold
+      await route.continue()
+    })
+    await page.reload()
+    const refreshContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(refreshContinue).toBeVisible()
+    await refreshContinue.click()
+    await familyHomeStarted
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+    releaseFamilyHome()
+    await page.getByRole('button', { name: 'Семья', exact: true }).click()
+    await page.getByRole('button', { name: 'Лента', exact: true }).click()
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+    const reopenedCard = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+    const reopenedActiveSlide = await reopenedCard.locator('[data-carousel-dot][aria-current="step"]').getAttribute('data-carousel-dot')
+    if (reopenedActiveSlide === '1') await reopenedCard.getByRole('button', { name: 'Следующий элемент' }).click()
+    if (reopenedActiveSlide === '3') await reopenedCard.getByRole('button', { name: 'Предыдущий элемент' }).click()
+    const reopenedPoster = reopenedCard.locator('[data-carousel-active="true"] img[alt="Кадр видео"]')
+    await expect(reopenedPoster).toBeVisible()
+    await expect.poll(() => posterChecks).toBeGreaterThanOrEqual(2)
+    expect(posterMediaRequests.every((path) => path === posterPath)).toBe(true)
+    const reopenedScreenshot = await reopenedCard.screenshot({ animations: 'disabled' })
+    await test.info().attach('max-poster-ready-after-feed-family-feed.png', { body: reopenedScreenshot, contentType: 'image/png' })
+    writeFileSync(resolve('e2e/.artifacts/max-poster-ready-after-family-navigation.png'), reopenedScreenshot)
+
+    const reopenedPage = await page.context().newPage()
+    try {
+      await installMaxHost(reopenedPage, signedInitData(Number(subject), 'Лента E2E'))
+      await installMaxAuthRoute(reopenedPage)
+      await reopenedPage.route(`**${readinessPath}`, (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'processing', recheckable: true }) }))
+      await reopenedPage.route(`**${posterReadinessPath}`, (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'ready', posterPath }) }))
+      await reopenedPage.route('**/api/v1/families/*/memories**', async (route) => {
+        if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
+        const response = await route.fetch()
+        const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
+        payload.items = payload.items.map((item) => item.body === 'Смешанное воспоминание E2E'
+          ? { ...item, attachments: item.attachments.map((attachment, index) => index === 1
+            ? { id: randomUUID(), source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath, posterState: 'ready', posterPath }
+            : attachment) }
+          : item)
+        await route.fulfill({ response, body: JSON.stringify(payload) })
+      })
+      await reopenedPage.goto('/')
+      const continueButton = reopenedPage.getByRole('button', { name: 'Продолжить' })
+      const restoredFeed = reopenedPage.locator('[data-memoly-feed="true"]')
+      const restoredScreen = await Promise.race([
+        restoredFeed.waitFor({ state: 'visible' }).then(() => 'feed' as const),
+        continueButton.waitFor({ state: 'visible' }).then(() => 'continue' as const),
+      ])
+      if (restoredScreen === 'continue') {
+        await expect(continueButton).toBeEnabled()
+        await continueButton.click()
+        const familyHub = reopenedPage.getByRole('heading', { name: 'Мои семьи' })
+        const restoredView = await Promise.race([
+          restoredFeed.waitFor({ state: 'visible' }).then(() => 'feed' as const),
+          familyHub.waitFor({ state: 'visible' }).then(() => 'family' as const),
+        ])
+        if (restoredView === 'family') await reopenedPage.locator('[data-slot="family-hub"] .family-hub-card').click()
+      }
+      await expect(restoredFeed).toBeVisible()
+      const reopenedContextCard = reopenedPage.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
+      await reopenedContextCard.scrollIntoViewIfNeeded()
+      const activeSlide = await reopenedContextCard.locator('[data-carousel-dot][aria-current="step"]').getAttribute('data-carousel-dot')
+      if (activeSlide === '1') await reopenedContextCard.getByRole('button', { name: 'Следующий элемент' }).click()
+      if (activeSlide === '3') await reopenedContextCard.getByRole('button', { name: 'Предыдущий элемент' }).click()
+      const reopenedContextPoster = reopenedContextCard.locator('[data-carousel-active="true"] img[alt="Кадр видео"]')
+      await expect(reopenedContextPoster).toBeVisible()
+      await expect.poll(() => reopenedContextPoster.evaluate((image: HTMLImageElement) => ({ complete: image.complete, width: image.naturalWidth }))).toMatchObject({ complete: true, width: 1 })
+    } finally {
+      await reopenedPage.close()
+    }
   })
 
   test('offscreen MAX card waits to check readiness and shows confirmed unavailable distinctly', async ({ page }) => {

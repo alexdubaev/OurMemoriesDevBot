@@ -1,4 +1,4 @@
-import { maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
+import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
@@ -36,7 +36,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
-import { maxVideoPosterPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
+import { maxVideoPosterPath, maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
@@ -689,7 +689,23 @@ function MaxVideo({ attachment, hostBridge, transport }: {
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const queryClient = useQueryClient()
   const readinessPath = maxVideoReadinessPath(attachment.playbackPath)
-  const posterUrl = usePrivateObjectUrl(maxVideoPosterPath(attachment.playbackPath), transport, nearViewport)
+  const posterReadinessPath = maxVideoPosterReadinessPath(attachment.playbackPath)
+  const posterReadinessKey = [...feedQueryKeys.all, 'max-video-poster-readiness', accountId, membershipEpoch, posterReadinessPath] as const
+  const posterReadiness = useQuery({
+    queryKey: posterReadinessKey,
+    queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
+    enabled: nearViewport && Boolean(posterReadinessPath) && attachment.posterState === 'pending',
+    refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
+    refetchIntervalInBackground: false,
+    retry: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  })
+  const posterPath = attachment.posterState === undefined
+    ? maxVideoPosterPath(attachment.playbackPath)
+    : attachment.posterState === 'ready' ? attachment.posterPath ?? null
+      : posterReadiness.data?.state === 'ready' ? posterReadiness.data.posterPath : null
+  const posterUrl = usePrivateObjectUrl(posterPath, transport, nearViewport)
   const readinessKey = [...feedQueryKeys.all, 'max-video-readiness', accountId, membershipEpoch, readinessPath] as const
   const cachedReadiness = queryClient.getQueryState<MaxVideoReadiness>(readinessKey)
   const checkInterval = cachedReadiness ? maxVideoReadinessInterval(cachedReadiness) : 0
@@ -747,27 +763,19 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
   const [intrinsicDimensions, setIntrinsicDimensions] = useState<{ width: number; height: number } | null>(null)
   const loadedSource = useRef<string | null>(null)
   const sourceFailed = sourceStatus === 'error'
+  const hasDecodedPoster = Boolean(poster && decodedPosterUrl === poster)
   const viewerState = readinessState === 'processing' || readinessState === 'unknown' || readinessState === 'unavailable' || readinessState === 'checking' || readinessState === 'check-error'
     ? readinessState
     : sourceFailed || failed ? 'error' : src ? 'ready' : 'loading'
   const frameDimensions = intrinsicDimensions ?? { width, height }
   const frameStyle = videoFrameStyle(frameDimensions.width, frameDimensions.height)
   useEffect(() => {
-    let current = true
-    if (poster) {
-      const image = new Image()
-      image.src = poster
-      void image.decode().then(() => { if (current) setDecodedPosterUrl(poster) }).catch(() => undefined)
-    }
-    return () => { current = false }
-  }, [poster])
-  useEffect(() => {
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
   return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady: previewReady || decodedPosterUrl === poster })} data-video-started={started} data-video-viewer-state={viewerState}>
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden bg-muted memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" style={frameStyle}>
-      <video aria-label="Предпросмотр видео" className="absolute inset-0 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
+      <video aria-label="Предпросмотр видео" className="absolute inset-0 z-10 size-full object-contain" controls onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
         const element = event.currentTarget
         if (Number.isFinite(element.videoWidth) && Number.isFinite(element.videoHeight) && element.videoWidth > 0 && element.videoHeight > 0) {
           setIntrinsicDimensions({ width: element.videoWidth, height: element.videoHeight })
@@ -777,14 +785,18 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
           try { element.currentTime = 0.001 } catch { /* Some WebViews reject a seek before the first frame is buffered. */ }
         }
       }} onPlay={() => { activate(); setStarted(true) }} poster={poster} preload="none" playsInline ref={video} />
-      {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-10 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
+      {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-20 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
         try { await element.play() } catch { setFailed(true) }
       })()} type="button">
         <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
       </button> : null}
-      {viewerState !== 'ready' ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
+      {viewerState !== 'ready' && !hasDecodedPoster ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
+      {poster && !previewReady ? <img alt="Кадр видео" className="pointer-events-none absolute inset-0 z-0 size-full object-contain" onLoad={(event) => {
+        const image = event.currentTarget
+        void image.decode().then(() => setDecodedPosterUrl(poster)).catch(() => undefined)
+      }} src={poster} /> : null}
       <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography>
     </div>
     {viewerState === 'loading' || viewerState === 'checking' || viewerState === 'processing' || viewerState === 'unknown' || viewerState === 'check-error' ? <div className="memoly-video-viewer-v2-status" role="status">{viewerState !== 'unknown' && viewerState !== 'check-error' ? <span className="memoly-video-viewer-v2-spinner" aria-hidden="true" /> : null}<Typography as="span" variant="memoryMeta">{viewerState === 'processing' ? 'Видео обрабатывается…' : viewerState === 'unknown' ? 'Готовность видео пока неизвестна' : viewerState === 'check-error' ? 'Не удалось проверить готовность видео' : viewerState === 'checking' ? 'Проверяем готовность видео…' : 'Загружаем видео…'}</Typography></div> : null}

@@ -10,7 +10,7 @@ import postcss from 'postcss'
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
-import { maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from '../src/features/feed/max-video-readiness'
+import { maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from '../src/features/feed/max-video-readiness'
 import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
 import { FeedShell } from '../src/features/feed/components/FeedShell'
@@ -807,12 +807,43 @@ test('a ready MAX video preview embeds native playback without a persistent MAX 
   }
 })
 
+test('a MAX poster stays behind native controls and the visible play affordance', () => {
+  const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
+    durationMs: 24_000,
+    height: 720,
+    onOpen: () => undefined,
+    poster: 'blob:private-max-video-poster',
+    src: '/api/v1/families/family/media/max-videos/video/content',
+    width: 1_280,
+  }))
+  const video = markup.slice(markup.indexOf('<video'), markup.indexOf('</video>'))
+  const playButton = markup.slice(markup.indexOf('<button'), markup.indexOf('</button>'))
+  const poster = markup.slice(markup.lastIndexOf('<img'))
+
+  expect(video).toContain('z-10')
+  expect(video).toContain('controls=""')
+  expect(playButton).toContain('aria-label="Смотреть видео"')
+  expect(playButton).toContain('z-20')
+  expect(poster).toContain('z-0')
+})
+
 test('MAX readiness URL uses the validated playback reference, not attachment identity', () => {
   const referenceId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
   const playbackPath = `/api/v1/families/${familyId}/media/max-videos/${referenceId}/content`
   expect(maxVideoReadinessPath(playbackPath)).toBe(`/api/v1/families/${familyId}/media/max-videos/${referenceId}/readiness`)
   expect(maxVideoReadinessPath(`${playbackPath}?token=unsafe`)).toBeNull()
   expect(maxVideoReadinessPath(`/api/v1/families/${familyId}/media/${referenceId}/content`)).toBeNull()
+})
+
+test('MAX poster readiness URL is validated and polling continues until poster generation reaches a terminal state', () => {
+  const familyId = '123e4567-e89b-42d3-a456-426614174000'
+  const referenceId = '123e4567-e89b-42d3-a456-426614174001'
+  const playbackPath = `/api/v1/families/${familyId}/media/max-videos/${referenceId}/content`
+  expect(maxVideoPosterReadinessPath(playbackPath)).toBe(`/api/v1/families/${familyId}/media/max-videos/${referenceId}/poster-readiness`)
+  expect(maxVideoPosterReadinessPath(`${playbackPath}?token=unsafe`)).toBeNull()
+  expect(maxVideoPosterReadinessInterval({ data: { state: 'pending' }, dataUpdateCount: 80, errorUpdateCount: 0 })).toBeGreaterThan(0)
+  expect(maxVideoPosterReadinessInterval({ data: { state: 'ready', posterPath: `/api/v1/families/${familyId}/media/${referenceId}/content?variant=display` }, dataUpdateCount: 80, errorUpdateCount: 0 })).toBe(false)
+  expect(maxVideoPosterReadinessInterval({ data: { state: 'failed' }, dataUpdateCount: 1, errorUpdateCount: 0 })).toBe(false)
 })
 
 test('MAX processing and unknown remain neutral while unavailable is terminal', () => {

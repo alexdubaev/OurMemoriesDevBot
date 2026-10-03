@@ -1,4 +1,4 @@
-import { backendMediaPathSchema, type MaxVideoReadiness } from '@web-app-demo/contracts'
+import { backendMediaPathSchema, type MaxVideoPosterReadiness, type MaxVideoReadiness } from '@web-app-demo/contracts'
 
 const maxVideoContentPath = /^\/api\/v1\/families\/[0-9a-f-]{36}\/media\/max-videos\/[0-9a-f-]{36}\/content$/i
 const MAX_CONCURRENT_READINESS_CHECKS = 3
@@ -13,6 +13,17 @@ export function maxVideoReadinessPath(playbackPath: string): string | null {
 export function maxVideoPosterPath(playbackPath: string): string | null {
   if (!backendMediaPathSchema.safeParse(playbackPath).success || !maxVideoContentPath.test(playbackPath)) return null
   return playbackPath.replace(/\/content$/, '/poster')
+}
+
+export function maxVideoPosterReadinessPath(playbackPath: string): string | null {
+  if (!backendMediaPathSchema.safeParse(playbackPath).success || !maxVideoContentPath.test(playbackPath)) return null
+  return playbackPath.replace(/\/content$/, '/poster-readiness')
+}
+
+export function maxVideoPosterReadinessInterval(state: { data?: MaxVideoPosterReadiness; dataUpdateCount: number; errorUpdateCount: number }) {
+  if (state.data && state.data.state !== 'pending') return false
+  if (state.errorUpdateCount > 0) return Math.min(5_000 * 2 ** Math.min(state.errorUpdateCount, 4), 60_000)
+  return Math.min(5_000 * 2 ** Math.min(state.dataUpdateCount, 4), 60_000)
 }
 
 export function maxVideoReadinessInterval(state: { data?: MaxVideoReadiness; dataUpdateCount: number; errorUpdateCount: number }) {
