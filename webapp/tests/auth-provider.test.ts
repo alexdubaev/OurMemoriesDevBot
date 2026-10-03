@@ -94,10 +94,27 @@ test('a failed session restore surfaces the error instead of an unknown session'
   expect(requests).not.toContain('GET /api/v1/auth/me')
 })
 
+test('verified MAX authentication clears an obsolete cookie bootstrap error', async () => {
+  installFakeBackend({
+    refresh: () => json({ error: { code: 'INTERNAL_ERROR', message: 'Refresh failed', requestId: '01993b24-7e7d-7000-8000-000000000205' } }, 500),
+    me: () => json({ user }, 200),
+    max: () => json({ accessToken: restoredAccessToken, user }, 200),
+  })
+  const mounted = await mountAuthProvider()
+  await flushUntil(() => !mounted.session().isBootstrapping)
+  expect(mounted.session().sessionError?.message).toBe('Refresh failed')
+
+  await act(async () => { await mounted.authenticateMax('synthetic-init-data') })
+  await flushUntil(() => mounted.session().sessionError === null)
+  expect(mounted.session()).toEqual({ isBootstrapping: false, sessionError: null, user })
+})
+
 async function mountAuthProvider() {
   const snapshots: SessionSnapshot[] = []
+  let currentAuth: AuthContextValue | null = null
   function SessionProbe() {
     const auth = useAuth()
+    currentAuth = auth
     snapshots.push({
       isBootstrapping: auth.isBootstrapping,
       sessionError: auth.sessionError,
@@ -122,6 +139,10 @@ async function mountAuthProvider() {
 
   return {
     snapshots,
+    authenticateMax: async (payload: string) => {
+      if (!currentAuth) throw new Error('AuthProvider has not rendered its consumer yet')
+      await currentAuth.authenticateMax(payload)
+    },
     session: () => {
       const latest = snapshots[snapshots.length - 1]
       if (!latest) throw new Error('AuthProvider has not rendered its consumer yet')
@@ -143,6 +164,7 @@ async function flushUntil(predicate: () => boolean) {
 function installFakeBackend(backend: {
   refresh: () => Response | Promise<Response>
   me: () => Response | Promise<Response>
+  max?: () => Response | Promise<Response>
 }) {
   const requests: string[] = []
   globalThis.fetch = async (input, init) => {
@@ -150,6 +172,7 @@ function installFakeBackend(backend: {
     requests.push(`${init?.method ?? 'GET'} ${path}`)
     if (path === '/api/v1/auth/refresh') return backend.refresh()
     if (path === '/api/v1/auth/me') return backend.me()
+    if (path === '/api/v1/auth/max' && backend.max) return backend.max()
     return json({ error: { code: 'NOT_FOUND', message: 'Unexpected request' } }, 404)
   }
   return requests

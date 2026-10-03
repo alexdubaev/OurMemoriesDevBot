@@ -3,8 +3,117 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="color-scheme" content="only light" />
+    <script>
+      (() => {
+        let mounted = false
+        let failed = false
+        let mountTimer
+        let rootObserver
+        const showFailure = () => {
+          if (failed && document.getElementById('root')?.dataset.startupFailed === 'true') return
+          failed = true
+          window.clearTimeout(mountTimer)
+          const target = document.getElementById('root')
+          if (!target) {
+            rootObserver ??= new MutationObserver(() => {
+              if (!document.getElementById('root')) return
+              rootObserver?.disconnect()
+              rootObserver = undefined
+              showFailure()
+            })
+            rootObserver.observe(document.documentElement, { childList: true, subtree: true })
+            return
+          }
+          target.dataset.startupFailed = 'true'
+          const main = document.createElement('main')
+          main.setAttribute('role', 'alert')
+          main.style.cssText = 'min-height:100vh;box-sizing:border-box;padding:24px;display:grid;place-content:center;gap:16px;text-align:center;background:#fff;color:#1f1f1f;font:16px/1.5 system-ui,sans-serif'
+          const message = document.createElement('p')
+          message.textContent = 'Не удалось открыть приложение. Проверьте соединение и попробуйте ещё раз.'
+          const retry = document.createElement('button')
+          retry.type = 'button'
+          retry.textContent = 'Повторить'
+          retry.style.cssText = 'min-height:48px;padding:0 20px;border:0;border-radius:14px;background:#efc9c0;color:#1f1f1f;font:inherit;font-weight:600'
+          retry.addEventListener('click', () => window.location.reload())
+          main.append(message, retry)
+          target.replaceChildren(main)
+        }
+        mountTimer = window.setTimeout(() => {
+          console.error('[memoLy] startup_mount_timeout')
+          showFailure()
+        }, 20000)
+        const api = {
+          fail: showFailure,
+          canMount: () => !failed,
+          mounted: () => { mounted = true; window.clearTimeout(mountTimer); rootObserver?.disconnect() },
+        }
+        window.__MEMOLY_STARTUP__ = api
+        window.addEventListener('error', (event) => {
+          if (!mounted && (event.target instanceof HTMLScriptElement || event instanceof ErrorEvent)) {
+            console.error(event.target instanceof HTMLScriptElement ? '[memoLy] startup_asset_failed' : '[memoLy] startup_runtime_failed')
+            showFailure()
+          }
+        }, true)
+        window.addEventListener('unhandledrejection', () => {
+          if (mounted) return
+          console.error('[memoLy] startup_unhandled_rejection')
+          showFailure()
+        })
+        const hasMarker = (value, markers) => typeof value === 'string'
+          && markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=[^&#]+`).test(value))
+        const isMeaningful = (app, max) => app && typeof app === 'object' && !Array.isArray(app)
+          && typeof app.initData === 'string' && app.initData.trim().length > 0
+          && (!max || typeof app.ready === 'function' || typeof app.close === 'function' || typeof app.version === 'string' || typeof app.platform === 'string' || typeof app.colorScheme === 'string')
+        let navigationHash = ''
+        try {
+          const navigation = window.performance?.getEntriesByType?.('navigation')?.[0]?.name
+          if (typeof navigation === 'string') {
+            const hashStart = navigation.indexOf('#')
+            navigationHash = hashStart >= 0 ? navigation.slice(hashStart) : ''
+          }
+        } catch { /* navigation timing is optional */ }
+        const currentHash = window.location.hash
+        const maxMarkers = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
+        const telegramMarkers = ['tgWebAppData', 'tgWebAppPlatform', 'tgWebAppVersion']
+        const currentMax = hasMarker(currentHash, maxMarkers)
+        const currentTelegram = hasMarker(currentHash, telegramMarkers)
+        const navigationMax = hasMarker(navigationHash, maxMarkers)
+        const navigationTelegram = hasMarker(navigationHash, telegramMarkers)
+        const maxApp = window.WebApp
+        const telegramApp = window.Telegram?.WebApp
+        const meaningfulMax = isMeaningful(maxApp, true)
+        const meaningfulTelegram = isMeaningful(telegramApp, false)
+        const host = currentMax ? 'max' : currentTelegram ? 'telegram'
+          : meaningfulMax ? 'max' : meaningfulTelegram ? 'telegram'
+            : navigationMax ? 'max' : navigationTelegram ? 'telegram' : null
+        const sdkUrl = host === 'max' && !meaningfulMax ? 'https://st.max.ru/js/max-web-app.js'
+          : host === 'telegram' && !meaningfulTelegram ? 'https://telegram.org/js/telegram-web-app.js?63' : null
+        api.hostReady = !sdkUrl ? Promise.resolve(true) : new Promise((resolve) => {
+          let settled = false
+          let timer
+          const finish = (ready) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timer)
+            if (!ready) {
+              console.error('[memoLy] host_sdk_unavailable')
+              showFailure()
+            }
+            resolve(ready)
+          }
+          timer = window.setTimeout(() => finish(false), 10000)
+          const script = document.createElement('script')
+          script.async = true
+          script.src = sdkUrl
+          script.onload = () => finish(host === 'max' ? isMeaningful(window.WebApp, true) : isMeaningful(window.Telegram?.WebApp, false))
+          script.onerror = () => finish(false)
+          document.head.append(script)
+        })
+      })()
+    </script>
     <link rel="preconnect" href="https://rsms.me/" />
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://rsms.me/inter/inter.css" /></noscript>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/webp" sizes="192x192" href="/assets/brand/pwa-memoly-192.webp" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -19,76 +128,6 @@
         Загрузка memoLy…
       </p>
     </div>
-    <script>
-      (() => {
-        const maxSdk = 'https://st.max.ru/js/max-web-app.js'
-        const telegramSdk = 'https://telegram.org/js/telegram-web-app.js?63'
-        const maxMarkers = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
-        const telegramMarkers = ['tgWebAppData', 'tgWebAppPlatform', 'tgWebAppVersion']
-
-        const hasMarker = (value, markers) => {
-          if (typeof value !== 'string') return false
-          return markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=[^&#]+`).test(value))
-        }
-
-        const navigationHash = (() => {
-          try {
-            const entries = window.performance?.getEntriesByType?.('navigation')
-            const name = entries?.[0]?.name
-            if (typeof name !== 'string') return ''
-            const hashStart = name.indexOf('#')
-            return hashStart >= 0 ? name.slice(hashStart) : ''
-          } catch {
-            return ''
-          }
-        })()
-        const currentHash = typeof window.location?.hash === 'string' ? window.location.hash : ''
-        const currentMaxLaunch = hasMarker(currentHash, maxMarkers)
-        const currentTelegramLaunch = hasMarker(currentHash, telegramMarkers)
-        const navigationMaxLaunch = hasMarker(navigationHash, maxMarkers)
-        const navigationTelegramLaunch = hasMarker(navigationHash, telegramMarkers)
-
-        const webApp = window.WebApp
-        const meaningfulMax = webApp !== null
-          && typeof webApp === 'object'
-          && !Array.isArray(webApp)
-          && typeof webApp.initData === 'string'
-          && webApp.initData.trim().length > 0
-          && (typeof webApp.ready === 'function'
-            || typeof webApp.close === 'function'
-            || typeof webApp.version === 'string'
-            || typeof webApp.platform === 'string'
-            || typeof webApp.colorScheme === 'string')
-
-        const telegramWebApp = window.Telegram?.WebApp
-        const meaningfulTelegram = telegramWebApp !== null
-          && typeof telegramWebApp === 'object'
-          && !Array.isArray(telegramWebApp)
-          && typeof telegramWebApp.initData === 'string'
-          && telegramWebApp.initData.trim().length > 0
-
-        const host = currentMaxLaunch
-          ? 'max'
-          : currentTelegramLaunch
-            ? 'telegram'
-            : meaningfulMax
-              ? 'max'
-              : meaningfulTelegram
-                ? 'telegram'
-                : navigationMaxLaunch
-                  ? 'max'
-                  : navigationTelegramLaunch
-                    ? 'telegram'
-                    : null
-        const sdk = host === 'max' && !meaningfulMax
-          ? maxSdk
-          : host === 'telegram' && !meaningfulTelegram
-            ? telegramSdk
-            : null
-
-        if (sdk) document.write(`<script src="${sdk}"><\/script>`)
-      })()
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

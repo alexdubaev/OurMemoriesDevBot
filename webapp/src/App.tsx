@@ -106,9 +106,19 @@ function AppContent({ hostBridge }: AppProps) {
     '--host-inset-top': `${insets.top}px`,
   } as CSSProperties
   if (!auth || auth.isBootstrapping || (hostAuthState && shouldKeepHostAuthPreloader(hostAuthState))) return <BootPreloader style={style} />
+  if (auth.sessionError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" role="alert" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
+      <Typography variant="memoryScreen">Не удалось восстановить вход</Typography>
+      <Typography className="mt-4" tone="muted" variant="memoryBody">Проверьте соединение и повторите попытку.</Typography>
+      <Button className="mt-8 min-h-12 w-full" onClick={() => {
+        if (hostAuthProvider) resetHostAuth()
+        void auth.retrySession()
+      }} type="button"><Typography variant="memoryButton">Повторить</Typography></Button>
+    </section>
+  </main>
   if (!auth.user) {
     if (hostBridge.kind === 'browser') {
-      if (auth.sessionError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={style}><BrandLogo className="w-[148px]" /><div className="mt-8"><InlineError onRetry={() => void auth.retrySession()} /></div></main>
       return <BrowserLinkLogin style={style} />
     }
     return (
