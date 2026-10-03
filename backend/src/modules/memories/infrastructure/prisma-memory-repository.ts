@@ -126,11 +126,13 @@ export class PrismaMemoryRepository implements MemoryRepository {
             if (entry.source !== 'max') continue
             const source = sessions.find((session) => session.id === entry.sessionId)?.outboundSource
             if (!source) throw new MemoryFailure('invalid_input', 'Видео MAX не найдено')
-            await tx.maxVideoReference.create({ data: {
+            const reference = await tx.maxVideoReference.create({ data: {
               familyId: scope.familyId, memoryId: created.id, outboundSourceId: source.id,
               attachmentPosition: position, providerAttachmentId: source.providerAttachmentId,
               width: source.width, height: source.height, durationMs: source.durationMs,
             } })
+            await insertTask(tx, { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}`,
+              payload: { referenceId: reference.id }, scheduledFor: idempotency.now })
           }
         }
         if (input.kind === 'photo' || input.kind === 'media') {
@@ -272,15 +274,24 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (!concurrent) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         throw versionConflict()
       }
-      const [linked, telegramVideo] = await Promise.all([
+      const [linked, telegramVideo, maxVideo] = await Promise.all([
         tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } }),
         tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
           SELECT "thumbnail_media_id" AS "thumbnailMediaId"
             FROM "telegram_video_references"
            WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
         `,
+        tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
+          SELECT "thumbnail_media_id" AS "thumbnailMediaId"
+            FROM "max_video_references"
+           WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
+        `,
       ])
-      const mediaIds = [...linked.map(({ mediaId }) => mediaId), ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : [])]
+      const mediaIds = [...new Set([
+        ...linked.map(({ mediaId }) => mediaId),
+        ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : []),
+        ...maxVideo.flatMap(({ thumbnailMediaId }) => thumbnailMediaId ? [thumbnailMediaId] : []),
+      ])]
       for (const mediaId of mediaIds) {
         await tx.mediaAsset.updateMany({ where: { id: mediaId, familyId: scope.familyId, deletedAt: null }, data: { deletedAt: now } })
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${mediaId}`,
@@ -574,7 +585,9 @@ function memoryInclude() {
     },
     maxVideoReferences: {
       orderBy: { attachmentPosition: 'asc' as const },
-      select: { id: true, attachmentPosition: true, width: true, height: true, durationMs: true },
+      select: { id: true, attachmentPosition: true, width: true, height: true, durationMs: true, thumbnailMedia: {
+        select: { id: true, originalStatus: true, deletedAt: true, variants: { select: { variant: true } } },
+      } },
     },
   } as const
 }
@@ -606,7 +619,8 @@ function dto(
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
     telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
-    maxVideoReferences: Array<{ id: string; attachmentPosition: number; width: number | null; height: number | null; durationMs: number | null }>
+    maxVideoReferences: Array<{ id: string; attachmentPosition: number; width: number | null; height: number | null; durationMs: number | null;
+      thumbnailMedia: { id: string; originalStatus: 'pending' | 'stored' | 'failed'; deletedAt: Date | null; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null }>
   },
   principalUserId: string,
   role: MemberRole,
@@ -667,6 +681,10 @@ function dto(
         height: reference.height,
         durationMs: reference.durationMs,
         playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${reference.id}/content`,
+        posterState: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display') ? 'ready' as const : 'pending' as const,
+        posterPath: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display')
+          ? `/api/v1/families/${memory.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display`
+          : null,
       } })),
     ].sort((a, b) => a.position - b.position).map((entry) => entry.attachment),
     reactionCounts: memory.likes.reduce((counts, like) => {
