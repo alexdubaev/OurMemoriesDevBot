@@ -782,6 +782,515 @@ maybeDescribe('MAX durable capture', () => {
     expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: newChatId })
   })
 
+  test('retains bot-added actor provenance until an actorless permissions update can bind the current single Full family', async () => {
+    const actor = await maxFamily('78120', 'full', false)
+    const chatId = -BigInt(Date.now()) * 100_000n - 920n
+    let writable = false
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!writable) throw new MaxChannelProviderError(403)
+      return { title: 'Pending permissions channel' }
+    }, now: () => new Date('2026-10-01T10:00:00.000Z') })
+    const deliver = async (body: string, kind: 'bot_added' | 'bot_admin_permissions_changed') => {
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: kind }, orderBy: { receivedAt: 'desc' } })
+      await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+      return inbox
+    }
+    const added = await deliver(`{"update_type":"bot_added","timestamp":1790841820000,"chat_id":${chatId},"is_channel":true,"user":{"user_id":78120}}`, 'bot_added')
+    expect(await prisma.maxChannelDecision.findUnique({ where: { originInboxId: added.id } })).toMatchObject({
+      actorSubject: '78120', actorUserId: actor.userId, candidateFamilyIds: [actor.familyId], phase: 'await_permissions', status: 'pending',
+    })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    writable = true
+    const permissions = await deliver(`{"update_type":"bot_admin_permissions_changed","timestamp":1790841821000,"chat_id":${chatId},"is_channel":true}`, 'bot_admin_permissions_changed')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: actor.familyId, state: 'connected', version: 2 })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: added.id }, select: { status: true } })).toEqual({ status: 'completed' })
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: permissions.id } })).toBe(1)
+  })
+
+  test('permissions updates without trusted bot-added provenance remain connected but unbound', async () => {
+    const actor = await maxFamily('78121', 'full', false)
+    const chatId = -BigInt(Date.now()) * 100_000n - 921n
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Unproven channel' }) })
+    const body = `{"update_type":"bot_admin_permissions_changed","timestamp":1790841822000,"chat_id":${chatId},"is_channel":true,"user":{"user_id":78121}}`
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+    const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_admin_permissions_changed' } })
+    await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: null, state: 'connected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    expect(await prisma.maxChannelDecision.count()).toBe(0)
+  })
+
+  test('removal invalidates pending bot-added provenance and later permissions cannot resurrect it', async () => {
+    const actor = await maxFamily('78122', 'full', false)
+    const chatId = -BigInt(Date.now()) * 100_000n - 922n
+    let writable = false
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!writable) throw new MaxChannelProviderError(403)
+      return { title: 'Removed before permissions' }
+    } })
+    const deliver = async (kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed', timestamp: number, withActor: boolean) => {
+      const body = `{"update_type":"${kind}","timestamp":${timestamp},"chat_id":${chatId},"is_channel":true${withActor ? ',"user":{"user_id":78122}' : ''}}`
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: kind }, orderBy: { receivedAt: 'desc' } })
+      await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+    }
+    await deliver('bot_added', 1790841823000, true)
+    const pending = await prisma.maxChannelDecision.findFirstOrThrow({ where: { chatId, status: 'pending' } })
+    await deliver('bot_removed', 1790841823000, true)
+    writable = true
+    await deliver('bot_admin_permissions_changed', 1790841825000, false)
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: pending.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: null, state: 'disconnected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+  })
+
+  test('repeated permission failures preserve only the original candidate snapshot for an actor-bound choice', async () => {
+    const actor = await maxMember('78123', 'full')
+    const first = await maxFamilyForUser(actor.userId, 'Pending first family', actor.subject, 'full', false)
+    const second = await maxFamily('78124', 'full', false)
+    await prisma.familyMember.create({ data: { familyId: second.familyId, userId: actor.userId, role: 'full' } })
+    const later = await maxFamily('78125', 'full', false)
+    const chatId = -BigInt(Date.now()) * 100_000n - 923n
+    let writable = false
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!writable) throw new MaxChannelProviderError(403)
+      return { title: 'Pending choice channel' }
+    }, now: () => new Date('2026-10-01T10:00:00.000Z') })
+    const deliver = async (kind: 'bot_added' | 'bot_admin_permissions_changed', timestamp: number) => {
+      const withActor = kind === 'bot_added' ? ',"user":{"user_id":78123}' : ''
+      const body = `{"update_type":"${kind}","timestamp":${timestamp},"chat_id":${chatId},"is_channel":true${withActor}}`
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: kind }, orderBy: { receivedAt: 'desc' } })
+      await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+      return inbox
+    }
+    const added = await deliver('bot_added', 1790841826000)
+    const firstDecision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: added.id } })
+    expect(firstDecision).toMatchObject({ candidateFamilyIds: [first.familyId, second.familyId], phase: 'await_permissions' })
+    await deliver('bot_admin_permissions_changed', 1790841827000)
+    const carried = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })
+    expect(carried).toMatchObject({ candidateFamilyIds: [first.familyId, second.familyId], phase: 'await_permissions', status: 'pending', expectedChannelVersion: 2 })
+    await prisma.familyMember.create({ data: { familyId: later.familyId, userId: actor.userId, role: 'full' } })
+    writable = true
+    const ready = await deliver('bot_admin_permissions_changed', 1790841828000)
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })).toMatchObject({
+      candidateFamilyIds: [first.familyId, second.familyId], phase: 'select_family', status: 'pending', actorSubject: actor.subject, actorUserId: actor.userId,
+    })
+    const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: ready.id } })
+    expect(response.destinationUserId).toBe(BigInt(actor.subject))
+    expect(response.buttons).toHaveLength(2)
+    const selectedIndex = (firstDecision.candidateFamilyIds as string[]).indexOf(second.familyId)
+    const callbackBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841829000, callback: {
+      user: { user_id: 78124 }, callback_id: 'pending-choice-wrong-actor', payload: `max_channel:${firstDecision.id}:select:${selectedIndex}`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: 78124 } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: callbackBody })
+    const callbackInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' } })
+    await channel.processCallback(callbackInbox.id, crypto.decrypt({ ciphertext: callbackInbox.encryptedPayload, iv: callbackInbox.encryptionIv, authTag: callbackInbox.encryptionAuthTag }))
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: second.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    const allowedBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841830000, callback: {
+      user: { user_id: 78123 }, callback_id: 'pending-choice-right-actor', payload: `max_channel:${firstDecision.id}:select:${selectedIndex}`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: 78123 } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: allowedBody })
+    const allowedInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' }, orderBy: { receivedAt: 'desc' } })
+    await channel.processCallback(allowedInbox.id, crypto.decrypt({ ciphertext: allowedInbox.encryptedPayload, iv: allowedInbox.encryptionIv, authTag: allowedInbox.encryptionAuthTag }))
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: second.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: later.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id }, select: { status: true } })).toEqual({ status: 'completed' })
+  })
+
+  test('a revoked or remapped lifecycle actor cannot consume pending bot-added provenance', async () => {
+    const revokedActor = await maxFamilyWithMember('78126', 'full')
+    const remappedActor = await maxFamilyWithMember('78127', 'full')
+    const replacementIdentity = await prisma.user.create({ data: { displayName: 'Unrelated identity target' } })
+    const firstChat = -BigInt(Date.now()) * 100_000n - 924n
+    const secondChat = firstChat - 1n
+    const writable = new Set<bigint>()
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async (chatId) => {
+      if (!writable.has(chatId)) throw new MaxChannelProviderError(403)
+      return { title: 'Pending actor channel' }
+    } })
+    const add = async (subject: string, chatId: bigint, timestamp: number) => {
+      const body = `{"update_type":"bot_added","timestamp":${timestamp},"chat_id":${chatId},"is_channel":true,"user":{"user_id":${subject}}}`
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_added' }, orderBy: { receivedAt: 'desc' } })
+      await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+      return inbox
+    }
+    const firstAdded = await add('78126', firstChat, 1790841831000)
+    const secondAdded = await add('78127', secondChat, 1790841832000)
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: revokedActor.familyId, userId: revokedActor.userId } }, data: { revokedAt: new Date() } })
+    const identity = await prisma.externalIdentity.findUniqueOrThrow({ where: { provider_subject: { provider: 'max', subject: remappedActor.subject } } })
+    await prisma.externalIdentity.update({ where: { id: identity.id }, data: { userId: replacementIdentity.id } })
+    writable.add(firstChat); writable.add(secondChat)
+    for (const [chatId, timestamp] of [[firstChat, 1790841833000], [secondChat, 1790841834000]] as const) {
+      const body = `{"update_type":"bot_admin_permissions_changed","timestamp":${timestamp},"chat_id":${chatId},"is_channel":true}`
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_admin_permissions_changed' }, orderBy: { receivedAt: 'desc' } })
+      await channel.processLifecycle(inbox.id, crypto.decrypt({ ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag }))
+    }
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: firstAdded.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: secondAdded.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: firstChat } })).toMatchObject({ familyId: null, state: 'connected' })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: secondChat } })).toMatchObject({ familyId: null, state: 'connected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: revokedActor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: remappedActor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+  })
+
+  test('removal while permissions verification is in flight wins against the stale provenance snapshot', async () => {
+    const actor = await maxFamily('78128', 'full', false)
+    const chatId = -BigInt(Date.now()) * 100_000n - 925n
+    let writable = false
+    let pausePermissions = false
+    let enteredVerification!: () => void
+    let releaseVerification!: () => void
+    const verificationEntered = new Promise<void>((resolve) => { enteredVerification = resolve })
+    const verificationRelease = new Promise<void>((resolve) => { releaseVerification = resolve })
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!writable) throw new MaxChannelProviderError(403)
+      if (pausePermissions) { enteredVerification(); await verificationRelease }
+      return { title: 'Removal wins race' }
+    } })
+    const send = async (kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed', timestamp: number) => {
+      const withActor = kind === 'bot_added' || kind === 'bot_removed' ? ',"user":{"user_id":78128}' : ''
+      const body = `{"update_type":"${kind}","timestamp":${timestamp},"chat_id":${chatId},"is_channel":true${withActor}}`
+      await webhook.request('/webhooks/max', { method: 'POST', headers, body })
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: kind }, orderBy: { receivedAt: 'desc' } })
+      const event = crypto.decrypt<Extract<MaxAcceptedEvent, { kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed' }>>({
+        ciphertext: inbox.encryptedPayload, iv: inbox.encryptionIv, authTag: inbox.encryptionAuthTag,
+      })
+      return { inbox, event }
+    }
+    const added = await send('bot_added', 1790841835000)
+    await channel.processLifecycle(added.inbox.id, added.event)
+    const pending = await prisma.maxChannelDecision.findFirstOrThrow({ where: { chatId, status: 'pending' } })
+    writable = true
+    pausePermissions = true
+    const delayed = await send('bot_admin_permissions_changed', 1790841837000)
+    const processingPermissions = channel.processLifecycle(delayed.inbox.id, delayed.event)
+    await verificationEntered
+    const removed = await send('bot_removed', 1790841836000)
+    await channel.processLifecycle(removed.inbox.id, removed.event)
+    releaseVerification()
+    await processingPermissions
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: pending.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: null, state: 'disconnected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+  })
+
+  test('trusted pending provenance requires and completes explicit confirmation to replace a healthy channel', async () => {
+    const actor = await maxFamily('78129', 'full', false)
+    const oldChatId = -BigInt(Date.now()) * 100_000n - 926n
+    const chatId = oldChatId - 1n
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: oldChatId } })
+    await prisma.maxChannelBinding.create({ data: { chatId: oldChatId, familyId: actor.familyId, state: 'connected', title: 'Healthy current' } })
+    let targetWritable = false
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async (id) => {
+      if (id === chatId && !targetWritable) throw new MaxChannelProviderError(403)
+      return { title: id === oldChatId ? 'Healthy current' : 'Confirmed target' }
+    }, now: () => new Date('2026-10-01T10:00:00.000Z') })
+    const addedBody = `{"update_type":"bot_added","timestamp":1790841838000,"chat_id":${chatId},"is_channel":true,"user":{"user_id":78129}}`
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: addedBody })
+    const added = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_added' } })
+    await channel.processLifecycle(added.id, crypto.decrypt({ ciphertext: added.encryptedPayload, iv: added.encryptionIv, authTag: added.encryptionAuthTag }))
+    targetWritable = true
+    const permissionsBody = `{"update_type":"bot_admin_permissions_changed","timestamp":1790841839000,"chat_id":${chatId},"is_channel":true}`
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: permissionsBody })
+    const permissions = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_admin_permissions_changed' } })
+    await channel.processLifecycle(permissions.id, crypto.decrypt({ ciphertext: permissions.encryptedPayload, iv: permissions.encryptionIv, authTag: permissions.encryptionAuthTag }))
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: added.id } })
+    expect(decision).toMatchObject({ phase: 'confirm_replacement', status: 'pending', selectedFamilyId: actor.familyId,
+      expectedActiveChatId: oldChatId, expectedActiveVersion: 1 })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: oldChatId })
+    const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: permissions.id } })
+    expect(response.buttons).toHaveLength(2)
+    const callbackBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841840000, callback: {
+      user: { user_id: 78129 }, callback_id: 'pending-confirm-replacement', payload: `max_channel:${decision.id}:replace:0`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: 78129 } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: callbackBody })
+    const callbackInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' } })
+    await channel.processCallback(callbackInbox.id, crypto.decrypt({ ciphertext: callbackInbox.encryptedPayload, iv: callbackInbox.encryptionIv, authTag: callbackInbox.encryptionAuthTag }))
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: oldChatId } })).toMatchObject({ familyId: actor.familyId, state: 'replaced', version: 2 })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: actor.familyId, state: 'connected', version: 2 })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'completed' })
+  })
+
+  test('trusted pending provenance clears a permanently unavailable old channel before connecting', async () => {
+    const actor = await maxFamily('78130', 'full', false)
+    const oldChatId = -BigInt(Date.now()) * 100_000n - 927n
+    const chatId = oldChatId - 1n
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: oldChatId } })
+    await prisma.maxChannelBinding.create({ data: { chatId: oldChatId, familyId: actor.familyId, state: 'connected', title: 'Lost current' } })
+    let targetWritable = false
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async (id) => {
+      if (id === chatId && !targetWritable || id === oldChatId) throw new MaxChannelProviderError(403)
+      return { title: 'Available target' }
+    }, now: () => new Date('2026-10-01T10:00:00.000Z') })
+    const addedBody = `{"update_type":"bot_added","timestamp":1790841841000,"chat_id":${chatId},"is_channel":true,"user":{"user_id":78130}}`
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: addedBody })
+    const added = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_added' } })
+    await channel.processLifecycle(added.id, crypto.decrypt({ ciphertext: added.encryptedPayload, iv: added.encryptionIv, authTag: added.encryptionAuthTag }))
+    targetWritable = true
+    const permissionsBody = `{"update_type":"bot_admin_permissions_changed","timestamp":1790841842000,"chat_id":${chatId},"is_channel":true}`
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: permissionsBody })
+    const permissions = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'bot_admin_permissions_changed' } })
+    await channel.processLifecycle(permissions.id, crypto.decrypt({ ciphertext: permissions.encryptedPayload, iv: permissions.encryptionIv, authTag: permissions.encryptionAuthTag }))
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: oldChatId } })).toMatchObject({ familyId: actor.familyId, state: 'permission_problem', version: 2 })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: actor.familyId, state: 'connected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: added.id }, select: { status: true } })).toEqual({ status: 'completed' })
+  })
+
+  test('actor-bound recovery offers consent then binds only after connect callback', async () => {
+    const actor = await maxFamily('78024', 'full', false)
+    const chatId = -913n
+    const origin = await prisma.maxInbox.create({ data: {
+      eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added',
+      encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
+    } })
+    await prisma.maxOutgoingResponse.create({ data: { inboxId: origin.id, destinationUserId: BigInt(actor.subject), kind: 'family_choice', text: 'Исходный выбор семьи', buttons: [] } })
+    let actorAdmin = true
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Recovered' }), verifyActorAdmin: async () => actorAdmin })
+    const noAdmin = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Recovered' }), verifyActorAdmin: async () => false })
+    expect(await noAdmin.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId })).toBe(false)
+    expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId })).toBe(true)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+    const forged = await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: randomUUID(), familyId: actor.familyId, chatId })
+    expect(forged).toBe(false) // Reusing an origin inbox with a different actor mapping cannot claim the persisted offer.
+    expect(decision).toMatchObject({ phase: 'confirm_actor_connection', status: 'pending', actorSubject: actor.subject, actorUserId: actor.userId, expectedActiveChatId: null, expectedActiveVersion: 0 })
+    const offer = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { channelDecisionId: decision.id } })
+    expect(offer.kind).toBe('welcome')
+    expect(offer.buttons).toEqual([
+      { text: 'Подключить', payload: `max_channel:${decision.id}:connect:0` },
+      { text: 'Отмена', payload: `max_channel:${decision.id}:cancel:0` },
+    ])
+    const callbackBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841711000, callback: {
+      user: { user_id: 78025 }, callback_id: 'actor-recovery-connect-wrong-actor', payload: `max_channel:${decision.id}:connect:0`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: 78025 } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: callbackBody })
+    const callbackInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice', status: 'accepted' }, orderBy: { receivedAt: 'desc' } })
+    await channel.processCallback(callbackInbox.id, crypto.decrypt({ ciphertext: callbackInbox.encryptedPayload, iv: callbackInbox.encryptionIv, authTag: callbackInbox.encryptionAuthTag }))
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    actorAdmin = false
+    const revokedBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841711500, callback: {
+      user: { user_id: Number(actor.subject) }, callback_id: 'actor-recovery-admin-revoked', payload: `max_channel:${decision.id}:connect:0`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: Number(actor.subject) } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: revokedBody })
+    const revokedInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice', status: 'accepted' }, orderBy: { receivedAt: 'desc' } })
+    await channel.processCallback(revokedInbox.id, crypto.decrypt({ ciphertext: revokedInbox.encryptedPayload, iv: revokedInbox.encryptionIv, authTag: revokedInbox.encryptionAuthTag }))
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    actorAdmin = true
+    const authorizedBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841712000, callback: {
+      user: { user_id: Number(actor.subject) }, callback_id: 'actor-recovery-connect', payload: `max_channel:${decision.id}:connect:0`,
+    }, message: { recipient: { chat_type: 'dialog', user_id: Number(actor.subject) } } })
+    await webhook.request('/webhooks/max', { method: 'POST', headers, body: authorizedBody })
+    const authorizedInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice', status: 'accepted' }, orderBy: { receivedAt: 'desc' } })
+    await channel.processCallback(authorizedInbox.id, crypto.decrypt({ ciphertext: authorizedInbox.encryptedPayload, iv: authorizedInbox.encryptionIv, authTag: authorizedInbox.encryptionAuthTag }))
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId } })).toMatchObject({ familyId: actor.familyId, state: 'connected', title: 'Recovered', version: 2 })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'completed' })
+  })
+
+  test('actor recovery accepts a family-null active channel and clears a dangling old pointer', async () => {
+    const first = await maxFamily('78026', 'full', false)
+    const activeTarget = -914n
+    await prisma.family.update({ where: { id: first.familyId }, data: { maxBackupChatId: activeTarget } })
+    await prisma.maxChannelBinding.create({ data: { chatId: activeTarget, familyId: null, state: 'connected', title: 'Existing unbound' } })
+    const second = await maxFamily('78027', 'full', false)
+    const dangling = -915n
+    await prisma.family.update({ where: { id: second.familyId }, data: { maxBackupChatId: dangling } })
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Recovery target' }), verifyActorAdmin: async () => true })
+    const finish = async (actor: typeof first, chatId: bigint) => {
+      const origin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId })).toBe(true)
+      const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+      const callbackInbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      await channel.processCallback(callbackInbox.id, { payload: `max_channel:${decision.id}:connect:0`, userId: actor.subject, callbackId: randomUUID() })
+      expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
+    }
+    await finish(first, activeTarget)
+    await finish(second, -916n)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: second.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: -916n })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: -916n } })).toMatchObject({ familyId: second.familyId, state: 'connected', version: 2 })
+  })
+
+  test('actor recovery callback rejects stale binding and Family state; healthy replacement needs a second admin check', async () => {
+    const actor = await maxFamilyWithMember('78028', 'full')
+    const target = -917n
+    const old = -918n
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: old } })
+    await prisma.maxChannelBinding.create({ data: { chatId: old, familyId: actor.familyId, state: 'connected', title: 'Healthy old' } })
+    const admin = { allowed: true }
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async (id) => ({ title: id === old ? 'Healthy old' : 'New channel' }), verifyActorAdmin: async (id) => id === target && admin.allowed })
+    const origin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId: target })).toBe(true)
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+    const post = async (action: 'connect' | 'replace', subject = actor.subject) => {
+      const inbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      await channel.processCallback(inbox.id, { payload: `max_channel:${decision.id}:${action}:0`, userId: subject, callbackId: randomUUID() })
+      return inbox
+    }
+    await post('connect')
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { phase: true } })).toEqual({ phase: 'confirm_actor_replacement' })
+    admin.allowed = false
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+    admin.allowed = true
+    await post('replace', '78029')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+    const replacementPointer = -922n
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: replacementPointer } })
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: replacementPointer })
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: old } })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: actor.familyId, userId: actor.userId } }, data: { role: 'viewer' } })
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: actor.familyId, userId: actor.userId } }, data: { role: 'full' } })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: actor.familyId, userId: actor.userId } }, data: { revokedAt: new Date() } })
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: actor.familyId, userId: actor.userId } }, data: { revokedAt: null } })
+    const identity = await prisma.externalIdentity.findUniqueOrThrow({ where: { provider_subject: { provider: 'max', subject: actor.subject } } })
+    const reassigned = await prisma.user.create({ data: { displayName: 'Reassigned callback identity' } })
+    await prisma.externalIdentity.update({ where: { id: identity.id }, data: { userId: reassigned.id } })
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+    await prisma.externalIdentity.update({ where: { id: identity.id }, data: { userId: actor.userId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: target }, data: { version: { increment: 1 } } })
+    await post('replace')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: old })
+
+    const successfulTarget = -929n
+    const successfulOrigin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    const successfulChannel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Replacement target' }), verifyActorAdmin: async () => true })
+    expect(await successfulChannel.offerActorChannelConnection({ inboxId: successfulOrigin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId: successfulTarget })).toBe(true)
+    const successfulDecision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: successfulOrigin.id } })
+    for (const action of ['connect', 'replace'] as const) {
+      const callbackInbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      await successfulChannel.processCallback(callbackInbox.id, { payload: `max_channel:${successfulDecision.id}:${action}:0`, userId: actor.subject, callbackId: randomUUID() })
+    }
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: old } })).toMatchObject({ familyId: actor.familyId, state: 'replaced', version: 2 })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: successfulTarget } })).toMatchObject({ familyId: actor.familyId, state: 'connected', version: 2 })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: successfulTarget })
+  })
+
+  test('actor recovery replacement proceeds after confirmed permanent loss of old channel access', async () => {
+    const actor = await maxFamilyWithMember('78037', 'full')
+    const target = -931n
+    const old = -932n
+    await prisma.family.update({ where: { id: actor.familyId }, data: { maxBackupChatId: old } })
+    await prisma.maxChannelBinding.create({ data: { chatId: old, familyId: actor.familyId, state: 'connected', title: 'Old channel' } })
+    let oldAccess = true
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async (id) => {
+      if (id === old && !oldAccess) throw new MaxChannelProviderError(403)
+      return { title: id === old ? 'Old channel' : 'New channel' }
+    }, verifyActorAdmin: async (id) => id === target })
+    const origin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId: target })).toBe(true)
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+    const post = async (action: 'connect' | 'replace') => {
+      const inbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      await channel.processCallback(inbox.id, { payload: `max_channel:${decision.id}:${action}:0`, userId: actor.subject, callbackId: randomUUID() })
+      return inbox
+    }
+    await post('connect')
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { phase: true } })).toEqual({ phase: 'confirm_actor_replacement' })
+    oldAccess = false
+    const replacementInbox = await post('replace')
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: old } })).toMatchObject({ state: 'replaced', version: 2 })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: target } })).toMatchObject({ familyId: actor.familyId, state: 'connected', version: 2 })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: target })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'completed' })
+    expect((await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: replacementInbox.id, kind: 'welcome' } } })).text).toContain('подключён к семье')
+  })
+
+  test('actor recovery offers require current Full membership and reject foreign channel history', async () => {
+    const viewer = await maxFamily('78030', 'viewer', false)
+    const active = await maxFamilyWithMember('78031', 'full')
+    const foreign = await maxFamily('78032', 'full', false)
+    const inactive = await maxFamilyWithMember('78034', 'full')
+    await prisma.family.update({ where: { id: inactive.familyId }, data: { status: 'deleting' } })
+    const foreignChannel = -919n
+    await prisma.maxChannelBinding.create({ data: { chatId: foreignChannel, familyId: foreign.familyId, state: 'connected', title: 'Foreign' } })
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Verified' }), verifyActorAdmin: async () => true })
+    const offer = async (actor: typeof viewer, familyId: string, chatId: bigint, actorUserId = actor.userId) => {
+      const inbox = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      return channel.offerActorChannelConnection({ inboxId: inbox.id, actorSubject: actor.subject, actorUserId, familyId, chatId })
+    }
+    expect(await offer(viewer, viewer.familyId, -920n)).toBe(false)
+    expect(await offer(inactive, inactive.familyId, -927n)).toBe(false)
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: active.familyId, userId: active.userId } }, data: { revokedAt: new Date() } })
+    expect(await offer(active, active.familyId, -921n)).toBe(false)
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: active.familyId, userId: active.userId } }, data: { revokedAt: null } })
+    expect(await offer(foreign, foreign.familyId, foreignChannel, randomUUID())).toBe(false)
+    // A foreign historical association cannot be reassigned even to a different active Full Family.
+    expect(await offer(active, active.familyId, foreignChannel)).toBe(false)
+  })
+
+  test('actor recovery callback does not bind after the bot loses write access', async () => {
+    const actor = await maxFamily('78035', 'full', false)
+    const target = -928n
+    let botCanWrite = true
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!botCanWrite) throw new MaxChannelProviderError(403)
+      return { title: 'Write revoked before callback' }
+    }, verifyActorAdmin: async () => true })
+    const origin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId: target })).toBe(true)
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+    const callback = async (callbackId: string) => {
+      const inbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      await channel.processCallback(inbox.id, { payload: `max_channel:${decision.id}:connect:0`, userId: actor.subject, callbackId })
+    }
+    botCanWrite = false
+    await callback('bot-write-lost')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'pending' })
+    botCanWrite = true
+    await callback('bot-write-restored')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: target })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'completed' })
+  })
+
+  test('actor recovery callback does not bind into a Family that became inactive after the offer', async () => {
+    const actor = await maxFamilyWithMember('78036', 'full')
+    const target = -930n
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Inactive callback family' }), verifyActorAdmin: async () => true })
+    const origin = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await channel.offerActorChannelConnection({ inboxId: origin.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId: target })).toBe(true)
+    const decision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: origin.id } })
+    await prisma.family.update({ where: { id: actor.familyId }, data: { status: 'deleting' } })
+    const callbackInbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    await channel.processCallback(callbackInbox.id, { payload: `max_channel:${decision.id}:connect:0`, userId: actor.subject, callbackId: 'inactive-family' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: target }, select: { familyId: true } })).toEqual({ familyId: null })
+  })
+
+  test('actor recovery cancel and expiry never change Family routing', async () => {
+    const actor = await maxFamily('78033', 'full', false)
+    const clock = { value: new Date('2026-10-01T10:00:00.000Z') }
+    const channel = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Expiring' }), verifyActorAdmin: async () => true, now: () => clock.value })
+    const offer = async (chatId: bigint) => {
+      const inbox = await prisma.maxInbox.create({ data: { eventKey: `actor-recovery-${randomUUID()}`, botId: 900n, eventKind: 'bot_added', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+      expect(await channel.offerActorChannelConnection({ inboxId: inbox.id, actorSubject: actor.subject, actorUserId: actor.userId, familyId: actor.familyId, chatId })).toBe(true)
+      return prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: inbox.id } })
+    }
+    const cancelled = await offer(-923n)
+    const cancelInbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    await channel.processCallback(cancelInbox.id, { payload: `max_channel:${cancelled.id}:cancel:0`, userId: actor.subject, callbackId: 'cancel' })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: cancelled.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
+    const expired = await offer(-924n)
+    clock.value = new Date(clock.value.getTime() + 16 * 60_000)
+    const expiredInbox = await prisma.maxInbox.create({ data: { eventKey: `actor-callback-${randomUUID()}`, botId: 900n, eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    await channel.processCallback(expiredInbox.id, { payload: `max_channel:${expired.id}:connect:0`, userId: actor.subject, callbackId: 'expired' })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: expired.id }, select: { status: true } })).toEqual({ status: 'pending' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
+  })
+
   test('multi-family selection that targets a healthy active channel transitions to explicit replacement', async () => {
     const actor = await maxMember('78102', 'full')
     const targetFamily = await maxFamilyForUser(actor.userId, 'Multi replacement family', actor.subject, 'full', false)
@@ -1062,7 +1571,7 @@ maybeDescribe('MAX durable capture', () => {
     const callbackInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice', status: 'accepted' }, orderBy: { receivedAt: 'desc' } })
     await channel.processCallback(callbackInbox.id, crypto.decrypt({ ciphertext: callbackInbox.encryptedPayload, iv: callbackInbox.encryptionIv, authTag: callbackInbox.encryptionAuthTag }))
     expect(await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: oldChatId })
-    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: oldDecision.id }, select: { status: true } })).toEqual({ status: 'pending' })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: oldDecision.id }, select: { status: true } })).toEqual({ status: 'cancelled' })
   })
 
   test('switching a channel creates a fresh runnable unsent backup task generation', async () => {

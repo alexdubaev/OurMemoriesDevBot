@@ -30,6 +30,7 @@ export function createMaxModule(options: {
   identity: MaxBotIdentity
   api?: MaxApiPort
   channelVerifier?: (chatId: bigint) => Promise<{ title: string | null }>
+  channelActorAdminVerifier?: (chatId: bigint, actorSubject: bigint) => Promise<boolean>
 }) {
   const env = options.runtime.env
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
@@ -38,6 +39,7 @@ export function createMaxModule(options: {
   const channelOnboarding = createMaxChannelOnboarding({
     prisma: options.runtime.prisma,
     verifyChannel: options.channelVerifier ?? (options.api ? async () => { throw new Error('MAX channel verification is unavailable') } : channelProvider.verifyChannel),
+    verifyActorAdmin: options.channelActorAdminVerifier ?? (options.api ? undefined : channelProvider.verifyActorAdmin),
   })
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
   const access = createPrismaFamilyAccess(options.runtime.prisma)
@@ -67,6 +69,7 @@ export function createMaxModule(options: {
     resolveDetailedInviteStart: createDetailedInviteStartResolver(options.runtime.prisma),
     processChannelLifecycle: channelOnboarding.processLifecycle,
     processChannelCallback: channelOnboarding.processCallback,
+    offerActorChannelConnection: channelOnboarding.offerActorChannelConnection,
   })
   const requireAuth = createAuthModule({ db: options.runtime.prisma, emailDelivery: options.runtime.emailDelivery ?? disabledEmailDelivery, env }).requireAuth
   const channelStatusRoutes = new Hono<AuthHttpEnv>()
@@ -97,7 +100,8 @@ export function createMaxTasks(runtime: BackendRuntime) {
   }
   const api = createMaxApi(env.MAX_BOT_TOKEN)
   const channelProvider = createMaxChannelProvider(env.MAX_BOT_TOKEN)
-  const channelOnboarding = createMaxChannelOnboarding({ prisma: runtime.prisma, verifyChannel: channelProvider.verifyChannel })
+  const channelOnboarding = createMaxChannelOnboarding({ prisma: runtime.prisma, verifyChannel: channelProvider.verifyChannel,
+    verifyActorAdmin: channelProvider.verifyActorAdmin })
   const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
   const processTask = createMaxTaskProcessor({
     runtime,
@@ -108,6 +112,7 @@ export function createMaxTasks(runtime: BackendRuntime) {
     resolveDetailedInviteStart: createDetailedInviteStartResolver(runtime.prisma),
     processChannelLifecycle: channelOnboarding.processLifecycle,
     processChannelCallback: channelOnboarding.processCallback,
+    offerActorChannelConnection: channelOnboarding.offerActorChannelConnection,
   })
   const processBackupMedia = createMaxMemoryBackupProcessor({
     repository: createPrismaMaxMemoryBackupRepository(runtime.prisma),

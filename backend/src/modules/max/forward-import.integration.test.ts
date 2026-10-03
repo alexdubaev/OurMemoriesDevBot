@@ -17,6 +17,10 @@ import { normalizeMaxUpdate } from './transport/update-mapping'
 import { pngFixture } from '../../storage/storage-contract'
 import { MaxProviderError } from './infrastructure/max-api'
 import { chooseMaxTarget } from './infrastructure/source-target'
+import { createMaxChannelOnboarding } from './application/channel-onboarding'
+import { createMaxResponseDelivery } from './infrastructure/deliver-response'
+import { choicePayload } from '../../bot-family-target'
+import { MaxChannelProviderError } from './application/channel-protocol'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -50,10 +54,12 @@ maybeDescribe('MAX forward import integration', () => {
   })
   afterAll(async () => { await prisma.$disconnect() })
 
-  test('imports the adapted synthetic forwarded video using the authenticated original and preserves its caption and date', async () => {
+  test('recovers an unbound channel through consent before importing the forwarded video once', async () => {
     const fixture = await familyFixture('7001', 'forward-video')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: null } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { familyId: null, state: 'connected' } })
     const outerDate = Date.parse('2026-10-02T10:00:00.000Z')
-    const originalDate = Date.parse('2025-04-03T12:13:14.000Z')
+    const originalDate = Date.parse('2026-05-16T12:13:14.000Z')
     const original: MaxResolvedMessage = {
       messageId: 'original-mid-synthetic', senderId: '0', recipientId: channelId.toString(), recipientType: 'channel',
       text: 'Synthetic forwarded video caption', timestamp: originalDate,
@@ -80,15 +86,38 @@ maybeDescribe('MAX forward import integration', () => {
         { url: 'https://maxvd123.okcdn.ru/synthetic.mp4', width: 640, height: 360, contentLength: 4 },
       ] }
     } })
-    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })
+    const onboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Synthetic channel' }), verifyActorAdmin: async () => true })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, offerActorChannelConnection: onboarding.offerActorChannelConnection,
+      processChannelCallback: onboarding.processCallback })
     await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
 
-    const source = await prisma.maxSource.findUniqueOrThrow({ where: { id: sourceBefore.id } })
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: sourceBefore.id } })).toMatchObject({ status: 'denied' })
+    const decision = await prisma.maxChannelDecision.findFirstOrThrow({ where: { originInboxId: accepted.inboxId } })
+    expect(decision.actorSubject).toBe('7001')
+    const sent: unknown[] = []
+    const deliverResponse = createMaxResponseDelivery({ prisma, api: apiFor(async () => original, { sendMessage: async (input) => { sent.push(input) } }) })
+    const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, channelDecisionId: decision.id } })
+    await expect(deliverResponse({ responseId: response.id })).resolves.toBe('done')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ buttons: [
+      { type: 'callback', payload: `max_channel:${decision.id}:connect:0` },
+      { type: 'callback', payload: `max_channel:${decision.id}:cancel:0` },
+    ] })
+    const callbackInbox = await prisma.maxInbox.create({ data: { eventKey: `recovery-callback-${decision.id}`, botId: 900n,
+      eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await onboarding.processCallback(callbackInbox.id, { userId: '7001', callbackId: 'callback', payload: `max_channel:${decision.id}:connect:0` })).toBe(true)
+
+    const retry = await accept(forwardEvent('7001', 'outer-mid-retry', 'original-mid-synthetic'))
+    await expect(processor({ inboxId: retry.inboxId })).resolves.toBe('done')
+    const duplicate = await accept(forwardEvent('7001', 'outer-mid-duplicate-retry', 'original-mid-synthetic'))
+    await expect(processor({ inboxId: duplicate.inboxId })).resolves.toBe('done')
+
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: retry.inboxId } })
     const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
     const reference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })
-    expect(messageLookups).toEqual(['original-mid-synthetic'])
+    expect(messageLookups).toEqual(['original-mid-synthetic', 'original-mid-synthetic', 'original-mid-synthetic'])
     expect(videoTokens).toEqual(['original-rotating-token'])
-    expect(source).toMatchObject({ status: 'published', senderSubject: '7001', messageId: 'outer-mid-synthetic',
+    expect(source).toMatchObject({ status: 'published', senderSubject: '7001', messageId: 'outer-mid-retry',
       originalMessageId: 'original-mid-synthetic', originalChannelId: channelId, familyId: fixture.familyId })
     expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, childId: fixture.childId,
       body: 'Synthetic forwarded video caption', kind: 'video', occurredAt: new Date(originalDate), sourcePublishedAt: new Date(originalDate) })
@@ -96,7 +125,7 @@ maybeDescribe('MAX forward import integration', () => {
     expect(await prisma.maxMemoryBackup.count()).toBe(0)
     expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
     expect(await prisma.maxSourceAttachment.count()).toBe(0)
-    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'saved' } })).toBe(1)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: retry.inboxId, kind: 'saved' } })).toBe(1)
   })
 
   test('serializes concurrent different actors importing one original to one Memory', async () => {
@@ -412,6 +441,183 @@ maybeDescribe('MAX forward import integration', () => {
     expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
   })
 
+  test('keeps the already-bound forwarded video import path working', async () => {
+    const fixture = await familyFixture('7005', 'forward-bound-video')
+    const originalDate = Date.parse('2026-05-16T12:13:14.000Z')
+    const original: MaxResolvedMessage = { messageId: 'bound-video-original', senderId: '0', recipientId: channelId.toString(),
+      recipientType: 'channel', text: 'Bound video caption', timestamp: originalDate,
+      attachments: [{ kind: 'video', providerAttachmentId: 'bound-456', currentToken: 'bound-token', inboundDurationSeconds: 12, width: 640, height: 360 }] }
+    const accepted = await accept(forwardEvent('7005', 'bound-video-forward', 'bound-video-original'))
+    const api = apiFor(async () => original, { getVideo: async () => ({ width: 640, height: 360, durationMs: 12_000, renditions: [
+      { url: 'https://maxvd123.okcdn.ru/bound.mp4', width: 640, height: 360, contentLength: 4 },
+    ] }) })
+    await expect(createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    expect(source).toMatchObject({ status: 'published', originalMessageId: 'bound-video-original', originalChannelId: channelId })
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate) } })).toBe(1)
+  })
+
+  test('offers recovery only after a multi-family sender chooses a family and preserves the source choice', async () => {
+    const fixture = await familyFixture('7020', 'forward-multi-family')
+    const secondFamily = await prisma.$transaction(async (tx) => {
+      const owner = await tx.user.create({ data: { displayName: 'Synthetic second family owner' } })
+      const family = await tx.family.create({ data: { ownerUserId: owner.id, name: 'Synthetic selected family', timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: family.id, userId: owner.id, role: 'full' } })
+      await tx.familyMember.create({ data: { familyId: family.id, userId: fixture.userId, role: 'full' } })
+      await tx.child.create({ data: { familyId: family.id, displayName: 'Selected child' } })
+      return family
+    })
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: null } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { familyId: null, state: 'connected' } })
+    const accepted = await accept(forwardEvent('7020', 'outer-multi-family-forward', 'multi-family-original'))
+    const onboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Synthetic channel' }), verifyActorAdmin: async () => true })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto,
+      api: apiFor(async (messageId) => originalText(messageId, channelId, Date.parse('2026-05-16T12:13:14.000Z'), 'Multi-family original')),
+      offerActorChannelConnection: onboarding.offerActorChannelConnection, processChannelCallback: onboarding.processCallback })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    let source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    expect(source.familyId).toBeNull()
+    expect(await prisma.maxChannelDecision.count()).toBe(0)
+    const candidates = source.choiceCandidates as Array<{ familyId: string }>
+    const selectedIndex = candidates.findIndex((candidate) => candidate.familyId === secondFamily.id)
+    expect(selectedIndex).toBeGreaterThanOrEqual(0)
+    const postChoice = async (userId: string, callbackId: string) => {
+      const callback = await accept({ kind: 'family_choice', callbackId, payload: choicePayload(source.id, selectedIndex), userId, occurredAt: new Date().toISOString() })
+      await expect(processor({ inboxId: callback.inboxId })).resolves.toBe('done')
+    }
+    await postChoice('7999', 'wrong-family-choice-actor')
+    source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    expect(source.familyId).toBeNull()
+    expect(await prisma.maxChannelDecision.count()).toBe(0)
+    await postChoice('7020', 'authorized-family-choice-actor')
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+    const sourceChoice = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: accepted.inboxId, kind: 'family_choice' } } })
+    const decision = await prisma.maxChannelDecision.findFirstOrThrow({ where: { originInboxId: accepted.inboxId } })
+    const recovery = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, channelDecisionId: decision.id } })
+    expect(source).toMatchObject({ familyId: secondFamily.id, childId: expect.any(String) })
+    expect(decision).toMatchObject({ phase: 'confirm_actor_connection', selectedFamilyId: secondFamily.id, actorSubject: '7020' })
+    expect(recovery.kind).toBe('welcome')
+    expect(sourceChoice.kind).toBe('family_choice')
+    expect(sourceChoice.id).not.toBe(recovery.id)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).toMatchObject({ maxBackupChatId: null })
+    const sent: unknown[] = []
+    await expect(createMaxResponseDelivery({ prisma, api: apiFor(async () => originalText('unused', channelId, Date.now(), ''), {
+      sendMessage: async (input) => { sent.push(input) },
+    }) })({ responseId: recovery.id })).resolves.toBe('done')
+    expect(sent[0]).toMatchObject({ buttons: [
+      { type: 'callback', payload: `max_channel:${decision.id}:connect:0` },
+      { type: 'callback', payload: `max_channel:${decision.id}:cancel:0` },
+    ] })
+    const recoveryCallback = await accept({ kind: 'family_choice', callbackId: 'selected-family-connect', userId: '7020',
+      payload: `max_channel:${decision.id}:connect:0`, occurredAt: new Date().toISOString() })
+    await expect(processor({ inboxId: recoveryCallback.inboxId })).resolves.toBe('done')
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: secondFamily.id } })).toMatchObject({ maxBackupChatId: channelId })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).toMatchObject({ maxBackupChatId: null })
+  })
+
+  test('fails closed when the verified actor is not an administrator of the forwarded channel', async () => {
+    const fixture = await familyFixture('7025', 'forward-not-admin')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: null } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { familyId: null, state: 'connected' } })
+    const accepted = await accept(forwardEvent('7025', 'outer-not-admin-forward', 'not-admin-original'))
+    const onboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Synthetic channel' }), verifyActorAdmin: async () => false })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto,
+      api: apiFor(async (messageId) => originalText(messageId, channelId, Date.parse('2026-05-16T12:13:14.000Z'), 'No authorization')),
+      offerActorChannelConnection: onboarding.offerActorChannelConnection })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
+    expect(await prisma.maxChannelDecision.count()).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+
+    const viewer = await prisma.user.create({ data: { displayName: 'Synthetic ordinary channel member' } })
+    await prisma.externalIdentity.create({ data: { userId: viewer.id, provider: 'max', subject: '7026' } })
+    await prisma.familyMember.create({ data: { familyId: fixture.familyId, userId: viewer.id, role: 'viewer' } })
+    const viewerForward = await accept(forwardEvent('7026', 'outer-viewer-forward', 'viewer-original'))
+    let adminChecks = 0
+    const viewerOnboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Synthetic channel' }),
+      verifyActorAdmin: async () => { adminChecks += 1; return false } })
+    const viewerProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto,
+      api: apiFor(async (messageId) => originalText(messageId, channelId, Date.parse('2026-05-16T12:13:14.000Z'), 'Viewer cannot connect')),
+      offerActorChannelConnection: viewerOnboarding.offerActorChannelConnection })
+    await expect(viewerProcessor({ inboxId: viewerForward.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: viewerForward.inboxId } })).toMatchObject({ status: 'denied' })
+    expect(adminChecks).toBe(0)
+    expect(await prisma.maxChannelDecision.count()).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+  })
+
+  test('binds from trusted bot-added provenance after permissions change before importing a forwarded video', async () => {
+    const fixture = await familyFixture('7030', 'forward-lifecycle-recovery')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: null } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { familyId: null } })
+    const originalDate = Date.parse('2026-05-16T12:13:14.000Z')
+    const original: MaxResolvedMessage = { messageId: 'lifecycle-video-original', senderId: '0', recipientId: channelId.toString(),
+      recipientType: 'channel', text: 'Lifecycle recovered video', timestamp: originalDate,
+      attachments: [{ kind: 'video', providerAttachmentId: 'lifecycle-video-file', currentToken: 'lifecycle-video-token', inboundDurationSeconds: 12, width: 640, height: 360 }] }
+    let writable = false
+    const onboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => {
+      if (!writable) throw new MaxChannelProviderError(403)
+      return { title: 'Synthetic channel' }
+    } })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto,
+      api: apiFor(async () => original, { getVideo: async () => ({ width: 640, height: 360, durationMs: 12_000, renditions: [
+        { url: 'https://maxvd123.okcdn.ru/lifecycle.mp4', width: 640, height: 360, contentLength: 4 },
+      ] }) }), processChannelLifecycle: onboarding.processLifecycle })
+    const baseTimestamp = Date.now()
+    const botAdded = await accept({ kind: 'bot_added', rawPayload: `{"chat_id":${channelId},"timestamp":${baseTimestamp},"user":{"user_id":7030}}` })
+    await expect(processor({ inboxId: botAdded.inboxId })).resolves.toBe('done')
+    const provenance = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: botAdded.inboxId } })
+    expect(provenance).toMatchObject({ actorSubject: '7030', actorUserId: fixture.userId,
+      candidateFamilyIds: [fixture.familyId], phase: 'await_permissions', status: 'pending' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).toMatchObject({ maxBackupChatId: null })
+
+    writable = true
+    const permissions = await accept({ kind: 'bot_admin_permissions_changed', rawPayload: `{"chat_id":${channelId},"timestamp":${baseTimestamp + 1}}` })
+    await expect(processor({ inboxId: permissions.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: provenance.id } })).toMatchObject({ status: 'completed' })
+    expect(await prisma.maxChannelBinding.findUniqueOrThrow({ where: { chatId: channelId } })).toMatchObject({ familyId: fixture.familyId, state: 'connected' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).toMatchObject({ maxBackupChatId: channelId })
+    const connectedResponse = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: permissions.inboxId } })
+    expect(connectedResponse.text).toContain('подключён')
+
+    const forward = await accept(forwardEvent('7030', 'outer-lifecycle-video-forward', 'lifecycle-video-original'))
+    await expect(processor({ inboxId: forward.inboxId })).resolves.toBe('done')
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: forward.inboxId } })
+    expect(source).toMatchObject({ status: 'published', originalMessageId: 'lifecycle-video-original', originalChannelId: channelId, familyId: fixture.familyId })
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate), body: 'Lifecycle recovered video' } })).toBe(1)
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
+  })
+
+  test('offers explicit channel recovery for a verified original whose channel is not bound', async () => {
+    const fixture = await familyFixture('7014', 'forward-recovery')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: null } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { familyId: null, state: 'connected' } })
+    const accepted = await accept(forwardEvent('7014', 'outer-forward-recovery', 'unbound-original'))
+    const onboarding = createMaxChannelOnboarding({ prisma, verifyChannel: async () => ({ title: 'Synthetic channel' }), verifyActorAdmin: async () => true })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) =>
+      originalText(messageId, channelId, Date.parse('2025-05-06T07:08:09.000Z'), 'Synthetic original')),
+      offerActorChannelConnection: onboarding.offerActorChannelConnection })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'denied' } })).toBe(0)
+    const decision = await prisma.maxChannelDecision.findFirstOrThrow({ where: { originInboxId: accepted.inboxId } })
+    expect(decision).toMatchObject({ phase: 'confirm_actor_connection', actorSubject: '7014', selectedFamilyId: fixture.familyId, status: 'pending' })
+    expect(await prisma.memory.count()).toBe(0)
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: accepted.inboxId, channelDecisionId: decision.id } })
+    expect(response.buttons).toEqual([
+      { text: 'Подключить', payload: `max_channel:${decision.id}:connect:0` },
+      { text: 'Отмена', payload: `max_channel:${decision.id}:cancel:0` },
+    ])
+    const callbackInbox = await prisma.maxInbox.create({ data: { eventKey: `recovery-callback-${decision.id}`, botId: 900n,
+      eventKind: 'family_choice', encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    expect(await onboarding.processCallback(callbackInbox.id, { userId: '7014', callbackId: 'callback', payload: `max_channel:${decision.id}:connect:0` })).toBe(true)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId } })).toMatchObject({ maxBackupChatId: channelId })
+    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id } })).toMatchObject({ status: 'completed' })
+  })
+
   async function familyFixture(subject: string, label: string) {
     const user = await prisma.user.create({ data: { displayName: `Synthetic ${label}` } })
     await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
@@ -440,7 +646,7 @@ function forwardedUpdate(timestamp: number) {
   return { update_type: 'message_created', timestamp, message: {
     sender: { user_id: 7001 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
     body: { mid: 'outer-mid-synthetic', seq: 21, text: 'Outer comment must not publish', attachments: [] },
-    link: { type: 'forward', chat_id: -123456, message: { mid: 'original-mid-synthetic', seq: 7,
+    link: { type: 'forward', chat_id: -123456, message: { mid: 'original-mid-synthetic', seq: 7, sender: { user_id: 9999 },
       text: 'Nested untrusted caption', attachments: [{ type: 'video', payload: { id: 456, token: 'nested-token', url: 'https://video.example.invalid/nested' }, duration: 29 }] } },
   } }
 }
