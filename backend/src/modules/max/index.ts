@@ -26,6 +26,8 @@ import { createMaxVideoPosterProcessor, enqueueMaxVideoPoster } from './infrastr
 import { Hono } from 'hono'
 import type { AuthHttpEnv } from '../auth'
 
+export { createMaxVideoPlayback }
+
 export function createMaxModule(options: {
   runtime: BackendRuntime
   identity: MaxBotIdentity

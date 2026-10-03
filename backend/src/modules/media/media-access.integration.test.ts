@@ -13,7 +13,7 @@ import { createPrivateStorage } from '../../storage'
 import { runBackgroundJob } from '../../jobs'
 import { pngFixture } from '../../storage/storage-contract'
 import { signAccessToken } from '../auth'
-import { createMaxVideoPlayback } from '../max/infrastructure/video-playback'
+import { createMaxVideoPlayback } from '../max'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
