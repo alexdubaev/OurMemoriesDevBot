@@ -10,6 +10,7 @@ import postcss from 'postcss'
 import { FeedPage, MaxVideoPreview, PhotoImage, TelegramVideo, TelegramVideoPoster } from '../src/features/feed/FeedPage'
 import { selectPendingPrivateVideoIds } from '../src/features/feed/pending-video-selection'
 import { loadMaxVideoSourceOnce } from '../src/features/feed/max-video-source'
+import { requestVideoStageFullscreen, supportsVideoStageFullscreen } from '../src/features/feed/video-fullscreen'
 import { maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from '../src/features/feed/max-video-readiness'
 import { refreshFromTop } from '../src/features/feed/live-refresh'
 import { composerModeForAdd, memoryActionNames } from '../src/features/feed/composer-routing'
@@ -222,14 +223,38 @@ test('private-video loading stays compact while error feedback layers transparen
   expect(duration['z-index']).toBe('4')
 })
 
-test('private video controls use accessible icons and keep the timeline without text buttons', () => {
+test('video controls have no app gradient and both video stages use the canonical dark contain background', () => {
+  const css = readFileSync(resolve(import.meta.dir, '../src/features/feed/presentation/memoly-feed.css'), 'utf8')
+  const rules: postcss.Rule[] = []
+  postcss.parse(css).walkRules((rule) => rules.push(rule))
+  const stageBackgrounds = [
+    '[data-memoly-feed] .memoly-private-video-v2-frame',
+    '[data-memoly-feed] .memoly-video-viewer-v2-frame',
+  ].map((selector) => Object.fromEntries(rules.filter((rule) => rule.selector === selector).flatMap((rule) => rule.nodes
+    ?.filter((node): node is postcss.Declaration => node.type === 'decl' && node.prop === 'background')
+    .map(({ prop, value }) => [prop, value]) ?? [])))
+
+  expect(css).not.toMatch(/\.memoly-private-video-v2-controls[^\n]*linear-gradient/)
+  expect(css).not.toMatch(/\.memory-media-slot\.video-wrap \.memoly-private-video-v2-controls[^\n]*linear-gradient/)
+  expect(stageBackgrounds[0]?.background).toBe('var(--memoly-video-stage)')
+  expect(stageBackgrounds[1]?.background).toBe('var(--memoly-video-stage)')
+  expect(css).toContain('--memoly-video-stage: #151315')
+})
+
+test('video fullscreen rejection is contained and unsupported fullscreen is disabled by capability detection', async () => {
+  const stage = { requestFullscreen: async () => { throw new Error('fullscreen denied') } } as unknown as HTMLElement
+  await expect(requestVideoStageFullscreen(stage, null)).resolves.toBeUndefined()
+  const webkitVideo = { webkitEnterFullscreen: () => { throw new Error('native fullscreen denied') } } as unknown as HTMLVideoElement
+  await expect(requestVideoStageFullscreen(null, webkitVideo)).resolves.toBeUndefined()
+  expect(supportsVideoStageFullscreen()).toBe(typeof HTMLElement !== 'undefined' && 'requestFullscreen' in HTMLElement.prototype && (typeof document === 'undefined' || document.fullscreenEnabled))
+})
+
+test('private video preview has only the central play action and no playback panel', () => {
   const markup = renderFeed(feedClientWith([videoMemory]))
   expect(markup).toContain('aria-label="Воспроизвести видео"')
-  expect(markup).toContain('aria-label="На весь экран"')
-  expect(markup).toContain('aria-label="Позиция видео"')
-  expect(markup).not.toContain('>Смотреть</button>')
-  expect(markup).not.toContain('>Полный экран</button>')
-  expect(markup).not.toContain('>Открыть<')
+  expect(markup).not.toContain('aria-label="На весь экран"')
+  expect(markup).not.toContain('aria-label="Позиция видео"')
+  expect(markup).not.toContain('data-slot="video-playback-controls"')
 })
 
 test('portrait Feed stages are not height-clipped and video seek targets remain touch-sized', () => {
@@ -242,8 +267,8 @@ test('portrait Feed stages are not height-clipped and video seek targets remain 
   expect(soloVideoStage?.nodes?.some((node) => node.type === 'decl' && node.prop === 'aspect-ratio' && node.value === '4 / 5')).toBe(true)
   expect(feedViewport?.nodes?.some((node) => node.type === 'decl' && node.prop === 'max-height')).toBe(false)
   expect(soloVideoStage?.nodes?.some((node) => node.type === 'decl' && node.prop === 'max-height')).toBe(false)
-  const seekRules = rules.filter((rule) => rule.selector.includes('.memoly-private-video-v2') && rule.selector.includes("input[type='range']"))
-  expect(seekRules.length).toBeGreaterThanOrEqual(2)
+  const seekRules = rules.filter((rule) => rule.selector.includes('.memoly-video-playback-controls') && rule.selector.includes("input[type='range']"))
+  expect(seekRules.length).toBeGreaterThanOrEqual(1)
   expect(seekRules.every((rule) => rule.nodes?.some((node) => node.type === 'decl' && node.prop === 'min-height' && Number.parseFloat(node.value) >= 44))).toBe(true)
 })
 
@@ -382,7 +407,7 @@ test('failed and unusable ready private videos retain a visible error', () => {
   }
 })
 
-test('a failed private video keeps its arrived poster, readable error, duration, and disabled playback', () => {
+test('a failed private video keeps its arrived poster and readable error without stale playback controls', () => {
   const failedWithPoster = { ...videoMemory, attachments: [{ ...videoMemory.attachments[0]!, renditionStatus: 'failed' as const, playbackPath: null }] }
   const markup = renderFeed(feedClientWith([failedWithPoster]))
   expect(markup).toContain('data-video-viewer-state="error"')
@@ -390,7 +415,7 @@ test('a failed private video keeps its arrived poster, readable error, duration,
   expect(markup).toContain('Не удалось загрузить видео')
   expect(markup).not.toContain('class="memoly-private-video-v2-play"')
   expect(markup).toContain('0:24')
-  expect(markup).toContain('disabled=""')
+  expect(markup).not.toContain('data-slot="video-playback-controls"')
 })
 
 test('a next-page error keeps already displayed memories on screen', () => {
@@ -841,7 +866,7 @@ test('a private feed photo preserves portrait, landscape, and square proportions
   }
 })
 
-test('a ready MAX video preview embeds native playback without a persistent MAX action', () => {
+test('a ready MAX video preview starts with poster controls and no inline native controls', () => {
   for (const [width, height] of [[720, 1_080], [1_920, 1_080], [1_080, 1_080]] as const) {
     const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
       durationMs: 24_000,
@@ -852,13 +877,15 @@ test('a ready MAX video preview embeds native playback without a persistent MAX 
     }))
 
     expect(markup).toContain('<video')
-    expect(markup).toContain('controls=""')
+    expect(markup).not.toContain('controls=""')
     expect(markup).toContain('preload="none"')
     expect(markup).toContain('playsInline=""')
     expect(markup).not.toContain('#t=0.001')
     expect(markup).toContain(`aspect-ratio:${width} / ${height}`)
     expect(markup).toContain('object-contain')
     expect(markup).toContain('Смотреть видео')
+    expect(markup).toContain('0:24')
+    expect(markup).not.toContain('data-slot="video-playback-controls"')
     expect(markup).toContain('data-video-viewer-state="ready"')
     expect(markup).not.toContain('Открыть в MAX')
     expect(markup).not.toContain('Открыть видео в memoLy')
@@ -867,7 +894,7 @@ test('a ready MAX video preview embeds native playback without a persistent MAX 
   }
 })
 
-test('a MAX poster stays behind native controls and the visible play affordance', () => {
+test('a MAX poster stays behind one preview play affordance and duration', () => {
   const markup = renderToStaticMarkup(createElement(MaxVideoPreview, {
     durationMs: 24_000,
     height: 720,
@@ -881,10 +908,12 @@ test('a MAX poster stays behind native controls and the visible play affordance'
   const poster = markup.slice(markup.lastIndexOf('<img'))
 
   expect(video).toContain('z-10')
-  expect(video).toContain('controls=""')
+  expect(video).not.toContain('controls=""')
   expect(playButton).toContain('aria-label="Смотреть видео"')
   expect(playButton).toContain('z-20')
   expect(poster).toContain('z-0')
+  expect(markup).toContain('0:24')
+  expect(markup).not.toContain('data-slot="video-playback-controls"')
 })
 
 test('MAX readiness URL uses the validated playback reference, not attachment identity', () => {
