@@ -1,16 +1,12 @@
 import { createHash } from 'node:crypto'
-import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoReadiness } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoPosterReadiness, type MaxVideoReadiness } from '@web-app-demo/contracts'
 
 import type { BackendRuntime } from '../../../runtime'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { MediaFailure } from '../../media'
 import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
 import { MaxProviderError } from './max-api'
-import { createMaxMediaDownload } from './media-download'
 import { isAllowedMaxVideoUrl, selectMaxVideoRendition } from './video-rendition'
-
-const maxPosterBytes = 2 * 1024 * 1024
-const posterMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
@@ -74,6 +70,24 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
     async readiness(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
       return (await resolve(scope, referenceId, signal)).readiness
     },
+    async posterReadiness(scope: FamilyScope, referenceId: string): Promise<MaxVideoPosterReadiness> {
+      await familyAccess.requireMember(scope)
+      const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: {
+        id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
+      }, select: { id: true, familyId: true, thumbnailMediaId: true, thumbnailMedia: { select: {
+        id: true, originalStatus: true, deletedAt: true,
+        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+      } } } })
+      if (!reference) throw new MediaFailure('not_found', 'Медиа не найдено')
+      const display = reference.thumbnailMedia?.variants[0]
+      if (reference.thumbnailMedia && reference.thumbnailMedia.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && display) {
+        return { state: 'ready', posterPath: `/api/v1/families/${scope.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display` }
+      }
+      const task = await options.runtime.prisma.taskOutbox.findUnique({ where: {
+        type_dedupeKey: { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}` },
+      }, select: { status: true } })
+      return task?.status === 'pending' || task?.status === 'processing' ? { state: 'pending' } : { state: 'failed' }
+    },
     async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
       const result = await resolve(scope, referenceId, signal)
       if (result.readiness.state === 'processing') throw new MediaFailure('video_processing', 'Видео обрабатывается')
@@ -82,17 +96,24 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       return fetchCdnVideo(result.url!, rangeHeader, method, maxBytes, signal)
     },
     async poster(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
-      const result = await resolve(scope, referenceId, signal)
-      if (result.readiness.state !== 'ready' || !result.thumbnailUrl) return null
-      const image = await createMaxMediaDownload()(result.thumbnailUrl, maxPosterBytes, signal)
-      const contentType = image.contentType?.split(';', 1)[0]?.trim().toLowerCase()
-      if (!contentType || !posterMimeTypes.has(contentType)) throw new MediaFailure('unsupported_media', 'Превью видео недоступно')
-      const bytes = image.bytes
+      void signal
+      await familyAccess.requireMember(scope)
+      const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: {
+        id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
+      }, select: { id: true, thumbnailMedia: { select: { id: true, familyId: true, originalStatus: true, deletedAt: true,
+        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+      } } } })
+      const display = reference?.thumbnailMedia?.variants[0]
+      if (!reference?.thumbnailMedia || reference.thumbnailMedia.familyId !== scope.familyId || reference.thumbnailMedia.deletedAt !== null ||
+          reference.thumbnailMedia.originalStatus !== 'stored' || !display) return null
+      const stored = await options.runtime.privateStorage.storage.readObject({ key: display.objectKey })
+      if (!stored) return null
+      const bytes = new Uint8Array(await new Response(stored.body).arrayBuffer())
       return {
         body: bytes,
-        contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp',
+        contentType: display.mime as 'image/jpeg' | 'image/png' | 'image/webp',
         contentLength: bytes.byteLength,
-        etag: `"${createHash('sha256').update(bytes).digest('hex')}"`,
+        etag: `"${display.sha256}"`,
       }
     },
   }

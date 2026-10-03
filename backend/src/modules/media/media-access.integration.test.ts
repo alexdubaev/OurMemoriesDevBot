@@ -13,6 +13,7 @@ import { createPrivateStorage } from '../../storage'
 import { runBackgroundJob } from '../../jobs'
 import { pngFixture } from '../../storage/storage-contract'
 import { signAccessToken } from '../auth'
+import { createMaxVideoPlayback } from '../max'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -444,6 +445,59 @@ maybeDescribe('Private media API', () => {
     expect((await app.request(viewerPath, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
   })
 
+  test('MAX poster readiness is authenticated, private, and follows pending, ready, and deleted state', async () => {
+    const owner = await admittedUser('Poster owner', '43510')
+    const viewer = await admittedUser('Poster viewer', '43511')
+    const outsider = await admittedUser('Poster outsider', '43512')
+    const family = await createFamily(owner.token, 'Poster family')
+    const foreignFamily = await createFamily(outsider.token, 'Other poster family')
+    await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const created = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
+      kind: 'note', childId: family.body.child.id, body: 'Synthetic poster readiness memory', occurredAt: new Date().toISOString(),
+    }, randomUUID())
+    expect(created.response.status).toBe(201)
+
+    const inbox = await prisma.maxInbox.create({ data: { eventKey: `poster-readiness-${randomUUID()}`, botId: 900n,
+      eventKind: 'message_created', encryptedPayload: Buffer.from([1]), encryptionIv: Buffer.from([2]), encryptionAuthTag: Buffer.from([3]) } })
+    const source = await prisma.maxSource.create({ data: { inboxId: inbox.id, botId: 900n, senderSubject: '43510', recipientId: 900n,
+      messageId: `poster-message-${randomUUID()}`, status: 'published', plannedMemoryId: randomUUID(), memoryId: created.body.id,
+      userId: owner.userId, familyId: family.body.family.id, childId: family.body.child.id } })
+    const reference = await prisma.maxVideoReference.create({ data: { sourceId: source.id, memoryId: created.body.id,
+      familyId: family.body.family.id, attachmentPosition: 0, providerAttachmentId: 'synthetic-provider-video' } })
+    await prisma.taskOutbox.create({ data: { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}`, payload: { referenceId: reference.id } } })
+
+    const playback = createMaxVideoPlayback({ runtime: { env, prisma, privateStorage } as never, api: {} as never })
+    const posterApp = createApp({ env, prisma, privateStorage, maxVideoPlayback: playback })
+    const path = `/api/v1/families/${family.body.family.id}/media/max-videos/${reference.id}/poster-readiness`
+    expect((await posterApp.request(path)).status).toBe(401)
+    const pending = await posterApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })
+    expect(pending.status).toBe(200)
+    expect(pending.headers.get('cache-control')).toBe('private, no-store')
+    expect(await pending.json()).toEqual({ state: 'pending' })
+    expect((await posterApp.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })).status).toBe(200)
+    expect((await posterApp.request(path, { headers: { Authorization: `Bearer ${outsider.token}` } })).status).toBe(404)
+    expect((await posterApp.request(path.replace(family.body.family.id, foreignFamily.body.family.id), {
+      headers: { Authorization: `Bearer ${outsider.token}` },
+    })).status).toBe(404)
+
+    const assetId = randomUUID()
+    await prisma.mediaAsset.create({ data: { id: assetId, familyId: family.body.family.id, uploaderId: owner.userId,
+      sourceKind: 'max', purpose: 'memory', mediaKind: 'photo', originalKey: `media-originals/${assetId}`,
+      declaredMime: 'image/png', verifiedMime: 'image/png', sha256: 'a'.repeat(64), byteSize: BigInt(pngFixture.byteLength),
+      width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready' } })
+    await prisma.mediaVariant.create({ data: { familyId: family.body.family.id, mediaId: assetId, variant: 'display',
+      objectKey: `media-display/${assetId}`, sha256: 'b'.repeat(64), byteSize: BigInt(pngFixture.byteLength),
+      mime: 'image/webp', width: 1, height: 1 } })
+    await prisma.maxVideoReference.update({ where: { id: reference.id }, data: { thumbnailMediaId: assetId } })
+    const ready = await posterApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })
+    expect(ready.status).toBe(200)
+    expect(ready.headers.get('cache-control')).toBe('private, no-store')
+    expect(await ready.json()).toEqual({ state: 'ready', posterPath: `/api/v1/families/${family.body.family.id}/media/${assetId}/content?variant=display` })
+
+    await prisma.memory.update({ where: { id: created.body.id }, data: { status: 'deleted', deletedAt: new Date() } })
+    expect((await posterApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
+  })
+
   async function uploadPhoto(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array) {
     const upload = await reserveAndPut(token, familyId, purpose, bytes)
     const finalized = await jsonRequest(
@@ -467,6 +521,9 @@ maybeDescribe('Private media API', () => {
 
   async function clearFixtures() {
     await prisma.idempotencyRecord.deleteMany()
+    await prisma.maxVideoReference.deleteMany()
+    await prisma.maxSource.deleteMany()
+    await prisma.maxInbox.deleteMany()
     await prisma.memoryLike.deleteMany()
     await prisma.memoryMedia.deleteMany()
     await prisma.memory.deleteMany()

@@ -235,14 +235,17 @@ model MaxVideoReference {
   width                Int?
   height               Int?
   durationMs           Int?       @map("duration_ms")
+  thumbnailMediaId     String?    @map("thumbnail_media_id") @db.Uuid
   createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   source               MaxSource? @relation(fields: [sourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_source_id_family_id_fkey")
   outboundSource       MaxOutboundSource? @relation(fields: [outboundSourceId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_outbound_source_id_family_id_fkey")
   memory               Memory     @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "max_video_references_memory_id_family_id_fkey")
+  thumbnailMedia       MediaAsset? @relation("MaxVideoThumbnail", fields: [thumbnailMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_video_references_thumbnail_media_id_family_id_fkey")
 
   @@index([familyId], map: "max_video_references_family_id_idx")
   @@unique([sourceId, familyId], map: "max_video_references_source_id_family_id_key")
   @@unique([outboundSourceId, familyId], map: "max_video_references_outbound_source_id_family_id_key")
+  @@unique([thumbnailMediaId, familyId], map: "max_video_references_thumbnail_media_id_family_id_key")
   @@index([memoryId, familyId], map: "max_video_references_memory_id_family_id_idx")
   @@unique([memoryId, attachmentPosition], map: "max_video_references_memory_position_key")
   @@map("max_video_references")
@@ -690,6 +693,7 @@ model MediaAsset {
   memories           MemoryMedia[]
   backupAttachments  MaxMemoryBackupAttachment[]
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
+  maxVideoThumbnailFor MaxVideoReference? @relation("MaxVideoThumbnail")
   avatarForChildren  Child[]              @relation("ChildAvatar")
 
   @@unique([id, familyId], map: "media_assets_id_family_id_key")

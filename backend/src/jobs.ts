@@ -112,12 +112,12 @@ export const backgroundJobs = {
     }
     const abandoned = await prisma.mediaAsset.findMany({
       where: { originalStatus: 'stored', deletedAt: null, createdAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
-        memories: { none: {} }, avatarForChildren: { none: {} }, telegramVideoThumbnailFor: { is: null } }, select: { id: true }, take: 500,
+        memories: { none: {} }, avatarForChildren: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null } }, select: { id: true }, take: 500,
     })
     for (const asset of abandoned) {
       await prisma.$transaction(async (tx) => {
         const marked = await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null,
-          memories: { none: {} }, avatarForChildren: { none: {} }, telegramVideoThumbnailFor: { is: null } }, data: { deletedAt: now } })
+          memories: { none: {} }, avatarForChildren: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null } }, data: { deletedAt: now } })
         if (marked.count === 0) return
         const { insertTask } = await import('./outbox/store')
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`,
