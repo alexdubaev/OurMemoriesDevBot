@@ -114,6 +114,31 @@ describe('MAX response delivery', () => {
     expect(row.updates()).toBe(1)
   })
 
+  test('delivers a recovery decision linked to the welcome fallback with its consent buttons', async () => {
+    let sent: unknown
+    const buttons = [{ text: 'Подключить', payload: `max_channel:${responseId}:connect:0` },
+      { text: 'Отмена', payload: `max_channel:${responseId}:cancel:0` }]
+    const row = fakePrisma({ id: responseId, destinationUserId: 77n, kind: 'welcome', text: 'Подключить канал?', deliveredAt: null,
+      channelDecisionId: responseId, channelDecision: { status: 'pending', expiresAt: new Date('2026-10-01T11:00:00.000Z') }, buttons })
+    const deliver = createMaxResponseDelivery({ prisma: row.prisma, now: () => new Date('2026-10-01T10:00:00.000Z'),
+      api: api({ sendMessage: async (input) => { sent = input } }) })
+    await expect(deliver({ responseId })).resolves.toBe('done')
+    expect(sent).toEqual({ userId: '77', text: 'Подключить канал?', buttons: buttons.map((button) => ({ type: 'callback', ...button })) })
+    expect(row.updates()).toBe(1)
+  })
+
+  test('does not deliver an expired decision linked to the welcome fallback', async () => {
+    let sends = 0
+    const row = fakePrisma({ id: responseId, destinationUserId: 77n, kind: 'welcome', text: 'expired', deliveredAt: null,
+      channelDecisionId: responseId, channelDecision: { status: 'pending', expiresAt: new Date('2026-10-01T09:00:00.000Z') },
+      buttons: [{ text: 'Подключить', payload: `max_channel:${responseId}:connect:0` }] })
+    const deliver = createMaxResponseDelivery({ prisma: row.prisma, now: () => new Date('2026-10-01T10:00:00.000Z'),
+      api: api({ sendMessage: async () => { sends += 1 } }) })
+    await expect(deliver({ responseId })).resolves.toBe('skipped')
+    expect(sends).toBe(0)
+    expect(row.updates()).toBe(0)
+  })
+
   test('leaves delivery state untouched when the provider fails', async () => {
     const row = fakePrisma({ id: responseId, destinationUserId: 77n, text: 'retry', deliveredAt: null })
     const failure = new Error('provider failure')

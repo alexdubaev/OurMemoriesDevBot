@@ -55,6 +55,7 @@ export function createMaxTaskProcessor(options: {
   videoDownload?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
   processChannelLifecycle?: (inboxId: string, event: Extract<MaxAcceptedEvent, { kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed' }>) => Promise<void>
   processChannelCallback?: (inboxId: string, event: Extract<MaxInboundEvent, { kind: 'family_choice' }>) => Promise<boolean>
+  offerActorChannelConnection?: (input: { inboxId: string; actorSubject: string; actorUserId: string; familyId: string; chatId: bigint }) => Promise<boolean>
 }): (payload: unknown, signal?: AbortSignal) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
@@ -206,6 +207,22 @@ export function createMaxTaskProcessor(options: {
         identity = validateMaxForwardedMessage(verifiedForward, forwardedFrom.messageId)
         verifiedForwardChannelId = identity.channelId
         forwardStage = 'channel_binding'
+        const binding = await prisma.maxChannelBinding.findUnique({ where: { chatId: identity.channelId }, select: { familyId: true } })
+        if (binding?.familyId && binding.familyId !== targetResult.target.familyId) {
+          await prisma.$transaction((tx) => assertMaxForwardBinding(tx, targetResult.target.familyId, identity.channelId))
+        }
+        if (!binding || binding.familyId === null) {
+          const actorSubject = event.senderId
+          const actorIdentity = actorSubject === source.senderSubject
+            ? await prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: actorSubject } }, select: { userId: true } })
+            : null
+          if (actorIdentity?.userId === targetResult.target.userId && options.offerActorChannelConnection &&
+              await options.offerActorChannelConnection({ inboxId: inbox.id, actorSubject, actorUserId: actorIdentity.userId,
+                familyId: targetResult.target.familyId, chatId: identity.channelId })) {
+            return await denyForward(deniedText, true)
+          }
+          return denyForward()
+        }
         await prisma.$transaction((tx) => assertMaxForwardBinding(tx, targetResult.target.familyId, identity.channelId))
       } catch (error) {
         if (signal?.aborted) throw error
