@@ -152,12 +152,11 @@ test('private storage posters render and native playback stays usable across fee
     const outcome = { fullscreenEnabled, ...result }
     testInfo.annotations.push({ type: 'video-fullscreen', description: JSON.stringify(outcome) })
     console.info('Video fullscreen capability:', JSON.stringify(outcome))
-    if (result.status === 'entered') {
-      expect(await page.evaluate(() => document.fullscreenElement?.classList.contains('memoly-private-video-v2-frame') ?? false)).toBe(true)
-      expect(await page.evaluate(() => Boolean(document.fullscreenElement?.querySelector('[data-slot="video-playback-controls"]')))).toBe(true)
-      await page.evaluate(() => document.exitFullscreen())
-      await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null)
-    }
+    expect(result.status).toBe('entered')
+    expect(await page.evaluate(() => document.fullscreenElement?.classList.contains('memoly-private-video-v2-frame') ?? false)).toBe(true)
+    expect(await page.evaluate(() => Boolean(document.fullscreenElement?.querySelector('[data-slot="video-playback-controls"]')))).toBe(true)
+    await page.evaluate(() => document.exitFullscreen())
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null)
   } else {
     const outcome = { fullscreenEnabled, reason: 'button disabled because fullscreen capability is unavailable' }
     testInfo.annotations.push({ type: 'video-fullscreen', description: JSON.stringify(outcome) })
