@@ -441,4 +441,27 @@ describe('MAX guarded video transport', () => {
     } finally { globalThis.fetch = originalFetch }
   })
 
+  test('plays envelope-forward video by refetching the outer message without requesting the private original', async () => {
+    let requestedMid = ''
+    const playback = createMaxVideoPlayback({
+      runtime: { env: { MAX_VIDEO_MAX_BYTES: 250_000_000 }, prisma: {
+        familyMember: { findFirst: async () => ({ role: 'viewer', family: { ownerUserId: 'owner-id' } }) },
+        maxVideoReference: { findFirst: async () => ({ id: 'reference-id', familyId: 'family-id', attachmentPosition: 0,
+          providerAttachmentId: 'outer-video', source: { messageId: 'outer-mid', senderSubject: '77', recipientId: 900n,
+            originalMessageId: 'private-original-mid', originalChannelId: null, familyId: 'family-id', memoryId: 'memory-id' },
+          outboundSource: null, memory: { id: 'memory-id', familyId: 'family-id', status: 'published', deletedAt: null } }) },
+      } } as never,
+      api: { getMessage: async (messageId: string) => {
+        requestedMid = messageId
+        return { messageId, senderId: '77', recipientId: '900', recipientType: 'dialog', attachments: [],
+          forwardedFrom: { messageId: 'private-original-mid' },
+          forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'outer-video', currentToken: 'outer-token', inboundDurationSeconds: 1, width: 320, height: 240 }] }
+      }, getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000, renditions: [
+        { url: 'https://maxvd1.okcdn.ru/outer.mp4', width: 320, height: 240, contentLength: 10 },
+      ] }) } as never,
+    })
+    const scope = { familyId: 'family-id', principal: { userId: 'viewer-id', sessionId: 'session-id' } }
+    await expect(playback.readiness(scope, 'reference-id')).resolves.toEqual({ state: 'ready', recheckable: false })
+    expect(requestedMid).toBe('outer-mid')
+  })
 })

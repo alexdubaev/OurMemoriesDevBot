@@ -217,6 +217,19 @@ describe('MAX update mapping', () => {
     } })).toThrow()
   })
 
+  test('retains supported media from the direct outer forward envelope only', () => {
+    const event = normalizeMaxUpdate({ ...messageFixture, message: {
+      ...messageFixture.message,
+      link: { type: 'forward', message: { mid: 'original-envelope-mid', timestamp: 1_790_000_000_000,
+        sender: { user_id: 987 }, attachments: [{ type: 'video', payload: { id: 12, token: 'outer-token' } }] } },
+      body: { mid: 'outer-envelope-mid', attachments: [] },
+    } })
+    expect(event).toMatchObject({ kind: 'message_created', attachments: [],
+      forwardedFrom: { messageId: 'original-envelope-mid', attachments: [{ kind: 'video', providerAttachmentId: '12' }] } })
+    expect(event).not.toHaveProperty('forwardedFrom.sender')
+    expect(event).not.toHaveProperty('forwardedFrom.author')
+  })
+
   test('rejects malformed supported identities, timestamps, and payloads', () => {
     expect(() => normalizeMaxUpdate({ ...messageFixture, timestamp: -1 })).toThrow()
     expect(() => normalizeMaxUpdate({ update_type: 'message_created', timestamp: 1 })).toThrow()
