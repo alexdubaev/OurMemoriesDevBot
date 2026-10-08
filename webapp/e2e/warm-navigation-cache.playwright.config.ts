@@ -6,6 +6,7 @@ const webappRoot = fileURLToPath(new URL('..', import.meta.url))
 export default defineConfig({
   testDir: '.',
   testMatch: 'warm-navigation-cache-regression.spec.ts',
+  testIgnore: '**/.artifacts/**',
   outputDir: '.artifacts/warm-navigation-cache-results',
   reporter: 'list',
   workers: 1,

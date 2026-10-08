@@ -15,9 +15,20 @@ export const verificationCommandIds = [
   'backend-integration',
   'webapp',
   'build-webapp',
+  'audit',
+  'lint',
+  'e2e-release',
+  'verification-tools',
+  'infra-tests',
+  'website-tests',
+  'build-contracts',
+  'storage-s3',
+  'docker-smoke',
 ]
 
-export const fullVerificationCommandIds = [...verificationCommandIds]
+// build-contracts already builds both browser surfaces, so the full profile omits
+// the standalone webapp build to avoid running the same build twice.
+export const fullVerificationCommandIds = verificationCommandIds.filter((commandId) => commandId !== 'build-webapp')
 
 const knownCommandIds = new Set(verificationCommandIds)
 const verificationControlPaths = [
@@ -60,6 +71,8 @@ export function planVerification(paths, map = readVerificationMap()) {
 
   if (unknownPaths.length > 0 || paths.length === 0) return fullVerificationPlan(unknownPaths)
 
+  if (commandIds.size === 0) throw new Error('verification map produced an empty command plan')
+
   return {
     status: 'ready',
     impacts,
@@ -81,12 +94,14 @@ function readVerificationMap() {
 }
 
 function validateVerificationMap(map) {
-  if (map.version !== 2 || !Array.isArray(map.rules)) {
+  if (map.version !== 2 || !Array.isArray(map.rules) || map.rules.length === 0) {
     throw new Error('verification-map.json must use version 2 with rules')
   }
 
   for (const rule of map.rules) {
-    if (!rule.impact || !Array.isArray(rule.prefixes) || !Array.isArray(rule.commandIds)) {
+    if (!rule.impact || !Array.isArray(rule.prefixes) || rule.prefixes.length === 0 ||
+        !Array.isArray(rule.commandIds) || rule.commandIds.length === 0 ||
+        rule.prefixes.some((prefix) => typeof prefix !== 'string' || prefix.length === 0)) {
       throw new Error('verification-map.json contains an invalid rule')
     }
     for (const commandId of rule.commandIds) {
@@ -122,7 +137,10 @@ function cliPaths(args) {
 }
 
 if (import.meta.main) {
-  const plan = planVerification(cliPaths(process.argv.slice(2)))
+  const args = process.argv.slice(2)
+  const plan = args.length === 1 && args[0] === '--full'
+    ? planVerification([])
+    : planVerification(cliPaths(args))
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
 
   if (process.env.GITHUB_OUTPUT) {

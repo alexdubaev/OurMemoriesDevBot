@@ -25,9 +25,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verification-gate:
+    name: Require exact-SHA Verify success
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Require main branch dispatch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo 'Selectel production releases may only be dispatched from main.' >&2
+          exit 1
+      - name: Check out requested release SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+      - name: Require the requested SHA to be current main
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'release_sha must be a 40-character lowercase SHA' >&2; exit 1; }
+          git fetch --prune origin main
+          accepted_sha="$(git rev-parse refs/remotes/origin/main)"
+          [ "$RELEASE_SHA" = "$accepted_sha" ] || { echo 'release_sha must equal the current origin/main SHA' >&2; exit 1; }
+      - name: Require successful Verify run for exact release SHA
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/require-release-verification.mjs
+
   release:
     name: Build and deploy Selectel release
     runs-on: ubuntu-latest
+    needs: verification-gate
+    permissions:
+      contents: read
     environment:
       name: selectel-production
     env:

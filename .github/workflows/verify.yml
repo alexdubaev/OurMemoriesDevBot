@@ -1,6 +1,8 @@
 name: Verify
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -26,17 +28,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
       - run: bun install --frozen-lockfile
       - id: plan
-        name: Plan verification from the pull-request diff
+        name: Select the pull-request impact plan or full release plan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            BASE_SHA="$(git rev-parse HEAD^)"
-            HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only --diff-filter=ACMRD -z "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
+            bun scripts/verify-plan.mjs --stdin0 < "$RUNNER_TEMP/changed-paths"
+          else
+            bun scripts/verify-plan.mjs --full
           fi
-          git diff --name-only --diff-filter=ACMRD -z "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
-          bun scripts/verify-plan.mjs --stdin0 < "$RUNNER_TEMP/changed-paths"
       - name: Architecture checks
         if: contains(steps.plan.outputs.command_ids, 'architecture')
         run: bun run architecture:check
@@ -58,6 +60,36 @@ jobs:
       - name: Webapp tests
         if: contains(steps.plan.outputs.command_ids, 'webapp')
         run: bun run test:webapp
+      - name: Website tests
+        if: contains(steps.plan.outputs.command_ids, 'website-tests')
+        run: bun run test:website
       - name: Webapp build
         if: contains(steps.plan.outputs.command_ids, 'build-webapp')
         run: bun run build:webapp
+      - name: Build artifact contract checks
+        if: contains(steps.plan.outputs.command_ids, 'build-contracts')
+        run: bun run test:build-contracts
+      - name: Infrastructure tests
+        if: contains(steps.plan.outputs.command_ids, 'infra-tests')
+        run: bun run test:infra
+      - name: Dependency audit
+        if: contains(steps.plan.outputs.command_ids, 'audit')
+        run: bun run audit
+      - name: Verification tooling tests
+        if: contains(steps.plan.outputs.command_ids, 'verification-tools')
+        run: bun run test:verification-tools
+      - name: Lint
+        if: contains(steps.plan.outputs.command_ids, 'lint')
+        run: bun run lint
+      - name: Install Playwright browsers and system dependencies
+        if: contains(steps.plan.outputs.command_ids, 'e2e-release')
+        run: bunx playwright install --with-deps chromium webkit
+      - name: Release E2E profile
+        if: contains(steps.plan.outputs.command_ids, 'e2e-release')
+        run: bun run e2e:webapp:release
+      - name: Local S3 storage integration tests
+        if: contains(steps.plan.outputs.command_ids, 'storage-s3')
+        run: bun run test:storage:s3
+      - name: Backend Docker runtime smoke
+        if: contains(steps.plan.outputs.command_ids, 'docker-smoke')
+        run: bun run smoke:backend:docker

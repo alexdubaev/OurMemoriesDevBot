@@ -39,7 +39,8 @@ const transport: AuthenticatedTransport = {
   async raw() { return new Response(new Blob([pngBytes], { type: 'image/png' })) },
 }
 const user = { id: userId, displayName: 'Adult Test', email: 'adult@example.test', role: 'user' } as never
-const auth = { user, externalIdentityProvider: null, isBootstrapping: false, isAuthenticated: true, sessionError: null, retrySession: async () => undefined, transport, updateTheme: async () => undefined, authenticateHost: async () => undefined, authenticateTelegram: async () => undefined, authenticateMax: async () => undefined, startBrowserLink: async () => ({}), browserLinkStatus: async () => ({}), approveBrowserLink: async () => undefined, redeemBrowserLink: async () => undefined, register: async () => undefined, login: async () => undefined, logout: async () => undefined, requestPasswordReset: async () => undefined, confirmPasswordReset: async () => undefined } as AuthContextValue
+const unexpectedAuthAction = async (): Promise<never> => { throw new Error('Unexpected auth action in avatar fixture') }
+const auth = { user, externalIdentityProvider: null, isBootstrapping: false, isAuthenticated: true, sessionError: null, retrySession: unexpectedAuthAction, transport, updateTheme: unexpectedAuthAction, authenticateHost: unexpectedAuthAction, authenticateTelegram: unexpectedAuthAction, authenticateMax: unexpectedAuthAction, startBrowserLink: unexpectedAuthAction, browserLinkStatus: unexpectedAuthAction, approveBrowserLink: unexpectedAuthAction, redeemBrowserLink: unexpectedAuthAction, register: unexpectedAuthAction, login: unexpectedAuthAction, logout: unexpectedAuthAction, requestPasswordReset: unexpectedAuthAction, confirmPasswordReset: unexpectedAuthAction } satisfies AuthContextValue
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 activatePrivateCacheIdentity(userId)
 queryClient.setQueryData(['session', 'auth', 'me'], { user })

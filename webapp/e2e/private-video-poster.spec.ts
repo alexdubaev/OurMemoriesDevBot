@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -12,6 +12,25 @@ const posterPath = join(artifacts, 'private-video-poster-synthetic.png')
 const portraitPosterPath = join(artifacts, 'private-video-poster-portrait-synthetic.png')
 const familyId = '22222222-2222-4222-8222-222222222222'
 const memories = fixtureMemories()
+
+async function expectCarouselSlideSettled(carousel: Locator, position: number) {
+  await expect.poll(() => carousel.evaluate(async (element, expectedPosition) => {
+    const viewport = element.querySelector<HTMLElement>('.memoly-mixed-viewport')
+    const track = element.querySelector<HTMLElement>('.memoly-mixed-track')
+    const slide = element.querySelector<HTMLElement>(`[data-carousel-position="${expectedPosition}"]`)
+    if (!viewport || !track || !slide || slide.dataset.carouselActive !== 'true') return false
+
+    const initialTransform = getComputedStyle(track).transform
+    const initialLeft = slide.getBoundingClientRect().left
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+
+    const viewportLeft = viewport.getBoundingClientRect().left
+    const settledRect = slide.getBoundingClientRect()
+    return getComputedStyle(track).transform === initialTransform
+      && Math.abs(settledRect.left - initialLeft) < 0.01
+      && Math.round(settledRect.left) === Math.round(viewportLeft)
+  }, position)).toBe(true)
+}
 
 test.beforeAll(() => {
   mkdirSync(artifacts, { recursive: true })
@@ -74,9 +93,17 @@ test('private storage posters render and native playback stays usable across fee
   await carousel.getByRole('button', { name: 'Предыдущий элемент' }).click()
   await expect(carousel.locator('[data-carousel-active="true"] [data-video-poster-state="ready"]')).toBeVisible()
   await carousel.getByRole('button', { name: 'Предыдущий элемент' }).click()
-  const fourPortrait = carousel.locator('[data-carousel-active="true"] .memoly-private-video-v2')
-  await expect(fourPortrait.locator('.memoly-private-video-v2-frame')).toHaveCSS('background-color', 'rgb(21, 19, 21)')
-  await expect(fourPortrait.locator('.memoly-private-video-v2-frame')).toHaveScreenshot('private-video-four-portrait-preview.png')
+  const fourPortraitSlide = carousel.locator('[data-carousel-position="2"]')
+  await expect(fourPortraitSlide).toHaveAttribute('data-carousel-active', 'true')
+  const fourPortrait = fourPortraitSlide.locator('.memoly-private-video-v2')
+  const fourPortraitFrame = fourPortrait.locator('.memoly-private-video-v2-frame')
+  await expect(fourPortraitFrame).toHaveAttribute('data-video-poster-state', 'ready')
+  const fourPortraitPoster = fourPortrait.locator('[data-slot="private-video-poster"] img')
+  await expect(fourPortraitPoster).toBeVisible()
+  await expect.poll(() => fourPortraitPoster.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+  await expectCarouselSlideSettled(carousel, 2)
+  await expect(fourPortraitFrame).toHaveCSS('background-color', 'rgb(21, 19, 21)')
+  await expect(fourPortraitFrame).toHaveScreenshot('private-video-four-portrait-preview.png')
   await fourPortrait.getByRole('button', { name: 'Воспроизвести видео' }).click()
   await expect(fourPortrait.locator('[data-slot="video-playback-controls"]')).toHaveCount(1)
   const fourPortraitVideo = await fourPortrait.locator('video').elementHandle()
@@ -149,6 +176,7 @@ test('private storage posters render and native playback stays usable across fee
   if (await fullscreenButton.isEnabled()) {
     await fullscreenButton.click()
     const result = await page.waitForFunction(() => (window as Window & { __videoFullscreenOutcome?: Promise<{ status: string; name: string; message: string }> }).__videoFullscreenOutcome, undefined, { timeout: 1_500 }).then((handle) => handle.jsonValue())
+    if (!result) throw new Error('Fullscreen outcome was not recorded')
     const outcome = { fullscreenEnabled, ...result }
     testInfo.annotations.push({ type: 'video-fullscreen', description: JSON.stringify(outcome) })
     console.info('Video fullscreen capability:', JSON.stringify(outcome))
@@ -187,7 +215,7 @@ test('private storage posters render and native playback stays usable across fee
 })
 
 test('a private poster becoming ready refreshes in place without a page reload', async ({ page }, testInfo) => {
-  await page.request.post('/__fixture__/poster-reset')
+  await page.request.post('/__fixture__/poster-reset?poster-processing=1')
   let mainFrameNavigations = 0
   page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) mainFrameNavigations += 1 })
   await page.goto('/e2e/private-video-poster.fixture.html?poster-processing=1')

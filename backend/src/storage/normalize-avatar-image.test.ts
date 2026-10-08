@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import { avatarImageForDisplay, normalizeAvatarImage } from './normalize-avatar-image'
 
@@ -44,6 +45,41 @@ test('existing HEIC falls back to original MIME and bytes if server decoding is 
   const display = await avatarImageForDisplay(input, 'image/heic')
   expect(display.contentType).toBe('image/heic')
   expect(display.bytes).toEqual(input)
+})
+
+test('rejects SVG content mislabeled as PNG before calling Sharp', async () => {
+  const moduleUrl = new URL('./normalize-avatar-image.ts', import.meta.url).href
+  const childScript = `
+    import { mock } from 'bun:test'
+    let sharpCalls = 0
+    mock.module('sharp', () => ({
+      default: () => {
+        sharpCalls += 1
+        return { metadata: async () => ({ format: 'svg', width: 1, height: 1 }) }
+      },
+    }))
+    const { normalizeAvatarImage } = await import(${JSON.stringify(moduleUrl)})
+    let rejected = false
+    try {
+      await normalizeAvatarImage(new TextEncoder().encode('<svg width="1" height="1"></svg>'), 'image/png')
+    } catch {
+      rejected = true
+    }
+    console.log(JSON.stringify({ rejected, sharpCalls }))
+    if (!rejected || sharpCalls !== 0) process.exitCode = 1
+  `
+  const child = Bun.spawn([process.execPath, '--eval', childScript], {
+    cwd: fileURLToPath(new URL('.', import.meta.url)),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(exitCode, stderr).toBe(0)
+  expect(JSON.parse(stdout)).toEqual({ rejected: true, sharpCalls: 0 })
 })
 
 test('preview still rejects oversized pixel dimensions before format-specific decoding', async () => {

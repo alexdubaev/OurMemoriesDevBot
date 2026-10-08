@@ -13,37 +13,37 @@
         "backend/src/modules/telegram/",
         "backend/src/storage/"
       ],
-      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+      "commandIds": ["architecture", "typecheck", "backend-unit", "backend-integration", "e2e-release", "storage-s3"]
     },
     {
       "impact": "contracts",
       "prefixes": ["packages/contracts/"],
-      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "webapp"]
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "webapp", "e2e-release"]
     },
     {
       "impact": "auth",
       "prefixes": ["backend/src/modules/auth/"],
-      "commandIds": ["architecture", "backend-unit", "backend-integration"]
+      "commandIds": ["architecture", "typecheck", "backend-unit", "backend-integration", "e2e-release"]
     },
     {
       "impact": "families",
       "prefixes": ["backend/src/modules/families/"],
-      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration"]
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration", "e2e-release"]
     },
     {
       "impact": "memories",
       "prefixes": ["backend/src/modules/memories/"],
-      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration"]
+      "commandIds": ["architecture", "typecheck", "contracts", "backend-unit", "backend-integration", "e2e-release"]
     },
     {
       "impact": "schema",
       "prefixes": ["backend/prisma/"],
-      "commandIds": ["architecture", "typecheck", "backend-integration"]
+      "commandIds": ["architecture", "typecheck", "backend-integration", "e2e-release"]
     },
     {
       "impact": "webapp",
       "prefixes": ["webapp/"],
-      "commandIds": ["architecture", "typecheck", "webapp", "build-webapp"]
+      "commandIds": ["architecture", "typecheck", "webapp", "build-webapp", "lint", "e2e-release"]
     },
     {
       "impact": "infrastructure",
@@ -70,12 +70,33 @@
         "architecture",
         "template",
         "typecheck",
+        "audit",
+        "lint",
+        "verification-tools",
+        "infra-tests",
         "contracts",
         "backend-unit",
         "backend-integration",
         "webapp",
-        "build-webapp"
+        "e2e-release",
+        "build-contracts",
+        "storage-s3",
+        "docker-smoke"
       ]
+    },
+    {
+      "impact": "manifests",
+      "prefixes": [
+        "webapp/package.json",
+        "website/package.json",
+        "packages/contracts/package.json"
+      ],
+      "commandIds": ["audit", "typecheck"]
+    },
+    {
+      "impact": "website",
+      "prefixes": ["website/"],
+      "commandIds": ["architecture", "typecheck", "website-tests", "build-contracts"]
     }
   ]
 }

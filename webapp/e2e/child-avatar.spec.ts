@@ -9,12 +9,12 @@ async function editExisting(page: import('@playwright/test').Page) {
   return editor
 }
 async function savedCalls(page: import('@playwright/test').Page) {
-  return page.evaluate(() => (window as Window & { __childAvatarCalls: Array<{ path: string; options: { method?: string; body?: unknown } }> }).__childAvatarCalls)
+  return page.evaluate(() => (window as unknown as Window & { __childAvatarCalls: Array<{ path: string; options: { method?: string; body?: unknown } }> }).__childAvatarCalls)
 }
 
 test('child profile edit recrops the displayed staged replacement instead of restoring the old server image', async ({ page }) => {
   await page.goto('/e2e/child-avatar.html?profile')
-  const replacement = await page.evaluate(() => (window as Window & { __childReplacementPng: string }).__childReplacementPng)
+  const replacement = await page.evaluate(() => (window as unknown as Window & { __childReplacementPng: string }).__childReplacementPng)
   await page.getByTestId('child-avatar-file').setInputFiles({ name: 'replacement.png', mimeType: 'image/png', buffer: Buffer.from(replacement.split(',')[1]!, 'base64') })
   let editor = page.getByRole('dialog', { name: 'Редактирование фотографии' })
   await editor.getByRole('slider', { name: 'Масштаб' }).fill('1.6')

@@ -19,6 +19,33 @@ async function confirmAvatarEditor(page: Page, zoom?: string) {
   await expect(editor).toBeHidden()
 }
 
+async function continueWelcome(page: Page) {
+  const button = page.getByRole('button', { name: 'Продолжить' })
+  await expect(button).toBeVisible()
+  await expect(button).toBeEnabled({ timeout: 6_000 })
+  await button.click()
+}
+
+async function continueWelcomeIfPresent(page: Page) {
+  const button = page.getByRole('button', { name: 'Продолжить' })
+  const restoredSurface = page.locator('[data-memoly-feed="true"], [data-slot="family-presentation"], [data-slot="family-hub"]')
+  await expect.poll(async () => (await button.isVisible()) || (await restoredSurface.evaluateAll((elements) => elements.some((element) => {
+    const bounds = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+  })))).toBe(true)
+  if (await button.isVisible()) await continueWelcome(page)
+}
+
+async function openFamilyFromFeed(page: Page) {
+  const activeFeed = page.locator('[data-navigation-surface="feed"][aria-hidden="false"]')
+  await expect(activeFeed).toBeVisible()
+  const familyNavigation = activeFeed.getByRole('button', { name: 'Семья', exact: true })
+  await expect(familyNavigation).toBeVisible()
+  await familyNavigation.click()
+  await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+}
+
 type HeaderGeometry = {
   avatar: { x: number; y: number; width: number; height: number }
   copy: { x: number; y: number; width: number; height: number }
@@ -69,10 +96,22 @@ async function assertFamilyHeader(page: Page, label: string, compareTo?: HeaderG
 }
 
 async function openFeedForMember(page: Page) {
+  // Every caller reaches this helper on a newly opened page or just after reload.
+  // Wait for the intentional splash and explicitly continue before resolving the
+  // restored surface, so a hidden background surface cannot race a Family click.
+  await continueWelcomeIfPresent(page)
+  const feed = page.locator('[data-memoly-feed="true"]')
+  const family = page.locator('[data-slot="family-presentation"]')
   const card = page.locator('[data-slot="family-hub"] .family-hub-card')
-  await expect(card).toHaveCount(1)
-  await expect(card).toBeEnabled()
-  await card.click()
+  await expect.poll(async () => (await feed.isVisible()) || (await family.isVisible()) || (await card.count()) === 1).toBe(true)
+  if (!(await feed.isVisible())) {
+    if (await family.isVisible()) {
+      await page.getByRole('button', { name: 'Лента' }).click()
+    } else {
+      await expect(card).toBeEnabled()
+      await card.click()
+    }
+  }
   await expect(page.locator('[data-child-header-mode="feed"]')).toBeVisible()
 }
 
@@ -125,6 +164,8 @@ async function installTelegramHost(page: Page, initData: string) {
 }
 
 async function createCompletedOwner(page: Page, subject: number): Promise<Owner> {
+  await resetSyntheticOwner(subject)
+  await page.setViewportSize({ width: 390, height: 844 })
   const familyCreations: string[] = []
   const childCompletions: string[] = []
   page.on('request', (request) => {
@@ -162,10 +203,11 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await page.locator('#child-birth-date').fill('2024-02-29')
   await page.getByRole('button', { name: 'Девочка' }).click()
   await page.getByRole('button', { name: 'Создать семейную ленту' }).dblclick()
-  await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
-  await page.getByRole('button', { name: 'Семья' }).click()
+  const activeFeed = page.locator('[data-navigation-surface="feed"][aria-hidden="false"]')
+  await expect(activeFeed).toBeVisible()
+  await expect(activeFeed.locator('[data-memoly-feed="true"]')).toBeVisible()
+  await openFamilyFromFeed(page)
   await expect(page.locator('[data-child-header-mode="family"]')).toBeVisible()
-  await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
   await expect(page.locator('[data-slot="family-presentation"] .family-section-head')).toContainText('Наша семья')
   await expect(page.locator('[data-slot="family-presentation"] .family-list')).toBeVisible()
   await expect(page.getByText('Семейный архив', { exact: true })).toBeVisible()
@@ -193,6 +235,33 @@ async function createCompletedOwner(page: Page, subject: number): Promise<Owner>
   await expect.poll(() => familyCreations.length).toBe(1)
   await expect.poll(() => childCompletions.length).toBe(1)
   return { context: page.context(), page }
+}
+
+/**
+ * Fixed Telegram subjects keep browser assertions readable, while these rows live in the
+ * persistent disposable E2E database between runs. Remove only the synthetic owner's previous
+ * fixture so a rerun always exercises the empty-family onboarding path.
+ */
+async function resetSyntheticOwner(subject: number) {
+  const prisma = createPrisma(process.env.TEST_DATABASE_URL!)
+  try {
+    const identity = await prisma.externalIdentity.findUnique({
+      where: { provider_subject: { provider: 'telegram', subject: String(subject) } },
+      select: { userId: true },
+    })
+    if (identity) {
+      await prisma.family.deleteMany({ where: { ownerUserId: identity.userId } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: identity.userId } })
+      await prisma.authSession.deleteMany({ where: { userId: identity.userId } })
+      await prisma.user.deleteMany({ where: { id: identity.userId } })
+    }
+    await prisma.pilotAdmission.createMany({
+      data: [{ provider: 'telegram', subject: String(subject) }],
+      skipDuplicates: true,
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
 }
 
 async function createInvite(page: Page, role: 'viewer' | 'full', alias: string, capture = false) {
@@ -229,7 +298,7 @@ async function inviteePage(
   label: string,
   requests?: RequestLog,
 ) {
-  const context = await browser.newContext()
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const page = await context.newPage()
   if (requests) page.on('request', (request) => {
     const path = new URL(request.url()).pathname
@@ -243,9 +312,6 @@ async function inviteePage(
   })
   await installTelegramHost(page, signedInitData(subject, label, startParam))
   await page.goto('/')
-  const continueWelcome = page.getByRole('button', { name: 'Продолжить' })
-  await continueWelcome.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
-  if (await continueWelcome.isVisible().catch(() => false)) await continueWelcome.click()
   return { context, page }
 }
 
@@ -316,10 +382,13 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
 
   // Reloading a preview preserves invite intent and never performs an implicit accept.
   await guest.page.reload()
+  await continueWelcome(guest.page)
+  await expect(guest.page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
   await expect(guest.page.getByRole('button', { name: 'Присоединиться' })).toBeVisible()
   await expect.poll(() => requests.privateFamilyRequests).toEqual([])
 
   await guest.page.getByRole('button', { name: 'Присоединиться' }).dblclick()
+  await expect(guest.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await expect(guest.page.getByRole('button', { name: 'Семья' })).toBeVisible()
   await guest.page.getByRole('button', { name: 'Семья' }).click()
   await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
@@ -334,7 +403,9 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
   await expect.poll(() => requests.accepts.length).toBe(1)
 
   await guest.page.reload()
-  await guest.page.getByRole('button', { name: 'Семья' }).click()
+  await continueWelcome(guest.page)
+  await expect(guest.page.locator('[data-memoly-feed="true"]')).toBeVisible()
+  await openFamilyFromFeed(guest.page)
   await expect(guest.page.locator('[data-slot="welcome-splash"]')).toHaveCount(0)
   await expect(guest.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(guest.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
@@ -353,6 +424,8 @@ test('onboards a child and accepts a viewer invite only after explicit bot-start
     'Приглашённая E2E',
     alreadyMemberRequests,
   )
+  await continueWelcome(alreadyMember.page)
+  await expect(alreadyMember.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await alreadyMember.page.getByRole('button', { name: 'Семья' }).click()
   await expect(alreadyMember.page.locator('[data-child-header-mode="family"]')).toBeVisible()
   await expect(alreadyMember.page.getByText('Тётя Ира', { exact: true })).toBeVisible()
@@ -400,9 +473,11 @@ test('Feed child header uses the same photo and geometry for own, viewer, and fu
   await owner.page.getByRole('button', { name: 'Семья' }).click()
   const viewerStartParam = await createInvite(owner.page, 'viewer', 'Бабушка Viewer')
   const viewer = await inviteePage(browser, ownerSubject + 1, viewerStartParam, 'Viewer Header E2E')
+  await continueWelcome(viewer.page)
   const viewerPhotoListener = recordChildPhotoRequest('viewer', expectedChildPhotoPath)
   viewer.page.on('request', viewerPhotoListener)
   await viewer.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(viewer.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await viewer.page.getByRole('button', { name: 'Лента' }).click()
   for (const width of [320, 390, 430]) {
     await viewer.page.setViewportSize({ width, height: 844 })
@@ -413,9 +488,11 @@ test('Feed child header uses the same photo and geometry for own, viewer, and fu
   await owner.page.getByRole('button', { name: 'Семья' }).click()
   const fullStartParam = await createInvite(owner.page, 'full', 'Дядя Full')
   const full = await inviteePage(browser, ownerSubject + 2, fullStartParam, 'Full Header E2E')
+  await continueWelcome(full.page)
   const fullPhotoListener = recordChildPhotoRequest('full', expectedChildPhotoPath)
   full.page.on('request', fullPhotoListener)
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(full.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await full.page.getByRole('button', { name: 'Лента' }).click()
   for (const width of [320, 390, 430]) {
     await full.page.setViewportSize({ width, height: 844 })
@@ -465,28 +542,107 @@ test('Feed child header uses the same photo and geometry for own, viewer, and fu
   await owner.context.close()
 })
 
-test('ordinary reload and list retry preserve explicit family selection', async ({ page }) => {
+test('ordinary reload preserves family selection and hub retries a cold list failure', async ({ browser, page }) => {
   await createCompletedOwner(page, 81000013)
-  await page.getByRole('button', { name: '‹ Все семьи' }).click()
-  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
-  await page.locator('[data-slot="family-hub"] .family-hub-card').click()
-  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
-  await page.getByRole('button', { name: '‹ Все семьи' }).click()
-  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  const prisma = createPrisma(process.env.TEST_DATABASE_URL!)
+  try {
+    const identity = await prisma.externalIdentity.findUniqueOrThrow({
+      where: { provider_subject: { provider: 'telegram', subject: '81000013' } },
+      select: { userId: true },
+    })
+    const expectedFamily = await prisma.family.findFirstOrThrow({ where: { ownerUserId: identity.userId }, select: { id: true } })
+    await page.reload()
+    await continueWelcomeIfPresent(page)
+    await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+    await expect(page.locator('[data-slot="family-presentation"] .family-section-head')).toContainText('Наша семья')
+    const restoredPresentation = await page.evaluate(async (userId) => {
+      const request = indexedDB.open('memoly-private-cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const entry = await new Promise<{ data?: { queries?: Array<{ queryKey: unknown[]; data?: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined>((resolve, reject) => {
+        const request = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${userId}:queries:state`)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      db.close()
+      return entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null
+    }, identity.userId)
+    expect(restoredPresentation).toEqual(expect.objectContaining({ screen: 'family', selectedFamilyId: expectedFamily.id }))
 
-  let failHome = true
-  await page.route('**/api/v1/me/families', (route) => {
-    if (failHome) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
-    return route.continue()
-  })
-  await page.reload()
-  await expect(page.getByText('Не удалось загрузить семьи')).toBeVisible()
-  failHome = false
-  await page.getByRole('button', { name: 'Повторить' }).click()
-  await expect(page.locator('[data-slot="family-hub"] .family-hub-card')).toHaveCount(1)
-  await page.locator('[data-slot="family-hub"] .family-hub-card').click()
-  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
-  await expect(page.locator('.family-context-title')).toHaveText('Наша семья')
+    // A failed refresh from the warm hub keeps the cached family available.
+    const failWarmHome = true
+    await page.route('**/api/v1/me/families', (route) => {
+      if (failWarmHome) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+      return route.continue()
+    })
+    const warmFailure = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/v1/me/families' && response.status() === 503)
+    await page.getByRole('button', { name: '‹ Все семьи' }).click()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    expect((await warmFailure).status()).toBe(503)
+    await expect(page.getByRole('status').filter({ hasText: 'Не удалось обновить список семей. Счётчики временно недоступны.' })).toBeVisible()
+    await expect(page.locator('[data-slot="family-hub"] .family-hub-card')).toHaveCount(1)
+    await expect.poll(async () => page.evaluate(async (userId) => {
+      const request = indexedDB.open('memoly-private-cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const entry = await new Promise<{ data?: { queries?: Array<{ queryKey: unknown[]; data?: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined>((resolve, reject) => {
+        const query = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${userId}:queries:state`)
+        query.onsuccess = () => resolve(query.result)
+        query.onerror = () => reject(query.error)
+      })
+      db.close()
+      return entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null
+    }, identity.userId)).toMatchObject({ screen: 'hub', selectedFamilyId: null })
+
+    // Use a fresh browser cache to verify the cold-load error and its Retry action.
+    const coldContext = await browser.newContext({ viewport: { width: 390, height: 844 } })
+    try {
+      const coldPage = await coldContext.newPage()
+      await installTelegramHost(coldPage, signedInitData(81000013, 'Организатор E2E'))
+      let failColdHome = true
+      await coldPage.route('**/api/v1/me/families', (route) => {
+        if (failColdHome) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+        return route.continue()
+      })
+      const telegramExchange = coldPage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/telegram'))
+      await coldPage.goto('/')
+      expect((await telegramExchange).status()).toBe(200)
+      await expect(coldPage.getByRole('button', { name: 'Продолжить' })).toBeVisible()
+      const coldFailure = coldPage.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/v1/me/families' && response.status() === 503)
+      await coldPage.getByRole('button', { name: 'Продолжить' }).click()
+      await expect(coldPage.getByRole('heading', { name: 'Не удалось загрузить семьи' })).toBeVisible()
+      expect((await coldFailure).status()).toBe(503)
+      failColdHome = false
+      await coldPage.getByRole('button', { name: 'Повторить' }).click()
+      await expect(coldPage.locator('[data-slot="family-hub"] .family-hub-card')).toHaveCount(1)
+      await coldPage.locator('[data-slot="family-hub"] .family-hub-card').click()
+      const activeFeed = coldPage.locator('[data-navigation-surface="feed"][aria-hidden="false"]')
+      await expect(activeFeed).toBeVisible()
+      await assertFamilyHeader(coldPage, 'cold-retry-owner', undefined, 'feed', 'Лиза')
+      await expect.poll(async () => coldPage.evaluate(async (userId) => {
+        const request = indexedDB.open('memoly-private-cache')
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result)
+          request.onerror = () => reject(request.error)
+        })
+        const entry = await new Promise<{ data?: { queries?: Array<{ queryKey: unknown[]; data?: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined>((resolve, reject) => {
+          const query = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${userId}:queries:state`)
+          query.onsuccess = () => resolve(query.result)
+          query.onerror = () => reject(query.error)
+        })
+        db.close()
+        return entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null
+      }, identity.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: expectedFamily.id })
+    } finally {
+      await coldContext.close()
+    }
+  } finally {
+    await prisma.$disconnect()
+  }
 })
 
 test('app settings matches the six-theme appearance flow across mobile widths', async ({ browser, page }, testInfo) => {
@@ -572,6 +728,8 @@ test('app settings matches the six-theme appearance flow across mobile widths', 
   await owner.page.evaluate(() => (window as typeof window & { __triggerTelegramBack?: () => void }).__triggerTelegramBack?.())
   await expect(owner.page.locator('[data-slot="memoly-settings-sheet"]')).toHaveCount(0)
   await owner.page.reload()
+  await continueWelcome(owner.page)
+  await expect(owner.page.locator('[data-slot="family-presentation"]')).toBeVisible()
   await expect(owner.page.locator('html')).toHaveAttribute('data-memoly-theme', 'sand')
   await owner.page.getByRole('button', { name: 'Лента' }).click()
   await owner.page.screenshot({ path: testInfo.outputPath('regression-feed-sand.png'), animations: 'disabled' })
@@ -596,8 +754,10 @@ test('a full member can invite but cannot gain owner management rights, and revo
   const owner = await createCompletedOwner(page, 81000021)
   const fullStartParam = await createInvite(owner.page, 'full', 'Дедушка Павел')
   const full = await inviteePage(browser, 81000022, fullStartParam, 'Полный E2E')
+  await continueWelcome(full.page)
   await expect(full.page.getByText('Можно добавлять, редактировать и удалять воспоминания семьи.')).toBeVisible()
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(full.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await expect(full.page.getByText('Дедушка Павел', { exact: true })).toBeVisible()
   await expect(full.page.locator('[data-slot="family-presentation"]')).toBeVisible()
@@ -612,7 +772,8 @@ test('a full member can invite but cannot gain owner management rights, and revo
 
   // The owner never gets self-demotion/removal controls, even after a full member joins.
   await owner.page.reload()
-  await owner.page.getByRole('button', { name: 'Семья' }).click()
+  await openFeedForMember(owner.page)
+  await openFamilyFromFeed(owner.page)
   await owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Павел' }).click()
   await expect(owner.page.getByRole('button', { name: 'Удалить из семьи' })).toHaveCount(1)
   await expect(owner.page.getByRole('textbox', { name: 'Имя профиля' })).toHaveCount(0)
@@ -670,7 +831,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   expect(scaledModal.right).toBeLessThanOrEqual(scaledModal.viewportWidth)
   expect(scaledModal.scrollWidth).toBeLessThanOrEqual(scaledModal.viewportWidth)
   await owner.page.screenshot({ path: resolve('e2e/.artifacts/member-remove-long-name-text-200-390.png'), animations: 'disabled' })
-  await textScale.evaluate((element) => element.remove())
+      await textScale.evaluate((element) => (element as ChildNode).remove())
   await owner.page.getByRole('dialog').getByRole('button', { name: 'Отмена' }).click()
   await expect(owner.page.getByRole('dialog')).toHaveCount(0)
   await owner.page.getByRole('button', { name: 'Удалить из семьи' }).click()
@@ -689,6 +850,7 @@ test('a full member can invite but cannot gain owner management rights, and revo
   await owner.page.getByRole('button', { name: 'Назад' }).click()
   await expect(owner.page.getByRole('button', { name: 'Открыть участника: Дедушка Петя' })).toBeVisible()
   const revoked = await inviteePage(browser, 81000023, revokedStartParam, 'Отозванный E2E')
+  await continueWelcome(revoked.page)
   await expect(revoked.page.getByText('Это приглашение отозвано.')).toBeVisible()
   await revoked.page.setViewportSize({ width: 390, height: 844 })
   await revoked.page.screenshot({ path: resolve('e2e/.artifacts/invite-revoked-390.png'), animations: 'disabled' })
@@ -727,9 +889,13 @@ test('the account theme is shared by fresh PWA and MAX WebView contexts despite 
   })
   await installTelegramHost(pwaPage, signedInitData(81000062, 'Организатор E2E'))
   await pwaPage.goto('/')
+  await continueWelcome(pwaPage)
+  await expect(pwaPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await pwaPage.locator('[data-slot="family-hub"] .family-hub-card').click()
   await expect(pwaPage.getByRole('button', { name: 'Лента' })).toBeVisible()
   await expect(pwaPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
   await pwaPage.reload()
+  await openFeedForMember(pwaPage)
   await expect(pwaPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
 
   const maxContext = await browser.newContext({
@@ -749,10 +915,14 @@ test('the account theme is shared by fresh PWA and MAX WebView contexts despite 
     await route.fulfill({ response })
   })
   await maxPage.goto('/')
+  await continueWelcome(maxPage)
+  await expect(maxPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await maxPage.locator('[data-slot="family-hub"] .family-hub-card').click()
   await expect(maxPage.getByRole('button', { name: 'Лента' })).toBeVisible()
   await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
   await expect(maxPage.locator('.app')).toHaveCSS('padding-top', '0px')
   await maxPage.reload()
+  await openFeedForMember(maxPage)
   await expect(maxPage.locator('html')).toHaveAttribute('data-memoly-theme', 'rose')
 
   await maxContext.close()
@@ -931,7 +1101,9 @@ test('participant avatar appears to the owner in family, read-only profile, and 
   })
   const startParam = await createInvite(owner.page, 'full', 'Дедушка Павел')
   const participant = await inviteePage(browser, participantSubject, startParam, 'Павел E2E')
+  await continueWelcome(participant.page)
   await participant.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(participant.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await participant.page.getByRole('button', { name: 'Семья' }).click()
   await owner.page.getByRole('button', { name: 'Готово' }).click()
 
@@ -988,7 +1160,9 @@ test('full member and viewer can edit only their own account profile and cannot 
   const owner = await createCompletedOwner(page, 81000105)
   const fullStartParam = await createInvite(owner.page, 'full', 'Полный участник')
   const full = await inviteePage(browser, 81000106, fullStartParam, 'Полный E2E')
+  await continueWelcome(full.page)
   await full.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(full.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await full.page.getByRole('button', { name: 'Семья' }).click()
   await full.page.getByRole('button', { name: 'Открыть участника: Полный участник' }).click()
   await expect(full.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()
@@ -1005,7 +1179,9 @@ test('full member and viewer can edit only their own account profile and cannot 
   await owner.page.getByRole('button', { name: 'Готово' }).click()
   const viewerStartParam = await createInvite(owner.page, 'viewer', 'Участник viewer')
   const viewer = await inviteePage(browser, 81000107, viewerStartParam, 'Viewer E2E')
+  await continueWelcome(viewer.page)
   await viewer.page.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(viewer.page.locator('[data-memoly-feed="true"]')).toBeVisible()
   await viewer.page.getByRole('button', { name: 'Семья' }).click()
   await viewer.page.getByRole('button', { name: 'Открыть участника: Участник viewer' }).click()
   await expect(viewer.page.getByRole('textbox', { name: 'Имя профиля' })).toBeEditable()

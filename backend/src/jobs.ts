@@ -98,10 +98,24 @@ export const backgroundJobs = {
       where: { releasedAt: null, expiresAt: { lt: now } },
       select: { id: true, mediaId: true, familyId: true, bytes: true }, take: 500,
     })
+    let releasedCount = 0
     for (const reservation of expired) {
       await prisma.$transaction(async (tx) => {
-        const released = await tx.uploadReservation.updateMany({ where: { id: reservation.id, releasedAt: null }, data: { releasedAt: now } })
+        // Finalization and rejection serialize on the family before touching a reservation. Keep
+        // cleanup on that same order, then recheck eligibility while holding the family lock.
+        await tx.$queryRaw`SELECT id FROM families WHERE id = ${reservation.familyId}::uuid FOR UPDATE`
+        const released = await tx.uploadReservation.updateMany({
+          where: {
+            id: reservation.id,
+            familyId: reservation.familyId,
+            releasedAt: null,
+            finalizedAt: null,
+            expiresAt: { lt: now },
+          },
+          data: { releasedAt: now },
+        })
         if (released.count === 0) return
+        releasedCount += 1
         await tx.family.update({ where: { id: reservation.familyId }, data: { storageReservedBytes: { decrement: reservation.bytes } } })
         await tx.mediaAsset.updateMany({ where: { id: reservation.mediaId, deletedAt: null },
           data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' } })
@@ -124,7 +138,7 @@ export const backgroundJobs = {
           payload: { mediaId: asset.id }, scheduledFor: now })
       })
     }
-    console.log(`Job media:pending:cleanup released ${expired.length} expired reservations and retired ${abandoned.length} unattached assets.`)
+    console.log(`Job media:pending:cleanup released ${releasedCount} expired reservations and retired ${abandoned.length} unattached assets.`)
   },
   'media:orphans:reconcile': async (runtime, now) => {
     const { prisma, privateStorage } = runtime

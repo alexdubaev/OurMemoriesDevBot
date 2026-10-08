@@ -3,12 +3,37 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import baseConfig from '../vite.config.ts'
+import type { MemoryDto } from '@web-app-demo/contracts'
 
 const artifacts = fileURLToPath(new URL('.artifacts/', import.meta.url))
 const familyId = '22222222-2222-4222-8222-222222222222'
+const memoriesPath = `/api/v1/families/${familyId}/memories`
 let rangedPlaybackRequests = 0
-let posterRenditionReady = false
+let posterRenditionReady = true
 let failedPlaybackMode = false
+
+function fixtureMemories() {
+  return JSON.parse(readFileSync(resolve(artifacts, 'private-video-poster-memories.json'), 'utf8')) as MemoryDto[]
+}
+
+function memoryAtCurrentPosterState(memory: MemoryDto): MemoryDto {
+  return {
+    ...memory,
+    attachments: memory.attachments.map((attachment) => {
+      if (attachment.source !== 'private_storage' || attachment.kind !== 'video') return attachment
+      if (failedPlaybackMode) {
+        return {
+          ...attachment,
+          renditionStatus: 'failed',
+          playbackPath: null,
+          previewPath: posterRenditionReady ? `/api/v1/families/${familyId}/media/${attachment.id}/content?variant=preview` : null,
+          displayPath: null,
+        }
+      }
+      return posterRenditionReady ? attachment : { ...attachment, previewPath: null, displayPath: null }
+    }),
+  }
+}
 
 const privateMediaFixture: Plugin = {
   name: 'private-video-poster-fixture-media',
@@ -27,13 +52,25 @@ const privateMediaFixture: Plugin = {
         return
       }
       if (url.pathname === '/__fixture__/poster-reset' && request.method === 'POST') {
-        posterRenditionReady = false
         failedPlaybackMode = url.searchParams.has('playback-failed')
+        posterRenditionReady = !failedPlaybackMode && !url.searchParams.has('poster-processing')
         response.statusCode = 204
         response.end()
         return
       }
       if (!url.pathname.startsWith(`/api/v1/families/${familyId}/`)) return next()
+      if (url.pathname === memoriesPath && request.method === 'GET') {
+        const queryKind = url.searchParams.get('kind')
+        const cursor = url.searchParams.get('cursor')
+        const requestedLimit = Number(url.searchParams.get('limit') ?? '20')
+        const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 20
+        const allMemories = fixtureMemories()
+        const matchingMemories = queryKind ? allMemories.filter((memory) => memory.kind === queryKind) : allMemories
+        const items = cursor ? [] : matchingMemories.slice(0, limit).map(memoryAtCurrentPosterState)
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ items, nextCursor: null }))
+        return
+      }
       if (url.pathname.endsWith('/media/playback-session') && request.method === 'POST') {
         response.statusCode = 204
         response.end()
@@ -42,16 +79,10 @@ const privateMediaFixture: Plugin = {
       if (request.method === 'GET') {
         const memoryMatch = new RegExp(`^/api/v1/families/${familyId}/memories/([0-9a-f-]{36})$`, 'i').exec(url.pathname)
         if (memoryMatch) {
-          const memories = JSON.parse(readFileSync(resolve(artifacts, 'private-video-poster-memories.json'), 'utf8')) as Array<{ id: string; attachments: Array<Record<string, unknown>> }>
-          const memory = memories.find((item) => item.id === memoryMatch[1])
+          const memory = fixtureMemories().find((item) => item.id === memoryMatch[1])
           if (memory) {
-            const refreshed = failedPlaybackMode
-              ? { ...memory, attachments: memory.attachments.map((item) => item.kind === 'video'
-                ? { ...item, renditionStatus: 'failed', playbackPath: null, previewPath: posterRenditionReady ? `/api/v1/families/${familyId}/media/${item.id}/content?variant=preview` : null, displayPath: null }
-                : item) }
-              : posterRenditionReady ? memory : { ...memory, attachments: memory.attachments.map((item) => item.kind === 'video' ? { ...item, previewPath: null, displayPath: null } : item) }
             response.setHeader('content-type', 'application/json')
-            response.end(JSON.stringify(refreshed))
+            response.end(JSON.stringify(memoryAtCurrentPosterState(memory)))
             return
           }
         }

@@ -6,10 +6,22 @@ import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
 import { createPrisma } from '../../../backend/src/db'
+import { Prisma } from '../../../backend/src/generated/prisma/client'
+import { FilesystemPrivateStorage } from '../../../backend/src/storage/filesystem-storage'
+import { pngImage } from '../helpers/images'
 import { expect, test } from '../helpers/test'
 
 const databaseUrl = process.env.TEST_DATABASE_URL!
 const backendUrl = process.env.E2E_BACKEND_URL!
+const storage = new FilesystemPrivateStorage({
+  driver: 'filesystem',
+  root: resolve('e2e/.artifacts/storage'),
+  publicBaseUrl: backendUrl,
+  signingKey: Buffer.alloc(32, 1),
+  uploadMaxBytes: 100_000_000,
+  uploadUrlTtlSeconds: 300,
+  downloadUrlTtlSeconds: 300,
+})
 const artifactRoot = resolve('e2e/.artifacts/agent-l-missing-visual-matrix')
 const referenceUrl = pathToFileURL(resolve('../docs/memoly-final-functional-state-pack.html')).href
 const canonicalPath = resolve('../docs/memoly-final-functional-state-pack.html')
@@ -48,7 +60,7 @@ type GeometryBox = Box & {
   aspectRatio: number
   viewport: { width: number; height: number }
 }
-type Fixture = { familyId: string; childId: string; userId: string; memoryId: string; subject: string }
+type Fixture = { familyId: string; childId: string; userId: string; memoryId: string; avatarObjectKey: string; avatarDisplayObjectKey: string; subject: string }
 
 let fixture: Fixture | undefined
 let subject: string
@@ -93,8 +105,17 @@ test.describe('Agent L missing visual matrix', () => {
     }
     await page.clock.setFixedTime(new Date('2026-09-20T06:00:00.000Z'))
     await page.goto('/')
-    if (isMaxComposer) await expect(page.locator('.memoly-video-v2')).toBeVisible()
-    else await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+    const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(welcomeContinue).toBeVisible()
+    await welcomeContinue.click()
+    if (isMaxComposer) {
+      await expect(page.locator('.memoly-video-v2')).toBeVisible()
+    } else {
+      const familyCard = page.locator('[data-slot="family-hub"] .family-hub-card')
+      await expect(familyCard).toHaveCount(1)
+      await familyCard.click()
+      await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
+    }
     await stabilize(page)
   })
 
@@ -102,6 +123,8 @@ test.describe('Agent L missing visual matrix', () => {
     const empty: MatrixState = {
       name: 'photo-empty', canonicalId: 'photoEmpty',
       reactSelector: '[data-add-screen="photo"]', canonicalSelector: '#photoEmpty .composer-screen',
+      visualOutcome: 'functional-delta',
+      visualNote: 'At 320px the current caption field keeps the documented iOS-safe 16px text and naturally wraps its placeholder to two lines; the static reference uses 14px text. The caption height is checked for natural fit and separation from the date row while the other geometry remains compared.',
       geometry: photoGeometry('photoEmpty', '.memoly-add-photo-picker', '.photo-picker', '.memoly-add-caption', '.form-block'),
       openReact: openPhotoEmpty, assertReact: async (target) => expect(target.locator('[data-add-screen="photo"]')).toBeVisible(),
     }
@@ -195,8 +218,15 @@ test.describe('Agent L missing visual matrix', () => {
   })
 
   test('Video Viewer loading is a real MAX playback-session loading state', async ({ browser, page }) => {
+    const currentFixture = fixture
+    if (!currentFixture) throw new Error('Visual matrix fixture was not initialized')
     const viewerFixture = await installMaxViewerFixture(page, 'loading')
+    await expect.poll(() => readPersistentUi(page, currentFixture.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: currentFixture.familyId })
     await page.reload()
+    const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(welcomeContinue).toBeVisible()
+    await welcomeContinue.click()
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
     const state: MatrixState = {
       name: 'video-viewer-loading', canonicalId: 'maxVideoLoading',
@@ -210,12 +240,21 @@ test.describe('Agent L missing visual matrix', () => {
       assertReact: async (target) => { await expect(target.locator('.memoly-detail-surface').getByRole('status')).toContainText('Загружаем видео…') },
     }
     await captureMatrix(browser, page, state)
+    expect(viewerFixture.readinessRequestCount()).toBeGreaterThan(0)
+    expect(viewerFixture.playbackRequestCount()).toBeGreaterThan(0)
     viewerFixture.release()
   })
 
   test('Video Viewer error is a real MAX playback-session error state', async ({ browser, page }) => {
+    const currentFixture = fixture
+    if (!currentFixture) throw new Error('Visual matrix fixture was not initialized')
     const viewerFixture = await installMaxViewerFixture(page, 'error')
+    await expect.poll(() => readPersistentUi(page, currentFixture.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: currentFixture.familyId })
     await page.reload()
+    const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+    await expect(welcomeContinue).toBeVisible()
+    await welcomeContinue.click()
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
     const state: MatrixState = {
       name: 'video-viewer-error', canonicalId: 'maxVideoError',
@@ -260,11 +299,23 @@ async function captureMatrix(browser: Browser, page: Page, state: MatrixState) {
     await canonical.screenshot({ path: canonicalPathForWidth, fullPage: false, animations: 'disabled' })
     const reactGeometry = state.geometry ? await measureGeometry(page, state.geometry, 'react') : undefined
     const canonicalGeometry = state.geometry ? await measureGeometry(canonical, state.geometry, 'canonical') : undefined
+    const captionTypography = state.name === 'photo-empty' && width === 320
+      ? await page.locator('#photo-composer-caption').evaluate((element: HTMLTextAreaElement) => {
+          const style = getComputedStyle(element)
+          return {
+            fontSize: Number.parseFloat(style.fontSize),
+            lineHeight: Number.parseFloat(style.lineHeight),
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight,
+          }
+        })
+      : undefined
     metrics[key] = {
       react: await measure(page, state.reactSelector),
       canonical: await measure(canonical, state.canonicalSelector),
       geometry: state.geometry ? { react: reactGeometry, canonical: canonicalGeometry } : undefined,
       geometryDeltas: state.geometry ? geometryDeltas(state.geometry, reactGeometry!, canonicalGeometry!) : undefined,
+      captionTypography,
       screenshots: { react: reactPath, canonical: canonicalPathForWidth },
     }
     await canonical.close()
@@ -301,10 +352,11 @@ async function captureMatrix(browser: Browser, page: Page, state: MatrixState) {
   }, null, 2))
   for (const [key, value] of Object.entries(metrics)) {
     const entry = value as {
-      react: { viewport: { width: number }; root: { width: number }; scrollWidth: number }
-      canonical: { root: { width: number }; scrollWidth: number }
+      react: { viewport: { width: number }; root: Box; scrollWidth: number }
+      canonical: { root: Box; scrollWidth: number }
       geometry?: { react: Record<string, GeometryBox | null>; canonical: Record<string, GeometryBox | null> }
       geometryDeltas?: Record<string, { present: { react: boolean; canonical: boolean }; delta: { x: number | null; y: number | null; width: number | null; height: number | null; aspectRatio: number | null } }>
+      captionTypography?: { fontSize: number; lineHeight: number; clientHeight: number; scrollHeight: number }
     }
     expect(entry.react.scrollWidth, `${state.name}/${key} React overflow`).toBeLessThanOrEqual(entry.react.viewport.width + 1)
     expect(entry.canonical.scrollWidth, `${state.name}/${key} canonical overflow`).toBeLessThanOrEqual(entry.react.viewport.width + 1)
@@ -324,7 +376,7 @@ async function captureMatrix(browser: Browser, page: Page, state: MatrixState) {
       if (check.expectedAspectRatio !== undefined) {
         expect(Math.abs(reactBox.aspectRatio - check.expectedAspectRatio), `${state.name}/${key}/${check.name} React aspect ratio`).toBeLessThanOrEqual(0.02)
       }
-      for (const [side, box] of [['React', reactBox], ['canonical', canonicalBox] as const]) {
+      for (const [side, box] of [['React', reactBox], ['canonical', canonicalBox]] as const) {
         expect(box.visible, `${state.name}/${key}/${check.name} ${side} visibility`).toBe(true)
         expect(box.width, `${state.name}/${key}/${check.name} ${side} width`).toBeGreaterThan(0)
         expect(box.height, `${state.name}/${key}/${check.name} ${side} height`).toBeGreaterThan(0)
@@ -341,7 +393,17 @@ async function captureMatrix(browser: Browser, page: Page, state: MatrixState) {
       if (check.compare?.x !== false) expect(Math.abs(reactBox.x - canonicalBox.x), `${state.name}/${key}/${check.name} x delta`).toBeLessThanOrEqual(check.tolerance.x)
       if (check.compare?.y !== false) expect(Math.abs(reactBox.y - canonicalBox.y), `${state.name}/${key}/${check.name} y delta`).toBeLessThanOrEqual(check.tolerance.y)
       if (check.compare?.width !== false) expect(Math.abs(reactBox.width - canonicalBox.width), `${state.name}/${key}/${check.name} width delta`).toBeLessThanOrEqual(check.tolerance.width)
-      if (check.compare?.height !== false) expect(Math.abs(reactBox.height - canonicalBox.height), `${state.name}/${key}/${check.name} height delta`).toBeLessThanOrEqual(check.tolerance.height)
+      if (state.name === 'photo-empty' && key === '320' && check.name === 'caption') {
+        const typography = entry.captionTypography
+        const dateBox = entry.geometry?.react.date
+        expect(typography, '320px photo caption typography was measured').toBeDefined()
+        expect(typography!.fontSize, 'photo caption retains the documented iOS-safe text size').toBeGreaterThanOrEqual(16)
+        expect(typography!.scrollHeight, 'wrapped caption content fits inside the natural textarea height').toBeLessThanOrEqual(typography!.clientHeight + 1)
+        expect(typography!.scrollHeight, 'placeholder wraps beyond a single line at 320px').toBeGreaterThan(typography!.lineHeight + 8)
+        expect(reactBox.bottom, 'wrapped caption stays above the date row').toBeLessThanOrEqual(dateBox!.y + 1)
+      } else if (check.compare?.height !== false) {
+        expect(Math.abs(reactBox.height - canonicalBox.height), `${state.name}/${key}/${check.name} height delta`).toBeLessThanOrEqual(check.tolerance.height)
+      }
     }
     for (const side of ['react', 'canonical'] as const) {
       const order = state.geometryOrder?.[side]
@@ -503,14 +565,44 @@ async function openVoiceHandoff(page: Page) {
 }
 
 async function openVideoMemoryDetail(page: Page) {
-  const card = page.locator(`[data-memory-id="${fixture.memoryId}"]`)
+  const currentFixture = fixture
+  if (!currentFixture) throw new Error('Visual matrix fixture was not initialized')
+  const card = page.locator(`[data-memory-id="${currentFixture.memoryId}"]`)
   await expect(card).toBeVisible()
+  await expect(card).toHaveAttribute('data-memory-kind', 'video')
+  await expect(card).toContainText('MAX visual fixture')
+  await expect(card.locator('.memoly-video-viewer-v2')).toBeVisible()
   await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
   await page.getByRole('button', { name: 'Подробнее' }).click()
   await expect(page.locator('.memoly-detail-surface')).toBeVisible()
 }
 
+async function readPersistentUi(page: Page, userId: string) {
+  return page.evaluate(async (id) => {
+    const dbRequest = indexedDB.open('memoly-private-cache')
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      dbRequest.onsuccess = () => resolve(dbRequest.result)
+      dbRequest.onerror = () => reject(dbRequest.error)
+    })
+    const presentation = await new Promise<{ screen?: string; selectedFamilyId?: string | null } | null>((resolve, reject) => {
+      const request = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${id}:queries:state`)
+      request.onsuccess = () => {
+        const entry = request.result as { data?: { queries?: Array<{ queryKey: unknown[]; data: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined
+        resolve(entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null)
+      }
+      request.onerror = () => reject(request.error)
+    })
+    db.close()
+    return presentation
+  }, userId)
+}
+
 async function installMaxViewerFixture(page: Page, mode: 'loading' | 'error') {
+  const currentFixture = fixture
+  if (!currentFixture) throw new Error('Visual matrix fixture was not initialized')
+  const referenceId = randomUUID()
+  const playbackPath = `/api/v1/families/${currentFixture.familyId}/media/max-videos/${referenceId}/content`
+  const readinessPath = `/api/v1/families/${currentFixture.familyId}/media/max-videos/${referenceId}/readiness`
   await page.addInitScript(() => Object.defineProperty(navigator, 'serviceWorker', { configurable: true, get: () => undefined }))
   await page.route('**/api/v1/families/*/memories**', async (route) => {
     const requestUrl = new URL(route.request().url())
@@ -521,19 +613,28 @@ async function installMaxViewerFixture(page: Page, mode: 'loading' | 'error') {
     if (!first) return route.fulfill({ response, body: JSON.stringify(payload) })
     payload.items = [{
       ...first,
-      id: fixture.memoryId,
+      id: currentFixture.memoryId,
       kind: 'video',
       body: 'MAX visual fixture',
       attachments: [{
-        id: randomUUID(), source: 'max', kind: 'video', width: 320, height: 180, durationMs: 18_000,
-        playbackPath: `/api/v1/families/${fixture.familyId}/media/max-videos/${randomUUID()}/content`,
+      id: randomUUID(), source: 'max', kind: 'video', width: 320, height: 180, durationMs: 18_000,
+        playbackPath,
       }],
     }]
     await route.fulfill({ response, body: JSON.stringify(payload) })
   })
   let release: (() => void) | null = null
+  let readinessRequests = 0
   let playbackRequests = 0
   const pending = new Promise<void>((resolvePending) => { release = resolvePending })
+  // Feed and MemoryDetail first check the provider reference's current readiness.
+  // This fixture owns a synthetic reference ID, so keep that check within the
+  // current readiness contract and let the following playback-session request
+  // drive the loading or error state under test.
+  await page.route(`**${readinessPath}`, async (route) => {
+    readinessRequests += 1
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'ready', recheckable: false }) })
+  })
   await page.route('**/api/v1/families/*/media/playback-session', async (route) => {
     playbackRequests += 1
     if (mode === 'loading') {
@@ -543,14 +644,20 @@ async function installMaxViewerFixture(page: Page, mode: 'loading' | 'error') {
     }
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SYNTHETIC_MAX_PLAYBACK_FAILURE' } }) })
   })
-  return { release: () => release?.(), playbackRequestCount: () => playbackRequests }
+  return { release: () => release?.(), readinessRequestCount: () => readinessRequests, playbackRequestCount: () => playbackRequests }
 }
 
 async function seedVisualFixture(): Promise<Fixture> {
   subject = await allocateSyntheticSubject()
   const familyId = randomUUID()
   const childId = randomUUID()
+  const avatarId = randomUUID()
+  const avatarObjectKey = `media-originals/${avatarId}.png`
+  const avatarDisplayObjectKey = `media-display/${avatarId}.png`
   let userId: string | undefined
+  let ownsAvatarObject = false
+  let ownsAvatarDisplayObject = false
+  const avatarBytes = new Uint8Array(pngImage.buffer)
   try {
     await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
     const user = await prisma.user.create({ data: { displayName: 'Матрица L E2E' } })
@@ -560,11 +667,59 @@ async function seedVisualFixture(): Promise<Fixture> {
       await tx.family.create({ data: { id: familyId, ownerUserId: user.id, name: 'Синтетическая семья L', timezone: 'Europe/Moscow' } })
       await tx.familyMember.create({ data: { familyId, userId: user.id, role: 'full' } })
     })
-    await prisma.child.create({ data: { id: childId, familyId, displayName: 'Лиза', birthDate: new Date('2024-02-29T00:00:00.000Z'), sex: 'girl' } })
-    const memory = await prisma.memory.create({ data: { familyId, childId, authorId: user.id, kind: 'note', body: 'MAX visual seed', occurredAt: new Date('2026-09-20T06:00:00.000Z') } })
-    return { familyId, childId, userId: user.id, memoryId: memory.id, subject }
+    const avatarStored = await storage.putObjectOnce(avatarObjectKey, avatarBytes, 'image/png')
+    if (!avatarStored.stored) throw new Error('Synthetic child avatar storage key is already occupied')
+    ownsAvatarObject = true
+    const avatarDisplayStored = await storage.putObjectOnce(avatarDisplayObjectKey, avatarBytes, 'image/png')
+    if (!avatarDisplayStored.stored) throw new Error('Synthetic child avatar display key is already occupied')
+    ownsAvatarDisplayObject = true
+    await prisma.mediaAsset.create({ data: {
+      id: avatarId,
+      familyId,
+      uploaderId: user.id,
+      sourceKind: 'upload',
+      purpose: 'child_avatar',
+      mediaKind: 'photo',
+      originalKey: avatarObjectKey,
+      declaredMime: 'image/png',
+      verifiedMime: 'image/png',
+      sha256: createHash('sha256').update(avatarBytes).digest('hex'),
+      byteSize: BigInt(avatarBytes.byteLength),
+      width: 1,
+      height: 1,
+      originalStatus: 'stored',
+      renditionStatus: 'ready',
+    } })
+    await prisma.mediaVariant.create({ data: {
+      familyId,
+      mediaId: avatarId,
+      variant: 'display',
+      objectKey: avatarDisplayObjectKey,
+      sha256: createHash('sha256').update(avatarBytes).digest('hex'),
+      byteSize: BigInt(avatarBytes.byteLength),
+      mime: 'image/png',
+      width: 1,
+      height: 1,
+    } })
+    await prisma.child.create({ data: {
+      id: childId,
+      familyId,
+      displayName: 'Лиза',
+      birthDate: new Date('2024-02-29T00:00:00.000Z'),
+      sex: 'girl',
+      avatarMediaId: avatarId,
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    } })
+    const memory = await prisma.memory.create({ data: { familyId, childId, authorId: user.id, kind: 'note', body: 'MAX visual seed', occurredAt: new Date('2026-09-20T06:00:00.000Z'), firstPublishedAt: new Date('2026-09-20T06:00:00.000Z') } })
+    return { familyId, childId, userId: user.id, memoryId: memory.id, avatarObjectKey, avatarDisplayObjectKey, subject }
   } catch (error) {
-    await cleanupVisualFixture({ familyId, userId, subject })
+    await cleanupVisualFixture({
+      familyId,
+      userId,
+      avatarObjectKey: ownsAvatarObject ? avatarObjectKey : undefined,
+      avatarDisplayObjectKey: ownsAvatarDisplayObject ? avatarDisplayObjectKey : undefined,
+      subject,
+    })
     throw error
   }
 }
@@ -582,7 +737,15 @@ async function allocateSyntheticSubject() {
 }
 
 async function cleanupVisualFixture(candidate: Partial<Fixture>) {
+  if (candidate.familyId) {
+    await prisma.child.updateMany({
+      where: { familyId: candidate.familyId, avatarMediaId: { not: null } },
+      data: { avatarMediaId: null, avatarCrop: Prisma.DbNull },
+    })
+  }
   if (candidate.familyId) await prisma.family.deleteMany({ where: { id: candidate.familyId } })
+  if (candidate.avatarObjectKey) await storage.deleteObject(candidate.avatarObjectKey)
+  if (candidate.avatarDisplayObjectKey) await storage.deleteObject(candidate.avatarDisplayObjectKey)
   if (candidate.userId) {
     await prisma.externalIdentity.deleteMany({ where: { userId: candidate.userId } })
     await prisma.authSession.deleteMany({ where: { userId: candidate.userId } })

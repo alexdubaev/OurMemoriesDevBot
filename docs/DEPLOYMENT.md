@@ -30,7 +30,12 @@ key path, key value, database password, MAX token, webhook secret, or encryption
 belongs in the repository. The manual workflow
 [`.github/workflows/selectel-release.yml`](../.github/workflows/selectel-release.yml)
 accepts only the current `main` SHA, requires the explicit `DEPLOY` confirmation,
-and serializes production releases. It transfers the reviewed
+requires the latest successful `verify-required` job from the trusted Verify
+workflow for that exact SHA on `main`, and serializes production releases. The
+gate checks the newest run and attempt, so an older passing run cannot hide a
+newer failed or unfinished run. Owner-operated SSH releases must perform the
+same exact-SHA check explicitly; a person with root access can bypass workflow
+controls by choosing to invoke the host release entry point directly. The workflow transfers the reviewed
 `deploy/selectel/ci-release.sh` over strict-host-key SSH; that script builds the
 immutable images on the host, prepares rollback, applies the guarded migration only
 when explicitly selected, promotes services, and writes a protected nonsecret

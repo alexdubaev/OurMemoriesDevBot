@@ -6,6 +6,7 @@ const webappRoot = fileURLToPath(new URL('..', import.meta.url))
 export default defineConfig({
   testDir: '.',
   testMatch: 'private-video-poster.spec.ts',
+  testIgnore: '**/.artifacts/**',
   outputDir: '.artifacts/private-video-poster-results',
   reporter: 'list',
   workers: 1,

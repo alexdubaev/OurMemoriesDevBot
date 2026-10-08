@@ -181,10 +181,21 @@ git fetch origin main
 SHA=$(git rev-parse refs/remotes/origin/main)
 test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
+GH_TOKEN="$(gh auth token)" RELEASE_SHA="$SHA" GITHUB_REPOSITORY=alexdubaev/OurMemoriesDevBot \
+  node scripts/require-release-verification.mjs
 git show "$SHA:deploy/selectel/ci-release.sh" |
   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
     bash -s -- "$SHA" DEPLOY true id911018762027_bot
 ```
+
+The verification command requires the latest completed successful Verify run
+and its `verify-required` job for this exact SHA, from a `push` or
+`workflow_dispatch` on `main`. The GitHub CLI identity needs read access to
+Actions. Run this gate immediately before the SSH command; do not rely on an
+older green run or a green PR check for another SHA. The automated workflow
+enforces its gate before entering the production environment. An owner with root
+access can bypass workflow checks by invoking the host entry point directly, so
+manual releases depend on following this explicit check.
 
 Set the third server argument to `true` only for a reviewed release that needs the
 guarded migration. This command builds both images on Selectel; no image transfer

@@ -10,6 +10,7 @@ import {
   postgresTestService,
   repositoryRoot,
 } from './env'
+import { ensureInterFontCache } from './helpers/inter-font-cache'
 
 const composeArgs = ['compose', '-p', composeProjectName]
 
@@ -48,6 +49,8 @@ async function waitForComposePostgres(service: string, database: string, env: No
 }
 
 export default async function globalSetup() {
+  await ensureInterFontCache()
+
   const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? defaultDatabaseUrl
   assertE2eDatabaseUrl(databaseUrl)
 

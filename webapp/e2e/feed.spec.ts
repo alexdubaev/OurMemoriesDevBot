@@ -20,6 +20,7 @@ type E2EAttachment = {
 }
 
 type E2EMemoryFixture = {
+  id?: string
   familyId: string
   body?: string
   attachments: E2EAttachment[]
@@ -84,15 +85,17 @@ test.describe.serial('T07 live feed', () => {
       })
     }
     await page.goto('/')
-    if (testInfo.title.startsWith('restores the authenticated family presentation') ||
-        testInfo.title === 'renders intrinsic photo and MAX video ratios and opens the memoLy bot' ||
-        testInfo.title.startsWith('MAX poster lifecycle') ||
-        testInfo.title === 'streams voice and legacy video on demand after legacy metadata, seeks with Range/206, and pauses on hide') {
-      const continueButton = page.getByRole('button', { name: 'Продолжить' })
-      await expect(continueButton).toBeVisible()
+    const continueButton = page.getByRole('button', { name: 'Продолжить' })
+    const familyHeading = page.getByRole('heading', { name: 'Мои семьи' })
+    const initialScreen = await Promise.race([
+      continueButton.waitFor({ state: 'visible' }).then(() => 'continue' as const),
+      familyHeading.waitFor({ state: 'visible' }).then(() => 'family' as const),
+    ])
+    if (initialScreen === 'continue') {
+      await expect(continueButton).toBeEnabled()
       await continueButton.click()
     }
-    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    await expect(familyHeading).toBeVisible()
   })
 
   test('restores the authenticated family presentation from IndexedDB after a page restart', async ({ page }) => {
@@ -180,19 +183,19 @@ test.describe.serial('T07 live feed', () => {
 
     const otherFamilyId = randomUUID()
     const cleanup = await page.evaluate(async ({ userId, familyId, otherFamilyId, imageBase64 }) => {
-      const cache = await import('/src/platform/persistence/private-cache.ts')
-      const { QueryClient } = await import('/node_modules/.vite/deps/@tanstack_react-query.js')
+      const cache = await import(new URL('/src/platform/persistence/private-cache.ts', location.origin).href)
+      const { QueryClient } = await import(new URL('/node_modules/.vite/deps/@tanstack_react-query.js', location.origin).href)
       const restoredForA = new QueryClient()
       const userAGenerationForQueries = cache.activatePrivateCacheIdentity(userId)
       await cache.restorePrivateQueryCache(restoredForA, userId, userAGenerationForQueries)
-      const restoredPresentation = restoredForA.getQueryData<{ screen?: string; selectedFamilyId?: string | null }>(cache.persistentUiQueryKey(userId))
-      const restoredFeedCount = restoredForA.getQueryCache().getAll().filter((query) => query.queryKey[1] === 'feed').length
+      const restoredPresentation = restoredForA.getQueryData(cache.persistentUiQueryKey(userId)) as { screen?: string; selectedFamilyId?: string | null } | undefined
+      const restoredFeedCount = restoredForA.getQueryCache().getAll().filter((query: { queryKey: unknown[] }) => query.queryKey[1] === 'feed').length
       const isolatedUserId = `${userId}-other-account`
       const restoredForB = new QueryClient()
       const userBGenerationForQueries = cache.activatePrivateCacheIdentity(isolatedUserId)
       await cache.restorePrivateQueryCache(restoredForB, isolatedUserId, userBGenerationForQueries)
       const otherUserQueries = restoredForB.getQueryCache().getAll().length
-      const sourceFeedData = restoredForA.getQueryCache().getAll().find((query) => query.queryKey[1] === 'feed')?.state.data
+      const sourceFeedData = restoredForA.getQueryCache().getAll().find((query: { queryKey: unknown[] }) => query.queryKey[1] === 'feed')?.state.data
       const boundedUserId = `${userId}-bounded`
       const boundedClient = new QueryClient()
       boundedClient.setQueryData(cache.persistentUiQueryKey(boundedUserId), restoredPresentation)
@@ -349,7 +352,7 @@ test.describe.serial('T07 live feed', () => {
     }, { userId: fixture.userId, familyId: fixture.familyId, otherFamilyId, imageBase64: pngImage.buffer.toString('base64') })
     expect(cleanup).toEqual({ familyRemoved: true, otherFamilyRetained: true, avatarImageHit: true, posterImageHit: true, changedAvatarIdMiss: true, rejectsVideoAndPartial: true, logoutCleared: true, usersIsolated: true, lateWriteRejected: true, staleSchemaDiscarded: true, imageEvictionBounded: true, expiredImagePruned: true, queryRestoreForOwner: true, queryIsolationForOtherUser: true, queryCountBounded: true, queryBytesBounded: true, querySnapshotBytesBounded: true })
     await page.evaluate(async ({ userId, familyId }) => {
-      const cache = await import('/src/platform/persistence/private-cache.ts')
+      const cache = await import(new URL('/src/platform/persistence/private-cache.ts', location.origin).href)
       cache.activatePrivateCacheIdentity(userId)
       window.dispatchEvent(new CustomEvent(cache.privateFamilyAccessRevokedEvent, { detail: { userId, familyId } }))
     }, { userId: fixture.userId, familyId: fixture.familyId })
@@ -363,12 +366,17 @@ test.describe.serial('T07 live feed', () => {
     const baseline = family.publicationOrdinal
     const ids = Array.from({ length: 3 }, () => randomUUID())
     const now = Date.now() - 86_400_000
+    const activationAt = new Date()
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: new Date(), publicationOrdinal: baseline } })
+        await tx.family.update({ where: { id: fixture.familyId }, data: { unreadTrackingActivatedAt: activationAt, publicationOrdinal: baseline } })
         await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: baseline } })
       })
+      // Today's heading is intentionally omitted. Advancing only this page clock makes
+      // the seeded current-day group use the real prior-day heading and geometry rule.
+      await page.clock.setFixedTime(new Date(Date.now() + 86_400_000))
       await page.reload()
+      await continueToFamilyHub(page)
       await page.locator('[data-slot="family-hub"] .family-hub-card').click()
       await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
       await expect(page.locator('.feed-unread-action, .feed-unread-mode')).toHaveCount(0)
@@ -403,8 +411,9 @@ test.describe.serial('T07 live feed', () => {
           } })
         }
       })
+      await expect.poll(() => readPersistentUi(page, fixture.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: fixture.familyId })
       await page.reload()
-      await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+      await continueToRestoredFeed(page)
       const action = page.locator('.feed-unread-action')
       await expect(action).toHaveText('3 новых')
       await expect(action).toHaveAttribute('aria-label', 'Показать 3 непросмотренных воспоминания')
@@ -488,7 +497,7 @@ test.describe.serial('T07 live feed', () => {
       await expect(page.locator('.feed-unread-mode')).toHaveCount(0)
       await prisma.memorySeen.createMany({ data: ids.slice(1).map((memoryId) => ({ familyId: fixture.familyId, userId: fixture.userId, membershipEpoch: member.membershipEpoch, memoryId })) })
       await page.reload()
-      await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+      await continueToRestoredFeed(page)
       const oneAction = page.locator('.feed-unread-action')
       await expect(oneAction).toHaveText('1 новое')
       await expect(oneAction).toHaveAttribute('aria-label', 'Показать 1 непросмотренное воспоминание')
@@ -597,7 +606,7 @@ test.describe.serial('T07 live feed', () => {
       await page.getByRole('button', { name: 'Лента' }).click()
       await expect(page.locator('[data-slot="memoly-theme-root"]')).toHaveAttribute('data-memoly-theme', theme)
       await expect(page.locator('[data-slot="memoly-filter-rail"]')).toHaveCount(0)
-      const navColors = await page.locator('[data-testid="bottom-navigation"]').evaluate((nav) => {
+      const navColors = await page.locator('[data-navigation-surface="feed"][aria-hidden="false"] [data-testid="bottom-navigation"]').evaluate((nav) => {
         const item = nav.querySelector('[data-nav-position="home"]')
         const icon = item?.querySelector('[data-slot="webp-icon"]')
         return item && icon ? {
@@ -619,9 +628,17 @@ test.describe.serial('T07 live feed', () => {
     for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
       await selectTheme(page, theme)
       await page.reload()
-      await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+      const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+      await expect(welcomeContinue).toBeVisible()
+      await welcomeContinue.click()
+      await expect(page.locator('[data-slot="family-presentation"]')).toBeVisible()
+      await expect(page.locator('[data-navigation-surface="family"][aria-hidden="false"]')).toBeVisible()
+      const restoredPresentation = await readPersistentUi(page, fixture.userId)
+      expect(restoredPresentation).toMatchObject({ screen: 'family', selectedFamilyId: fixture.familyId })
       await expect(page.locator('html')).toHaveAttribute('data-memoly-theme', theme)
-      await openFeed(page)
+      await page.locator('[data-navigation-surface="family"][aria-hidden="false"]')
+        .getByRole('button', { name: 'Лента', exact: true }).click()
+      await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
       const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
       await expect(card).toHaveCount(1)
       await expect(card.locator('.memoly-mixed-slide')).toHaveCount(3)
@@ -688,7 +705,7 @@ test.describe.serial('T07 live feed', () => {
       mediaId: randomUUID(),
       bytes: generatedMedia(['-f', 'lavfi', '-i', `color=c=${photo.color}:s=${photo.width}x${photo.height}:d=0.1`, '-frames:v', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1']),
     }))
-    const photoByMediaId = new Map(photos.map((photo) => [photo.mediaId, photo]))
+    const photoByMediaId = new Map<string, (typeof photos)[number]>(photos.map((photo) => [photo.mediaId, photo]))
 
     await page.route(/\/api\/v1\/families\/[^/]+\/media\/[^/]+\/content\?variant=display/, async (route) => {
       const mediaId = new URL(route.request().url()).pathname.split('/').at(-2)
@@ -697,7 +714,7 @@ test.describe.serial('T07 live feed', () => {
       await route.fulfill({ body: photo.bytes, contentType: 'image/png' })
     })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
-      if (route.request().method() !== 'GET') return route.continue()
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
       const response = await route.fetch()
       const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
       const template = payload.items.find((item) => item.attachments.some((attachment) => attachment.kind === 'photo' && attachment.source === 'private_storage'))
@@ -719,6 +736,7 @@ test.describe.serial('T07 live feed', () => {
     })
 
     await page.reload()
+    await continueToFamilyHub(page)
     await openFeed(page)
     for (const photo of photos) {
       const card = page.locator('[data-memory-id]').filter({ hasText: photo.body })
@@ -734,13 +752,15 @@ test.describe.serial('T07 live feed', () => {
         const imageRect = element.getBoundingClientRect()
         const frameRect = element.closest('.ml-media-button')!.getBoundingClientRect()
         const wellRect = element.closest('.memory-media-slot')!.getBoundingClientRect()
-        const actionsRect = element.closest('.memory-card')!.querySelector('.actions')!.getBoundingClientRect()
+        const captionRect = element.closest('.memory-card')!.querySelector('.caption')!.getBoundingClientRect()
+        const reactions = element.closest('.memory-card')!.querySelector('.actions')
         return {
           imageWidth: imageRect.width, imageHeight: imageRect.height,
           frameWidth: frameRect.width, frameHeight: frameRect.height,
           imageTop: imageRect.top, imageBottom: imageRect.bottom,
           frameTop: frameRect.top, frameBottom: frameRect.bottom,
-          wellBottom: wellRect.bottom, actionsTop: actionsRect.top,
+          wellBottom: wellRect.bottom, captionTop: captionRect.top,
+          reactionsTop: reactions?.getBoundingClientRect().top ?? null,
           pageWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth,
           objectFit: getComputedStyle(element).objectFit,
         }
@@ -750,7 +770,8 @@ test.describe.serial('T07 live feed', () => {
       expect(Math.abs(geometry.imageHeight - geometry.frameHeight)).toBeLessThan(2)
       expect(geometry.imageTop).toBeGreaterThanOrEqual(geometry.frameTop - 1)
       expect(geometry.imageBottom).toBeLessThanOrEqual(geometry.frameBottom + 1)
-      expect(geometry.wellBottom).toBeLessThanOrEqual(geometry.actionsTop + 1)
+      expect(geometry.wellBottom).toBeLessThanOrEqual(geometry.captionTop + 1)
+      if (geometry.reactionsTop !== null) expect(geometry.wellBottom).toBeLessThanOrEqual(geometry.reactionsTop + 1)
       expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1)
       expect(geometry.objectFit).toBe('contain')
     }
@@ -796,8 +817,8 @@ test.describe.serial('T07 live feed', () => {
       { body: 'MAX landscape video UX E2E', width: 1_280, height: 720, decodedWidth: 1_280, decodedHeight: 720, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=teal:s=1280x720:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
       { body: 'MAX square video UX E2E', width: 900, height: 900, decodedWidth: 900, decodedHeight: 900, bytes: generatedMedia(['-f', 'lavfi', '-i', 'color=c=purple:s=900x900:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']) },
     ].map((video) => ({ ...video, id: randomUUID(), posterMediaId: randomUUID() }))
-    const maxVideoById = new Map(maxVideos.map((video) => [video.id, video.bytes]))
-    const maxVideoLikedByMe = new Map(maxVideos.map((video) => [video.id, false]))
+    const maxVideoById = new Map<string, (typeof maxVideos)[number]['bytes']>(maxVideos.map((video) => [video.id, video.bytes]))
+    const maxVideoLikedByMe = new Map<string, boolean>(maxVideos.map((video) => [video.id, false]))
     const maxVideoRequests: string[] = []
     const maxPosterRequests: Array<{ method: string; origin: string | null }> = []
     page.on('request', (request) => {
@@ -826,6 +847,7 @@ test.describe.serial('T07 live feed', () => {
     })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const requestUrl = new URL(route.request().url())
+      if (route.request().method() !== 'GET' || !requestUrl.pathname.endsWith('/memories')) return route.continue()
       if (requestUrl.searchParams.has('cursor')) return route.continue()
       const response = await route.fetch()
       const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
@@ -919,13 +941,18 @@ test.describe.serial('T07 live feed', () => {
     await maxWelcomeContinue.click()
     await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
     await openFeed(page)
-    const ratios = [
-      ['Фотоальбом E2E', 'img', 4 / 5],
-      ['Одиночное фото E2E', 'img', 4 / 5],
+    const ratios: Array<{ body: string; element: 'img' | 'video'; expected: number; sourcePath: string | null }> = [
+      { body: 'Фотоальбом E2E', element: 'img', expected: 4 / 5, sourcePath: null },
+      { body: 'Одиночное фото E2E', element: 'img', expected: 4 / 5, sourcePath: null },
       // MAX videos stay in the canonical 4:5 Feed stage; the intrinsic frame is contained inside it.
-      ...maxVideos.map((video) => [video.body, 'video', 4 / 5] as const),
-    ] as const
-    for (const [body, element, expected] of ratios) {
+      ...maxVideos.map((video) => ({
+        body: video.body,
+        element: 'video' as const,
+        expected: 4 / 5,
+        sourcePath: `/api/v1/families/${fixture.familyId}/media/max-videos/${video.id}/content`,
+      })),
+    ]
+    for (const { body, element, expected, sourcePath } of ratios) {
       const card = page.locator('[data-memory-id]').filter({ hasText: body })
       await expect(card).toBeVisible()
       await card.scrollIntoViewIfNeeded()
@@ -933,7 +960,13 @@ test.describe.serial('T07 live feed', () => {
         ? card.locator('[data-slot="memoly-photo-layout"] img').first()
         : card.locator('video').first()
       await expect(media).toBeVisible()
-      if (element === 'video') await expect(media).toHaveAttribute('poster', /^blob:/)
+      if (element === 'video') {
+        await expect(media).toHaveAttribute('poster', /^blob:/)
+        await expect(media).toHaveAttribute('src', sourcePath!)
+        await expect(card.locator('[data-video-viewer-state="ready"]')).toHaveAttribute('data-seen-ready', 'true')
+        await expect(media).toHaveAttribute('preload', 'none')
+        await expect.poll(() => media.evaluate((entry) => (entry as HTMLVideoElement).paused)).toBe(true)
+      }
       const actual = await media.evaluate((entry) => {
         const rect = entry.getBoundingClientRect()
         return { ratio: rect.width / rect.height, objectFit: getComputedStyle(entry).objectFit }
@@ -973,27 +1006,28 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => maxPosterRequests.length).toBeGreaterThanOrEqual(maxVideos.length)
     await expect(maxVideo).toHaveAttribute('preload', 'none')
     await expect(maxVideo).toHaveAttribute('src', /\/media\/max-videos\/[^#]+\/content$/)
-    expect(await maxVideo.evaluate((entry) => entry.src.includes('#'))).toBe(false)
+    expect(await maxVideo.evaluate((element) => (element as HTMLVideoElement).src.includes('#'))).toBe(false)
     await expect(maxVideo).toHaveAttribute('poster', /^blob:/)
     await expect(maxVideoCard.locator('[data-video-viewer-state="ready"]')).toHaveAttribute('data-seen-ready', 'true')
     await page.screenshot({ path: resolve('e2e/.artifacts/max-poster-before-play.png'), animations: 'disabled' })
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __maxVideoExplicitLoadCalls?: number }).__maxVideoExplicitLoadCalls ?? 0)).toBe(0)
     expect(await page.evaluate(() => (window as typeof window & { __maxVideoSourceAssignments?: number }).__maxVideoSourceAssignments ?? 0)).toBe(maxVideos.length)
     expect(maxVideoRequests).toHaveLength(0)
-    await expect(maxVideo).toHaveAttribute('controls', '')
+    await expect(maxVideo).toHaveJSProperty('controls', false)
+    await expect(maxVideoCard.getByRole('button', { name: 'Смотреть видео' })).toBeVisible()
     await expect(maxVideo).toHaveAttribute('playsinline', '')
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
-    expect(await maxVideo.evaluate((entry) => entry.muted)).toBe(false)
+    await expect.poll(() => maxVideo.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true)
+    expect(await maxVideo.evaluate((element) => (element as HTMLVideoElement).muted)).toBe(false)
     await expect(maxVideoCard.getByRole('button', { name: 'Открыть', exact: true })).toHaveCount(0)
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
     await maxVideoCard.focus()
     await page.keyboard.press('Shift+F10')
     await page.getByRole('button', { name: 'Сердце', exact: true }).click()
     await expect(maxVideoCard.locator('[data-reaction="heart"]')).toContainText('1')
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
+    await expect.poll(() => maxVideo.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true)
     await page.setViewportSize({ width: 390, height: 844 })
     await maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(true)
+    await expect.poll(() => maxVideo.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true)
     await page.getByRole('button', { name: 'Подробнее' }).click()
     await expect(page.getByRole('dialog')).toContainText(maxVideos[0]!.body)
     await expect.poll(() => page.evaluate(() => Boolean(document.querySelector('[role="dialog"]')?.contains(document.activeElement)))).toBe(true)
@@ -1001,8 +1035,8 @@ test.describe.serial('T07 live feed', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Закрыть' }).click()
     await expect(maxVideoCard.getByRole('button', { name: 'Действия с воспоминанием' })).toBeFocused()
     await maxVideoCard.getByRole('button', { name: 'Смотреть видео' }).click()
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.paused)).toBe(false)
-    await expect.poll(() => maxVideo.evaluate((entry) => entry.readyState)).toBeGreaterThanOrEqual(2)
+    await expect.poll(() => maxVideo.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(false)
+    await expect.poll(() => maxVideo.evaluate((element) => (element as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(2)
     expect(maxVideoRequests.length).toBeGreaterThan(0)
     expect(maxVideoRequests.every((url) => !url.includes('#'))).toBe(true)
     expect(await page.evaluate(() => (window as typeof window & { __openedMaxLink?: string }).__openedMaxLink)).toBeUndefined()
@@ -1080,11 +1114,18 @@ test.describe.serial('T07 live feed', () => {
     })
 
     try {
-      for (const width of [320, 390, 430, 480]) {
+      for (const [iteration, width] of [320, 390, 430, 480].entries()) {
         await page.setViewportSize({ width, height: 844 })
-        await page.goto('/')
-        await expect(page.getByRole('button', { name: 'Лента' })).toBeVisible()
-        await openFeed(page)
+        if (iteration === 0) {
+          await page.goto('/')
+          await continueToFamilyHub(page)
+          await expect(page.locator('[data-slot="family-hub"] .family-hub-card')).toBeVisible()
+          await openFeed(page)
+        } else {
+          await expect.poll(() => readPersistentUi(page, fixture.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: fixture.familyId })
+          await page.goto('/')
+          await continueToRestoredFeed(page)
+        }
         await page.getByRole('button', { name: 'Добавить', exact: true }).click()
 
         const panel = page.locator('[data-slot="memoly-add-sheet-panel"]')
@@ -1177,7 +1218,7 @@ test.describe.serial('T07 live feed', () => {
       expect(scaledLayout.bottom).toBeLessThanOrEqual(844)
       expect(scaledLayout.scrollWidth).toBeLessThanOrEqual(scaledLayout.viewportWidth)
       await page.screenshot({ path: resolve('e2e/.artifacts/full-ui-add-text-200-390.png'), animations: 'disabled' })
-      await textScale.evaluate((element) => element.remove())
+      await textScale.evaluate((element) => (element as ChildNode).remove())
       await page.getByRole('button', { name: 'Добавить голос или видео' }).click()
       await expect(page.locator('[data-slot="memoly-voice-video-sheet"]')).toBeVisible()
       await page.getByRole('button', { name: 'Назад' }).click()
@@ -1208,6 +1249,7 @@ test.describe.serial('T07 live feed', () => {
 
     try {
       await page.reload()
+      await continueToFamilyHub(page)
       await openFeed(page)
       const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
       for (let pageIndex = 0; pageIndex < 4 && await card.count() === 0; pageIndex += 1) {
@@ -1423,6 +1465,9 @@ test.describe.serial('T07 live feed', () => {
     await page.screenshot({ path: resolve('e2e/.artifacts/mm3-card-video.png'), animations: 'disabled' })
     await page.setViewportSize({ width: 390, height: 500 })
     await card.scrollIntoViewIfNeeded()
+    await card.getByRole('button', { name: 'Воспроизвести видео' }).click()
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false)
+    await expect(card.locator('[data-carousel-active="true"] [data-slot="video-playback-controls"] input[type="range"]')).toBeVisible()
     const shortStage = await viewport.evaluate((element) => {
       const viewportRect = element.getBoundingClientRect()
       const slideRect = element.querySelector('[data-carousel-active="true"]')!.getBoundingClientRect()
@@ -1439,6 +1484,8 @@ test.describe.serial('T07 live feed', () => {
     expect(Math.abs(shortStage.viewportHeight - shortStage.slideHeight)).toBeLessThan(2)
     expect(shortStage.seekHeight).toBeGreaterThanOrEqual(44)
     expect(shortStage.seekMinHeight).toBeGreaterThanOrEqual(44)
+    await card.getByRole('button', { name: 'Поставить видео на паузу' }).click()
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true)
     await page.setViewportSize({ width: 390, height: 844 })
     await card.scrollIntoViewIfNeeded()
     await card.getByRole('button', { name: 'Воспроизвести видео' }).click()
@@ -1481,6 +1528,8 @@ test.describe.serial('T07 live feed', () => {
     const attachmentId = randomUUID()
     const contentPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/content`
     const readinessPath = `/api/v1/families/${fixture.familyId}/media/max-videos/${referenceId}/readiness`
+    const maxAttachment = { id: attachmentId, source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath }
+    let injectedMemoryId: string | null = null
     let checks = 0
     let mockedReadiness: 'processing' | 'unknown' | 'ready' = 'processing'
     const checkTimes: number[] = []
@@ -1499,15 +1548,30 @@ test.describe.serial('T07 live feed', () => {
       if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
       const response = await route.fetch()
       const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
-      payload.items = payload.items.map((item) => item.body === 'Смешанное воспоминание E2E'
-        ? { ...item, attachments: item.attachments.map((attachment, index) => index === 1
-          ? { id: attachmentId, source: 'max', kind: 'video', width: 320, height: 180, durationMs: 2_000, playbackPath: contentPath }
-          : attachment) }
-        : item)
+      payload.items = payload.items.map((item) => {
+        if (item.body !== 'Смешанное воспоминание E2E') return item
+        if (!item.id) throw new Error('The seeded mixed memory has no ID for its exact synthetic MAX detail route')
+        injectedMemoryId = item.id
+        return { ...item, attachments: item.attachments.map((attachment, index) => index === 1 ? maxAttachment : attachment) }
+      })
       await route.fulfill({ response, body: JSON.stringify(payload) })
+    })
+    await page.route('**/api/v1/families/*/memories/*', async (route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'GET' || !injectedMemoryId || url.pathname !== `/api/v1/families/${fixture.familyId}/memories/${injectedMemoryId}`) return route.continue()
+      const response = await route.fetch()
+      const memory = await response.json() as E2EMemoryFixture
+      expect(memory.id).toBe(injectedMemoryId)
+      expect(memory.familyId).toBe(fixture.familyId)
+      expect(memory.body).toBe('Смешанное воспоминание E2E')
+      expect(memory.attachments).toHaveLength(3)
+      expect(memory.attachments[1]).toMatchObject({ source: 'private_storage', kind: 'video' })
+      memory.attachments = memory.attachments.map((attachment, index) => index === 1 ? maxAttachment : attachment)
+      await route.fulfill({ response, body: JSON.stringify(memory) })
     })
     await page.evaluate(async () => { await Promise.all((await navigator.serviceWorker?.getRegistrations() ?? []).map((registration) => registration.unregister())) })
     await page.reload()
+    await continueToFamilyHub(page)
     await openFeed(page)
     const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Смешанное воспоминание E2E' })
     const waitForActiveSlideAlignment = async () => {
@@ -1563,10 +1627,15 @@ test.describe.serial('T07 live feed', () => {
     mockedReadiness = 'ready'
     await card.getByRole('button', { name: 'Проверить готовность' }).click()
     await expect.poll(() => checks).toBe(4)
-    await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`${referenceId}/content$`))
+    const readyVideo = card.locator('[data-carousel-active="true"] video')
+    await expect(readyVideo).toHaveAttribute('src', new RegExp(`${referenceId}/content$`))
     await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-current', 'step')
     await waitForActiveSlideAlignment()
-    await expect.poll(() => card.locator('[data-carousel-active="true"] video').evaluate((video: HTMLVideoElement) => ({
+    await expect.poll(() => readyVideo.evaluate((video: HTMLVideoElement) => video.paused)).toBe(true)
+    expect(contentRequests).toHaveLength(0)
+    await card.getByRole('button', { name: 'Смотреть видео' }).click()
+    await expect.poll(() => readyVideo.evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true)
+    await expect.poll(() => readyVideo.evaluate((video: HTMLVideoElement) => ({
       width: video.videoWidth, height: video.videoHeight, hasMetadata: video.readyState >= 1, error: video.error?.code ?? null,
     }))).toMatchObject({ width: 320, height: 180, hasMetadata: true, error: null })
     await expect(card.getByText('Не удалось загрузить видео')).toHaveCount(0)
@@ -1620,6 +1689,7 @@ test.describe.serial('T07 live feed', () => {
     await card.scrollIntoViewIfNeeded()
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     await expect(card.locator('[data-video-viewer-state="processing"]')).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Смотреть видео' })).toHaveCount(0)
     await expect.poll(() => posterChecks, { timeout: 3_000 }).toBe(1)
     await expect(card.locator('video')).not.toHaveAttribute('poster', /^blob:/)
     expect(playbackRequests).toHaveLength(0)
@@ -1631,7 +1701,7 @@ test.describe.serial('T07 live feed', () => {
     await expect.poll(() => posterImage.evaluate((image: HTMLImageElement) => ({ complete: image.complete, width: image.naturalWidth }))).toMatchObject({ complete: true, width: 1 })
     expect(posterMediaRequests.length).toBeGreaterThan(0)
     expect(posterMediaRequests.every((path) => path === posterPath)).toBe(true)
-    expect(await video.evaluate((element: HTMLVideoElement) => ({ controls: element.controls, paused: element.paused, durationIsNaN: Number.isNaN(element.duration) }))).toEqual({ controls: true, paused: true, durationIsNaN: true })
+    expect(await video.evaluate((element: HTMLVideoElement) => ({ controls: element.controls, paused: element.paused, durationIsNaN: Number.isNaN(element.duration) }))).toEqual({ controls: false, paused: true, durationIsNaN: true })
     expect(playbackRequests).toHaveLength(0)
     expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
     expect(mainFrameNavigations).toBe(0)
@@ -1809,6 +1879,7 @@ test.describe.serial('T07 live feed', () => {
       memoryId = memory.id
       await page.setViewportSize({ width: 390, height: 844 })
       await page.reload()
+      await continueToFamilyHub(page)
       await openFeed(page)
       const card = page.locator(`[data-memory-id="${memory.id}"]`)
       await card.scrollIntoViewIfNeeded()
@@ -1916,6 +1987,7 @@ test.describe.serial('T07 live feed', () => {
         await route.continue()
       })
       await page.reload()
+      await continueToFamilyHub(page)
       await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /1 непросмотренных воспоминаний/)
       await page.locator('.family-hub-card').click()
       await page.getByRole('button', { name: 'Показать 1 непросмотренное воспоминание' }).click()
@@ -1981,6 +2053,9 @@ test.describe.serial('T07 live feed', () => {
 
     const voiceCard = page.locator('[data-memory-id]').filter({ hasText: 'Голос E2E' })
     const voice = voiceCard.locator('audio')
+    const voicePageErrors: string[] = []
+    const collectVoicePageError = (error: Error) => voicePageErrors.push(error.message)
+    page.on('pageerror', collectVoicePageError)
     await expect(voice).toHaveAttribute('src', /^\/api\//)
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
     await voiceCard.getByRole('button', { name: 'Слушать' }).click()
@@ -1992,6 +2067,7 @@ test.describe.serial('T07 live feed', () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
     await expect.poll(() => voice.evaluate((element) => (element as HTMLAudioElement).paused)).toBe(true)
+    await expect(voiceCard.getByRole('button', { name: 'Слушать', exact: true })).toBeVisible()
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => false })
       document.dispatchEvent(new Event('visibilitychange'))
@@ -2006,26 +2082,23 @@ test.describe.serial('T07 live feed', () => {
     await videoCard.getByLabel('Позиция видео').fill('2')
     await expect.poll(() => legacyVideo.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThanOrEqual(1.9)
     await expect.poll(() => responses.every((response) => response.status === 206)).toBe(true)
+    expect(voicePageErrors.filter((message) => /AbortError|play\(\).*interrupted|interrupted.*pause/i.test(message))).toEqual([])
+    page.off('pageerror', collectVoicePageError)
   })
 
   test('pending private video becomes ready in place after its Memory detail is polled', async ({ page }) => {
     let memoryId: string | null = null
     let detailReads = 0
-    let listReads = 0
-    let listReady = false
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const url = new URL(route.request().url())
       if (route.request().method() !== 'GET') return route.fallback()
       if (url.pathname.endsWith('/memories')) {
-        listReads += 1
         const response = await route.fetch()
         const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
         payload.items = payload.items.map((item) => {
           if (item.body !== 'Legacy video E2E') return item
           memoryId = String(item.id)
-          return listReady
-            ? { ...item, likes: { ...(item.likes as Record<string, unknown>), count: 7 } }
-            : { ...item, attachments: item.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null })) }
+          return { ...item, attachments: item.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null })) }
         })
         return route.fulfill({ response, body: JSON.stringify(payload) })
       }
@@ -2036,6 +2109,19 @@ test.describe.serial('T07 live feed', () => {
       const detail = await response.json() as E2EMemoryFixture
       detail.attachments = detail.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'pending', playbackPath: null }))
       return route.fulfill({ response, body: JSON.stringify(detail) })
+    })
+    let reactionWriteCount = 0
+    let acceptedReaction: { reaction: string | null } | null = null
+    await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'PUT' || !memoryId || url.pathname !== `/api/v1/families/${fixture.familyId}/memories/${memoryId}/reaction`) return route.fallback()
+      reactionWriteCount += 1
+      acceptedReaction = route.request().postDataJSON() as { reaction: string | null }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        reactionCounts: { heart: 7 },
+        currentUserReaction: 'heart',
+        likes: { count: 7, likedByMe: true },
+      }) })
     })
 
     await openFeed(page)
@@ -2058,15 +2144,24 @@ test.describe.serial('T07 live feed', () => {
     await expect(card.getByText('Подготавливаем видео')).toHaveCount(0)
     await expect(card.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
     await expect(viewer.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
-    listReady = true
-    const priorListReads = listReads
-    await card.locator('button[aria-label$="сердечко"]').evaluate((button) => (button as HTMLButtonElement).click())
-    await expect.poll(() => listReads).toBeGreaterThan(priorListReads)
-    await expect(card.locator('button[aria-label$="сердечко"]')).toContainText('7')
-    await expect(viewer.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
-    await expect(viewer.getByText('Подготавливаем видео')).toHaveCount(0)
+    await viewer.getByRole('button', { name: 'Закрыть' }).click()
+    await expect(viewer).toHaveCount(0)
+    // Reactions are selected from the card picker and reconcile the existing query cache; they do not refetch the feed.
+    await card.focus()
+    await page.keyboard.press('Shift+F10')
+    await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Сердце', exact: true }).click()
+    await expect(acceptedReaction).toEqual({ reaction: 'heart' })
+    expect(reactionWriteCount).toBe(1)
+    await expect(card.locator('[data-slot="memory-reactions"] [data-reaction="heart"] .reaction-result-count')).toHaveText('7')
+    await expect(card.locator('[data-slot="memory-reactions"]')).toHaveAttribute('aria-label', /Сердце 7, ваша реакция/)
     expect(await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-memory-id')))).toEqual(idsBefore)
     expect(await card.evaluate((element, original) => element === original, cardHandle)).toBe(true)
+    await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await page.getByRole('button', { name: 'Подробнее' }).click()
+    const refreshedViewer = page.getByRole('dialog')
+    await expect(refreshedViewer.locator('video')).toHaveAttribute('src', new RegExp(`/media/${fixture.legacyVideoId}/content\\?variant=playback`))
+    await expect(refreshedViewer.getByText('Подготавливаем видео')).toHaveCount(0)
     await expect(card.locator('.ml-video-row button').first()).toBeEnabled()
   })
 
@@ -2074,6 +2169,11 @@ test.describe.serial('T07 live feed', () => {
     await page.setViewportSize({ width: 390, height: 3000 })
     let pending: E2EMemoryFixture[] = []
     const detailCalls: string[] = []
+    await page.route('**/api/v1/families/*/media/*/content**', async (route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'GET' || url.pathname !== `/api/v1/families/${fixture.familyId}/media/${fixture.legacyVideoId}/content` || url.searchParams.get('variant') !== 'preview') return route.fallback()
+      return route.fulfill({ status: 200, body: pngImage.buffer, contentType: pngImage.mimeType })
+    })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
       const url = new URL(route.request().url())
       if (route.request().method() !== 'GET') return route.fallback()
@@ -2096,7 +2196,7 @@ test.describe.serial('T07 live feed', () => {
       detailCalls.push(String(match.id))
       const ready = String(match.id) === String(pending[0]?.id) || String(match.id) === String(pending[4]?.id)
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify(ready
-        ? { ...match, attachments: match.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'ready', playbackPath: `/api/v1/families/${fixture.familyId}/media/${fixture.legacyVideoId}/content?variant=playback` })) }
+        ? { ...match, attachments: match.attachments.map((attachment) => ({ ...attachment, renditionStatus: 'ready', previewPath: `/api/v1/families/${fixture.familyId}/media/${fixture.legacyVideoId}/content?variant=preview`, playbackPath: `/api/v1/families/${fixture.familyId}/media/${fixture.legacyVideoId}/content?variant=playback` })) }
         : match) })
     })
 
@@ -2129,6 +2229,7 @@ test.describe.serial('T07 live feed', () => {
       data: { role: 'full' },
     })
     await page.reload()
+    await continueToFamilyHub(page)
     await openFeed(page)
     const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Фотоальбом E2E' }).first()
     await card.scrollIntoViewIfNeeded()
@@ -2185,6 +2286,7 @@ test.describe.serial('T07 live feed', () => {
       data: { role: 'full' },
     })
     await page.reload()
+    await continueToFamilyHub(page)
     await openFeed(page)
     const card = page.locator('#root [data-memoly-feed] [data-memory-id]').filter({ hasText: 'Заметка E2E 42' })
     for (let pageIndex = 0; pageIndex < 4 && await card.count() === 0; pageIndex += 1) {
@@ -2239,14 +2341,16 @@ test.describe.serial('T07 live feed', () => {
     const loading = new Promise<void>((resolveLoading) => { releaseLoading = resolveLoading })
     let loadingReleased = false
     await page.route('**/api/v1/families/*/memories**', async (route) => {
-      if (route.request().method() !== 'GET') return route.continue()
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
       if (!loadingReleased) await loading
       if (mode === 'error') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic visual failure' } }) })
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], nextCursor: null }) })
     })
     await page.setViewportSize({ width: 390, height: 844 })
     await page.reload()
-    await page.getByRole('button', { name: 'Лента' }).click()
+    await continueToFamilyHub(page)
+    await page.locator('[data-slot="family-hub"] .family-hub-card').click()
+    await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator('[data-slot="feed-skeleton"]')).toBeVisible()
     await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-loading-390.png'), animations: 'disabled' })
     loadingReleased = true
@@ -2254,8 +2358,9 @@ test.describe.serial('T07 live feed', () => {
     await expect(page.locator('[data-slot="feed-empty"]')).toBeVisible()
     await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-empty-390.png'), animations: 'disabled' })
     mode = 'error'
+    await expect.poll(() => readPersistentUi(page, fixture.userId)).toMatchObject({ screen: 'feed', selectedFamilyId: fixture.familyId })
     await page.reload()
-    await page.getByRole('button', { name: 'Лента' }).click()
+    await continueToRestoredFeed(page)
     await expect(page.locator('[data-slot="inline-error"]')).toBeVisible()
     await page.screenshot({ path: resolve('e2e/.artifacts/agent-b-react-error-390.png'), animations: 'disabled' })
     mode = 'empty'
@@ -2290,7 +2395,7 @@ test.describe.serial('T07 live feed', () => {
       await tx.familyMember.update({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, data: { unreadBaselineOrdinal: 0n } })
     })
     await page.route('**/api/v1/families/*/memories**', async (route) => {
-      if (route.request().method() !== 'GET') return route.continue()
+      if (route.request().method() !== 'GET' || !new URL(route.request().url()).pathname.endsWith('/memories')) return route.continue()
       const response = await route.fetch()
       const payload = await response.json() as { items: E2EMemoryFixture[]; nextCursor: string | null }
       payload.items = payload.items.filter((item) => item.id === memory.id).map((item) => ({ ...item, occurredAt: '2026-09-25T07:24:00.000Z' }))
@@ -2299,6 +2404,7 @@ test.describe.serial('T07 live feed', () => {
     })
     await page.clock.setFixedTime(new Date('2026-09-25T07:30:00.000Z'))
     await page.reload()
+    await continueToFamilyHub(page)
     await page.locator('[data-slot="family-hub"] .family-hub-card').click()
     await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
@@ -2604,20 +2710,36 @@ test.describe.serial('T07 live feed', () => {
 
   test('dragging away after a recognized hold cannot select a reaction or open the photo', async ({ page }) => {
     await openFeed(page)
-    const image = page.locator('.memory-media-slot img').first()
+    const image = page.locator('.memory-media-slot img[alt="Воспоминание"]').first()
     const card = image.locator('xpath=ancestor::article[@data-memory-id]')
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+    await image.evaluate(async (element: HTMLImageElement) => element.decode())
     await image.scrollIntoViewIfNeeded()
     const bounds = await image.boundingBox()
     expect(bounds).not.toBeNull()
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const visibleLeft = Math.max(0, bounds!.x)
+    const visibleRight = Math.min(viewport!.width, bounds!.x + bounds!.width)
+    const visibleTop = Math.max(0, bounds!.y)
+    const visibleBottom = Math.min(viewport!.height, bounds!.y + bounds!.height)
+    expect(visibleRight).toBeGreaterThan(visibleLeft)
+    expect(visibleBottom).toBeGreaterThan(visibleTop)
+    const targetPoint = { x: visibleLeft + (visibleRight - visibleLeft) / 2, y: visibleTop + (visibleBottom - visibleTop) / 2 }
+    console.info('[photo drag visible target]', JSON.stringify({ bounds, viewport, visibleIntersection: { x: visibleLeft, y: visibleTop, width: visibleRight - visibleLeft, height: visibleBottom - visibleTop }, targetPoint }))
+    await test.info().attach('photo-drag-visible-target.json', {
+      body: Buffer.from(JSON.stringify({ image: bounds, viewport, visibleIntersection: { x: visibleLeft, y: visibleTop, width: visibleRight - visibleLeft, height: visibleBottom - visibleTop }, targetPoint }, null, 2)),
+      contentType: 'application/json',
+    })
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, targetPoint)).toBe(true)
     let writes = 0
     await page.route('**/api/v1/families/*/memories/*/reaction', async (route) => {
       writes += 1
       await route.continue()
     })
 
-    const x = bounds!.x + bounds!.width / 2
-    const y = bounds!.y + bounds!.height / 2
-    await page.mouse.move(x, y)
+    await page.mouse.move(targetPoint.x, targetPoint.y)
     await page.mouse.down()
     await page.waitForTimeout(550)
     const picker = page.getByRole('group', { name: 'Реакции', exact: true })
@@ -2629,7 +2751,7 @@ test.describe.serial('T07 live feed', () => {
     await page.mouse.up()
 
     await expect(picker).toBeVisible()
-    await expect(card.locator('.pswp')).toHaveCount(0)
+    await expect(page.locator('.pswp')).toHaveCount(0)
     expect(writes).toBe(0)
     await expect(card.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
   })
@@ -2704,12 +2826,24 @@ test.describe.serial('T07 live feed', () => {
 
   test('Chromium touch hold opens once after release and note text holds stay selectable', async ({ page }) => {
     await openFeed(page)
-    const image = page.locator('.memory-media-slot img').first()
+    const image = page.locator('[data-memory-kind="photo"] .memory-media-slot img[alt="Воспоминание"]').first()
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+    await image.evaluate(async (element: HTMLImageElement) => element.decode())
     await image.scrollIntoViewIfNeeded()
     const bounds = await image.boundingBox()
     expect(bounds).not.toBeNull()
-    const x = Math.round(bounds!.x + bounds!.width / 2)
-    const y = Math.round(bounds!.y + bounds!.height / 2)
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const visibleLeft = Math.max(0, bounds!.x)
+    const visibleRight = Math.min(viewport!.width, bounds!.x + bounds!.width)
+    const visibleTop = Math.max(0, bounds!.y)
+    const visibleBottom = Math.min(viewport!.height, bounds!.y + bounds!.height)
+    expect(visibleRight).toBeGreaterThan(visibleLeft)
+    expect(visibleBottom).toBeGreaterThan(visibleTop)
+    const x = Math.round(visibleLeft + (visibleRight - visibleLeft) / 2)
+    const y = Math.round(visibleTop + (visibleBottom - visibleTop) / 2)
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x, y })).toBe(true)
     const cdp = await page.context().newCDPSession(page)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
     await page.waitForTimeout(550)
@@ -2901,12 +3035,24 @@ test.describe.serial('T07 live feed', () => {
 
   test('movement, pointer cancellation, and a second touch cancel recognition without opening a viewer', async ({ page }) => {
     await openFeed(page)
-    const image = page.locator('.memory-media-slot img').first()
+    const image = page.locator('[data-memory-kind="photo"] .memory-media-slot img[alt="Воспоминание"]').first()
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+    await image.evaluate(async (element: HTMLImageElement) => element.decode())
     await image.scrollIntoViewIfNeeded()
     const bounds = await image.boundingBox()
     expect(bounds).not.toBeNull()
-    const x = Math.round(bounds!.x + bounds!.width / 2)
-    const y = Math.round(bounds!.y + bounds!.height / 2)
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const visibleLeft = Math.max(0, bounds!.x)
+    const visibleRight = Math.min(viewport!.width, bounds!.x + bounds!.width)
+    const visibleTop = Math.max(0, bounds!.y)
+    const visibleBottom = Math.min(viewport!.height, bounds!.y + bounds!.height)
+    expect(visibleRight).toBeGreaterThan(visibleLeft)
+    expect(visibleBottom).toBeGreaterThan(visibleTop)
+    const x = Math.round(visibleLeft + (visibleRight - visibleLeft) / 2)
+    const y = Math.round(visibleTop + (visibleBottom - visibleTop) / 2)
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x, y })).toBe(true)
     const cdp = await page.context().newCDPSession(page)
 
     await page.mouse.move(x, y)
@@ -2997,14 +3143,21 @@ test.describe.serial('T07 live feed', () => {
     await card.getByRole('button', { name: 'Следующий элемент' }).click()
     const video = card.locator('[data-carousel-active="true"] video')
     await expect(video).toBeVisible()
-    const seek = card.locator('[data-carousel-active="true"] .memoly-private-video-v2-controls input[type="range"]').first()
+    await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true)
+    await expect(card.getByRole('button', { name: 'Воспроизвести видео', exact: true })).toBeVisible()
+    await card.getByRole('button', { name: 'Воспроизвести видео', exact: true }).click()
+    await expect.poll(() => video.evaluate((element) => {
+      const player = element as HTMLVideoElement
+      return !player.paused && player.readyState >= HTMLMediaElement.HAVE_METADATA
+    })).toBe(true)
+    const seek = card.locator('[data-carousel-active="true"] [data-slot="video-playback-controls"] input[type="range"]').first()
     await seek.scrollIntoViewIfNeeded()
     await expect(seek).toBeVisible()
     const seekRect = await seek.boundingBox()
     expect(seekRect).not.toBeNull()
     expect(await page.evaluate(({ x, y }) => {
       const target = document.elementFromPoint(x, y)
-      const controls = document.querySelector('[data-carousel-active="true"] .memoly-private-video-v2-controls')
+      const controls = document.querySelector('[data-carousel-active="true"] [data-slot="video-playback-controls"]')
       const seekInput = controls?.querySelector('input[type="range"]')
       return Boolean(target && controls?.contains(target) && seekInput && getComputedStyle(seekInput).visibility !== 'hidden')
     }, { x: seekRect!.x + seekRect!.width / 2, y: seekRect!.y + seekRect!.height / 2 })).toBe(true)
@@ -3027,7 +3180,7 @@ test.describe.serial('T07 live feed', () => {
     await waveform.scrollIntoViewIfNeeded()
     const waveformBounds = await waveform.boundingBox()
     expect(waveformBounds).not.toBeNull()
-    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-slot="voice-waveform"]') !== null, { x: waveformBounds!.x + waveformBounds!.width / 2, y: waveformBounds!.y + waveformBounds!.height / 2 })).toBe(true)
+    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[data-slot="voice-waveform"]')), { x: waveformBounds!.x + waveformBounds!.width / 2, y: waveformBounds!.y + waveformBounds!.height / 2 })).toBe(true)
     await page.mouse.move(waveformBounds!.x + waveformBounds!.width / 2, waveformBounds!.y + waveformBounds!.height / 2)
     await page.mouse.down()
     await page.waitForTimeout(550)
@@ -3091,12 +3244,24 @@ test.describe.serial('T07 live feed', () => {
 
   test('leaving the family while a hold is pending cancels it and closes an open picker', async ({ page }) => {
     await openFeed(page)
-    const image = page.locator('.memory-media-slot img').first()
+    const image = page.locator('[data-memory-kind="photo"] .memory-media-slot img[alt="Воспоминание"]').first()
+    await expect(image).toBeVisible()
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+    await image.evaluate(async (element: HTMLImageElement) => element.decode())
     await image.scrollIntoViewIfNeeded()
     const rect = await image.boundingBox()
     expect(rect).not.toBeNull()
-    const x = Math.round(rect!.x + rect!.width / 2)
-    const y = Math.round(rect!.y + rect!.height / 2)
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const visibleLeft = Math.max(0, rect!.x)
+    const visibleRight = Math.min(viewport!.width, rect!.x + rect!.width)
+    const visibleTop = Math.max(0, rect!.y)
+    const visibleBottom = Math.min(viewport!.height, rect!.y + rect!.height)
+    expect(visibleRight).toBeGreaterThan(visibleLeft)
+    expect(visibleBottom).toBeGreaterThan(visibleTop)
+    const x = Math.round(visibleLeft + (visibleRight - visibleLeft) / 2)
+    const y = Math.round(visibleTop + (visibleBottom - visibleTop) / 2)
+    expect(await image.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x, y })).toBe(true)
     const cdp = await page.context().newCDPSession(page)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y, radiusX: 1, radiusY: 1, force: 1 }] })
     await page.waitForTimeout(100)
@@ -3106,8 +3271,10 @@ test.describe.serial('T07 live feed', () => {
     await page.waitForTimeout(550)
     await expect(page.getByRole('group', { name: 'Реакции', exact: true })).toHaveCount(0)
 
+    await expect.poll(() => readPersistentUi(page, fixture.userId)).toMatchObject({ screen: 'hub', selectedFamilyId: null })
     await cdp.detach()
     await page.reload()
+    await continueToFamilyHub(page)
     await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
     await openFeed(page)
     await image.scrollIntoViewIfNeeded()
@@ -3136,8 +3303,8 @@ test.describe.serial('T07 live feed', () => {
     const photo = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key: photoKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
     const video = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'video', variant: 'playback', key: videoKey, bytes: videoBytes, mime: 'video/mp4', width: 320, height: 180, durationMs: 8_000 })
     const unvisitedPhoto = await createAsset({ familyId: fixture.familyId, userId: fixture.ownerUserId, kind: 'photo', variant: 'display', key: unvisitedPhotoKey, bytes: pngImage.buffer, mime: 'image/png', width: 1, height: 1 })
-    let releasePhoto = () => undefined
-    let releaseSeen = () => undefined
+    let releasePhoto: () => void = () => {}
+    let releaseSeen: () => void = () => {}
     const photoGate = new Promise<void>((resolve) => { releasePhoto = resolve })
     const seenGate = new Promise<void>((resolve) => { releaseSeen = resolve })
     let seenPostStarted = 0
@@ -3155,6 +3322,7 @@ test.describe.serial('T07 live feed', () => {
       await page.route('**/memories/seen', async (route) => { seenPostStarted += 1; await seenGate; await route.continue() })
       await page.setViewportSize({ width: 390, height: 844 })
       await page.reload()
+      await continueToFamilyHub(page)
       await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /1 непросмотренных воспоминаний/)
       await page.locator('.family-hub-card').click()
       await page.getByRole('button', { name: 'Показать 1 непросмотренное воспоминание' }).click()
@@ -3231,11 +3399,19 @@ test.describe.serial('T07 live feed', () => {
       await page.route('**/media/*/content?variant=display', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }))
       await page.setViewportSize({ width: 390, height: 650 })
       await page.reload()
+      const welcomeContinue = page.getByRole('button', { name: 'Продолжить' })
+      await expect(welcomeContinue).toBeVisible()
+      await welcomeContinue.click()
+      await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
       await expect(page.locator('.family-hub-card')).toHaveAttribute('aria-label', /7 непросмотренных воспоминаний/)
       secondContext = await browser.newContext({ viewport: { width: 390, height: 650 } })
       const secondPage = await secondContext.newPage()
       await installTelegramHost(secondPage, signedInitData(Number(secondSubject), 'Другой зритель E2E'))
       await secondPage.goto('/')
+      const secondWelcomeContinue = secondPage.getByRole('button', { name: 'Продолжить' })
+      await expect(secondWelcomeContinue).toBeVisible()
+      await secondWelcomeContinue.click()
+      await expect(secondPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
       await expect(secondPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /7 непросмотренных воспоминаний/)
 
       await page.bringToFront()
@@ -3295,6 +3471,10 @@ test.describe.serial('T07 live feed', () => {
       const sameAccountPage = await sameAccountContext.newPage()
       await installTelegramHost(sameAccountPage, signedInitData(Number(subject), 'Лента E2E'))
       await sameAccountPage.goto('/')
+      const sameAccountWelcomeContinue = sameAccountPage.getByRole('button', { name: 'Продолжить' })
+      await expect(sameAccountWelcomeContinue).toBeVisible()
+      await sameAccountWelcomeContinue.click()
+      await expect(sameAccountPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
       await expect(sameAccountPage.locator('.family-hub-card')).toHaveAttribute('aria-label', /5 непросмотренных воспоминаний/)
 
       await page.locator('.family-hub-card').click()
@@ -3487,7 +3667,7 @@ async function createMemoryWithMedia(input: { familyId: string; childId: string;
 }
 
 async function store(key: string, bytes: Buffer, contentType: string) {
-  await storage.writeObject({ key, body: new Blob([bytes]).stream(), contentLength: bytes.byteLength, contentType })
+  await storage.writeObject({ key, body: new Blob([new Uint8Array(bytes)]).stream(), contentLength: bytes.byteLength, contentType })
 }
 
 function generatedMedia(args: string[]) {
@@ -3655,6 +3835,42 @@ async function openFeed(page: Page) {
   await expect(page.locator('[data-memory-kind="photo"]').first()).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
   await expect(page.getByText('Фотоальбом E2E')).toBeVisible()
+}
+
+async function continueToFamilyHub(page: Page) {
+  const continueButton = page.getByRole('button', { name: 'Продолжить' })
+  await expect(continueButton).toBeVisible()
+  await expect(continueButton).toBeEnabled()
+  await continueButton.click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+}
+
+async function continueToRestoredFeed(page: Page) {
+  const continueButton = page.getByRole('button', { name: 'Продолжить' })
+  await expect(continueButton).toBeVisible()
+  await expect(continueButton).toBeEnabled()
+  await continueButton.click()
+  await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
+}
+
+async function readPersistentUi(page: Page, userId: string) {
+  return page.evaluate(async (id) => {
+    const dbRequest = indexedDB.open('memoly-private-cache')
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      dbRequest.onsuccess = () => resolve(dbRequest.result)
+      dbRequest.onerror = () => reject(dbRequest.error)
+    })
+    const presentation = await new Promise<{ screen?: string; selectedFamilyId?: string | null } | null>((resolve, reject) => {
+      const request = db.transaction('entries', 'readonly').objectStore('entries').get(`memoLy:1:${id}:queries:state`)
+      request.onsuccess = () => {
+        const entry = request.result as { data?: { queries?: Array<{ queryKey: unknown[]; data: { screen?: string; selectedFamilyId?: string | null } }> } } | undefined
+        resolve(entry?.data?.queries?.find((query) => query.queryKey[1] === 'persistent-ui')?.data ?? null)
+      }
+      request.onerror = () => reject(request.error)
+    })
+    db.close()
+    return presentation
+  }, userId)
 }
 
 async function selectTheme(page: Page, theme: string) {

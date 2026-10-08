@@ -141,16 +141,16 @@ test('warm navigation preserves family and feed state through ten round trips an
       revoked.add(url)
       original(url)
     }
-    ;(window as Window & { __warmNav?: Record<string, unknown> }).__warmNav = { revoked, revokeSnapshots, imageErrors: [], samples: [], feedNodes: new Set(), familyNodes: new Set(), running: true }
+    ;(window as unknown as Window & { __warmNav?: Record<string, unknown> }).__warmNav = { revoked, revokeSnapshots, imageErrors: [], samples: [], feedNodes: new Set(), familyNodes: new Set(), running: true }
     document.addEventListener('error', (event) => {
       const image = event.target
       if (image instanceof HTMLImageElement && image.alt === 'Воспоминание') {
-        const evidence = (window as Window & { __warmNav: { imageErrors: Array<Record<string, unknown>>; revoked: Set<string> } }).__warmNav
+        const evidence = (window as unknown as Window & { __warmNav: { imageErrors: Array<Record<string, unknown>>; revoked: Set<string> } }).__warmNav
         evidence.imageErrors.push({ src: image.src, revokedAtError: evidence.revoked.has(image.src), at: performance.now() })
       }
     }, true)
     const sample = () => {
-      const evidence = (window as Window & { __warmNav: { running: boolean; revoked: Set<string>; samples: Array<Record<string, unknown>>; feedNodes: Set<Element>; familyNodes: Set<Element> } }).__warmNav
+      const evidence = (window as unknown as Window & { __warmNav: { running: boolean; revoked: Set<string>; samples: Array<Record<string, unknown>>; feedNodes: Set<Element>; familyNodes: Set<Element> } }).__warmNav
       if (!evidence?.running) return
       const feed = document.querySelector('[data-memoly-feed]')
       const family = document.querySelector('.ml-page')
@@ -184,7 +184,7 @@ test('warm navigation preserves family and feed state through ten round trips an
   const childAvatarPath = `/api/v1/families/${familyId}/media/${childAvatarId}/content?variant=display`
   await expect.poll(() => apiRequests.filter((path) => path === childAvatarPath).length).toBeGreaterThan(0)
   await page.evaluate(() => {
-    const state = (window as Window & { __warmNav: { samples: unknown[] } }).__warmNav
+    const state = (window as unknown as Window & { __warmNav: { samples: unknown[] } }).__warmNav
     state.samples.length = 0
   })
   await page.evaluate(() => { document.body.style.minHeight = '1400px'; window.scrollTo(0, 100) })
@@ -216,7 +216,7 @@ test('warm navigation preserves family and feed state through ten round trips an
     if (Math.abs(slideRect.left - viewportRect.left) >= 1 || Math.abs(slideRect.width - viewportRect.width) >= 1) {
       throw new Error('Initial capture requires the active slide to align with its viewport')
     }
-    ;(window as Window & { __warmNav: { samples: unknown[] } }).__warmNav.samples.length = 0
+    ;(window as unknown as Window & { __warmNav: { samples: unknown[] } }).__warmNav.samples.length = 0
   })
   expect(await activeSlide.boundingBox()).not.toBeNull()
   expect(await carouselViewport.boundingBox()).not.toBeNull()
@@ -316,7 +316,7 @@ test('warm navigation preserves family and feed state through ten round trips an
     `/api/v1/families/${familyId}/media/max-videos/${maxVideoId}/poster`,
   ].map((path) => [path, apiRequests.filter((requestPath) => requestPath === path).length]))
   const navigationEvidence = await page.evaluate(() => {
-    const state = (window as Window & { __warmNav: { revoked: Set<string>; imageErrors: unknown[]; samples: Array<{ hasPlaceholder: boolean; visible: boolean; revoked: boolean; complete: boolean | null; naturalWidth: number | null }>; feedNodes: Set<Element>; familyNodes: Set<Element> } }).__warmNav
+    const state = (window as unknown as Window & { __warmNav: { revoked: Set<string>; imageErrors: unknown[]; samples: Array<{ hasPlaceholder: boolean; visible: boolean; revoked: boolean; complete: boolean | null; naturalWidth: number | null }>; feedNodes: Set<Element>; familyNodes: Set<Element> } }).__warmNav
     return {
       feedMounts: state.feedNodes.size,
       familyMounts: state.familyNodes.size,
@@ -356,13 +356,13 @@ test('warm navigation preserves family and feed state through ten round trips an
   // AuthProvider recreates AuthenticatedTransport when its access token refreshes. Re-rendering
   // the real App with a new transport identity reproduces that lifecycle while the synthetic
   // private HTTP response is held, then verify the fullscreen viewer's borrowed URL stays live.
-  const revokeCountBeforeTransportRefresh = await page.evaluate(() => (window as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)
-  await page.evaluate(() => (window as Window & { __warmNavRerender: (generation: number) => void }).__warmNavRerender(2))
+  const revokeCountBeforeTransportRefresh = await page.evaluate(() => (window as unknown as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)
+  await page.evaluate(() => (window as unknown as Window & { __warmNavRerender: (generation: number) => void }).__warmNavRerender(2))
   await transportRefreshRequest
   await expect.poll(() => refreshRequestPending, { timeout: 3_000 }).toBe(true)
   await page.waitForTimeout(100)
   const refreshEvidence = await page.evaluate(() => {
-    const state = (window as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ alt: string; src: string; isConnected: boolean; complete: boolean; naturalWidth: number; hiddenSurface: boolean }> }>; imageErrors: unknown[]; samples: Array<{ revoked: boolean; complete: boolean | null; naturalWidth: number | null }> } }).__warmNav
+    const state = (window as unknown as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ alt: string; src: string; isConnected: boolean; complete: boolean; naturalWidth: number; hiddenSurface: boolean }> }>; imageErrors: unknown[]; samples: Array<{ revoked: boolean; complete: boolean | null; naturalWidth: number | null }> } }).__warmNav
     const image = document.querySelector<HTMLImageElement>('[data-mixed-viewer] img[alt="Воспоминание"]')
     return {
       src: image?.src ?? null,
@@ -375,10 +375,10 @@ test('warm navigation preserves family and feed state through ten round trips an
   })
   releaseTransportRefresh()
   await expect.poll(() => transportRefreshCompleted).toBe(true)
-  await expect.poll(() => page.evaluate(() => (window as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)).toBeGreaterThan(revokeCountBeforeTransportRefresh)
+  await expect.poll(() => page.evaluate(() => (window as unknown as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)).toBeGreaterThan(revokeCountBeforeTransportRefresh)
   await expect.poll(() => photo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
   const refreshReplacementEvidence = await page.evaluate((previousSrc) => {
-    const state = (window as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ src: string; isConnected: boolean }> }> } }).__warmNav
+    const state = (window as unknown as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ src: string; isConnected: boolean }> }> } }).__warmNav
     const image = document.querySelector<HTMLImageElement>('[data-mixed-viewer] img[alt="Воспоминание"]')
     return {
       previousSrc,
@@ -411,14 +411,14 @@ test('warm navigation preserves family and feed state through ten round trips an
 
   // Remove this resource from the real IndexedDB private-image cache, then reproduce an HTTP 200
   // whose declared image format contains undecodable bytes during a transport-token refresh.
-  await page.evaluate(() => (window as Window & { __warmNavEvictPhoto: () => Promise<void> }).__warmNavEvictPhoto())
-  const revokeCountBeforeCorruptResponse = await page.evaluate(() => (window as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)
-  await page.evaluate(() => (window as Window & { __warmNavRerender: (generation: number) => void }).__warmNavRerender(3))
+  await page.evaluate(() => (window as unknown as Window & { __warmNavEvictPhoto: () => Promise<void> }).__warmNavEvictPhoto())
+  const revokeCountBeforeCorruptResponse = await page.evaluate(() => (window as unknown as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)
+  await page.evaluate(() => (window as unknown as Window & { __warmNavRerender: (generation: number) => void }).__warmNavRerender(3))
   await expect.poll(() => corruptResponseRequested).toBe(true)
   await expect.poll(() => corruptResponseCompleted).toBe(true)
-  await expect.poll(() => page.evaluate(() => (window as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)).toBeGreaterThan(revokeCountBeforeCorruptResponse)
+  await expect.poll(() => page.evaluate(() => (window as unknown as Window & { __warmNav: { revokeSnapshots: unknown[] } }).__warmNav.revokeSnapshots.length)).toBeGreaterThan(revokeCountBeforeCorruptResponse)
   const corruptResponseEvidence = await page.evaluate(() => {
-    const state = (window as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ alt: string; src: string; isConnected: boolean; complete: boolean; naturalWidth: number; hiddenSurface: boolean }> }>; imageErrors: Array<{ src: string; revokedAtError: boolean }> } }).__warmNav
+    const state = (window as unknown as Window & { __warmNav: { revoked: Set<string>; revokeSnapshots: Array<{ url: string; images: Array<{ alt: string; src: string; isConnected: boolean; complete: boolean; naturalWidth: number; hiddenSurface: boolean }> }>; imageErrors: Array<{ src: string; revokedAtError: boolean }> } }).__warmNav
     const image = document.querySelector<HTMLImageElement>('[data-memoly-feed] img[alt="Воспоминание"]')
     return {
       src: image?.src ?? null,

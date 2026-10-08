@@ -7,6 +7,7 @@ import { MemberAvatarImage } from '@/features/avatar'
 import { NoteStoryPresentation } from './NoteStoryPresentation'
 import { MemoryReactions } from './MemoryReactions'
 import type { ReactionHapticStyle } from '@/platform/reaction-haptics'
+import { installRetargetedTouchClickGuard } from './retargeted-touch-click-guard'
 
 export type MemoryCardPresentationProps = {
   actions: ReactNode
@@ -58,7 +59,7 @@ export function MemoryCardPresentation({
   const interactive = mode === 'feed'
   const articleRef = useRef<HTMLElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pointerRef = useRef<{ id: number; x: number; y: number; target: EventTarget | null } | null>(null)
+  const pointerRef = useRef<{ id: number; x: number; y: number; target: EventTarget | null; pointerType: string } | null>(null)
   const recognizedPointerRef = useRef<{ id: number; target: EventTarget | null } | null>(null)
   const didHoldRef = useRef(false)
   const holdClickTargetRef = useRef<Element | null>(null)
@@ -128,7 +129,11 @@ export function MemoryCardPresentation({
     window.addEventListener('blur', cancelOnScroll)
     document.addEventListener('visibilitychange', cancelOnScroll)
     window.addEventListener('pagehide', cancelOnScroll)
-    return () => { document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current) }
+    return () => {
+      const pendingTouch = pointerRef.current?.pointerType === 'touch' ? pointerRef.current : null
+      if (pendingTouch) installRetargetedTouchClickGuard(document, window, pendingTouch.id, pendingTouch.x, pendingTouch.y)
+      document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current)
+    }
   }, [cancelPending, memoryId, reactionScopeKey, setPickerOpen])
 
   const eligible = (event: ReactPointerEvent<HTMLElement>) => {
@@ -178,7 +183,7 @@ export function MemoryCardPresentation({
     recognizedPointerRef.current = null
     holdClickTargetRef.current = null
     didHoldRef.current = false
-    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target, pointerType: event.pointerType }
     timerRef.current = setTimeout(() => {
       const pointer = pointerRef.current
       if (!pointer || pointer.id !== event.pointerId) return

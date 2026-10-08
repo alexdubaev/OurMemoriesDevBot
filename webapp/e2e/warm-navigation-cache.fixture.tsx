@@ -6,7 +6,7 @@ import App from '../src/App'
 import { AuthContext } from '../src/features/auth/context'
 import type { AuthContextValue } from '../src/features/auth/context'
 import { createBrowserDevHostBridge } from '../src/platform/telegram/host-bridge'
-import type { AuthenticatedTransport } from '../src/platform/api'
+import type { AuthenticatedTransport, HttpRequestOptions } from '../src/platform/api'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache, persistPrivateQueryCache, persistentUiQueryKey, removePrivateImage, restorePrivateQueryCache } from '../src/platform/persistence/private-cache'
 import '../src/production.css'
 
@@ -38,11 +38,17 @@ allowPrivateFamilyCache(userId, familyId)
 
 function createTransport(generation: number): AuthenticatedTransport {
   const headers = (source?: HeadersInit) => ({ ...Object.fromEntries(new Headers(source)), 'X-Fixture-Transport-Generation': String(generation) })
+  const fetchOptions = (options?: HttpRequestOptions): RequestInit => {
+    const { body, rawBody, ...init } = options ?? {}
+    if (body !== undefined && rawBody !== undefined) throw new TypeError('body and rawBody cannot be used together')
+    const requestHeaders = new Headers(headers(options?.headers))
+    if (body !== undefined && rawBody === undefined) requestHeaders.set('Content-Type', 'application/json')
+    return { ...init, headers: requestHeaders, body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)) }
+  }
   return {
-    raw: (path, options) => fetch(path, { ...options, headers: headers(options?.headers) }),
+    raw: (path, options) => fetch(path, fetchOptions(options)),
     request: async (path, schema, options) => {
-      const { body, ...requestOptions } = options ?? {}
-      const response = await fetch(path, { ...requestOptions, headers: headers(options?.headers), body: body === undefined ? undefined : JSON.stringify(body) })
+      const response = await fetch(path, fetchOptions(options))
       if (!response.ok) throw new Error(`Synthetic transport returned ${response.status}`)
       const payload: unknown = await response.json()
       try {
@@ -56,6 +62,7 @@ function createTransport(generation: number): AuthenticatedTransport {
 }
 
 function AuthenticatedFixture({ generation }: PropsWithChildren<{ generation: number }>) {
+  const unexpectedAuthAction = async (): Promise<never> => { throw new Error('Unexpected auth action in warm navigation fixture') }
   const auth = {
     user: { id: userId, email: null, displayName: 'Анна', role: 'user' as const, theme: 'mint' as const, createdAt: now },
     externalIdentityProvider: 'max' as const,
@@ -63,21 +70,21 @@ function AuthenticatedFixture({ generation }: PropsWithChildren<{ generation: nu
     isAuthenticated: true,
     sessionError: null,
     transport: createTransport(generation),
-    retrySession: async () => undefined,
-    updateTheme: async () => undefined,
-    authenticateHost: async () => undefined,
-    authenticateTelegram: async () => undefined,
-    authenticateMax: async () => undefined,
-    startBrowserLink: async () => ({}),
-    browserLinkStatus: async () => ({}),
-    approveBrowserLink: async () => undefined,
-    redeemBrowserLink: async () => undefined,
-    register: async () => undefined,
-    login: async () => undefined,
-    logout: async () => undefined,
-    requestPasswordReset: async () => undefined,
-    confirmPasswordReset: async () => undefined,
-  } as unknown as AuthContextValue
+    retrySession: unexpectedAuthAction,
+    updateTheme: unexpectedAuthAction,
+    authenticateHost: unexpectedAuthAction,
+    authenticateTelegram: unexpectedAuthAction,
+    authenticateMax: unexpectedAuthAction,
+    startBrowserLink: unexpectedAuthAction,
+    browserLinkStatus: unexpectedAuthAction,
+    approveBrowserLink: unexpectedAuthAction,
+    redeemBrowserLink: unexpectedAuthAction,
+    register: unexpectedAuthAction,
+    login: unexpectedAuthAction,
+    logout: unexpectedAuthAction,
+    requestPasswordReset: unexpectedAuthAction,
+    confirmPasswordReset: unexpectedAuthAction,
+  } satisfies AuthContextValue
   return <QueryClientProvider client={queryClient}><AuthContext.Provider value={auth}><App hostBridge={createBrowserDevHostBridge({ maxBotUsername: 'OurMemoriesDevBot' })} /></AuthContext.Provider></QueryClientProvider>
 }
 

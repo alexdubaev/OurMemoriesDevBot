@@ -1,18 +1,18 @@
 import { expect, test } from '@playwright/test'
 
 async function image(page: import('@playwright/test').Page) {
-  return page.evaluate(() => (window as Window & { __adultPng: string }).__adultPng)
+  return page.evaluate(() => (window as unknown as Window & { __adultPng: string }).__adultPng)
 }
 
 async function calls(page: import('@playwright/test').Page) {
-  return page.evaluate(() => (window as Window & { __adultAvatarCalls: Array<{ path: string; options: { method?: string; body?: unknown } }> }).__adultAvatarCalls)
+  return page.evaluate(() => (window as unknown as Window & { __adultAvatarCalls: Array<{ path: string; options: { method?: string; body?: unknown } }> }).__adultAvatarCalls)
 }
 
 test('adult add keeps selection local until Done and finalizes crop with original upload', async ({ page }) => {
   await page.route('**/signed-avatar', (route) => route.fulfill({ status: 200 }))
   await page.goto('/e2e/adult-avatar.html')
   await expect.poll(async () => (await calls(page)).some((call) => call.path === '/api/uploads/avatar')).toBe(true)
-  await page.evaluate(() => { (window as Window & { __adultAvatarCalls: unknown[] }).__adultAvatarCalls.length = 0 })
+  await page.evaluate(() => { (window as unknown as Window & { __adultAvatarCalls: unknown[] }).__adultAvatarCalls.length = 0 })
   await page.getByTestId('avatar-file-input').setInputFiles({ name: 'adult.png', mimeType: 'image/png', buffer: Buffer.from((await image(page)).split(',')[1]!, 'base64') })
   const editor = page.getByRole('dialog', { name: 'Редактирование фотографии' })
   await expect(editor).toBeVisible()
@@ -62,6 +62,7 @@ test('adult recrop keeps its editor image alive while feed cache reconciliation 
   await expect(editor).toBeVisible()
   const editorImageUrl = await editor.locator('img').getAttribute('src')
   expect(editorImageUrl).toMatch(/^blob:/)
+  if (editorImageUrl === null) throw new Error('Avatar editor image URL was missing')
 
   await editor.getByRole('button', { name: 'Готово' }).click()
   await expect.poll(async () => (await calls(page)).some((call) => call.path === '/api/uploads/avatar/crop')).toBe(true)
@@ -70,7 +71,7 @@ test('adult recrop keeps its editor image alive while feed cache reconciliation 
     try { return (await fetch(url)).ok } catch { return false }
   }, editorImageUrl)).toBe(true)
 
-  await page.evaluate(() => (window as Window & { __releaseAdultFeedInvalidation: () => void }).__releaseAdultFeedInvalidation())
+  await page.evaluate(() => (window as unknown as Window & { __releaseAdultFeedInvalidation: () => void }).__releaseAdultFeedInvalidation())
   await expect(editor).toBeHidden()
 })
 
@@ -78,7 +79,7 @@ test('adult failed finalize keeps the selected file and crop for retry', async (
   await page.route('**/signed-avatar', (route) => route.fulfill({ status: 200 }))
   await page.goto('/e2e/adult-avatar.html?retry')
   await expect.poll(async () => (await calls(page)).some((call) => call.path === '/api/uploads/avatar')).toBe(true)
-  await page.evaluate(() => { (window as Window & { __adultAvatarCalls: unknown[] }).__adultAvatarCalls.length = 0 })
+  await page.evaluate(() => { (window as unknown as Window & { __adultAvatarCalls: unknown[] }).__adultAvatarCalls.length = 0 })
   await page.getByTestId('avatar-file-input').setInputFiles({ name: 'adult.png', mimeType: 'image/png', buffer: Buffer.from((await image(page)).split(',')[1]!, 'base64') })
   const editor = page.getByRole('dialog', { name: 'Редактирование фотографии' })
   await editor.getByRole('button', { name: 'Готово' }).click()

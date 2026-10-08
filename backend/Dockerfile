@@ -2,12 +2,15 @@ FROM oven/bun:1.4.0 AS build
 
 WORKDIR /app
 
-# Copy the repository instead of enumerating workspace manifests. The master branch
-# intentionally has no mobile package, while the mobile branch does; this build must
-# remain valid for both repository shapes.
-COPY . .
+COPY package.json bun.lock bunfig.toml ./
+COPY webapp/package.json ./webapp/
+COPY website/package.json ./website/
+COPY backend/package.json ./backend/
+COPY packages/contracts/package.json ./packages/contracts/
 
 RUN BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --network-concurrency 8 --filter @web-app-demo/backend
+
+COPY . .
 
 WORKDIR /app/backend
 
@@ -17,9 +20,15 @@ FROM oven/bun:1.4.0 AS production-dependencies
 
 WORKDIR /app
 
-COPY . .
+COPY package.json bun.lock bunfig.toml ./
+COPY webapp/package.json ./webapp/
+COPY website/package.json ./website/
+COPY backend/package.json ./backend/
+COPY packages/contracts/package.json ./packages/contracts/
 
 RUN BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --production --network-concurrency 8 --filter @web-app-demo/backend
+
+COPY . .
 
 FROM oven/bun:1.4.0 AS runtime
 
