@@ -10,6 +10,6 @@
 | Local PostgreSQL | `docker-compose.yml`, `backend/.env.example` | Keep Docker Compose and synthetic local data only. |
 | Architecture guard | `scripts/architecture-check.mjs` | Reuse unchanged. |
 | Documentation package | `docs/mvp/`, `assets/`, `references/`, `templates/` | Copied from the approved package; `archive/` is intentionally excluded. |
-| Changed-path verification | `scripts/verify-plan.mjs`, `verification-map.json` | Added by Block 00; plans commands only and fails closed for unknown paths. |
+| Local publication verification | `scripts/verify-local.mjs`, `.githooks/pre-push` | Run `bun run verify:local` before main/master publication; install the pre-push hook locally. GitHub Actions CI/CD is not used. |
 
 Template identifiers such as `@web-app-demo/*` and `web_app_demo` remain internal Vibe implementation names in this block. Renaming them requires coordinated changes across workspace manifests, generated Prisma paths, Compose, test fixtures, and `bun.lock`; it is not required to establish MVP boundaries and is deferred rather than silently regenerated.

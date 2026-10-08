@@ -18,7 +18,6 @@ This section may be updated during first-run bootstrap. Once [CHECKLIST.md](../C
 - TanStack Form
 - TanStack Router
 - Zod contracts from `@web-app-demo/contracts`
-- shadcn CLI
 - Playwright
 - ESLint
 
@@ -31,8 +30,6 @@ bun run typecheck
 bun run lint
 bun run test
 bun run e2e
-bun run e2e:ui
-bun run ui:info
 bun run storybook
 bun run storybook:build
 ```
@@ -107,14 +104,7 @@ Product typography goes through `src/components/typography.tsx`. Use `Typography
 
 The current shadcn configuration is `radix-vega` with the `hugeicons` icon library and CSS variables, as recorded in `components.json`. The registry was refreshed from the official CLI with `npx shadcn@latest add --all -c webapp --overwrite -y`; the auth composition comes from `login-02` and `signup-02`. Generated inputs use the standard Vega `rounded-md` primitive. The authenticated shell keeps real product/API state rather than registry demo data. Do not add community registries or custom generator output unless the product asks for them.
 
-When adding or refreshing shadcn components:
-
-```bash
-bun run --cwd webapp ui:info
-bun run --cwd webapp ui:add -- <component>
-```
-
-Use the local `shadcn` devDependency pinned in `webapp/package.json` and `bun.lock`; do not use `shadcn@latest` for routine refreshes because it can produce registry output that no longer matches this template. If generated files need compatibility fixes for current package versions, keep the edits small and leave app-specific composition outside `src/components/ui`.
+The checked-in `src/components/ui` files are the shadcn-derived primitives used by this app. Their shared Tailwind stylesheet is vendored at `../vendor/shadcn/tailwind.css` with its MIT license and source version recorded alongside it, so builds do not depend on the shadcn generator. If component generation is needed during development, install and run the CLI as separate optional tooling; it is not a workspace dependency or build prerequisite.
 
 ## E2E
 

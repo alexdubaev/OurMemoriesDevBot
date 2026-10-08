@@ -16,7 +16,7 @@ import { AuthContext } from '@/features/auth'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { responseToPrivateImageObjectUrl } from '@/platform/media/private-image'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
-import { toggleMediaPlayback } from '@/platform/media/playback'
+import { toggleAudioPlayback } from './audio-playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
 import { loadFeed, loadMemory, openTelegramVideo } from './api'
@@ -457,7 +457,14 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
   const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const photoViewerSession = useRef<AbortController | null>(null)
-  useEffect(() => () => photoViewerSession.current?.abort(), [])
+  useEffect(() => {
+    const closeViewer = () => photoViewerSession.current?.abort()
+    document.addEventListener('memoly:feed-inactive', closeViewer)
+    return () => {
+      document.removeEventListener('memoly:feed-inactive', closeViewer)
+      closeViewer()
+    }
+  }, [])
   const select = useCallback(() => {
     if (!embla) return
     const next = embla.selectedScrollSnap()
@@ -913,14 +920,19 @@ export function PhotoImage({ alt, height, onError, onLoad, src, width }: {
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
   const { url } = usePrivateMediaSource(path)
   const audio = useRef<HTMLAudioElement | null>(null)
+  const playbackAttempt = useRef(0)
   const activate = usePlaybackRegistration(`audio:${path ?? 'missing'}`, audio)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(() => durationMs ? durationMs / 1_000 : 0)
+  useEffect(() => {
+    playbackAttempt.current += 1
+    return () => { playbackAttempt.current += 1 }
+  }, [url])
   const updateDuration = (element: HTMLAudioElement) => { if (Number.isFinite(element.duration) && element.duration >= 0) setDuration(element.duration) }
   const syncCurrent = (element: HTMLAudioElement) => setCurrent(element.currentTime)
-  return <div className="ml-audio p-4" data-seen-ready={mediaCardSeenReady({ kind: 'voice', objectUrl: url })}><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={() => setPlaying(false)} onPlay={(e) => { activate(); syncCurrent(e.currentTarget) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
-    <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => void (async () => { const element = audio.current; if (!element) return; setPlaying(await toggleMediaPlayback(element)) })()} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div>
+  return <div className="ml-audio p-4" data-seen-ready={mediaCardSeenReady({ kind: 'voice', objectUrl: url })}><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (!e.currentTarget.ended) return; if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); playbackAttempt.current += 1; setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={(e) => { if (!e.currentTarget.paused) return; playbackAttempt.current += 1; setPlaying(false) }} onPlay={(e) => { if (e.currentTarget.paused) return; activate(); syncCurrent(e.currentTarget); setPlaying(true) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
+    <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => { const element = audio.current; if (!element) return; const attempt = ++playbackAttempt.current; void toggleAudioPlayback(element, () => playbackAttempt.current === attempt, setPlaying) }} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div>
     <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position; setCurrent(position) }} waveform={waveform} />
   </div>
 }

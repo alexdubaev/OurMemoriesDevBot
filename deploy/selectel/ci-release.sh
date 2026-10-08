@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# This is the only server-side entry point used by the reviewed GitHub
-# workflow. It deliberately performs the host checkout and image build on the
-# Selectel machine, so the deployment uses the same immutable source SHA that
-# is checked out in the server worktree.
+# Guarded manual entry point for Selectel releases. It performs the host
+# checkout and image build on the Selectel machine, preserving the immutable
+# source SHA used by the server worktree.
 
 SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}

@@ -145,7 +145,7 @@
 [data-memoly-feed] .memory-header > [aria-label="Действия с воспоминанием"] { width: 44px; height: 44px; min-width: 44px; margin-left: auto; padding: 8px 3px 8px 12px; }
 
 [data-memoly-feed] .memoly-mixed-carousel { position: relative; width: 100%; min-width: 0; }
-[data-memoly-feed] .memoly-mixed-viewport { overflow: hidden; border-radius: 19px; touch-action: pan-y pinch-zoom; }
+[data-memoly-feed] .memoly-mixed-viewport { overflow: hidden; overflow: clip; border-radius: 19px; touch-action: pan-y pinch-zoom; }
 [data-memoly-feed] .memoly-mixed-viewport[data-media-stage='feed'] { aspect-ratio: 4 / 5; }
 [data-memoly-feed] .memoly-mixed-track { display: flex; align-items: stretch; }
 [data-memoly-feed] .memoly-mixed-slide { position: relative; min-width: 0; min-height: 0; flex: 0 0 100%; aspect-ratio: 4 / 5; overflow: hidden; background: var(--theme-surface-lo, #eee6df); }

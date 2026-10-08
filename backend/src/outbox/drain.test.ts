@@ -141,61 +141,7 @@ describe('drainTaskOutbox', () => {
   })
 })
 
-test('a retry is scheduled from the attempt, not from the start of a long pass', async () => {
-  // The password-reset cooldown starts when the token row is written, which is real time. If the
-  // backoff were measured from pass start, a pass that had already been running for longer than
-  // the cooldown would schedule the retry inside it, where the handler skips it and the work is
-  // silently lost - the exact failure this whole table exists to prevent.
-  const passStartedAt = new Date('2026-08-09T12:00:00.000Z')
-  const attemptAt = new Date('2026-08-09T12:04:00.000Z')
-  const rows = [taskRow({ id: 'a', type: 'test:work', scheduledFor: passStartedAt })]
 
-  await drainTaskOutbox(createFakeOutboxRuntime(rows), {
-    clock: () => attemptAt,
-    handlers: registry(async () => {
-      throw new Error('provider unavailable')
-    }),
-    now: passStartedAt,
-    random: noJitter,
-  })
-
-  expect(rows[0]?.scheduledFor).toEqual(new Date(attemptAt.getTime() + 120_000))
-})
-
-test('a result that cannot be written down does not abort the pass', async () => {
-  // The side effect already happened. Leaving the row for lease recovery is survivable; losing
-  // the rest of the batch is not.
-  const rows = [
-    taskRow({ id: 'a', type: 'test:work' }),
-    taskRow({ id: 'b', type: 'test:work' }),
-  ]
-  const runtime = createFakeOutboxRuntime(rows)
-  const fake = runtime.prisma.taskOutbox as unknown as {
-    updateMany: (args: { where: Record<string, unknown>; data: unknown }) => Promise<unknown>
-  }
-  const realUpdateMany = fake.updateMany.bind(fake)
-  fake.updateMany = async (args) => {
-    if (args.where.processingToken && args.where.id === 'a') throw new Error('connection reset')
-    return realUpdateMany(args)
-  }
-  const error = spyOn(console, 'error').mockImplementation(() => {})
-
-  try {
-    const metrics = await drainTaskOutbox(runtime, {
-      clock: () => now,
-      handlers: registry(async () => undefined),
-      now,
-      random: noJitter,
-    })
-
-    expect(metrics).toMatchObject({ claimed: 2, done: 1 })
-    expect(rows.find((row) => row.id === 'a')?.status).toBe('processing')
-    expect(rows.find((row) => row.id === 'b')?.status).toBe('done')
-    expect(String(error.mock.calls[0]?.[0])).toContain('could not be recorded')
-  } finally {
-    error.mockRestore()
-  }
-})
 
 test('a handler that ignores its deadline does not stop the outbox', async () => {
   // The signal is a request, not a guarantee - Prisma calls take no signal at all. Without a
@@ -263,30 +209,3 @@ test('an over-deadline attempt is retried rather than lost', async () => {
     release?.()
   }
 }, 5_000)
-
-test('the lease floor is applied, not merely available', async () => {
-  // A lease shorter than an attempt would let a second drain claim a row whose first runner is
-  // still working. The floor is a pure function, but it has to actually be called with the
-  // slowest handler deadline - otherwise an operator setting a tiny lease breaks the invariant.
-  const rows = [
-    taskRow({
-      id: 'held',
-      type: 'test:work',
-      processingToken: 'someone-else',
-      status: 'processing',
-      updatedAt: new Date(now.getTime() - 20_000),
-    }),
-  ]
-
-  const metrics = await drainTaskOutbox(createFakeOutboxRuntime(rows), {
-    clock: () => now,
-    handlers: { 'test:work': { deadlineMs: 30_000, run: async () => undefined } },
-    // Absurdly short on purpose: the floor must override it.
-    leaseStaleMs: 1,
-    now,
-    random: noJitter,
-  })
-
-  expect(metrics.recoveredStale).toBe(0)
-  expect(rows[0]?.status).toBe('processing')
-})

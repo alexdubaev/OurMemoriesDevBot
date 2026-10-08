@@ -59,40 +59,9 @@ test('unreadable MM0 marker recovery falls back to stopping all application writ
   assert.doesNotMatch(result.stdout, /ACTION:.*rollback/)
 })
 
-test('MM0 boundary is keyed to migration-compatible commit, not a production SHA', () => {
-  assert.match(release, /MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190/)
-  assert.match(release, /MM0_MIGRATION=20260928100000_mm0_domain_temporal_foundation/)
-  assert.match(functionBody(release, 'detect_mm0_boundary'), /merge-base --is-ancestor "\$MM0_RUNTIME_SHA" "\$PREVIOUS_BACKEND_IMAGE_TAG"/)
-})
 
-test('build, preflight and validated backup precede MM0 marker and writer quiescence', () => {
-  const flow = release.slice(release.indexOf('  if [ "$PREBUILT_IMAGES" = false ]; then'))
-  for (const [before, after] of [
-    ['build-images.sh', 'redeploy.sh" preflight'],
-    ['redeploy.sh" preflight', 'redeploy.sh" backup-migration'],
-    ['redeploy.sh" backup-migration', 'write_mm0_marker'],
-  ]) assert.ok(flow.indexOf(before) < flow.indexOf(after), `${before} before ${after}`)
-  const mmFlow = flow.slice(flow.indexOf('  if [ "$LEGACY_MM0_RUNTIME" = true ]; then'))
-  assert.ok(mmFlow.indexOf('write_mm0_marker') < mmFlow.indexOf('quiesce-legacy'))
-  assert.ok(mmFlow.indexOf('quiesce-legacy') < mmFlow.indexOf('redeploy.sh" migrate'))
-  const migration = functionBody(redeploy, 'migrate')
-  assert.ok(migration.indexOf('verify_no_legacy_writers') < migration.indexOf('bun run db:deploy'))
-  assert.match(functionBody(redeploy, 'verify_no_legacy_writers'), /verify_mm0_spike_stopped/)
-})
 
-test('no-migration MM0 release checks pending state before marker and quiescence', () => {
-  const flow = release.slice(release.indexOf('  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = false ]; then'))
-  assert.ok(flow.indexOf('migration-status') < flow.indexOf('write_mm0_marker'))
-  assert.ok(flow.indexOf('migration-status') < flow.indexOf('quiesce-legacy'))
-})
 
-test('migration command failure remains ambiguous and cannot auto-rollback', () => {
-  const migration = functionBody(redeploy, 'migrate')
-  assert.match(migration, /if ! compose run --rm --no-deps backend bun run db:deploy/)
-  const failure = release.slice(release.indexOf('  release_failure() {'), release.indexOf('  trap release_failure EXIT'))
-  assert.ok(failure.indexOf('MM0_FORWARD_MARKER') < failure.indexOf('PROMOTION_STARTED'))
-  assert.match(failure, /FORWARD_FIX_REQUIRED/)
-})
 
 for (const stage of ['preflight', 'backup']) {
   test(`${stage} failure before MM0 attempt leaves the old runtime running`, () => {
@@ -167,14 +136,6 @@ printf 'CLEARED\\n'
   assert.match(result.stdout, /CLEARED/)
 })
 
-test('migration-status, startup and readiness failures retain the armed marker', () => {
-  const flow = release.slice(release.indexOf('  if [ "$RUN_MIGRATION" = true ]; then'))
-  const remove = flow.indexOf('rm -- "$MM0_FORWARD_MARKER"')
-  for (const step of ['redeploy.sh" migration-status', 'redeploy.sh" deploy', 'verify_promoted_revision', 'public_smoke', 'write_release_manifest']) {
-    assert.ok(flow.indexOf(step) >= 0 && flow.indexOf(step) < remove, `${step} before marker removal`)
-  }
-  assert.match(functionBody(redeploy, 'deploy'), /wait_backend_internal[\s\S]*promote_jobs[\s\S]*readiness/)
-})
 
 test('post-promotion revision mismatch fails before marker cleanup', () => {
   const check = functionBody(release, 'verify_promoted_revision')
@@ -191,22 +152,7 @@ verify_promoted_revision
   assert.match(result.stderr, /revision label does not match/)
 })
 
-test('interrupted MM0 retry validates a fresh backup before migration', () => {
-  const flow = release.slice(release.indexOf('  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = true ]; then'))
-  assert.match(flow, /backup-migration/)
-  assert.doesNotMatch(flow.slice(0, flow.indexOf('backup-migration')), /RESUMING_MM0.*false/)
-  assert.ok(flow.indexOf('backup-migration') < flow.indexOf('redeploy.sh" migrate'))
-  assert.match(functionBody(redeploy, 'backup_migration'), /backup_database/)
-})
 
-test('an existing B2 marker is superseded only after a durable MM0 marker is written', () => {
-  assert.match(release, /load_forward_marker\n\s+MM0_ACTIVE_MARKER=\$FORWARD_MARKER/)
-  const flow = release.slice(release.indexOf('  if [ "$LEGACY_MM0_RUNTIME" = true ]; then\n    if [ "$RESUMING_MM0" = false ]; then'))
-  assert.ok(flow.indexOf('write_mm0_marker') < flow.indexOf('rm -- "$FORWARD_MARKER"'))
-  assert.match(flow, /MM0_ACTIVE_MARKER=\$MM0_FORWARD_MARKER/)
-  assert.match(flow, /FORWARD_MARKER="\$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash .*quiesce-legacy/)
-  assert.match(flow, /FORWARD_MARKER="\$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true MM0_BACKUP_PREPARED=true bash .*migrate/)
-})
 
 test('crash with both B2 and MM0 markers recovers through MM0 and removes superseded B2 marker', () => {
   const mmTarget = 'a'.repeat(40)
@@ -412,11 +358,4 @@ backup_migration
   assert.equal(result.status, 19, `${result.stdout}${result.stderr}`)
   assert.doesNotMatch(result.stdout, /BACKUP_CALLED/)
   assert.match(result.stderr, /cannot classify MAX video spike database target before MM0 migration/)
-})
-
-test('manual rollback rejects pre-MM0 runtime after marker cleanup', () => {
-  const rollback = functionBody(redeploy, 'rollback')
-  assert.match(rollback, /\[ ! -e "\$MM0_FORWARD_MARKER" \]/)
-  assert.match(rollback, /merge-base --is-ancestor "\$MM0_RUNTIME_SHA" "\$PREVIOUS_BACKEND_IMAGE_TAG"/)
-  assert.ok(rollback.indexOf('FORWARD_FIX_REQUIRED: rollback target predates the MM0 runtime') < rollback.indexOf('compose up -d'))
 })

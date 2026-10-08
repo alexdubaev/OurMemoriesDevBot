@@ -15,14 +15,26 @@ export class PrismaCaptionRepository implements CaptionRepository {
       if (request.cancelledAt || request.expiresAt <= new Date()) return { kind: 'expired' as const }
       const full = await tx.familyMember.count({ where: { familyId: input.familyId, userId: input.userId, role: 'full', revokedAt: null,
         family: { status: 'active' } } })
-      if (full !== 1 || !(await lockCurrentFullMember(tx, input.familyId, input.userId))) {
-        await tx.captionRequest.update({ where: { id: request.id }, data: { cancelledAt: new Date() } })
+      const authorized = full === 1 && await lockCurrentFullMember(tx, input.familyId, input.userId)
+
+      // Preserve the user/family/member lock order above, then serialize reply and /cancel on the
+      // request itself. The first read only identifies the request; this read decides whether it
+      // may still change a memory after any concurrent cancellation has committed.
+      await tx.$queryRaw`SELECT id FROM caption_requests WHERE id = ${request.id}::uuid FOR UPDATE`
+      const current = await tx.captionRequest.findUnique({ where: { id: request.id } })
+      if (!current) return { kind: 'not_found' as const }
+      if (current.consumedAt) return { kind: 'updated' as const }
+      const checkedAt = new Date()
+      if (current.cancelledAt || current.expiresAt <= checkedAt) return { kind: 'expired' as const }
+
+      if (!authorized) {
+        await tx.captionRequest.update({ where: { id: current.id }, data: { cancelledAt: checkedAt } })
         return { kind: 'forbidden' as const }
       }
-      const updated = await tx.memory.updateMany({ where: { id: request.memoryId, familyId: input.familyId, deletedAt: null,
-        version: request.expectedVersion }, data: { body: input.text, version: { increment: 1 } } })
+      const updated = await tx.memory.updateMany({ where: { id: current.memoryId, familyId: input.familyId, deletedAt: null,
+        version: current.expectedVersion }, data: { body: input.text, version: { increment: 1 } } })
       if (updated.count !== 1) return { kind: 'stale' as const }
-      await tx.captionRequest.update({ where: { id: request.id }, data: { consumedAt: new Date() } })
+      await tx.captionRequest.update({ where: { id: current.id }, data: { consumedAt: checkedAt } })
       return { kind: 'updated' as const }
     })
   }
