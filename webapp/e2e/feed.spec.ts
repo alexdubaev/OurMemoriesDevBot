@@ -1162,6 +1162,8 @@ test.describe.serial('T07 live feed', () => {
           if (!navigation || !sheet) return null
           const navRect = navigation.getBoundingClientRect()
           const sheetRect = sheet.getBoundingClientRect()
+          const titleRect = sheet.querySelector('.sheet-title')?.getBoundingClientRect()
+          const subtitleRect = sheet.querySelector('.sheet-subtitle')?.getBoundingClientRect()
           const navStyle = getComputedStyle(navigation)
           return {
             maxRight: Math.max(...rects.map((rect) => rect.right)),
@@ -1175,11 +1177,26 @@ test.describe.serial('T07 live feed', () => {
             navTop: navRect.top,
             navBottom: navRect.bottom,
             navPaddingBottom: Number.parseFloat(navStyle.paddingBottom),
+            sheetTop: sheetRect.top,
             sheetBottom: sheetRect.bottom,
+            titleTop: titleRect?.top ?? null,
+            titleBottom: titleRect?.bottom ?? null,
+            subtitleTop: subtitleRect?.top ?? null,
+            subtitleBottom: subtitleRect?.bottom ?? null,
             navCovered: Boolean(document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 40)?.closest('[data-memoly-bottom-sheet="true"]')),
           }
         })
         expect(geometry).not.toBeNull()
+        expect(geometry!.sheetTop).toBeGreaterThanOrEqual(0)
+        expect(geometry!.sheetBottom).toBe(geometry!.viewportHeight)
+        expect(geometry!.titleTop).not.toBeNull()
+        expect(geometry!.titleBottom).not.toBeNull()
+        expect(geometry!.subtitleTop).not.toBeNull()
+        expect(geometry!.subtitleBottom).not.toBeNull()
+        expect(geometry!.sheetTop).toBeLessThanOrEqual(geometry!.titleTop!)
+        expect(geometry!.titleBottom).toBeLessThanOrEqual(geometry!.sheetBottom)
+        expect(geometry!.subtitleTop).toBeGreaterThanOrEqual(geometry!.titleBottom!)
+        expect(geometry!.subtitleBottom).toBeLessThanOrEqual(geometry!.minTop)
         expect(geometry!.minLeft).toBeGreaterThanOrEqual(0)
         expect(geometry!.maxRight).toBeLessThanOrEqual(geometry!.viewportWidth)
         expect(geometry!.maxBottom).toBeLessThanOrEqual(geometry!.viewportHeight - 12)
@@ -1190,9 +1207,6 @@ test.describe.serial('T07 live feed', () => {
         expect(geometry!.navPaddingBottom).toBeGreaterThanOrEqual(0)
         expect(geometry!.navCovered).toBe(true)
         if (width === 320 || width === 390) {
-          const sheetTop = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => element.getBoundingClientRect().top)
-          expect(sheetTop).toBeGreaterThanOrEqual(width === 320 ? 631 : 640)
-          expect(sheetTop).toBeLessThanOrEqual(width === 320 ? 637 : 652)
           expect(geometry!.minTop).toBeGreaterThanOrEqual(700)
         }
 
@@ -1203,11 +1217,18 @@ test.describe.serial('T07 live feed', () => {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.getByRole('button', { name: 'Добавить', exact: true }).click()
       await page.waitForTimeout(500)
+      const baselineThemeGeometry = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { top: rect.top, bottom: rect.bottom }
+      })
       for (const theme of ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand']) {
         await page.locator('html').evaluate((html, value) => html.setAttribute('data-memoly-theme', value), theme)
-        const top = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => element.getBoundingClientRect().top)
-        expect(top).toBeGreaterThanOrEqual(640)
-        expect(top).toBeLessThanOrEqual(652)
+        const geometry = await page.locator('[data-memoly-bottom-sheet="true"]').evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return { top: rect.top, bottom: rect.bottom }
+        })
+        expect(Math.abs(geometry.top - baselineThemeGeometry.top)).toBeLessThanOrEqual(1)
+        expect(Math.abs(geometry.bottom - baselineThemeGeometry.bottom)).toBeLessThanOrEqual(1)
         await page.screenshot({ path: resolve(`e2e/.artifacts/full-ui-add-${theme}-390.png`), animations: 'disabled' })
       }
       await page.keyboard.press('Escape')
