@@ -1,6 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   assertTestDatabaseUrl,
   composeEnv,
@@ -18,6 +21,7 @@ const smokeResources = createDockerSmokeResources({
   runId: randomUUID().replaceAll('-', '').slice(0, 16),
 })
 const { projectName, containerName, networkName } = smokeResources
+const imageIdFile = join(tmpdir(), `${projectName}.iid`)
 const postgresHostPort = await findOpenPort()
 const hostPort = process.env.BACKEND_DOCKER_SMOKE_PORT ?? String(await findOpenPort(new Set([postgresHostPort])))
 const hostPortNumber = Number(hostPort)
@@ -87,6 +91,31 @@ export function dockerSmokeRuntimeEnv(databaseUrl) {
   ]
 }
 
+export async function buildDockerSmokeImage({ runDocker, imageName, iidFile }) {
+  await runDocker('docker', ['build', '--iidfile', iidFile, '-f', 'backend/Dockerfile', '-t', imageName, '.'])
+  const imageId = (await readFile(iidFile, 'utf8')).trim()
+  if (!/^sha256:[a-f0-9]{64}$/.test(imageId)) throw new Error('Docker smoke build did not return an immutable image ID')
+  return imageId
+}
+
+export function dockerSmokeRunArgs({ containerName, networkName, hostPort, databaseUrl, imageId }) {
+  if (typeof imageId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(imageId)) {
+    throw new Error('Docker smoke container must run the immutable image ID produced by its build')
+  }
+  return [
+    'run',
+    '-d',
+    '--name',
+    containerName,
+    '--network',
+    networkName,
+    '-p',
+    `127.0.0.1:${hostPort}:3000`,
+    ...dockerSmokeRuntimeEnv(databaseUrl).flatMap((value) => ['-e', value]),
+    imageId,
+  ]
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repositoryRoot,
@@ -126,9 +155,9 @@ function findOpenPort(excluded = new Set()) {
   })
 }
 
-async function waitForComposePostgres() {
+export async function waitForComposePostgres({ runProbe = spawnSync, wait = (durationMs) => new Promise((resolveWait) => setTimeout(resolveWait, durationMs)) } = {}) {
   for (let attempt = 1; attempt <= 30; attempt += 1) {
-    const result = spawnSync(
+    const result = runProbe(
       'docker',
       [
         ...composeArgs,
@@ -136,6 +165,8 @@ async function waitForComposePostgres() {
         '-T',
         'postgres_test',
         'pg_isready',
+        '-h',
+        '127.0.0.1',
         '-U',
         'superuser',
         '-d',
@@ -152,7 +183,7 @@ async function waitForComposePostgres() {
       return
     }
 
-    await new Promise((resolveWait) => setTimeout(resolveWait, 1_000))
+    await wait(1_000)
   }
 
   process.stderr.write('Timed out waiting for postgres_test\n')
@@ -231,20 +262,15 @@ async function runDockerSmoke() {
       },
     })
 
-    run('docker', ['build', '-f', 'backend/Dockerfile', '-t', imageName, '.'])
+    const imageId = await buildDockerSmokeImage({ runDocker: run, imageName, iidFile: imageIdFile })
 
-    run('docker', [
-      'run',
-      '-d',
-      '--name',
+    run('docker', dockerSmokeRunArgs({
       containerName,
-      '--network',
       networkName,
-      '-p',
-      `127.0.0.1:${hostPort}:3000`,
-      ...dockerSmokeRuntimeEnv(databaseUrlForContainer).flatMap((value) => ['-e', value]),
-      imageName,
-    ])
+      hostPort,
+      databaseUrl: databaseUrlForContainer,
+      imageId,
+    }))
     smokeContainerCreated = true
 
     await waitForHealth()
@@ -257,6 +283,7 @@ async function runDockerSmoke() {
         stdio: command === 'docker' && args[0] === 'compose' ? 'inherit' : 'ignore',
       })
     }
+    await rm(imageIdFile, { force: true }).catch(() => undefined)
   }
 }
 

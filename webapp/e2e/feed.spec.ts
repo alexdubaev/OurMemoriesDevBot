@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import type { FamilyHomeResponse } from '@web-app-demo/contracts'
 import { createPrisma } from '../../backend/src/db'
 import { FilesystemPrivateStorage } from '../../backend/src/storage/filesystem-storage'
 import { pngImage } from './helpers/images'
@@ -2412,6 +2413,20 @@ test.describe.serial('T07 live feed', () => {
     await prisma.child.update({ where: { id: fixture.childId }, data: { displayName: 'София', birthDate: new Date('2024-05-25T00:00:00.000Z') } })
     const priorUnreadState = await prisma.family.findUniqueOrThrow({ where: { id: fixture.familyId }, select: { unreadTrackingActivatedAt: true, publicationOrdinal: true } })
     const priorMemberUnreadState = await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: fixture.familyId, userId: fixture.userId } }, select: { unreadBaselineOrdinal: true } })
+    const familySummaryRoute = '**/api/v1/me/families'
+    const familySummaryHandler = async (route: import('@playwright/test').Route) => {
+      const url = new URL(route.request().url())
+      if (route.request().method() !== 'GET' || url.pathname !== '/api/v1/me/families') return route.continue()
+      const response = await route.fetch()
+      const payload = await response.json() as FamilyHomeResponse
+      const pinnedPayload: FamilyHomeResponse = {
+        ...payload,
+        items: payload.items.map((item) => item.familyId === fixture.familyId
+          ? { ...item, unreadState: 'ready', unreadCount: 1 }
+          : item),
+      }
+      await route.fulfill({ response, body: JSON.stringify(pinnedPayload) })
+    }
     await prisma.family.update({ where: { id: fixture.familyId }, data: { publicationOrdinal: 1n } })
     const body = 'Моё солнышко утром ☀️\nКак же ты любишь своего зайку 🤍'
     const memory = await prisma.memory.create({ data: {
@@ -2432,12 +2447,21 @@ test.describe.serial('T07 live feed', () => {
       payload.nextCursor = null
       await route.fulfill({ response, body: JSON.stringify(payload) })
     })
+    await page.route(familySummaryRoute, familySummaryHandler)
     await page.clock.setFixedTime(new Date('2026-09-25T07:30:00.000Z'))
+    const seenAcknowledgement = page.waitForResponse((response) => {
+      const request = response.request()
+      const url = new URL(response.url())
+      if (request.method() !== 'POST' || url.pathname !== `/api/v1/families/${fixture.familyId}/memories/seen`) return false
+      const payload = request.postDataJSON() as { memoryIds?: string[] } | null
+      return response.status() === 204 && payload?.memoryIds?.includes(memory.id) === true
+    })
     await page.reload()
     await continueToFamilyHub(page)
     await page.locator('[data-slot="family-hub"] .family-hub-card').click()
     await expect(page.locator('[data-memoly-feed="true"]')).toBeVisible()
     await expect(page.locator(`[data-memory-id="${memory.id}"]`)).toBeVisible()
+    await seenAcknowledgement
     await expect(page.locator(`[data-memory-id="${memory.id}"] .memory-child-tag`)).toHaveCount(0)
     const reactionSummary = page.locator(`[data-memory-id="${memory.id}"] [data-slot="memory-reactions"]`)
     await expect(reactionSummary).toHaveCount(0)
@@ -2494,6 +2518,7 @@ test.describe.serial('T07 live feed', () => {
     await expect(reactionSummary).toHaveCount(0)
     writeFileSync(resolve('e2e/.artifacts/agent-b-react-metrics.json'), JSON.stringify(geometry, null, 2))
     } finally {
+      await page.unroute(familySummaryRoute, familySummaryHandler)
       await prisma.memory.deleteMany({ where: { id: memory.id } })
       await prisma.mediaAsset.deleteMany({ where: { id: asset.id } })
       await prisma.$transaction(async (tx) => {

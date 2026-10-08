@@ -26,6 +26,10 @@ function photo(id: string): MediaDto {
   return { id, source: 'private_storage', kind: 'photo', width: 320, height: 180, durationMs: null, renditionStatus: 'ready', previewPath: path(id, 'preview'), displayPath: path(id, 'display'), playbackPath: null, originalDownloadPath: path(id, 'original'), waveform: null }
 }
 
+function voice(id: string): MediaDto {
+  return { id, source: 'private_storage', kind: 'voice', width: null, height: null, durationMs: 2_000, renditionStatus: 'ready', previewPath: null, displayPath: null, playbackPath: path(id, 'playback'), originalDownloadPath: path(id, 'original'), waveform: null }
+}
+
 function memory(id: string, kind: MemoryDto['kind'], attachments: MediaDto[], minute: number): MemoryDto {
   return { id, familyId, childId, author: { id: authorId, name: 'Анна', avatarPath: null, avatarCrop: null }, kind, body: `Synthetic ${id}`, occurredAt: `2026-10-03T10:${String(minute).padStart(2, '0')}:00.000Z`, firstPublishedAt: null, sourcePublishedAt: null, createdAt: now, version: 1, status: 'published', attachments, reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
 }
@@ -36,12 +40,14 @@ const videoC = video('55555555-5555-4555-8555-555555555553')
 const videoD = video('55555555-5555-4555-8555-555555555554')
 const videoPortrait = video('55555555-5555-4555-8555-555555555555', true)
 const photoA = photo('66666666-6666-4666-8666-666666666661')
+const voiceA = voice('55555555-5555-4555-8555-555555555556')
 const memories = [
   memory('77777777-7777-4777-8777-777777777771', 'video', [videoA], 1),
   memory('77777777-7777-4777-8777-777777777772', 'media', [photoA, videoPortrait], 2),
   memory('77777777-7777-4777-8777-777777777773', 'media', [videoA, videoB, videoC, videoD], 3),
   memory('77777777-7777-4777-8777-777777777774', 'media', [videoA, videoB], 4),
   memory('77777777-7777-4777-8777-777777777775', 'video', [videoPortrait], 5),
+  memory('77777777-7777-4777-8777-777777777776', 'voice', [voiceA], 6),
 ]
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })

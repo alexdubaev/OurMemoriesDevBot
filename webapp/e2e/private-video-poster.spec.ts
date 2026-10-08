@@ -10,6 +10,7 @@ const videoPath = join(artifacts, 'private-video-poster-synthetic.mp4')
 const portraitVideoPath = join(artifacts, 'private-video-poster-portrait-synthetic.mp4')
 const posterPath = join(artifacts, 'private-video-poster-synthetic.png')
 const portraitPosterPath = join(artifacts, 'private-video-poster-portrait-synthetic.png')
+const audioPath = join(artifacts, 'private-video-poster-audio-synthetic.wav')
 const familyId = '22222222-2222-4222-8222-222222222222'
 const memories = fixtureMemories()
 
@@ -41,7 +42,105 @@ test.beforeAll(() => {
     const frame = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-i', path, '-frames:v', '1', '-y', poster], { encoding: 'utf8' })
     if (frame.status !== 0) throw new Error(`Unable to create synthetic video poster: ${frame.stderr}`)
   }
+  const sampleRate = 8_000
+  const sampleCount = sampleRate * 2
+  const wav = Buffer.alloc(44 + sampleCount * 2)
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVE', 8)
+  wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(sampleRate, 24); wav.writeUInt32LE(sampleRate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(sampleCount * 2, 40)
+  for (let index = 0; index < sampleCount; index += 1) wav.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * index / sampleRate) * 3_000), 44 + index * 2)
+  writeFileSync(audioPath, wav)
   writeFileSync(join(artifacts, 'private-video-poster-memories.json'), JSON.stringify(memories))
+})
+
+test('audio pause events delivered after a newer play preserve the actual playing state', async ({ page }) => {
+  await page.goto('/e2e/private-video-poster.fixture.html')
+  const card = page.locator('[data-memory-id="77777777-7777-4777-8777-777777777776"]')
+  await card.scrollIntoViewIfNeeded()
+  const audio = card.locator('audio')
+  // Keep playback active during the controlled event-order sequence.
+  await audio.evaluate((element: HTMLAudioElement) => { element.loop = true })
+
+  await card.getByRole('button', { name: 'Слушать' }).click()
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+  await card.getByRole('button', { name: 'Пауза' }).click()
+  await expect(audio).toHaveJSProperty('paused', true)
+  await expect(card.getByRole('button', { name: 'Слушать' })).toBeVisible()
+  await card.getByRole('button', { name: 'Слушать' }).click()
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+
+  await audio.evaluate((element) => {
+    const target = element as HTMLAudioElement & { __delayedPause?: Event; __delayedPauseCount?: number }
+    target.__delayedPauseCount = 0
+    target.addEventListener('pause', (event) => {
+      if (target.__delayedPause) return
+      target.__delayedPause = event
+      target.__delayedPauseCount = (target.__delayedPauseCount ?? 0) + 1
+      event.stopImmediatePropagation()
+    }, { capture: true })
+  })
+  await card.getByRole('button', { name: 'Пауза' }).click()
+  await expect(audio).toHaveJSProperty('paused', true)
+  await expect.poll(() => audio.evaluate((element) => (element as HTMLAudioElement & { __delayedPauseCount?: number }).__delayedPauseCount)).toBe(1)
+  await card.getByRole('button', { name: 'Слушать' }).click()
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+
+  // Controlled event re-delivery after a newer play reproduces stale delivery ordering;
+  // browsers do not spontaneously produce this exact ordering in every run.
+  await audio.evaluate((element) => {
+    const target = element as HTMLAudioElement & { __delayedPause?: Event }
+    if (!target.__delayedPause) throw new Error('No native pause event was captured')
+    target.dispatchEvent(new Event('pause'))
+  })
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+})
+
+test('a queued ended event cannot overwrite playback after restarting the same audio', async ({ page }) => {
+  await page.goto('/e2e/private-video-poster.fixture.html')
+  const card = page.locator('[data-memory-id="77777777-7777-4777-8777-777777777776"]')
+  await card.scrollIntoViewIfNeeded()
+  const audio = card.locator('audio')
+  const endedEvent = audio.evaluate((element) => new Promise<void>((resolve) => {
+    const target = element as HTMLAudioElement & { __queuedEnded?: Event }
+    target.addEventListener('ended', (event) => {
+      event.stopImmediatePropagation()
+      target.__queuedEnded = event
+      resolve()
+    }, { capture: true, once: true })
+  }))
+
+  await card.getByRole('button', { name: 'Слушать' }).click()
+  await endedEvent
+  await expect(audio).toHaveJSProperty('ended', true)
+  await expect(audio).toHaveJSProperty('paused', true)
+  await expect(card.getByRole('button', { name: 'Слушать' })).toBeVisible()
+  await audio.evaluate((element) => {
+    const target = element as HTMLAudioElement & { __queuedEnded?: Event }
+    if (!target.__queuedEnded) throw new Error('The actual ended event was not retained')
+    target.dispatchEvent(target.__queuedEnded)
+  })
+  await expect(card.getByRole('button', { name: 'Слушать' })).toBeVisible()
+  await expect(card.locator('.ml-audio')).toContainText('0:02 / 0:02')
+
+  await audio.evaluate((element) => { (element as HTMLAudioElement).loop = true })
+  await card.getByRole('button', { name: 'Слушать' }).click()
+  await expect(audio).toHaveJSProperty('ended', false)
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+  await audio.evaluate((element) => {
+    const target = element as HTMLAudioElement & { __queuedEnded?: Event }
+    if (!target.__queuedEnded) throw new Error('The actual ended event was not retained')
+    target.dispatchEvent(target.__queuedEnded)
+  })
+
+  await expect(audio).toHaveJSProperty('paused', false)
+  await expect(card.getByRole('button', { name: 'Пауза' })).toBeVisible()
+  await expect(card.locator('.ml-audio')).not.toContainText('0:02 / 0:02')
 })
 
 test('private storage posters render and native playback stays usable across feed shapes', async ({ page }, testInfo) => {
