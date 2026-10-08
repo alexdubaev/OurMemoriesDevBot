@@ -30,7 +30,6 @@ bun run typecheck
 bun run lint
 bun run test
 bun run e2e
-bun run e2e:ui
 bun run storybook
 bun run storybook:build
 ```

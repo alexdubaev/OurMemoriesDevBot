@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_push=0
+target_local_ref=
+target_local_sha=
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      if [[ "$target_push" -eq 1 ]]; then
+        echo "Refusing a push with multiple main/master refs; verify and publish one protected ref at a time." >&2
+        exit 1
+      fi
+      target_push=1
+      target_local_ref=$local_ref
+      target_local_sha=$local_sha
+      ;;
+  esac
+done
+
+if [[ "$target_push" -eq 0 ]]; then
+  exit 0
+fi
+
+branch=$(git symbolic-ref --quiet --short HEAD || true)
+if [[ -z "$branch" ]]; then
+  echo "Refusing main/master publication from a detached HEAD." >&2
+  exit 1
+fi
+if [[ "$branch" != "main" && "$branch" != "master" ]]; then
+  echo "Refusing main/master publication: checked-out branch is '$branch'. Push the verified branch ref." >&2
+  exit 1
+fi
+if [[ "$target_local_ref" != "refs/heads/$branch" ]]; then
+  echo "Refusing main/master publication: pushed ref does not match the checked-out branch." >&2
+  exit 1
+fi
+if [[ "$target_local_sha" =~ ^0+$ ]]; then
+  echo "Refusing main/master deletion." >&2
+  exit 1
+fi
+head_sha=$(git rev-parse HEAD)
+if [[ "$target_local_sha" != "$head_sha" ]]; then
+  echo "Refusing publication: pushed SHA does not match checked-out HEAD." >&2
+  exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Refusing publication: working tree is not clean." >&2
+  exit 1
+fi
+
+echo "Running local publication verification for $head_sha..."
+bun run verify:local

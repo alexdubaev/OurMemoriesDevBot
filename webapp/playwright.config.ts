@@ -90,13 +90,7 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   globalTeardown: './e2e/global-teardown.ts',
   testDir: './e2e',
-  // These specs own Vite fixture servers and are required as separate release companions.
-  // Keeping them out of the backend-backed default project makes each case run in its intended harness.
-  testIgnore: [
-    '**/.artifacts/**',
-    '**/private-video-poster.spec.ts',
-    '**/warm-navigation-cache-regression.spec.ts',
-  ],
+  testIgnore: ['**/.artifacts/**'],
   outputDir: './e2e/.artifacts/test-results',
   timeout: 90_000,
   expect: {

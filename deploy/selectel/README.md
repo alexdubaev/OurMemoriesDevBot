@@ -23,24 +23,14 @@ access boundary, the build inputs, the migration gate, and the rollback contract
 
   If this fails, stop and ask the owner to provision the server access. Never look
   for, print, commit, or request a private key in Git or chat.
-- A GitHub Environment named `selectel-production` is configured for `main` and
-  contains pinned known-hosts, but the owner chose to keep the deploy SSH private
-  key outside GitHub. The manual workflow therefore stops before SSH. For the
-  current release route, use owner-provisioned SSH access and this runbook. A
-  future decision to enable the workflow would use
-  the names `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` and `SELECTEL_KNOWN_HOSTS` for those
-  environment secrets, and `SELECTEL_HOST`, `SELECTEL_SSH_USER` plus
-  `SELECTEL_MAX_BOT_USERNAME` for the environment variables. The current verified
-  values are `app.memoly.ru`, `root` and `id911018762027_bot`; the owner must
-  recheck them in the Selectel panel. The nonsecret variables are configured in
-  GitHub; the key value and its filesystem path never appear in this repository.
+- GitHub Actions CI/CD is not used. The owner-provisioned SSH access is the
+  manual release route; never store private key values or paths in this repository.
 - The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
   and `/opt/memoly/secrets`. They are loaded only by the server deployment script;
   they are never copied into an image or committed.
-- The server checkout must also have a read-only credential for its canonical GitHub
-  origin so the release entry point can run `git fetch origin main` as `memoly`.
-  Provision that credential on the host through the owner’s secure access process;
-  the GitHub Actions SSH key used to reach Selectel is not forwarded to GitHub.
+- The server checkout must have a read-only credential for its canonical Git origin
+  so the release entry point can run `git fetch origin main` as `memoly`. Provision
+  that credential on the host through the owner’s secure access process.
   Verify it without printing credentials:
 
   ```sh
@@ -65,16 +55,14 @@ access boundary, the build inputs, the migration gate, and the rollback contract
   `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
   changes. Production uses same-origin API requests, so `VITE_API_URL` is empty.
 
-The reviewed manual workflow `.github/workflows/selectel-release.yml` runs from
-`main` with concurrency protection. It sends `deploy/selectel/ci-release.sh` over
-strict-host-key SSH; that host entry point fetches the current `origin/main`, checks
-out the exact SHA, builds both immutable images with `build-images.sh`, prepares a
-server-only rollback backup, and invokes the reviewed `redeploy.sh` actions. It
-never receives database or MAX secrets from GitHub and never runs ad-hoc SQL. The
-host release lock is held across checkout, image build, migration, promotion, and
-smoke; direct `redeploy.sh` actions cannot interleave with that release. If
-promotion or public smoke fails after the release starts changing services, the
-entry point attempts the prepared application rollback and keeps the original
+The guarded host entry point `deploy/selectel/ci-release.sh` is invoked manually
+through strict-host-key SSH. It fetches the requested SHA, builds immutable images,
+prepares a server-only rollback backup, and invokes the reviewed `redeploy.sh`
+actions. It never receives database or MAX secrets from GitHub and never runs
+ad-hoc SQL. The host release lock is held across checkout, image build, migration,
+promotion, and smoke; direct `redeploy.sh` actions cannot interleave with that
+release. If promotion or public smoke fails after services begin changing, the
+entry point attempts the prepared application rollback and preserves the original
 failure status if rollback also fails.
 For the first release crossing the B2 membership boundary, the entry point
 compares the running backend SHA with the accepted B2 runtime SHA. A pre-B2
@@ -88,11 +76,8 @@ can resume the guarded forward fix after inspecting the actual host state.
 Do not remove the marker manually; the entry point clears it after successful
 public smoke and release manifest creation. Direct rollback refuses pre-B2
 images and any rollback after unread activation or multiple memberships.
-Dispatch it with the exact current `main` SHA, type `DEPLOY`, and enable the
-migration input only when that release contains a pending migration. The workflow
-fails closed when the environment variables or secrets are missing. GitHub's
-environment branch restriction is `main`; a human required-reviewer rule is not
-configured because the private-repository plan rejected that setting.
+Invoke it manually with the exact accepted `main` SHA and explicit `DEPLOY`
+confirmation; enable migration only when that release contains a pending migration.
 The B7 release has pending B1–B4 migrations and must use the migration input.
 
 For a local release, prepare both immutable images from the accepted commit with
@@ -172,8 +157,13 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-With owner-provisioned SSH access, run the same reviewed host entry point manually
-from a Bash shell after the target commit is accepted on `main`:
+Before any publication to `main`, including PR merge, run `bun run verify:local`
+on the exact source SHA and record its command, result, and environment limits.
+Run it on Linux/Bash with Bun 1.4.0, Node.js, Docker, and Playwright Chromium. The
+pre-push hook runs it for main/master pushes; PR merges do not invoke local hooks,
+so record a separate result for the merge SHA. Production releases are separate manual operations and require an explicit
+owner request. With owner-provisioned SSH access, confirm the accepted clean SHA,
+then invoke the reviewed host entry point:
 
 ```sh
 set -euo pipefail
@@ -181,25 +171,14 @@ git fetch origin main
 SHA=$(git rev-parse refs/remotes/origin/main)
 test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
-GH_TOKEN="$(gh auth token)" RELEASE_SHA="$SHA" GITHUB_REPOSITORY=alexdubaev/OurMemoriesDevBot \
-  node scripts/require-release-verification.mjs
 git show "$SHA:deploy/selectel/ci-release.sh" |
   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
     bash -s -- "$SHA" DEPLOY true id911018762027_bot
 ```
 
-The verification command requires the latest completed successful Verify run
-and its `verify-required` job for this exact SHA, from a `push` or
-`workflow_dispatch` on `main`. The GitHub CLI identity needs read access to
-Actions. Run this gate immediately before the SSH command; do not rely on an
-older green run or a green PR check for another SHA. The automated workflow
-enforces its gate before entering the production environment. An owner with root
-access can bypass workflow checks by invoking the host entry point directly, so
-manual releases depend on following this explicit check.
-
 Set the third server argument to `true` only for a reviewed release that needs the
 guarded migration. This command builds both images on Selectel; no image transfer
-is needed. Do not run it until the host GitHub credential, 4 GiB disk gate, and
+is needed. Do not run it until the canonical host Git credential, 4 GiB disk gate, and
 rollback prerequisites above are satisfied. The local build and image-transfer
 sequence above is an alternative when server-side building is unavailable.
 It must not replace the guarded entry point for the first pre-B2 to B2
@@ -323,7 +302,7 @@ Keep the Compose env files at `/opt/memoly/env/postgres.env` and
 
 ## Guarded promotion and one-shot database migration
 
-Use the `ci-release.sh` entry point above for the whole B7 release. It holds
+Use the guarded `ci-release.sh` entry point above for the whole B7 release. It holds
 one host release lock across checkout, image build, legacy-writer quiescence,
 migration, promotion, and public smoke. Do not run `redeploy.sh migrate` and
 `redeploy.sh deploy` as separate operator commands for the B2 transition.

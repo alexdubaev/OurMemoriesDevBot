@@ -19,28 +19,17 @@ the guarded database migration, promotion, smoke checks, and rollback, lives in 
 [Selectel runbook](../deploy/selectel/README.md). Do not reconstruct that procedure
 from chat history or run an invented migration command.
 
-Access is provisioned by the owner outside Git, using the owner’s secure store or an
-SSH agent. A GitHub Environment named `selectel-production` contains the nonsecret
-`SELECTEL_HOST`, `SELECTEL_SSH_USER`, and `SELECTEL_MAX_BOT_USERNAME` variables and
-the pinned `SELECTEL_KNOWN_HOSTS` secret. The owner decided to keep the deploy SSH
-key outside GitHub. `SELECTEL_DEPLOY_SSH_PRIVATE_KEY` is therefore absent and the
-manual workflow stops before connecting to production. The current release route
-uses owner-provisioned SSH access and the Selectel runbook. No private
-key path, key value, database password, MAX token, webhook secret, or encryption key
-belongs in the repository. The manual workflow
-[`.github/workflows/selectel-release.yml`](../.github/workflows/selectel-release.yml)
-accepts only the current `main` SHA, requires the explicit `DEPLOY` confirmation,
-requires the latest successful `verify-required` job from the trusted Verify
-workflow for that exact SHA on `main`, and serializes production releases. The
-gate checks the newest run and attempt, so an older passing run cannot hide a
-newer failed or unfinished run. Owner-operated SSH releases must perform the
-same exact-SHA check explicitly; a person with root access can bypass workflow
-controls by choosing to invoke the host release entry point directly. The workflow transfers the reviewed
-`deploy/selectel/ci-release.sh` over strict-host-key SSH; that script builds the
-immutable images on the host, prepares rollback, applies the guarded migration only
-when explicitly selected, promotes services, and writes a protected nonsecret
-release manifest. It never runs an invented SQL command or removes old images,
-gateway containers, or persistent data.
+Access is provisioned by the owner outside Git using a secure store or SSH agent.
+GitHub Actions CI/CD is not used. Before publication to `main`, including PR
+merge, run `bun run verify:local` against the exact source SHA and record the
+command, result, and environment limits. The pre-push hook runs it for main/master
+pushes; a PR merge does not invoke local hooks and requires a separately recorded
+result. Production deployment remains a separate manual operation, only
+when explicitly requested by the owner. The guarded host entry point builds
+immutable SHA images, prepares rollback, applies only the selected guarded
+migration, checks readiness, and writes a protected nonsecret release manifest.
+Never store private key paths, key values, database passwords, MAX tokens,
+webhook secrets, or encryption keys in the repository.
 
 ## Supported production shape
 

@@ -70,8 +70,8 @@ git worktree add .worktrees/t04-bot -b feat/t04-bot-capture origin/main
 git push --set-upstream origin feat/t04-bot-capture
 ```
 
-## 5. GitHub-права и фактическая проверка
-Наличие URL в документации не доказывает, что текущая среда имеет доступ к private repository, право push, Actions или branch protections. Этап 00 обязан проверить реальный remote/permission и честно записать результат в `GIT_SETTINGS.md`. Не обещать включённую защиту ветки, пока она не прочитана обратно или не подтверждена GitHub.
+## 5. GitHub-права и локальная проверка
+Наличие URL в документации не доказывает доступ к private repository, право push или branch protections. Этап 00 проверяет remote/permission и записывает результат в `GIT_SETTINGS.md`. GitHub Actions CI/CD не используется. Перед каждой публикацией в `main`, включая PR merge, требуется локальный `bun run verify:local` на точном source SHA с записью команды, результата и ограничений среды. Установи hook командой `git config core.hooksPath .githooks`; PR merge не вызывает локальный hook. Gate требует Linux/Bash, Bun 1.4.0, Node.js, Docker и Playwright Chromium; для уже работающей тестовой PostgreSQL поддерживаются `TEST_DATABASE_URL` с именем `*_test` и `TEST_SKIP_DOCKER=1 E2E_SKIP_DOCKER=1`.
 
 ## 6. Секреты
 GitHub URL и имя репозитория — публичная конфигурация. В Git нельзя помещать Bot Token, webhook secret, cloud credentials, `.env`, signing keys и приватные семейные данные. Git remote с credential/token внутри URL запрещён; использовать SSH-agent, Git credential manager или GitHub App/secret store среды.
