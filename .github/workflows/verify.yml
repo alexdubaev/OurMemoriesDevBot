@@ -85,8 +85,27 @@ jobs:
         if: contains(steps.plan.outputs.command_ids, 'e2e-release')
         run: bunx playwright install --with-deps chromium webkit
       - name: Release E2E profile
+        id: release_e2e
         if: contains(steps.plan.outputs.command_ids, 'e2e-release')
         run: bun run e2e:webapp:release
+      - name: Upload Release E2E failure diagnostics
+        if: ${{ failure() && steps.release_e2e.conclusion == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-e2e-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            webapp/e2e/.artifacts/test-results/**/trace.zip
+            webapp/e2e/.artifacts/test-results/**/test-failed-*.png
+            webapp/e2e/.artifacts/test-results/**/error-context.md
+            webapp/e2e/.artifacts/private-video-poster-results/**/trace.zip
+            webapp/e2e/.artifacts/private-video-poster-results/**/test-failed-*.png
+            webapp/e2e/.artifacts/private-video-poster-results/**/error-context.md
+            webapp/e2e/.artifacts/warm-navigation-cache-results/**/trace.zip
+            webapp/e2e/.artifacts/warm-navigation-cache-results/**/test-failed-*.png
+            webapp/e2e/.artifacts/warm-navigation-cache-results/**/error-context.md
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: true
       - name: Local S3 storage integration tests
         if: contains(steps.plan.outputs.command_ids, 'storage-s3')
         run: bun run test:storage:s3

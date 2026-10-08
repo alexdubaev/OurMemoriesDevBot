@@ -1,6 +1,18 @@
 # FIX-PREPROD-2026-10-08 — исправления и локальная приёмка
 
-Статус: REVIEW. Подтверждённые дефекты исправлены и проверены локально. Независимое ревью не оставило подтверждённых P0/P1/P2. Публикация, merge и deploy не выполнялись; результаты не являются production-сертификацией.
+## Продолжение доставки — RELEASE-PREPROD-20261008
+
+Текущий статус: IN_PROGRESS. Владелец прямо разрешил commit, push и deploy. Task-коммит `dd21d6aeb189eaf05a277d92e127d90e8628927a` опубликован в [PR157](https://github.com/alexdubaev/OurMemoriesDevBot/pull/157), base main `c5f289fb9d4d9f3d97206d3e7b2e823e69efaf2d`. Merge и production-деплой ещё не выполнены.
+
+[Verify37789536271](https://github.com/alexdubaev/OurMemoriesDevBot/actions/runs/37789536271) на точном task HEAD завершился failure: default E2E88 passed,3 failed,35 did not run. Тест failed-like остановился до reaction-request; два семейных сценария исчерпали общий90-секундный timeout при клике по строкам настроек. Причина движения элементов/исчерпания бюджета не доказана. Companion E2E, S3 и Docker smoke не достигнуты. Выполненные предшествующие CI-проверки успешны; отдельный Webapp build объяснимо пропущен FULL plan, обе production-сборки выполнены в Build artifact contract checks.
+
+API артефактов вернул0: ссылки на trace/screenshot/error-context существуют только в runner-local журнале. Добавлено сохранение только этих синтетических файлов при падении E2E; upload action закреплён immutable SHA. Проверки YAML, architecture (807 source files), template и diff-check имеют exit0; загрузка артефактов ещё не проверена реальным Actions run. Логи и диагностический Git-archive snapshot находятся в ignored `webapp/e2e/.artifacts/fix/`. Требования, retries, timeout и release-profile не изменены; результаты локальной приёмки ниже не заменяют упавший GitHub CI.
+
+Read-only Selectel preflight подтвердил SSH-доступ, canonical host origin/clean checkout, достаточное место и48 применённых миграций без pending/failed. В этом task нет schema/migration diff, поэтому migration input=false. Следующий выпуск требует green текущего PR HEAD, squash merge, отдельного успешного Verify на точном main SHA, затем штатного `ci-release.sh`, проверки runtime image IDs/revision и публичного smoke. Ограничение zoom и принятое решение о контрасте сохраняются.
+
+## Исходная локальная приёмка до публикации
+
+Локальный статус на исходном source freeze: REVIEW. Подтверждённые дефекты исправлены и проверены локально. Независимое ревью не оставило подтверждённых P0/P1/P2. На момент фиксации этой локальной приёмки публикация, merge и deploy ещё не выполнялись; результаты не являются production-сертификацией.
 
 Task ID: FIX-PREPROD-2026-10-08. Назначение владельца: глубокое code review, гонки, TDD/E2E с субагентами и последующее «Тогда исправляй». Lead: GPT-6; reviewers — GPT-6 Luna High, role-based scout/worker — GPT-6 Luna Medium, первоначальные workers — GPT-6 Luna High. Точный runtime identifier lead недоступен.
 
