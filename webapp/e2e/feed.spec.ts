@@ -1092,19 +1092,28 @@ test.describe.serial('T07 live feed', () => {
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic like failure' } }),
     }))
     const albumCard = page.locator('[data-memory-id]').filter({ hasText: 'Фотоальбом E2E' })
+    const memoryId = await albumCard.getAttribute('data-memory-id')
+    expect(memoryId).not.toBeNull()
     await expect(albumCard.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
     await expect(albumCard.getByRole('button', { name: 'Действия с воспоминанием' })).toHaveCount(1)
-    const image = albumCard.locator('.memory-media-slot img').first()
-    const bounds = await image.boundingBox()
-    expect(bounds).not.toBeNull()
-    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+    const image = albumCard.locator('[data-carousel-active="true"] img')
+    await expect(image).toHaveCount(1)
+    await expect(image).toBeVisible()
+    await image.hover()
     await page.mouse.down()
     await page.waitForTimeout(550)
     await expect(page.locator('.reaction-picker-options')).toBeVisible()
     await page.mouse.up()
+    const failedReaction = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PUT'
+        && url.pathname === `/api/v1/families/${fixture.familyId}/memories/${memoryId}/reaction`
+    })
     await page.getByRole('button', { name: 'Сердце' }).click()
+    expect((await failedReaction).status()).toBe(503)
     await expect(albumCard.locator('[data-slot="memory-reactions"]')).toHaveCount(0)
     await expect(albumCard).toContainText('Фотоальбом E2E')
+    await expect(albumCard).toHaveAttribute('data-memory-id', memoryId!)
   })
 
   test('opens the approved Add sheet with three horizontal options across mobile viewports', async ({ page }) => {
