@@ -320,3 +320,154 @@ nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-viewer {
 @media (max-width: 355px) {
   nav[data-bottom-navigation-appearance='memoly'] > div { padding-inline: 8px; }
 }
+
+/* Fixed v2 palette and reusable design values. Cover preferences never alter
+   these tokens; they only choose the header artwork. */
+.memoly-app-root[data-ui-version='v2'],
+:root[data-ui-version='v2'] {
+  --ui-v2-color-canvas: #f7f2eb;
+  --ui-v2-color-milk: var(--ui-v2-color-canvas);
+  --ui-v2-color-surface: #fffcf7;
+  --ui-v2-color-paper: var(--ui-v2-color-surface);
+  --ui-v2-color-text: #504e49;
+  --ui-v2-color-ink: var(--ui-v2-color-text);
+  --ui-v2-color-muted: #706e67;
+  --ui-v2-color-line: #ebe6de;
+  --ui-v2-color-accent: #486d5e;
+  --ui-v2-color-accent-soft: #e5ede5;
+  --ui-v2-color-accent-detail: #a1b6a3;
+  --ui-v2-color-field: #f2f5ee;
+  --ui-v2-color-danger: #a33f3b;
+  --ui-v2-color-danger-soft: #f9e9e6;
+  --ui-v2-color-viewer: #202620;
+  --ui-v2-color-white: #fff;
+  --ui-v2-header-wash: linear-gradient(90deg, rgb(255 252 247 / 30%) 0%, rgb(255 252 247 / 16%) 42%, rgb(255 252 247 / 2%) 75%), linear-gradient(180deg, rgb(255 252 247 / 8%), transparent 55%);
+  --ui-v2-header-action: rgb(255 252 247 / 78%);
+  --ui-v2-header-text-shadow: 0 1px 2px rgb(255 255 255 / 92%);
+  --ui-v2-header-avatar-shadow: 0 4px 15px rgb(46 54 47 / 22%);
+  --ui-v2-logo-shadow: drop-shadow(0 1px 2px rgb(255 255 255 / 80%));
+  --ui-v2-copy-shadow: 0 1px 3px rgb(255 255 255 / 95%);
+  --ui-v2-shadow-surface: 0 4px 20px rgb(102 90 69 / 6%);
+  --ui-v2-shadow-overlay: 0 12px 48px rgb(32 38 32 / 14%);
+  --ui-v2-shadow-header: 0 4px 20px rgb(102 90 69 / 8%);
+  --ui-v2-shadow-tint: linear-gradient(90deg, rgb(255 252 247 / 76%), rgb(255 252 247 / 30%));
+  --ui-v2-font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ui-v2-font-caption: 12px;
+  --ui-v2-font-meta: 13px;
+  --ui-v2-font-body: 16px;
+  --ui-v2-font-person: 15px;
+  --ui-v2-font-section: 19px;
+  --ui-v2-font-title: 26px;
+  --ui-v2-font-display: 28px;
+  --ui-v2-weight-regular: 400;
+  --ui-v2-weight-medium: 500;
+  --ui-v2-weight-strong: 600;
+  --ui-v2-line-body: 1.55;
+  --ui-v2-space-xs: 4px;
+  --ui-v2-space-sm: 8px;
+  --ui-v2-space-md: 12px;
+  --ui-v2-space-lg: 16px;
+  --ui-v2-space-xl: 24px;
+  --ui-v2-space-2xl: 32px;
+  --ui-v2-radius-small: 8px;
+  --ui-v2-radius-field: 12px;
+  --ui-v2-radius-surface: 24px;
+  --ui-v2-radius-sheet: 24px;
+  --ui-v2-radius-pill: 999px;
+  --ui-v2-button-radius: var(--ui-v2-radius-field);
+  --ui-v2-button-height: var(--ui-v2-target-primary);
+  --ui-v2-nav-add-size: var(--ui-v2-target-primary);
+  --ui-v2-nav-add-radius: var(--ui-v2-radius-pill);
+  --ui-v2-button-primary-background: var(--ui-v2-color-accent);
+  --ui-v2-button-primary-color: var(--ui-v2-color-white);
+  --ui-v2-button-primary-weight: var(--ui-v2-weight-strong);
+  --ui-v2-target-minimum: 44px;
+  --ui-v2-target-primary: 48px;
+  --ui-v2-layout-avatar: 40px;
+  --ui-v2-layout-hero-avatar: 84px;
+  --ui-v2-layout-header-height: 206px;
+  --ui-v2-layout-header-radius: 24px;
+  --ui-v2-layout-header-control: 44px;
+  --ui-v2-layout-header-avatar-border: 5px;
+  --ui-v2-layout-header-logo-top: 24px;
+  --ui-v2-layout-header-logo-width: 124px;
+  --ui-v2-layout-header-logo-width-narrow: 84px;
+  --ui-v2-layout-header-tagline-top: 75px;
+  --ui-v2-layout-header-identity-bottom: 16px;
+  --ui-v2-layout-header-inset: 12px;
+  --ui-v2-layout-header-identity-gap: 10px;
+  --ui-v2-font-header-name: var(--ui-v2-font-display);
+  --ui-v2-font-header-name-narrow: 24px;
+  --ui-v2-font-subtitle: 14px;
+
+  --theme-canvas: var(--ui-v2-color-canvas);
+  --theme-canvas-top: var(--ui-v2-color-canvas);
+  --theme-canvas-bottom: var(--ui-v2-color-canvas);
+  --theme-bg: var(--ui-v2-color-canvas);
+  --theme-bg-top: var(--ui-v2-color-canvas);
+  --theme-bg-bottom: var(--ui-v2-color-canvas);
+  --theme-surface: var(--ui-v2-color-surface);
+  --theme-surface-hi: var(--ui-v2-color-surface);
+  --theme-surface-lo: var(--ui-v2-color-field);
+  --theme-surface-bright: var(--ui-v2-color-surface);
+  --theme-inset-hi: var(--ui-v2-color-field);
+  --theme-inset-lo: var(--ui-v2-color-field);
+  --theme-inset-bright: var(--ui-v2-color-field);
+  --theme-sheet: var(--ui-v2-color-surface);
+  --theme-accent-hi: var(--ui-v2-color-accent-detail);
+  --theme-accent: var(--ui-v2-color-accent);
+  --theme-accent-mid: var(--ui-v2-color-accent);
+  --theme-accent-deep: var(--ui-v2-color-accent);
+  --theme-accent-text: var(--ui-v2-color-accent);
+  --theme-accent-soft: var(--ui-v2-color-accent-soft);
+  --theme-accent-soft-hi: var(--ui-v2-color-field);
+  --theme-shadow: rgb(102 90 69 / 10%);
+  --theme-shadow-soft: rgb(102 90 69 / 7%);
+  --theme-glow: rgb(255 255 255 / 88%);
+  --theme-text-muted: var(--ui-v2-color-muted);
+  --theme-text: var(--ui-v2-color-text);
+  --theme-danger-text: var(--ui-v2-color-danger);
+  --theme-raised-shadow: var(--ui-v2-shadow-surface);
+  --theme-inset-shadow: inset 1px 1px 3px rgb(102 90 69 / 8%);
+  --memory-canvas: var(--ui-v2-color-canvas);
+  --memory-surface: var(--ui-v2-color-surface);
+  --memory-surface-soft: var(--ui-v2-color-field);
+  --memory-surface-raised: var(--ui-v2-color-surface);
+  --memory-surface-inset: var(--ui-v2-color-field);
+  --memory-text: var(--ui-v2-color-text);
+  --memory-text-muted: var(--ui-v2-color-muted);
+  --memory-line: var(--ui-v2-color-line);
+  --memory-accent-soft: var(--ui-v2-color-accent-detail);
+  --memory-accent-strong: var(--ui-v2-color-accent);
+  --memory-accent-tint: var(--ui-v2-color-accent-soft);
+  --memory-danger: var(--ui-v2-color-danger);
+  --memory-overlay: rgb(32 38 32 / 48%);
+  --background: var(--ui-v2-color-canvas);
+  --foreground: var(--ui-v2-color-text);
+  --card: var(--ui-v2-color-surface);
+  --card-foreground: var(--ui-v2-color-text);
+  --popover: var(--ui-v2-color-surface);
+  --popover-foreground: var(--ui-v2-color-text);
+  --primary: var(--ui-v2-color-accent);
+  --primary-foreground: var(--ui-v2-color-white);
+  --secondary: var(--ui-v2-color-field);
+  --secondary-foreground: var(--ui-v2-color-text);
+  --muted: var(--ui-v2-color-field);
+  --muted-foreground: var(--ui-v2-color-muted);
+  --accent: var(--ui-v2-color-accent-soft);
+  --accent-foreground: var(--ui-v2-color-accent);
+  --destructive: var(--ui-v2-color-danger);
+  --border: var(--ui-v2-color-line);
+  --input: var(--ui-v2-color-line);
+  --ring: var(--ui-v2-color-accent);
+  --radius: var(--ui-v2-radius-field);
+  --shadow-card: var(--ui-v2-shadow-surface);
+  --radius-card: var(--ui-v2-radius-surface);
+  --radius-field: var(--ui-v2-radius-field);
+  --radius-sheet: var(--ui-v2-radius-sheet);
+  --layout-bottom-nav: 88px;
+}
+
+@media (max-width: 355px) {
+  :root[data-ui-version='v2'] { --ui-v2-font-header-name: var(--ui-v2-font-header-name-narrow); }
+}

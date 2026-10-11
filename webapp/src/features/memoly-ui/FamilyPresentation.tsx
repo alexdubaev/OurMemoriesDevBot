@@ -1,6 +1,6 @@
 /* eslint-disable typographyPolicy/use-typography-component -- faithful static HTML port keeps canonical semantic hierarchy. */
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ChildHeader } from '@/components/ChildHeader'
 import { WebpIcon } from '@/components/WebpIcon'
@@ -34,10 +34,12 @@ export type FamilyPresentationProps = {
   onRemoveMember: (member: FamilyMemberDto) => Promise<void>; onLeaveFamily: () => Promise<void>
   onUpdateFamily: (input: FamilySettingsChange) => Promise<void>
   canOpenInstall: boolean; installLabel?: string; onOpenInstall: () => void
+  settingsRequest?: number
+  onSettingsRequestHandled?: () => void
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'family-settings' | 'archive' | 'invites' | 'leave-confirm'
 
-export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall }: FamilyPresentationProps) {
+export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, childProfileOpen, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onChangeChildPhoto, onOpenChild, onCloseChild, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall, settingsRequest, onSettingsRequestHandled }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [inviteReturnView, setInviteReturnView] = useState<'overview' | 'invites'>('overview')
@@ -45,6 +47,7 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
   const [ageDetailsOpen, setAgeDetailsOpen] = useState(false)
   const [selfNameOverride, setSelfNameOverride] = useState<SelfNameOverride | null>(null)
   const settingsTriggerRef = useRef<HTMLElement | null>(null)
+  const consumedSettingsRequest = useRef(0)
   const { theme } = useMemolyTheme()
   useEffect(() => {
     if (active) return
@@ -61,7 +64,26 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (serverConfirmsSelfName(members, currentUserId, selfNameOverride)) setSelfNameOverride(null)
   }, [currentUserId, members, selfNameOverride])
-  const openSettings = () => { if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) settingsTriggerRef.current = document.activeElement; setView('overview'); setSelectedMember(null); setSettingsOpen(true) }
+  const openSettings = useCallback((requestTrigger?: HTMLElement | null) => {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      const activeTrigger = document.activeElement.closest('[data-navigation-surface="family"]') ? document.activeElement : null
+      settingsTriggerRef.current = requestTrigger ?? activeTrigger
+    }
+    setView('overview')
+    setSelectedMember(null)
+    setSettingsOpen(true)
+  }, [])
+  useEffect(() => {
+    if (!settingsRequest) {
+      consumedSettingsRequest.current = 0
+      return
+    }
+    if (!active || settingsRequest <= consumedSettingsRequest.current) return
+    consumedSettingsRequest.current = settingsRequest
+    const trigger = document.querySelector<HTMLElement>('[data-navigation-surface="family"] .ui-v2-settings')
+    openSettings(trigger)
+    onSettingsRequestHandled?.()
+  }, [active, onSettingsRequestHandled, openSettings, settingsRequest])
   const goOverview = () => { setView('overview'); setSelectedMember(null) }
   const goInviteSource = () => setView(inviteReturnView)
   useEffect(() => {

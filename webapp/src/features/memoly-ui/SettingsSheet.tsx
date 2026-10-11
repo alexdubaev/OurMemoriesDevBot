@@ -4,17 +4,21 @@ import { useCallback, useEffect, useState, type RefObject } from 'react'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { WebpIcon } from '@/components/WebpIcon'
+import { getUiV2HeaderAsset } from '@/components/ui-v2/header-assets'
 import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme } from '@/features/theme'
+import { readUiVersion } from '@/features/ui-version'
 import type { HostBridge } from '@/platform/host-bridge'
 
 type SettingsView = 'menu' | 'appearance' | 'help' | 'about'
+const HEADER_ART_LABELS: Record<MemolyTheme, string> = { mint: 'Луг', rose: 'Воздушный змей', sky: 'Самолётик', lavender: 'Кит', apricot: 'Медвежонок', sand: 'Луна' }
 export type SettingsSheetProps = { hostBridge: Pick<HostBridge, 'onBack'>; open: boolean; onOpenChange: (open: boolean) => void; returnFocusRef?: RefObject<HTMLElement | null>; canManageFamily: boolean; canOpenInstall?: boolean; installLabel?: string; onOpenInstall?: () => void; onFamilySettings: () => void; onArchive: () => void }
 
 /** Canonical settings sheet. Controllers remain outside this presentation surface. */
 export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, canManageFamily, canOpenInstall = false, installLabel = 'Установить memoLy', onOpenInstall, onFamilySettings, onArchive }: SettingsSheetProps) {
   const [view, setView] = useState<SettingsView>('menu')
   const { theme, setTheme } = useMemolyTheme()
-  const title = view === 'appearance' ? 'Оформление' : view === 'help' ? 'Помощь и приватность' : view === 'about' ? 'О memoLy' : 'Настройки'
+  const isV2 = readUiVersion() === 'v2'
+  const title = view === 'appearance' ? isV2 ? 'Оформление шапки профиля' : 'Оформление' : view === 'help' ? 'Помощь и приватность' : view === 'about' ? 'О memoLy' : 'Настройки'
   const close = useCallback(() => { setView('menu'); onOpenChange(false) }, [onOpenChange])
   useEffect(() => { if (!open) return undefined; return hostBridge.onBack(() => { if (view !== 'menu') setView('menu'); else close() }) }, [close, hostBridge, open, view])
   return <MemolyBottomSheet onOpenChange={(nextOpen) => { if (!nextOpen) setView('menu'); onOpenChange(nextOpen) }} open={open} returnFocusRef={returnFocusRef}>
@@ -32,8 +36,9 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
 }
 
 export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, onOpenInstall, canOpenInstall = false, installLabel = 'Установить memoLy', canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; onOpenInstall?: () => void; canOpenInstall?: boolean; installLabel?: string; canManageFamily: boolean; theme: MemolyTheme }) {
+  const isV2 = readUiVersion() === 'v2'
   return <div className="ml-settings-list ml-sheet-panel--list">
-    <SettingsRow icon="palette" onClick={onAppearance} title="Оформление" subtitle={theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
+    <SettingsRow icon="palette" onClick={onAppearance} title={isV2 ? 'Оформление шапки профиля' : 'Оформление'} subtitle={isV2 ? `Иллюстрация: ${HEADER_ART_LABELS[theme]}` : theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
     <SettingsRow icon="help-circle" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
     <SettingsRow icon="archive-box" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
     {canManageFamily ? <SettingsRow icon="pencil" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
@@ -53,7 +58,8 @@ const THEME_DESCRIPTIONS: Record<MemolyTheme, string> = {
 }
 
 export function AppearanceChoices({ onSelect, selected }: { onSelect: (theme: MemolyTheme) => void; selected: MemolyTheme }) {
-  return <div className="ml-theme-choices"><div className="ml-appearance-hero"><span aria-hidden="true" className="ml-appearance-hero-icon"><span /></span><h2>Выберите настроение</h2><p>Тема меняет только акценты: хедер ребёнка, нижнее меню, активный фильтр и реакции. Основной интерфейс остаётся светлым.</p></div><div aria-label="Темы memoLy" className="ml-theme-grid" role="group">{MEMOLY_THEMES.map((theme) => { const config = getMemolyThemeConfig(theme); return <button aria-pressed={theme === selected} className={`ml-theme-choice${theme === selected ? ' selected' : ''}`} data-theme-choice={theme} key={theme} onClick={() => onSelect(theme)} type="button"><span aria-hidden="true" className={`ml-theme-swatch ml-theme-swatch--${theme}`} /><span className="ml-theme-choice-copy"><strong>{config.label}</strong><small>{THEME_DESCRIPTIONS[theme]}</small></span><span aria-hidden="true" className="ml-theme-radio-mark" /></button> })}</div><p className="ml-theme-note">Основной фон, карточки и поля одинаковы во всех темах. Оформление не зависит от пола ребёнка.</p></div>
+  const isV2 = readUiVersion() === 'v2'
+  return <div className="ml-theme-choices" data-appearance-mode={isV2 ? 'v2' : 'legacy'}><div className="ml-appearance-hero"><span aria-hidden="true" className="ml-appearance-hero-icon"><span /></span><h2>{isV2 ? 'Оформление шапки профиля' : 'Выберите настроение'}</h2><p>{isV2 ? 'Выберите иллюстрацию для шапки профиля ребёнка.' : 'Тема меняет только акценты: хедер ребёнка, нижнее меню, активный фильтр и реакции. Основной интерфейс остаётся светлым.'}</p></div><div aria-label={isV2 ? 'Оформление шапки профиля' : 'Темы memoLy'} className="ml-theme-grid" role="group">{MEMOLY_THEMES.map((theme) => { const config = getMemolyThemeConfig(theme); return <button aria-label={isV2 ? HEADER_ART_LABELS[theme] : undefined} aria-pressed={theme === selected} className={`ml-theme-choice${theme === selected ? ' selected' : ''}`} data-theme-choice={theme} key={theme} onClick={() => onSelect(theme)} type="button">{isV2 ? <img alt="" className="ml-theme-artwork" src={getUiV2HeaderAsset(theme)} /> : <span aria-hidden="true" className={`ml-theme-swatch ml-theme-swatch--${theme}`} />}<span className="ml-theme-choice-copy"><strong>{isV2 ? HEADER_ART_LABELS[theme] : config.label}</strong>{!isV2 ? <small>{THEME_DESCRIPTIONS[theme]}</small> : null}</span><span aria-hidden="true" className="ml-theme-radio-mark" /></button> })}</div>{isV2 ? null : <p className="ml-theme-note">Основной фон, карточки и поля одинаковы во всех темах. Оформление не зависит от пола ребёнка.</p>}</div>
 }
 
 function HelpPrivacy() { return <div className="ml-settings-copy"><h2>Приватные воспоминания</h2><p>Фото, видео, голосовые и заметки доступны только участникам вашей семьи.</p><p>Роль просмотра позволяет открывать материалы и ставить лайки. Создание, изменение и удаление доступны только участникам с соответствующими правами.</p></div> }

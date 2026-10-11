@@ -354,3 +354,67 @@
 [data-memoly-feed] [data-memoly-note-gradient]::before,
 [data-memoly-feed] [data-memoly-note-gradient]::after { display: none; }
 [data-memoly-feed] [data-memoly-note-gradient]:focus-visible { outline-offset: 0; }
+
+/* Production feed presentation for the opt-in v2 skin. All color, type,
+   spacing and shape values come from shared semantic tokens. */
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card {
+  margin: 0 0 var(--ui-v2-space-lg);
+  padding: 0 0 var(--ui-v2-space-sm);
+  overflow: hidden;
+  border: 1px solid var(--ui-v2-color-line);
+  border-radius: var(--ui-v2-radius-surface);
+  color: var(--ui-v2-color-text);
+  background: var(--ui-v2-color-surface);
+  box-shadow: var(--ui-v2-shadow-surface);
+}
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-header { min-height: 60px; padding: var(--ui-v2-space-sm) var(--ui-v2-space-md); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-avatar { width: var(--ui-v2-layout-avatar); height: var(--ui-v2-layout-avatar); flex-basis: var(--ui-v2-layout-avatar); margin-right: 0; border: 0; border-radius: var(--ui-v2-radius-pill); background: var(--ui-v2-color-field); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-initials { color: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-meta { flex: 1; min-width: 0; gap: var(--ui-v2-space-xs); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-name { color: var(--ui-v2-color-text); font-size: var(--ui-v2-font-person); font-weight: var(--ui-v2-weight-strong); line-height: 1.3; overflow-wrap: anywhere; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-time { margin: 0; color: var(--ui-v2-color-muted); font-size: var(--ui-v2-font-caption); line-height: 1.35; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-media-slot { overflow: hidden; border-radius: 0; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot { aspect-ratio: 4 / 3; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot > :first-child,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot .ml-media-button { width: 100%; height: 100%; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot .ml-media-button > img { width: 100%; height: 100%; object-fit: cover; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memory-media-slot { aspect-ratio: 4 / 3; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memory-media-slot .memoly-mixed-viewport { width: 100%; height: 100%; aspect-ratio: auto; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memory-media-slot .memoly-mixed-track,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memory-media-slot .memoly-mixed-slide,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memory-media-slot .memoly-mixed-slide-media { height: 100%; aspect-ratio: auto; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='media'] .memoly-mixed-slide-media .ml-media-button > img { width: 100%; height: 100%; object-fit: contain; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .caption { padding: var(--ui-v2-space-md) var(--ui-v2-space-lg) 0; color: var(--ui-v2-color-text); font-size: var(--ui-v2-font-person); font-weight: var(--ui-v2-weight-regular); line-height: 1.5; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .caption-open { color: inherit; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .note-story-slot { padding: var(--ui-v2-space-md); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] [data-memoly-note-gradient] { min-height: 104px; padding: var(--ui-v2-space-xl); border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-field); font-family: inherit; font-size: var(--ui-v2-font-section); font-weight: var(--ui-v2-weight-medium); line-height: 1.5; letter-spacing: 0; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .actions { padding: var(--ui-v2-space-sm) var(--ui-v2-space-lg); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-reaction-footer { display: flex; min-height: var(--ui-v2-target-minimum); align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--ui-v2-space-sm); margin: var(--ui-v2-space-sm) var(--ui-v2-space-lg) 0; padding: var(--ui-v2-space-xs) 0; border-top: 1px solid var(--ui-v2-color-line); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-reactions { gap: var(--ui-v2-space-sm); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .reaction-result { min-height: var(--ui-v2-target-minimum); gap: var(--ui-v2-space-xs); padding: 0 var(--ui-v2-space-sm); border-radius: var(--ui-v2-radius-pill); color: var(--ui-v2-color-muted); background: var(--ui-v2-color-field); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .reaction-result.is-mine { color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .reaction-result-count { color: inherit; font-size: var(--ui-v2-font-caption); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-reaction-button { display: inline-flex; min-height: var(--ui-v2-target-minimum); align-items: center; gap: var(--ui-v2-space-xs); padding-inline: var(--ui-v2-space-sm); color: var(--ui-v2-color-accent); white-space: nowrap; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-reaction-button [data-slot='webp-icon'] { width: 18px; height: 18px; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card:focus-visible { outline-color: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ml-audio { margin: var(--ui-v2-space-md); padding: var(--ui-v2-space-lg); border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-field); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ml-audio > div:first-of-type { min-height: var(--ui-v2-target-minimum); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ml-audio > div:first-of-type button { min-width: var(--ui-v2-target-minimum); min-height: var(--ui-v2-target-minimum); border-radius: var(--ui-v2-radius-pill); color: var(--ui-v2-color-white); background: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] [data-slot='voice-waveform'] { height: 44px; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] [data-slot='voice-waveform'] > span { background: var(--ui-v2-color-accent-detail); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] [data-waveform-played='true'] { background: var(--ui-v2-color-accent) !important; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ml-audio input[type='range'] { accent-color: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-mixed-controls { color: var(--ui-v2-color-muted); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-mixed-controls > button { border-radius: var(--ui-v2-radius-pill); color: var(--ui-v2-color-accent); background: var(--ui-v2-color-field); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-mixed-dots > span:not(.sr-only) { background: var(--ui-v2-color-line); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-mixed-dots > span.active { background: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-private-video-v2-play { box-shadow: var(--ui-v2-shadow-overlay); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-video-playback-controls input[type='range'] { accent-color: var(--ui-v2-color-accent-detail); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-video-viewer-v2-error { color: var(--ui-v2-color-danger); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-video-control:focus-visible,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-mixed-controls > button:focus-visible { outline-color: var(--ui-v2-color-accent-detail); }
+html[data-ui-version='v2'] .reaction-picker { color: var(--ui-v2-color-text); border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); background: var(--ui-v2-color-surface); box-shadow: var(--ui-v2-shadow-overlay); }
+html[data-ui-version='v2'] .reaction-choice:hover,
+html[data-ui-version='v2'] .reaction-choice.is-selected { background: var(--ui-v2-color-accent-soft); }
+html[data-ui-version='v2'] .reaction-choice-check { color: var(--ui-v2-color-accent); }
+html[data-ui-version='v2'] .memoly-mixed-viewer button:focus-visible { outline-color: var(--ui-v2-color-accent-detail); }

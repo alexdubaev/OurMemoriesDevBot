@@ -8,6 +8,8 @@ import { ChildAvatar } from './ChildAvatar'
 import { roleLabel } from './model'
 import { useChildAvatar } from './useChildAvatar'
 import { getMemolyThemeConfig, useMemolyTheme } from '@/features/theme'
+import { getUiV2HeaderAsset } from '@/components/ui-v2/header-assets'
+import { readUiVersion } from '@/features/ui-version'
 import type { AuthenticatedTransport } from '@/platform/api'
 
 import './family-hub.css'
@@ -61,7 +63,8 @@ export function FamilyHubPage({ home, loading, error, notice, busy, loadingMore,
   transport: AuthenticatedTransport
 }) {
   const { theme } = useMemolyTheme()
-  const style = { '--family-hub-theme-art': `url(${getMemolyThemeConfig(theme).headerArtUrl})` } as CSSProperties
+  const headerArt = readUiVersion() === 'v2' ? getUiV2HeaderAsset(theme) : getMemolyThemeConfig(theme).headerArtUrl
+  const style = { '--family-hub-theme-art': `url(${headerArt})` } as CSSProperties
   const own = home?.items.filter((family) => family.isOwner) ?? []
   const invited = home?.items.filter((family) => !family.isOwner) ?? []
   const empty = !loading && !error && home?.items.length === 0

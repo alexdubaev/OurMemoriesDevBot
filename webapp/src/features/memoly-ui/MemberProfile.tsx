@@ -3,6 +3,7 @@ import type { FamilyMemberDto } from '@web-app-demo/contracts'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 
 import { WebpIcon } from '@/components/WebpIcon'
+import { UiV2Button } from '@/components/ui-v2/UiV2Button'
 import { familyMemberName, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
 import { AvatarPhoto, CurrentUserAvatarControls, MemberAvatarImage, useAvatarQuery } from '@/features/avatar'
@@ -88,7 +89,7 @@ export function MemberProfile({ member, actions, busy, currentUserId, onBack, on
       </section>
       {error ? <div className="member-profile-error" role="alert">{error}{conflict ? <button onClick={onRefresh} type="button">Обновить данные</button> : null}</div> : null}
       {saved ? <p aria-live="polite" className="member-profile-success">Изменения сохранены</p> : null}
-      {(actions.canEditAlias || actions.canManageRole) ? <button className="member-profile-save" disabled={!canSave} onClick={() => void save()} type="button">{busy ? 'Сохраняем…' : 'Сохранить изменения'}</button> : null}
+      {(actions.canEditAlias || actions.canManageRole) ? <UiV2Button className="member-profile-save" disabled={!canSave} onClick={() => void save()} type="button" variant="primary">{busy ? 'Сохраняем…' : 'Сохранить изменения'}</UiV2Button> : null}
       {actions.canRemove ? <button className="member-profile-danger" disabled={busy} onClick={() => setDialogOpen(true)} type="button">Удалить из семьи</button> : null}
     </div>
     {dialogOpen ? <dialog aria-describedby="member-remove-description" aria-labelledby="member-remove-title" className="member-remove-modal" onCancel={() => setDialogOpen(false)} ref={removeDialog}><div aria-hidden="true" className="member-remove-icon"><WebpIcon decorative name="trash" size={25} state="active" /></div><h2 id="member-remove-title">Удалить участника из семьи?</h2><p id="member-remove-description">Он потеряет доступ к семейным воспоминаниям. Позже его можно будет пригласить снова.</p><div className="member-remove-actions"><button disabled={busy} onClick={() => setDialogOpen(false)} type="button">Отмена</button><button disabled={busy} onClick={() => void remove()} type="button">{busy ? 'Удаляем…' : 'Удалить'}</button></div></dialog> : null}
@@ -134,7 +135,7 @@ function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: b
         {hasNameError ? <p className="member-profile-error" id={errorId} role="alert">{nameErrors?.[0]?.message}</p> : null}
         {profile.isError ? <p className="member-profile-error" role="alert">Не удалось сохранить имя профиля. Попробуйте снова.</p> : null}
         {profile.isSuccess ? <p aria-live="polite" className="member-profile-success">Имя профиля сохранено.</p> : null}
-        <button className="member-profile-save" disabled={busy || profile.isPending || !validation.request} type="submit">{profile.isPending ? 'Сохраняем…' : 'Сохранить имя профиля'}</button>
+        <UiV2Button className="member-profile-save" disabled={busy || profile.isPending || !validation.request} type="submit" variant="primary">{profile.isPending ? 'Сохраняем…' : 'Сохранить имя профиля'}</UiV2Button>
       </form>
     </section>
   </>

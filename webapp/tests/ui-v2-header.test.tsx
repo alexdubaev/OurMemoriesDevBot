@@ -40,7 +40,6 @@ test('keeps the legacy header default byte-for-byte in markup and switches only 
   expect(v2).toContain('Лилия Александровна с длинным именем')
   expect(v2).toContain('1 год 4 месяца')
   expect(v2).toContain('src="blob:private-child-avatar"')
-  expect(v2).toContain('object-position:45% 40%')
   expect(v2).toContain('aria-label="Настройки"')
   expect(v2).toContain('aria-label="Все семьи"')
   expect(v2).toContain('aria-label="Открыть профиль ребёнка: Лилия Александровна с длинным именем"')

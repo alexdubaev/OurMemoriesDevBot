@@ -27,6 +27,8 @@ export function FamilyScreen({
   onChangeChildPhoto,
   onOpenChild,
   onCloseChild,
+  settingsRequest,
+  onSettingsRequestHandled,
   onFeed,
   onRefresh,
   createInviteLink,
@@ -48,6 +50,8 @@ export function FamilyScreen({
   onChangeChildPhoto: () => void
   onOpenChild: () => void
   onCloseChild: () => void
+  settingsRequest?: number
+  onSettingsRequestHandled?: () => void
   onFeed: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
@@ -163,6 +167,8 @@ export function FamilyScreen({
           onChangeChildPhoto={onChangeChildPhoto}
           onOpenChild={onOpenChild}
           onCloseChild={onCloseChild}
+          settingsRequest={settingsRequest}
+          onSettingsRequestHandled={onSettingsRequestHandled}
           onLeaveFamily={async () => {
             if (!current) return
             await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version), true)

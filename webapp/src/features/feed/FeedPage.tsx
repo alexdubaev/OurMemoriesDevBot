@@ -66,6 +66,8 @@ type Props = {
   onMaxVideoLaunchHandled?: () => void
   onAddRequestHandled?: () => void
   onFamily: () => void
+  onOpenChild?: () => void
+  onOpenSettings?: () => void
   onAllFamilies: () => void
   onFilterChange: (filter: FeedFilter) => void
   onAccessLost: () => void
@@ -103,7 +105,7 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 
 export function FeedPage({
   active = true, accountId = '', childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
-  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, role, transport,
+  isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, onOpenChild, onOpenSettings, role, transport,
   openAddInitially = false,
 }: Props) {
   // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
@@ -338,7 +340,7 @@ export function FeedPage({
     <MediaPlaybackCoordinator active={active}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
-      onAllFamilies={onAllFamilies} onFamily={onFamily} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
+      onAllFamilies={onAllFamilies} onFamily={onFamily} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
       role={role} unreadCount={unreadCount} unreadOnly={unreadOnly} unreadState={unreadState}>
       {active && isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}

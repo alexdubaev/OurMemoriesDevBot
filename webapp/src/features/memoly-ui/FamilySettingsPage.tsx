@@ -3,6 +3,7 @@ import type { FamilyResponse } from '@web-app-demo/contracts'
 import { useRef, useState } from 'react'
 
 import { WebpIcon } from '@/components/WebpIcon'
+import { UiV2Button } from '@/components/ui-v2/UiV2Button'
 import { familySettingsChanges, type FamilySettingsChange } from './family-settings-model'
 import './family-management.css'
 
@@ -42,7 +43,7 @@ export function FamilySettingsPage({ family, busy, onBack, onRefresh, onSave }: 
       </section>
       {error ? <div className="family-management-error" role="alert">Не удалось сохранить настройки семьи. Обновите данные и попробуйте снова.<button onClick={onRefresh} type="button">Обновить данные</button></div> : null}
       {saved ? <p aria-live="polite" className="family-management-success">Настройки семьи сохранены</p> : null}
-      <button className="family-management-primary" disabled={!changes || busy || name.trim().length === 0} type="submit">{busy ? 'Сохраняем…' : 'Сохранить'}</button>
+      <UiV2Button className="family-management-primary" disabled={!changes || busy || name.trim().length === 0} type="submit" variant="primary">{busy ? 'Сохраняем…' : 'Сохранить'}</UiV2Button>
       {busy ? <p aria-live="polite" className="family-management-status">Сохраняем настройки семьи</p> : null}
     </form>
   </section>

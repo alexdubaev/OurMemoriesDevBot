@@ -53,6 +53,7 @@ export function BottomNavigation({
               appearance === 'memoly' && 'memoly-nav-add',
             )}
             data-nav-position="add"
+            data-v2-add="true"
             disabled={!onAdd}
             onClick={onAdd}
             ref={addButtonRef}
@@ -110,6 +111,7 @@ function NavButton({
         active ? 'text-primary' : 'text-muted-foreground',
       )}
       data-nav-position={icon}
+      data-v2-active={active ? 'true' : undefined}
       onClick={onClick}
       type="button"
     >

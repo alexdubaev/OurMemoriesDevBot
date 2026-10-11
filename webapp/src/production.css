@@ -1,5 +1,6 @@
 @import "./index.css";
 @import "./features/memoly-ui/memoly-ui.css";
 @import "./features/family/ChildProfile.css";
+@import "./components/ui-v2/shared-skin.css";
 
 @source not "./stories";

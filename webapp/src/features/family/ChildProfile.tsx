@@ -3,6 +3,7 @@ import { useRef } from 'react'
 import type { FamilyResponse } from '@web-app-demo/contracts'
 
 import { WebpIcon } from '@/components/WebpIcon'
+import { UiV2Button } from '@/components/ui-v2/UiV2Button'
 import { ChildAvatar } from './ChildAvatar'
 import { familyCalendarDate, formatChildAge } from './model'
 
@@ -56,7 +57,7 @@ export function ChildProfile({ avatarUrl, canEdit, child, familyTimezone, onBack
         <div><span>Дней с рождения</span><strong>{details.days} {countWord(details.days, 'день', 'дня', 'дней')}</strong></div>
       </div> : null}
       <div className="child-helper centered">Возраст обновляется автоматически на основе даты рождения.</div>
-      {canEdit ? <button className="child-secondary" onClick={onEdit} type="button">Изменить данные</button> : null}
+      {canEdit ? <UiV2Button className="child-secondary" onClick={onEdit} type="button" variant="primary">Изменить данные</UiV2Button> : null}
     </> : <>
       {canEdit ? <div className="child-action-list">
         <ActionRow label="Редактировать профиль" onClick={onEdit} />
