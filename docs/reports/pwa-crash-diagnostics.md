@@ -1,6 +1,6 @@
 # DIAG-PWA-WHITE-SCREEN
 
-Status IN_PROGRESS. Owner approved durable local diagnostics and default deployment after green checks. Lead GPT-6; task branch `fix/pwa-crash-diagnostics`, worktree `.worktrees/pwa-crash-diagnostics`; base `ac3309886c0fbafc94497062c68bff8ab1458092`.
+Status APPROVED for publication. Owner approved durable local diagnostics and default deployment after green checks. Lead GPT-6; task branch `fix/pwa-crash-diagnostics`, worktree `.worktrees/pwa-crash-diagnostics`; base `ac3309886c0fbafc94497062c68bff8ab1458092`.
 
 Outcome: after an installed iPhone PWA white bootstrap/restart, the owner can copy a bounded, privacy-safe technical report from the startup error screen or Settings → About memoLy. This gathers evidence; it is not an assertion that the underlying crash is fixed or caused by memory pressure.
 
@@ -28,3 +28,9 @@ Lead independently reran ignored `webapp/e2e/.artifacts/pwa-diagnostics-probe.mj
 Fresh independent reviewer `diagnostics_review` found an incorrect `/feed` navigation classifier: the real feed/home route is `/`. The reviewer corrected it and added a behavior assertion; lead inspected and reran its narrow closure check. No additional confirmed product finding was reported. Publication still requires the final local gate on committed source.
 
 Limits: localStorage can be unavailable; the latest throttled two seconds may be lost on abrupt termination. Only the current and preceding run survive; copy the report after the next incident before repeated reopenings replace it. Sampled DOM counts are approximate, not heap measurements. A hidden/pagehide/unfinished run does not establish an OS kill or memory pressure. No automatic upload, additional network request or automatic retry is introduced.
+
+## Final publication gate
+
+2026-10-11: `bun run verify:local`, 16/16 stages passed, 662 Bun tests plus 3 Chromium journeys (665 total), exit 0. Verified committed source SHA `27f7ac43b16959b1338d51c3b095e992d8a3b8ca`, exact Git tree `7a1dd9f1d63705be90ecb7ce10ddb75377edefcb`. A LF Git archive was compared with its recreated Git tree in the cached native Linux runtime, then checked with real isolated test PostgreSQL. The gate generated Prisma, passed all types/lint/builds, and did not require installing new external tools. Evidence is ignored `webapp/e2e/.artifacts/pwa-diagnostics-verify-local-linux.log`.
+
+Production build plus all four focused browser scenarios were rerun after the review correction, exit 0. This subsequent report-only evidence commit does not alter verified product source or require rerunning unchanged product tests. Merge SHA and guarded deployment result are recorded in the final local release evidence after publication.
