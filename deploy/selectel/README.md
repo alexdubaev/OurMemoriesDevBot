@@ -383,7 +383,7 @@ missing marker stops rollback rather than mixing old images with new configurati
 It leaves both additive MAX migrations in place; database rollback is not part of
 application rollback.
 
-For a UI-only rollback, run `deploy/selectel/redeploy.sh rollback-static` on the
+For a UI-only rollback, run `bash deploy/selectel/redeploy.sh rollback-static` on the
 host. The action uses the normal deployment lock and reads the previous webapp
 SHA from the root-owned mode-0600 `/opt/memoly/rollback.env`. It requires the
 running backend, worker, scheduler, and static services to be unique and to match
