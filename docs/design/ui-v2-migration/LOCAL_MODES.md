@@ -28,12 +28,21 @@ Both outputs stay in the ignored local artifact directory; neither enters the pr
 For development preview, set the desired flag before starting Vite; restart Vite to switch modes.
 Keep synthetic test data and private storage isolated from the production bot and families.
 
-Before an eventual owner-approved release, retain the compatible legacy frontend artifact and
+Before an owner-approved release, retain the compatible legacy frontend artifact and
 record the source revision, mode and bundle checksum. Returning to that artifact changes the
 interface without restoring the database or deleting memories. Confirm API compatibility and
 browser asset-cache handling in the release procedure. Never overwrite an existing production
-SHA image with a different UI-mode build. The current deployment Dockerfile does not forward
-this flag; release activation and hosting remain separate owner decisions.
+SHA image with a different UI-mode build. The Selectel Dockerfile forwards this flag with
+`legacy` as its fallback; the canonical Selectel builder explicitly supplies `v2` for the
+owner-approved release. Its SHA-tagged image always has the mode selected in that source
+revision, rather than an operator-controlled mode under an existing image tag.
+
+For the UI-only release, the current legacy image and a compressed Docker archive are retained
+on the server. The reviewed Selectel `redeploy.sh rollback-static` action restores the saved
+frontend image under the host deployment lock. It validates image identity, lineage and exact
+backend/contracts/dependency/config compatibility; backend, jobs, data and gateway stay running.
+Use the [Selectel runbook](../../../deploy/selectel/README.md) and the recorded release evidence.
+Do not use the full application rollback to change only presentation.
 
 Shared styling lives in `webapp/src/styles/tokens.css` and
 `webapp/src/components/ui-v2/shared-skin.css`. Shared controls live in

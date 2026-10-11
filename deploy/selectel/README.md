@@ -383,6 +383,19 @@ missing marker stops rollback rather than mixing old images with new configurati
 It leaves both additive MAX migrations in place; database rollback is not part of
 application rollback.
 
+For a UI-only rollback, run `deploy/selectel/redeploy.sh rollback-static` on the
+host. The action uses the normal deployment lock and reads the previous webapp
+SHA from the root-owned mode-0600 `/opt/memoly/rollback.env`. It requires the
+running backend, worker, scheduler, and static services to be unique and to match
+their immutable image tags, image IDs, and OCI revision labels. The saved webapp
+SHA must be an ancestor of the running backend, with identical backend,
+contracts, root package/lockfile, and Selectel Compose/Caddy templates. It
+recreates only `static`, checks internal and public readiness, and retains the
+running backend, jobs, database, and gateway. If static promotion or readiness
+fails, it attempts to restore and verify the static image that was running when
+the command began. B2/MM0 forward-only markers block this action; use the guarded
+forward-recovery release flow instead.
+
 ## B7 unread activation after a healthy compatible release
 
 Keep `MULTI_FAMILY_ACTIVATION` off while the B1–B4 migrations and B1–B6 runtime
