@@ -10,6 +10,7 @@ import { createHostBridge } from './platform/telegram'
 import { installPwaPromptListeners } from './platform/pwa-install'
 import './production.css'
 
+window.__MEMOLY_DIAGNOSTICS__?.record('module-ready')
 installAppZoomPrevention(document)
 installPwaPromptListeners(window)
 

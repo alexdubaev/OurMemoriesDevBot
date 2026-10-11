@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import tailwindcss from '@tailwindcss/vite'
@@ -7,6 +8,7 @@ import { defineConfig } from 'vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const backendProxyTarget = process.env.VITE_API_URL ?? 'http://127.0.0.1:3000'
+const diagnosticsBootstrap = readFileSync(path.resolve(__dirname, 'src/platform/diagnostics/bootstrap.js'), 'utf8')
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -36,7 +38,16 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    {
+      name: 'memoly-diagnostics-bootstrap',
+      transformIndexHtml(html) {
+        return html.replace('<!-- memoly-diagnostics-bootstrap -->', `<script>${diagnosticsBootstrap}</script>`)
+      },
+    },
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

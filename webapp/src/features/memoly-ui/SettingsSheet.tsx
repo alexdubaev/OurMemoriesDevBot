@@ -5,6 +5,7 @@ import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { WebpIcon } from '@/components/WebpIcon'
 import { getUiV2HeaderAsset } from '@/components/ui-v2/header-assets'
+import { DiagnosticsReportAction } from '@/platform/diagnostics/DiagnosticsReportAction'
 import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import { readUiVersion } from '@/features/ui-version'
 import type { HostBridge } from '@/platform/host-bridge'
@@ -63,4 +64,4 @@ export function AppearanceChoices({ onSelect, selected }: { onSelect: (theme: Me
 }
 
 function HelpPrivacy() { return <div className="ml-settings-copy"><h2>Приватные воспоминания</h2><p>Фото, видео, голосовые и заметки доступны только участникам вашей семьи.</p><p>Роль просмотра позволяет открывать материалы и ставить лайки. Создание, изменение и удаление доступны только участникам с соответствующими правами.</p></div> }
-function AboutMemoLy() { return <div className="ml-settings-copy"><h2>memoLy</h2><p>Приватный семейный архив воспоминаний о ребёнке.</p><p>В приложении можно хранить фотографии, видео, голосовые и текстовые заметки для своей семьи.</p></div> }
+function AboutMemoLy() { return <div className="ml-settings-copy"><h2>memoLy</h2><p>Приватный семейный архив воспоминаний о ребёнке.</p><p>В приложении можно хранить фотографии, видео, голосовые и текстовые заметки для своей семьи.</p><DiagnosticsReportAction /></div> }
