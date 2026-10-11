@@ -217,6 +217,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   // token, until the first `/api/v1/auth/me` load has settled. Reporting "signed out" in between would
   // send a signed-in user through the login redirect on every reload.
   const isBootstrapping = isRestoringSession || (Boolean(accessToken) && meQuery.isPending)
+  const isAuthenticated = Boolean(meQuery.data?.user)
+  useEffect(() => {
+    window.__MEMOLY_DIAGNOSTICS__?.updateState?.('auth', { bootstrapping: isBootstrapping, authenticated: isAuthenticated })
+  }, [isAuthenticated, isBootstrapping])
   const sessionError = bootstrapError ?? (accessToken ? toOptionalError(meQuery.error) : null)
   const transport = useMemo(
     () => ({
@@ -231,7 +235,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user: meQuery.data?.user ?? null,
       externalIdentityProvider: meQuery.data?.externalIdentityProvider,
       isBootstrapping,
-      isAuthenticated: Boolean(meQuery.data?.user),
+      isAuthenticated,
       sessionError,
       retrySession,
       transport,
@@ -249,7 +253,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       requestPasswordReset,
       confirmPasswordReset,
     }),
-    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport, updateTheme],
+    [approveBrowserLink, authenticateHost, authenticateMax, authenticateTelegram, browserLinkStatus, confirmPasswordReset, isAuthenticated, isBootstrapping, login, logout, meQuery.data?.externalIdentityProvider, meQuery.data?.user, redeemBrowserLink, register, requestPasswordReset, retrySession, sessionError, startBrowserLink, transport, updateTheme],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
