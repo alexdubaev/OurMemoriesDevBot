@@ -1,7 +1,7 @@
 import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode, RefObject } from 'react'
+import type { CSSProperties, ReactNode, RefObject } from 'react'
 import 'photoswipe/style.css'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import useEmblaCarousel from 'embla-carousel-react'
@@ -460,6 +460,10 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     }),
   })
   const [index, setIndex] = useState(startIndex)
+  const activeAttachment = memory.attachments[index]!
+  const metadataAspect = mediaAspectRatio(activeAttachment.width, activeAttachment.height)
+  const [measuredAspect, setMeasuredAspect] = useState<{ attachmentId: string; ratio: string } | null>(null)
+  const activeAspect = metadataAspect ?? (measuredAspect?.attachmentId === activeAttachment.id ? measuredAspect.ratio : '16 / 9')
   const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const photoViewerSession = useRef<AbortController | null>(null)
@@ -484,6 +488,25 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     embla.on('reInit', select)
     return () => { embla.off('select', select); embla.off('reInit', select) }
   }, [embla, select])
+  useEffect(() => {
+    const slide = root.current?.querySelector<HTMLElement>(`[data-carousel-position="${index + 1}"]`)
+    if (!slide) return
+    const measure = () => {
+      if (mediaAspectRatio(activeAttachment.width, activeAttachment.height)) return
+      const video = activeAttachment.kind === 'video' ? slide.querySelector('video') : null
+      const image = activeAttachment.kind === 'photo' ? slide.querySelector<HTMLImageElement>('.ml-media-button img[alt="Воспоминание"]') : null
+      const poster = activeAttachment.kind === 'video' ? slide.querySelector<HTMLImageElement>('.memoly-video-viewer-v2-frame > img[alt="Кадр видео"], [data-slot="private-video-poster"] img, [data-slot="telegram-video-poster"]') : null
+      const width = video?.videoWidth || (poster?.complete && poster.naturalWidth > 0 ? poster.naturalWidth : 0) || (image?.complete ? image.naturalWidth : 0)
+      const height = video?.videoHeight || (poster?.complete && poster.naturalWidth > 0 ? poster.naturalHeight : 0) || (image?.complete ? image.naturalHeight : 0)
+      if (!width || !height) return
+      const ratio = `${width} / ${height}`
+      setMeasuredAspect((current) => current?.attachmentId === activeAttachment.id && current.ratio === ratio ? current : { attachmentId: activeAttachment.id, ratio })
+    }
+    slide.addEventListener('load', measure, true)
+    slide.addEventListener('loadedmetadata', measure, true)
+    measure()
+    return () => { slide.removeEventListener('load', measure, true); slide.removeEventListener('loadedmetadata', measure, true) }
+  }, [activeAttachment.height, activeAttachment.id, activeAttachment.kind, activeAttachment.width, index])
   const open = (at: number, trigger: HTMLElement, photoUrl?: string) => {
     root.current?.querySelectorAll('video').forEach((video) => video.pause())
     if (memory.kind === 'photo') {
@@ -499,8 +522,12 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     }
     onOpen(at, trigger, photoUrl)
   }
-  return <div aria-label={`Медиа воспоминания, ${memory.attachments.length} элементов`} className="memoly-mixed-carousel" data-seen-active-index={index} ref={root} role="group">
-    <div className="memoly-mixed-viewport" data-media-stage="feed" ref={viewportRef}>
+  return <div aria-label={`Медиа воспоминания, ${memory.attachments.length} элементов`} className="memoly-mixed-carousel" data-seen-active-index={index} onKeyDown={(event) => {
+    if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (event.key === 'ArrowLeft' && index > 0) { event.preventDefault(); embla?.scrollPrev() }
+    if (event.key === 'ArrowRight' && index < memory.attachments.length - 1) { event.preventDefault(); embla?.scrollNext() }
+  }} ref={root} role="group" tabIndex={0}>
+    <div className="memoly-mixed-viewport" data-media-stage="feed" ref={viewportRef} style={{ '--memoly-active-media-aspect': activeAspect } as CSSProperties}>
       <div className="memoly-mixed-track">
         {memory.attachments.map((attachment, position) => <div aria-hidden={position !== index} aria-label={position === index ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-slide" data-carousel-active={position === index} data-carousel-position={position + 1} data-media-kind={attachment.kind} inert={position !== index} key={attachment.id} role={position === index ? 'group' : undefined}>
           {position === index || (attachment.kind === 'photo' && Math.abs(position - index) === 1)
@@ -510,12 +537,10 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
       </div>
     </div>
     {memory.attachments.length > 1 ? <div className="memoly-mixed-controls">
-      <button aria-label="Предыдущий элемент" disabled={index === 0} onClick={() => embla?.scrollPrev()} type="button"><Typography as="span" variant="memoryMeta">‹</Typography></button>
-      <div aria-label="Положение карусели" aria-live="polite" className="memoly-mixed-dots" role="group">
+      <div aria-label={`Положение карусели: ${index + 1} из ${memory.attachments.length}`} aria-live="polite" className="memoly-mixed-dots" role="status">
         <Typography as="span" className="sr-only" variant="memoryMeta">{index + 1} из {memory.attachments.length}</Typography>
-        {memory.attachments.map((attachment, position) => <span aria-current={position === index ? 'step' : undefined} aria-hidden="true" className={position === index ? 'active' : ''} data-carousel-dot={position + 1} key={attachment.id} />)}
+        {memory.attachments.map((attachment, position) => <span aria-hidden="true" className={position === index ? 'active' : ''} data-carousel-dot={position + 1} key={attachment.id} />)}
       </div>
-      <button aria-label="Следующий элемент" disabled={index === memory.attachments.length - 1} onClick={() => embla?.scrollNext()} type="button"><Typography as="span" variant="memoryMeta">›</Typography></button>
     </div> : null}
     {photoViewerError ? <Typography as="p" className="memoly-photo-viewer-error" role="alert" variant="memoryMeta">Не удалось открыть фото. Попробуйте ещё раз.</Typography> : null}
   </div>
@@ -684,10 +709,11 @@ export function TelegramVideoPoster({ durationMs, posterUrl, posterReady = false
   durationMs: number | null; posterUrl: string | null; width: number | null; height: number | null
   onOpen?: () => void; onPosterReady?: (url: string | null) => void; posterReady?: boolean; disabled?: boolean; busy?: boolean
 }) {
-  const aspectRatio = videoPosterAspectRatio(width, height)
+  const [measuredPoster, setMeasuredPoster] = useState<{ url: string; width: number; height: number } | null>(null)
+  const aspectRatio = mediaAspectRatio(width, height) ?? (measuredPoster?.url === posterUrl ? `${measuredPoster.width} / ${measuredPoster.height}` : '16 / 9')
   return <button aria-label="Смотреть видео в Telegram" className="relative isolate block w-full overflow-hidden bg-muted text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-60" data-seen-ready={posterReady} disabled={disabled} onClick={onOpen} style={{ aspectRatio }} type="button">
     {posterUrl
-      ? <img alt="Кадр видео" className="size-full object-cover" onError={() => onPosterReady?.(null)} onLoad={(event) => { const image = event.currentTarget; void image.decode().then(() => onPosterReady?.(posterUrl)).catch(() => onPosterReady?.(null)) }} src={posterUrl} />
+      ? <img alt="Кадр видео" className="size-full object-contain" data-slot="telegram-video-poster" onError={() => onPosterReady?.(null)} onLoad={(event) => { const image = event.currentTarget; void image.decode().then(() => { if (image.naturalWidth > 0 && image.naturalHeight > 0) setMeasuredPoster({ url: posterUrl, width: image.naturalWidth, height: image.naturalHeight }); onPosterReady?.(posterUrl) }).catch(() => onPosterReady?.(null)) }} src={posterUrl} />
       : <span className="absolute inset-0 flex items-center justify-center"><Typography as="span" tone="muted" variant="memoryBody">Видео</Typography></span>}
     <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" data-slot="telegram-video-play-control">
       {busy
@@ -820,7 +846,7 @@ function MaxVideoPreviewContent({ durationMs, height, onCheckReadiness, onOpen, 
       {viewerState !== 'ready' && !hasDecodedPoster ? <div aria-hidden="true" className="memoly-video-viewer-v2-placeholder"><WebpIcon decorative name="video" size={48} /></div> : null}
       {!started && poster && !previewReady ? <img alt="Кадр видео" className="pointer-events-none absolute inset-0 z-0 size-full object-contain" onLoad={(event) => {
         const image = event.currentTarget
-        void image.decode().then(() => setDecodedPosterUrl(poster)).catch(() => undefined)
+        void image.decode().then(() => { setDecodedPosterUrl(poster); if (!mediaAspectRatio(width, height) && image.naturalWidth > 0 && image.naturalHeight > 0) setIntrinsicDimensions({ width: image.naturalWidth, height: image.naturalHeight }) }).catch(() => undefined)
       }} src={poster} /> : null}
       {!started ? <Typography as="span" className="pointer-events-none absolute bottom-3 right-3 z-20 rounded bg-black/70 px-2 py-1 text-white" variant="memoryMeta">{formatDuration(durationMs)}</Typography> : null}
       {started && viewerState === 'ready' ? <VideoPlaybackControls available={Boolean(src)} current={current} duration={duration} onSeek={(position) => { if (video.current) video.current.currentTime = position; setCurrent(position) }} onToggle={() => void (async () => { const element = video.current; if (!element) return; if (element.paused) { try { await element.play() } catch { setFailed(true) } } else element.pause() })()} playing={playing} stageRef={stage} videoRef={video} /> : null}
@@ -983,11 +1009,14 @@ function PrivateVideo({ attachment, memory, transport }: { attachment: Extract<M
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(effective.durationMs ? effective.durationMs / 1_000 : 0)
+  const dimensionKey = `${effective.id}:${effective.width ?? ''}x${effective.height ?? ''}:${playablePath ?? ''}`
+  const [measuredDimensions, setMeasuredDimensions] = useState<{ key: string; width: number; height: number } | null>(null)
+  const intrinsicDimensions = measuredDimensions?.key === dimensionKey ? measuredDimensions : { width: effective.width, height: effective.height }
   const [failed, setFailed] = useState(false)
   const [previewReady, setPreviewReady] = useState(false)
   const [started, setStarted] = useState(false)
   const viewerState = renditionStatus === 'pending' ? 'loading' : renditionStatus === 'failed' || failed || source.status === 'error' ? 'error' : source.status
-  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'} ref={stage} style={videoFrameStyle(effective.width, effective.height)}><video aria-label="Видео воспоминания" className="h-full w-full" onEnded={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onError={() => { setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onPause={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onPlay={() => { setFailed(false); setStarted(true); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline poster={started ? undefined : posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
+  return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'} ref={stage} style={videoFrameStyle(intrinsicDimensions.width, intrinsicDimensions.height)}><video aria-label="Видео воспоминания" className="h-full w-full" onEnded={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onError={() => { setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => { setDuration(e.currentTarget.duration); const { videoWidth, videoHeight } = e.currentTarget; if (videoWidth > 0 && videoHeight > 0) setMeasuredDimensions({ key: dimensionKey, width: videoWidth, height: videoHeight }) }} onPause={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onPlay={() => { setFailed(false); setStarted(true); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline poster={started ? undefined : posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
     {!started ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : null}</div> : null}
     {!started && viewerState !== 'error' ? <button aria-label="Воспроизвести видео" className="memoly-private-video-v2-play" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; try { await element.play() } catch { setFailed(true) } })()} type="button"><WebpIcon decorative name="play" size={24} state="white" /></button> : null}
     {!started ? <Typography as="span" className="memoly-private-video-v2-duration" variant="memoryMeta">{formatDuration(effective.durationMs)}</Typography> : null}
