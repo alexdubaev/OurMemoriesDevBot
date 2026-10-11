@@ -3,15 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="color-scheme" content="only light" />
+    <!-- memoly-diagnostics-bootstrap -->
     <script>
       (() => {
         let mounted = false
         let failed = false
         let mountTimer
         let rootObserver
-        const showFailure = () => {
+        const showFailure = (category = 'startup-failed') => {
           if (failed && document.getElementById('root')?.dataset.startupFailed === 'true') return
           failed = true
+          window.__MEMOLY_DIAGNOSTICS__?.record(category, 'startup')
           window.clearTimeout(mountTimer)
           const target = document.getElementById('root')
           if (!target) {
@@ -35,29 +37,53 @@
           retry.textContent = 'Повторить'
           retry.style.cssText = 'min-height:48px;padding:0 20px;border:0;border-radius:14px;background:#efc9c0;color:#1f1f1f;font:inherit;font-weight:600'
           retry.addEventListener('click', () => window.location.reload())
-          main.append(message, retry)
+          const copy = document.createElement('button')
+          copy.type = 'button'
+          copy.textContent = 'Скопировать отчёт об ошибке'
+          copy.style.cssText = retry.style.cssText
+          copy.addEventListener('click', async () => {
+            const report = window.__MEMOLY_DIAGNOSTICS__?.report() ?? '{"error":"report-unavailable"}'
+            try {
+              if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+              await navigator.clipboard.writeText(report)
+              copy.textContent = 'Отчёт скопирован'
+              fallback.hidden = true
+            } catch {
+              fallback.value = report
+              fallback.hidden = false
+              fallback.focus()
+              fallback.select()
+            }
+          })
+          const fallback = document.createElement('textarea')
+          fallback.setAttribute('aria-label', 'Отчёт об ошибке для ручного копирования')
+          fallback.readOnly = true
+          fallback.hidden = true
+          fallback.style.cssText = 'width:100%;min-height:120px;box-sizing:border-box;font:12px/1.4 monospace'
+          main.append(message, retry, copy, fallback)
           target.replaceChildren(main)
         }
         mountTimer = window.setTimeout(() => {
           console.error('[memoLy] startup_mount_timeout')
-          showFailure()
+          showFailure('startup-timeout')
         }, 20000)
         const api = {
           fail: showFailure,
           canMount: () => !failed,
-          mounted: () => { mounted = true; window.clearTimeout(mountTimer); rootObserver?.disconnect() },
+          mounted: () => { mounted = true; window.clearTimeout(mountTimer); rootObserver?.disconnect(); window.__MEMOLY_DIAGNOSTICS__?.record('mounted', 'mounted') },
         }
         window.__MEMOLY_STARTUP__ = api
         window.addEventListener('error', (event) => {
           if (!mounted && (event.target instanceof HTMLScriptElement || event instanceof ErrorEvent)) {
+            const category = event.target instanceof HTMLScriptElement ? 'startup-asset-failed' : 'startup-runtime-failed'
             console.error(event.target instanceof HTMLScriptElement ? '[memoLy] startup_asset_failed' : '[memoLy] startup_runtime_failed')
-            showFailure()
+            showFailure(category)
           }
         }, true)
         window.addEventListener('unhandledrejection', () => {
           if (mounted) return
           console.error('[memoLy] startup_unhandled_rejection')
-          showFailure()
+          showFailure('startup-unhandled-rejection')
         })
         const hasMarker = (value, markers) => typeof value === 'string'
           && markers.some((marker) => new RegExp(`(?:^|[#&])${marker}=[^&#]+`).test(value))
@@ -97,7 +123,7 @@
             window.clearTimeout(timer)
             if (!ready) {
               console.error('[memoLy] host_sdk_unavailable')
-              showFailure()
+              showFailure('host-sdk-unavailable')
             }
             resolve(ready)
           }

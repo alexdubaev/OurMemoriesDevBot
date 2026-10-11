@@ -1,6 +1,7 @@
 import { Component, useLayoutEffect, type PropsWithChildren } from 'react'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
+import { DiagnosticsReportAction } from '@/platform/diagnostics/DiagnosticsReportAction'
 
 declare global {
   interface Window {
@@ -30,7 +31,12 @@ class StartupErrorBoundary extends Component<PropsWithChildren, { failed: boolea
     return <main className="mx-auto grid min-h-screen min-h-dvh max-w-md content-center gap-5 px-7 py-10 text-center" role="alert">
       <Typography variant="memoryScreen">Не удалось открыть приложение</Typography>
       <Typography tone="muted" variant="memoryBody">Проверьте соединение и попробуйте ещё раз.</Typography>
+      <DiagnosticsReportAction />
       <Button className="min-h-12 w-full" onClick={() => window.location.reload()} type="button"><Typography variant="memoryButton">Повторить</Typography></Button>
     </main>
+  }
+
+  componentDidCatch() {
+    window.__MEMOLY_DIAGNOSTICS__?.record('react-boundary', 'mounted')
   }
 }

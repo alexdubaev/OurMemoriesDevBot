@@ -489,6 +489,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     setLastKnownAspect(nextKnownAspect ?? activeAspect)
     setIndex(next)
     onIndexChange(next)
+    window.__MEMOLY_DIAGNOSTICS__?.record('carousel-selection', 'mounted')
   }, [activeAspect, embla, memory.attachments, measuredAspects, onIndexChange])
   useEffect(() => {
     if (!embla) return
