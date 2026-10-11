@@ -75,18 +75,16 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
         revokeOwnedUrl(ownedUrls.current, candidateUrl)
         return
       }
-      if (eligiblePrivateImage(path)) await cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
-      if (!isCurrent()) {
-        revokeOwnedUrl(ownedUrls.current, candidateUrl)
-        return
-      }
-      if (readyUrlAlreadyShown || cachedWasShown || hasPriorReadyUrl()) {
+      const keepWarmUrl = readyUrlAlreadyShown || cachedWasShown || hasPriorReadyUrl()
+      if (!keepWarmUrl) {
+        setLoaded({ userId, path, url: candidateUrl, identityGeneration, ...(familyId ? { familyId, familyGeneration } : {}) })
+      } else {
         // Keep a warm URL stable while refreshing the persistent Blob. The fullscreen viewer can
         // borrow this URL, so replacing it here could revoke a URL still used by that viewer.
         revokeOwnedUrl(ownedUrls.current, candidateUrl)
-      } else {
-        setLoaded({ userId, path, url: candidateUrl, identityGeneration, ...(familyId ? { familyId, familyGeneration } : {}) })
       }
+      if (eligiblePrivateImage(path)) await cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
+      if (!isCurrent()) return
       onSettledRef.current?.()
     })().catch((error: unknown) => {
       if (!isCurrent()) return
