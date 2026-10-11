@@ -713,6 +713,121 @@ rollback() {
 	printf 'Application rollback complete; additive migrations remain applied.\n'
 }
 
+read_static_rollback_tag() {
+	local line backend_seen=0 webapp_seen=0 database_seen=0
+	PREVIOUS_WEBAPP_IMAGE_TAG=
+	validate_rollback_file
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in
+			''|'#'*) ;;
+			PREVIOUS_BACKEND_IMAGE_TAG=*)
+				[ "$backend_seen" -eq 0 ] || die 'rollback env contains a duplicate previous backend tag'
+				[[ "$line" =~ ^PREVIOUS_BACKEND_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'rollback env previous backend tag is invalid'
+				backend_seen=1
+				;;
+			PREVIOUS_WEBAPP_IMAGE_TAG=*)
+				[ "$webapp_seen" -eq 0 ] || die 'rollback env contains a duplicate previous webapp tag'
+				[[ "$line" =~ ^PREVIOUS_WEBAPP_IMAGE_TAG=([0-9a-f]{40})$ ]] || die 'rollback env previous webapp tag is invalid'
+				PREVIOUS_WEBAPP_IMAGE_TAG=${BASH_REMATCH[1]}
+				webapp_seen=1
+				;;
+			MEMOLY_DB_ROLLBACK_ALLOWED=*)
+				[ "$database_seen" -eq 0 ] || die 'rollback env contains a duplicate database rollback setting'
+				[ "$line" = 'MEMOLY_DB_ROLLBACK_ALLOWED=false' ] || die 'database rollback must remain disabled'
+				database_seen=1
+				;;
+			*) die 'rollback env contains an unexpected setting' ;;
+		esac
+	done < "$ROLLBACK_ENV"
+	[ "$backend_seen" -eq 1 ] && [ "$webapp_seen" -eq 1 ] && [ "$database_seen" -eq 1 ] ||
+		die 'rollback env is missing a required setting'
+}
+
+inspect_running_service_image() {
+	local service=$1 expected_prefix=$2 running details image tag container_id image_id revision
+	running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+		--filter "label=com.docker.compose.service=$service") || die "cannot enumerate running $service service"
+	[ "$(printf '%s\n' "$running" | awk 'NF { count += 1 } END { print count + 0 }')" -eq 1 ] ||
+		die "running $service service identity is missing or ambiguous"
+	details=$(docker inspect --format '{{.Config.Image}}|{{.Image}}' "$running") || die "cannot inspect running $service image"
+	image=${details%%|*}
+	container_id=${details#*|}
+	case "$image" in
+		"$expected_prefix:"*) tag=${image#"$expected_prefix:"} ;;
+		*) die "running $service does not use an immutable $expected_prefix image" ;;
+	esac
+	[[ "$tag" =~ ^[0-9a-f]{40}$ ]] || die "running $service image tag is invalid"
+	[[ "$container_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "running $service container image ID is invalid"
+	image_id=$(docker image inspect --format '{{.Id}}' "$image") || die "cannot inspect tagged $service image"
+	[ "$image_id" = "$container_id" ] || die "running $service image ID does not match its immutable tag"
+	revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image") ||
+		die "cannot inspect $service image revision label"
+	[ "$revision" = "$tag" ] || die "running $service image revision label does not match its tag"
+	printf '%s\n' "$tag"
+}
+
+rollback_static() {
+	local service backend_tag static_tag image_id image_revision actual_static_tag
+	[ ! -e "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] ||
+		die 'B2 forward-only marker exists; static rollback is forbidden during forward recovery'
+	[ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] ||
+		die 'MM0 forward-only marker exists; static rollback is forbidden during forward recovery'
+	read_static_rollback_tag
+	backend_tag=$(inspect_running_service_image backend memoly-backend)
+	for service in worker scheduler; do
+		local service_tag
+		service_tag=$(inspect_running_service_image "$service" memoly-backend)
+		[ "$service_tag" = "$backend_tag" ] || die "running $service image differs from the backend image"
+	done
+	static_tag=$(inspect_running_service_image static memoly-webapp)
+	[ "$static_tag" != "$PREVIOUS_WEBAPP_IMAGE_TAG" ] || die 'requested static rollback is already active'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$backend_tag^{commit}" 2>/dev/null ||
+		die 'running backend SHA is unavailable in the checkout; static rollback compatibility cannot be verified'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$PREVIOUS_WEBAPP_IMAGE_TAG^{commit}" 2>/dev/null ||
+		die 'previous webapp SHA is unavailable in the checkout; static rollback compatibility cannot be verified'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$PREVIOUS_WEBAPP_IMAGE_TAG" "$backend_tag" ||
+		die 'previous webapp SHA is not an ancestor of the running backend'
+	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet \
+		"$PREVIOUS_WEBAPP_IMAGE_TAG" "$backend_tag" -- \
+		backend packages/contracts package.json bun.lock bunfig.toml \
+		deploy/selectel/compose.yml.template \
+		deploy/selectel/Caddyfile.edge.template \
+		deploy/selectel/Caddyfile.static.template; then
+		die 'backend, contracts, root package/build config, lockfile, or Compose/Caddy templates changed since the previous webapp'
+	fi
+	docker image inspect "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG" >/dev/null 2>&1 ||
+		die 'previous immutable webapp image is not present locally'
+	image_id=$(docker image inspect --format '{{.Id}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG") ||
+		die 'cannot inspect previous webapp image ID'
+	[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'previous webapp image ID is invalid'
+	image_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+		"memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG") || die 'cannot inspect previous webapp revision label'
+	[ "$image_revision" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] || die 'previous webapp revision label does not match its tag'
+
+	gateway_preflight
+	load_runtime_secrets
+	export MEMOLY_BACKEND_IMAGE_TAG="$backend_tag"
+	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
+	compose config >/dev/null || die 'Compose configuration validation failed before static rollback'
+	if ( compose up -d --no-deps --force-recreate static &&
+		actual_static_tag=$(inspect_running_service_image static memoly-webapp) &&
+		[ "$actual_static_tag" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] &&
+		verify_static_internal && wait_public / ); then
+		printf 'UI-only rollback complete: static=%s backend=%s; backend, worker, scheduler, database, and gateway were retained.\n' \
+			"$PREVIOUS_WEBAPP_IMAGE_TAG" "$backend_tag"
+		return 0
+	fi
+	printf 'ERROR: static rollback promotion or readiness failed; restoring the previous static image %s.\n' "$static_tag" >&2
+	export MEMOLY_WEBAPP_IMAGE_TAG="$static_tag"
+	if ! ( compose up -d --no-deps --force-recreate static &&
+		actual_static_tag=$(inspect_running_service_image static memoly-webapp) &&
+		[ "$actual_static_tag" = "$static_tag" ] &&
+		verify_static_internal && wait_public / ); then
+		die 'static rollback failed and restoration of the previously running static image also failed'
+	fi
+	die 'static rollback failed; previously running static image was restored'
+}
+
 deploy() {
 	guard_membership_transition
 	preflight
@@ -730,7 +845,7 @@ deploy() {
 
 usage() {
 	cat <<'EOF'
-Usage: redeploy.sh {preflight|backup-migration|migrate|deploy|rollback|migration-status|quiesce-legacy|quiesce-all}
+Usage: redeploy.sh {preflight|backup-migration|migrate|deploy|rollback|rollback-static|migration-status|quiesce-legacy|quiesce-all}
 
 Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
 GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
@@ -749,6 +864,7 @@ main() {
 		preflight) preflight ;;
 		deploy) deploy ;;
 		rollback) rollback ;;
+		rollback-static) require_command docker; rollback_static ;;
 		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
 		backup-migration) require_command docker; guard_membership_transition backup; backup_migration ;;
 		quiesce-legacy) require_command docker; quiesce_legacy_runtime ;;

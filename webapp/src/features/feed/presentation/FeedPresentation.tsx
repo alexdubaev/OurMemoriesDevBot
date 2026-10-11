@@ -34,6 +34,8 @@ export type FeedPresentationProps = {
   insets: TelegramInsets
   onAdd?: () => void
   onFamily: () => void
+  onOpenChild?: () => void
+  onOpenSettings?: () => void
   onAllFamilies?: () => void
   onFeed: () => void
   onFilterChange: (filter: FeedFilter) => void
@@ -59,7 +61,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
     <div data-memoly-feed="true" style={style}>
       <main className="app" data-slot="feed-scroll">
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
-        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} theme={theme} />
+        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />
         <div className="feed-rest">
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
           <div className="feed-unread-mode">

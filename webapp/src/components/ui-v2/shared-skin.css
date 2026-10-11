@@ -1,0 +1,156 @@
+/* Shared production component skin. Tokens live in styles/tokens.css so later
+   presentation phases can reuse them without adding screen-specific palettes. */
+.memoly-app-root[data-ui-version='v2'] {
+  min-height: 100dvh;
+  color: var(--ui-v2-color-text);
+  background: var(--ui-v2-color-canvas);
+  font-family: var(--ui-v2-font-family);
+  font-size: var(--ui-v2-font-body);
+  line-height: var(--ui-v2-line-body);
+}
+
+.memoly-app-root[data-ui-version='v2'] :where(button, input, select, textarea) { color: inherit; font: inherit; }
+.memoly-app-root[data-ui-version='v2'] :where(button, a, input, select, textarea) { -webkit-tap-highlight-color: transparent; }
+.memoly-app-root[data-ui-version='v2'] :where(button, a, input, select, textarea, [tabindex]):focus-visible { outline: 3px solid var(--ui-v2-color-accent); outline-offset: 2px; }
+.memoly-app-root[data-ui-version='v2'] :where(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) { border-color: var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); background-color: var(--ui-v2-color-surface); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-composer-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-screen, .family-management-page, main > section.mx-auto) [data-slot='button'] { border-radius: var(--ui-v2-button-radius); font-weight: var(--ui-v2-weight-strong); transition-duration: 160ms; }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-composer-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-screen, .family-management-page, main > section.mx-auto) [data-slot='button'][data-variant='default'] { min-height: var(--ui-v2-button-height); border-color: transparent; border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); box-shadow: none; font-family: var(--ui-v2-font-family); font-weight: var(--ui-v2-button-primary-weight); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-composer-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-screen, .family-management-page, main > section.mx-auto) [data-slot='button'][data-variant='secondary'] { min-height: var(--ui-v2-button-height); border-color: transparent; border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); box-shadow: none; font-family: var(--ui-v2-font-family); font-weight: var(--ui-v2-button-primary-weight); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-composer-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-screen, .family-management-page, main > section.mx-auto) :where([data-slot='button'][data-variant='outline'], [data-slot='button'][data-variant='ghost']) { min-height: var(--ui-v2-target-minimum); border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-color-text); background: var(--ui-v2-color-field); box-shadow: none; font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-composer-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-screen, .family-management-page, main > section.mx-auto) [data-slot='button'][data-variant='destructive'] { min-height: var(--ui-v2-target-minimum); border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-color-danger); background: var(--ui-v2-color-danger-soft); font-family: var(--ui-v2-font-family); }
+html[data-ui-version='v2'] :where([data-slot='memoly-add-sheet-panel'], [data-slot='memoly-voice-video-sheet']) [data-slot='button'] { border-radius: var(--ui-v2-button-radius); font-family: var(--ui-v2-font-family); }
+html[data-ui-version='v2'] :where([data-slot='memoly-add-sheet-panel'], [data-slot='memoly-voice-video-sheet']) [data-slot='button'][data-variant='default'] { min-height: var(--ui-v2-button-height); border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button { display: inline-flex; min-height: var(--ui-v2-button-height); align-items: center; justify-content: center; gap: var(--ui-v2-space-sm); padding: var(--ui-v2-space-md) var(--ui-v2-space-lg); border: 0; border-radius: var(--ui-v2-button-radius); font-family: var(--ui-v2-font-family); font-weight: var(--ui-v2-weight-strong); cursor: pointer; }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button--primary { color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button--secondary { color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button--quiet { color: var(--ui-v2-color-accent); background: transparent; }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button--danger { color: var(--ui-v2-color-danger); background: var(--ui-v2-color-danger-soft); }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-button--quiet { min-height: var(--ui-v2-target-minimum); padding: var(--ui-v2-space-sm) var(--ui-v2-space-md); }
+.memoly-app-root[data-ui-version='v2'] .memoly-composer-page .memoly-composer-primary { min-height: var(--ui-v2-button-height) !important; border-radius: var(--ui-v2-button-radius) !important; color: var(--ui-v2-button-primary-color) !important; background: var(--ui-v2-button-primary-background) !important; box-shadow: none !important; }
+.memoly-app-root[data-ui-version='v2'] .memoly-add-page .memoly-add-publish { min-height: var(--ui-v2-button-height) !important; border-radius: var(--ui-v2-button-radius) !important; color: var(--ui-v2-button-primary-color) !important; background: var(--ui-v2-button-primary-background) !important; box-shadow: none !important; }
+.memoly-app-root[data-ui-version='v2'] .memoly-add-page .memoly-add-publish:disabled { color: var(--ui-v2-color-muted) !important; background: var(--ui-v2-color-field) !important; box-shadow: none !important; }
+.memoly-app-root[data-ui-version='v2'] .memoly-video-v2 .memoly-video-v2-action:not(.secondary) { min-height: var(--ui-v2-button-height) !important; border-radius: var(--ui-v2-button-radius) !important; color: var(--ui-v2-button-primary-color) !important; background: var(--ui-v2-button-primary-background) !important; box-shadow: none !important; font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] .memoly-video-v2 .memoly-video-v2-action.secondary { min-height: var(--ui-v2-target-minimum) !important; border-radius: var(--ui-v2-button-radius) !important; color: var(--ui-v2-color-text) !important; background: var(--ui-v2-color-field) !important; box-shadow: none !important; font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-field { min-height: var(--ui-v2-target-primary); padding: var(--ui-v2-space-md); border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-surface); font: inherit; }
+.memoly-app-root[data-ui-version='v2'] :where([data-slot='input'], [data-slot='textarea'], [data-slot='select-trigger']) { border-radius: var(--ui-v2-radius-field); background-color: var(--ui-v2-color-surface); }
+.memoly-app-root[data-ui-version='v2'] :where([data-memoly-feed] *, .family-screen *, .family-management-page *, .member-profile-screen *, .ml-settings-sheet *, [data-slot='child-profile'] *, .memoly-video-v2 *) { font-family: var(--ui-v2-font-family) !important; }
+html[data-ui-version='v2'] :where([role='dialog'], [data-slot='dialog-content'], [data-slot='sheet-content']) { color: var(--ui-v2-color-text); border-color: var(--ui-v2-color-line); background-color: var(--ui-v2-color-surface); }
+html[data-ui-version='v2'] .memoly-mixed-viewer { color: var(--ui-v2-color-white); background: var(--ui-v2-color-viewer); }
+html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-color-white); background: rgb(255 255 255 / 12%); }
+.memoly-app-root[data-ui-version='v2'] .family-screen,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] { color: var(--ui-v2-color-text); background: var(--ui-v2-color-canvas); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] :where(.ui-v2-header-back, .ui-v2-settings) { color: var(--ui-v2-color-accent); background: var(--ui-v2-header-action); font-family: var(--ui-v2-font-family); }
+
+/* Existing controller-owned navigation, with its three positions and refs. */
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] {
+  left: 50% !important; right: auto !important;
+  bottom: max(8px, var(--host-inset-bottom)) !important;
+  width: min(calc(100% - 24px - var(--host-inset-left) - var(--host-inset-right)), 456px) !important;
+  min-height: 82px !important;
+  transform: translateX(-50%); padding: 0 !important;
+  border: 1px solid var(--ui-v2-color-line) !important;
+  border-radius: var(--ui-v2-radius-surface) !important;
+  background: var(--ui-v2-color-surface) !important;
+  box-shadow: var(--ui-v2-shadow-surface) !important;
+}
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { width: 100%; min-height: 82px; padding: 8px 14px; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] { min-height: 60px; color: var(--ui-v2-color-muted) !important; border-radius: var(--ui-v2-radius-pill); font-weight: var(--ui-v2-weight-medium); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] [data-variant='memoryNav'] { color: inherit; font-family: inherit; font-size: var(--ui-v2-font-caption); font-weight: inherit; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] { color: var(--ui-v2-color-accent) !important; background: var(--ui-v2-color-accent-soft); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] [data-variant='memoryNav'] { color: inherit; font-weight: var(--ui-v2-weight-strong); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-add='true'] { color: var(--ui-v2-color-muted) !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle { width: var(--ui-v2-nav-add-size); height: var(--ui-v2-nav-add-size); margin: 0; border-radius: var(--ui-v2-nav-add-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background) !important; box-shadow: var(--ui-v2-shadow-surface) !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle [data-slot='webp-icon'] { width: 26px; height: 26px; }
+
+/* Shared control and surface variants keep presentation values in one place. */
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-card, .family-management-invite-row, .family-member-row, .family-info-card, .family-usage, .family-pending, .family-member-actions, .family-permissions, .invite-role, .family-management-invites-link, .member-profile-hero, .member-profile-card, .child-profile .ds-card, .child-profile .child-age-card, .child-profile .child-action-list, .child-profile .child-more-actions, .ml-sheet-row, .ml-settings-copy, .ml-theme-choice, .family-max-channel) {
+  border: 1px solid var(--ui-v2-color-line);
+  border-radius: var(--ui-v2-radius-surface);
+  color: var(--ui-v2-color-text);
+  background: var(--ui-v2-color-surface);
+  box-shadow: var(--ui-v2-shadow-surface);
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-fields input, .family-management-fields select, .member-account-form input, .member-profile-field, .member-profile-field input, .child-edit-v2-field, .child-edit-v2-field input, .invite-alias-field input) {
+  border-color: var(--ui-v2-color-line);
+  border-radius: var(--ui-v2-radius-field);
+  color: var(--ui-v2-color-text);
+  background: var(--ui-v2-color-field);
+  box-shadow: none;
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-primary, .member-profile-save, .child-edit-v2-save, .child-profile .child-secondary) {
+  min-height: var(--ui-v2-button-height);
+  border: 0;
+  border-radius: var(--ui-v2-button-radius);
+  color: var(--ui-v2-button-primary-color);
+  background: var(--ui-v2-button-primary-background);
+  box-shadow: none;
+  font-family: var(--ui-v2-font-family);
+  font-size: var(--ui-v2-font-body);
+  font-weight: var(--ui-v2-button-primary-weight);
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-secondary, .member-remove-actions button:first-child, .child-profile .child-more-actions button) {
+  border-radius: var(--ui-v2-radius-field);
+  color: var(--ui-v2-color-text);
+  background: var(--ui-v2-color-field);
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-invite-btn, .family-management-invites-link, .family-management-error button, .family-max-channel button, .family-management-invite-row button) {
+  border-color: var(--ui-v2-color-line);
+  border-radius: var(--ui-v2-button-radius);
+  color: var(--ui-v2-color-accent);
+  background: var(--ui-v2-color-accent-soft);
+  box-shadow: none;
+  font-family: var(--ui-v2-font-family);
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-danger, .member-profile-danger, .member-remove-actions button:last-child) {
+  color: var(--ui-v2-color-danger);
+  background: var(--ui-v2-color-danger-soft);
+}
+.memoly-app-root[data-ui-version='v2'] :where(.family-detail-screen, .family-management-page, .member-profile-screen, .child-profile, .ml-settings-sheet, .ml-sheet-row-copy, .ml-appearance-hero) { color: var(--ui-v2-color-text); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-topbar h1, .family-page-title, .child-page-title, .child-profile .child-hero h2, .ml-settings-subview-title, .ml-appearance-hero h2) { color: var(--ui-v2-color-text); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-fields p, .family-management-status, .family-management-success, .member-profile-section-title, .member-account-hint, .member-profile-hero p, .child-profile .child-born, .child-profile .child-age, .child-profile .child-helper, .ml-appearance-hero p) { color: var(--ui-v2-color-muted); }
+.memoly-app-root[data-ui-version='v2'] .child-profile :where(.ds-card, .child-age-card, .child-action-list) { border-color: var(--ui-v2-color-line) !important; background: var(--ui-v2-color-surface) !important; box-shadow: var(--ui-v2-shadow-surface) !important; }
+.memoly-app-root[data-ui-version='v2'] .child-profile :where(.ds-page-title, .ds-entity-title) { color: var(--ui-v2-color-text) !important; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-appearance-hero { padding-top: var(--ui-v2-space-lg); }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-appearance-hero-icon { display: none; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice { grid-template-columns: minmax(0, 1fr) 20px; grid-template-rows: 68px auto; min-height: 112px; border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); background: var(--ui-v2-color-surface); box-shadow: var(--ui-v2-shadow-surface); }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice.selected { box-shadow: inset 0 0 0 2px var(--ui-v2-color-accent), var(--ui-v2-shadow-surface); }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-artwork { display: block; width: 100%; height: 68px; grid-column: 1 / -1; border-radius: var(--ui-v2-radius-small); object-fit: cover; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice-copy { min-width: 0; overflow: hidden; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice-copy strong { color: var(--ui-v2-color-text); font-size: var(--ui-v2-font-meta); line-height: 1.25; overflow-wrap: anywhere; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-radio-mark { justify-self: center; }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-radio-mark { border-color: var(--ui-v2-color-accent-detail); }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice.selected .ml-theme-radio-mark { border-color: var(--ui-v2-color-accent); }
+html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice.selected .ml-theme-radio-mark::after { background: var(--ui-v2-color-accent); }
+html[data-ui-version='v2'] [data-memoly-bottom-sheet='true']:has(.ml-settings-sheet[data-view='appearance']) { background: var(--ui-v2-color-canvas) !important; }
+html[data-ui-version='v2'] :where(.ml-settings-sheet, .ml-settings-sheet *, .member-remove-modal, .member-remove-modal *) { font-family: var(--ui-v2-font-family) !important; }
+html[data-ui-version='v2'] :where(.ml-settings-sheet, .ml-settings-sheet .ml-sheet-row, .ml-settings-sheet .ml-settings-copy, .ml-settings-sheet .ml-theme-choice, .member-remove-modal) { color: var(--ui-v2-color-text); background-color: var(--ui-v2-color-surface); }
+html[data-ui-version='v2'] :where(.ml-settings-sheet .ml-settings-subview-title, .ml-settings-sheet .ml-appearance-hero h2, .member-remove-modal h2) { color: var(--ui-v2-color-text); }
+html[data-ui-version='v2'] .ml-settings-sheet[data-view='appearance'] .ml-settings-subview-title { color: var(--ui-v2-color-text) !important; font-family: var(--ui-v2-font-family) !important; }
+html[data-ui-version='v2'] :where(.ml-settings-sheet .ml-appearance-hero p, .ml-settings-sheet .ml-theme-note, .ml-settings-sheet .ml-theme-choice-copy small, .member-remove-modal p) { color: var(--ui-v2-color-muted); }
+
+/* Remaining live entry, invite, composer, install and welcome presentations. */
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash']) { color: var(--ui-v2-color-text); background-color: var(--ui-v2-color-canvas); font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .memoly-video-v2, .pwa-install-prompt, [data-slot='welcome-splash'], .family-management-page) * { font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-intro h1, .family-hub-section h2, .family-hub-card-name, .family-hub-state h2, .invitation-header h1, .invitation-card-heading h2, .invitation-section-title, .memoly-add-page h1, .welcome-splash h1) { color: var(--ui-v2-color-text); font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-intro p, .family-hub-card-subtitle, .family-hub-card-unread-state, .family-hub-footer, .family-hub-state p, .invitation-hint, .invitation-card p, .pwa-install-copy, .welcome-splash p) { color: var(--ui-v2-color-muted); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-intro h1, .invitation-header h1, .memoly-add-page h1, [data-slot='welcome-splash'] h1) { font-size: var(--ui-v2-font-title); font-weight: var(--ui-v2-weight-strong); line-height: 1.2; letter-spacing: 0; }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-section h2, .family-hub-card-name, .family-hub-state h2, .invitation-card-heading h2, .invitation-section-title, .pwa-install-copy h2) { font-size: var(--ui-v2-font-section); font-weight: var(--ui-v2-weight-strong); line-height: 1.35; letter-spacing: 0; }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-intro p, .family-hub-state p, .invitation-screen, .memoly-add-page, .pwa-install-copy, [data-slot='welcome-splash'] .copy) { font-size: var(--ui-v2-font-body); line-height: var(--ui-v2-line-body); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-card-subtitle, .family-hub-card-role, .family-hub-card-unread-state, .family-hub-footer, .invitation-hint, .invitation-name-label, .invitation-role small, .pwa-install-copy [data-variant='memoryMeta']) { font-size: var(--ui-v2-font-meta); line-height: 1.4; }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-card-role, .invitation-role:has(input:checked)) { color: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-card, .family-hub-state, .invitation-card, .invitation-role, .memoly-add-success, .memoly-add-photo-picker, .memoly-add-more, .memoly-composer-card) { border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-surface); color: var(--ui-v2-color-text); background: var(--ui-v2-color-surface); box-shadow: var(--ui-v2-shadow-surface); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-create, .family-hub-create-primary, .family-hub-more, .family-hub-state button, .invitation-primary, .invitation-screen button[data-slot='button'], .memoly-add-page .memoly-add-publish, .memoly-add-success-actions [data-slot='button']:first-child, .pwa-install-actions [data-slot='button']:first-child) { min-height: var(--ui-v2-button-height); border: 0; border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); box-shadow: none; font-family: var(--ui-v2-font-family); font-weight: var(--ui-v2-button-primary-weight); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-card, .family-hub-create, .family-hub-more, .family-hub-state button, .invitation-screen button, .invitation-role, .memoly-add-page button, .pwa-install-prompt button) { font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-card, .invitation-role, .invitation-card, .memoly-add-success) { border-color: var(--ui-v2-color-line); }
+.memoly-app-root[data-ui-version='v2'] :where(.invitation-back, .memoly-add-back, .family-hub-count, .family-hub-count-unknown) { color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); }
+.memoly-app-root[data-ui-version='v2'] :where(.memoly-add-page textarea, .memoly-add-page input:not([type='file']), .invitation-name-input, .memoly-composer-field) { border-color: var(--ui-v2-color-line) !important; border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-field) !important; box-shadow: none !important; }
+.memoly-app-root[data-ui-version='v2'] .memoly-add-sheet-panel,
+html[data-ui-version='v2'] :where([data-slot='memoly-add-sheet-panel'], [data-slot='memoly-voice-video-sheet']) { color: var(--ui-v2-color-text); font-family: var(--ui-v2-font-family); }
+.memoly-app-root[data-ui-version='v2'] :where(.add-option, .media-choice-card) { border-color: var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-surface); box-shadow: var(--ui-v2-shadow-surface); }
+.memoly-app-root[data-ui-version='v2'] :where(.family-hub-page, .invitation-screen, .memoly-add-page, .pwa-install-prompt, [data-slot='welcome-splash'], .family-management-page, .family-screen) :where(button, [data-slot='button']) { transition-duration: 160ms; }
+.memoly-app-root[data-ui-version='v2'] main > section.mx-auto { border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-surface); color: var(--ui-v2-color-text); background: var(--ui-v2-color-surface); box-shadow: var(--ui-v2-shadow-surface); }
+.memoly-app-root[data-ui-version='v2'] :where(.bg-accent) { color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); }
+.memoly-app-root[data-ui-version='v2'] [data-slot='welcome-splash'] :where(.copy h1, .kicker, .feature-desc, .privacy, .footer) { color: var(--ui-v2-color-text); font-family: var(--ui-v2-font-family); }
+@media (prefers-reduced-motion: reduce) {
+  .memoly-app-root[data-ui-version='v2'] *, .memoly-app-root[data-ui-version='v2'] *::before, .memoly-app-root[data-ui-version='v2'] *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

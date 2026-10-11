@@ -243,7 +243,7 @@ export function MemoryCardPresentation({
         : kind === 'video'
           ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
           : hasCaption ? <div className="caption"><MemoryOpenButton body={body} interactive={interactive} kind={kind} onOpen={onOpen} /></div> : null}
-      <MemoryReactions counts={reactionCounts ?? {}} current={currentUserReaction ?? null} interactive={interactive} onSelect={onReaction} onHaptic={onReactionFeedback} open={pickerOpen} point={pickerPoint} onOpenChange={setPickerOpen} returnFocusRef={articleRef} />
+      <MemoryReactions counts={reactionCounts ?? {}} current={currentUserReaction ?? null} interactive={interactive} onSelect={onReaction} onHaptic={onReactionFeedback} onOpenFromTrigger={(point) => { setPickerPoint(point); if (!pickerOpenRef.current) onReactionFeedback?.('light'); setPickerOpen(true) }} open={pickerOpen} point={pickerPoint} onOpenChange={setPickerOpen} returnFocusRef={articleRef} />
     </article>
   )
 }

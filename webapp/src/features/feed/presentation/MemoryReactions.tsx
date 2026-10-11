@@ -3,6 +3,9 @@ import { useEffect, useRef } from 'react'
 
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
+import { UiV2Button } from '@/components/ui-v2/UiV2Button'
+import { readUiVersion } from '@/features/ui-version'
 import type { ReactionHapticStyle } from '@/platform/reaction-haptics'
 
 const reactionOptions: Array<{ value: MemoryReaction; emoji: string; label: string }> = [
@@ -14,7 +17,7 @@ const reactionOptions: Array<{ value: MemoryReaction; emoji: string; label: stri
   { value: 'clap', emoji: '👏', label: 'Аплодисменты' },
 ]
 
-export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onHaptic, returnFocusRef }: {
+export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onOpenFromTrigger, onHaptic, returnFocusRef }: {
   counts: Partial<Record<MemoryReaction, number>>
   current: MemoryReaction | null
   interactive: boolean
@@ -22,10 +25,13 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   open: boolean
   point: { x: number; y: number }
   onOpenChange: (open: boolean) => void
+  onOpenFromTrigger: (point: { x: number; y: number }) => void
   onHaptic?: (style: ReactionHapticStyle) => void
   returnFocusRef: React.RefObject<HTMLElement | null>
 }) {
   const firstChoice = useRef<HTMLButtonElement>(null)
+  const uiV2 = readUiVersion() === 'v2'
+  const triggerLabel = uiV2 ? 'Добавить реакцию' : 'Откликнуться'
   const used = reactionOptions.filter(({ value }) => (counts[value] ?? 0) > 0)
   useEffect(() => {
     if (open) requestAnimationFrame(() => { if (open) firstChoice.current?.focus({ preventScroll: true }) })
@@ -38,7 +44,18 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   }
 
   return <>
-    {used.length ? <div className="actions"><div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">
+    {uiV2 && interactive ? <footer className="memory-reaction-footer" data-slot="memory-reaction-footer">
+      {used.length ? <div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">
+      {used.map(({ value, emoji }) => <span className={`reaction-result${current === value ? ' is-mine' : ''}`} data-reaction={value} data-reaction-result="" key={value}>
+        <Typography as="span" aria-hidden="true" className="reaction-result-emoji" variant="memoryMeta">{emoji}</Typography>
+        <Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography>
+      </span>)}
+      </div> : <span aria-hidden="true" className="memory-reactions-empty" />}
+      <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
+      }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span">{triggerLabel}</Typography></UiV2Button>
+    </footer> : used.length ? <div className="actions"><div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">
       {used.map(({ value, emoji }) => <span className={`reaction-result${current === value ? ' is-mine' : ''}`} data-reaction={value} data-reaction-result="" key={value}>
         <Typography as="span" aria-hidden="true" className="reaction-result-emoji" variant="memoryMeta">{emoji}</Typography>
         <Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography>

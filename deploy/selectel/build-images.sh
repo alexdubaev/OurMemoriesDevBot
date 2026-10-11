@@ -67,6 +67,7 @@ docker build \
 docker build \
   --build-arg VITE_API_URL= \
   --build-arg "VITE_MAX_BOT_USERNAME=$SELECTEL_MAX_BOT_USERNAME" \
+  --build-arg VITE_MEMOLY_UI_VERSION=v2 \
   --label "org.opencontainers.image.revision=$PRODUCT_SHA" \
   --tag "$WEBAPP_IMAGE" \
   --file "$BUILD_CONTEXT/deploy/selectel/Dockerfile.webapp" \

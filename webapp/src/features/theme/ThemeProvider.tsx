@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react'
 
 import { AuthContext } from '@/features/auth'
+import { readUiVersion } from '@/features/ui-version'
 import { isMemolyTheme, type MemolyTheme } from './theme'
 
 type MemolyThemeContextValue = {
@@ -13,6 +14,7 @@ const MemolyThemeContext = createContext<MemolyThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: PropsWithChildren) {
   const auth = useContext(AuthContext)
+  const uiVersion = readUiVersion()
   const serverTheme = isMemolyTheme(auth?.user?.theme) ? auth.user.theme : 'mint'
   const [theme, setThemeState] = useState<MemolyTheme>(serverTheme)
   const updateQueue = useRef<Promise<void>>(Promise.resolve())
@@ -43,10 +45,14 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     document.documentElement.dataset.memolyTheme = theme
   }, [theme])
 
+  useEffect(() => {
+    document.documentElement.dataset.uiVersion = uiVersion
+  }, [uiVersion])
+
   const value = useMemo(() => ({ theme, setTheme }), [setTheme, theme])
 
   return (
-    <div className="memoly-app-root" data-memoly-theme={theme} data-slot="memoly-theme-root">
+    <div className="memoly-app-root" data-memoly-theme={theme} data-ui-version={uiVersion} data-slot="memoly-theme-root">
       <MemolyThemeContext.Provider value={value}>{children}</MemolyThemeContext.Provider>
     </div>
   )

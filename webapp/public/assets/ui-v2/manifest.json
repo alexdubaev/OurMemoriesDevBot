@@ -1,0 +1,77 @@
+{
+  "task": "UIM-01",
+  "assets": [
+    {
+      "file": "/assets/ui-v2/headers/header-bunny-meadow.webp",
+      "width": 732,
+      "height": 318,
+      "alpha": false,
+      "bytes": 36970,
+      "sha256": "78446c01706f516cff7c53b516fcce601f30dce22bfb0f69a8181077fb530f0f",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/headers/header-kite-sunset.webp",
+      "width": 744,
+      "height": 312,
+      "alpha": false,
+      "bytes": 22944,
+      "sha256": "66064647dde2d228e49a72137d924357791aea252befd43de3e2e50f99028cfa",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/headers/header-airplane-sky.webp",
+      "width": 744,
+      "height": 318,
+      "alpha": false,
+      "bytes": 22712,
+      "sha256": "a1b17e145fba01d08eb078c2a61360d0cbd5f1b50834d6ff94b916d7d5782c98",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/headers/header-whale-ocean.webp",
+      "width": 732,
+      "height": 308,
+      "alpha": false,
+      "bytes": 21228,
+      "sha256": "556903382ea477f279af29e1129033de331565178ec83d473a00a25953c3de90",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/headers/header-bear-forest.webp",
+      "width": 744,
+      "height": 308,
+      "alpha": false,
+      "bytes": 45670,
+      "sha256": "75b245a950a14f99d706c29d45aae4ba314e95bb69da94ac248ddaf4fa71c5ae",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/headers/header-moon-dream.webp",
+      "width": 732,
+      "height": 312,
+      "alpha": false,
+      "bytes": 12038,
+      "sha256": "f2e03fa0baeff92e3992199af0d6c531c782e6ec4f9193a7b013a48e8e4e35c2",
+      "provenance": "Owner-supplied optimized cover artwork"
+    },
+    {
+      "file": "/assets/ui-v2/icons/settings-gear@2x.webp",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 1706,
+      "sha256": "9d6a6ded9d6a38d8f73caffd9829517a4b5fde1c1ed681936e99f0e823d1eaa6",
+      "provenance": "Generated transparent settings gear; lossless WebP"
+    },
+    {
+      "file": "/assets/ui-v2/icons/settings-gear@3x.webp",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 2764,
+      "sha256": "c7ff35d26b44c65c276e9470edcd2a1247fb0402ca9ab8aa60f493feff82d99e",
+      "provenance": "Generated transparent settings gear; lossless WebP"
+    }
+  ]
+}
