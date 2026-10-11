@@ -16,6 +16,9 @@ export function PrivateCacheGate({ children, fallback }: PropsWithChildren<{ fal
   const userId = auth.user?.id ?? null
   const lastIdentity = useRef<string | null>(null)
   const [hydrated, setHydrated] = useState<{ userId: string; generation: number } | null>(null)
+  useEffect(() => {
+    window.__MEMOLY_DIAGNOSTICS__?.updateState?.('cache', { hydrated: !userId || (hydrated?.userId === userId && hydrated.generation === privateCacheIdentityGeneration()) })
+  }, [hydrated?.generation, hydrated?.userId, userId])
 
   useEffect(() => {
     const previous = lastIdentity.current

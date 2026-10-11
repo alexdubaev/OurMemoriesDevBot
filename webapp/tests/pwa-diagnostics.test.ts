@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 
 const sourcePath = new URL('../src/platform/diagnostics/bootstrap.js', import.meta.url)
 type DiagnosticEvent = { target?: object; message?: string; reason?: unknown }
+const statusRoot = (textContent: string) => {
+  const textNode = { nodeType: 3, nodeValue: textContent }
+  const paragraph = { tagName: 'P', childNodes: [textNode], getAttribute: (name: string) => name === 'role' ? 'status' : null }
+  return { id: 'root', children: { length: 1 }, childNodes: [paragraph], firstElementChild: paragraph, contains: (node: unknown) => node === paragraph || node === textNode }
+}
 
 function startDiagnostics(storage: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) {
   const listeners = new Map<string, Array<(event: unknown) => void>>()
@@ -12,11 +17,20 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
   let timerId = 0
   let scans = 0
   let loadedImages = 0
+  type FakeNode = { id?: string; tagName?: string; nodeType?: number; nodeValue?: string; childNodes?: Array<FakeNode>; children?: { length: number }; firstElementChild?: FakeNode; getAttribute?: (name: string) => string | null; contains?: (node: unknown) => boolean }
+  type FakeRoot = FakeNode & { textContent?: string }
+  let root: FakeRoot | null = { id: 'root', children: { length: 1 }, childNodes: [{ tagName: 'DIV', childNodes: [] }], firstElementChild: { tagName: 'DIV', childNodes: [] } }
+  const mutationCallbacks: Array<(records: Array<{ target: unknown; addedNodes: FakeNode[]; removedNodes: FakeNode[] }>) => void> = []
+  let rootLookups = 0
+  class FakeMutationObserver {
+    constructor(callback: (records: Array<{ target: unknown; addedNodes: FakeNode[]; removedNodes: FakeNode[] }>) => void) { mutationCallbacks.push(callback) }
+    observe() {}
+    disconnect() {}
+  }
   class FakeImage { complete = true; naturalWidth = 1; currentSrc = ''; src = '' }
   class FakeMedia { readyState = 2; currentSrc = ''; src = '' }
   const window = {
     localStorage: storage,
-    location: { pathname: '/', hash: '#private=value' },
     performance: { getEntriesByType: (type: string) => type === 'navigation' ? [{ type: 'reload' }] : [] },
     addEventListener: (name: string, listener: (event: unknown) => void) => {
       const entries = listeners.get(name) ?? []
@@ -25,9 +39,15 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
     },
     setTimeout: (callback: () => void) => { timerId += 1; timers.set(timerId, callback); return timerId },
     clearTimeout: (id: number) => { timers.delete(id) },
+    setInterval: (callback: () => void) => { timerId += 1; timers.set(timerId, callback); return timerId },
+    clearInterval: (id: number) => { timers.delete(id) },
+    matchMedia: () => ({ matches: false }),
+    location: { pathname: '/', origin: 'https://app.test', host: 'app.test', href: 'https://app.test/', hash: '#private=value' },
   }
   const document = {
     visibilityState: 'visible',
+    documentElement: {},
+    getElementById: (id: string) => { if (id === 'root') rootLookups += 1; return id === 'root' ? root : null },
     addEventListener: (name: string, listener: (event: DiagnosticEvent) => void) => {
       const entries = documentListeners.get(name) ?? []
       entries.push(listener)
@@ -38,9 +58,9 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
   const source = (() => {
     try { return readFileSync(sourcePath, 'utf8') } catch { return '' }
   })()
-  new Function('window', 'document', 'Date', 'HTMLImageElement', 'HTMLMediaElement', source)(window, document, { now: () => clock }, FakeImage, FakeMedia)
+  new Function('window', 'document', 'Date', 'HTMLImageElement', 'HTMLMediaElement', 'MutationObserver', 'navigator', source)(window, document, { now: () => clock }, FakeImage, FakeMedia, FakeMutationObserver, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15', standalone: true })
   return {
-    diagnostics: (window as typeof window & { __MEMOLY_DIAGNOSTICS__?: { record: (...args: unknown[]) => void; report: () => string } }).__MEMOLY_DIAGNOSTICS__,
+    diagnostics: (window as typeof window & { __MEMOLY_DIAGNOSTICS__?: { record: (...args: unknown[]) => void; updateState: (area: 'auth' | 'cache', value: Record<string, boolean>) => void; report: () => string } }).__MEMOLY_DIAGNOSTICS__,
     advance: (milliseconds: number) => {
       clock += milliseconds
       const pending = [...timers.values()]
@@ -53,6 +73,18 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
     setLoadedImages: (count: number) => { loadedImages = count },
     createImage: () => new FakeImage(),
     scanCount: () => scans,
+    rootLookupCount: () => rootLookups,
+    setRoot: (value: typeof root) => {
+      const previous = root
+      root = value
+      mutationCallbacks.forEach((callback) => callback([{ target: document.documentElement, addedNodes: value ? [value] : [], removedNodes: previous ? [previous] : [] }]))
+    },
+    dispatchUnrelatedMutation: () => mutationCallbacks.forEach((callback) => callback([{ target: {}, addedNodes: [{ tagName: 'DIV' }], removedNodes: [] }])),
+    setVisibility: (value: 'visible' | 'hidden') => {
+      document.visibilityState = value
+      documentListeners.get('visibilitychange')?.forEach((listener) => listener({}))
+    },
+    dispatchError: (error: unknown) => listeners.get('error')?.forEach((listener) => listener({ error })),
   }
 }
 
@@ -161,4 +193,112 @@ test('oversized stored values are ignored before they can become report content'
   const { diagnostics } = startDiagnostics({ getItem: () => 'x'.repeat(20000), setItem: () => undefined })
   expect(diagnostics).toBeDefined()
   expect(diagnostics!.report()).not.toContain('x'.repeat(100))
+})
+
+test('mounted screen watch ignores initial preloader and ordinary valid root replacement', () => {
+  const harness = startDiagnostics({ getItem: () => null, setItem: () => undefined })
+  const diagnostics = harness.diagnostics!
+  harness.setRoot(statusRoot('Загрузка memoLy…'))
+  expect(JSON.parse(diagnostics.report()).incident).toBeNull()
+  harness.setRoot(statusRoot('Лента'))
+  diagnostics.record('mounted', 'mounted')
+  harness.setRoot(statusRoot('Семья'))
+  const report = JSON.parse(diagnostics.report())
+  expect(report.current.rootState).toBe('present')
+  expect(report.current.events.some((event: { kind: string }) => event.kind === 'root-replaced')).toBe(true)
+  expect(report.incident).toBeNull()
+  const lookupsBeforeUnrelatedMutation = harness.rootLookupCount()
+  harness.dispatchUnrelatedMutation()
+  expect(harness.rootLookupCount()).toBe(lookupsBeforeUnrelatedMutation)
+})
+
+test('mounted literal loading screen pins incident immediately and preserves it across launches', () => {
+  let saved: string | null = null
+  const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value } }
+  const harness = startDiagnostics(storage)
+  const diagnostics = harness.diagnostics!
+  diagnostics.record('mounted', 'mounted')
+  harness.setRoot(statusRoot('Загрузка memoLy…'))
+  const first = JSON.parse(saved!)
+  expect(first.incident).toMatchObject({ kind: 'screen-loss', rootState: 'startup-placeholder' })
+  expect(first.current.lastFailure.kind).toBe('screen-loss')
+  expect(JSON.parse(startDiagnostics(storage).diagnostics!.report()).incident.kind).toBe('screen-loss')
+  expect(JSON.parse(startDiagnostics(storage).diagnostics!.report()).incident.kind).toBe('screen-loss')
+})
+
+test('mounted root removal pins loss while hidden mutations wait until visible', () => {
+  let saved = ''
+  const harness = startDiagnostics({ getItem: () => null, setItem: (_key, value) => { saved = value } })
+  const diagnostics = harness.diagnostics!
+  diagnostics.record('mounted', 'mounted')
+  harness.setVisibility('hidden')
+  harness.setRoot(null)
+  expect(JSON.parse(diagnostics.report()).incident).toBeNull()
+  harness.setVisibility('visible')
+  expect(JSON.parse(saved).incident).toMatchObject({ kind: 'screen-loss', rootState: 'missing' })
+  const emptyHarness = startDiagnostics({ getItem: () => null, setItem: (_key, value) => { saved = value } })
+  emptyHarness.diagnostics!.record('mounted', 'mounted')
+  emptyHarness.setRoot({ id: 'root', children: { length: 0 }, childNodes: [] })
+  expect(JSON.parse(saved).incident).toMatchObject({ kind: 'screen-loss', rootState: 'empty' })
+})
+
+test('mounted snapshot flushes immediately and visible heartbeat persists freshness without DOM scans', () => {
+  let saved = ''
+  const harness = startDiagnostics({ getItem: () => null, setItem: (_key, value) => { saved = value } })
+  harness.diagnostics!.record('mounted', 'mounted')
+  const mounted = JSON.parse(saved).current
+  expect(mounted.phase).toBe('mounted')
+  expect(mounted.rootState).toBe('present')
+  const scansBeforeHeartbeat = harness.scanCount()
+  harness.advance(5000)
+  const heartbeat = JSON.parse(saved).current
+  expect(heartbeat.lastObservedAt).toBeGreaterThan(mounted.lastObservedAt)
+  expect(harness.scanCount()).toBe(scansBeforeHeartbeat)
+})
+
+test('oversized numeric environment versions are dropped and pinned incident remains under storage cap', () => {
+  let saved = ''
+  const malformedButBounded = JSON.stringify({
+    current: { startedAt: 1000, phase: 'mounted', state: 'active', navigationType: 'reload', environment: { os: 'ios', osVersion: '9'.repeat(7000), webkitVersion: '1.2' }, events: [] },
+  })
+  expect(malformedButBounded.length).toBeLessThanOrEqual(8192)
+  const harness = startDiagnostics({ getItem: () => malformedButBounded, setItem: (_key, value) => { saved = value } })
+  harness.diagnostics!.record('mounted', 'mounted')
+  harness.setRoot(statusRoot('Загрузка memoLy…'))
+  const snapshot = JSON.parse(saved)
+  expect(saved.length).toBeLessThanOrEqual(8192)
+  expect(snapshot.incident.kind).toBe('screen-loss')
+  expect(snapshot.previous.environment.osVersion).toBeNull()
+  expect(harness.diagnostics!.report().length).toBeLessThanOrEqual(8192)
+})
+
+test('error and environment report only safe allowlisted fields', () => {
+  const harness = startDiagnostics({ getItem: () => null, setItem: () => undefined })
+  harness.dispatchError({ name: 'PrivateFamilyError', message: 'family name token=secret', stack: 'at x (https://app.test/assets/index-abcdef.js:12:3)\nat y (https://third.test/assets/index-zyxwvu.js:4:5)' })
+  const report = harness.diagnostics!.report()
+  expect(report).toContain('"os":"ios"')
+  expect(report).toContain('"osVersion":"17.2"')
+  expect(report).toContain('"standalone":true')
+  expect(report).toContain('"asset":"index-abcdef.js"')
+  expect(report).not.toContain('PrivateFamilyError')
+  expect(report).not.toContain('family name')
+  expect(report).not.toContain('third.test')
+  expect(report).not.toContain('index-zyxwvu.js')
+  expect(report).not.toContain('secret')
+})
+
+test('auth and cache state keep only the latest boolean transition', () => {
+  const harness = startDiagnostics({ getItem: () => null, setItem: () => undefined })
+  const diagnostics = harness.diagnostics!
+  diagnostics.updateState('auth', { bootstrapping: true, authenticated: false, token: true })
+  diagnostics.updateState('auth', { bootstrapping: false, authenticated: true })
+  diagnostics.updateState('cache', { hydrated: true, familyName: true })
+  const current = JSON.parse(diagnostics.report()).current
+  expect(current.auth).toMatchObject({ bootstrapping: false, authenticated: true })
+  expect(current.cache.hydrated).toBe(true)
+  expect(JSON.stringify(current)).not.toContain('token')
+  expect(JSON.stringify(current)).not.toContain('familyName')
+  expect(current.events.map((event: { kind: string }) => event.kind)).toContain('auth-restoring')
+  expect(current.events.map((event: { kind: string }) => event.kind)).toContain('auth-signed-in')
+  expect(current.events.map((event: { kind: string }) => event.kind)).toContain('cache-ready')
 })
