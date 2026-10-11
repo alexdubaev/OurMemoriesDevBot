@@ -1,6 +1,6 @@
 # FIX-V2-CAROUSEL — implementation brief
 
-Status: APPROVED locally; not published or deployed. Base/live SHA 5908b00f6c98827c4ab2dc783414a76e0ae6f4cf. Branch fix/v2-carousel-layout, worktree .worktrees/v2-carousel-layout. Lead: GPT-6; delegated discovery/implementation/review.
+Status: APPROVED; release authorized by the owner and queued after green verification. Base/live-before-release SHA 5908b00f6c98827c4ab2dc783414a76e0ae6f4cf. Branch fix/v2-carousel-layout, worktree .worktrees/v2-carousel-layout. Lead: GPT-6; delegated discovery/implementation/review.
 
 Owner requirements: restore the old working mixed photo/video carousel behavior. Both photos and videos fill card width with height following their natural proportions, without cropping, distortion, or a small image inside a fixed frame. Apply this to single-media and carousel cards. Carousel navigation is a compact single row of dots beneath media, without previous/next arrow buttons. Restore visible photo/video content in the currently blank mixed-media card. Preserve MAX video routing and existing resource release on inactive feed.
 
@@ -31,4 +31,12 @@ Actual V2 portrait photo: native 235x374, rendered 346x550.64. Landscape photo: 
 
 Fresh independent reviewer completed one review with bounded closures. Confirmed poster fallback issues and a legacy viewport ratio regression were fixed; lead inspected the actual final diff and reran the focused browser check. No unresolved confirmed P0/P1/P2 remains. No migrations, contracts, dependencies, uploads, storage, backend or production configuration changed.
 
-Screenshots are local ignored artifacts: `webapp/e2e/.artifacts/v2-carousel-after.png` and `v2-carousel-video-after.png`. The probe mocks the playback-session response and disables the service worker; it verifies rendered components and real video decoding/playback, not production authentication or physical iPhone behavior. Full `bun run verify:local` has not been run for this task; it remains required before publication to main. PR: not published. Deployment: not performed.
+Screenshots are local ignored artifacts: `webapp/e2e/.artifacts/v2-carousel-after.png` and `v2-carousel-video-after.png`. The probe mocks the playback-session response and disables the service worker; it verifies rendered components and real video decoding/playback, not production authentication or physical iPhone behavior.
+
+## Publication gate and release authorization
+
+Owner explicitly requested deployment on 2026-10-11 and made deployment after green applicable checks the default unless stated otherwise. This standing instruction, including no unnecessary repeat checks/reviews, is recorded in AGENTS.md.
+
+The single full `bun run verify:local` passed on Linux/Ubuntu WSL with existing Bun 1.4.0, Node 22.15.0, Docker test PostgreSQL and cached Playwright Chromium: 16 stages, 658 Bun tests and 3 browser journeys (661 total), exit 0. Exact verified source SHA: c32e00850ff95af97f4260f4bef10ffc640e2d98, Git tree ef8df4d4d67efccc94b207aae0ecf290218aa899. Extracted source tree was checked against Git before execution; log: `webapp/e2e/.artifacts/carousel-verify-local-linux.log`. Runtime/browser/tool installations were reused; dependency setup reused the existing package cache. This subsequent report update changes documentation only, so unchanged product checks are not rerun.
+
+PR: https://github.com/alexdubaev/OurMemoriesDevBot/pull/160. Production release uses the existing guarded Selectel entry point with migrations disabled; release completion is recorded by the server manifest and task deployment log.
