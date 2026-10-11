@@ -39,6 +39,7 @@ html[data-ui-version='v2'] .memoly-mixed-viewer { color: var(--ui-v2-color-white
 html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-color-white); background: rgb(255 255 255 / 12%); }
 .memoly-app-root[data-ui-version='v2'] .family-screen,
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] { color: var(--ui-v2-color-text); background: var(--ui-v2-color-canvas); }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] :where(.ui-v2-header-back, .ui-v2-settings) { color: var(--ui-v2-color-accent); background: var(--ui-v2-header-action); font-family: var(--ui-v2-font-family); }
 
 /* Existing controller-owned navigation, with its three positions and refs. */
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] {

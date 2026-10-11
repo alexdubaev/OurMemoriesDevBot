@@ -373,6 +373,7 @@
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-meta { flex: 1; min-width: 0; gap: var(--ui-v2-space-xs); }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-name { color: var(--ui-v2-color-text); font-size: var(--ui-v2-font-person); font-weight: var(--ui-v2-weight-strong); line-height: 1.3; overflow-wrap: anywhere; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .author-time { margin: 0; color: var(--ui-v2-color-muted); font-size: var(--ui-v2-font-caption); line-height: 1.35; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .date-heading { color: var(--ui-v2-color-muted); font-family: var(--ui-v2-font-family); font-size: var(--ui-v2-font-section); font-weight: var(--ui-v2-weight-strong); line-height: 1.3; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-media-slot { overflow: hidden; border-radius: 0; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot { aspect-ratio: 4 / 3; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card[data-memory-kind='photo'] .memory-media-slot > :first-child,
