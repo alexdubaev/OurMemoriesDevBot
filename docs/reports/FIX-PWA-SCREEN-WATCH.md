@@ -35,3 +35,9 @@ The bounded closure caps version strings at24 characters, narrows mutation relev
 Lead closure evidence: `bun test webapp/tests/pwa-diagnostics.test.ts`, exit0,13 pass/77 assertions; and `bunx playwright test --config .scratch/pwa-screen-watch-webkit.config.ts`, exit0,1 pass,14.3s after the bounded fixes. Unique Compose `memoly-screen-watch-closure-148ed4dd` was stopped/removed by teardown. Evidence `.scratch/pwa-screen-watch-unit-closure.log` and `.scratch/pwa-screen-watch-webkit-closure.log`. Earlier lint also passed; publication gate will verify final source lint again.
 
 Exact publication source SHA, `bun run verify:local` and release outcome are pending. This report does not assert that the watcher is deployed or that the iPhone failure is fixed.
+
+## Publication verification
+
+`bun run verify:local` completed with exit0 on committed product source `ab5140d25223cfa55f70d04000a1eca5617e563e`: all16 stages passed,302 nonintegration Bun tests,369 PostgreSQL integration tests and4 Chromium browser journeys. Tool/Selectel guard suites also passed. PostgreSQL stage108.5s; browser stage44.1s. Environment: Windows PowerShell/Bun with Docker and existing WSL bash, not native iOS. Full evidence is ignored `.scratch/pwa-screen-watch-verify-local.log`.
+
+This subsequent report-only update does not change the tested product source. The independent review's two P2 findings were closed with the narrow unit/Chromium/WebKit checks recorded above. No schema migrations or shared-contract changes. Publication and guarded release are authorized by the owner; final PR, squash SHA and actual release status will be reported separately after execution.
