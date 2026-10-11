@@ -44,7 +44,11 @@ type CacheEntry = {
   key: string
   familyId?: string
   data?: PersistedState
+  // New image entries use byte buffers because WebKit can reject Blob values
+  // when they are written to IndexedDB. `blob` remains for schema-1 entries.
   blob?: Blob
+  imageBytes?: ArrayBuffer
+  imageContentType?: string
   size: number
   lastAccess: number
 }
@@ -211,12 +215,17 @@ export async function readPrivateImage(userId: string, path: string) {
   const eligible = eligiblePrivateImage(path)
   if (!eligible || typeof indexedDB === 'undefined') return null
   const entry = await readEntryWithMetadata(userId, 'image', eligible.key)
-  if (!entry || !(entry.blob instanceof Blob) || entry.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || Date.now() - entry.lastAccess > PRIVATE_CACHE_MAX_AGE_MS) {
+  const blob = entry?.blob instanceof Blob
+    ? entry.blob
+    : entry?.imageBytes instanceof ArrayBuffer && typeof entry.imageContentType === 'string'
+      ? new Blob([entry.imageBytes], { type: entry.imageContentType })
+      : null
+  if (!entry || !blob || blob.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || entry.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || Date.now() - entry.lastAccess > PRIVATE_CACHE_MAX_AGE_MS) {
     if (entry) await removeEntry(userId, 'image', eligible.key)
     return null
   }
   await touchEntry(userId, 'image', eligible.key)
-  return entry.blob
+  return blob
 }
 
 export async function cachePrivateImageResponse(userId: string, path: string, response: Response, generation = identityGeneration, capturedFamilyGeneration?: number) {
@@ -226,13 +235,13 @@ export async function cachePrivateImageResponse(userId: string, path: string, re
   const declaredSize = lengthHeader ? Number(lengthHeader) : null
   if (!eligible || response.status !== 200 || !['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/heic'].includes(contentType ?? '') ||
       (declaredSize !== null && (!Number.isSafeInteger(declaredSize) || declaredSize < 0 || declaredSize > PRIVATE_CACHE_MAX_IMAGE_BYTES))) return false
-  const blob = await response.clone().blob()
-  if (blob.size === 0 || blob.size > PRIVATE_CACHE_MAX_IMAGE_BYTES) return false
+  const imageBytes = await response.clone().arrayBuffer()
+  if (imageBytes.byteLength === 0 || imageBytes.byteLength > PRIVATE_CACHE_MAX_IMAGE_BYTES) return false
   const key = familyCacheScopeKey(userId, eligible.familyId)
   if (revokedFamilyCache.has(key)) return false
   const familyGeneration = capturedFamilyGeneration ?? familyCacheGeneration.get(key) ?? 0
   if (!isActivePrivateCacheIdentity(userId, generation) || privateFamilyCacheGeneration(userId, eligible.familyId) !== familyGeneration) return false
-  await writeEntry(userId, 'image', eligible.key, blob, eligible.familyId, generation, familyGeneration)
+  await writeEntry(userId, 'image', eligible.key, imageBytes, eligible.familyId, generation, familyGeneration, contentType!)
   await evictPrivateImages(userId)
   return true
 }
@@ -368,7 +377,7 @@ async function readEntryWithMetadata(userId: string, kind: CacheEntry['kind'], k
   } finally { db.close() }
 }
 
-async function writeEntry(userId: string, kind: CacheEntry['kind'], key: string, value: PersistedState | Blob, familyId?: string, generation?: number, familyGeneration?: number) {
+async function writeEntry(userId: string, kind: CacheEntry['kind'], key: string, value: PersistedState | Blob | ArrayBuffer, familyId?: string, generation?: number, familyGeneration?: number, imageContentType?: string) {
   if (typeof indexedDB === 'undefined') return
   const expectedGeneration = generation ?? identityGeneration
   await enqueue(async () => {
@@ -386,11 +395,13 @@ async function writeEntry(userId: string, kind: CacheEntry['kind'], key: string,
         if (revokedFamilyCache.has(scopeKey) || privateFamilyCacheGeneration(userId, familyId) !== familyGeneration) { transaction.abort(); return }
       }
       const blob = value instanceof Blob ? value : undefined
-      const data = blob ? undefined : value as PersistedState
+      const imageBytes = value instanceof ArrayBuffer ? value : undefined
+      const data = blob || imageBytes ? undefined : value as PersistedState
       transaction.objectStore(STORE_NAME).put({
         id: entryId(userId, kind, key), userId, schema: PRIVATE_CACHE_SCHEMA, kind, key,
         ...(familyId ? { familyId } : {}), ...(data ? { data } : {}), ...(blob ? { blob } : {}),
-        size: blob?.size ?? estimateSize(data), lastAccess: Date.now(),
+        ...(imageBytes ? { imageBytes, imageContentType } : {}),
+        size: blob?.size ?? imageBytes?.byteLength ?? estimateSize(data), lastAccess: Date.now(),
       } satisfies CacheEntry)
       await transactionDone(transaction)
     } finally { db.close() }
