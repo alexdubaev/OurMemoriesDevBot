@@ -2,6 +2,8 @@
 
 Status: REVIEW; mandatory local release gate and integration pending. Lead: GPT-6; worker and independent reviewer: gpt-6-luna. Branch `fix/ios-video-bootstrap-reload`; worktree `.worktrees/ios-video-bootstrap-reload`. Base SHA `f712f20c36d36ec29b95a3ec25db759db64710b1`. Production changes are limited to `webapp/src/features/feed/FeedPage.tsx`. Probe and output are ignored artifacts under `webapp/e2e/.artifacts/`.
 
+Release gate: APPROVED. Single documented command `bun run verify:local` passed all 16 stages, 658 Bun tests and 3 Chromium critical journeys (661 total), exit 0. Verified source SHA `c9415ed389387e2c76908079851f4e5b5c9803fe`, exact Git tree `2bb2c7e631111c692d6d76bc0bdff01e63fb7dcd`. Run used the existing Linux runtime/browser/package cache and isolated real test PostgreSQL; Prisma generation resolved the initial checkout's missing generated client. Evidence remains in ignored `webapp/e2e/.artifacts/video-jitter-verify-local-linux.log`. This gate-evidence update is documentation only; unchanged product tests are not repeated. Before publishing, compare product diff with the verified source and confirm the accepted squash tree.
+
 ## Findings
 
 The initial source held one measured `{attachmentId, ratio}`. When selecting another attachment without DTO dimensions, its full-width stage used 16:9 while awaiting the intrinsic poster/video dimensions. The actual `FeedPage` probe reproduced a repeated height and scroll shift with a synthetic portrait photo and MAX poster, without pressing play:
