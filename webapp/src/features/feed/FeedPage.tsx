@@ -462,8 +462,13 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   const [index, setIndex] = useState(startIndex)
   const activeAttachment = memory.attachments[index]!
   const metadataAspect = mediaAspectRatio(activeAttachment.width, activeAttachment.height)
-  const [measuredAspect, setMeasuredAspect] = useState<{ attachmentId: string; ratio: string } | null>(null)
-  const activeAspect = metadataAspect ?? (measuredAspect?.attachmentId === activeAttachment.id ? measuredAspect.ratio : '16 / 9')
+  const [measuredAspects, setMeasuredAspects] = useState<Record<string, string>>(() => Object.fromEntries(memory.attachments.flatMap((attachment) => {
+    const ratio = mediaAspectRatio(attachment.width, attachment.height)
+    return ratio ? [[attachment.id, ratio]] : []
+  })))
+  const knownAspect = metadataAspect ?? measuredAspects[activeAttachment.id]
+  const [lastKnownAspect, setLastKnownAspect] = useState(metadataAspect ?? '16 / 9')
+  const activeAspect = knownAspect ?? lastKnownAspect
   const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const photoViewerSession = useRef<AbortController | null>(null)
@@ -479,9 +484,12 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   const select = useCallback(() => {
     if (!embla) return
     const next = embla.selectedScrollSnap()
+    const nextAttachment = memory.attachments[next]
+    const nextKnownAspect = nextAttachment ? mediaAspectRatio(nextAttachment.width, nextAttachment.height) ?? measuredAspects[nextAttachment.id] : undefined
+    setLastKnownAspect(nextKnownAspect ?? activeAspect)
     setIndex(next)
     onIndexChange(next)
-  }, [embla, onIndexChange])
+  }, [activeAspect, embla, memory.attachments, measuredAspects, onIndexChange])
   useEffect(() => {
     if (!embla) return
     embla.on('select', select)
@@ -500,7 +508,8 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
       const height = video?.videoHeight || (poster?.complete && poster.naturalWidth > 0 ? poster.naturalHeight : 0) || (image?.complete ? image.naturalHeight : 0)
       if (!width || !height) return
       const ratio = `${width} / ${height}`
-      setMeasuredAspect((current) => current?.attachmentId === activeAttachment.id && current.ratio === ratio ? current : { attachmentId: activeAttachment.id, ratio })
+      setLastKnownAspect(ratio)
+      setMeasuredAspects((current) => current[activeAttachment.id] === ratio ? current : { ...current, [activeAttachment.id]: ratio })
     }
     slide.addEventListener('load', measure, true)
     slide.addEventListener('loadedmetadata', measure, true)
