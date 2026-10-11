@@ -14,7 +14,7 @@ Pinned `incident` still refers to a legacy build with missing run identity and t
 
 Correction: update inferred `previous-run-unclosed` evidence for a different latest eligible prior run; preserve actual `screen-loss` incidents, normal pagehide behavior and repeated same-source fallback evidence. Preserve bounded storage, privacy and failure isolation. No automatic reload, delay, media/auth/cache behavior, database/ACL/schema or Telegram changes. This corrects evidence attribution; it does not fix or identify the physical white-screen mechanism.
 
-Tests, independent review and release verification pending.
+Verification and review results are recorded below.
 
 ## Actual verification and independent review
 
@@ -24,4 +24,13 @@ Lead `bun test webapp/tests/pwa-diagnostics.test.ts`, exit0,15pass/87assertions.
 
 One fresh ephemeral read-only CLI review, gpt-6-luna/high (requested default tier, billing not independently verified): APPROVE, no confirmedP0/P1/P2. Reviewer reran15tests successfully. No second formal review. Evidence `.scratch/pwa-incident-refresh-review.txt` and `.scratch/pwa-incident-refresh-review.log`.
 
-Mandatory `bun run verify:local` and publication source SHA will be recorded after completion. There are no migrations or changed shared contracts. Rollback target is the previous accepted watcher release8fb522c32e7a9eca6faf00826ad77e8025feb1a4; database rollback not required.
+Publication verification on the committed source is recorded below. There are no migrations or changed shared contracts. Rollback target is the previous accepted watcher release8fb522c32e7a9eca6faf00826ad77e8025feb1a4; database rollback not required.
+
+
+## Publication gate on committed product source
+
+Source `25069e322faa13de0cf389e4953faf775b09441b`. First `bun run verify:local` exited1 because Bun1.4.0/Windows x64 process crashed with native segmentation fault0x32 during the memories PostgreSQL integration file; the gate correctly stopped before browser checks. Log `.scratch/pwa-incident-refresh-verify-local.log` retained. This local test-runner crash does not identify the iPhone WebKit mechanism.
+
+One unchanged-source retry `bun run verify:local`: exit0, all16stages,304 nonintegration Bun tests,369 PostgreSQL integration tests and4Chromium browser scenarios; tools/Selectel guards also passed. Evidence `.scratch/pwa-incident-refresh-verify-local-retry.log`. Environment Windows PowerShell/Bun/Docker plus existing WSL bash, not native iOS. No tests skipped/quarantined or runtime/product configuration changes made to obtain the pass.
+
+This following documentation-only commit leaves the checked product source unchanged. PR/squash SHA and actual guarded deployment outcome will be reported after execution.
