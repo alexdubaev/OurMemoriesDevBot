@@ -10,12 +10,16 @@ type Callback = { payload: string; userId: string; callbackId: string }
 export function createMaxChannelOnboarding(options: {
   prisma: DbClient
   verifyChannel: (chatId: bigint) => Promise<{ title: string | null }>
+  verifyActorAdmin?: (chatId: bigint, actorSubject: bigint) => Promise<boolean>
   now?: () => Date
 }) {
   const now = options.now ?? (() => new Date())
 
   async function processLifecycle(inboxId: string, event: Lifecycle) {
     const details = readLifecycle(event)
+    const pendingProvenance = event.kind === 'bot_admin_permissions_changed'
+      ? await options.prisma.maxChannelDecision.findFirst({ where: { chatId: details.chatId, phase: 'await_permissions', status: 'pending', expiresAt: { gt: now() } }, orderBy: { createdAt: 'desc' } })
+      : null
     // Provider I/O happens before the serialized transaction. No DB lock is held across network calls.
     let verified: { title: string | null } | null = null
     let accessLost = false
@@ -25,9 +29,11 @@ export function createMaxChannelOnboarding(options: {
       if (!verified && !accessLost) throw new Error('MAX channel provider could not be verified; lifecycle event will retry')
     }
     let oneFamilyReplacement: { familyId: string; familyName: string; oldChatId: bigint; oldVersion: number; oldTitle: string | null } | null = null
-    let oneFamilyOldUnavailable: { familyId: string; oldChatId: bigint; oldVersion: number } | null = null
-    if (event.kind === 'bot_added' && verified) {
-      const identity = await options.prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: details.actorSubject } }, select: { userId: true } })
+    let oneFamilyOldUnavailable: { familyId: string; oldChatId: bigint; oldVersion: number; oldState: string | null } | null = null
+    let lifecycleResult: { state: string; familyAssociated: boolean; decisionCategory: string } | undefined
+    if ((event.kind === 'bot_added' && verified) || (pendingProvenance && verified)) {
+      const actorSubject = pendingProvenance?.actorSubject ?? details.actorSubject
+      const identity = await options.prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: actorSubject } }, select: { userId: true } })
       if (identity) {
         const memberships = await options.prisma.familyMember.findMany({
           where: { userId: identity.userId, role: 'full', revokedAt: null, family: { status: 'active' } },
@@ -45,20 +51,30 @@ export function createMaxChannelOnboarding(options: {
               oneFamilyReplacement = { familyId: replacementFamily.familyId, familyName: replacementFamily.family.name, oldChatId: old.chatId, oldVersion: old.version, oldTitle: old.title }
             } catch (error) {
               if (!(error instanceof MaxChannelProviderError) || !error.permanentAccessLoss) throw error
-              oneFamilyOldUnavailable = { familyId: replacementFamily.familyId, oldChatId: old.chatId, oldVersion: old.version }
+              oneFamilyOldUnavailable = { familyId: replacementFamily.familyId, oldChatId: old.chatId, oldVersion: old.version, oldState: old.state }
             }
-          } else oneFamilyOldUnavailable = { familyId: replacementFamily.familyId, oldChatId: replacementFamily.family.maxBackupChatId, oldVersion: old?.version ?? 0 }
+          } else oneFamilyOldUnavailable = { familyId: replacementFamily.familyId, oldChatId: replacementFamily.family.maxBackupChatId, oldVersion: old?.version ?? 0, oldState: old?.state ?? null }
         }
       }
     }
     await options.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`
       const current = await tx.maxChannelBinding.findUnique({ where: { chatId: details.chatId } })
-      if (current?.lastLifecycleAt && current.lastLifecycleAt.getTime() >= details.occurredAt.getTime()) {
+      const trustedProvenance = event.kind === 'bot_admin_permissions_changed'
+        ? await tx.maxChannelDecision.findFirst({ where: { chatId: details.chatId, phase: 'await_permissions', status: 'pending', expiresAt: { gt: now() } }, orderBy: { createdAt: 'desc' } })
+        : null
+      if (event.kind === 'bot_admin_permissions_changed' && trustedProvenance && pendingProvenance?.id !== trustedProvenance.id) {
+        throw new Error('MAX pending lifecycle provenance changed during provider verification; retry with current provenance')
+      }
+      if (current?.lastLifecycleAt && (current.lastLifecycleAt.getTime() > details.occurredAt.getTime() ||
+          current.lastLifecycleAt.getTime() === details.occurredAt.getTime() &&
+          (event.kind !== 'bot_removed' || current.state === 'disconnected'))) {
+        lifecycleResult = await readLifecycleResult(tx, details.chatId, 'stale')
         await finishInbox(tx, inboxId)
         return
       }
       if (event.kind === 'bot_removed') {
+        await tx.maxChannelDecision.updateMany({ where: { chatId: details.chatId, status: 'pending' }, data: { status: 'cancelled' } })
         if (current?.familyId) await lockFamilyRows(tx, [current.familyId])
         await tx.maxChannelBinding.upsert({
           where: { chatId: details.chatId },
@@ -70,6 +86,8 @@ export function createMaxChannelOnboarding(options: {
           await tx.family.updateMany({ where: { id: current.familyId, maxBackupChatId: details.chatId }, data: { maxBackupChatId: null } })
           await detachUnsentBackups(tx, current.familyId, details.chatId)
         }
+      } else if (event.kind === 'bot_admin_permissions_changed' && !trustedProvenance && current?.state === 'disconnected') {
+        await tx.maxChannelBinding.update({ where: { chatId: details.chatId }, data: { lastLifecycleAt: details.occurredAt } })
       } else if (!verified && accessLost) {
         if (current?.familyId) await lockFamilyRows(tx, [current.familyId])
         await tx.maxChannelBinding.upsert({
@@ -82,8 +100,87 @@ export function createMaxChannelOnboarding(options: {
           await tx.family.updateMany({ where: { id: current.familyId, maxBackupChatId: details.chatId }, data: { maxBackupChatId: null } })
           await detachUnsentBackups(tx, current.familyId, details.chatId)
         }
+        if (event.kind === 'bot_added') {
+          await tx.maxChannelDecision.updateMany({ where: { chatId: details.chatId, status: 'pending' }, data: { status: 'cancelled' } })
+          const identity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: details.actorSubject } }, select: { userId: true } })
+          const eligible = identity ? await tx.familyMember.findMany({ where: { userId: identity.userId, role: 'full', revokedAt: null, family: { status: 'active' } },
+            select: { familyId: true } }) : []
+          const candidates = current?.familyId ? eligible.filter((item) => item.familyId === current.familyId) : eligible
+          if (identity && candidates.length) {
+            const valid: string[] = []
+            for (const item of candidates) if ((await lockCurrentFullActorFamily(tx, details.actorSubject, item.familyId))?.userId === identity.userId) valid.push(item.familyId)
+            if (valid.length) await tx.maxChannelDecision.create({ data: {
+              originInboxId: inboxId, actorSubject: details.actorSubject, actorUserId: identity.userId, chatId: details.chatId,
+              candidateFamilyIds: valid, expectedActiveChatId: null, expectedActiveVersion: 0,
+              expectedChannelVersion: (current?.version ?? 0) + 1, phase: 'await_permissions', status: 'pending',
+              expiresAt: new Date(now().getTime() + expiresInMs),
+            } })
+          }
+        } else if (trustedProvenance) {
+          const stillMapped = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: trustedProvenance.actorSubject } }, select: { userId: true } })
+          const candidateIds = Array.isArray(trustedProvenance.candidateFamilyIds) ? trustedProvenance.candidateFamilyIds.filter((id): id is string => typeof id === 'string') : []
+          const stillEligible: string[] = []
+          if (stillMapped?.userId === trustedProvenance.actorUserId) {
+            for (const familyId of candidateIds) if ((await lockCurrentFullActorFamily(tx, trustedProvenance.actorSubject, familyId))?.userId === trustedProvenance.actorUserId) stillEligible.push(familyId)
+          }
+          if (!stillEligible.length) await tx.maxChannelDecision.update({ where: { id: trustedProvenance.id }, data: { status: 'cancelled' } })
+          else await tx.maxChannelDecision.update({ where: { id: trustedProvenance.id }, data: { candidateFamilyIds: stillEligible, expectedChannelVersion: (current?.version ?? 0) + 1 } })
+        }
+      } else if (verified && event.kind === 'bot_admin_permissions_changed' && !trustedProvenance && current?.state === 'disconnected') {
+        await tx.maxChannelBinding.update({ where: { chatId: details.chatId }, data: { title: verified.title, lastLifecycleAt: details.occurredAt } })
       } else if (verified) {
-        const identity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: details.actorSubject } }, select: { userId: true } })
+        if (trustedProvenance) {
+          const decision = await tx.maxChannelDecision.findUnique({ where: { id: trustedProvenance.id } })
+          const actorIdentity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: trustedProvenance.actorSubject } }, select: { userId: true } })
+          const candidateIds = Array.isArray(decision?.candidateFamilyIds) ? decision.candidateFamilyIds.filter((id): id is string => typeof id === 'string') : []
+          const eligible = actorIdentity?.userId === trustedProvenance.actorUserId
+            ? await tx.familyMember.findMany({ where: { userId: trustedProvenance.actorUserId!, role: 'full', revokedAt: null, familyId: { in: candidateIds }, family: { status: 'active' } },
+              select: { familyId: true, family: { select: { name: true, maxBackupChatId: true } } } }) : []
+          const candidates = eligible.filter((item) => candidateIds.includes(item.familyId))
+          const validCandidates = []
+          for (const item of candidates) if ((await lockCurrentFullActorFamily(tx, trustedProvenance.actorSubject, item.familyId))?.userId === trustedProvenance.actorUserId) validCandidates.push(item)
+          const saved = await tx.maxChannelBinding.upsert({ where: { chatId: details.chatId },
+            create: { chatId: details.chatId, title: verified.title, familyId: null, state: 'connected', version: 1, lastLifecycleAt: details.occurredAt },
+            update: { title: verified.title, state: 'connected', version: { increment: 1 }, lastLifecycleAt: details.occurredAt } })
+          if (!decision || decision.status !== 'pending' || decision.phase !== 'await_permissions' || decision.expectedChannelVersion !== current?.version || !validCandidates.length) {
+            if (decision?.status === 'pending') await tx.maxChannelDecision.update({ where: { id: decision.id }, data: { status: 'cancelled' } })
+          } else if (validCandidates.length === 1 && (!validCandidates[0]!.family.maxBackupChatId || validCandidates[0]!.family.maxBackupChatId === details.chatId ||
+              oneFamilyOldUnavailable?.familyId === validCandidates[0]!.familyId && oneFamilyOldUnavailable.oldChatId === validCandidates[0]!.family.maxBackupChatId)) {
+            const candidate = validCandidates[0]!
+            if (oneFamilyOldUnavailable?.familyId === candidate.familyId && oneFamilyOldUnavailable.oldChatId === candidate.family.maxBackupChatId) {
+              const old = await tx.maxChannelBinding.findUnique({ where: { chatId: oneFamilyOldUnavailable.oldChatId } })
+              if ((old?.version ?? 0) !== oneFamilyOldUnavailable.oldVersion || (old?.state ?? null) !== oneFamilyOldUnavailable.oldState) throw new Error('MAX channel binding changed during permissions preflight')
+              if (old) await tx.maxChannelBinding.update({ where: { chatId: old.chatId }, data: { state: 'permission_problem', version: { increment: 1 }, lastProviderCheckAt: now() } })
+              await tx.family.updateMany({ where: { id: candidate.familyId, maxBackupChatId: oneFamilyOldUnavailable.oldChatId }, data: { maxBackupChatId: null } })
+              await detachUnsentBackups(tx, candidate.familyId, oneFamilyOldUnavailable.oldChatId)
+            }
+            await bindMaxChannelAndQueue(tx, candidate.familyId, details.chatId, saved.version)
+            await tx.maxChannelBinding.update({ where: { chatId: details.chatId }, data: { familyId: candidate.familyId } })
+            await tx.maxChannelDecision.update({ where: { id: decision.id }, data: { status: 'completed', expectedChannelVersion: saved.version } })
+            await createSimpleResponse(tx, inboxId, decision.actorSubject, `Канал ${verified.title ? `“${verified.title}”` : ''} подключён к семье “${candidate.family.name}”.`)
+          } else {
+            const replace = validCandidates.length === 1 && oneFamilyReplacement?.familyId === validCandidates[0]!.familyId &&
+              validCandidates[0]!.family.maxBackupChatId === oneFamilyReplacement.oldChatId ? oneFamilyReplacement : null
+            await tx.maxChannelDecision.update({ where: { id: decision.id }, data: {
+              candidateFamilyIds: validCandidates.map((item) => item.familyId), expectedChannelVersion: saved.version,
+              expectedActiveChatId: replace?.oldChatId ?? null, expectedActiveVersion: replace?.oldVersion ?? 0,
+              ...(replace ? { selectedFamilyId: replace.familyId, phase: 'confirm_replacement' } : { selectedFamilyId: null, phase: 'select_family' }),
+            } })
+            if (replace) await createDecisionResponse(tx, inboxId, decision.actorSubject, decision.id,
+              `Заменить ${replace.oldTitle ? `“${replace.oldTitle}”` : 'текущий канал'} на ${verified.title ? `“${verified.title}”` : 'новый канал'}?`, [], now(), [
+                { text: 'Заменить', payload: `max_channel:${decision.id}:replace:0` }, { text: 'Отмена', payload: `max_channel:${decision.id}:cancel:0` },
+              ])
+            else await createDecisionResponse(tx, inboxId, decision.actorSubject, decision.id,
+              'К какой семье относится этот канал?', validCandidates.map((item) => ({ id: item.familyId, name: item.family.name })), now())
+          }
+          lifecycleResult = await readLifecycleResult(tx, details.chatId)
+          await finishInbox(tx, inboxId)
+          return
+        }
+        const trustedActorSubject = event.kind === 'bot_added' ? details.actorSubject : ''
+        const identity = trustedActorSubject
+          ? await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: trustedActorSubject } }, select: { userId: true } })
+          : null
         const eligible = identity ? await tx.familyMember.findMany({
           where: { userId: identity.userId, role: 'full', revokedAt: null, family: { status: 'active' } },
           select: { familyId: true, family: { select: { name: true, maxBackupChatId: true } } },
@@ -106,7 +203,7 @@ export function createMaxChannelOnboarding(options: {
         const candidate = historiedFamily ?? (candidates.length === 1 &&
           (candidates[0]!.family.maxBackupChatId === null || candidates[0]!.family.maxBackupChatId === details.chatId || staleOld)
           ? candidates[0] : undefined)
-        const currentActor = candidate ? await lockCurrentFullActorFamily(tx, details.actorSubject, candidate.familyId) : null
+        const currentActor = candidate ? await lockCurrentFullActorFamily(tx, trustedActorSubject, candidate.familyId) : null
         if (!candidate && current?.familyId) await lockFamilyRows(tx, [current.familyId])
         const saved = await tx.maxChannelBinding.upsert({
           where: { chatId: details.chatId },
@@ -151,16 +248,25 @@ export function createMaxChannelOnboarding(options: {
           }
         }
       }
+      lifecycleResult = await readLifecycleResult(tx, details.chatId)
       await finishInbox(tx, inboxId)
+    })
+    console.info('MAX channel lifecycle', {
+      kind: event.kind, inboxId, channelId: details.chatId.toString(), state: lifecycleResult?.state ?? 'missing',
+      familyAssociated: lifecycleResult?.familyAssociated ?? false, decisionCategory: lifecycleResult?.decisionCategory ?? 'none',
     })
   }
 
   async function processCallback(inboxId: string, event: Callback) {
-    const match = /^max_channel:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(select|replace|cancel):([0-9]{1,15})$/i.exec(event.payload)
+    const match = /^max_channel:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(select|connect|replace|cancel):([0-9]{1,15})$/i.exec(event.payload)
     if (!match) return false
     const decisionId = match[1]!
     const action = match[2]!
     const index = Number(match[3])
+    const initial = await options.prisma.maxChannelDecision.findUnique({ where: { id: decisionId } })
+    if (initial && ['confirm_actor_connection', 'confirm_actor_replacement'].includes(initial.phase)) {
+      return processActorRecoveryCallback(inboxId, event, decisionId, action, initial)
+    }
     if (!Number.isSafeInteger(index)) {
       await options.prisma.$transaction((tx) => finishInbox(tx, inboxId))
       return true
@@ -269,6 +375,139 @@ export function createMaxChannelOnboarding(options: {
     return true
   }
 
+  async function offerActorChannelConnection(input: { inboxId: string; actorSubject: string; actorUserId: string; familyId: string; chatId: bigint }) {
+    if (!options.verifyActorAdmin) return false
+    let title: string | null
+    try {
+      const verified = await options.verifyChannel(input.chatId)
+      if (!(await options.verifyActorAdmin(input.chatId, BigInt(input.actorSubject)))) return false
+      title = verified.title
+    } catch (error) {
+      if (error instanceof MaxChannelProviderError && error.permanentAccessLoss) return false
+      throw error
+    }
+    return options.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`
+      const current = await lockCurrentFullActorFamily(tx, input.actorSubject, input.familyId)
+      if (!current || current.userId !== input.actorUserId) return false
+      const prior = await tx.maxChannelDecision.findUnique({ where: { originInboxId: input.inboxId } })
+      if (prior) return prior.actorSubject === input.actorSubject && prior.actorUserId === input.actorUserId && prior.chatId === input.chatId && prior.selectedFamilyId === input.familyId && prior.phase.startsWith('confirm_actor_') && prior.status === 'pending' && prior.expiresAt > now()
+      const family = await tx.family.findUnique({ where: { id: input.familyId }, select: { name: true, maxBackupChatId: true } })
+      if (!family) return false
+      const occupied = await tx.family.findFirst({ where: { maxBackupChatId: input.chatId, id: { not: input.familyId } }, select: { id: true } })
+      if (occupied) return false
+      const existing = await tx.maxChannelBinding.findUnique({ where: { chatId: input.chatId } })
+      if (existing?.familyId && existing.familyId !== input.familyId) return false
+      const binding = existing ?? await tx.maxChannelBinding.create({ data: { chatId: input.chatId, familyId: null, title, state: 'connected', version: 1, lastLifecycleAt: null } })
+      if (!['connected', 'disconnected', 'permission_problem'].includes(binding.state) || (existing && existing.familyId !== null && existing.familyId !== input.familyId)) return false
+      if (existing && existing.familyId === null && (existing.title !== title || existing.state !== 'connected')) {
+        await tx.maxChannelBinding.update({ where: { chatId: input.chatId }, data: { title, state: 'connected', version: { increment: 1 } } })
+        binding.version += 1
+      }
+      const decision = await tx.maxChannelDecision.create({ data: {
+        originInboxId: input.inboxId, actorSubject: input.actorSubject, actorUserId: input.actorUserId, chatId: input.chatId,
+        candidateFamilyIds: [input.familyId], selectedFamilyId: input.familyId,
+        expectedChannelVersion: binding.version, expectedActiveChatId: family.maxBackupChatId,
+        expectedActiveVersion: family.maxBackupChatId === null ? 0 : (await tx.maxChannelBinding.findUnique({ where: { chatId: family.maxBackupChatId }, select: { version: true } }))?.version ?? 0,
+        phase: 'confirm_actor_connection', status: 'pending', expiresAt: new Date(now().getTime() + expiresInMs),
+      } })
+      const priorChoice = await tx.maxOutgoingResponse.findUnique({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'family_choice' } }, select: { id: true } })
+      const recoveryKind = priorChoice ? 'welcome' : 'family_choice'
+      if (priorChoice && await tx.maxOutgoingResponse.findUnique({ where: { inboxId_kind: { inboxId: input.inboxId, kind: 'welcome' } }, select: { id: true } })) {
+        throw new Error('MAX recovery response slot is already occupied')
+      }
+      await createDecisionResponse(tx, input.inboxId, input.actorSubject, decision.id,
+        `Подключить канал ${title ? `“${title}”` : ''} к семье “${family.name}”?`, [], now(), [
+          { text: 'Подключить', payload: `max_channel:${decision.id}:connect:0` },
+          { text: 'Отмена', payload: `max_channel:${decision.id}:cancel:0` },
+        ], recoveryKind)
+      return true
+    })
+  }
+
+  async function processActorRecoveryCallback(inboxId: string, event: Callback, decisionId: string, action: string, decision: any) {
+    if (!['connect', 'replace', 'cancel'].includes(action) || decision.actorSubject !== event.userId || decision.status !== 'pending' || decision.expiresAt <= now()) {
+      await options.prisma.$transaction((tx) => finishInbox(tx, inboxId)); return true
+    }
+    let verified: { title: string | null } | null = null
+    let actorAdmin = false
+    let oldCheck: { chatId: bigint; version: number; state: string; available: boolean } | null = null
+    if (action !== 'cancel') {
+      if (!options.verifyActorAdmin) { await options.prisma.$transaction((tx) => finishInbox(tx, inboxId)); return true }
+      try {
+        verified = await options.verifyChannel(decision.chatId)
+        actorAdmin = await options.verifyActorAdmin(decision.chatId, BigInt(decision.actorSubject))
+        if (!actorAdmin) { await options.prisma.$transaction((tx) => finishInbox(tx, inboxId)); return true }
+        if (decision.expectedActiveChatId !== null && decision.expectedActiveChatId !== decision.chatId) {
+          const old = await options.prisma.maxChannelBinding.findUnique({ where: { chatId: decision.expectedActiveChatId } })
+          if (old?.state === 'connected') {
+            try { await options.verifyChannel(old.chatId); oldCheck = { chatId: old.chatId, version: old.version, state: old.state, available: true } }
+            catch (error) {
+              if (!(error instanceof MaxChannelProviderError) || !error.permanentAccessLoss) throw error
+              oldCheck = { chatId: old.chatId, version: old.version, state: old.state, available: false }
+            }
+          } else oldCheck = { chatId: decision.expectedActiveChatId, version: old?.version ?? 0, state: old?.state ?? 'missing', available: false }
+        }
+      } catch (error) {
+        if (error instanceof MaxChannelProviderError && error.permanentAccessLoss) { await options.prisma.$transaction((tx) => finishInbox(tx, inboxId)); return true }
+        throw error
+      }
+    }
+    await options.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`
+      const locked = await tx.maxChannelDecision.findUnique({ where: { id: decisionId } })
+      if (!locked || locked.status !== 'pending' || locked.actorSubject !== event.userId || locked.expiresAt <= now()) { await finishInbox(tx, inboxId); return }
+      const familyId = locked.selectedFamilyId
+      const binding = await tx.maxChannelBinding.findUnique({ where: { chatId: locked.chatId } })
+      if (!familyId || !binding || binding.version !== locked.expectedChannelVersion || binding.familyId !== null && binding.familyId !== familyId) { await finishInbox(tx, inboxId); return }
+      if (action === 'cancel') {
+        await tx.maxChannelDecision.update({ where: { id: decisionId }, data: { status: 'cancelled' } }); await finishInbox(tx, inboxId); return
+      }
+      if (!actorAdmin || !verified || (await lockCurrentFullActorFamily(tx, locked.actorSubject, familyId))?.userId !== locked.actorUserId) { await finishInbox(tx, inboxId); return }
+      const family = await tx.family.findUnique({ where: { id: familyId }, select: { name: true, maxBackupChatId: true } })
+      if (!family || family.maxBackupChatId !== locked.expectedActiveChatId) { await finishInbox(tx, inboxId); return }
+      const isAlreadyActiveTarget = locked.expectedActiveChatId === locked.chatId
+      const old = locked.expectedActiveChatId === null || isAlreadyActiveTarget ? null : await tx.maxChannelBinding.findUnique({ where: { chatId: locked.expectedActiveChatId } })
+      const missingOldPointer = locked.expectedActiveChatId !== null && !isAlreadyActiveTarget && old === null
+      if ((isAlreadyActiveTarget ? binding.version : old?.version ?? 0) !== locked.expectedActiveVersion) { await finishInbox(tx, inboxId); return }
+      if (action === 'connect' && locked.phase === 'confirm_actor_connection' && locked.expectedActiveChatId !== null && !isAlreadyActiveTarget) {
+        if (missingOldPointer) {
+          await tx.family.updateMany({ where: { id: familyId, maxBackupChatId: locked.expectedActiveChatId }, data: { maxBackupChatId: null } })
+          await detachUnsentBackups(tx, familyId, locked.expectedActiveChatId)
+        } else if (old && old.chatId !== locked.chatId) {
+        if (old.state === 'connected' && oldCheck?.available && oldCheck.version === old.version) {
+          await tx.maxChannelDecision.update({ where: { id: decisionId }, data: { phase: 'confirm_actor_replacement' } })
+          await createDecisionResponse(tx, inboxId, event.userId, decisionId,
+            `Заменить ${old.title ? `“${old.title}”` : 'текущий канал'} на ${verified.title ? `“${verified.title}”` : 'новый канал'}?`, [], now(), [
+              { text: 'Заменить', payload: `max_channel:${decisionId}:replace:0` }, { text: 'Отмена', payload: `max_channel:${decisionId}:cancel:0` },
+            ])
+          await finishInbox(tx, inboxId); return
+        }
+          if (oldCheck && !oldCheck.available) {
+          if (old.state === 'connected') await tx.maxChannelBinding.update({ where: { chatId: old.chatId }, data: { state: 'permission_problem', version: { increment: 1 }, lastProviderCheckAt: now() } })
+          await tx.family.updateMany({ where: { id: familyId, maxBackupChatId: old.chatId }, data: { maxBackupChatId: null } })
+          await detachUnsentBackups(tx, familyId, old.chatId)
+          } else { await finishInbox(tx, inboxId); return }
+        }
+      } else if (!(action === 'connect' && locked.phase === 'confirm_actor_connection') && !(action === 'replace' && locked.phase === 'confirm_actor_replacement' && old)) {
+        await finishInbox(tx, inboxId); return
+      }
+      if (action === 'replace' && old) {
+        if (old.state === 'connected' && (!oldCheck || oldCheck.chatId !== old.chatId || oldCheck.version !== old.version || oldCheck.state !== old.state)) { await finishInbox(tx, inboxId); return }
+        if (!['connected', 'permission_problem', 'disconnected'].includes(old.state)) { await finishInbox(tx, inboxId); return }
+        await tx.maxChannelBinding.update({ where: { chatId: old.chatId }, data: { state: 'replaced', version: { increment: 1 } } })
+        await tx.family.updateMany({ where: { id: familyId, maxBackupChatId: old.chatId }, data: { maxBackupChatId: null } })
+        await detachUnsentBackups(tx, familyId, old.chatId)
+      }
+      await bindMaxChannelAndQueue(tx, familyId, locked.chatId, binding.version)
+      await tx.maxChannelBinding.update({ where: { chatId: locked.chatId }, data: { familyId, state: 'connected', title: verified.title, version: { increment: 1 } } })
+      await tx.maxChannelDecision.update({ where: { id: decisionId }, data: { status: 'completed' } })
+      await createSimpleResponse(tx, inboxId, event.userId, `Канал ${verified.title ? `“${verified.title}” ` : ''}подключён к семье “${family.name}”. Перешлите запись ещё раз.`)
+      await finishInbox(tx, inboxId)
+    })
+    return true
+  }
+
   async function status(familyId: string, userId: string) {
     const membership = await options.prisma.familyMember.findFirst({
       where: { familyId, userId, revokedAt: null, family: { status: 'active' } },
@@ -321,7 +560,7 @@ export function createMaxChannelOnboarding(options: {
     title: binding?.title ?? null, canManage: currentMembership.role === 'full' }
   }
 
-  return { processLifecycle, processCallback, status }
+  return { processLifecycle, processCallback, offerActorChannelConnection, status }
 }
 
 export async function bindMaxChannelAndQueue(tx: any, familyId: string, chatId: bigint, channelVersion: number) {
@@ -376,11 +615,24 @@ async function finishInbox(tx: any, inboxId: string) {
   } })
 }
 
+async function readLifecycleResult(tx: any, chatId: bigint, categoryOverride?: string) {
+  const binding = await tx.maxChannelBinding.findUnique({ where: { chatId }, select: { state: true, familyId: true } })
+  const decision = await tx.maxChannelDecision.findFirst({ where: { chatId }, orderBy: { updatedAt: 'desc' }, select: { phase: true, status: true } })
+  const decisionCategory = categoryOverride ?? (decision?.status === 'completed' ? 'bound'
+    : decision?.status === 'cancelled' ? 'cancelled'
+    : decision?.phase === 'await_permissions' ? 'await_permissions'
+    : decision?.phase === 'confirm_replacement' ? 'replacement_confirmation'
+    : decision?.phase === 'select_family' ? 'family_selection'
+    : decision?.phase?.startsWith('confirm_actor_') ? 'actor_confirmation'
+    : 'none')
+  return { state: binding?.state ?? 'missing', familyAssociated: binding?.familyId !== null && binding?.familyId !== undefined, decisionCategory }
+}
+
 async function createDecisionResponse(tx: any, inboxId: string, actorSubject: string, decisionId: string, text: string,
-  candidates: Array<{ id: string; name: string }>, scheduledFor: Date, buttons?: Array<{ text: string; payload: string }>) {
+  candidates: Array<{ id: string; name: string }>, scheduledFor: Date, buttons?: Array<{ text: string; payload: string }>, kind: 'family_choice' | 'welcome' = 'family_choice') {
   const selectionButtons = candidates.map((item, index) => ({ text: item.name.slice(0, 64), payload: `max_channel:${decisionId}:select:${index}` }))
   const response = await tx.maxOutgoingResponse.create({ data: {
-    inboxId, channelDecisionId: decisionId, destinationUserId: BigInt(actorSubject), kind: 'family_choice',
+    inboxId, channelDecisionId: decisionId, destinationUserId: BigInt(actorSubject), kind,
     text,
     buttons: buttons ?? selectionButtons,
   }, select: { id: true } })

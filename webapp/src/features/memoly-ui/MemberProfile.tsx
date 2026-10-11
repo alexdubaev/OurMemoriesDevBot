@@ -1,15 +1,16 @@
 /* eslint-disable typographyPolicy/use-typography-component -- canonical member profile preserves its semantic HTML hierarchy. */
 import type { FamilyMemberDto } from '@web-app-demo/contracts'
-import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { familyMemberName, roleLabel } from '@/features/family'
 import { AvatarLetter } from '@/features/session'
-import { MemberAvatarImage } from '@/features/avatar'
-import { describeAvatarFile, useAvatarImage, useAvatarQuery, useDeleteAvatarMutation, useUploadAvatarMutation } from '@/features/avatar'
+import { AvatarPhoto, CurrentUserAvatarControls, MemberAvatarImage, useAvatarQuery } from '@/features/avatar'
+import { useAuth } from '@/features/auth'
+import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { useUpdateProfileMutation, validateProfileForm } from '@/features/users'
 import type { FamilyMemberActions } from './FamilyPresentation'
-import { avatarFileErrorMessage, avatarUploadErrorMessage, isMemberSelf, memberProfileChanges, memberProfileError, type MemberProfileChange } from './member-profile-model'
+import { isMemberSelf, memberProfileChanges, memberProfileError, type MemberProfileChange } from './member-profile-model'
 import './member-profile.css'
 
 export function MemberProfile({ member, actions, busy, currentUserId, onBack, onRefresh, onSave, onRemove, onAccountNameSaved }: {
@@ -95,25 +96,21 @@ export function MemberProfile({ member, actions, busy, currentUserId, onBack, on
 }
 
 function MemberProfileHero({ displayName, member }: { displayName: string; member: FamilyMemberDto }) {
-  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><MemberAvatarImage avatarPath={member.avatarPath} className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
+  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><MemberAvatarImage avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
 }
 
 function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: boolean; displayName: string; member: FamilyMemberDto; onNameSaved: (name: string | null) => void }) {
   const errorId = useId()
-  const fileInput = useRef<HTMLInputElement>(null)
   const [name, setName] = useState(displayName)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [fileError, setFileError] = useState<string | null>(null)
   const profile = useUpdateProfileMutation()
   const avatar = useAvatarQuery()
-  const upload = useUploadAvatarMutation()
-  const remove = useDeleteAvatarMutation()
-  const avatarUrl = useAvatarImage(avatar.data?.avatar?.downloadUrl)
+  const auth = useAuth()
+  const savedAvatar = avatar.data?.avatar
+  const avatarPath = savedAvatar?.id ? `/api/uploads/avatar/content?avatar=${encodeURIComponent(savedAvatar.id)}&v=${encodeURIComponent(savedAvatar.updatedAt ?? '')}` : null
+  const avatarUrl = usePrivateImageUrl(auth.user?.id ?? '', avatarPath, auth.transport, Boolean(auth.user?.id && avatarPath))
   const validation = validateProfileForm(name)
   const nameErrors = validation.errors?.fieldErrors.displayName
   const hasNameError = Boolean(nameErrors?.length)
-  const avatarBusy = upload.isPending || remove.isPending
-  const hasAvatar = Boolean(avatar.data?.avatar)
 
   function saveName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -126,35 +123,11 @@ function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: b
     })
   }
 
-  function pickAvatar(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    setNotice(null)
-    const description = describeAvatarFile(file)
-    if (!description.ok) {
-      setFileError(avatarFileErrorMessage(description.reason))
-      upload.reset()
-      return
-    }
-    setFileError(null)
-    upload.mutate(file, { onSuccess: () => setNotice('Фото профиля обновлено.') })
-  }
-
   return <>
-    <section className="member-profile-hero"><div className="member-profile-avatar-wrap">{avatarUrl ? <img alt="Фото профиля" className="member-profile-avatar" src={avatarUrl} /> : <AvatarLetter className="member-profile-avatar" name={familyMemberName(member)} size="xl" />}</div><h2>{familyMemberName(member)}</h2><p>Имя профиля: {displayName || 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
+    <section className="member-profile-hero"><div className="member-profile-avatar-wrap">{avatarUrl ? <AvatarPhoto alt="Фото профиля" className="member-profile-avatar" crop={avatar.data?.avatar?.avatarCrop} src={avatarUrl} /> : <AvatarLetter className="member-profile-avatar" name={familyMemberName(member)} size="xl" />}</div><h2>{familyMemberName(member)}</h2><p>Имя профиля: {displayName || 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
     <h3 className="member-profile-section-title">Профиль</h3>
     <section aria-label="Профиль" className="member-profile-card member-account-card">
-      <div className="member-account-avatar-actions">
-        <button disabled={avatarBusy || busy} onClick={() => fileInput.current?.click()} type="button">{upload.isPending ? 'Загружаем…' : hasAvatar ? 'Изменить фото' : 'Добавить фото'}</button>
-        {hasAvatar ? <button disabled={avatarBusy || busy} onClick={() => { setNotice(null); remove.mutate(undefined, { onSuccess: () => setNotice('Фото профиля удалено.') }) }} type="button">{remove.isPending ? 'Удаляем…' : 'Удалить фото'}</button> : null}
-      </div>
-      <input accept="image/jpeg,image/png,image/heic,image/heif" aria-label="Выбрать фото профиля" className="sr-only" onChange={pickAvatar} ref={fileInput} tabIndex={-1} type="file" />
-      <p className="member-account-hint">JPEG, PNG, HEIC или HEIF, до 5 МБ.</p>
-      {fileError ? <p className="member-profile-error" role="alert">{fileError}</p> : null}
-      {upload.isError ? <p className="member-profile-error" role="alert">{avatarUploadErrorMessage(upload.error)}</p> : null}
-      {remove.isError ? <p className="member-profile-error" role="alert">Не удалось удалить фото. Попробуйте снова.</p> : null}
-      {notice && !upload.isError && !remove.isError ? <p aria-live="polite" className="member-profile-success">{notice}</p> : null}
+      <CurrentUserAvatarControls compact displayName={displayName} />
       <form className="member-account-form" noValidate onSubmit={saveName}>
         <label htmlFor="member-account-name">Имя профиля</label>
         <input aria-describedby={hasNameError ? errorId : undefined} aria-invalid={hasNameError} autoComplete="name" disabled={busy || profile.isPending} id="member-account-name" maxLength={80} onChange={(event) => { setName(event.target.value); profile.reset() }} value={name} />

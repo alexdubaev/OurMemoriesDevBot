@@ -164,6 +164,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       : api.authenticateTelegram(initData, options))
     options.signal?.throwIfAborted()
     if (options.isCurrent?.() === false) return
+    setBootstrapError(null)
     setAccessToken(result.data.accessToken)
     queryClient.setQueryData(authQueryKeys.me(), {
       user: result.data.user,

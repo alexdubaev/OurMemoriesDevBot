@@ -24,16 +24,15 @@ export function createMaxResponseDelivery(options: {
     const responseId = responsePayload(payload)
     const response = await options.prisma.maxOutgoingResponse.findUnique({ where: { id: responseId }, include: { inbox: { include: { source: true } }, channelDecision: true } })
     if (!response || response.deliveredAt) return 'skipped'
-    if (response.kind === 'family_choice') {
-      if (response.channelDecisionId && response.channelDecision) {
-        const decision = response.channelDecision
-        if (decision.status !== 'pending' || decision.expiresAt <= (options.now ?? (() => new Date()))()) return 'skipped'
-        const buttons = readChannelButtons(response.buttons)
-        for (let offset = 0; offset < buttons.length; offset += 30) {
-          if (offset > 0) await waitForChannelBatch(signal)
-          await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text, buttons: buttons.slice(offset, offset + 30) }, signal)
-        }
-      } else {
+    if (response.channelDecisionId && response.channelDecision) {
+      const decision = response.channelDecision
+      if (decision.status !== 'pending' || decision.expiresAt <= (options.now ?? (() => new Date()))()) return 'skipped'
+      const buttons = readChannelButtons(response.buttons)
+      for (let offset = 0; offset < buttons.length; offset += 30) {
+        if (offset > 0) await waitForChannelBatch(signal)
+        await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text, buttons: buttons.slice(offset, offset + 30) }, signal)
+      }
+    } else if (response.kind === 'family_choice') {
       const source = response.inbox.source
       if (!source || source.familyId || !source.choiceExpiresAt || source.choiceExpiresAt <= new Date()) return 'skipped'
       const candidates = readCandidates(source.choiceCandidates)
@@ -42,7 +41,6 @@ export function createMaxResponseDelivery(options: {
           buttons: candidates.slice(offset, offset + 30).map((candidate, pageIndex) => ({
             text: candidate.name, payload: choicePayload(source.id, offset + pageIndex),
           })) }, signal)
-      }
       }
     } else {
       const inviteContext = response.kind === 'welcome'

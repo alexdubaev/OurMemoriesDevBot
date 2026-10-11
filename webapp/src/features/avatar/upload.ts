@@ -35,6 +35,7 @@ export function resolveAvatarContentType(file: File): AvatarContentType | null {
 
   const extension = file.name.toLowerCase().split('.').pop()
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'webp') return 'image/webp'
   if (extension === 'png') return 'image/png'
   if (extension === 'heic') return 'image/heic'
   if (extension === 'heif') return 'image/heif'

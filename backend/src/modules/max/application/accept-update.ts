@@ -9,6 +9,7 @@ import type {
 } from './ports'
 
 const acceptedText = 'Получено. Сохраняем…'
+const forwardAcceptedText = 'Получено. Импортируем публикацию…'
 const unsupportedMediaText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
 const maxTextCodePoints = 8_000
 
@@ -28,6 +29,9 @@ function attachmentsOf(event: Extract<MaxAcceptedEvent, { kind: 'message_created
 export function selectMaxImmediateResponse(event: MaxAcceptedEvent): MaxImmediateResponse | null {
   if (event.kind === 'bot_started' || event.kind === 'family_choice' || isLifecycleEvent(event)) return null
   if (event.kind === 'message_created' && event.isChannel) return null
+  if (event.kind === 'message_created' && event.forwardedFrom) {
+    return { kind: 'accepted', text: forwardAcceptedText, destinationUserId: event.senderId }
+  }
   const attachments = attachmentsOf(event)
   if (attachments.length > 0) {
     const images = attachments.filter((attachment) => attachment.kind === 'image')

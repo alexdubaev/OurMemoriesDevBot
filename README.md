@@ -26,13 +26,13 @@ bun run dev:webapp
 
 ## Проверки
 
-```powershell
-bun run architecture:check
-bun run typecheck
-bun test tests/verify-plan.test.ts
-bun run build:webapp
-```
+GitHub Actions CI/CD не используется. Перед каждой публикацией в `main`, включая
+PR merge, запускайте `bun run verify:local` на точном source SHA; отчёт фиксирует
+команду, результат и ограничения среды. Hook `.githooks/pre-push` запускает gate
+при публикации ветки `main` или `master`; включите его командой
+`git config core.hooksPath .githooks`. PR merge не вызывает локальные Git hooks,
+поэтому подтвердите результат перед merge отдельно. Нужны Linux/Bash, Bun 1.4.0,
+Node.js, Docker и Playwright Chromium. Для изолированной тестовой PostgreSQL
+задайте `TEST_DATABASE_URL` (`*_test`) и `TEST_SKIP_DOCKER=1 E2E_SKIP_DOCKER=1`.
 
-`bun run verify:plan -- <changed-path>` только печатает план проверок. Он не исполняет команды и возвращает fail-safe результат для неизвестных путей.
-
-Подробные границы MVP, архитектура и порядок задач находятся в `docs/mvp/`. Происхождение шаблона зафиксировано в [UPSTREAM.md](UPSTREAM.md); правила GitHub — в [GIT_SETTINGS.md](GIT_SETTINGS.md).
+Подробные границы MVP, архитектура и порядок задач находятся в `docs/mvp/`. Происхождение шаблона зафиксировано в [UPSTREAM.md](UPSTREAM.md); правила Git и branch protections — в [GIT_SETTINGS.md](GIT_SETTINGS.md).

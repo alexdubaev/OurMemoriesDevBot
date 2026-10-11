@@ -14,6 +14,9 @@ import type { MaxDownloadedMedia, MaxVideoStream } from './media-download'
 import { createMaxVideoStreamDownload, MaxMediaDownloadError } from './media-download'
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
+import { assertMaxForwardBinding } from './forward-import'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { selectMaxVideoRendition } from './video-rendition'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
@@ -31,7 +34,8 @@ export function createMaxImageProcessor(options: {
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
   const videoDownload = options.videoDownload ?? createMaxVideoStreamDownload()
-  const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
+  const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal;
+    verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>; verifiedChannelId?: bigint }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const terminalAndDiscard = async (kind: 'denied' | 'unsupported_media', text: string) => {
@@ -55,12 +59,15 @@ export function createMaxImageProcessor(options: {
       throw error
     }
     let resolved
-    try { resolved = await options.api.getMessage(input.event.messageId, input.signal) } catch (error) {
+    try { resolved = input.verifiedMessage ?? await options.api.getMessage(input.event.messageId, input.signal) } catch (error) {
       if (!(error instanceof MaxProviderError) || error.retryable) throw error
       return terminalAndDiscard('unsupported_media', unsupportedText)
     }
     const accepted = policy.kind === 'quick-images' || policy.kind === 'mixed-media' ? policy.attachments : [policy.attachment]
-    if (resolved.messageId !== input.event.messageId || (!input.event.isChannel && resolved.senderId !== input.event.senderId) || resolved.recipientId !== input.event.recipientId ||
+    const identityMatches = input.event.forwardedFrom
+      ? resolved.messageId === input.event.forwardedFrom.messageId && resolved.recipientType === 'channel' && resolved.recipientId === String(input.verifiedChannelId)
+      : resolved.messageId === input.event.messageId && (!input.event.isChannel && resolved.senderId !== input.event.senderId ? false : true) && resolved.recipientId === input.event.recipientId
+    if (!identityMatches ||
         resolved.attachments.length !== accepted.length || resolved.attachments.some((item, index) => item.kind !== accepted[index]!.kind || item.providerAttachmentId !== accepted[index]!.providerAttachmentId)) {
       return terminalAndDiscard('unsupported_media', unsupportedText)
     }
@@ -82,6 +89,7 @@ export function createMaxImageProcessor(options: {
       }
       await publisher.publish(scope, { id: source.plannedMemoryId, childId: admission.childId, kind: policy.kind === 'mixed-media' ? 'media' : 'photo', body: policy.body,
         occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds }, async (tx, memoryId) => {
+        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)
         await tx.maxSource.update({ where: { id: source.id }, data: { status: 'published', memoryId,
@@ -217,10 +225,8 @@ async function ensureVideoStored(input: {
           }
           throw error
         })
-        const rendition = video.renditions
-          .filter((candidate) => candidate.height !== null && candidate.height > 0 && candidate.height <= 720 && isAllowedVideoUrl(candidate.url))
-          .sort((a, b) => b.height! - a.height! || (b.width ?? 0) - (a.width ?? 0))[0]
-        if (!rendition || rendition.contentLength !== null && rendition.contentLength > input.maxBytes) throw new MaxMediaDownloadError()
+        const rendition = selectMaxVideoRendition(video.renditions, input.maxBytes ?? MAX_DIRECT_VIDEO_MAX_BYTES)
+        if (!rendition) throw new MaxMediaDownloadError()
         const downloaded = await input.download(rendition.url, input.maxBytes, input.signal)
         if (rendition.contentLength !== null && rendition.contentLength !== downloaded.contentLength) {
           void downloaded.body.cancel().catch(() => undefined)
@@ -247,13 +253,6 @@ async function ensureVideoStored(input: {
       throw error
     }
   }
-}
-
-function isAllowedVideoUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.port && !url.username && !url.password && /^maxvd[0-9]+\.okcdn\.ru$/i.test(url.hostname)
-  } catch { return false }
 }
 
 export async function waitForMaxAttachmentPoll(signal?: AbortSignal) {

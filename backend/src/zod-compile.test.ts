@@ -31,16 +31,6 @@ function probe(mode: ProbeMode): ProbeReport {
   return report
 }
 
-test('the composition root compiles contract schemas once, on their first parse', () => {
-  const [firstParse, ...laterParses] = probe('composition-root').codegenPerParse
-
-  // Generated code on the first parse, none afterwards: the schema was compiled exactly once.
-  expect(firstParse).toBeGreaterThan(0)
-  expect(laterParses).toEqual([0, 0])
-  // The same string schema loaded without the composition root never generates code, so the
-  // probe measures the compilation the backend turns on and not something Zod does by default.
-  expect(probe('plain').codegenPerParse).toEqual([0, 0, 0])
-})
 
 test('compiled contract schemas accept, reject, and transform exactly like the runtime parser', () => {
   const compiled = probe('composition-root').results

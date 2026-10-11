@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { userSchema } from './auth'
 import { backendMediaPathSchema } from './memories'
+import { avatarCropSchema } from './avatar-crop'
 
 export const familyRoleSchema = z.enum(['full', 'viewer'])
 
@@ -42,13 +43,7 @@ const birthDateSchema = z
 
 export const childSexSchema = z.enum(['boy', 'girl'])
 
-export const childAvatarCropSchema = z.object({
-  x: z.number().min(0).max(1),
-  y: z.number().min(0).max(1),
-  width: z.number().gt(0).max(1),
-  height: z.number().gt(0).max(1),
-}).strict().refine((crop) => crop.x + crop.width <= 1 && crop.y + crop.height <= 1,
-  'Avatar crop must stay within the image bounds')
+export const childAvatarCropSchema = avatarCropSchema
 
 export const createFamilyRequestSchema = z
   .object({
@@ -124,6 +119,7 @@ export const familyMemberSchema = z
   .object({
     userId: z.uuid(),
     avatarPath: backendMediaPathSchema.nullable(),
+    avatarCrop: avatarCropSchema.nullable().optional(),
     displayName: z.string().nullable(),
     familyDisplayName: z.string().nullable(),
     role: familyRoleSchema,
@@ -242,6 +238,7 @@ export const familyHomeItemSchema = z.object({
   name: z.string(),
   displaySubtitle: z.string().nullable(),
   childAvatarMediaId: z.uuid().nullable(),
+  childAvatarCrop: avatarCropSchema.nullable().optional(),
   isOwner: z.boolean(),
   role: familyRoleSchema,
   setupStatus: z.enum(['needs_child', 'ready']),

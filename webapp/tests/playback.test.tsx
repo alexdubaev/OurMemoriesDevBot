@@ -3,7 +3,77 @@ import { act, createElement, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { MediaPlaybackCoordinator } from '../src/features/feed/playback'
+import { toggleAudioPlayback } from '../src/features/feed/audio-playback'
 import { usePlaybackRegistration } from '../src/features/feed/use-playback-registration'
+
+test('a cancelled audio play rejection cannot overwrite paused or newer playback state', async () => {
+  let rejectPlay!: (reason: unknown) => void
+  const pendingPlay = new Promise<void>((_resolve, reject) => { rejectPlay = reject })
+  const audio = {
+    paused: true,
+    pause() { this.paused = true },
+    play() { return pendingPlay },
+  }
+  let attempt = 1
+  const states: boolean[] = []
+  const firstAttempt = toggleAudioPlayback(audio, () => attempt === 1, (playing) => states.push(playing))
+
+  attempt += 1 // A visibility pause invalidates the pending click attempt.
+  rejectPlay(new DOMException('The play() request was interrupted by a call to pause().', 'AbortError'))
+
+  await expect(firstAttempt).resolves.toBeUndefined()
+  expect(states).toEqual([])
+})
+
+test('a stale audio play rejection cannot overwrite a later successful play', async () => {
+  let rejectFirstPlay!: (reason: unknown) => void
+  let playCount = 0
+  const audio = {
+    paused: true,
+    pause() { this.paused = true },
+    play() {
+      playCount += 1
+      if (playCount === 1) return new Promise<void>((_resolve, reject) => { rejectFirstPlay = reject })
+      this.paused = false
+      return Promise.resolve()
+    },
+  }
+  let attempt = 1
+  const states: boolean[] = []
+  const stalePlay = toggleAudioPlayback(audio, () => attempt === 1, (playing) => states.push(playing))
+
+  attempt = 2 // The pause event and the user's next click invalidate the old request.
+  await toggleAudioPlayback(audio, () => attempt === 2, (playing) => states.push(playing))
+  rejectFirstPlay(new DOMException('The play() request was interrupted by a call to pause().', 'AbortError'))
+  await expect(stalePlay).resolves.toBeUndefined()
+
+  expect(states).toEqual([true])
+})
+
+test('audio play reports real failures as paused and allows a later valid play', async () => {
+  let attempt = 0
+  const states: boolean[] = []
+  const audio = {
+    paused: true,
+    pause() { this.paused = true },
+    play() {
+      if (attempt === 1) return Promise.reject(new Error('decoder unavailable'))
+      this.paused = false
+      return Promise.resolve()
+    },
+  }
+  const isCurrent = (id: number) => () => attempt === id
+  const update = (playing: boolean) => states.push(playing)
+
+  attempt = 1
+  await toggleAudioPlayback(audio, isCurrent(1), update)
+  attempt = 2
+  await toggleAudioPlayback(audio, isCurrent(2), update)
+  attempt = 3
+  await toggleAudioPlayback(audio, isCurrent(3), update)
+
+  expect(states).toEqual([false, true, false])
+})
 
 test('hiding the Mini App pauses registered media and visibility never autoplays it', async () => {
   const browser = installBrowser()

@@ -1,4 +1,4 @@
-import type { MaxAcceptedEvent } from '../application/ports'
+import type { MaxAcceptedEvent, MaxInboundAttachment } from '../application/ports'
 import { readMaxInt64AtPath, readMaxStringAtPath } from '../application/channel-protocol'
 
 export type MaxMappedUpdate = MaxAcceptedEvent | { kind: 'ignored' }
@@ -210,22 +210,38 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string, ra
   if (!isRecord(message.body)) throw new Error('Invalid MAX message body')
   if (typeof message.body.mid !== 'string' || message.body.mid.length === 0) throw new Error('Invalid MAX message id')
   const body = message.body
+  const forwardLink = forwardLinkOf(message, body)
+  if (forwardLink) {
+    const original = forwardLink.message
+    const originalMessageId = isRecord(original) ? original.mid : null
+    if (!isForwardMessageId(originalMessageId)) throw new Error('Invalid MAX forward identity')
+    return {
+      kind: 'message_created', senderId: sender ? String(sender.user_id) : '0',
+      recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
+      messageId: body.mid as string, occurredAt, text: null, attachments: [],
+      forwardedFrom: { messageId: originalMessageId,
+        ...(isRecord(original) && isNonNegativeSafeInteger(original.timestamp) ? { timestamp: original.timestamp } : {}),
+        ...(isRecord(original) && Array.isArray(original.attachments) ? { attachments: original.attachments
+          .filter((attachment) => isRecord(attachment) && (attachment.type === 'image' || attachment.type === 'video'))
+          .map((attachment) => normalizeAttachment(attachment, true)) as MaxInboundAttachment[] } : {}) },
+      ...(isChannel ? { isChannel: true } : {}),
+    }
+  }
   const messageId = body.mid as string
   if (body.attachments !== undefined && body.attachments !== null && !Array.isArray(body.attachments)) {
     throw new Error('Invalid MAX message attachments')
   }
   // TODO(post-MVP MAX history import): Preserve provider attachment order for history after controlled validation confirms it matches authored/display order.
-  const attachments = Array.isArray(body.attachments) ? body.attachments.map(normalizeAttachment) : []
+  const attachments = Array.isArray(body.attachments) ? body.attachments.map((attachment) => normalizeAttachment(attachment)) : []
   const text = body.text === null || body.text === undefined ? null :
     typeof body.text === 'string' ? body.text : (() => { throw new Error('Invalid MAX message text') })()
-  if (text === null && attachments.length === 0 && isForwardOnly(message, body)) return { kind: 'ignored' }
   return {
     kind: 'message_created', senderId: sender ? String(sender.user_id) : '0', recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
     messageId, occurredAt, text, attachments, ...(isChannel ? { isChannel: true } : {}),
   }
 }
 
-function normalizeAttachment(value: unknown) {
+function normalizeAttachment(value: unknown, envelope = false) {
   if (!isRecord(value) || typeof value.type !== 'string') throw new Error('Invalid MAX attachment')
   // Unsupported provider kinds are ignored at the ingress boundary. Supported image/file/video/audio
   // shapes are validated strictly; only the confirmed audio URL is retained transiently in the encrypted event
@@ -234,13 +250,16 @@ function normalizeAttachment(value: unknown) {
   if (!isRecord(value.payload)) throw new Error('Invalid MAX attachment payload')
   const payload = value.payload
   const rawProviderAttachmentId = value.type === 'image' ? payload.photo_id : value.type === 'file' ? payload.fileId : payload.id
+  const tokenOnlyVideo = envelope && value.type === 'video' && (rawProviderAttachmentId === undefined || rawProviderAttachmentId === null) && typeof payload.token === 'string'
+  const fallbackVideoId = tokenOnlyVideo ? 'token-only-video' : rawProviderAttachmentId
   const providerAttachmentId = value.type === 'file' || value.type === 'audio'
     ? normalizeFileAttachmentId(rawProviderAttachmentId)
-    : normalizeProviderAttachmentId(rawProviderAttachmentId, true)
+    : tokenOnlyVideo ? fallbackVideoId as string : normalizeProviderAttachmentId(fallbackVideoId, true)
   if (!providerAttachmentId) {
     throw new Error('Invalid MAX attachment identity')
   }
-  if (typeof payload.token !== 'string' || payload.token.length === 0 || typeof payload.url !== 'string' || !isHttpsUrl(payload.url)) {
+  if (typeof payload.token !== 'string' || payload.token.length === 0 ||
+      (!(envelope && value.type === 'video') && (typeof payload.url !== 'string' || !isHttpsUrl(payload.url)))) {
     throw new Error('Invalid MAX attachment transport')
   }
   if (value.type === 'image') return { kind: 'image' as const, providerAttachmentId }
@@ -253,7 +272,7 @@ function normalizeAttachment(value: unknown) {
     if (height !== undefined && height !== null && !isPositiveSafeInteger(height)) throw new Error('Invalid MAX video height')
     return { kind: 'video' as const, providerAttachmentId, durationSeconds: durationSeconds ?? null, width: width ?? null, height: height ?? null }
   }
-  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId, url: payload.url }
+  if (value.type === 'audio') return { kind: 'voice' as const, providerAttachmentId, url: payload.url as string }
   const filename = value.filename === undefined || value.filename === null ? null : value.filename
   if (filename !== null && (typeof filename !== 'string' || filename.length === 0 || [...filename].length > 512)) throw new Error('Invalid MAX filename')
   const declaredSize = value.size === undefined || value.size === null ? null : value.size
@@ -275,9 +294,15 @@ function normalizeFileAttachmentId(value: unknown) {
   return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : null
 }
 
-function isForwardOnly(message: Record<string, unknown>, body: Record<string, unknown>) {
-  return (isRecord(message.link) && message.link.type === 'forward') ||
-    (isRecord(body.link) && body.link.type === 'forward')
+function forwardLinkOf(message: Record<string, unknown>, body: Record<string, unknown>) {
+  const messageLink = isRecord(message.link) && message.link.type === 'forward' ? message.link : null
+  const bodyLink = isRecord(body.link) && body.link.type === 'forward' ? body.link : null
+  if (messageLink && bodyLink) throw new Error('Ambiguous MAX forward identity')
+  return messageLink ?? bodyLink
+}
+
+function isForwardMessageId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\s,\u0000-\u001f\u007f-\u009f]/u.test(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

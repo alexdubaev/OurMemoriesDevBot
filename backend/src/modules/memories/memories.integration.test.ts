@@ -628,9 +628,13 @@ maybeDescribe('Memories API', () => {
     expect(created.body.attachments.map((item: { source: string }) => item.source)).toEqual(['private_storage', 'max', 'private_storage', 'max'])
     expect(created.body.attachments[1]).toMatchObject({ width: 1280, height: 720, durationMs: 7000 })
     expect(memoryDtoSchema.safeParse(created.body).success).toBe(true)
+    const outboundReferences = await prisma.maxVideoReference.findMany({ where: { memoryId: created.body.id }, select: { id: true } })
+    expect(outboundReferences).toHaveLength(2)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:video-poster', dedupeKey: { in: outboundReferences.map(({ id }) => `max-video-poster:${id}`) } } })).toBe(2)
     const replay = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'POST', input, key)
     expect(replay.response.status).toBe(200)
     expect(replay.body).toEqual(created.body)
+    expect(await prisma.taskOutbox.count({ where: { type: 'max:video-poster', dedupeKey: { in: outboundReferences.map(({ id }) => `max-video-poster:${id}`) } } })).toBe(2)
     expect(await prisma.memory.count({ where: { familyId } })).toBe(1)
     const backup = await prisma.maxMemoryBackup.findUniqueOrThrow({
       where: { memoryId: created.body.id }, include: { attachments: { orderBy: { position: 'asc' } } },

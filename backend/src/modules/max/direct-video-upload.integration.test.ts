@@ -14,6 +14,7 @@ import { createMaxDirectVideoUploadService } from './application/direct-video-up
 import { PrismaMaxDirectUploadRepository } from './infrastructure/prisma-max-direct-upload-repository'
 import { createMaxApi } from './infrastructure/max-api'
 import { createMaxModule } from './index'
+import { enqueueMaxVideoPoster } from './infrastructure/video-poster'
 
 const scope: FamilyScope = {
   familyId: '11111111-1111-4111-8111-111111111111',
@@ -634,11 +635,13 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
         getMessage: baseApi.getMessage,
       }), { findVideoMessageByIntent: async () => ({ messageId: 'recovery-message-1' }) }) as MaxApiPort
       const restartedService = createMaxDirectVideoUploadService({ access: familyAccess, api: recoveryApi, repository,
-        publisher, now: () => new Date('2026-09-20T10:01:00.000Z') })
+        publisher, enqueueVideoPoster: enqueueMaxVideoPoster, now: () => new Date('2026-09-20T10:01:00.000Z') })
 
       await expect(restartedService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken)).resolves.toMatchObject({ state: 'finalized' })
       expect(sends).toBe(1)
       expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(1)
+      const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { familyId: family.id } })
+      expect(await prisma.taskOutbox.count({ where: { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}` } })).toBe(1)
       expect((await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { id_familyId: { id: reservation.sessionId, familyId: family.id } } })).providerMessageId).toBe('recovery-message-1')
     } finally {
       await prisma.memory.deleteMany({ where: { familyId: family.id } })

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { MaxSource } from '../../../generated/prisma/client'
 import type { DbClient } from '../../../db'
 import type { PrismaTransactionClient } from '../../../idempotency'
@@ -5,13 +6,15 @@ import type { BackendRuntime } from '../../../runtime'
 import { TerminalTaskError } from '../../../outbox'
 import { createDetailedInviteStartResolver, createInviteStartResolver, createPrismaFamilyAccess, type DetailedInviteStartResolution, type FamilyScope } from '../../families'
 import { createSourceMemoryPublisher } from '../../memories'
-import type { MaxAcceptedEvent, MaxApiPort, MaxInboundEvent } from '../application/ports'
+import type { MaxAcceptedEvent, MaxApiPort, MaxInboundEvent, MaxInboundAttachment, MaxResolvedMessage } from '../application/ports'
 import { createMaxImageProcessor } from './process-image'
 import { createMaxVideoProcessor } from './process-video'
 import { createMaxVoiceProcessor } from './process-voice'
 import type { MaxDownloadedMedia, MaxVideoStream } from './media-download'
 import { resolveMaxTarget, chooseMaxTarget, expireMaxTarget } from './source-target'
 import { parseChoicePayload, savedFamilyText } from '../../../bot-family-target'
+import { assertMaxForwardBinding, reportMaxForwardDiagnostic, validateMaxForwardedMessage } from './forward-import'
+import { MaxProviderError } from './max-api'
 
 type PayloadCrypto = {
   decrypt<T>(payload: { ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array }): T
@@ -52,6 +55,7 @@ export function createMaxTaskProcessor(options: {
   videoDownload?: (url: string, maxBytes: number, signal?: AbortSignal) => Promise<MaxVideoStream>
   processChannelLifecycle?: (inboxId: string, event: Extract<MaxAcceptedEvent, { kind: 'bot_added' | 'bot_removed' | 'bot_admin_permissions_changed' }>) => Promise<void>
   processChannelCallback?: (inboxId: string, event: Extract<MaxInboundEvent, { kind: 'family_choice' }>) => Promise<boolean>
+  offerActorChannelConnection?: (input: { inboxId: string; actorSubject: string; actorUserId: string; familyId: string; chatId: bigint }) => Promise<boolean>
 }): (payload: unknown, signal?: AbortSignal) => Promise<'done' | 'skipped'> {
   const { prisma } = options.runtime
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
@@ -75,19 +79,20 @@ export function createMaxTaskProcessor(options: {
       return 'skipped'
     }
 
-    const event = options.crypto.decrypt<MaxAcceptedEvent>({
+    const decryptedEvent = options.crypto.decrypt<MaxAcceptedEvent>({
       ciphertext: inbox.encryptedPayload,
       iv: inbox.encryptionIv,
       authTag: inbox.encryptionAuthTag,
     })
 
-    if (event.kind === 'bot_added' || event.kind === 'bot_removed' || event.kind === 'bot_admin_permissions_changed') {
-      if (options.processChannelLifecycle) await options.processChannelLifecycle(inbox.id, event)
+    if (decryptedEvent.kind === 'bot_added' || decryptedEvent.kind === 'bot_removed' || decryptedEvent.kind === 'bot_admin_permissions_changed') {
+      if (options.processChannelLifecycle) await options.processChannelLifecycle(inbox.id, decryptedEvent)
       else await prisma.maxInbox.updateMany({ where: { id: inbox.id, status: 'accepted' }, data: { status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
       return 'done'
     }
 
-    if (event.kind === 'bot_started') {
+    if (decryptedEvent.kind === 'bot_started') {
+      const event = decryptedEvent
       const token = inviteTokenFromPayload(event.payload)
       const browserApproval = isBrowserApprovalPayload(event.payload)
       let responseText = welcomeText
@@ -121,7 +126,8 @@ export function createMaxTaskProcessor(options: {
         },
         retainInviteContext) ? 'done' : 'skipped'
     }
-    if (event.kind === 'family_choice') {
+    if (decryptedEvent.kind === 'family_choice') {
+      const event = decryptedEvent
       if (event.payload.startsWith('max_channel:') && options.processChannelCallback &&
           await options.processChannelCallback(inbox.id, event)) {
         await options.api?.answerCallback?.(event.callbackId, 'Проверяем настройку канала…')
@@ -138,6 +144,7 @@ export function createMaxTaskProcessor(options: {
       return 'done'
     }
 
+    let event = decryptedEvent
     if (event.kind === 'message_created' && event.isChannel && event.senderId === '0') {
       const channelChatId = BigInt(event.recipientId)
       const ownBackup = await prisma.maxMemoryBackup.findFirst({ where: {
@@ -166,15 +173,135 @@ export function createMaxTaskProcessor(options: {
       return 'skipped'
     }
 
+    let verifiedForward: MaxResolvedMessage | undefined
+    let verifiedForwardChannelId: bigint | undefined
+    let envelopeFallback = false
+    if (event.forwardedFrom) {
+      const forwardedFrom = event.forwardedFrom
+      const denyForward = async (text = deniedText, suppressResponse = false) => {
+        const denied = await deny(prisma, source, text, suppressResponse)
+        if (denied) await retryTerminalSourceCleanup(prisma, options.media, source)
+        return denied ? 'done' as const : 'skipped' as const
+      }
+      if (event.isChannel || event.senderId === '0') return denyForward(deniedText, true)
+      if (!options.api?.getMessage) return denyForward()
+      const targetResult = await resolveMaxTarget(prisma, source, new Date(), false)
+      if (targetResult.kind === 'pending') return 'done'
+      if (targetResult.kind === 'expired') {
+        const result = await expireMaxTarget(prisma, source.id, source.inboxId, responseActor(event))
+        if (result === 'done') await retryTerminalSourceCleanup(prisma, options.media, source)
+        return result
+      }
+      if (targetResult.kind !== 'target') return denyForward()
+      const forwardScope: FamilyScope = {
+        familyId: targetResult.target.familyId,
+        principal: { userId: targetResult.target.userId, sessionId: `max:${source.id}` },
+      }
+      try { await access.requireFull(forwardScope) } catch (error) {
+        if (isExpectedAuthorizationFailure(error)) return denyForward()
+        throw error
+      }
+      let identity: ReturnType<typeof validateMaxForwardedMessage>
+      let forwardStage: 'provider_lookup' | 'channel_binding' = 'provider_lookup'
+      try {
+        verifiedForward = await options.api.getMessage(forwardedFrom.messageId, signal)
+        identity = validateMaxForwardedMessage(verifiedForward, forwardedFrom.messageId)
+        verifiedForwardChannelId = identity.channelId
+        forwardStage = 'channel_binding'
+        const binding = await prisma.maxChannelBinding.findUnique({ where: { chatId: identity.channelId }, select: { familyId: true } })
+        if (binding?.familyId && binding.familyId !== targetResult.target.familyId) {
+          await prisma.$transaction((tx) => assertMaxForwardBinding(tx, targetResult.target.familyId, identity.channelId))
+        }
+        if (!binding || binding.familyId === null) {
+          if ((event.forwardedFrom.attachments?.length ?? 0) > 0) {
+            const outer = await getVerifiedEnvelope(options.api, event, forwardedFrom.messageId, signal)
+            if (outer) {
+              verifiedForward = outer
+              envelopeFallback = true
+              throw new MaxProviderError(undefined, false, 403, 'forward_channel_unbound')
+            }
+          }
+          const actorSubject = event.senderId
+          const actorIdentity = actorSubject === source.senderSubject
+            ? await prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: actorSubject } }, select: { userId: true } })
+            : null
+          if (actorIdentity?.userId === targetResult.target.userId && options.offerActorChannelConnection &&
+              await options.offerActorChannelConnection({ inboxId: inbox.id, actorSubject, actorUserId: actorIdentity.userId,
+                familyId: targetResult.target.familyId, chatId: identity.channelId })) {
+            return await denyForward(deniedText, true)
+          }
+          if ((event.forwardedFrom.attachments?.length ?? 0) > 0 && await getVerifiedEnvelope(options.api, event, forwardedFrom.messageId, signal)) {
+            throw new MaxProviderError(undefined, false, 403, 'forward_channel_unbound')
+          }
+          throw new MaxProviderError(undefined, false, 403, 'forward_channel_unbound')
+        }
+        await prisma.$transaction((tx) => assertMaxForwardBinding(tx, targetResult.target.familyId, identity.channelId))
+      } catch (error) {
+        if (signal?.aborted) throw error
+        reportMaxForwardDiagnostic(forwardStage, error, { sourceId: source.id, inboxId: inbox.id,
+          outerMessageId: event.messageId, originalMessageId: forwardedFrom.messageId })
+        if (error instanceof MaxProviderError && error.retryable) throw error
+        if (error instanceof MaxProviderError || isExpectedAuthorizationFailure(error)) {
+          const outer = envelopeFallback ? verifiedForward : await getVerifiedEnvelope(options.api, event, forwardedFrom.messageId, signal)
+          if (!outer) return denyForward()
+          verifiedForward = outer
+          verifiedForwardChannelId = undefined
+          envelopeFallback = true
+          const canonicalAttachments = outer.attachments.filter((attachment) => attachment.kind === 'image' || attachment.kind === 'video').map(toInboundAttachment)
+          if (canonicalAttachments.length === 0 || outer.attachments.length !== canonicalAttachments.length) return denyForward()
+          const timestamp = validForwardTimestamp(outer.forwardedFrom?.timestamp) ?? inbox.receivedAt.getTime()
+          event = { ...event, forwardedFrom: undefined, text: null, occurredAt: new Date(timestamp).toISOString(), attachments: canonicalAttachments }
+        }
+        else throw error
+      }
+      const canonicalAttachments = envelopeFallback
+        ? event.attachments ?? [] : verifiedForward!.attachments.map(toInboundAttachment)
+      if (!envelopeFallback) {
+        const timestamp = verifiedForward!.timestamp!
+        event = { ...event, text: verifiedForward!.text ?? null, occurredAt: new Date(timestamp).toISOString(), attachments: canonicalAttachments }
+      }
+      if (canonicalAttachments.length === 0 && !isPublishableText(event.text)) {
+        return denyForward()
+      }
+      let claim: Awaited<ReturnType<typeof claimMaxForwardSource>>
+      try {
+        claim = envelopeFallback
+          ? await claimMaxEnvelopeSource(prisma, source, targetResult.target.familyId, forwardedFrom.messageId, canonicalAttachments, source.botId)
+          : await claimMaxForwardSource(prisma, source.id, targetResult.target.familyId, identity!.channelId, forwardedFrom.messageId, canonicalAttachments)
+        while (!envelopeFallback && claim.kind === 'cleanup') {
+          const terminalOwner = await prisma.maxSource.findUnique({ where: { id: claim.ownerId } })
+          await retryTerminalSourceCleanup(prisma, options.media, terminalOwner)
+          claim = await claimMaxForwardSource(prisma, source.id, targetResult.target.familyId, identity!.channelId,
+            forwardedFrom.messageId, canonicalAttachments)
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error
+        reportMaxForwardDiagnostic('source_claim', error, { sourceId: source.id, inboxId: inbox.id,
+          outerMessageId: event.messageId, originalMessageId: forwardedFrom.messageId })
+        if (isExpectedAuthorizationFailure(error)) {
+          return denyForward()
+        }
+        if (error instanceof MaxProviderError && !error.retryable) {
+          return denyForward('Не удалось проверить исходную публикацию в MAX.')
+        }
+        throw error
+      }
+      if (claim.kind === 'duplicate') return await completeForwardDuplicate(prisma, options.media, source, event.senderId) ? 'done' : 'skipped'
+      if (claim.kind === 'published') return 'skipped'
+    }
+
     const hasAttachments = (event.attachments?.length ?? (event.hasAttachments ? 1 : 0)) > 0
     if (hasAttachments) {
       if (videoProcessor && event.attachments?.length === 1 && event.attachments[0]?.kind === 'video') {
-        return videoProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
+        return videoProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal,
+          ...(verifiedForward ? { verifiedMessage: verifiedForward, verifiedChannelId: verifiedForwardChannelId } : {}) })
       }
       if (voiceProcessor && event.attachments?.length === 1 && event.attachments[0]?.kind === 'voice') {
-        return voiceProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
+        return voiceProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal,
+          ...(verifiedForward ? { verifiedMessage: verifiedForward, verifiedChannelId: verifiedForwardChannelId } : {}) })
       }
-      if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal })
+      if (imageProcessor && source) return imageProcessor({ inboxId: inbox.id, sourceId: source.id, event, signal,
+        ...(verifiedForward ? { verifiedMessage: verifiedForward, verifiedChannelId: verifiedForwardChannelId } : {}) })
       return await terminalSource(prisma, source, 'unsupported_media', responseActor(event), unsupportedMediaText) ? 'done' : 'skipped'
     }
 
@@ -203,6 +330,7 @@ export function createMaxTaskProcessor(options: {
       sourcePublishedAt: new Date(event.occurredAt),
       mediaIds: [],
     }, async (tx, memoryId) => {
+        if (verifiedForwardChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, verifiedForwardChannelId)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await tx.maxSource.update({ where: { id: source.id }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,
@@ -232,6 +360,147 @@ export function createMaxTaskProcessor(options: {
   }
 }
 
+async function claimMaxForwardSource(
+  db: DbClient,
+  sourceId: string,
+  familyId: string,
+  channelId: bigint,
+  originalMessageId: string,
+  attachments: MaxInboundAttachment[],
+) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-forward:${familyId}:${channelId}:${originalMessageId}`}, 0))`
+    await assertMaxForwardBinding(tx, familyId, channelId)
+    const liveSource = await tx.maxSource.findFirst({ where: {
+      id: { not: sourceId }, familyId, recipientId: channelId, messageId: originalMessageId,
+      status: { in: ['accepted', 'published'] },
+    }, select: { status: true } })
+    if (liveSource?.status === 'published') return { kind: 'duplicate' as const }
+    if (liveSource?.status === 'accepted') throw new MaxProviderError(undefined, true, 503, 'forward_claim_pending')
+
+    const canonicalOwner = await tx.maxSource.findFirst({ where: {
+      id: { not: sourceId }, familyId, originalChannelId: channelId, originalMessageId,
+    }, select: { id: true, status: true } })
+    if (canonicalOwner?.status === 'published') return { kind: 'duplicate' as const }
+    if (canonicalOwner?.status === 'accepted') throw new MaxProviderError(undefined, true, 503, 'forward_claim_pending')
+    if (canonicalOwner) return { kind: 'cleanup' as const, ownerId: canonicalOwner.id }
+
+    const currentRows = await tx.maxSourceAttachment.findMany({ where: { sourceId }, orderBy: { position: 'asc' }, select: {
+      position: true, providerKind: true, providerAttachmentId: true,
+    } })
+    const staged = attachments.filter((attachment) => attachment.kind !== 'video' || attachments.length > 1)
+    if (currentRows.length > 0 && (currentRows.length !== staged.length || currentRows.some((row, index) => {
+      const attachment = staged[index]!
+      const kind = attachment.kind === 'image' ? 'image' : attachment.kind === 'video' ? 'video' : 'file'
+      return row.position !== index || row.providerKind !== kind || row.providerAttachmentId !== attachment.providerAttachmentId
+    }))) throw new MaxProviderError(undefined, false, 400, 'forward_attachment_mismatch')
+    const changed = await tx.maxSource.updateMany({ where: { id: sourceId, status: 'accepted' }, data: {
+      familyId, originalChannelId: channelId, originalMessageId,
+    } })
+    if (changed.count !== 1) {
+      const current = await tx.maxSource.findUnique({ where: { id: sourceId }, select: { status: true, familyId: true, originalChannelId: true, originalMessageId: true } })
+      if (current?.status === 'published') return { kind: 'published' as const }
+      if (current?.status === 'accepted' && current.familyId === familyId && current.originalChannelId === channelId && current.originalMessageId === originalMessageId) return { kind: 'claimed' as const }
+      throw new MaxProviderError(undefined, true, 503, 'forward_claim_lost')
+    }
+    if (currentRows.length === 0 && staged.length > 0) await tx.maxSourceAttachment.createMany({ data: staged.map((attachment, position) => ({
+      sourceId, position,
+      providerKind: attachment.kind === 'image' ? 'image' : attachment.kind === 'video' ? 'video' : 'file',
+      providerAttachmentId: attachment.providerAttachmentId,
+      plannedMediaId: randomUUID(),
+    })) })
+    return { kind: 'claimed' as const }
+  })
+}
+
+async function claimMaxEnvelopeSource(db: DbClient, source: MaxSource, familyId: string, originalMessageId: string,
+  attachments: MaxInboundAttachment[], botId: bigint) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-envelope:${botId}:${familyId}:${source.senderSubject}:${originalMessageId}`}, 0))`
+    const owner = await tx.maxSource.findFirst({ where: { id: { not: source.id }, botId, familyId, senderSubject: source.senderSubject,
+      originalChannelId: null, originalMessageId, status: { in: ['accepted', 'published'] } }, select: { id: true, status: true } })
+    if (owner) {
+      const ownerRows = await tx.maxSourceAttachment.findMany({ where: { sourceId: owner.id }, orderBy: { position: 'asc' }, select: { providerKind: true, providerAttachmentId: true } })
+      if (!sameEnvelopeAttachments(ownerRows, attachments)) throw new MaxProviderError(undefined, false, 400, 'envelope_attachment_mismatch')
+      if (owner.status === 'published') return { kind: 'duplicate' as const }
+      throw new MaxProviderError(undefined, true, 503, 'envelope_claim_pending')
+    }
+    const currentRows = await tx.maxSourceAttachment.findMany({ where: { sourceId: source.id }, orderBy: { position: 'asc' }, select: { position: true, providerKind: true, providerAttachmentId: true } })
+    if (currentRows.length > 0 && !sameEnvelopeAttachments(currentRows, attachments)) throw new MaxProviderError(undefined, false, 400, 'envelope_attachment_mismatch')
+    const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
+      familyId, originalChannelId: null, originalMessageId,
+    } })
+    if (changed.count !== 1) {
+      const current = await tx.maxSource.findUnique({ where: { id: source.id }, select: { status: true, familyId: true, originalChannelId: true, originalMessageId: true } })
+      if (current?.status === 'published') return { kind: 'published' as const }
+      if (current?.status === 'accepted' && current.familyId === familyId && current.originalChannelId === null && current.originalMessageId === originalMessageId) return { kind: 'claimed' as const }
+      throw new MaxProviderError(undefined, true, 503, 'envelope_claim_lost')
+    }
+    if (currentRows.length === 0) await tx.maxSourceAttachment.createMany({ data: attachments.map((attachment, position) => ({
+      sourceId: source.id, position, providerKind: attachment.kind === 'image' ? 'image' : 'video',
+      providerAttachmentId: attachment.providerAttachmentId, plannedMediaId: randomUUID(),
+    })) })
+    return { kind: 'claimed' as const }
+  })
+}
+
+function sameEnvelopeAttachments(rows: Array<{ providerKind: string; providerAttachmentId: string }>, attachments: MaxInboundAttachment[]) {
+  return rows.length === attachments.length && rows.every((row, index) => {
+    const attachment = attachments[index]!
+    return row.providerKind === attachment.kind && row.providerAttachmentId === attachment.providerAttachmentId
+  })
+}
+
+async function getVerifiedEnvelope(api: MaxApiPort | undefined, event: Extract<MaxInboundEvent, { kind: 'message_created' }>, originalMessageId: string, signal?: AbortSignal) {
+  if (!api?.getMessage || event.isChannel || event.senderId === '0') return null
+  try {
+    const outer = await api.getMessage(event.messageId, signal)
+    const attachments = outer.forwardedAttachments
+    if (outer.messageId !== event.messageId || outer.senderId !== event.senderId || outer.recipientType !== 'dialog' || outer.recipientId !== event.recipientId ||
+        outer.forwardedFrom?.messageId !== originalMessageId || !attachments?.length || attachments.some((attachment) => attachment.kind !== 'image' && attachment.kind !== 'video') ||
+        new Set(attachments.map((attachment) => attachment.providerAttachmentId)).size !== attachments.length) return null
+    const ingress = event.forwardedFrom?.attachments ?? []
+    if (ingress.length > 0 && (ingress.length !== attachments.length || ingress.some((item, index) => item.kind !== attachments[index]!.kind || item.providerAttachmentId !== attachments[index]!.providerAttachmentId))) return null
+    return { ...outer, attachments }
+  } catch (error) {
+    if (signal?.aborted) throw error
+    if (error instanceof MaxProviderError && error.retryable) throw error
+    return null
+  }
+}
+
+function validForwardTimestamp(timestamp: number | undefined, now = Date.now()) {
+  return timestamp !== undefined && Number.isSafeInteger(timestamp) && timestamp >= 0 && timestamp <= 8_640_000_000_000_000 && timestamp <= now + 5 * 60_000
+    ? timestamp : null
+}
+
+async function completeForwardDuplicate(db: DbClient, media: ReturnType<typeof import('../../media').createMediaService> | undefined, source: MaxSource, actorId: string) {
+  const staged = await db.maxSourceAttachment.findMany({ where: { sourceId: source.id }, select: { plannedMediaId: true } })
+  if (staged.length > 0) {
+    if (!media) throw new MaxProviderError(undefined, true, 503, 'forward_duplicate_cleanup_pending')
+    await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: staged.map((row) => row.plannedMediaId) })
+  }
+  return db.$transaction(async (tx) => {
+    const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
+      status: 'denied', rejectionCode: 'duplicate', originalChannelId: null,
+    } })
+    if (changed.count !== 1) return false
+    await markInboxProcessed(tx, source.inboxId)
+    if (BigInt(actorId) > 0n) await createResponseAndTask(tx, {
+      inboxId: source.inboxId, destinationUserId: actorId, kind: 'saved', text: 'Эта публикация уже сохранена в семейной ленте.',
+    })
+    return true
+  })
+}
+
+function toInboundAttachment(attachment: MaxResolvedMessage['attachments'][number]): MaxInboundAttachment {
+  if (attachment.kind === 'image') return { kind: 'image', providerAttachmentId: attachment.providerAttachmentId }
+  if (attachment.kind === 'voice') return { kind: 'voice', providerAttachmentId: attachment.providerAttachmentId, url: attachment.url }
+  if (attachment.kind === 'video') return { kind: 'video', providerAttachmentId: attachment.providerAttachmentId,
+    durationSeconds: attachment.inboundDurationSeconds, width: attachment.width, height: attachment.height }
+  return { kind: 'file', providerAttachmentId: attachment.providerAttachmentId, filename: attachment.filename, declaredSize: attachment.declaredSize }
+}
+
 async function suppressCorrelatedChannelEcho(db: DbClient, inboxId: string, sourceId: string) {
   await db.$transaction(async (tx) => {
     const changed = await tx.maxSource.updateMany({ where: { id: sourceId, inboxId, status: 'accepted' }, data: {
@@ -246,10 +515,14 @@ async function retryTerminalSourceCleanup(
   media: ReturnType<typeof import('../../media').createMediaService> | undefined,
   source: MaxSource | null,
 ) {
-  if (!media || !source || (source.status !== 'denied' && source.status !== 'unsupported_media')) return
+  if (!source) return
   const stored = await db.maxSource.findUnique({ where: { id: source.id }, include: { attachments: { select: { plannedMediaId: true } } } })
-  if (!stored || stored.status === 'published') return
-  await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: stored.attachments.map(({ plannedMediaId }) => plannedMediaId) })
+  if (!stored || (stored.status !== 'denied' && stored.status !== 'unsupported_media')) return
+  if (stored.attachments.length > 0 && media) {
+    await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: stored.attachments.map(({ plannedMediaId }) => plannedMediaId) })
+  }
+  if (stored.attachments.length > 0 && !media && stored.originalChannelId !== null) throw new MaxProviderError(undefined, true, 503, 'forward_cleanup_pending')
+  if (stored.originalChannelId !== null) await db.maxSource.updateMany({ where: { id: source.id, status: stored.status }, data: { originalChannelId: null } })
 }
 
 function inviteTokenFromPayload(payload: string | null) {

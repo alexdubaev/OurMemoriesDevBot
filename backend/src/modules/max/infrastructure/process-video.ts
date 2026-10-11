@@ -9,18 +9,20 @@ import { classifyMaxVideoMessage, normalizeVideoDurationMs } from '../applicatio
 import { MaxProviderError } from './max-api'
 import { expireMaxTarget, resolveMaxTarget } from './source-target'
 import { savedFamilyText } from '../../../bot-family-target'
+import { assertMaxForwardBinding } from './forward-import'
+import { enqueueMaxVideoPoster } from './video-poster'
+import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { selectMaxVideoRendition } from './video-rendition'
 
 const deniedText = 'Не удалось сохранить это сообщение в memoLy.'
 const unsupportedText = 'Получено. Медиа пока не поддерживается — отправьте текстовую заметку.'
-const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
-const maxHeight = 720
-
 export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const { prisma } = options.runtime
   const access = createPrismaFamilyAccess(prisma)
   const publisher = createSourceMemoryPublisher(prisma, access)
 
-  return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal }): Promise<'done' | 'skipped'> => {
+  return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal;
+    verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>; verifiedChannelId?: bigint }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId } })
     if (!source || source.status !== 'accepted') return 'skipped'
     const policy = classifyMaxVideoMessage(input.event)
@@ -38,14 +40,16 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
 
     let resolved
     try {
-      resolved = await options.api.getMessage(input.event.messageId, input.signal)
+      resolved = input.verifiedMessage ?? await options.api.getMessage(input.event.messageId, input.signal)
     } catch (error) {
       if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
       throw error
     }
     const attachment = resolved.attachments.length === 1 ? resolved.attachments[0] : null
-    if (!attachment || attachment.kind !== 'video' || resolved.messageId !== input.event.messageId ||
-      (!input.event.isChannel && resolved.senderId !== input.event.senderId) || resolved.recipientId !== input.event.recipientId ||
+    const identityMatches = input.event.forwardedFrom
+      ? resolved.messageId === input.event.forwardedFrom.messageId && resolved.recipientType === 'channel' && resolved.recipientId === String(input.verifiedChannelId)
+      : resolved.messageId === input.event.messageId && (input.event.isChannel || resolved.senderId === input.event.senderId) && resolved.recipientId === input.event.recipientId
+    if (!attachment || attachment.kind !== 'video' || !identityMatches ||
       attachment.providerAttachmentId !== policy.attachment.providerAttachmentId) {
       return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
     }
@@ -57,9 +61,8 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       if (isTerminalProviderShape(error)) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
       throw error
     }
-    const rendition = video.renditions
-      .filter((candidate) => isAllowedCdnUrl(candidate.url) && candidate.height !== null && candidate.height > 0 && candidate.height <= maxHeight)
-      .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0]
+    const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
+    const rendition = selectMaxVideoRendition(video.renditions, maxBytes)
     if (!rendition) return terminal(prisma, source.id, source.inboxId, 'unsupported_media', responseActor(input.event), unsupportedText)
 
     const durationMs = normalizeVideoDurationMs(attachment.inboundDurationSeconds, video.durationMs)
@@ -75,6 +78,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         mediaIds: [],
         externalAttachment: 'max-video',
       }, async (tx, memoryId) => {
+        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,
@@ -83,7 +87,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         if (!currentSource || currentSource.familyId !== admission.familyId || currentSource.status !== 'published' || !currentSource.memoryId || (changed.count !== 1 && currentSource.memoryId !== memoryId)) {
           throw new Error('MAX source publication state changed')
         }
-        await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
+        const reference = await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
           memoryId: currentSource.memoryId, familyId: admission.familyId, attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
           ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         }, create: {
@@ -91,6 +95,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
           attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
           ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         } })
+        await enqueueMaxVideoPoster(tx, reference.id)
         await tx.maxInbox.updateMany({ where: { id: input.inboxId, status: 'accepted' }, data: {
           status: 'processed', processedAt: new Date(), encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0),
         } })
@@ -111,13 +116,6 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
       throw error
     }
   }
-}
-
-function isAllowedCdnUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname)
-  } catch { return false }
 }
 
 function positiveOrNull(value: number | null) {

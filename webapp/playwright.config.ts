@@ -90,6 +90,7 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   globalTeardown: './e2e/global-teardown.ts',
   testDir: './e2e',
+  testIgnore: ['**/.artifacts/**'],
   outputDir: './e2e/.artifacts/test-results',
   timeout: 90_000,
   expect: {

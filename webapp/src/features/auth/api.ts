@@ -104,13 +104,13 @@ export class AuthApi {
     return this.authCoordinator(async () => {
       options.signal?.throwIfAborted()
       const data = await this.http.request('/api/v1/auth/telegram', cookieAuthResponseSchema, {
-        method: 'POST', body: payload, signal: options.signal,
+        method: 'POST', body: payload, signal: options.signal, timeoutMs: 15000,
       })
       ensureHostAuthAttemptCurrent(options)
       this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
-    })
+    }, { timeoutMs: 15000, signal: options.signal })
   }
 
   authenticateMax(initData: string, options: HostAuthAttemptOptions = {}): Promise<BrowserSessionTransition<CookieAuthResponse>> {
@@ -118,13 +118,13 @@ export class AuthApi {
     return this.authCoordinator(async () => {
       options.signal?.throwIfAborted()
       const data = await this.http.request('/api/v1/auth/max', cookieAuthResponseSchema, {
-        method: 'POST', body: payload, signal: options.signal,
+        method: 'POST', body: payload, signal: options.signal, timeoutMs: 15000,
       })
       ensureHostAuthAttemptCurrent(options)
       this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
       return { data, sessionEpoch: sessionEvent.epoch }
-    })
+    }, { timeoutMs: 15000, signal: options.signal })
   }
 
   requestPasswordReset(
@@ -153,7 +153,7 @@ export class AuthApi {
     })
   }
 
-  refresh(expectedEpoch = this.sessionEpoch): Promise<CookieRefreshResponse> {
+  refresh(expectedEpoch = this.sessionEpoch, options: Pick<HttpRequestOptions, 'timeoutMs'> = {}): Promise<CookieRefreshResponse> {
     if (this.refreshInFlight?.epoch === expectedEpoch) return this.refreshInFlight.promise
 
     const refreshPromise = this.authCoordinator(async () => {
@@ -168,6 +168,7 @@ export class AuthApi {
         return await this.http.request('/api/v1/auth/refresh', cookieRefreshResponseSchema, {
           method: 'POST',
           body: payload,
+          timeoutMs: options.timeoutMs ?? 15000,
         })
       } catch (error) {
         if (error instanceof ApiRequestError && error.status === 401) {
@@ -175,7 +176,7 @@ export class AuthApi {
         }
         throw error
       }
-    })
+    }, { timeoutMs: options.timeoutMs ?? 15000 })
     const trackedPromise = refreshPromise.finally(() => {
       if (this.refreshInFlight?.promise === trackedPromise) this.refreshInFlight = null
     })
@@ -185,7 +186,7 @@ export class AuthApi {
   }
 
   me(options: { signal?: AbortSignal } = {}): Promise<MeResponse> {
-    return this.requestAuthenticated('/api/v1/auth/me', meResponseSchema, options)
+    return this.requestAuthenticated('/api/v1/auth/me', meResponseSchema, { ...options, timeoutMs: 15000 })
   }
 
   logout(): Promise<BrowserSessionTransition<undefined> | null> {
@@ -207,12 +208,13 @@ export class AuthApi {
     return this.http.request('/api/v1/auth/browser-link/start', browserLinkStartResponseSchema, {
       method: 'POST',
       body: {},
+      timeoutMs: 15000,
     })
   }
 
   browserLinkStatus(id: string): Promise<BrowserLinkStatusResponse> {
     const challengeId = browserLinkChallengeParamsSchema.parse({ id }).id
-    return this.http.request(`/api/v1/auth/browser-link/${challengeId}/status`, browserLinkStatusResponseSchema)
+    return this.http.request(`/api/v1/auth/browser-link/${challengeId}/status`, browserLinkStatusResponseSchema, { timeoutMs: 15000 })
   }
 
   approveBrowserLink(id: string, initData: string) {
@@ -237,7 +239,7 @@ export class AuthApi {
   }
 
   async clearSession() {
-    return this.authCoordinator(() => this.expireSessionWithinMutation(this.sessionEpoch))
+    return this.authCoordinator(() => this.expireSessionWithinMutation(this.sessionEpoch), { timeoutMs: 15000 })
   }
 
   isSessionEpochCurrent(epoch: string) {

@@ -32,7 +32,7 @@ export function FamilySummaryCard({ family, onSelect, transport, disabled = fals
     onClick={() => onSelect(family.familyId)}
     type="button"
   >
-    <span aria-hidden="true" className="family-hub-avatar"><ChildAvatar avatarCrop={null} avatarUrl={avatarUrl} name={family.name.split(/\s+/).at(-1) ?? family.name} size="family-card" /></span>
+    <span aria-hidden="true" className="family-hub-avatar"><ChildAvatar avatarCrop={family.childAvatarCrop ?? null} avatarUrl={avatarUrl} name={family.name.split(/\s+/).at(-1) ?? family.name} size="family-card" /></span>
       <span className="family-hub-card-copy">
         <strong className="family-hub-card-name">{family.name}</strong>
         {family.displaySubtitle ? <span className="family-hub-card-subtitle">{family.displaySubtitle}</span> : null}

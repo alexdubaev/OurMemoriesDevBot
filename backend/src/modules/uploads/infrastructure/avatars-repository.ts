@@ -17,6 +17,7 @@ type UserAvatarRow = {
   expiresAt: Date
   readyAt: Date | null
   updatedAt: Date
+  avatarCrop: unknown
 }
 
 /**
@@ -74,7 +75,7 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
       return row ? toAvatarRecord(row) : null
     },
 
-    async promoteToReady({ userId, uploadId, readyAt }) {
+    async promoteToReady({ userId, uploadId, readyAt, avatarCrop }) {
       return db.$transaction(async (tx) => {
         await acquireUserAvatarMutationLock(tx, userId)
 
@@ -99,13 +100,23 @@ export function createPrismaAvatarsRepository(db: DbClient): AvatarRepository {
 
         const avatar = await tx.userAvatar.update({
           where: { id: uploadId },
-          data: { state: 'ready', readyAt },
+          data: { state: 'ready', readyAt, ...(avatarCrop ? { avatarCrop } : {}) },
         })
 
         return {
           avatar: toAvatarRecord(avatar),
           replacedObjectKey: previous?.objectKey ?? null,
         }
+      })
+    },
+
+    async updateCrop({ userId, avatarId, expectedUpdatedAt, avatarCrop }) {
+      return db.$transaction(async (tx) => {
+        await acquireUserAvatarMutationLock(tx, userId)
+        const current = await tx.userAvatar.findFirst({ where: { id: avatarId, userId, state: 'ready' } })
+        if (!current || current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return null
+        const updated = await tx.userAvatar.update({ where: { id: current.id }, data: { avatarCrop } })
+        return toAvatarRecord(updated)
       })
     },
 
@@ -150,8 +161,15 @@ function toAvatarRecord(row: UserAvatarRow): AvatarRecord {
     objectKey: row.objectKey,
     contentType: row.contentType as AvatarContentType,
     byteSize: row.byteSize,
+    avatarCrop: isAvatarCrop(row.avatarCrop) ? row.avatarCrop : null,
     expiresAt: row.expiresAt,
     readyAt: row.readyAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function isAvatarCrop(value: unknown): value is NonNullable<AvatarRecord['avatarCrop']> {
+  if (!value || typeof value !== 'object') return false
+  const crop = value as Record<string, unknown>
+  return ['x', 'y', 'width', 'height'].every((key) => typeof crop[key] === 'number')
 }

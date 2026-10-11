@@ -1,6 +1,7 @@
 import type { AvatarContentType } from '@web-app-demo/contracts'
 
 import type { PrivateStorage } from '../../../storage/port'
+import type { AvatarCrop } from '@web-app-demo/contracts'
 
 /**
  * What the avatar use cases need from the outside world.
@@ -20,6 +21,7 @@ export type AvatarRecord = {
   objectKey: string
   contentType: AvatarContentType
   byteSize: number
+  avatarCrop: AvatarCrop | null
   expiresAt: Date
   readyAt: Date | null
   updatedAt: Date
@@ -56,7 +58,10 @@ export type AvatarRepository = {
     userId: string
     uploadId: string
     readyAt: Date
+    avatarCrop?: AvatarCrop
   }): Promise<{ avatar: AvatarRecord; replacedObjectKey: string | null } | null>
+
+  updateCrop(input: { userId: string; avatarId: string; expectedUpdatedAt: Date; avatarCrop: AvatarCrop }): Promise<AvatarRecord | null>
 
   /**
    * Removes a still-pending upload by id and reports the key it pointed at, or `null` when it is

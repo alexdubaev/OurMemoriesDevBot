@@ -43,11 +43,11 @@
     "dotenv": "^17.4.2",
     "grammy": "1.46.0",
     "heic-decode": "2.1.0",
-    "hono": "4.13.6",
+    "hono": "4.13.7",
     "jose": "^6.2.7",
     "pg": "^8.20.0",
     "prisma": "7.9.0",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "zod": "^4.5.4"
   },
   "devDependencies": {

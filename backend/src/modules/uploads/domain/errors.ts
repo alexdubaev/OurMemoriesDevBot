@@ -7,6 +7,8 @@ export type UploadsFailureKind =
   | 'not_completed'
   /** Something is stored, but it is not what was declared. */
   | 'rejected'
+  /** The currently published avatar no longer matches the edit precondition. */
+  | 'conflict'
 
 export class UploadsFailure extends Error {
   constructor(

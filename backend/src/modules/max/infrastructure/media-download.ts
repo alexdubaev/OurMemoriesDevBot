@@ -1,6 +1,7 @@
 import { MaxProviderError } from './max-api'
 
 const MAX_MEDIA_HOSTS = new Set(['i.oneme.ru', 'fd.oneme.ru', 'a.oneme.ru'])
+const MAX_POSTER_HOSTS = new Set(['i.oneme.ru', 'fd.oneme.ru', 'a.oneme.ru', 'pimg.mycdn.me'])
 const MAX_VIDEO_CDN_HOST = /^maxvd[0-9]+\.okcdn\.ru$/i
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -161,10 +162,83 @@ export function createMaxMediaDownload(options: { fetch?: FetchLike; timeoutMs?:
   }
 }
 
+/** MAX video thumbnails use a separate image CDN policy from ordinary uploaded media. */
+export function createMaxPosterDownload(options: { fetch?: FetchLike; timeoutMs?: number } = {}) {
+  const fetchImpl = options.fetch ?? fetch
+  const timeoutMs = options.timeoutMs ?? 10_000
+  return async (url: string, maxBytes: number, callerSignal?: AbortSignal): Promise<MaxDownloadedMedia> => {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || !isAllowedPosterUrl(url)) throw new MaxMediaDownloadError()
+    const controller = new AbortController()
+    const abortCaller = () => controller.abort()
+    callerSignal?.addEventListener('abort', abortCaller, { once: true })
+    if (callerSignal?.aborted) controller.abort()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const response = await fetchImpl(url, { method: 'GET', redirect: 'manual', credentials: 'omit', referrer: '', headers: {}, signal: controller.signal })
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        cancelResponseBody(response)
+        throw new MaxProviderError(undefined, true, response.status)
+      }
+      if (response.status !== 200 || !response.body) {
+        cancelResponseBody(response)
+        throw new MaxMediaDownloadError()
+      }
+      const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? null
+      if (!contentType || !['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+        cancelResponseBody(response)
+        throw new MaxMediaDownloadError()
+      }
+      const declared = response.headers.get('content-length')
+      if (declared !== null && (!/^[0-9]+$/.test(declared) || Number(declared) <= 0 || Number(declared) > maxBytes)) {
+        cancelResponseBody(response)
+        throw new MaxMediaDownloadError()
+      }
+      const reader = response.body.getReader()
+      const chunks: Uint8Array[] = []
+      let total = 0
+      try {
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) break
+          total += next.value.byteLength
+          if (total > maxBytes || (declared !== null && total > Number(declared))) {
+            void reader.cancel().catch(() => undefined)
+            throw new MaxMediaDownloadError()
+          }
+          chunks.push(next.value.slice())
+        }
+      } finally { reader.releaseLock() }
+      if (total === 0 || (declared !== null && total !== Number(declared))) throw new MaxMediaDownloadError()
+      const bytes = new Uint8Array(total)
+      let offset = 0
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+      return { bytes, contentType, contentLength: total }
+    } catch (error) {
+      if (error instanceof MaxProviderError) throw error
+      if (controller.signal.aborted) throw new MaxProviderError(undefined, true)
+      throw new MaxProviderError(undefined, true)
+    } finally {
+      clearTimeout(timeout)
+      callerSignal?.removeEventListener('abort', abortCaller)
+    }
+  }
+}
+
 function isAllowedMediaUrl(value: string, videoCdn: boolean) {
   try {
     const parsed = new URL(value)
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.port === '' &&
       (videoCdn ? MAX_VIDEO_CDN_HOST.test(parsed.hostname) : MAX_MEDIA_HOSTS.has(parsed.hostname))
   } catch { return false }
+}
+
+function isAllowedPosterUrl(value: string) {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.port === '' && MAX_POSTER_HOSTS.has(parsed.hostname.toLowerCase())
+  } catch { return false }
+}
+
+function cancelResponseBody(response: Response) {
+  void response.body?.cancel().catch(() => undefined)
 }

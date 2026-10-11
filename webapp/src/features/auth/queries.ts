@@ -39,6 +39,8 @@ export function currentUserQueryOptions(api: Pick<AuthApi, 'me'>) {
   return queryOptions({
     queryKey: authQueryKeys.me(),
     queryFn: ({ signal }) => api.me({ signal }),
+    networkMode: 'always',
+    retry: 1,
   })
 }
 

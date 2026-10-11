@@ -7,12 +7,14 @@ import { MemberAvatarImage } from '@/features/avatar'
 import { NoteStoryPresentation } from './NoteStoryPresentation'
 import { MemoryReactions } from './MemoryReactions'
 import type { ReactionHapticStyle } from '@/platform/reaction-haptics'
+import { installRetargetedTouchClickGuard } from './retargeted-touch-click-guard'
 
 export type MemoryCardPresentationProps = {
   actions: ReactNode
   authorInitials: string
   authorName: string
   authorAvatarPath?: string | null
+  authorAvatarCrop?: { x: number; y: number; width: number; height: number } | null
   childName?: string
   childAvatarUrl?: string | null
   childAvatarCrop?: ChildAvatarCrop | null
@@ -37,6 +39,7 @@ export function MemoryCardPresentation({
   authorInitials,
   authorName,
   authorAvatarPath,
+  authorAvatarCrop,
   body,
   kind,
   reactionCounts,
@@ -56,7 +59,7 @@ export function MemoryCardPresentation({
   const interactive = mode === 'feed'
   const articleRef = useRef<HTMLElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pointerRef = useRef<{ id: number; x: number; y: number; target: EventTarget | null } | null>(null)
+  const pointerRef = useRef<{ id: number; x: number; y: number; target: EventTarget | null; pointerType: string } | null>(null)
   const recognizedPointerRef = useRef<{ id: number; target: EventTarget | null } | null>(null)
   const didHoldRef = useRef(false)
   const holdClickTargetRef = useRef<Element | null>(null)
@@ -126,7 +129,11 @@ export function MemoryCardPresentation({
     window.addEventListener('blur', cancelOnScroll)
     document.addEventListener('visibilitychange', cancelOnScroll)
     window.addEventListener('pagehide', cancelOnScroll)
-    return () => { document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current) }
+    return () => {
+      const pendingTouch = pointerRef.current?.pointerType === 'touch' ? pointerRef.current : null
+      if (pendingTouch) installRetargetedTouchClickGuard(document, window, pendingTouch.id, pendingTouch.x, pendingTouch.y)
+      document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current)
+    }
   }, [cancelPending, memoryId, reactionScopeKey, setPickerOpen])
 
   const eligible = (event: ReactPointerEvent<HTMLElement>) => {
@@ -176,7 +183,7 @@ export function MemoryCardPresentation({
     recognizedPointerRef.current = null
     holdClickTargetRef.current = null
     didHoldRef.current = false
-    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target, pointerType: event.pointerType }
     timerRef.current = setTimeout(() => {
       const pointer = pointerRef.current
       if (!pointer || pointer.id !== event.pointerId) return
@@ -226,7 +233,7 @@ export function MemoryCardPresentation({
     <article aria-describedby={interactive ? `reaction-help-${memoryId}` : undefined} aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind} onClickCapture={onCardClickCapture} onKeyDown={onCardKeyDown} onLostPointerCapture={cancelPending} onPointerCancel={cancelPending} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} ref={articleRef} tabIndex={interactive ? 0 : undefined}>
       {interactive ? <Typography as="span" className="sr-only" id={`reaction-help-${memoryId}`} variant="memoryMeta">Удерживайте свободную область, чтобы выбрать реакцию. Shift+F10 открывает выбор с клавиатуры.</Typography> : null}
       <header className="memory-header" data-slot="memoly-author-row">
-        <MemberAvatarImage avatarPath={authorAvatarPath} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
+        <MemberAvatarImage avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>

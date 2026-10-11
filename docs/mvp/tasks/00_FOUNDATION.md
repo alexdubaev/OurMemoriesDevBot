@@ -13,18 +13,18 @@
 MVP: только личный бот, Telegram Mini App, четыре формата, full/viewer, семейные лайки. Без AI, групп, платежей и реализации будущих платформ. Новые семейные данные — только synthetic fixtures до приёмки закрытого пилота.
 
 ## Файлы
-README.md; AGENTS.md; .env.example (или существующий backend env example с Telegram placeholders, без секретов); .github/workflows/verify.yml; .github/pull_request_template.md; GIT_SETTINGS.md; CHECKLIST.md; UPSTREAM.md; REPO_MAP.md; DEPENDENCIES.md; package.json; scripts/verify-plan.mjs; verification-map.json; tests/verify-plan.test.ts; выбранные template config; docs/mvp/ (этот комплект).
+README.md; AGENTS.md; .env.example (или существующий backend env example с Telegram placeholders, без секретов); GIT_SETTINGS.md; CHECKLIST.md; UPSTREAM.md; REPO_MAP.md; DEPENDENCIES.md; package.json; выбранные template config; docs/mvp/ (этот комплект).
 
 ## Потребляемые и производимые интерфейсы
-Производит локальные команды dev:webapp/dev:backend, architecture:check и verify:plan. Не производит фиктивную Telegram-авторизацию. Точные исходные команды сохраняет из выбранного package.json.
+Производит локальные команды разработки и проверки, перечисленные в package.json. Не производит фиктивную Telegram-авторизацию.
 
 ## Порядок выполнения
 1. Прочитать `../REPOSITORY.md`. Канонический repo уже задан: `alexdubaev/OurMemoriesDevBot`; SSH `git@github.com:alexdubaev/OurMemoriesDevBot.git`, HTTPS `https://github.com/alexdubaev/OurMemoriesDevBot.git`. Проверить `git remote get-url origin` и `git ls-remote origin`; `origin` должен быть одним из этих адресов, Vibe — только read-only `vibe-template`. Проверить выбранный upstream SHA и актуальные requirements Bun/PostgreSQL, сохранить Apache LICENSE/NOTICE. Если remote пустой — показать владельцу план первого `main` push и дождаться явного разрешения; если remote уже содержит историю — сравнить её и не перезаписывать.
 2. Установить locked dependencies, поднять только тестовую/локальную PostgreSQL по README. Запустить и записать baseline: типы, архитектура, auth-unit/integration, webapp build. Если baseline падает — сообщить конкретно, не маскировать.
 3. Активные surfaces: backend/webapp/contracts. Website/mobile deferred. Не устанавливать Expo/Capacitor/VK/AI SDK. Убрать demo-продуктовые меню из активного webapp, не удаляя полезные primitives.
 4. Обновить CHECKLIST именем и scope; создать REPO_MAP с реальными путями вместо выдуманных. AGENTS описывает узкие импорты, no real data, no automatic deployment, профили проверок. Не создавать пустые слои каждому модулю.
-5. Реализовать verify-plan: читаемый changed-path план с whitelist команд из configuration. Docs-only не требует DB; auth/contracts/media/schema затрагивают соответствующих потребителей; неизвестный путь fail-safe. Скрипт только планирует, не считает планирование запуском тестов.
-6. Зафиксировать в `GIT_SETTINGS.md` canonical repo/remotes, фактический default branch, push permission и результат чтения remote. Создать минимальный PR workflow без верхнеуровневого paths-skip: он запускает только уже существующие проверки, завершает единым verify-required с fail-closed итогом. Добавить PR template. После первого фактического запуска, и только при подтверждённом доступе, настроить main protections с этим check. Не требовать статус, который ещё ни разу не создавался. Настройки и ограничения тарифа зафиксировать в GIT_SETTINGS.md. Нет origin/разрешения — написать «GitHub не настроен», не заявлять обратное; не делать push и не включать мнимые защиты.
+5. Зафиксировать существующие команды проекта в REPO_MAP и выбрать проверки по изменяемой области; локальный publication gate назначается отдельной задачей и не считается существующим до реализации.
+6. Зафиксировать в `GIT_SETTINGS.md` canonical repo/remotes, фактический default branch, push permission и результат чтения remote. GitHub Actions CI/CD не используется. Сохранить PR и branch protections без обязательного Actions status. Перед каждым попаданием в main, включая PR merge, выполнить локальную проверку точного source SHA командой `bun run verify:local`. Pre-push hook запускает gate для main/master pushes; PR merge не вызывает локальные hooks.
 7. Зафиксировать публичную конфигурацию development-бота: `TELEGRAM_BOT_EXPECTED_USERNAME=OurMemoriesDevBot`. Перенести только пустые placeholders секретов из `templates/telegram/backend.env.example`; реальный token не просить и не коммитить. На этом блоке не вызывать `setWebhook` и не требовать живой Telegram-интеграции.
 8. Сохранить registry лицензий кандидатов. Ничего не мигрировать из старого широкого ТЗ; продуктовый scope задаёт этот комплект.
 
@@ -42,11 +42,10 @@ F00.1 docs-only diff → только document/link checks. F00.2 media adapter 
 - [ ] Передать владельцу результат и остановиться до следующего блока. Commit — в своей ветке, без автоматического merge/deploy.
 
 ## Команды проверки
-Новые тестовые файлы с указанными именами создаёт этот блок. Фильтр должен реально находить тесты: ноль найденных тестов не является успехом. Если выбранный Vibe использует другую эквивалентную команду, обновить REPO_MAP/verification-map и привести фактический запуск.
+Проверять только полезные границы; точный набор локальной publication-команды будет определён отдельной задачей.
 ```bash
 bun run architecture:check
 bun run typecheck
-bun test tests/verify-plan.test.ts
 bun run build:webapp
 ```
 

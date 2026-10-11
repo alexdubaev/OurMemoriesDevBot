@@ -43,6 +43,15 @@ export const taskHandlers = {
       return createMaxTasks(runtime).backupMedia(payload, signal, finalAttempt)
     },
   },
+  'max:video-poster': {
+    maxAttempts: 5,
+    deadlineMs: 90_000,
+    retryDelayMs: providerRetryDelay,
+    run: async ({ payload, signal }, runtime) => {
+      const { createMaxTasks } = await import('../modules/max')
+      return createMaxTasks(runtime).videoPoster(payload, signal)
+    },
+  },
   'telegram:process': {
     maxAttempts: 5,
     deadlineMs: 90_000,
@@ -94,6 +103,18 @@ export const taskHandlers = {
       }
       const { createMediaTasks } = await import('../modules/media')
       await createMediaTasks(runtime).prepareAsset({ mediaId, signal })
+    },
+  },
+  'media:video-poster': {
+    maxAttempts: 5,
+    deadlineMs: 90_000,
+    run: async ({ payload, signal }, runtime) => {
+      const mediaId = (payload as { mediaId?: unknown })?.mediaId
+      if (typeof mediaId !== 'string' || !/^[0-9a-f-]{36}$/i.test(mediaId)) {
+        throw new TerminalTaskError('Task payload is missing a usable media id')
+      }
+      const { createMediaTasks } = await import('../modules/media')
+      await createMediaTasks(runtime).createVideoPoster({ mediaId, signal })
     },
   },
   /**

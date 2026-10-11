@@ -126,11 +126,13 @@ export class PrismaMemoryRepository implements MemoryRepository {
             if (entry.source !== 'max') continue
             const source = sessions.find((session) => session.id === entry.sessionId)?.outboundSource
             if (!source) throw new MemoryFailure('invalid_input', 'Видео MAX не найдено')
-            await tx.maxVideoReference.create({ data: {
+            const reference = await tx.maxVideoReference.create({ data: {
               familyId: scope.familyId, memoryId: created.id, outboundSourceId: source.id,
               attachmentPosition: position, providerAttachmentId: source.providerAttachmentId,
               width: source.width, height: source.height, durationMs: source.durationMs,
             } })
+            await insertTask(tx, { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}`,
+              payload: { referenceId: reference.id }, scheduledFor: idempotency.now })
           }
         }
         if (input.kind === 'photo' || input.kind === 'media') {
@@ -272,15 +274,24 @@ export class PrismaMemoryRepository implements MemoryRepository {
         if (!concurrent) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         throw versionConflict()
       }
-      const [linked, telegramVideo] = await Promise.all([
+      const [linked, telegramVideo, maxVideo] = await Promise.all([
         tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, select: { mediaId: true } }),
         tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
           SELECT "thumbnail_media_id" AS "thumbnailMediaId"
             FROM "telegram_video_references"
            WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
         `,
+        tx.$queryRaw<Array<{ thumbnailMediaId: string | null }>>`
+          SELECT "thumbnail_media_id" AS "thumbnailMediaId"
+            FROM "max_video_references"
+           WHERE "memory_id" = ${memoryId}::uuid AND "family_id" = ${scope.familyId}::uuid
+        `,
       ])
-      const mediaIds = [...linked.map(({ mediaId }) => mediaId), ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : [])]
+      const mediaIds = [...new Set([
+        ...linked.map(({ mediaId }) => mediaId),
+        ...(telegramVideo[0]?.thumbnailMediaId ? [telegramVideo[0].thumbnailMediaId] : []),
+        ...maxVideo.flatMap(({ thumbnailMediaId }) => thumbnailMediaId ? [thumbnailMediaId] : []),
+      ])]
       for (const mediaId of mediaIds) {
         await tx.mediaAsset.updateMany({ where: { id: mediaId, familyId: scope.familyId, deletedAt: null }, data: { deletedAt: now } })
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${mediaId}`,
@@ -558,7 +569,7 @@ function memoryInclude() {
   return {
     author: { select: {
       displayName: true,
-      avatars: { where: { state: 'ready' as const }, select: { id: true }, take: 1 },
+      avatars: { where: { state: 'ready' as const }, select: { id: true, avatarCrop: true }, take: 1 },
       familyMemberships: { where: { revokedAt: null, family: { status: 'active' as const } }, select: { familyId: true } },
     } },
     likes: {
@@ -574,7 +585,9 @@ function memoryInclude() {
     },
     maxVideoReferences: {
       orderBy: { attachmentPosition: 'asc' as const },
-      select: { id: true, attachmentPosition: true, width: true, height: true, durationMs: true },
+      select: { id: true, attachmentPosition: true, width: true, height: true, durationMs: true, thumbnailMedia: {
+        select: { id: true, originalStatus: true, deletedAt: true, variants: { select: { variant: true } } },
+      } },
     },
   } as const
 }
@@ -593,7 +606,7 @@ function dto(
     createdAt: Date
     version: number
     status: 'processing' | 'published' | 'failed' | 'deleted'
-    author: { displayName: string | null; avatars: Array<{ id: string }>; familyMemberships: Array<{ familyId: string }> }
+    author: { displayName: string | null; avatars: Array<{ id: string; avatarCrop: unknown }>; familyMemberships: Array<{ familyId: string }> }
     likes: Array<{ userId: string; reaction: MemoryReaction }>
     media: Array<{ position: number; asset: {
       id: string
@@ -606,7 +619,8 @@ function dto(
       variants: Array<{ variant: 'preview' | 'display' | 'playback' }>
     } }>
     telegramVideoReference: { id: string; width: number | null; height: number | null; durationMs: number | null; thumbnailMedia: { id: string; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null } | null
-    maxVideoReferences: Array<{ id: string; attachmentPosition: number; width: number | null; height: number | null; durationMs: number | null }>
+    maxVideoReferences: Array<{ id: string; attachmentPosition: number; width: number | null; height: number | null; durationMs: number | null;
+      thumbnailMedia: { id: string; originalStatus: 'pending' | 'stored' | 'failed'; deletedAt: Date | null; variants: Array<{ variant: 'preview' | 'display' | 'playback' }> } | null }>
   },
   principalUserId: string,
   role: MemberRole,
@@ -618,7 +632,8 @@ function dto(
     author: { id: memory.authorId, name: memory.author.displayName ?? 'Участник семьи',
       avatarPath: memory.author.familyMemberships.some(({ familyId }) => familyId === memory.familyId) && memory.author.avatars[0]
         ? `/api/v1/families/${memory.familyId}/media/avatars/${memory.authorId}/${memory.author.avatars[0].id}/content`
-        : null },
+        : null,
+      avatarCrop: isAvatarCrop(memory.author.avatars[0]?.avatarCrop) ? memory.author.avatars[0]!.avatarCrop : null },
     kind: memory.kind,
     body: memory.body,
     occurredAt: memory.occurredAt.toISOString(),
@@ -666,6 +681,10 @@ function dto(
         height: reference.height,
         durationMs: reference.durationMs,
         playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${reference.id}/content`,
+        posterState: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display') ? 'ready' as const : 'pending' as const,
+        posterPath: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display')
+          ? `/api/v1/families/${memory.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display`
+          : null,
       } })),
     ].sort((a, b) => a.position - b.position).map((entry) => entry.attachment),
     reactionCounts: memory.likes.reduce((counts, like) => {
@@ -679,6 +698,14 @@ function dto(
     },
     capabilities: { edit: role === 'full', delete: role === 'full', like: true },
   }
+}
+
+function isAvatarCrop(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object') return false
+  const crop = value as Record<string, unknown>
+  return ['x', 'y', 'width', 'height'].every((key) => typeof crop[key] === 'number')
+    && (crop.x as number) >= 0 && (crop.y as number) >= 0 && (crop.width as number) > 0 && (crop.height as number) > 0
+    && (crop.x as number) + (crop.width as number) <= 1 && (crop.y as number) + (crop.height as number) <= 1
 }
 
 function measuredWaveform(value: unknown) {

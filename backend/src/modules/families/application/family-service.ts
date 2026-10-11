@@ -6,6 +6,7 @@ import {
 } from '@web-app-demo/contracts'
 import type {
   AcceptInviteResponse,
+  AvatarCrop,
   CompleteChildProfileRequest,
   CreateFamilyRequest,
   CreateInviteRequest,
@@ -152,6 +153,7 @@ export class FamilyService {
           name: family.name,
           displaySubtitle: familyDisplayName ?? child?.displayName ?? null,
           childAvatarMediaId: child?.avatarMediaId ?? null,
+          childAvatarCrop: child && validAvatarCrop(child.avatarCrop) ? child.avatarCrop : null,
           isOwner,
           role,
           setupStatus: ready ? 'ready' as const : 'needs_child' as const,
@@ -548,7 +550,7 @@ export class FamilyService {
     if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
     const members = await this.db.familyMember.findMany({
       where: { familyId: scope.familyId, revokedAt: null },
-      include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
+      include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true, avatarCrop: true }, take: 1 } } } },
       orderBy: { joinedAt: 'asc' },
     })
     return {
@@ -879,7 +881,7 @@ export class FamilyService {
       }
       const member = await tx.familyMember.findUniqueOrThrow({
         where: { familyId_userId: { familyId: scope.familyId, userId } },
-        include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
+        include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true, avatarCrop: true }, take: 1 } } } },
       })
       return { membership: memberDto(member, family.ownerUserId) }
     })
@@ -1123,7 +1125,7 @@ function memberDto(
     familyDisplayName: string | null
     joinedAt: Date
     version: number
-    user: { displayName: string | null; avatars: Array<{ id: string }> }
+    user: { displayName: string | null; avatars: Array<{ id: string; avatarCrop: unknown }> }
   },
   ownerUserId: string,
 ): FamilyMemberDto {
@@ -1132,6 +1134,7 @@ function memberDto(
     avatarPath: member.user.avatars[0]
       ? `/api/v1/families/${member.familyId}/media/avatars/${member.userId}/${member.user.avatars[0].id}/content`
       : null,
+    avatarCrop: member.user.avatars[0] && validAvatarCrop(member.user.avatars[0].avatarCrop) ? member.user.avatars[0].avatarCrop : null,
     displayName: member.user.displayName,
     familyDisplayName: member.familyDisplayName,
     role: member.role,
@@ -1149,7 +1152,7 @@ async function inviteResponse(
   const family = await tx.family.findUniqueOrThrow({ where: { id: familyId } })
   const member = await tx.familyMember.findFirst({
     where: { familyId, userId, revokedAt: null },
-    include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true }, take: 1 } } } },
+    include: { user: { select: { displayName: true, avatars: { where: { state: 'ready' }, select: { id: true, avatarCrop: true }, take: 1 } } } },
   })
   if (!member) throw new FamilyFailure('invite_used', 'Приглашение уже использовано')
   return {

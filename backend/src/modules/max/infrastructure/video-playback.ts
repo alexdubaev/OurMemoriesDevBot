@@ -1,17 +1,12 @@
 import { createHash } from 'node:crypto'
-import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoReadiness } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type MaxVideoPosterReadiness, type MaxVideoReadiness } from '@web-app-demo/contracts'
 
 import type { BackendRuntime } from '../../../runtime'
 import { createPrismaFamilyAccess, type FamilyScope } from '../../families'
 import { MediaFailure } from '../../media'
 import type { MaxApiPort, MaxVideoRendition } from '../application/ports'
 import { MaxProviderError } from './max-api'
-import { createMaxMediaDownload } from './media-download'
-
-const allowedCdnHost = /^maxvd[0-9]+\.okcdn\.ru$/i
-const maxHeight = 720
-const maxPosterBytes = 2 * 1024 * 1024
-const posterMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+import { isAllowedMaxVideoUrl, selectMaxVideoRendition } from './video-rendition'
 
 export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const maxBytes = options.runtime.env.MAX_VIDEO_MAX_BYTES ?? MAX_DIRECT_VIDEO_MAX_BYTES
@@ -20,7 +15,7 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       await familyAccess.requireMember(scope)
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: { id: referenceId, familyId: scope.familyId }, select: {
         id: true, familyId: true, attachmentPosition: true, providerAttachmentId: true,
-        source: { select: { messageId: true, senderSubject: true, recipientId: true, familyId: true, memoryId: true } },
+        source: { select: { messageId: true, senderSubject: true, recipientId: true, originalMessageId: true, originalChannelId: true, familyId: true, memoryId: true } },
         outboundSource: { select: { messageId: true, recipientId: true, familyId: true } },
         memory: { select: { id: true, familyId: true, status: true, deletedAt: true } },
       } })
@@ -29,24 +24,32 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         (reference.source && reference.source.memoryId !== reference.memory.id) || reference.memory.familyId !== scope.familyId ||
         reference.memory.status !== 'published' || reference.memory.deletedAt !== null) throw new MediaFailure('not_found', 'Медиа не найдено')
 
-      let expectedSenderId: string
-      try {
-        expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
-      } catch (error) {
-        if (signal?.aborted) throw error
-        return { readiness: { state: 'unknown', recheckable: true } }
+      const isForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId !== null)
+      const isEnvelopeForward = Boolean(reference.source?.originalMessageId && reference.source.originalChannelId === null)
+      let expectedSenderId: string | null = null
+      if (!isForward) {
+        try {
+          expectedSenderId = reference.source ? reference.source.senderSubject : await resolveOutboundSender(options.api, signal)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          return { readiness: { state: 'unknown', recheckable: true } }
+        }
       }
 
       let resolved
       try {
-        resolved = await options.api.getMessage(source.messageId, signal)
+        resolved = await options.api.getMessage(isForward ? reference.source!.originalMessageId! : source.messageId, signal)
       } catch (error) {
         if (signal?.aborted) throw error
         return { readiness: { state: 'unknown', recheckable: true } }
       }
       const providerPosition = reference.source ? reference.attachmentPosition : 0
-      const current = resolved.attachments[providerPosition]
-      if (resolved.messageId !== source.messageId || resolved.senderId !== expectedSenderId || resolved.recipientId !== String(source.recipientId)) throw new MediaFailure('not_found', 'Медиа не найдено')
+      const current = (isEnvelopeForward ? resolved.forwardedAttachments : resolved.attachments)?.[providerPosition]
+      const expectedMessageId = isForward ? reference.source!.originalMessageId! : source.messageId
+      const expectedRecipientId = isForward ? String(reference.source!.originalChannelId) : String(source.recipientId)
+      if (resolved.messageId !== expectedMessageId || resolved.recipientId !== expectedRecipientId ||
+          (isForward ? resolved.recipientType !== 'channel' : resolved.senderId !== expectedSenderId) ||
+          (isEnvelopeForward && resolved.forwardedFrom?.messageId !== reference.source!.originalMessageId)) throw new MediaFailure('not_found', 'Медиа не найдено')
       if (!current || current.kind !== 'video' || current.providerAttachmentId !== reference.providerAttachmentId) {
         throw new MediaFailure('not_found', 'Медиа не найдено')
       }
@@ -59,13 +62,31 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         if (signal?.aborted) throw error
         return { readiness: isVideoProcessing(error) ? { state: 'processing', recheckable: true } : { state: 'unknown', recheckable: true } }
       }
-      const rendition = selectRendition(video.renditions)
+      const rendition = selectRendition(video.renditions, maxBytes)
       if (!rendition) return { readiness: { state: 'unknown', recheckable: true } }
       return { readiness: { state: 'ready', recheckable: false }, url: rendition.url, thumbnailUrl: video.thumbnailUrl ?? null }
   }
   return {
     async readiness(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
       return (await resolve(scope, referenceId, signal)).readiness
+    },
+    async posterReadiness(scope: FamilyScope, referenceId: string): Promise<MaxVideoPosterReadiness> {
+      await familyAccess.requireMember(scope)
+      const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: {
+        id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
+      }, select: { id: true, familyId: true, thumbnailMediaId: true, thumbnailMedia: { select: {
+        id: true, originalStatus: true, deletedAt: true,
+        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+      } } } })
+      if (!reference) throw new MediaFailure('not_found', 'Медиа не найдено')
+      const display = reference.thumbnailMedia?.variants[0]
+      if (reference.thumbnailMedia && reference.thumbnailMedia.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && display) {
+        return { state: 'ready', posterPath: `/api/v1/families/${scope.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display` }
+      }
+      const task = await options.runtime.prisma.taskOutbox.findUnique({ where: {
+        type_dedupeKey: { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}` },
+      }, select: { status: true } })
+      return task?.status === 'pending' || task?.status === 'processing' ? { state: 'pending' } : { state: 'failed' }
     },
     async content(scope: FamilyScope, referenceId: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', signal?: AbortSignal) {
       const result = await resolve(scope, referenceId, signal)
@@ -75,17 +96,24 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       return fetchCdnVideo(result.url!, rangeHeader, method, maxBytes, signal)
     },
     async poster(scope: FamilyScope, referenceId: string, signal?: AbortSignal) {
-      const result = await resolve(scope, referenceId, signal)
-      if (result.readiness.state !== 'ready' || !result.thumbnailUrl) return null
-      const image = await createMaxMediaDownload()(result.thumbnailUrl, maxPosterBytes, signal)
-      const contentType = image.contentType?.split(';', 1)[0]?.trim().toLowerCase()
-      if (!contentType || !posterMimeTypes.has(contentType)) throw new MediaFailure('unsupported_media', 'Превью видео недоступно')
-      const bytes = image.bytes
+      void signal
+      await familyAccess.requireMember(scope)
+      const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: {
+        id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
+      }, select: { id: true, thumbnailMedia: { select: { id: true, familyId: true, originalStatus: true, deletedAt: true,
+        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+      } } } })
+      const display = reference?.thumbnailMedia?.variants[0]
+      if (!reference?.thumbnailMedia || reference.thumbnailMedia.familyId !== scope.familyId || reference.thumbnailMedia.deletedAt !== null ||
+          reference.thumbnailMedia.originalStatus !== 'stored' || !display) return null
+      const stored = await options.runtime.privateStorage.storage.readObject({ key: display.objectKey })
+      if (!stored) return null
+      const bytes = new Uint8Array(await new Response(stored.body).arrayBuffer())
       return {
         body: bytes,
-        contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp',
+        contentType: display.mime as 'image/jpeg' | 'image/png' | 'image/webp',
         contentLength: bytes.byteLength,
-        etag: `"${createHash('sha256').update(bytes).digest('hex')}"`,
+        etag: `"${display.sha256}"`,
       }
     },
   }
@@ -105,14 +133,12 @@ async function resolveOutboundSender(api: MaxApiPort, signal?: AbortSignal) {
   return String(identity.userId)
 }
 
-export function selectRendition(renditions: MaxVideoRendition[]) {
-  return renditions
-    .filter((item) => isAllowedCdnUrl(item.url) && item.height !== null && item.height > 0 && item.height <= maxHeight)
-    .sort((a, b) => (b.height! - a.height!) || ((b.width ?? 0) - (a.width ?? 0)))[0] ?? null
+export function selectRendition(renditions: MaxVideoRendition[], maxBytes = MAX_DIRECT_VIDEO_MAX_BYTES) {
+  return selectMaxVideoRendition(renditions, maxBytes)
 }
 
 export async function fetchCdnVideo(url: string, rangeHeader: string | undefined, method: 'GET' | 'HEAD', maxBytes: number, signal?: AbortSignal) {
-  if (!isAllowedCdnUrl(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
+  if (!isAllowedMaxVideoUrl(url)) throw new MediaFailure('unsupported_media', 'Медиа недоступно')
   const range = rangeHeader === undefined ? null : parseRangeHeader(rangeHeader)
   let response: Response
   try {
@@ -252,10 +278,6 @@ function parseLength(value: string | null) {
   if (!value || !/^\d+$/.test(value)) return null
   const length = Number(value)
   return Number.isSafeInteger(length) && length > 0 ? length : null
-}
-
-function isAllowedCdnUrl(value: string) {
-  try { const url = new URL(value); return url.protocol === 'https:' && !url.port && !url.username && !url.password && allowedCdnHost.test(url.hostname) } catch { return false }
 }
 
 function isVideoProcessing(error: unknown) {

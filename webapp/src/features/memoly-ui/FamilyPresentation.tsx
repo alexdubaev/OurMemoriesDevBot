@@ -123,7 +123,7 @@ export function FamilyMaxChannelCard({ status, loading, error, canManage, onRetr
 function FamilyMemberRow({ member, onOpen }: { member: FamilyMemberDto; onOpen: (member: FamilyMemberDto) => void }) {
   const displayName = familyMemberName(member)
   const alias = member.familyDisplayName && member.familyDisplayName !== member.displayName ? member.displayName : null
-  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><MemberAvatarImage avatarPath={member.avatarPath} className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{alias ? <span>{alias}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span><span aria-hidden="true" className="family-row-more">•••</span></button>
+  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><MemberAvatarImage avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{alias ? <span>{alias}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span><span aria-hidden="true" className="family-row-more">•••</span></button>
 }
 
 function formatBytes(value: number) { if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`; return `${(value / 1024 / 1024).toFixed(1)} МБ` }

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Avatar } from '@/components/ui/avatar'
 import { AvatarLetter } from '@/features/session'
 import { shouldShowChildAvatarImage } from './child-avatar-state'
+import { avatarCropStyle } from '@/features/avatar'
 
 type AvatarCrop = { x: number; y: number; width: number; height: number } | null
 type ChildAvatarSize = 'family-card' | 'feed-header' | 'profile'
@@ -26,17 +27,14 @@ export function ChildAvatar({
   }
 
   return (
-    <Avatar className={sizeClass} data-slot="child-avatar" size="xl">
+    <Avatar className={`${sizeClass} relative overflow-hidden`} data-slot="child-avatar" size="xl">
       <img
         alt={`Аватар ${name}`}
         className="size-full rounded-full object-cover"
         data-slot="child-avatar-image"
         onError={() => setFailedAvatarUrl(avatarUrl)}
         src={avatarUrl ?? undefined}
-        style={avatarCrop ? {
-          objectPosition: `${(avatarCrop.x + avatarCrop.width / 2) * 100}% ${(avatarCrop.y + avatarCrop.height / 2) * 100}%`,
-          transform: `scale(${1 / Math.min(avatarCrop.width, avatarCrop.height)})`,
-        } : undefined}
+        style={avatarCropStyle(avatarCrop)}
       />
     </Avatar>
   )

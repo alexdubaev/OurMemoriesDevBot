@@ -35,7 +35,7 @@ export async function bootstrapAuthSession({
 }
 
 function refreshBootstrapSession(api: Pick<AuthApi, 'refresh'>) {
-  bootstrapRefreshPromise ??= api.refresh().finally(() => {
+  bootstrapRefreshPromise ??= api.refresh(undefined, { timeoutMs: 15000 }).finally(() => {
     bootstrapRefreshPromise = null
   })
 

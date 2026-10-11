@@ -45,6 +45,9 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ['desktop-7sch55t.tail879033.ts.net'],
+    watch: {
+      ignored: ['**/e2e/.artifacts/**'],
+    },
     proxy: {
       '/api': { target: backendProxyTarget, changeOrigin: true },
       '/storage': { target: backendProxyTarget, changeOrigin: true },

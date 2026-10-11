@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, test } from 'bun:test'
+import { QueryClient } from '@tanstack/react-query'
 
 import {
   activatePrivateCacheIdentity,
@@ -6,12 +7,35 @@ import {
   isActivePrivateCacheIdentity,
   isPersistableQueryKey,
   privateCacheIdentityGeneration,
+  restorePrivateQueryCache,
 } from '../src/platform/persistence/private-cache'
 
 const familyId = '11111111-1111-4111-8111-111111111111'
 const mediaId = '22222222-2222-4222-8222-222222222222'
 const memberId = '33333333-3333-4333-8333-333333333333'
 const avatarId = '44444444-4444-4444-8444-444444444444'
+const originalIndexedDb = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
+afterEach(() => {
+  if (originalIndexedDb) Object.defineProperty(globalThis, 'indexedDB', originalIndexedDb)
+  else Reflect.deleteProperty(globalThis, 'indexedDB')
+})
+
+test('late IndexedDB open closes its connection after the bounded open has failed', async () => {
+  let request!: IDBOpenDBRequest
+  let closed = false
+  Object.defineProperty(globalThis, 'indexedDB', {
+    configurable: true,
+    value: { open: () => {
+      request = { result: null, onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null } as unknown as IDBOpenDBRequest
+      return request
+    } } as unknown as IDBFactory,
+  })
+  const generation = activatePrivateCacheIdentity('idb-user')
+  await expect(restorePrivateQueryCache(new QueryClient(), 'idb-user', generation)).rejects.toThrow('timed out')
+  request.result = { close: () => { closed = true } } as IDBDatabase
+  request.onsuccess?.(new Event('success') as unknown as Event)
+  expect(closed).toBe(true)
+})
 
 describe('private cache boundaries', () => {
   it('accepts only same-origin image variants, member avatars and MAX posters', () => {

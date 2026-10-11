@@ -72,6 +72,7 @@ export function createMaxDirectVideoUploadService(options: {
   repository: MaxDirectUploadRepository
   publisher: SourceMemoryPublisher
   memoryReader?: MemoryReader
+  enqueueVideoPoster?: (tx: PrismaTransactionClient, referenceId: string) => Promise<unknown>
   now?: () => Date
   reservationTtlMs?: number
 }) {
@@ -311,7 +312,7 @@ export function createMaxDirectVideoUploadService(options: {
           mediaIds: [],
           externalAttachment: 'max-video',
         }, async (tx, memoryId) => {
-          await tx.maxVideoReference.upsert({
+          const reference = await tx.maxVideoReference.upsert({
             where: { outboundSourceId_familyId: { outboundSourceId: outbound.id, familyId: scope.familyId } },
             create: {
               id: randomUUID(), outboundSourceId: outbound.id, memoryId, familyId: scope.familyId,
@@ -323,6 +324,7 @@ export function createMaxDirectVideoUploadService(options: {
               width: video.width, height: video.height,
               durationMs: video.inboundDurationSeconds === null ? null : Math.max(1, Math.round(video.inboundDurationSeconds * 1_000)) },
           })
+          await options.enqueueVideoPoster?.(tx, reference.id)
         })
         const finalized = await options.repository.update(session, { state: 'finalized', lastErrorCode: null })
         return finalizedResult(scope, finalized, options.memoryReader)

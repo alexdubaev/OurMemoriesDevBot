@@ -186,7 +186,7 @@ describe('MAX API client', () => {
         ],
       } }] })
     } })
-    await expect(api.getMessage('m/1')).resolves.toEqual({ messageId: 'm/1', senderId: '42', recipientId: '99', attachments: [
+    await expect(api.getMessage('m/1')).resolves.toEqual({ messageId: 'm/1', senderId: '42', recipientId: '99', recipientType: 'dialog', text: null, attachments: [
       { kind: 'image', providerAttachmentId: '1234', url: 'https://i.oneme.ru/a' },
       { kind: 'file', providerAttachmentId: 'f-1', filename: 'x.png', declaredSize: 12, url: 'https://fd.oneme.ru/b' },
     ] })
@@ -204,8 +204,46 @@ describe('MAX API client', () => {
     }] }) })
 
     await expect(api.getMessage('live-m/1')).resolves.toEqual({
-      messageId: 'live-m/1', senderId: '42', recipientId: '99', attachments: [],
+      messageId: 'live-m/1', senderId: '42', recipientId: '99', recipientType: 'dialog', text: null, attachments: [],
     })
+  })
+
+  test('resolves supported media from the direct forwarded envelope without requiring a video URL', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 }, timestamp: 1_790_000_000_000,
+      body: { mid: 'outer-forward', attachments: [] },
+      link: { type: 'forward', message: { mid: 'private-original', timestamp: 1_789_000_000_000,
+        attachments: [{ type: 'video', payload: { token: 'provider-confirmed-token', duration: 4 } }] } },
+    }] }) })
+
+    await expect(api.getMessage('outer-forward')).resolves.toMatchObject({
+      messageId: 'outer-forward', senderId: '42', recipientId: '99', recipientType: 'dialog',
+      forwardedFrom: { messageId: 'private-original', timestamp: 1_789_000_000_000 },
+      attachments: [], forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'token-only-video', currentToken: 'provider-confirmed-token' }],
+    })
+  })
+
+  test('returns a text-only channel original when attachments are omitted and preserves its timestamp', async () => {
+    const timestamp = 1_702_000_000_123
+    const raw = `{"messages":[{"recipient":{"chat_id":-9007199254740993,"chat_type":"channel","user_id":null},"timestamp":${timestamp},"body":{"mid":"text-only-original","text":"Original channel text"}}]}`
+    const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
+    await expect(api.getMessage('text-only-original')).resolves.toEqual({
+      messageId: 'text-only-original', senderId: '0', recipientId: '-9007199254740993', recipientType: 'channel',
+      text: 'Original channel text', timestamp, attachments: [],
+    })
+  })
+
+  test('rejects a looked-up original with an invalid timestamp, ambiguous mid, or malformed attachments', async () => {
+    const malformed = [
+      `{"message":{"recipient":{"chat_id":-90,"chat_type":"channel"},"timestamp":"1700000000000","body":{"mid":"requested-original","text":"x"}}}`,
+      `{"message":{"recipient":{"chat_id":-90,"chat_type":"channel"},"body":{"mid":"other-original","text":"x"}}}`,
+      `{"message":{"recipient":{"chat_id":-90,"chat_type":"channel"},"body":{"mid":"requested-original","attachments":{}}}}`,
+      `{"message":{"recipient":{"chat_id":-90,"chat_type":"group"},"body":{"mid":"requested-original","text":"x"}}}`,
+    ]
+    for (const raw of malformed) {
+      const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
+      await expect(api.getMessage('requested-original')).rejects.toBeInstanceOf(MaxProviderError)
+    }
   })
 
   test('resolves channel messages by the exact signed chat id when the provider omits the sender', async () => {
@@ -213,7 +251,7 @@ describe('MAX API client', () => {
       chat_id: -79560265048692, chat_type: 'channel', user_id: null,
     }, body: { mid: 'channel-message', attachments: [] } }] }) })
     await expect(api.getMessage('channel-message')).resolves.toEqual({
-      messageId: 'channel-message', senderId: '0', recipientId: '-79560265048692', attachments: [],
+      messageId: 'channel-message', senderId: '0', recipientId: '-79560265048692', recipientType: 'channel', text: null, attachments: [],
     })
   })
 
@@ -221,7 +259,7 @@ describe('MAX API client', () => {
     const raw = '{"messages":[{"recipient":{"chat_id":9007199254740993,"chat_type":"channel","user_id":null},"body":{"mid":"requested-mid","attachments":[]}},{"recipient":{"chat_id":77,"chat_type":"channel"},"body":{"mid":"other-mid","attachments":[]}}]}'
     const api = createMaxApi(token, { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) })
     await expect(api.getMessage('requested-mid')).resolves.toEqual({
-      messageId: 'requested-mid', senderId: '0', recipientId: '9007199254740993', attachments: [],
+      messageId: 'requested-mid', senderId: '0', recipientId: '9007199254740993', recipientType: 'channel', text: null, attachments: [],
     })
   })
 
@@ -266,7 +304,7 @@ describe('MAX API client', () => {
       },
     }] }) })
     await expect(api.getMessage('audio/1')).resolves.toEqual({
-      messageId: 'audio/1', senderId: '42', recipientId: '99', attachments: [{
+      messageId: 'audio/1', senderId: '42', recipientId: '99', recipientType: 'dialog', text: null, attachments: [{
         kind: 'voice', providerAttachmentId: '987', url: 'https://i.oneme.ru/audio-987',
       }],
     })
@@ -521,7 +559,7 @@ describe('MAX API client', () => {
 
     const api = createMaxApi(token, { fetch: async () => response(message(12345)) })
     await expect(api.getMessage('live-file/1')).resolves.toEqual({
-      messageId: 'live-file/1', senderId: '42', recipientId: '99', attachments: [
+      messageId: 'live-file/1', senderId: '42', recipientId: '99', recipientType: 'dialog', text: null, attachments: [
         { kind: 'file', providerAttachmentId: '12345', filename: 'photo.png', declaredSize: 9, url: 'https://fd.oneme.ru/file' },
       ],
     })
@@ -574,5 +612,17 @@ describe('MAX API client', () => {
         { url: 'https://maxvd123.okcdn.ru/video-720.mp4?sig=opaque', width: null, height: 720, contentLength: null },
       ],
     })
+  })
+
+  test('normalizes an isolated 1080 rendition and preserves unknown height for unparseable keys', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ urls: {
+      mp4_1080: 'https://maxvd123.okcdn.ru/video-1080.mp4?sig=opaque',
+      delivery_profile: 'https://maxvd123.okcdn.ru/video-unknown.mp4?sig=opaque',
+    } }) })
+    const result = await api.getVideo!('synthetic-token')
+    expect(result.renditions).toEqual([
+      { url: 'https://maxvd123.okcdn.ru/video-1080.mp4?sig=opaque', width: null, height: 1080, contentLength: null },
+      { url: 'https://maxvd123.okcdn.ru/video-unknown.mp4?sig=opaque', width: null, height: null, contentLength: null },
+    ])
   })
 })

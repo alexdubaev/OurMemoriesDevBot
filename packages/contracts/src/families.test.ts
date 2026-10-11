@@ -6,6 +6,7 @@ import {
   createInviteRequestSchema,
   familyHomeQuerySchema,
   familyHomeResponseSchema,
+  familyMemberSchema,
   familyMaxChannelStatusSchema,
   familyMeResponseSchema,
   familyRoleSchema,
@@ -17,6 +18,18 @@ import {
 import type { FamilyHomeResponse } from './index'
 
 describe('family contracts', () => {
+  test('member DTO carries one canonical avatar crop while allowing legacy null metadata', () => {
+    const member = { userId: '019c0000-0000-7000-8000-000000000001', avatarPath: null, displayName: null, familyDisplayName: null, role: 'viewer' as const, isOwner: false, joinedAt: '2026-08-09T00:00:00.000Z', version: 1 }
+    const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.6 }
+    expect(familyMemberSchema.parse({ ...member, avatarCrop: crop }).avatarCrop).toEqual(crop)
+    expect(familyMemberSchema.parse(member).avatarCrop).toBeUndefined()
+  })
+  test('family home carries the child crop but keeps legacy home payloads valid', () => {
+    const item = { familyId: '019c0000-0000-7000-8000-000000000001', name: 'Семья', displaySubtitle: 'Лиза', childAvatarMediaId: '019c0000-0000-7000-8000-000000000002', isOwner: true, role: 'full' as const, setupStatus: 'ready' as const, capabilities: { canCreateInvite: true, canManageMembers: true, canEditChild: true, canPublishNote: true, canPublishPhoto: true, canPublishVoice: true, canPublishVideo: false, canUploadChildAvatar: true }, unreadCount: null, unreadState: 'not_enabled' as const, membershipEpoch: 1 }
+    const response = { version: 1 as const, ownFamilyId: item.familyId, ownFamilyStatus: 'active' as const, canCreateOwnFamily: false, items: [item], nextCursor: null }
+    expect(familyHomeResponseSchema.parse({ ...response, items: [{ ...item, childAvatarCrop: { x: 0.2, y: 0.1, width: 0.6, height: 0.6 } }] }).items[0]?.childAvatarCrop).toEqual({ x: 0.2, y: 0.1, width: 0.6, height: 0.6 })
+    expect(familyHomeResponseSchema.parse(response).items[0]?.childAvatarCrop).toBeUndefined()
+  })
   test('exposes compact MAX channel status without provider identifiers', () => {
     expect(familyMaxChannelStatusSchema.parse({ state: 'connected', title: 'Private memories', canManage: false })).toEqual({
       state: 'connected', title: 'Private memories', canManage: false,

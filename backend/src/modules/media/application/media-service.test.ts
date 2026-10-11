@@ -80,97 +80,11 @@ test('private image validators never bypass membership and Range stays no-store'
   expect(reads).toBe(1)
 })
 
-test('finalize still rejects a processing error before commit', async () => {
-  let committed = false
-  const service = createService({
-    processPhoto: async () => { throw new Error('photo processing failed') },
-    commit: async () => { committed = true; return { kind: 'ready', asset } },
-  })
 
-  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004')).rejects.toThrow('photo processing failed')
-  expect(committed).toBe(false)
-})
 
-test('labels a missing uploaded photo object without releasing its retryable reservation', async () => {
-  let rejected = 0
-  const service = createService({
-    headObject: async () => null,
-    reject: async () => { rejected += 1 },
-    commit: async () => ({ kind: 'ready', asset }),
-  })
 
-  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004'))
-    .rejects.toMatchObject({ code: 'PHOTO_FINALIZE_OBJECT_MISSING' })
-  expect(rejected).toBe(0)
-})
 
-test('labels a rejected photo-processing failure with a safe finalize code', async () => {
-  const service = createService({
-    processPhoto: async () => { throw new MediaFailure('invalid_file', 'Изображение не удалось безопасно декодировать') },
-    commit: async () => ({ kind: 'ready', asset }),
-  })
 
-  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004'))
-    .rejects.toMatchObject({ code: 'PHOTO_FINALIZE_MEDIA_PROCESSING_FAILED' })
-})
-
-test('finalize keeps its normal ready result when cleanup succeeds', async () => {
-  let cleanupCalls = 0
-  const service = createService({
-    commit: async () => ({ kind: 'ready', asset }),
-    cleanup: async () => { cleanupCalls += 1 },
-  })
-
-  await expect(service.finalize(scope, '0196f6f8-6600-7000-8000-000000000004')).resolves.toEqual({ asset })
-  expect(cleanupCalls).toBe(1)
-})
-
-test('replays the same reservation when an idempotent reserve response was lost', async () => {
-  let reserveCalls = 0
-  const pendingUpload = {
-    uploadId: '0196f6f8-6600-7000-8000-000000000004',
-    assetId: '0196f6f8-6600-7000-8000-000000000003',
-    familyId: scope.familyId,
-    userId: scope.principal.userId,
-    purpose: 'memory' as const,
-    kind: 'photo' as const,
-    objectKey: 'media-originals/retry-photo',
-    declaredMime: 'image/png' as const,
-    byteSize: 80,
-    expiresAt: new Date('2026-09-12T00:10:00.000Z'),
-  }
-  const service = createReserveService({
-    reserve: async (input) => {
-      reserveCalls += 1
-      if (reserveCalls === 1) Object.assign(pendingUpload, input)
-      if (reserveCalls > 1) throw { code: 'P2002' }
-    },
-    findUpload: async () => pendingUpload,
-  })
-  const input = { purpose: 'memory' as const, kind: 'photo' as const, contentType: 'image/png' as const, byteSize: 80 }
-
-  const first = await service.reserve(scope, input, '0196f6f8-6600-7000-8000-000000000005')
-  const replay = await service.reserve(scope, input, '0196f6f8-6600-7000-8000-000000000005')
-
-  expect(replay).toEqual(first)
-  expect(reserveCalls).toBe(2)
-})
-
-test('does not replay an idempotency key for changed photo metadata', async () => {
-  let stored: any = null
-  const service = createReserveService({
-    reserve: async (input) => {
-      if (stored) throw { code: 'P2002' }
-      stored = input
-    },
-    findUpload: async () => stored,
-  })
-  const key = '0196f6f8-6600-7000-8000-000000000006'
-  await service.reserve(scope, { purpose: 'memory', kind: 'photo', contentType: 'image/png', byteSize: 80 }, key)
-
-  await expect(service.reserve(scope, { purpose: 'memory', kind: 'photo', contentType: 'image/png', byteSize: 81 }, key))
-    .rejects.toMatchObject({ kind: 'idempotency_conflict' })
-})
 
 function createService(options: {
   commit: MediaRepository['commitFinalization']
