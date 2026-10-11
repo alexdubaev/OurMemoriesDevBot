@@ -389,7 +389,8 @@ SHA from the root-owned mode-0600 `/opt/memoly/rollback.env`. It requires the
 running backend, worker, scheduler, and static services to be unique and to match
 their immutable image tags, image IDs, and OCI revision labels. The saved webapp
 SHA must be an ancestor of the running backend, with identical backend,
-contracts, root package/lockfile, and Selectel Compose/Caddy templates. It
+contracts, root package/build configuration and lockfile, and Selectel
+Compose/Caddy templates. It
 recreates only `static`, checks internal and public readiness, and retains the
 running backend, jobs, database, and gateway. If static promotion or readiness
 fails, it attempts to restore and verify the static image that was running when

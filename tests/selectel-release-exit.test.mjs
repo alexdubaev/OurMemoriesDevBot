@@ -64,7 +64,7 @@ test('nonzero release exit preserves application rollback handling', () => {
   assert.match(result.stderr, /attempting application rollback/)
 })
 
-function runStaticRollback({ marker, badLabel, badId, incompatible = false, rollbackTag, curlFailures = 0 } = {}) {
+function runStaticRollback({ marker, badLabel, badId, incompatible = false, bunfigChanged = false, rollbackTag, curlFailures = 0 } = {}) {
   const fixture = mkdtempSync(resolve(root, 'tests', '.uim-static-rollback-'))
   const server = resolve(fixture, 'server')
   const bin = resolve(fixture, 'bin')
@@ -94,7 +94,11 @@ function runStaticRollback({ marker, badLabel, badId, incompatible = false, roll
     stat: `#!/usr/bin/env bash\ncase "$2" in %u) printf '0\\n' ;; %a) printf '600\\n' ;; *) exit 2 ;; esac\n`,
     readlink: `#!/usr/bin/env bash\nprintf '%s\\n' "$3"\n`,
     flock: '#!/usr/bin/env bash\nexit 0\n',
-    git: `#!/usr/bin/env bash\nif [[ " $* " == *" diff --quiet "* ]] && [ "\${STATIC_INCOMPATIBLE:-false}" = true ]; then exit 1; fi\nexit 0\n`,
+    git: `#!/usr/bin/env bash
+if [[ " $* " == *" diff --quiet "* ]] && [ "\${STATIC_INCOMPATIBLE:-false}" = true ]; then exit 1; fi
+if [[ " $* " == *" diff --quiet "* && " $* " == *" bunfig.toml "* ]] && [ "\${STATIC_BUNFIG_CHANGED:-false}" = true ]; then exit 1; fi
+exit 0
+`,
     docker: `#!/usr/bin/env bash
 set -euo pipefail
 if [ "$1" = ps ]; then
@@ -174,6 +178,7 @@ exit 0
     STATIC_CURL_COUNTER: bashPath(curlCounter),
     STATIC_CURRENT_SHA: current,
     STATIC_INCOMPATIBLE: String(incompatible),
+    STATIC_BUNFIG_CHANGED: String(bunfigChanged),
     STATIC_BAD_LABEL_TAG: badLabel ?? '',
     STATIC_BAD_ID_SERVICE: badId ?? '',
     STATIC_CURL_FAILURES: String(curlFailures),
@@ -207,6 +212,7 @@ test('UI rollback rejects forward markers, incompatible trees, bad labels, and i
     { marker: 'b2.marker' },
     { marker: 'mm0.marker' },
     { incompatible: true },
+    { bunfigChanged: true },
     { badLabel: 'a'.repeat(40) },
     { badId: 'backend' },
   ]) {

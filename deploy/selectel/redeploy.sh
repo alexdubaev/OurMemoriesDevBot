@@ -789,11 +789,11 @@ rollback_static() {
 		die 'previous webapp SHA is not an ancestor of the running backend'
 	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet \
 		"$PREVIOUS_WEBAPP_IMAGE_TAG" "$backend_tag" -- \
-		backend packages/contracts package.json bun.lock \
+		backend packages/contracts package.json bun.lock bunfig.toml \
 		deploy/selectel/compose.yml.template \
 		deploy/selectel/Caddyfile.edge.template \
 		deploy/selectel/Caddyfile.static.template; then
-		die 'backend, contracts, root package/lockfile, or Compose/Caddy templates changed since the previous webapp'
+		die 'backend, contracts, root package/build config, lockfile, or Compose/Caddy templates changed since the previous webapp'
 	fi
 	docker image inspect "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG" >/dev/null 2>&1 ||
 		die 'previous immutable webapp image is not present locally'
