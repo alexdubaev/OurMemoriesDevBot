@@ -101,3 +101,46 @@ No memory shortage, JS freeze, document reload or server fault was established f
 - `bun run verify:local`: not run; no production fix or main publication is proposed.
 - PR / merge / deployment: **not published**. Confirmed main/deployed SHA remains `00e1c67ade30d0e26a063caf7fabe81ce3753e2f`.
 - Acceptance on iPhone remains unverified; this report establishes the local experiment result, not an iPhone fix.
+
+## No-Mac continuation: production WebKit control
+
+The owner has no Mac. No Mac purchase, repeated JSON export or repeat system analytics was requested. The existing Windows environment already had Playwright WebKit; no tools were downloaded. The continuation used the same worktree, task branch and production source (origin/main still `00e1c67ade30d0e26a063caf7fabe81ce3753e2f`). Its baseline local experiment commit was `dddce4b6f1219cc5cdc72a41da99ed6f54104002`.
+
+An ignored `.scratch/playwright.webkit.production.config.ts` derives from the existing Playwright configuration, retaining its isolated real backend/database, replaces Vite dev with a build plus Vite preview through `.scratch/build-preview.mjs`, and selects desktop WebKit 26.5. This is a locally built production frontend, not the deployed artifact or installed iPhone PWA. The runner files are retained as ignored local experiment artifacts; they are not new repository release gates.
+
+The test now records runtime metadata and service-worker controller, observes cache hydration without relying on minified function names, and remembers the discovered cache hook slot so later null states remain observable. API conditions use the real feed `/memories?limit=20` endpoint. A test-dispatched `document.visibilitychange` while visible invokes the existing active FeedPage foreground check. This synthetic event is an explicit setup trigger, not a claim that an actual iPhone background/foreground transition was reproduced. Requests must be captured before rapid actions begin; the pending assertion was retained.
+
+With service workers enabled, ordinary rapid navigation, carousel changes and two fullscreen-photo history cycles completed with the interface intact: no new document request, pageerror, crash, sampled global loading or initial placeholder; original root and working navigation remained. The first production run then failed its API pending assertion (exit 1, 32.3 seconds body); a corrected foreground-request setup also failed that assertion (exit 1, 31.6 seconds body). These are incomplete injected-condition runs, not reproduced product interface failures.
+
+The trace of the latter run shows a matching real GET `/api/v1/families/{synthetic-id}/memories?limit=20` after interception-pattern registration, completing 200 while the route callback never incremented pendingCount. A context-level routing trial also missed the request; its read-only observation identified `private-media-sw.js` as controller. Therefore no delayed/500 API behavior is claimed for the service-worker-controlled WebKit page. An accidentally unfiltered intermediate invocation was interrupted after one unrelated smoke passed; it is not acceptance evidence.
+
+A single separate routing control set `serviceWorkers: 'block'` only in the ignored test config. It used this exact narrow command from the explicit worktree:
+
+```powershell
+bun run --cwd webapp e2e --config ../.scratch/playwright.webkit.production.config.ts --grep 'rapid full-app navigation and carousel switching while requests are pending'
+```
+
+Worker execution: **exit 0, 1 passed, 47.6 seconds total / 27.7 seconds body**. The lead inspected the actual diff, full result and extracted machine-readable observations. The controller was null in all conditions. No production service worker behavior or code was changed.
+
+| Separate no-SW condition | Pending at interaction start | Still open at release | Actual terminal outcome | Auth/cache samples |
+| --- | ---: | ---: | --- | ---: |
+| Normal rapid actions / fullscreen viewer | 0 | 0 | Four same-document viewer events | 17 / 17 |
+| Delayed feed API | 1 | 1 | One request finished 200 | 34 / 34 |
+| Feed API 500 | 1 | 1 | One controlled request finished 500 | 33 / 33 |
+| Delayed protected photos | 4 | 4 | Nine intercepted total: four finished 200, five `Load request cancelled` | 9 / 9 |
+
+All four no-SW conditions preserved the original connected root, feed and navigation; recorded 0 new document requests during interaction, 0 pageerrors, 0 crashes, 0 loading/initial-placeholder samples. Auth remained non-bootstrapping/authenticated with a user, and cache samples remained hydrated. The app remained interactive after the 500 and media cancellations.
+
+Blocking service workers made interception work in this environment. This isolates a test-routing limitation; it does not implicate the production service worker in iPhone interface loss. The delayed/error API and delayed-media results here apply only to the no-SW control. Service-worker-controlled API fault injection remains a specific experiment gap, in addition to the missing live installed-iPhone document/root/JS observation described above. The owner does not need a Mac for these completed local checks; physical iPhone acceptance remains unresolved.
+
+Continuation checks and evidence:
+
+- `bun run --cwd webapp tsc --noEmit -p tsconfig.e2e.json`: exit 0.
+- `git diff --check`: exit 0.
+- Latest tested test-file SHA256: `3A7694284C0282C33E4FD7DC48738E483E0F757B024D4BCCDDC69765120C017A`.
+- Ignored logs: `.scratch/pwa-interface-loss-webkit-production-attempt1.log`, `.scratch/pwa-interface-loss-webkit-production-attempt2.log`, `.scratch/pwa-interface-loss-webkit-production-swblocked.log`.
+- Lead-extracted JSON: `.scratch/interface-loss-webkit-production-swblocked.json`.
+- Changed tracked paths remain only the browser experiment and this report. No new formal review loop or broad test matrix; the earlier independent review is historical, not a claim of a fresh review of this continuation.
+- No production fix, PR, merge, `verify:local` or deploy. Main/deploy remains `00e1c67ade30d0e26a063caf7fabe81ce3753e2f`; the iPhone cause and acceptance criterion remain unestablished.
+
+The lead also reran the updated scenario through the default Chromium/Vite-development runner to verify that the harness changes did not break its original execution mode: `bun run --cwd webapp e2e --grep 'rapid full-app navigation and carousel switching while requests are pending'`, **exit 0, 1 passed, 29.8 seconds total / 18.3 seconds body**. Chromium version was `151.0.7922.34`, and the real `private-media-sw.js` controller was present in every condition. Each feed API condition held one request before interaction through release and completed respectively 200/500; media held four at interaction/release, with four finishes and five cancellations. All conditions preserved root and working UI without new document navigation, crash, pageerror or sampled global loading/initial placeholder; auth/cache sample counts were 17/37/37/15. This does not close the WebKit-with-SW interception gap or establish an iPhone fix. Evidence: `.scratch/pwa-interface-loss-chromium-continuation.log`. No source changes followed this run except report text.

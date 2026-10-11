@@ -147,6 +147,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
   try {
   await page.addInitScript(() => {
     const state = window as Window & { __reactStateSamples?: Array<Record<string, unknown>>; __REACT_DEVTOOLS_GLOBAL_HOOK__?: Record<string, unknown> }
+    const cacheHookIndexes = new Map<unknown, number>()
     const hook = {
       supportsFiber: true,
       renderers: new Map<number, unknown>(),
@@ -160,10 +161,26 @@ test('rapid full-app navigation and carousel switching while requests are pendin
             const value = fiber.memoizedProps.value
             sample.auth = { isBootstrapping: value.isBootstrapping, isAuthenticated: value.isAuthenticated, userPresent: Boolean(value.user) }
           }
-          if (typeof fiber.type === 'function' && fiber.type.name === 'PrivateCacheGate') {
-            const stateHook = fiber.memoizedState?.next
-            const hydrated = stateHook?.memoizedState
-            sample.cache = { hydrated: Boolean(hydrated?.userId && Number.isFinite(hydrated?.generation)), generationPresent: Number.isFinite(hydrated?.generation) }
+          if (typeof fiber.type === 'function') {
+            let stateHook = fiber.memoizedState
+            let hookIndex = 0
+            const knownCacheHookIndex = cacheHookIndexes.get(fiber.type)
+            while (stateHook) {
+              const hydrated = stateHook.memoizedState
+              const hasHydratedIdentity = Boolean(hydrated && typeof hydrated === 'object' && 'userId' in hydrated && 'generation' in hydrated
+                && typeof hydrated.userId === 'string' && Number.isFinite(hydrated.generation))
+              if (knownCacheHookIndex === hookIndex) {
+                sample.cache = { hydrated: hasHydratedIdentity, generationPresent: hasHydratedIdentity }
+                break
+              }
+              if (knownCacheHookIndex === undefined && hasHydratedIdentity) {
+                cacheHookIndexes.set(fiber.type, hookIndex)
+                sample.cache = { hydrated: true, generationPresent: true }
+                break
+              }
+              stateHook = stateHook.next
+              hookIndex += 1
+            }
           }
           if (fiber.child) pending.push(fiber.child)
           if (fiber.sibling) pending.push(fiber.sibling)
@@ -174,7 +191,8 @@ test('rapid full-app navigation and carousel switching while requests are pendin
         state.__reactStateSamples = samples
       },
     }
-    type FiberNode = { type?: unknown; memoizedProps?: { value?: Record<string, unknown> }; memoizedState?: { next?: { memoizedState?: { userId?: string; generation?: number } } }; child?: FiberNode | null; sibling?: FiberNode | null }
+    type HookNode = { memoizedState?: unknown; next?: HookNode }
+    type FiberNode = { type?: unknown; memoizedProps?: { value?: Record<string, unknown> }; memoizedState?: HookNode; child?: FiberNode | null; sibling?: FiberNode | null }
     state.__REACT_DEVTOOLS_GLOBAL_HOOK__ = hook
     const record = () => {
       const currentRoot = document.getElementById('root')
@@ -214,7 +232,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
   await expect(carousel.locator('[data-carousel-dot]')).toHaveCount(3)
   await expect(carousel.locator('.memoly-mixed-controls button')).toHaveCount(0)
 
-  const familyUsageUrl = `**/api/v1/families/${familyId}/usage*`
+  const feedMemoriesUrl = `**/api/v1/families/${familyId}/memories*`
   const mediaUrl = `**/api/v1/families/${familyId}/media/*/content*`
   const runCase = async (name: string, mode: 'baseline' | 'api-delay' | 'api-error' | 'media-delay') => {
     let releasePending: (() => void) | undefined
@@ -252,8 +270,9 @@ test('rapid full-app navigation and carousel switching while requests are pendin
       page.on('requestfailed', failedListener)
     }
     const pendingGate = new Promise<void>((resolve) => { releasePending = resolve })
+    const routeContext = page.context()
     if (mode === 'api-delay') {
-      await page.route(familyUsageUrl, async (route) => {
+      await routeContext.route(feedMemoriesUrl, async (route) => {
         interceptedRequests.add(route.request())
         pendingCount += 1
         firstPendingAt ??= Date.now()
@@ -261,7 +280,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
         await route.continue()
       })
     } else if (mode === 'api-error') {
-      await page.route(familyUsageUrl, async (route) => {
+      await routeContext.route(feedMemoriesUrl, async (route) => {
         interceptedRequests.add(route.request())
         pendingCount += 1
         firstPendingAt ??= Date.now()
@@ -270,7 +289,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
         controlledResponses += 1
       })
     } else if (mode === 'media-delay') {
-      await page.route(mediaUrl, async (route) => {
+      await routeContext.route(mediaUrl, async (route) => {
         interceptedRequests.add(route.request())
         pendingCount += 1
         firstPendingAt ??= Date.now()
@@ -293,18 +312,27 @@ test('rapid full-app navigation and carousel switching while requests are pendin
     const observation: Record<string, unknown> = { name, mode, phase: 'ready', pendingCount: 0, pendingAtInteractionStart: 0 }
     observations.push(observation)
     let interactionStartedAt: number
+    observation.serviceWorkerController = await page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL ?? null)
+    if (mode === 'api-delay' || mode === 'api-error') {
+      const documentHidden = await page.evaluate(() => document.hidden)
+      expect(documentHidden).toBe(false)
+      observation.setupTrigger = 'test-dispatched document.visibilitychange to invoke active FeedPage foreground check'
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect.poll(() => pendingCount).toBeGreaterThan(0)
+      interactionStartedAt = Date.now()
+      observation.pendingAtInteractionStart = pendingCount
+      observation.interactionStartedAt = interactionStartedAt
+    } else {
+      observation.setupTrigger = mode === 'media-delay'
+        ? 'synthetic media memory loaded while protected content requests were held'
+        : 'baseline UI interaction'
+    }
     if (mode === 'baseline' || mode === 'media-delay') {
       interactionStartedAt = Date.now()
       observation.pendingAtInteractionStart = pendingCount
       observation.interactionStartedAt = interactionStartedAt
     }
     await page.getByRole('button', { name: 'Семья' }).click()
-    if (mode === 'api-delay' || mode === 'api-error') {
-      await expect.poll(() => pendingCount).toBeGreaterThan(0)
-      interactionStartedAt = Date.now()
-      observation.pendingAtInteractionStart = pendingCount
-      observation.interactionStartedAt = interactionStartedAt
-    }
     observation.phase = 'interactions'
     observation.pendingCount = pendingCount
     observation.firstPendingAt = firstPendingAt
@@ -394,7 +422,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
       expect(terminalRequests.some((request) => request.event === 'response-headers' && request.status === 500)).toBe(true)
       expect(terminalRequests.some((request) => request.event === 'request-finished' && request.status === 500)).toBe(true)
     }
-    if (mode === 'api-delay' || mode === 'api-error' || mode === 'media-delay') await page.unrouteAll()
+    if (mode === 'api-delay' || mode === 'api-error' || mode === 'media-delay') await routeContext.unrouteAll()
     page.off('response', responseListener)
     page.off('requestfinished', finishedListener)
     page.off('requestfailed', failedListener)
@@ -414,7 +442,7 @@ test('rapid full-app navigation and carousel switching while requests are pendin
   await runCase('delayed protected media', 'media-delay')
   } finally {
     const report = {
-      runtime: { browser: 'Chromium / Playwright', appMode: 'Vite dev server', syntheticPhotoDimensions: '2048x1536 each', syntheticPhotos: 3 },
+      runtime: { project: testInfo.project.name, browserVersion: browser.version(), appMode: process.env.MEMOLY_E2E_APP_MODE ?? 'vite-development (default; custom runner must set MEMOLY_E2E_APP_MODE)', syntheticPhotoDimensions: '2048x1536 each', syntheticPhotos: 3 },
       documentNavigations, mainFrameUrls, pageErrors, crashes, observations,
       limitation: 'AuthProvider and PrivateCacheGate state samples come from read-only React committed fibers; this does not reproduce iOS PWA lifecycle behavior.',
     }
