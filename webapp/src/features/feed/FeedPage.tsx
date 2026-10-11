@@ -351,7 +351,7 @@ export function FeedPage({
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
         : <EmptyState filtered={false} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
-      {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
+      {active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> =>
           attachment.source === 'private_storage' && attachment.kind === 'photo')
@@ -370,7 +370,7 @@ export function FeedPage({
           reactionCounts={memory.reactionCounts}
           currentUserReaction={memory.currentUserReaction}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
-            ? <MixedMediaCarousel hostBridge={hostBridge} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
+            ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           reactionScopeKey={`${familyId}:${accountId}:${membershipEpoch ?? 0}`}
@@ -438,8 +438,9 @@ export function FeedPage({
   )
 }
 
-function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, transport }: {
+function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, transport }: {
   hostBridge: HostBridge
+  initialIndex: number
   memory: MemoryDto
   onIndexChange: (index: number) => void
   onPhotoUrlChange: (attachmentId: string, url: string | null) => void
@@ -447,18 +448,22 @@ function MixedMediaCarousel({ hostBridge, memory, onIndexChange, onPhotoUrlChang
   registerFullscreen?: (element: HTMLElement | null) => void
   transport: AuthenticatedTransport
 }) {
+  const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
+  const reportInitialIndex = useEffectEvent(() => onIndexChange(startIndex))
   const [viewportRef, embla] = useEmblaCarousel({
     align: 'start',
     containScroll: 'trimSnaps',
+    startIndex,
     watchResize: (_api, entries) => entries.every((entry) => {
       const element = entry.target
       return element.getClientRects().length > 0 && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0
     }),
   })
-  const [index, setIndex] = useState(0)
+  const [index, setIndex] = useState(startIndex)
   const [photoViewerError, setPhotoViewerError] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const photoViewerSession = useRef<AbortController | null>(null)
+  useEffect(() => { reportInitialIndex() }, [startIndex])
   useEffect(() => {
     const closeViewer = () => photoViewerSession.current?.abort()
     document.addEventListener('memoly:feed-inactive', closeViewer)
