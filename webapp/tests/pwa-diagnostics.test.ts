@@ -226,6 +226,64 @@ test('mounted literal loading screen pins incident immediately and preserves it 
   expect(JSON.parse(startDiagnostics(storage).diagnostics!.report()).incident.kind).toBe('screen-loss')
 })
 
+test('inferred unclosed incident refreshes to each latest eligible run but confirmed screen loss stays pinned', () => {
+  let saved: string | null = JSON.stringify({ current: { startedAt: 90000, phase: 'mounted', state: 'active', build: 'index-legacy1.js', navigationType: 'reload', rootState: 'present', lastObservedAt: 99000, environment: { os: 'ios', osVersion: '16.1', webkitVersion: '605.1', standalone: true }, events: [] } })
+  const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value } }
+
+  const firstLaunch = startDiagnostics(storage)
+  firstLaunch.diagnostics!.record('mounted', 'mounted')
+  const firstRun = JSON.parse(saved!).current
+  expect(JSON.parse(saved!).incident).toMatchObject({ kind: 'previous-run-unclosed', build: 'index-legacy1.js' })
+
+  const secondLaunch = startDiagnostics(storage)
+  secondLaunch.diagnostics!.record('mounted', 'mounted')
+  const secondRun = JSON.parse(saved!).current
+  expect(JSON.parse(saved!).incident).toMatchObject({ kind: 'previous-run-unclosed', runId: firstRun.runId, navigationType: firstRun.navigationType, lastObservedAt: firstRun.lastObservedAt, environment: firstRun.environment })
+
+  const thirdLaunch = startDiagnostics(storage)
+  thirdLaunch.diagnostics!.record('mounted', 'mounted')
+  const thirdRun = JSON.parse(saved!).current
+  expect(JSON.parse(saved!).incident).toMatchObject({ kind: 'previous-run-unclosed', runId: secondRun.runId, lastObservedAt: secondRun.lastObservedAt })
+  expect(JSON.parse(saved!).incident.runId).not.toBe(thirdRun.runId)
+
+  const confirmed = JSON.parse(saved!)
+  confirmed.incident = { ...confirmed.incident, kind: 'screen-loss', rootState: 'startup-placeholder' }
+  saved = JSON.stringify(confirmed)
+  const fourthLaunch = startDiagnostics(storage)
+  fourthLaunch.diagnostics!.record('mounted', 'mounted')
+  expect(JSON.parse(saved!).incident).toMatchObject({ kind: 'screen-loss', runId: secondRun.runId, rootState: 'startup-placeholder' })
+
+  const normal = JSON.parse(saved!)
+  normal.current.state = 'pagehide'
+  saved = JSON.stringify(normal)
+  const fifthLaunch = startDiagnostics(storage)
+  fifthLaunch.diagnostics!.record('mounted', 'mounted')
+  expect(JSON.parse(saved!).incident.kind).toBe('screen-loss')
+  expect(thirdRun.runId).toBeDefined()
+})
+
+test('inferred evidence survives pagehide and same-source fallback without refreshing', () => {
+  let saved: string | null = JSON.stringify({ current: { startedAt: 90000, runId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', phase: 'mounted', state: 'active', build: 'index-source1.js', rootState: 'present', events: [] } })
+  const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value } }
+  const firstLaunch = startDiagnostics(storage)
+  firstLaunch.diagnostics!.record('mounted', 'mounted')
+  const first = JSON.parse(saved!)
+  expect(first.incident.kind).toBe('previous-run-unclosed')
+
+  first.current.state = 'pagehide'
+  saved = JSON.stringify(first)
+  startDiagnostics(storage).diagnostics!.record('mounted', 'mounted')
+  const afterPagehide = JSON.parse(saved!)
+  expect(afterPagehide.incident).toMatchObject({ kind: 'previous-run-unclosed', runId: first.incident.runId, sourceStartedAt: first.incident.sourceStartedAt })
+
+  const fallback = JSON.parse(saved!)
+  fallback.current = null
+  fallback.previous = { ...fallback.previous, phase: 'mounted', state: 'active', startedAt: first.incident.sourceStartedAt, runId: first.incident.runId }
+  saved = JSON.stringify(fallback)
+  startDiagnostics(storage).diagnostics!.record('mounted', 'mounted')
+  expect(JSON.parse(saved!).incident).toMatchObject({ kind: 'previous-run-unclosed', runId: first.incident.runId, at: first.incident.at })
+})
+
 test('mounted root removal pins loss while hidden mutations wait until visible', () => {
   let saved = ''
   const harness = startDiagnostics({ getItem: () => null, setItem: (_key, value) => { saved = value } })

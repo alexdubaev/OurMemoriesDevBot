@@ -43,11 +43,12 @@
     const auth = value.auth && typeof value.auth === 'object' ? { bootstrapping: value.auth.bootstrapping === true, authenticated: value.auth.authenticated === true, at: cleanSampleTime(value.auth.at) } : null
     const cache = value.cache && typeof value.cache === 'object' ? { hydrated: value.cache.hydrated === true, at: cleanSampleTime(value.cache.at) } : null
     const runId = typeof value.runId === 'string' && /^[a-f0-9-]{8,40}$/.test(value.runId) ? value.runId : null
+    const sourceStartedAt = Number.isFinite(value.sourceStartedAt) && value.sourceStartedAt > 0 ? Math.floor(value.sourceStartedAt) : 0
     const rootIdentity = Number.isInteger(value.rootIdentity) ? Math.max(0, Math.min(9999, value.rootIdentity)) : 0
     const navigationType = ['navigate', 'reload', 'back_forward'].includes(value.navigationType) ? value.navigationType : 'unknown'
     const build = typeof value.build === 'string' && /^index-[A-Za-z0-9_-]{6,64}\.js$/.test(value.build) ? value.build : null
     const lastHealthyAt = cleanSampleTime(value.lastHealthyAt)
-    return kind && at ? { kind, at, rootState: cleanRootState(value.rootState), rootIdentity, navigationType, build, runId, lastHealthyAt, environment, lastObservedAt, auth, cache, error, lastFailure, context } : null
+    return kind && at ? { kind, at, rootState: cleanRootState(value.rootState), rootIdentity, navigationType, build, runId, sourceStartedAt, lastHealthyAt, environment, lastObservedAt, auth, cache, error, lastFailure, context } : null
   }
   const cleanEnvironment = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -94,8 +95,15 @@
   } catch { /* diagnostics are optional */ }
   const previous = stored?.current ?? stored?.previous ?? null
   let pinnedIncident = stored?.incident ?? null
-  if (!pinnedIncident && previous?.phase === 'mounted' && previous.state !== 'pagehide') {
-    pinnedIncident = { kind: 'previous-run-unclosed', at: now(), rootState: cleanRootState(previous.rootState), rootIdentity: previous.rootIdentity, navigationType: previous.navigationType, build: previous.build, runId: previous.runId, lastHealthyAt: previous.lastHealthyAt, environment: cleanEnvironment(previous.environment), lastObservedAt: cleanSampleTime(previous.lastObservedAt), auth: previous.auth, cache: previous.cache, error: cleanError(previous.error), lastFailure: cleanFailure(previous.lastFailure), context: previous.events.slice(-6) }
+  const eligibleCurrentRun = stored?.current?.phase === 'mounted' && stored.current.state !== 'pagehide' ? stored.current : null
+  const eligibleFallbackRun = !stored?.current && stored?.previous?.phase === 'mounted' && stored.previous.state !== 'pagehide' ? stored.previous : null
+  const unclosedRun = eligibleCurrentRun ?? eligibleFallbackRun
+  const sameInferredRun = unclosedRun && pinnedIncident?.kind === 'previous-run-unclosed'
+    && (unclosedRun.runId && pinnedIncident.runId
+      ? pinnedIncident.runId === unclosedRun.runId
+      : pinnedIncident.sourceStartedAt > 0 && pinnedIncident.sourceStartedAt === unclosedRun.startedAt)
+  if (unclosedRun && (!pinnedIncident || (pinnedIncident.kind === 'previous-run-unclosed' && !sameInferredRun))) {
+    pinnedIncident = makeUnclosedIncident(unclosedRun)
   }
   let phase = 'startup'
   let writeTimer = 0
@@ -226,6 +234,9 @@
   }
   function makeIncident(kind, rootState) {
     return { kind, at: now(), rootState: cleanRootState(rootState), rootIdentity: current.rootIdentity, navigationType: current.navigationType, build: current.build, runId: current.runId, lastHealthyAt: current.lastHealthyAt, environment: current.environment, lastObservedAt: current.lastObservedAt, auth: current.auth, cache: current.cache, error: current.error, lastFailure: cleanFailure(current.lastFailure), context: current.events.slice(-6) }
+  }
+  function makeUnclosedIncident(run) {
+    return { kind: 'previous-run-unclosed', at: now(), rootState: cleanRootState(run.rootState), rootIdentity: run.rootIdentity, navigationType: run.navigationType, build: run.build, runId: run.runId, sourceStartedAt: run.startedAt, lastHealthyAt: run.lastHealthyAt, environment: run.environment, lastObservedAt: run.lastObservedAt, auth: run.auth, cache: run.cache, error: run.error, lastFailure: run.lastFailure, context: run.events.slice(-6) }
   }
   function readEnvironment() {
     const ua = typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' ? navigator.userAgent : ''
