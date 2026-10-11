@@ -6,7 +6,9 @@ Branch: `feat/ui-v2-production-migration`.
 Worktree: `D:/codex/TG_OurMemoriesDevBot/OurMemoriesDevBot/.worktrees/ui-v2-production-migration`.
 Accepted main: `ee2b25d3151afb88394687a20d3ec38bd1adbb4a`.
 Base после merge main: `3955d0a30093aa245f4f57ff6a71af77c2be318e`.
-Проверенный product HEAD: `fff0c51214887bdb9b62fee9b3bfa0cc891340b7`.
+Проверенный UI product HEAD: `fff0c51214887bdb9b62fee9b3bfa0cc891340b7`.
+Полный штатный local gate после исправления EOL: **exit 0**, source HEAD
+`fc7968b1b3fbf85ad13880401b3e958af4a7c5e3`; подробности в `VERIFY_ENV_CLOSURE.md`.
 Product commits: `4cf0805904c6a1dee6b0ab9d657ab2f937a78a23`, `fff0c51214887bdb9b62fee9b3bfa0cc891340b7`.
 PR / merge SHA: не опубликовано / не слито. Deployment не выполнялся.
 
@@ -57,14 +59,15 @@ Backend, контракты, schema/migrations, зависимости и deploy
 и получает его из защищённого storage; читатель не может изменить/удалить запись,
 посторонний не получает приватное фото.
 
-Каноническая команда публикации остаётся `bun run verify:local`. Её запуск здесь
+История первоначального запуска (ограничение закрыто, см. `VERIFY_ENV_CLOSURE.md`):
+каноническая команда публикации — `bun run verify:local`. Её первый запуск здесь
 **exit 1**: unchanged Selectel guards — 40 pass / 2 fail, bash через WSL не принимает
 CRLF в `deploy/selectel/in-place-file.sh` (`pipefail\r`). Deploy-код не исправлялся
 в UI-задаче. Оставшиеся product checks выполнены отдельно и приведены выше.
 Первый web unit запуск ошибочно унаследовал v2 build env (29 pass / 2 default-legacy
 assertions fail); исправленный запуск без env и final closure дают 31/31.
 
-Канонический `bun run e2e:webapp` завершился webServer timeout на повторной генерации
+Первоначальный `bun run e2e:webapp` завершился webServer timeout на повторной генерации
 Prisma (сценарии ещё не начались). Для исполнения тех же трёх сценариев использован
 ignored temporary config: `bunx playwright test --config=e2e/.artifacts/ui-v2-closure.config.ts`
 из webapp с v2 env. Единственное изменение запуска backend — `bun src/index.ts`
@@ -116,8 +119,11 @@ hardcoded date style; targeted build и actual computed styles подтверж�
 
 ## Ограничения и следующий шаг
 
-Статус REVIEW, без утверждения о готовом production release. Перед публикацией нужен
-успешный канонический local gate в подходящем окружении и owner acceptance на устройстве.
+Статус REVIEW, без утверждения о готовом production release. Канонический local gate
+завершён успешно: 16 этапов, 658 тестов, exit 0 на `fc7968b`.
+Отдельный штатный v2 E2E также прошёл 3/3. EOL-проблема устранена одной строкой
+в `.gitattributes`; прежний startup timeout не повторился, runner не менялся.
+Нужна owner acceptance на устройстве перед принятием интерфейса.
 Нативные Telegram/MAX/WebView, install handoff и настоящее audio/video playback
 на устройствах этим browser preview не проверены; существующие playback boundary
 tests прошли, движки не менялись. В mock preview проверено voice presentation,
