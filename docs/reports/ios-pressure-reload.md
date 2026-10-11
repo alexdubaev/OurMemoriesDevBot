@@ -1,11 +1,11 @@
 # FIX-IOS-PRESSURE-RELOAD
 
-Status: REVIEWED_LOCAL_FIX. Owner requested investigation on 2026-10-11. Physical iPhone root cause is not established.
+Status: APPROVED_FOR_OWNER_AUTHORIZED_RELEASE. Owner requested investigation and explicitly authorized deployment on 2026-10-11. Physical iPhone root cause is not established.
 
 - Base: `72714ce421840ba994cadccf90dbd1444384953c` (accepted main and live UI v2).
 - Branch: `fix/ios-profile-photo-reload`.
 - Worktree: `.worktrees/ios-profile-photo-reload`.
-- Lead scope: diagnostic notes and verification. Diagnostic worker scope: ignored scratch artifacts only; production edits have not been assigned.
+- Allowed paths: `webapp/src/features/feed/FeedPage.tsx`, this report; ignored diagnostic/release artifacts. Production implementation and bounded review fix were delegated; lead owns verification and release.
 
 ## Owner evidence
 
@@ -51,8 +51,20 @@ Lead verification on the actual uncommitted diff:
 
 Worker initial typecheck required generating the existing Prisma client; `bun run --cwd backend prisma:generate` succeeded, then typecheck passed. No tracked dependency/schema changes were made.
 
-The direct `FeedPage` harness does not exercise the App scroll-restoration effect or actual profile editor. Synthetic payloads are tiny; actual iPhone memory pressure and the unexpected fresh/stalled document remain unproven. There is no demonstrated per-action leak in the bounded baseline. No persistent browser spec, backend change, contract change, migration, PR, main publication or deployment was added for this task. Local full publication gate has not been run: this change is not approved for main or deployment.
+The direct `FeedPage` harness does not exercise the App scroll-restoration effect or actual profile editor. Synthetic payloads are tiny; actual iPhone memory pressure and the unexpected fresh/stalled document remain unproven. There is no demonstrated per-action leak in the bounded baseline. No persistent browser spec, backend change, contract change or migration was added for this task.
 
 Independent review: GPT-6 Luna (high), one fresh review and bounded fix pass under owner policy. P2 fixed: removing cards reset each carousel to its first attachment while the retained parent index could open a different attachment. Carousel local state and Embla now initialize from the clamped retained index, and report the initial clamped value back to the parent. No unresolved P0/P1/P2 in this bounded change.
 
 Final lead narrow closure on the final source: the same probe passed 1/1, exit 0 (8.6 seconds total). It additionally verifies the selected second attachment survives return, card and details viewer open the same second attachment, and reducing attachment count clamps both carousel and viewers to the available first attachment. Reviewer final typecheck and targeted lint passed, exit 0. `git diff --check` passed. Full-source behavior on physical iPhone remains unverified; the local change reduces confirmed hidden-surface retention and is not presented as an established fix for the owner's unexpected restart.
+
+## Publication verification and release authorization
+
+Verified product commit: `d9ba17ed0fd1a0ebd76b5170201ca0fef73e86fe`, tree `cd74f0f9ca34346728fe7e0f29595345d6edacb4`. An isolated Linux copy was exported with Git CRLF conversion disabled; its indexed tree was confirmed identical before the final gate. The subsequent report update is documentation only.
+
+Full command: `bun run verify:local`, Ubuntu WSL, native Bun 1.4.0 and Node 22.15.0, test Docker accessed through the local root session. All 16 stages passed, exit 0; 661 tests, including 369 PostgreSQL integration tests and 3 critical Chromium journeys. Evidence: ignored `webapp/e2e/.artifacts/ios-pressure-verify-local-linux-release.log`. A separate actual-source V2 lifecycle probe passed 1/1, exit 0 (`ios-pressure-v2-release-probe.log`).
+
+Earlier Windows full runs stalled before the last two users integration scenarios, despite isolated users 18/18 passing; those processes were stopped and their disposable databases cleaned up. They are failures, not green evidence. Additional Linux preparation failures involved missing runtime tools, Git archive line endings/temporary storage, Docker permissions and ffprobe/browser dependencies; no tests were removed or weakened. The final complete gate passed on the exact source tree after environment preparation.
+
+Owner authorization: «Ну деплой, будем проверять», reiterated «Просто закончи деплой». Publication plan: squash PR to main, confirm identical accepted tree, then guarded `ci-release.sh` deployment of the exact accepted SHA with migration=false. Existing data and video storage routing remain unchanged.
+
+Rollback: preserve previous immutable images and the original legacy UI image/archive. `/opt/memoly/rollback-legacy-ee2b25d.env` is separately retained root-only so the new release's default previous-release rollback does not replace the original-interface option. Legacy return uses compatible `rollback-static`; no database restore is part of this release. Deployed SHA/manifest and public smoke are recorded in the release evidence after promotion.
