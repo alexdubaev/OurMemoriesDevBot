@@ -263,4 +263,3 @@ test('runtime witness records a neutral gap when an overdue monitor tick clears 
   expect(record.monitorGap?.elapsedMs).toBeGreaterThan(10_000)
   expect(harness.messages.some((message) => message.type === 'challenge' && message.runId === runId)).toBe(true)
 })
-
