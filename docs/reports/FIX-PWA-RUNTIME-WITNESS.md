@@ -33,7 +33,7 @@ All logs below are local ignored artifacts in this worktree.
 
 ## Independent review and final local gate
 
-Pending at the time this source snapshot was prepared. Publication requires the actual fresh-review verdict, closure of confirmed findings and `bun run verify:local` on the exact product source. Those results will be recorded before publication.
+Completed after the bounded closure below. Exact tested source: `a04965918fba24c59d5965f542e8efc45939bc66`. Lead-run `bun run verify:local` passed all 16 stages, exit 0: 313 unit/tool/contract checks, 369 PostgreSQL integration checks and 8 Chromium browser scenarios (86.8 seconds). Log: `.scratch/pwa-runtime-witness-verify-local.log`.
 
 ## Remaining observation limit
 
@@ -43,7 +43,7 @@ No migrations or shared-contract changes. Rollback uses the previously deployed 
 
 ### Fresh independent review
 
-`.scratch/pwa-runtime-witness-review.log` identifies the requested model `gpt-6-luna`, high reasoning, read-only CLI session; exit 0. The reviewer reported two P2 findings: asynchronous journal opening can outlive hidden/pagehide, and an overdue matching ACK can clear an expired probe before its timer callback runs. Both findings were accepted by the lead and assigned for one bounded correction with deterministic regression checks. No second whole-change review is required by owner policy. Final closure evidence is pending.
+`.scratch/pwa-runtime-witness-review.log` identifies the requested model `gpt-6-luna`, high reasoning, read-only CLI session; exit 0. The reviewer reported two P2 findings: asynchronous journal opening can outlive hidden/pagehide, and an overdue matching ACK can clear an expired probe before its timer callback runs. Both findings were accepted by the lead and assigned for one bounded correction with deterministic regression checks. No second whole-change review is required by owner policy. Final closure evidence is recorded below.
 
 ### Bounded closure
 
@@ -52,3 +52,9 @@ Both reviewer P2 findings were corrected: serialized generation-cancelled openin
 The first closure browser run exposed a recovery regression (persisted records were not republished after a cancelled startup opening). The successful-reopen path was corrected and the same positive native/reload proof passed again, Chromium 1 pass, exit 0, 30.8 seconds. The earlier failed intermediate run is not acceptance evidence. Worker-only suspension passed in that two-case run; the final gate covers the final source again.
 
 Lead personally ran the final narrow boundary checks: `bun test ./webapp/tests/pwa-diagnostics.test.ts ./webapp/tests/pwa-runtime-journal.test.ts`, 24 pass, 0 fail, 161 expectations, exit 0; `.scratch/pwa-runtime-witness-lead-closure-unit.log`. The seven journal tests include the exact overdue-monitor clearing boundary, late ACK with/without Worker suspension, and hidden-opening cancellation followed by visible recovery. Actual closure diff was inspected. No unresolved confirmed P0/P1/P2 remains; no second formal whole-change review was launched.
+
+### Exact-source gate environment
+
+The tracked source archive was generated with explicit LF export (core.autocrlf=false), SHA256 8e7f568a7b49105f76db4c9df472a71885c53d79903ad1af55757b10e39c7d28. Its Git HEAD and clean status matched the tested SHA; all 1823 tracked-file SHA256 checks passed after the gate. Source-audit log: .scratch/pwa-runtime-witness-source-after.log.
+
+Linux cached runner: Bun 1.4.0, Node 22.23.2, isolated fresh PostgreSQL 18 tmpfs database. Existing installed Windows Playwright Chromium was connected through the supported run-server loopback tunnel; no tools or browsers downloaded. TEST_SKIP_DOCKER=1 and E2E_SKIP_DOCKER=1 reused the explicitly supplied test dependency; they did not skip tests. The runner unset inherited NODE_ENV before bun run verify:local. The final browser gate covered positive native flush/readback and reload recovery, Worker suspension, denied storage, unsupported API and the existing root-placeholder observer. Windows WebKit unavailable coverage was separate. Production code/test changes are frozen; the subsequent evidence-only documentation commit does not alter this tested product source.
