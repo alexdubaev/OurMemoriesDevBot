@@ -9,7 +9,7 @@ const statusRoot = (textContent: string) => {
   return { id: 'root', children: { length: 1 }, childNodes: [paragraph], firstElementChild: paragraph, contains: (node: unknown) => node === paragraph || node === textNode }
 }
 
-function startDiagnostics(storage: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) {
+function startDiagnostics(storage: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }, workerEnabled = false) {
   const listeners = new Map<string, Array<(event: unknown) => void>>()
   const documentListeners = new Map<string, Array<(event: DiagnosticEvent) => void>>()
   const timers = new Map<number, () => void>()
@@ -17,11 +17,24 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
   let timerId = 0
   let scans = 0
   let loadedImages = 0
-  type FakeNode = { id?: string; tagName?: string; nodeType?: number; nodeValue?: string; childNodes?: Array<FakeNode>; children?: { length: number }; firstElementChild?: FakeNode; getAttribute?: (name: string) => string | null; contains?: (node: unknown) => boolean }
+  type FakeNode = { id?: string; tagName?: string; nodeType?: number; nodeValue?: string; childNodes?: Array<FakeNode>; children?: { length: number }; firstElementChild?: FakeNode; getAttribute?: (name: string) => string | null; contains?: (node: unknown) => boolean; querySelector?: (selector: string) => FakeNode | null }
   type FakeRoot = FakeNode & { textContent?: string }
   let root: FakeRoot | null = { id: 'root', children: { length: 1 }, childNodes: [{ tagName: 'DIV', childNodes: [] }], firstElementChild: { tagName: 'DIV', childNodes: [] } }
   const mutationCallbacks: Array<(records: Array<{ target: unknown; addedNodes: FakeNode[]; removedNodes: FakeNode[] }>) => void> = []
   let rootLookups = 0
+  const fakeWorkers: FakeWorker[] = []
+  class FakeWorker {
+    private listeners = new Map<string, Array<(event: { data: unknown }) => void>>()
+    constructor() { fakeWorkers.push(this) }
+    addEventListener(name: string, listener: (event: { data: unknown }) => void) {
+      const entries = this.listeners.get(name) ?? []
+      entries.push(listener)
+      this.listeners.set(name, entries)
+    }
+    postMessage() {}
+    terminate() {}
+    emit(data: unknown) { this.listeners.get('message')?.forEach((listener) => listener({ data })) }
+  }
   class FakeMutationObserver {
     constructor(callback: (records: Array<{ target: unknown; addedNodes: FakeNode[]; removedNodes: FakeNode[] }>) => void) { mutationCallbacks.push(callback) }
     observe() {}
@@ -31,7 +44,7 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
   class FakeMedia { readyState = 2; currentSrc = ''; src = '' }
   const window = {
     localStorage: storage,
-    performance: { getEntriesByType: (type: string) => type === 'navigation' ? [{ type: 'reload' }] : [] },
+    performance: { timeOrigin: 100000, getEntriesByType: (type: string) => type === 'navigation' ? [{ type: 'reload' }] : [] },
     addEventListener: (name: string, listener: (event: unknown) => void) => {
       const entries = listeners.get(name) ?? []
       entries.push(listener)
@@ -41,6 +54,7 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
     clearTimeout: (id: number) => { timers.delete(id) },
     setInterval: (callback: () => void) => { timerId += 1; timers.set(timerId, callback); return timerId },
     clearInterval: (id: number) => { timers.delete(id) },
+    Worker: workerEnabled ? FakeWorker : undefined,
     matchMedia: () => ({ matches: false }),
     location: { pathname: '/', origin: 'https://app.test', host: 'app.test', href: 'https://app.test/', hash: '#private=value' },
   }
@@ -85,6 +99,7 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
       documentListeners.get('visibilitychange')?.forEach((listener) => listener({}))
     },
     dispatchError: (error: unknown) => listeners.get('error')?.forEach((listener) => listener({ error })),
+    dispatchWorkerMessage: (message: unknown) => fakeWorkers.at(-1)?.emit(message),
   }
 }
 
@@ -314,6 +329,41 @@ test('mounted snapshot flushes immediately and visible heartbeat persists freshn
   expect(harness.scanCount()).toBe(scansBeforeHeartbeat)
 })
 
+test('global app loading is observed without pinning screen loss and lifecycle lineage is retained', () => {
+  let saved = ''
+  const harness = startDiagnostics({ getItem: () => null, setItem: (_key, value) => { saved = value } })
+  const loadingRoot = {
+    id: 'root',
+    children: { length: 1 },
+    childNodes: [{ tagName: 'MAIN', childNodes: [] }],
+    firstElementChild: { tagName: 'MAIN', childNodes: [] },
+    querySelector: (selector: string) => selector === '[data-slot="app-loading"]' ? { tagName: 'MAIN' } : null,
+  }
+  harness.setRoot(loadingRoot)
+  harness.diagnostics!.record('mounted', 'mounted')
+  let report = JSON.parse(harness.diagnostics!.report())
+  expect(report.current.rootState).toBe('app-loading')
+  expect(report.current.lastHealthyAt).toBe(0)
+  expect(report.incident).toBeNull()
+  expect(report.current.events.map((event: { kind: string }) => event.kind)).toContain('app-loading')
+
+  harness.setRoot({ id: 'root', children: { length: 1 }, childNodes: [{ tagName: 'DIV', childNodes: [] }], firstElementChild: { tagName: 'DIV', childNodes: [] } })
+  report = JSON.parse(harness.diagnostics!.report())
+  expect(report.current.rootState).toBe('present')
+  expect(report.current.lastHealthyAt).toBeGreaterThan(0)
+  expect(report.current.events.map((event: { kind: string }) => event.kind)).toContain('app-working')
+  expect(report.witness.status).toBe('unavailable')
+  expect(report.current.documentTimeOrigin).toBe(100000)
+
+  harness.dispatch('pagehide', { persisted: true })
+  harness.dispatch('pageshow', { persisted: true })
+  report = JSON.parse(harness.diagnostics!.report())
+  expect(report.current.pagehidePersisted).toBe(true)
+  expect(report.current.pageshowPersisted).toBe(true)
+  expect(report.current.runId).toMatch(/^[a-f0-9-]{8,40}$/)
+  expect(saved.length).toBeLessThanOrEqual(8192)
+})
+
 test('oversized numeric environment versions are dropped and pinned incident remains under storage cap', () => {
   let saved = ''
   const malformedButBounded = JSON.stringify({
@@ -359,4 +409,43 @@ test('auth and cache state keep only the latest boolean transition', () => {
   expect(current.events.map((event: { kind: string }) => event.kind)).toContain('auth-restoring')
   expect(current.events.map((event: { kind: string }) => event.kind)).toContain('auth-signed-in')
   expect(current.events.map((event: { kind: string }) => event.kind)).toContain('cache-ready')
+})
+
+test('two bounded worker records and pinned incident stay within the UTF-8 report limit', () => {
+  const oldRunId = '11111111-1111-4111-8111-111111111111'
+  const storage = {
+    getItem: () => JSON.stringify({
+      current: { startedAt: 90000, runId: oldRunId, phase: 'mounted', state: 'active', rootState: 'present', events: [] },
+      incident: { kind: 'screen-loss', at: 99000, runId: oldRunId, rootState: 'empty', context: Array.from({ length: 6 }, (_, index) => ({ kind: 'media-load', at: 99000 + index, phase: 'mounted' })) },
+    }),
+    setItem: () => undefined,
+  }
+  const harness = startDiagnostics(storage, true)
+  const diagnostics = harness.diagnostics!
+  const initial = JSON.parse(diagnostics.report())
+  const currentRunId = initial.current.runId
+  const events = Array.from({ length: 6 }, (_, index) => ({ kind: 'media-load', at: 100000 + index, phase: 'mounted' }))
+  const makeRecord = (runId: string) => {
+    const sample = { runId, sentAt: 101000, documentTimeOrigin: 100000, phase: 'mounted', state: 'active', visibility: 'visible', lastObservedAt: 100999, lastHealthyAt: 100998, rootState: 'present', auth: { bootstrapping: true, authenticated: true, at: 100900 }, cache: { hydrated: true, at: 100901 }, events, pagehidePersisted: false, pageshowPersisted: false }
+    return {
+      runId,
+      updatedAt: 101000,
+      lastAckAt: 100950,
+      sample,
+      evidence: { kind: 'main-response-gap', runId, probeSeq: 12, sentAt: 100940, deadlineAt: 100950, evidenceAt: 100960, lastAckAt: 100930, visibilityAtLastAck: 'visible', sample },
+      monitorGap: { fromAt: 100900, observedAt: 100950, elapsedMs: 50000, visibilityAtLastAck: 'visible' },
+      storageReason: null,
+      storage: { backend: 'opfs-sync', lastFlushAt: 101001, lastReadBackAt: 101002, gapReadBackAt: 101002 },
+      status: 'ready',
+    }
+  }
+
+  harness.dispatchWorkerMessage({ type: 'ready', status: 'ready', records: [makeRecord(currentRunId), makeRecord(oldRunId), makeRecord('22222222-2222-4222-8222-222222222222')] })
+  const serialized = diagnostics.report()
+  const report = JSON.parse(serialized)
+  expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(8192)
+  expect(report.witness.records.map((record: { runId: string }) => record.runId).sort()).toEqual([currentRunId, oldRunId].sort())
+  expect(report.witness.records.every((record: { evidence: { kind: string } }) => record.evidence.kind === 'main-response-gap')).toBe(true)
+  expect(report.witness.records.every((record: { storage: { backend: string; gapReadBackAt: number } }) => record.storage.backend === 'opfs-sync' && record.storage.gapReadBackAt > 0)).toBe(true)
+  expect(report.incident.kind).toBe('screen-loss')
 })
