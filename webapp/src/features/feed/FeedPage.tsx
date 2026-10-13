@@ -42,6 +42,7 @@ import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { mediaCardSeenReady } from './seen-visibility'
 import { VideoPlaybackControls } from './video-presentation'
+import { FeedSharedAuthorAvatars } from './shared-author-avatars'
 
 type Props = {
   active?: boolean
@@ -337,6 +338,7 @@ export function FeedPage({
 
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
+    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
@@ -434,6 +436,7 @@ export function FeedPage({
       submitting={deletion.isPending}
     />
     </MediaPlaybackCoordinator>
+    </FeedSharedAuthorAvatars>
     </VideoQueryScope.Provider>
   )
 }
