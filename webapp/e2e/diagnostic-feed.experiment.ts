@@ -4,6 +4,10 @@ import { createRefreshToken, hashRefreshToken, hashRefreshTokenFamily } from '..
 import { jpegImage } from './helpers/images'
 import { expect, test } from '@playwright/test'
 import { completeChildProfile, uploadChildAvatar, uploadFamilyPhoto } from '../src/features/family/api'
+import { createAvatarUpload, finalizeAvatarUpload } from '../src/features/avatar/api'
+import { uploadAvatarObject } from '../src/features/avatar/upload'
+import { setMemoryReaction } from '../src/features/feed/api'
+import type {} from '../src/diagnostic/main'
 import sharp from 'sharp'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { z } from 'zod'
@@ -78,6 +82,7 @@ function testTransport(accessToken: string): AuthenticatedTransport {
 
 test('MAX identity opens the plain family feed with private photo, cursor paging, and the existing media worker', async ({ page }, testInfo) => {
   const { familyId, childId, refreshToken } = await seed()
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.context().addCookies([{
     name: 'web_app_demo_refresh',
     value: refreshToken,
@@ -92,6 +97,12 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const { accessToken } = await authenticated.json() as { accessToken: string }
   await expect(page.getByText(/Вы вошли как Synthetic MAX user/)).toBeVisible()
   const transport = testTransport(accessToken)
+  const ownerAvatarBytes = await sharp({ create: { width: 240, height: 240, channels: 3, background: '#8a6454' } }).jpeg().toBuffer()
+  const ownerAvatarFile = new File([ownerAvatarBytes], 'diagnostic-owner-avatar.jpg', { type: 'image/jpeg' })
+  const { upload: ownerAvatarTicket } = await createAvatarUpload(transport, { contentType: 'image/jpeg', byteSize: ownerAvatarFile.size })
+  await uploadAvatarObject(ownerAvatarTicket, ownerAvatarFile)
+  const ownerAvatar = await finalizeAvatarUpload(transport, ownerAvatarTicket.uploadId, { x: 0, y: 0, width: 1, height: 1 })
+  expect(ownerAvatar.avatar?.id).toBeTruthy()
   const avatarBytes = await sharp({ create: { width: 240, height: 240, channels: 3, background: '#8a6454' } }).jpeg().toBuffer()
   const avatarMediaId = await uploadChildAvatar(transport, familyId, new File([avatarBytes], 'diagnostic-child-avatar.jpg', { type: 'image/jpeg' }), 'image/jpeg')
   await completeChildProfile(transport, familyId, {
@@ -113,6 +124,9 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
     body: { childId, kind: 'photo', mediaIds: [assetId, secondAssetId], body: photoBody, occurredAt: new Date().toISOString() },
   })
   expect(created.status).toBe(201)
+  const createdMemory = await created.json() as { id: string }
+  const reaction = await setMemoryReaction(transport, familyId, createdMemory.id, 'heart')
+  expect(reaction.currentUserReaction).toBe('heart')
   await page.route('**/api/v1/families/*/memories**', async (route) => {
     const response = await route.fetch()
     const payload = await response.json() as { items: Array<{ body: string; attachments: Array<Record<string, unknown>> }> }
@@ -162,6 +176,30 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   expect(familyMetadataRequests).toBe(1)
   await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-header-viewport.png') })
   await expect(page.getByText(photoBody)).toBeVisible()
+  const navigation = page.getByRole('navigation', { name: 'Основная навигация' })
+  await expect(page.getByRole('link', { name: 'Лента' })).toHaveAttribute('aria-current', 'page')
+  await expect(navigation.getByRole('button', { name: 'Добавить', exact: true })).toBeDisabled()
+  await expect(navigation.getByRole('button', { name: 'Семья', exact: true })).toBeDisabled()
+  await expect(page.getByText(/Добавление записей, раздел «Семья» и добавление реакций временно недоступны/)).toBeVisible()
+  await expect.poll(() => navigation.locator('img').evaluateAll((icons) => icons.length === 3 && icons.every((icon) => (icon as HTMLImageElement).complete && (icon as HTMLImageElement).naturalWidth > 0))).toBe(true)
+  const navGeometry = await navigation.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    const addCircle = element.querySelector<HTMLElement>('.diagnostic-navigation-add-circle')!.getBoundingClientRect()
+    return { x: bounds.x, width: bounds.width, height: bounds.height, bottom: window.innerHeight - bounds.bottom, circle: addCircle.width }
+  })
+  expect(navGeometry.x).toBeCloseTo(12, 0)
+  expect(navGeometry.width).toBeCloseTo(366, 0)
+  expect(navGeometry.height).toBeGreaterThanOrEqual(82)
+  expect(navGeometry.bottom).toBeGreaterThanOrEqual(8)
+  expect(navGeometry.circle).toBe(48)
+  const photoCard = page.locator(`[data-memory-id="${createdMemory.id}"]`)
+  await expect(photoCard.locator('.diagnostic-reaction-count[data-current-user-reaction="true"]')).toContainText('1')
+  await expect.poll(() => photoCard.locator('.diagnostic-reaction-count img').evaluate((icon: HTMLImageElement) => icon.complete && icon.naturalWidth > 0)).toBe(true)
+  await expect(photoCard.getByRole('button', { name: 'Добавить реакцию' })).toBeDisabled()
+  const ownerAvatarImage = photoCard.locator('.diagnostic-author-avatar img')
+  await expect(ownerAvatarImage).toBeVisible()
+  await expect.poll(() => ownerAvatarImage.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0), { timeout: 20_000 }).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-v2-card-390.png') })
   const images = page.getByRole('img', { name: 'Фотография воспоминания' })
   await expect(images).toHaveCount(1)
   const image = images.first()

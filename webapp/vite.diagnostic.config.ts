@@ -18,6 +18,11 @@ function diagnosticHtml(): Plugin {
         ['/private-media-sw.js', path.resolve(root, 'public/private-media-sw.js')],
         ['/pwa-runtime-witness-v1.js', path.resolve(root, 'public/pwa-runtime-witness-v1.js')],
         ['/assets/brand/memoly-logo-correct.webp', path.resolve(root, 'public/assets/brand/memoly-logo-correct.webp')],
+        ['/assets/icons/home-active@2x.webp', path.resolve(root, 'public/assets/icons/home-active@2x.webp')],
+        ['/assets/icons/family-default@2x.webp', path.resolve(root, 'public/assets/icons/family-default@2x.webp')],
+        ['/assets/icons/plus-default@2x.webp', path.resolve(root, 'public/assets/icons/plus-default@2x.webp')],
+        ['/assets/icons/heart-default@2x.webp', path.resolve(root, 'public/assets/icons/heart-default@2x.webp')],
+        ['/assets/icons/heart-filled-active@2x.webp', path.resolve(root, 'public/assets/icons/heart-filled-active@2x.webp')],
       ])
       server.middlewares.use((request, response, next) => {
         const assetPath = request.url ? localRuntimeAssets.get(new URL(request.url, 'http://localhost').pathname) : undefined
@@ -32,6 +37,11 @@ function diagnosticHtml(): Plugin {
         ['/private-media-sw.js', path.resolve(root, 'public/private-media-sw.js')],
         ['/pwa-runtime-witness-v1.js', path.resolve(root, 'public/pwa-runtime-witness-v1.js')],
         ['/assets/brand/memoly-logo-correct.webp', path.resolve(root, 'public/assets/brand/memoly-logo-correct.webp')],
+        ['/assets/icons/home-active@2x.webp', path.resolve(root, 'public/assets/icons/home-active@2x.webp')],
+        ['/assets/icons/family-default@2x.webp', path.resolve(root, 'public/assets/icons/family-default@2x.webp')],
+        ['/assets/icons/plus-default@2x.webp', path.resolve(root, 'public/assets/icons/plus-default@2x.webp')],
+        ['/assets/icons/heart-default@2x.webp', path.resolve(root, 'public/assets/icons/heart-default@2x.webp')],
+        ['/assets/icons/heart-filled-active@2x.webp', path.resolve(root, 'public/assets/icons/heart-filled-active@2x.webp')],
       ])
       server.middlewares.use((request, response, next) => {
         const assetPath = request.url ? localRuntimeAssets.get(new URL(request.url, 'http://localhost').pathname) : undefined

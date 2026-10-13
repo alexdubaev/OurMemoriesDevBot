@@ -1,4 +1,4 @@
-import { Component, StrictMode, useCallback, useEffect, useRef, useState, useLayoutEffect, type PropsWithChildren } from 'react'
+import { Component, StrictMode, useCallback, useEffect, useRef, useState, useLayoutEffect, type CSSProperties, type PropsWithChildren } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 
@@ -9,6 +9,7 @@ import { shouldKeepHostAuthPreloader, useHostAuthHandoff } from '@/features/auth
 import { loadFamily, loadFamilyHome } from '@/features/family/api'
 import { DiagnosticHeader } from './DiagnosticHeader'
 import { DiagnosticFeed } from './DiagnosticFeed'
+import { DiagnosticNavigation } from './DiagnosticNavigation'
 import { DiagnosticMaxLogin } from './DiagnosticMaxLogin'
 import { DiagnosticMaxApproval } from './DiagnosticMaxApproval'
 import { ApiRequestError } from '@/platform/api'
@@ -94,8 +95,10 @@ function DiagnosticApp({ hostBridge }: { hostBridge: HostBridge }) {
 }
 
 function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBridge: HostBridge; userId: string; displayName: string; transport: ReturnType<typeof useAuth>['transport'] }) {
+  const bottomInset = hostBridge.kind === 'browser' ? 'env(safe-area-inset-bottom)' : `${hostBridge.getInsets().bottom}px`
+  const pageStyle = { '--diagnostic-bottom-inset': bottomInset } as CSSProperties
   const [home, setHome] = useState<FamilyHomeResponse | null>(null)
-  const [selected, setSelected] = useState<{ familyId: string; membershipEpoch: number; name: string; child: Awaited<ReturnType<typeof loadFamily>>['child'] } | null>(null)
+  const [selected, setSelected] = useState<{ familyId: string; membershipEpoch: number; name: string; role: 'full' | 'viewer'; child: Awaited<ReturnType<typeof loadFamily>>['child'] } | null>(null)
   const [homeError, setHomeError] = useState('')
   const [selectionBusy, setSelectionBusy] = useState(false)
   const queryClient = useQueryClient()
@@ -124,7 +127,7 @@ function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBr
     return () => { cancelled = true; mounted.current = false; selectionGeneration.current += 1 }
   }, [queryClient, transport, userId])
 
-  const selectFamily = useCallback(async (familyId: string, membershipEpoch: number, name: string) => {
+  const selectFamily = useCallback(async (familyId: string, membershipEpoch: number, name: string, role: 'full' | 'viewer') => {
     const generation = ++selectionGeneration.current
     setSelectionBusy(true)
     setSelected(null)
@@ -132,7 +135,7 @@ function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBr
       const family = await loadFamily(transport, familyId)
       if (!mounted.current || selectionGeneration.current !== generation) return
       allowPrivateFamilyCache(userId, familyId)
-      setSelected({ familyId, membershipEpoch, name, child: family.child })
+      setSelected({ familyId, membershipEpoch, name, role, child: family.child })
     } catch (error) {
       if (!mounted.current || selectionGeneration.current !== generation) return
       if (error instanceof ApiRequestError && [403, 404].includes(error.status)) {
@@ -155,22 +158,26 @@ function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBr
     return () => window.removeEventListener(privateFamilyAccessRevokedEvent, revoke)
   }, [queryClient, userId])
 
-  return <div className="diagnostic-page">
+  return <div className="diagnostic-page" style={pageStyle}>
     <header className="diagnostic-header"><h1>Диагностическая лента</h1><ReportButton /></header>
     <main className="diagnostic-main">
       <p>Вы вошли как {displayName}.</p>
       {home ? <section aria-label="Семьи" className="diagnostic-family-picker">
         <strong>Выберите семью</strong>
-        {home.items.map((item) => <button aria-pressed={selected?.familyId === item.familyId} disabled={selectionBusy} key={item.familyId} onClick={() => void selectFamily(item.familyId, item.membershipEpoch, item.name)} type="button">{item.name} · {item.role === 'full' ? 'полный доступ' : 'просмотр'}</button>)}
+        {home.items.map((item) => <button aria-pressed={selected?.familyId === item.familyId} disabled={selectionBusy} key={item.familyId} onClick={() => void selectFamily(item.familyId, item.membershipEpoch, item.name, item.role)} type="button">{item.name} · {item.role === 'full' ? 'полный доступ' : 'просмотр'}</button>)}
         {home.items.length === 0 ? <p>Доступных семей пока нет.</p> : null}
       </section> : <p className="diagnostic-state" role="status">{homeError || 'Загружаем семьи…'}</p>}
       {homeError ? <p className="diagnostic-error" role="alert">{homeError}</p> : null}
       {selected ? <section aria-label={`Лента семьи ${selected.name}`}>
         <h2>{selected.name}</h2>
         <DiagnosticHeader child={selected.child} familyId={selected.familyId} transport={transport} userId={userId} />
-        <DiagnosticFeed familyId={selected.familyId} hostBridge={hostBridge} membershipEpoch={selected.membershipEpoch} userId={userId} transport={transport} onAccessRevoked={() => window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId, familyId: selected.familyId } }))} />
+        <div id="diagnostic-feed">
+          <p className="diagnostic-read-only-notice" id="diagnostic-read-only-notice">В этом эксперименте лента доступна для просмотра. Добавление записей, раздел «Семья» и добавление реакций временно недоступны.</p>
+          <DiagnosticFeed familyId={selected.familyId} hostBridge={hostBridge} membershipEpoch={selected.membershipEpoch} userId={userId} transport={transport} onAccessRevoked={() => window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId, familyId: selected.familyId } }))} />
+        </div>
       </section> : null}
     </main>
+    {selected ? <DiagnosticNavigation role={selected.role} /> : null}
   </div>
 }
 

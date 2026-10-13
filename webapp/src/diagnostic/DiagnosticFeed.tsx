@@ -50,12 +50,42 @@ export function DiagnosticFeed({ familyId, hostBridge, membershipEpoch, userId, 
 }
 
 function Memory({ familyId, hostBridge, membershipEpoch, memory, userId, transport }: { familyId: string; hostBridge: HostBridge; membershipEpoch: number; memory: MemoryDto; userId: string; transport: AuthenticatedTransport }) {
-  return <article className="diagnostic-memory">
-    <h2>{memory.author.name}</h2>
-    <p className="diagnostic-meta"><time dateTime={memory.occurredAt}>{new Date(memory.occurredAt).toLocaleString('ru-RU')}</time>{memory.kind === 'note' ? ' · заметка' : ` · ${memory.kind}`}</p>
-    {memory.body ? <p className="diagnostic-note">{memory.body}</p> : null}
+  return <article className="diagnostic-memory" data-memory-id={memory.id}>
+    <header className="diagnostic-memory-author">
+      <AuthorAvatar avatarPath={memory.author.avatarPath} name={memory.author.name} transport={transport} userId={userId} />
+      <div className="diagnostic-memory-author-meta">
+        <h2>{memory.author.name}</h2>
+        <p className="diagnostic-meta"><time dateTime={memory.occurredAt}>{new Date(memory.occurredAt).toLocaleString('ru-RU')}</time></p>
+      </div>
+    </header>
     {memory.attachments.length ? <Carousel attachments={memory.attachments} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} memoryId={memory.id} userId={userId} transport={transport} /> : null}
+    {memory.body ? <p className="diagnostic-note">{memory.body}</p> : null}
+    <footer className="diagnostic-memory-reactions">
+      <div aria-label="Реакции" className="diagnostic-reaction-counts" role="group">
+        {Object.entries(memory.reactionCounts).map(([reaction, count]) => <span aria-label={`${reactionLabel(reaction)}: ${count}${memory.currentUserReaction === reaction ? ', ваша реакция' : ''}`} className="diagnostic-reaction-count" data-current-user-reaction={memory.currentUserReaction === reaction ? 'true' : undefined} key={reaction}>
+          {reaction === 'heart' ? <img alt="" height="20" src={memory.currentUserReaction === reaction ? '/assets/icons/heart-filled-active@2x.webp' : '/assets/icons/heart-default@2x.webp'} width="20" /> : <span aria-hidden="true">{reactionGlyph(reaction)}</span>}
+          <span>{count}</span>
+        </span>)}
+        {memory.currentUserReaction && !memory.reactionCounts[memory.currentUserReaction] ? <span className="diagnostic-current-reaction" data-current-user-reaction="true">Вы поставили {reactionLabel(memory.currentUserReaction)}</span> : null}
+      </div>
+      <button aria-describedby="diagnostic-read-only-notice" className="diagnostic-add-reaction" disabled type="button">Добавить реакцию</button>
+    </footer>
   </article>
+}
+
+function AuthorAvatar({ avatarPath, name, userId, transport }: { avatarPath: string | null; name: string; userId: string; transport: AuthenticatedTransport }) {
+  const avatarUrl = usePrivateImageUrl(userId, avatarPath, transport)
+  return <span aria-hidden="true" className="diagnostic-author-avatar">
+    {avatarUrl ? <img alt="" height="40" src={avatarUrl} width="40" /> : <span>{name.trim().slice(0, 1).toLocaleUpperCase('ru-RU') || 'У'}</span>}
+  </span>
+}
+
+function reactionLabel(reaction: string) {
+  return ({ heart: 'сердце', love: 'любовь', laugh: 'смех', touched: 'трогательно', wow: 'удивление', clap: 'аплодисменты' } as Record<string, string>)[reaction] ?? 'реакция'
+}
+
+function reactionGlyph(reaction: string) {
+  return ({ love: '😍', laugh: '😂', touched: '🥹', wow: '😮', clap: '👏' } as Record<string, string>)[reaction] ?? '•'
 }
 
 type AttachmentProps = { attachment: MemoryAttachment; active: boolean; membershipEpoch: number; userId: string; transport: AuthenticatedTransport; onDimensions: (id: string, width: number, height: number) => void }
