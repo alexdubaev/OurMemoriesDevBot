@@ -32,3 +32,29 @@ The original product rollback remains `minimal-feed-release.sh off`. Do not merg
 - Evidence: allowed-worktree `.scratch/minimal-feed/author-avatars-{typecheck,build,smoke}.log`; screenshots under `webapp/e2e/.artifacts/minimal-feed/test-results/diagnostic-feed.experiment-0265a-d-the-existing-media-worker-chromium/`.
 - Execution note: the worker accidentally appended one build-verifier output to `.scratch/minimal-feed/author-avatars-build.log` in the main checkout, outside the permitted worktree. It was disclosed; source files there were not changed, and that log was left untouched. All subsequent evidence is within the permitted worktree. This is a log-path mistake, not a product change.
 - One fresh independent read-only GPT-6 Luna/high review of the entire active diff was clean, with no confirmed P0/P1/P2. No fix pass or repeated audit was needed. No migration, contract, backend, ACL or normal-product UI change.
+
+## Delivered artifact
+
+Active source SHA: `275acee42bd84bf723da950bd02c9e7f30ef71d7`, served in place at `https://app.memoly.ru/` in root mode. It retains the existing MAX/PWA entry and session; no new login mechanism. Reload/reopen the existing owner entry for the physical test. Local/browser checks do not substitute for that test.
+
+The exact clean source commit was built with the same configuration after commit and verified again (exit 0). Three immutable files staged under `/opt/memoly/experiments/minimal-feed/releases/275acee42bd84bf723da950bd02c9e7f30ef71d7/`, then activated through the unchanged guarded helper. No main merge, server application checkout switch, normal static image replacement, backend/DB change or helper edit.
+
+SHA-256:
+
+- `dist/diagnostic.html`: `4dc765996b6b26252204298fbe567ef705699b27de89a996b9a0de6d6233ee3a`
+- `dist/assets/diagnostic-feed-DKl1iDya.css`: `07b484369a72a3b97dee45e31ac90f9a8c939b61d3acc3b5c7c0223674279412`
+- `dist/assets/index-DfrxD-fd.js`: `1b1ff5d3a875f491e00899e0094a04f679c101baed51d2a854542b057f750172`
+
+Immediately before activation, the helper and public HTML confirmed `8feb515`. Activation validated permissions, manifests, host preflight/lock, gateway configuration/backup/reload, public three-file checksums, root HTML/no-store and live/ready health. The real rollback `275acee → 8feb515` succeeded, including public root hash `28e7386d443a8b69b706086ec040e3905c3aa58ecf6ec7a860849555d5fa62b2` and health; subsequent `8feb515 → 275acee` succeeded. Both operations exited 0, and the new version is active.
+
+After reactivation, all three public artifact checksums match; `/health/live` and `/health/ready` return `{"status":"ok"}`. The existing signed-out public browser smoke passes: root HTTP 200, MAX entry, preserved query/fragment, one diagnostic stylesheet, no page errors. No production challenge or private owner session was used.
+
+Normal service image/container identities, public SW/runtime-witness hashes, original rollback files and helper checksum are identical to the pre-delivery snapshot. All 15 manifest entries across `78da662`, `97a6fa2`, `bda2b3c`, `b899f35` and `8feb515` remain valid. The working `8feb515` checkpoint and all previous artifacts are retained. Evidence: allowed-worktree `.scratch/minimal-feed/author-avatars-{activate,rollback,reactivate,public-checksums,public-smoke}.log`, production before/after snapshots and source-build log.
+
+Reactivate this version with:
+
+```bash
+/opt/memoly/experiments/minimal-feed/minimal-feed-release.sh activate 275acee42bd84bf723da950bd02c9e7f30ef71d7 root
+```
+
+Delivery is complete; physical iPhone acceptance is pending. Stop here. Do not add reactions until a separate owner instruction. This receipt-only commit does not alter tested product source or the delivered artifact.
