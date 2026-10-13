@@ -8,6 +8,15 @@ The updated helper accepts `activate <full-sha> root` to serve the diagnostic do
 
 The diagnostic entry now uses the existing MAX browser-link methods directly for code creation, status and redemption, so authentication stays on that page. MAX confirmation uses the existing signed challenge parser, forced host authentication and explicit approval action. No auth endpoint or protocol has changed. No rollback will run automatically while the owner is testing.
 
+Root activation receipt, 2026-10-13 02:37 UTC:
+
+- Active source/helper: `f6db4c15a5fe486a996fd298f27d511c18723a2e`, mode `root`. Root and prefix serve the same verified three-file artifact. Main has not been merged or published.
+- `activate <sha> root`, `off`, and reactivation exited 0. Off restored the exact original root hash `c5fc47eab8bee445e945646f3e13a42030224763fb4a360d5ead5d14df59c88f`. Final state is root experiment active. Roll back on owner request with `sudo /opt/memoly/experiments/minimal-feed/minimal-feed-release.sh off`.
+- Artifact SHA-256: HTML `8eeb85402fa6ed0015f6bc651fcfd32f7922e8df10b2f345c408e49df0e9842a`; JS `index-BImeQS-w.js` `08ce253faae74161840d5472866d8460dd9cddfbc982d6c0058f52700afda616`; CSS unchanged from initial release. Versioned helper `helper-f6db4c1.sh` hash `c0b077a3fe1b1020498a53faa282b65d7b9c401bc573a8436d4f8bf364c93e49`.
+- Typecheck, isolated build/artifact guard, shell syntax and route/manifest closure passed. One focused real-backend browser pairing smoke passed (1/1, 33.4s): actual start/status/redeem, same diagnostic URL and family feed; approval state was seeded only in the test database, so live external MAX confirmation is still manual. One fresh independent review reported no P0/P1/P2 findings.
+- Public browser smoke passed: ordinary root HTTP 200, no redirect, query/fragment preserved, plain MAX entry, exactly one diagnostic CSS, no page errors. Root uses no-store. Both existing workers and all five normal Compose container IDs/images stayed identical; health checks passed; no DB changes or migrations.
+- Evidence: `.scratch/minimal-feed/root-{activate,rollback-reactivate,mode-closure}.log`, `root-production-after.txt`, `public-root-smoke.log`, `public-root.png`, `max-entry-auth-smoke.log`. Physical iPhone result remains pending; this delivery does not establish the white-screen cause.
+
 The sections below record the initial prefix-only deployment, before the owner's root-test request.
 
 This helper exposes the isolated UI at `https://app.memoly.ru/__experiments/minimal-feed/diagnostic.html` while leaving the normal `/` app, backend, database, and existing static container in place. It does not run a product release or migration.
