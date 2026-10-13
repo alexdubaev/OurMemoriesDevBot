@@ -130,6 +130,7 @@ export default defineConfig({
       env: normalizeEnv({
         ...process.env,
         VITE_API_URL: backendUrl,
+        VITE_MEMOLY_UI_VERSION: 'v2',
         VITE_MAX_BOT_USERNAME: process.env.VITE_MAX_BOT_USERNAME ?? 'memoLy',
       }),
       url: frontendUrl,
