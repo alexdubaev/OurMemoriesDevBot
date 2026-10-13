@@ -10,7 +10,7 @@ body { margin: 0; background: #fff; }
 button, a { font: inherit; }
 button { color: inherit; }
 
-.diagnostic-page { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px calc(106px + max(8px, var(--diagnostic-bottom-inset, env(safe-area-inset-bottom)))); }
+.diagnostic-page { width: min(100%, 480px); margin: 0 auto; padding: 20px 16px calc(106px + max(8px, var(--diagnostic-bottom-inset, env(safe-area-inset-bottom)))); }
 .diagnostic-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #ddd; }
 .diagnostic-header h1 { margin: 0; font-size: 1.2rem; }
 .diagnostic-report { min-height: 40px; padding: 7px 12px; border: 1px solid #aaa; border-radius: 4px; background: white; }
@@ -26,10 +26,14 @@ button { color: inherit; }
 .diagnostic-family-picker button, .diagnostic-login { min-height: 44px; padding: 8px 12px; border: 1px solid #999; border-radius: 4px; background: white; text-align: left; }
 .diagnostic-family-picker button[aria-pressed="true"] { border-color: #333; background: #f3f3f3; }
 .diagnostic-state { padding: 16px 0; }
-.diagnostic-memory { padding: 18px 0; border-top: 1px solid #ddd; overflow-wrap: anywhere; }
-.diagnostic-memory h2 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
+.diagnostic-memory { display: flex; flex-direction: column; margin: 0 0 16px; padding: 0 0 8px; border: 1px solid #e8dfda; border-radius: 24px; background: #fff; overflow: hidden; overflow-wrap: anywhere; }
+.diagnostic-memory > h2 { order: 0; margin: 0; padding: 8px 12px 0; font-size: .9375rem; font-weight: 600; }
+.diagnostic-memory > .diagnostic-meta { order: 1; min-height: 26px; margin: 2px 0 0; padding: 0 12px 8px; color: #555; font-size: .75rem; }
+.diagnostic-memory > .diagnostic-carousel { order: 2; }
+.diagnostic-memory > .diagnostic-carousel-dots { order: 3; }
 .diagnostic-meta { margin: 0 0 10px; color: #555; font-size: .875rem; }
 .diagnostic-note { white-space: pre-wrap; }
+.diagnostic-memory > .diagnostic-note { order: 4; margin: 0; padding: 12px 16px 0; font-size: .9375rem; }
 .diagnostic-attachment { display: block; width: 100%; margin-top: 12px; }
 .diagnostic-media-stage { width: 100%; min-width: 0; }
 .diagnostic-media-stage > .diagnostic-attachment { margin-top: 0; }
