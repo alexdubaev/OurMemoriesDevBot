@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import useEmblaCarousel from 'embla-carousel-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
@@ -9,6 +9,7 @@ import { openTelegramVideo } from '@/features/feed/api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from '@/features/feed/telegram-video-handoff'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { privateMediaSource } from '@/platform/media/private-media-access'
+import { privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import type { HostBridge } from '@/platform/host-bridge'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 
@@ -39,20 +40,46 @@ export function DiagnosticFeed({ familyId, hostBridge, membershipEpoch, userId, 
   }, [feed.error, onAccessRevoked])
 
   const memories = feed.data?.pages.flatMap((page) => page.items) ?? []
+  const [authorAvatarUrls, setAuthorAvatarUrls] = useState<Record<string, string>>({})
+  const avatarScope = `${userId}:${familyId}:${membershipEpoch}:${privateCacheIdentityGeneration()}:${privateFamilyCacheGeneration(userId, familyId)}`
+  const authors = new Map<string, string>()
+  for (const memory of memories) {
+    const path = memory.author.avatarPath
+    if (path) authors.set(`${memory.author.id}:${path}`, path)
+  }
+  const updateAuthorAvatar = useCallback((key: string, url: string | null) => {
+    setAuthorAvatarUrls((current) => {
+      if (url === null) {
+        if (!(key in current)) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      }
+      return current[key] === url ? current : { ...current, [key]: url }
+    })
+  }, [])
   if (feed.isPending) return <p className="diagnostic-state" role="status">Загружаем воспоминания…</p>
   if (feed.error) return <p className="diagnostic-error" role="alert">Не удалось загрузить ленту.</p>
   return <>
-    {memories.map((memory) => <Memory key={memory.id} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} memory={memory} userId={userId} transport={transport} />)}
+    {[...authors].map(([authorKey, path]) => {
+      const key = `${avatarScope}:${authorKey}`
+      return <AuthorAvatarUrl key={key} path={path} scopeKey={key} transport={transport} userId={userId} onChange={updateAuthorAvatar} />
+    })}
+    {memories.map((memory) => {
+      const authorKey = memory.author.avatarPath ? `${memory.author.id}:${memory.author.avatarPath}` : ''
+      const avatarKey = authors.has(authorKey) ? `${avatarScope}:${authorKey}` : ''
+      return <Memory key={memory.id} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} memory={memory} avatarUrl={authorAvatarUrls[avatarKey] ?? null} userId={userId} transport={transport} />
+    })}
     {memories.length === 0 ? <p>Воспоминаний пока нет.</p> : null}
     <div aria-hidden="true" ref={sentinel} />
     {feed.hasNextPage ? <button className="diagnostic-load-more" disabled={feed.isFetchingNextPage} onClick={() => void feed.fetchNextPage()} type="button">{feed.isFetchingNextPage ? 'Загружаем…' : 'Загрузить ещё'}</button> : null}
   </>
 }
 
-function Memory({ familyId, hostBridge, membershipEpoch, memory, userId, transport }: { familyId: string; hostBridge: HostBridge; membershipEpoch: number; memory: MemoryDto; userId: string; transport: AuthenticatedTransport }) {
+function Memory({ familyId, hostBridge, membershipEpoch, memory, avatarUrl, userId, transport }: { familyId: string; hostBridge: HostBridge; membershipEpoch: number; memory: MemoryDto; avatarUrl: string | null; userId: string; transport: AuthenticatedTransport }) {
   return <article className="diagnostic-memory">
     <div className="diagnostic-author-row">
-      <AuthorAvatar name={memory.author.name} />
+      <AuthorAvatar name={memory.author.name} url={avatarUrl} />
       <div className="diagnostic-author-details">
         <h2>{memory.author.name}</h2>
         <p className="diagnostic-meta"><time dateTime={memory.occurredAt}>{new Date(memory.occurredAt).toLocaleString('ru-RU')}</time>{memory.kind === 'note' ? ' · заметка' : ` · ${memory.kind}`}</p>
@@ -63,10 +90,19 @@ function Memory({ familyId, hostBridge, membershipEpoch, memory, userId, transpo
   </article>
 }
 
-function AuthorAvatar({ name }: { name: string }) {
+function AuthorAvatar({ name, url }: { name: string; url: string | null }) {
   return <span aria-hidden="true" className="diagnostic-author-avatar">
-    {name.trim().charAt(0).toLocaleUpperCase('ru-RU')}
+    {url ? <img alt="" src={url} /> : name.trim().charAt(0).toLocaleUpperCase('ru-RU')}
   </span>
+}
+
+function AuthorAvatarUrl({ path, scopeKey, transport, userId, onChange }: { path: string; scopeKey: string; transport: AuthenticatedTransport; userId: string; onChange: (key: string, url: string | null) => void }) {
+  const url = usePrivateImageUrl(userId, path, transport)
+  useLayoutEffect(() => {
+    onChange(scopeKey, url)
+    return () => onChange(scopeKey, null)
+  }, [onChange, scopeKey, url])
+  return null
 }
 
 type AttachmentProps = { attachment: MemoryAttachment; active: boolean; membershipEpoch: number; userId: string; transport: AuthenticatedTransport; onDimensions: (id: string, width: number, height: number) => void }
