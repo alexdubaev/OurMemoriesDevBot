@@ -21,3 +21,23 @@ The owner authorized this separate deployment on 2026-10-13. The experiment arti
 Rollback to the normal interface uses `off`; reactivation uses `activate 40ff11a64a4d2827a269e3a71df4c7966d33b549`. Future experiment versions must each have their own verified artifact directory and full SHA. Switching among these saved frontend versions requires neither a rebuild nor a database restore. This does not promise compatibility for arbitrary historical backend versions or versions whose artifacts have not been retained; those still use the guarded product release procedure.
 
 For the physical test, open the explicit HTTPS diagnostic URL in Safari. If needed, follow its canonical MAX sign-in link, finish authentication, then return to the diagnostic URL in the same browser profile. Select the actual family and scroll normally beyond the first page. Safari and an installed standalone PWA can have different sessions; a Safari result is not acceptance in standalone mode. The normal UI has no new experiment navigation control. The cause of the white screen remains unconfirmed until the owner performs the physical comparison.
+
+## Delivery receipt — 2026-10-13
+
+- Task: `MEMOLY-PWA-MINIMAL-UI-EXPERIMENT`; branch `experiment/pwa-minimal-feed`; allowed worktree `.worktrees/pwa-crash-diagnostics`.
+- Activated artifact source: `40ff11a64a4d2827a269e3a71df4c7966d33b549`. Delivery helper source: `49ac01708b291b38e977991afd1ae9138220e585`. No main publication, PR, or merge.
+- Server helper SHA-256 matches the reviewed local file: `07a65f8904ceab67677e173ecc64058183c615a8fb87095102cbb883f6db0694`. Its immutable copy is `/opt/memoly/experiments/minimal-feed/helper-49ac017.sh`.
+- Activation, `off`, and reactivation all exited 0. While off, the diagnostic path returned the normal root HTML hash. Final state: source `40ff11a64a4d2827a269e3a71df4c7966d33b549` active. Immediate gateway backups are retained under `/opt/memoly/backups/minimal-feed-*`.
+- Public HTML and both assets matched their staged SHA-256 hashes; the response uses `Cache-Control: no-store`. Local artifact verification passed: exactly three files, one isolated CSS asset, no published manifest or worker.
+- Root HTML, existing private-media SW, runtime-witness worker, all five normal Compose container IDs and images remained identical before/after. Both health endpoints passed. Production checkout stayed clean at `920f223fae0216be6a92b6c3ad2199c87bad0c0a`. No migrations, data edits, backend changes, or normal service restarts.
+- Public Chromium smoke passed (exit 0): HTTPS 200, signed-out canonical MAX handoff visible, exactly one diagnostic stylesheet, no page errors. No private production session was used. Existing local real-backend feed/photo/pagination smoke evidence is recorded in the experiment document; physical iPhone acceptance remains outstanding.
+- One fresh independent review found two P2 issues in the helper; both fixed in one bounded pass. Lead closure: Bash syntax passed; valid checksum manifest accepted, duplicate and omitted manifests rejected; post-activation snapshot failure explicitly invokes rollback. No unresolved P0/P1/P2 findings. Scout, worker and reviewer: GPT-6 Luna High; lead: Codex.
+- Ignored local evidence: `.scratch/minimal-feed/production-{activate,off,off-proof,reactivate}.log`, `production-{before,after}.txt`, `deploy-closure.log`, `public-smoke.log`, and `public-signed-out.png`.
+
+Artifact SHA-256:
+
+| File | SHA-256 |
+| --- | --- |
+| `diagnostic.html` | `27f08308c0995f8309852127504bbf5f0e53925ca39bf9eb7613a3beb35cee7e` |
+| `assets/diagnostic-feed-Enk8_a8l.css` | `c7d6d743ac85f76ffd1c006c7b8c37aa75ac21fdbdd48e90e5c31aee453d464f` |
+| `assets/index-D5KFgtP1.js` | `d95a588a3134653eb813c58c6cb85dff88b05585fca5416f99d90c333375e2e7` |
