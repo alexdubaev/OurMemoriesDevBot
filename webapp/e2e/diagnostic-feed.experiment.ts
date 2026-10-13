@@ -4,6 +4,7 @@ import { createRefreshToken, hashRefreshToken, hashRefreshTokenFamily } from '..
 import { jpegImage } from './helpers/images'
 import { expect, test } from '@playwright/test'
 import { uploadFamilyPhoto } from '../src/features/family/api'
+import sharp from 'sharp'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { z } from 'zod'
 
@@ -93,20 +94,105 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const transport = testTransport(accessToken)
   const file = new File([jpegImage.buffer], 'diagnostic-photo.jpg', { type: 'image/jpeg' })
   const assetId = await uploadFamilyPhoto(transport, familyId, file, 'image/jpeg', 'memory')
+  const portraitBytes = await sharp({ create: { width: 240, height: 360, channels: 3, background: '#547890' } }).jpeg().toBuffer()
+  const secondAssetId = await uploadFamilyPhoto(transport, familyId, new File([portraitBytes], 'diagnostic-photo-2.jpg', { type: 'image/jpeg' }), 'image/jpeg', 'memory')
   const photoBody = `Synthetic diagnostic photo ${randomUUID()}`
   const created = await transport.raw(`/api/v1/families/${familyId}/memories`, {
     method: 'POST',
     headers: { 'Idempotency-Key': randomUUID() },
-    body: { childId, kind: 'photo', mediaIds: [assetId], body: photoBody, occurredAt: new Date().toISOString() },
+    body: { childId, kind: 'photo', mediaIds: [assetId, secondAssetId], body: photoBody, occurredAt: new Date().toISOString() },
   })
   expect(created.status).toBe(201)
+  await page.route('**/api/v1/families/*/memories**', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json() as { items: Array<{ body: string; attachments: Array<Record<string, unknown>> }> }
+    const fixtureMemory = payload.items.find((item) => item.body === photoBody)
+    if (fixtureMemory?.attachments[1]) {
+      // Local-only fixture: the backend-served private image is presented as a pending video poster.
+      const privatePhoto = fixtureMemory.attachments[1]
+      fixtureMemory.attachments[1] = { ...privatePhoto, kind: 'video', width: null, height: null, previewPath: privatePhoto.originalDownloadPath, playbackPath: null }
+    }
+    await route.fulfill({ response, json: payload })
+  })
+  await page.evaluate((mediaId) => {
+    type PosterGateWindow = Window & { __posterRequested?: () => void; __posterRequestedPromise?: Promise<void>; __releasePoster?: () => void }
+    const target = window as unknown as PosterGateWindow
+    const originalFetch = window.fetch.bind(window)
+    let notifyRequested!: () => void
+    let release!: () => void
+    const requested = new Promise<void>((resolve) => { notifyRequested = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    target.__posterRequested = notifyRequested
+    target.__posterRequestedPromise = requested
+    target.__releasePoster = release
+    const wrappedFetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString(), location.href)
+      if (url.pathname.includes(`/media/${mediaId}/content`)) {
+        notifyRequested()
+        return gate.then(() => originalFetch(input, init))
+      }
+      return originalFetch(input, init)
+    }, { preconnect: originalFetch.preconnect }) as typeof fetch
+    window.fetch = wrappedFetch
+  }, secondAssetId)
   await page.getByRole('button', { name: /Synthetic diagnostic family/ }).click()
   await expect(page.getByRole('heading', { name: 'Synthetic diagnostic family' })).toBeVisible()
   await expect(page.getByText(photoBody)).toBeVisible()
-  const image = page.getByRole('img', { name: 'Фотография воспоминания' })
+  const images = page.getByRole('img', { name: 'Фотография воспоминания' })
+  await expect(images).toHaveCount(1)
+  const image = images.first()
   await expect(image).toBeVisible()
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0), { timeout: 20_000 }).toBe(true)
-  await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-photo.png'), fullPage: true })
+  const geometry = await image.evaluate((element: HTMLImageElement) => ({ naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))
+  expect(geometry.width).toBeGreaterThan(300)
+  expect(geometry.height).toBeCloseTo(geometry.width * geometry.naturalHeight / geometry.naturalWidth, 0)
+  const secondDot = page.getByRole('button', { name: 'Медиа 2 из 2' })
+  const firstStage = page.locator('[data-attachment-id]').first()
+  const firstStageHeight = await firstStage.evaluate((element) => element.getBoundingClientRect().height)
+  const posterRequest = page.evaluate(async () => await (window as unknown as Window & { __posterRequestedPromise: Promise<void> }).__posterRequestedPromise)
+  await secondDot.click()
+  await expect(secondDot).toHaveAttribute('aria-current', 'true')
+  await posterRequest
+  await expect.poll(() => firstStage.evaluate((element) => element.getBoundingClientRect().height)).toBe(firstStageHeight)
+  await expect.poll(() => page.locator('[data-carousel-slide]').nth(1).evaluate((slide) => Math.abs(slide.getBoundingClientRect().left - slide.closest('.diagnostic-carousel')!.getBoundingClientRect().left) < 1)).toBe(true)
+  await page.evaluate(() => (window as unknown as Window & { __releasePoster: () => void }).__releasePoster())
+  const poster = page.getByRole('img', { name: 'Кадр видео' })
+  await expect(poster).toBeVisible()
+  await expect.poll(() => poster.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0), { timeout: 20_000 }).toBe(true)
+  const posterGeometry = await poster.evaluate((element: HTMLImageElement) => ({ naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))
+  expect(posterGeometry.width).toBeGreaterThan(300)
+  expect(posterGeometry.height).toBeCloseTo(posterGeometry.width * posterGeometry.naturalHeight / posterGeometry.naturalWidth, 0)
+  await expect.poll(() => firstStage.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(posterGeometry.width * posterGeometry.naturalHeight / posterGeometry.naturalWidth, 0)
+  const firstDot = page.getByRole('button', { name: 'Медиа 1 из 2' })
+  await firstDot.click()
+  await expect(firstDot).toHaveAttribute('aria-current', 'true')
+  await expect.poll(() => page.locator('[data-carousel-slide]').first().evaluate((slide) => Math.abs(slide.getBoundingClientRect().left - slide.closest('.diagnostic-carousel')!.getBoundingClientRect().left) < 1)).toBe(true)
+  await secondDot.click()
+  await expect(secondDot).toHaveAttribute('aria-current', 'true')
+  await expect.poll(() => page.locator('[data-carousel-slide]').nth(1).evaluate((slide) => Math.abs(slide.getBoundingClientRect().left - slide.closest('.diagnostic-carousel')!.getBoundingClientRect().left) < 1)).toBe(true)
+  await expect(poster).toBeVisible()
+  await expect.poll(() => poster.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+  const revisitedGeometry = await page.locator('.diagnostic-carousel').evaluate((viewport) => ({ width: viewport.getBoundingClientRect().width, height: viewport.getBoundingClientRect().height, scrollLeft: viewport.scrollLeft }))
+  expect(revisitedGeometry.width).toBeGreaterThan(300)
+  expect(revisitedGeometry.height).toBeCloseTo(revisitedGeometry.width * posterGeometry.naturalHeight / posterGeometry.naturalWidth, 0)
+  expect(posterGeometry.width).toBeCloseTo(revisitedGeometry.width, 0)
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await expect(secondDot).toHaveAttribute('aria-current', 'true')
+  await expect.poll(() => page.locator('[data-carousel-slide]').nth(1).evaluate((slide) => Math.abs(slide.getBoundingClientRect().left - slide.closest('.diagnostic-carousel')!.getBoundingClientRect().left) < 1)).toBe(true)
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await expect(secondDot).toHaveAttribute('aria-current', 'true')
+  await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-carousel-poster-viewport.png') })
+  await expect(secondDot).toHaveAttribute('aria-current', 'true')
+  await expect.poll(() => page.locator('[data-carousel-slide]').nth(1).evaluate((slide) => Math.abs(slide.getBoundingClientRect().left - slide.closest('.diagnostic-carousel')!.getBoundingClientRect().left) < 1)).toBe(true)
+  const capturedGeometry = await page.locator('.diagnostic-carousel').evaluate((viewport) => {
+    const stage = viewport.querySelector<HTMLElement>('[data-attachment-id]')!
+    return { width: viewport.getBoundingClientRect().width, height: viewport.getBoundingClientRect().height, stageWidth: stage.getBoundingClientRect().width, stageHeight: stage.getBoundingClientRect().height }
+  })
+  expect(capturedGeometry.width).toBeCloseTo(revisitedGeometry.width, 0)
+  expect(capturedGeometry.height).toBeCloseTo(revisitedGeometry.height, 0)
+  expect(capturedGeometry.stageWidth).toBeCloseTo(capturedGeometry.width, 0)
+  expect(capturedGeometry.stageHeight).toBeCloseTo(capturedGeometry.width * posterGeometry.naturalHeight / posterGeometry.naturalWidth, 0)
+  await expect.poll(() => poster.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0 && element.getBoundingClientRect().width > 300)).toBe(true)
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 20_000 }).toBe(true)
   const cursorResponse = page.waitForResponse((response) => {
     const url = new URL(response.url())
