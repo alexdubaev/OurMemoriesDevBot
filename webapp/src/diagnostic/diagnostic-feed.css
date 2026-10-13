@@ -10,7 +10,7 @@ body { margin: 0; background: #fff; }
 button, a { font: inherit; }
 button { color: inherit; }
 
-.diagnostic-page { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px 48px; }
+.diagnostic-page { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px calc(106px + max(8px, var(--diagnostic-bottom-inset, env(safe-area-inset-bottom)))); }
 .diagnostic-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #ddd; }
 .diagnostic-header h1 { margin: 0; font-size: 1.2rem; }
 .diagnostic-report { min-height: 40px; padding: 7px 12px; border: 1px solid #aaa; border-radius: 4px; background: white; }
@@ -48,3 +48,13 @@ button { color: inherit; }
 .diagnostic-load-more { min-height: 44px; width: 100%; margin-top: 10px; }
 .diagnostic-error { color: #8b1717; }
 .diagnostic-fallback { width: 100%; min-height: 120px; margin-top: 8px; }
+
+.diagnostic-navigation { position: fixed; z-index: 5; bottom: max(8px, var(--diagnostic-bottom-inset, env(safe-area-inset-bottom))); left: 50%; width: min(calc(100vw - 24px), 456px); min-height: 82px; padding: 0; transform: translateX(-50%); border: 1px solid #e8dfda; border-radius: 24px; background: #fff; }
+.diagnostic-navigation-items { display: grid; width: 100%; min-height: 82px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; padding: 8px 14px; }
+.diagnostic-navigation-item { display: flex; min-width: 0; min-height: 60px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 999px; background: transparent; color: #756a71; font-size: .75rem; text-decoration: none; }
+.diagnostic-navigation-item > img { display: block; width: 24px; height: 24px; }
+.diagnostic-navigation-item[aria-current='page'] { color: #202020; }
+.diagnostic-navigation-add:disabled, .diagnostic-navigation-item:disabled { opacity: 1; }
+.diagnostic-navigation-add-circle { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; background: #eee; }
+.diagnostic-navigation-add-circle img { display: block; width: 24px; height: 24px; }
+.diagnostic-navigation-viewer { color: #756a71; }

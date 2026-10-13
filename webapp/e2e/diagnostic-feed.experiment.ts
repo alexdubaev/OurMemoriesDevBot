@@ -77,6 +77,7 @@ function testTransport(accessToken: string): AuthenticatedTransport {
 }
 
 test('MAX identity opens the plain family feed with private photo, cursor paging, and the existing media worker', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   const { familyId, childId, refreshToken } = await seed()
   await page.context().addCookies([{
     name: 'web_app_demo_refresh',
@@ -152,6 +153,27 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   })
   await page.getByRole('button', { name: /Synthetic diagnostic family/ }).click()
   await expect(page.getByRole('heading', { name: 'Synthetic diagnostic family' })).toBeVisible()
+  const navigation = page.getByRole('navigation', { name: 'Основная навигация' })
+  await expect(navigation).toBeVisible()
+  await expect(navigation.getByRole('link', { name: 'Лента' })).toHaveAttribute('href', '#diagnostic-feed')
+  await expect(navigation.getByRole('button', { name: 'Добавить' })).toBeDisabled()
+  await expect(navigation.getByRole('button', { name: 'Семья' })).toBeDisabled()
+  await expect(page.locator('#diagnostic-read-only-notice')).toContainText('управление семьёй недоступны')
+  await expect.poll(() => navigation.locator('img').evaluateAll((images) => images.length === 3 && images.every((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
+  const navigationGeometry = await navigation.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return { position: style.position, left: rect.left, width: rect.width, bottom: innerHeight - rect.bottom, height: rect.height, minHeight: style.minHeight, transform: style.transform }
+  })
+  expect(navigationGeometry.position).toBe('fixed')
+  expect(navigationGeometry.left).toBe(12)
+  expect(navigationGeometry.width).toBe(366)
+  expect(navigationGeometry.bottom).toBe(8)
+  expect(navigationGeometry.height).toBeGreaterThanOrEqual(82)
+  expect(navigationGeometry.minHeight).toBe('82px')
+  await expect(navigation.locator('.diagnostic-navigation-add-circle')).toHaveCSS('width', '48px')
+  await expect(navigation.locator('.diagnostic-navigation-add-circle')).toHaveCSS('height', '48px')
+  expect(navigationGeometry.transform).toBe('matrix(1, 0, 0, 1, -183, 0)')
   await expect(page.getByText('Synthetic diagnostic child', { exact: true })).toBeVisible()
   const logo = page.getByRole('img', { name: 'memoLy' })
   await expect(logo).toBeVisible()
@@ -167,6 +189,7 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const image = images.first()
   await expect(image).toBeVisible()
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0), { timeout: 20_000 }).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('diagnostic-nav-only-390.png') })
   const geometry = await image.evaluate((element: HTMLImageElement) => ({ naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))
   expect(geometry.width).toBeGreaterThan(300)
   expect(geometry.height).toBeCloseTo(geometry.width * geometry.naturalHeight / geometry.naturalWidth, 0)
