@@ -51,11 +51,23 @@ export function DiagnosticFeed({ familyId, hostBridge, membershipEpoch, userId, 
 
 function Memory({ familyId, hostBridge, membershipEpoch, memory, userId, transport }: { familyId: string; hostBridge: HostBridge; membershipEpoch: number; memory: MemoryDto; userId: string; transport: AuthenticatedTransport }) {
   return <article className="diagnostic-memory">
-    <h2>{memory.author.name}</h2>
-    <p className="diagnostic-meta"><time dateTime={memory.occurredAt}>{new Date(memory.occurredAt).toLocaleString('ru-RU')}</time>{memory.kind === 'note' ? ' · заметка' : ` · ${memory.kind}`}</p>
+    <div className="diagnostic-author-row">
+      <AuthorAvatar avatarPath={memory.author.avatarPath} name={memory.author.name} transport={transport} userId={userId} />
+      <div className="diagnostic-author-details">
+        <h2>{memory.author.name}</h2>
+        <p className="diagnostic-meta"><time dateTime={memory.occurredAt}>{new Date(memory.occurredAt).toLocaleString('ru-RU')}</time>{memory.kind === 'note' ? ' · заметка' : ` · ${memory.kind}`}</p>
+      </div>
+    </div>
     {memory.body ? <p className="diagnostic-note">{memory.body}</p> : null}
     {memory.attachments.length ? <Carousel attachments={memory.attachments} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} memoryId={memory.id} userId={userId} transport={transport} /> : null}
   </article>
+}
+
+function AuthorAvatar({ avatarPath, name, transport, userId }: { avatarPath: string | null; name: string; transport: AuthenticatedTransport; userId: string }) {
+  const url = usePrivateImageUrl(userId, avatarPath, transport)
+  return <span aria-hidden="true" className="diagnostic-author-avatar">
+    {url ? <img alt="" src={url} /> : name.trim().charAt(0).toLocaleUpperCase('ru-RU')}
+  </span>
 }
 
 type AttachmentProps = { attachment: MemoryAttachment; active: boolean; membershipEpoch: number; userId: string; transport: AuthenticatedTransport; onDimensions: (id: string, width: number, height: number) => void }

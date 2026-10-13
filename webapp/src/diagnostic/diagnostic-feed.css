@@ -27,8 +27,12 @@ button { color: inherit; }
 .diagnostic-family-picker button[aria-pressed="true"] { border-color: #333; background: #f3f3f3; }
 .diagnostic-state { padding: 16px 0; }
 .diagnostic-memory { display: flex; flex-direction: column; margin: 0 0 16px; padding: 0 0 8px; border: 1px solid #e8dfda; border-radius: 24px; background: #fff; overflow: hidden; overflow-wrap: anywhere; }
-.diagnostic-memory > h2 { order: 0; margin: 0; padding: 8px 12px 0; font-size: .9375rem; font-weight: 600; }
-.diagnostic-memory > .diagnostic-meta { order: 1; min-height: 26px; margin: 2px 0 0; padding: 0 12px 8px; color: #555; font-size: .75rem; }
+.diagnostic-memory > .diagnostic-author-row { order: 0; display: flex; align-items: center; gap: 12px; padding: 8px 12px; }
+.diagnostic-author-avatar { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; overflow: hidden; border-radius: 50%; background: #eee; color: #555; font-size: .875rem; font-weight: 600; }
+.diagnostic-author-avatar > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.diagnostic-author-details { min-width: 0; }
+.diagnostic-author-details > h2 { margin: 0; font-size: .9375rem; font-weight: 600; }
+.diagnostic-author-details > .diagnostic-meta { margin: 2px 0 0; color: #555; font-size: .75rem; }
 .diagnostic-memory > .diagnostic-carousel { order: 2; }
 .diagnostic-memory > .diagnostic-carousel-dots { order: 3; }
 .diagnostic-meta { margin: 0 0 10px; color: #555; font-size: .875rem; }
