@@ -4,11 +4,14 @@ import { createRefreshToken, hashRefreshToken, hashRefreshTokenFamily } from '..
 import { jpegImage } from './helpers/images'
 import { expect, test } from '@playwright/test'
 import { completeChildProfile, uploadChildAvatar, uploadFamilyPhoto } from '../src/features/family/api'
+import { createAvatarUpload, finalizeAvatarUpload } from '../src/features/avatar/api'
+import { uploadAvatarObject } from '../src/features/avatar/upload'
 import sharp from 'sharp'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { z } from 'zod'
 
 const maxSubject = 99130001
+const fallbackSubject = 99130002
 const jwtSecret = 'web-e2e-secret-at-least-thirty-two-characters'
 
 async function seed() {
@@ -21,9 +24,18 @@ async function seed() {
       await prisma.externalIdentity.deleteMany({ where: { userId: old.userId } })
       await prisma.user.deleteMany({ where: { id: old.userId } })
     }
+    const oldFallback = await prisma.externalIdentity.findUnique({ where: { provider_subject: { provider: 'max', subject: String(fallbackSubject) } }, select: { userId: true } })
+    if (oldFallback) {
+      await prisma.authSession.deleteMany({ where: { userId: oldFallback.userId } })
+      await prisma.family.deleteMany({ where: { ownerUserId: oldFallback.userId } })
+      await prisma.externalIdentity.deleteMany({ where: { userId: oldFallback.userId } })
+      await prisma.user.deleteMany({ where: { id: oldFallback.userId } })
+    }
     await prisma.pilotAdmission.upsert({ where: { provider_subject: { provider: 'max', subject: String(maxSubject) } }, update: { revokedAt: null }, create: { provider: 'max', subject: String(maxSubject) } })
     const user = await prisma.user.create({ data: { displayName: 'Synthetic MAX user' } })
     const identity = await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject: String(maxSubject) } })
+    const fallbackUser = await prisma.user.create({ data: { displayName: 'Synthetic fallback author' } })
+    await prisma.externalIdentity.create({ data: { userId: fallbackUser.id, provider: 'max', subject: String(fallbackSubject) } })
     const refreshToken = createRefreshToken(jwtSecret)
     await prisma.authSession.create({ data: {
       userId: user.id,
@@ -38,6 +50,7 @@ async function seed() {
     await prisma.$transaction(async (tx) => {
       await tx.family.create({ data: { id: familyId, name: 'Synthetic diagnostic family', timezone: 'Europe/Moscow', ownerUserId: user.id } })
       await tx.familyMember.create({ data: { familyId, userId: user.id, role: 'full' } })
+      await tx.familyMember.create({ data: { familyId, userId: fallbackUser.id, role: 'viewer' } })
       await tx.child.create({ data: { id: childId, familyId, displayName: 'Synthetic child' } })
       await tx.memory.createMany({ data: Array.from({ length: 21 }, (_, index) => ({
         familyId,
@@ -50,7 +63,18 @@ async function seed() {
         firstPublishedAt: publishedAt,
         firstPublishedOrdinal: BigInt(index + 1),
       })) })
-      await tx.family.update({ where: { id: familyId }, data: { publicationOrdinal: 21 } })
+      await tx.memory.create({ data: {
+        familyId,
+        childId,
+        authorId: fallbackUser.id,
+        kind: 'note',
+        body: 'Synthetic fallback author note',
+        occurredAt: new Date(publishedAt.getTime() - 22 * 60_000),
+        status: 'published',
+        firstPublishedAt: publishedAt,
+        firstPublishedOrdinal: 22n,
+      } })
+      await tx.family.update({ where: { id: familyId }, data: { publicationOrdinal: 22 } })
     })
     return { familyId, childId, refreshToken, userId: user.id, identityId: identity.id }
   } finally { await prisma.$disconnect() }
@@ -78,7 +102,7 @@ function testTransport(accessToken: string): AuthenticatedTransport {
 
 test('MAX identity opens the plain family feed with private photo, cursor paging, and the existing media worker', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const { familyId, childId, refreshToken } = await seed()
+  const { familyId, childId, refreshToken, userId } = await seed()
   await page.context().addCookies([{
     name: 'web_app_demo_refresh',
     value: refreshToken,
@@ -93,6 +117,13 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const { accessToken } = await authenticated.json() as { accessToken: string }
   await expect(page.getByText(/Вы вошли как Synthetic MAX user/)).toBeVisible()
   const transport = testTransport(accessToken)
+  const authorAvatarBytes = await sharp({ create: { width: 240, height: 240, channels: 3, background: '#84634f' } }).jpeg().toBuffer()
+  const authorAvatarFile = new File([authorAvatarBytes], 'diagnostic-author-avatar.jpg', { type: 'image/jpeg' })
+  const authorAvatarUpload = await createAvatarUpload(transport, { contentType: 'image/jpeg', byteSize: authorAvatarFile.size })
+  await uploadAvatarObject(authorAvatarUpload.upload, authorAvatarFile)
+  const authorAvatar = await finalizeAvatarUpload(transport, authorAvatarUpload.upload.uploadId)
+  expect(authorAvatar.avatar?.id).toBeTruthy()
+  const authorAvatarPath = `/api/v1/families/${familyId}/media/avatars/${userId}/${authorAvatar.avatar!.id}/content`
   const avatarBytes = await sharp({ create: { width: 240, height: 240, channels: 3, background: '#8a6454' } }).jpeg().toBuffer()
   const avatarMediaId = await uploadChildAvatar(transport, familyId, new File([avatarBytes], 'diagnostic-child-avatar.jpg', { type: 'image/jpeg' }), 'image/jpeg')
   await completeChildProfile(transport, familyId, {
@@ -116,8 +147,9 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   expect(created.status).toBe(201)
   await page.route('**/api/v1/families/*/memories**', async (route) => {
     const response = await route.fetch()
-    const payload = await response.json() as { items: Array<{ body: string; attachments: Array<Record<string, unknown>> }> }
+    const payload = await response.json() as { items: Array<{ body: string; author: { avatarPath: string | null }; attachments: Array<Record<string, unknown>> }> }
     const fixtureMemory = payload.items.find((item) => item.body === photoBody)
+    if (fixtureMemory) expect(fixtureMemory.author.avatarPath).toBe(authorAvatarPath)
     if (fixtureMemory?.attachments[1]) {
       // Local-only fixture: the backend-served private image is presented as a pending video poster.
       const privatePhoto = fixtureMemory.attachments[1]
@@ -147,9 +179,11 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
     window.fetch = wrappedFetch
   }, secondAssetId)
   let familyMetadataRequests = 0
+  let authorAvatarRequests = 0
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (request.method() === 'GET' && url.pathname === `/api/v1/families/${familyId}`) familyMetadataRequests += 1
+    if (url.pathname === authorAvatarPath) authorAvatarRequests += 1
   })
   await page.getByRole('button', { name: /Synthetic diagnostic family/ }).click()
   await expect(page.getByRole('heading', { name: 'Synthetic diagnostic family' })).toBeVisible()
@@ -184,6 +218,14 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   expect(familyMetadataRequests).toBe(1)
   await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-header-viewport.png') })
   await expect(page.getByText(photoBody)).toBeVisible()
+  const photoCard = page.locator('.diagnostic-memory').filter({ hasText: photoBody }).first()
+  await expect(photoCard.locator('.diagnostic-author-avatar')).toHaveText('S')
+  await expect(photoCard.locator('.diagnostic-author-avatar img')).toHaveCount(0)
+  const authorAvatarGeometry = await photoCard.locator('.diagnostic-author-avatar').evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { width: rect.width, height: rect.height }
+  })
+  expect(authorAvatarGeometry).toEqual({ width: 40, height: 40 })
   const images = page.getByRole('img', { name: 'Фотография воспоминания' })
   await expect(images).toHaveCount(1)
   const image = images.first()
@@ -193,8 +235,8 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const card = page.locator('.diagnostic-memory').filter({ hasText: photoBody }).first()
   const cardGeometry = await card.evaluate((element) => {
     const rect = element.getBoundingClientRect()
-    const title = element.querySelector(':scope > h2')!.getBoundingClientRect()
-    const date = element.querySelector(':scope > .diagnostic-meta')!.getBoundingClientRect()
+    const title = element.querySelector(':scope > .diagnostic-author-row h2')!.getBoundingClientRect()
+    const date = element.querySelector(':scope > .diagnostic-author-row .diagnostic-meta')!.getBoundingClientRect()
     const media = element.querySelector(':scope > .diagnostic-carousel')!.getBoundingClientRect()
     const dots = element.querySelector(':scope > .diagnostic-carousel-dots')!.getBoundingClientRect()
     const caption = element.querySelector(':scope > .diagnostic-note')!.getBoundingClientRect()
@@ -273,6 +315,10 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const nextPage = await cursorResponse
   expect(nextPage.ok()).toBe(true)
   await expect(page.getByText('Synthetic diagnostic note 21')).toBeVisible({ timeout: 20_000 })
+  const fallbackCard = page.locator('.diagnostic-memory').filter({ hasText: 'Synthetic fallback author note' })
+  await expect(fallbackCard.locator('.diagnostic-author-avatar')).toHaveText('S')
+  await expect(fallbackCard.locator('.diagnostic-author-avatar img')).toHaveCount(0)
+  await expect.poll(() => authorAvatarRequests).toBe(0)
 })
 
 test('signed-out diagnostic starts MAX browser link and redeems into the same diagnostic feed', async ({ page }) => {
