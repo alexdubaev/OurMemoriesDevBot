@@ -51,7 +51,7 @@ async function seed() {
       })) })
       await tx.family.update({ where: { id: familyId }, data: { publicationOrdinal: 21 } })
     })
-    return { familyId, childId, refreshToken }
+    return { familyId, childId, refreshToken, userId: user.id, identityId: identity.id }
   } finally { await prisma.$disconnect() }
 }
 
@@ -116,4 +116,41 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const nextPage = await cursorResponse
   expect(nextPage.ok()).toBe(true)
   await expect(page.getByText('Synthetic diagnostic note 21')).toBeVisible({ timeout: 20_000 })
+})
+
+test('signed-out diagnostic starts MAX browser link and redeems into the same diagnostic feed', async ({ page }) => {
+  const { userId, identityId } = await seed()
+  const diagnosticPath = '/__experiments/minimal-feed/diagnostic.html'
+  await page.goto(diagnosticPath)
+  const startButton = page.getByRole('button', { name: 'Создать код для входа через MAX' })
+  await expect(startButton).toBeVisible()
+  const startResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/browser-link/start'))
+  await startButton.click()
+  const started = await startResponse
+  expect(started.ok()).toBe(true)
+  const challenge = await started.json() as { challengeId: string; displayCode: string; startParam: string }
+  await expect(page.getByLabel('Код подтверждения')).toHaveText(challenge.displayCode)
+  await expect(page.getByRole('link', { name: 'Открыть MAX' })).toHaveAttribute('href', `https://max.ru/id911018762027_bot?startapp=${challenge.startParam}`)
+  expect(new URL(page.url()).pathname).toBe(diagnosticPath)
+
+  const redeemResponse = page.waitForResponse((response) => response.url().endsWith(`/api/v1/auth/browser-link/${challenge.challengeId}/redeem`))
+  const prisma = createPrisma(process.env.TEST_DATABASE_URL!)
+  try {
+    // MAX approval happens outside the browser; this smoke keeps its boundary at the real redeem endpoint.
+    await prisma.browserLoginChallenge.update({ where: { id: challenge.challengeId }, data: {
+      state: 'approved',
+      approvedAt: new Date(),
+      approvedUserId: userId,
+      approvedExternalIdentityId: identityId,
+    } })
+  } finally { await prisma.$disconnect() }
+
+  const redeemed = await redeemResponse
+  expect(redeemed.ok()).toBe(true)
+  await expect(page.getByText(/Вы вошли как Synthetic MAX user/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Synthetic diagnostic family/ })).toBeVisible()
+  expect(new URL(page.url()).pathname).toBe(diagnosticPath)
+  await page.getByRole('button', { name: /Synthetic diagnostic family/ }).click()
+  await expect(page.getByRole('heading', { name: 'Synthetic diagnostic family' })).toBeVisible()
+  await expect(page.getByText('Synthetic diagnostic note 01')).toBeVisible()
 })

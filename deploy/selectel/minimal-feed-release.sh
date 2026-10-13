@@ -63,7 +63,7 @@ host_preflight() {
 	[ "$available" -ge 4194304 ] || die 'less than 4 GiB is available on the Selectel filesystem'
 }
 
-active_sha() {
+active_state() {
 	python3 - "$GATEWAY_FILE" "$BEGIN_MARKER" "$END_MARKER" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
@@ -80,30 +80,41 @@ import re
 matches = re.findall(r'memoly-minimal-feed-([0-9a-f]{40}):80', block)
 if len(matches) != 1:
     raise SystemExit('ERROR: cannot identify the active experiment SHA from its route')
-print(matches[0])
+mode_matches = re.findall(r'^# CODEX MINIMAL-FEED MODE: (root|prefix)$', block, re.M)
+if len(mode_matches) > 1:
+    raise SystemExit('ERROR: experiment route has multiple mode markers')
+# Routes created by the previous helper version were prefix-only.
+mode = mode_matches[0] if mode_matches else 'prefix'
+print(matches[0], mode)
 PY
 }
 
 route_candidate() {
-	local target=$1 output=$2
-	python3 - "$GATEWAY_FILE" "$output" "$BEGIN_MARKER" "$END_MARKER" "$target" <<'PY'
+	local target=$1 mode=$2 output=$3
+	python3 - "$GATEWAY_FILE" "$output" "$BEGIN_MARKER" "$END_MARKER" "$target" "$mode" <<'PY'
 import pathlib, sys
-source, destination, begin, end, target = sys.argv[1:]
+source, destination, begin, end, target, mode = sys.argv[1:]
 with open(source, newline='') as stream:
     text = stream.read()
 if text.count(begin) != text.count(end) or text.count(begin) > 1:
     raise SystemExit('ERROR: existing experiment route markers are malformed or duplicated')
 block = ''
 if target != 'off':
-    block = (f'{begin}\n\thandle /__experiments/minimal-feed/* {{\n'
-             f'\t\treverse_proxy memoly-minimal-feed-{target}:80\n\t}}\n{end}\n')
+    if mode == 'root':
+        block = (f'{begin}\n# CODEX MINIMAL-FEED MODE: root\n'
+                 f'\t@minimal_feed_{target} path / /__experiments/minimal-feed/*\n'
+                 f'\thandle @minimal_feed_{target} {{\n'
+                 f'\t\treverse_proxy memoly-minimal-feed-{target}:80\n\t}}\n{end}\n')
+    else:
+        block = (f'{begin}\n# CODEX MINIMAL-FEED MODE: prefix\n'
+                 f'\thandle /__experiments/minimal-feed/* {{\n'
+                 f'\t\treverse_proxy memoly-minimal-feed-{target}:80\n\t}}\n{end}\n')
 if begin in text:
-    left, rest = text.split(begin, 1)
-    _, right = rest.split(end, 1)
-    old = text[text.index(begin):text.index(end) + len(end)]
     start = text.index(begin)
-    after = start + len(old)
-    text = text[:start] + block.rstrip('\n') + text[after:]
+    after = text.index(end, start) + len(end)
+    if text[after:after + 1] == '\n':
+        after += 1
+    text = text[:start] + block + text[after:]
 else:
     if target == 'off':
         pass
@@ -111,7 +122,7 @@ else:
         anchor = '\t# Host ports stay on the stable gateway; normal traffic goes to internal static:80.\n'
         if text.count(anchor) != 1:
             raise SystemExit('ERROR: expected exactly one stable gateway route anchor')
-        text = text.replace(anchor, block + '\n' + anchor, 1)
+        text = text.replace(anchor, block + anchor, 1)
 with open(destination, 'w', newline='') as stream:
     stream.write(text)
 PY
@@ -124,6 +135,9 @@ normal_services_snapshot() {
 	docker inspect --format '{{.Name}} {{.Image}}' $ids | LC_ALL=C sort
 }
 root_html_hash() { curl --fail --silent --show-error --compressed --max-time 10 "$PUBLIC_URL/" | sha256sum | awk '{print $1}'; }
+canonical_root_hash() {
+	docker exec memoly-static-1 sha256sum /srv/index.html | awk '{print $1}'
+}
 check_normal_health() {
 	local path
 	for path in /health/live /health/ready; do
@@ -160,19 +174,22 @@ install_gateway_candidate() {
 	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_MOUNT" --adapter caddyfile || return 1
 }
 restore_gateway() {
+	local expected_root=$1 restored_root
 	[ -n "$ACTIVE_BACKUP" ] && [ -f "$ACTIVE_BACKUP" ] || { printf 'ERROR: gateway backup is unavailable\n' >&2; return 1; }
 	bash "$APP_ROOT/deploy/selectel/in-place-file.sh" restore "$ACTIVE_BACKUP" "$GATEWAY_FILE" || return 1
 	gateway_hash_matches || return 1
 	docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_MOUNT" --adapter caddyfile || return 1
 	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_MOUNT" --adapter caddyfile || return 1
 	check_normal_health || return 1
+	restored_root=$(root_html_hash) || return 1
+	[ "$restored_root" = "$expected_root" ] || return 1
 }
 rollback_failure() {
-	local why=$1
+	local why=$1 previous_root=$2
 	printf 'ERROR: %s\n' "$why" >&2
 	if [ -z "$ACTIVE_BACKUP" ] || [ ! -f "$ACTIVE_BACKUP" ]; then
 		printf 'NO_GATEWAY_CHANGE_MADE\n' >&2
-	elif restore_gateway; then printf 'ROLLED_BACK_AFTER_EXPERIMENT_FAILURE\n' >&2
+	elif restore_gateway "$previous_root"; then printf 'ROLLED_BACK_AFTER_EXPERIMENT_FAILURE\n' >&2
 	else printf 'GATEWAY_ROLLBACK_FAILED_AFTER_EXPERIMENT_FAILURE\n' >&2; fi
 	exit 1
 }
@@ -216,7 +233,7 @@ validate_artifact() {
 }
 
 prepare_release() {
-	local sha=$1 release=$RELEASE_ROOT/$1 metadata=$RELEASE_ROOT/$1/release.env image_id current_image
+	local sha=$1 mode=$2 release=$RELEASE_ROOT/$1 metadata=$RELEASE_ROOT/$1/release.env image_id current_image
 	validate_artifact "$sha"
 	root_only_dir "$RELEASE_ROOT/$sha"
 	if [ -e "$metadata" ]; then
@@ -248,7 +265,15 @@ prepare_release() {
 	if [ ! -e "$config" ]; then
 		install -o root -g root -m 0600 /dev/null "$config"
 		cat > "$config" <<'EOF'
+# CODEX MINIMAL-FEED ROOT SUPPORT v1
 :80 {
+	@minimal_feed_root path /
+	handle @minimal_feed_root {
+		root * /srv
+		header Cache-Control "no-store"
+		rewrite * /diagnostic.html
+		file_server
+	}
 	handle_path /__experiments/minimal-feed/* {
 		root * /srv
 		header Cache-Control "no-store"
@@ -262,6 +287,9 @@ EOF
 		chmod 600 "$config"
 	fi
 	root_only_file "$config"
+	if [ "$mode" = root ] && ! grep -Fq '# CODEX MINIMAL-FEED ROOT SUPPORT v1' "$config"; then
+		die 'this release sidecar predates root-mode support; use a fresh reviewed artifact SHA'
+	fi
 	image_id=$(awk -F= '$1=="STATIC_IMAGE_ID" {print $2}' "$metadata")
 	[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'release manifest has no valid static image ID'
 	local name=memoly-minimal-feed-$sha state existing_image existing_dist existing_config existing_labels existing_networks readonly_root
@@ -290,7 +318,7 @@ EOF
 }
 
 verify_experiment() {
-	local sha=$1 release=$RELEASE_ROOT/$1 expected actual path header_file
+	local sha=$1 mode=$2 release=$RELEASE_ROOT/$1 expected actual path header_file root_header
 	expected=$(sha_file "$release/dist/diagnostic.html")
 	actual=$(fetch_hash "$PUBLIC_URL$PREFIX/diagnostic.html") || return 1
 	[ "$expected" = "$actual" ] || return 1
@@ -305,6 +333,18 @@ verify_experiment() {
 	curl --fail --silent --show-error --max-time 10 -D "$header_file" -o /dev/null "$PUBLIC_URL$PREFIX/diagnostic.html" || { rm -f "$header_file"; return 1; }
 	grep -Eiq '^Cache-Control:.*no-store' "$header_file" || { rm -f "$header_file"; return 1; }
 	rm -f "$header_file"
+	if [ "$mode" = root ]; then
+		expected=$(sha_file "$release/dist/diagnostic.html")
+		actual=$(fetch_hash "$PUBLIC_URL/") || return 1
+		[ "$expected" = "$actual" ] || return 1
+		actual=$(fetch_hash "$PUBLIC_URL/?minimal-feed-smoke=1") || return 1
+		[ "$expected" = "$actual" ] || return 1
+		root_header=$(mktemp)
+		curl --fail --silent --show-error --max-time 10 -D "$root_header" -o /dev/null "$PUBLIC_URL/" || { rm -f "$root_header"; return 1; }
+		grep -Eiq '^Cache-Control:.*no-store' "$root_header" || { rm -f "$root_header"; return 1; }
+		if grep -Eiq '^Location:' "$root_header"; then rm -f "$root_header"; return 1; fi
+		rm -f "$root_header"
+	fi
 }
 fetch_hash() {
 	local url=$1 attempt hash
@@ -319,36 +359,46 @@ fetch_hash() {
 }
 
 switch_route() {
-	local target=$1 root_before services_before root_after services_after current
+	local target=$1 mode=${2:-prefix} root_before canonical_root expected_root services_before services_after current
 	root_before=$(root_html_hash) || die 'cannot snapshot current root HTML'
+	canonical_root=$(canonical_root_hash) || die 'cannot read the canonical root from memoly-static-1'
 	check_normal_health || die 'normal public health checks failed before activation'
 	services_before=$(normal_services_snapshot)
-	current=$(active_sha) || die 'cannot read current experiment route'
+	current=$(active_state) || die 'cannot read current experiment route'
 	if [ "$target" = off ] && [ "$current" = off ]; then printf 'off\n'; return 0; fi
-	if [ "$target" != off ]; then prepare_release "$target"; fi
+	expected_root=$canonical_root
+	if [ "$target" != off ]; then
+		prepare_release "$target" "$mode"
+		if [ "$mode" = root ]; then expected_root=$(sha_file "$RELEASE_ROOT/$target/dist/diagnostic.html"); fi
+	fi
 	mkdir -p "$SERVER_ROOT/backups"
 	root_only_dir "$SERVER_ROOT/backups"
 	ACTIVE_CANDIDATE=$(mktemp "$SERVER_ROOT/backups/minimal-feed-candidate.XXXXXXXX")
 	chmod 600 "$ACTIVE_CANDIDATE"
-	route_candidate "$target" "$ACTIVE_CANDIDATE"
-	if ! install_gateway_candidate; then rollback_failure 'gateway candidate could not be safely installed and reloaded'; fi
-	if [ "$target" != off ] && ! verify_experiment "$target"; then rollback_failure 'experiment HTML, assets, or no-store smoke check failed'; fi
-	root_after=$(root_html_hash) || rollback_failure 'normal root HTML failed after route change'
-	[ "$root_before" = "$root_after" ] || rollback_failure 'normal root HTML changed during experiment route change'
-	check_normal_health || rollback_failure 'normal /health/live or /health/ready failed after route change'
-	services_after=$(normal_services_snapshot) || rollback_failure 'cannot verify normal service image IDs after route change'
-	[ "$services_before" = "$services_after" ] || rollback_failure 'normal service image IDs changed during experiment route change'
-	if [ "$target" = off ]; then printf 'off\n'; else printf '%s\n' "$target"; fi
+	route_candidate "$target" "$mode" "$ACTIVE_CANDIDATE"
+	if ! install_gateway_candidate; then rollback_failure 'gateway candidate could not be safely installed and reloaded' "$root_before"; fi
+	if [ "$target" != off ] && ! verify_experiment "$target" "$mode"; then rollback_failure 'experiment HTML, assets, or no-store smoke check failed' "$root_before"; fi
+	root_after=$(root_html_hash) || rollback_failure 'root HTML failed after route change' "$root_before"
+	[ "$expected_root" = "$root_after" ] || rollback_failure 'root HTML does not match the intended experiment or canonical static page' "$root_before"
+	check_normal_health || rollback_failure 'normal /health/live or /health/ready failed after route change' "$root_before"
+	services_after=$(normal_services_snapshot) || rollback_failure 'cannot verify normal service image IDs after route change' "$root_before"
+	[ "$services_before" = "$services_after" ] || rollback_failure 'normal service image IDs changed during experiment route change' "$root_before"
+	if [ "$target" = off ]; then printf 'off\n'; else printf '%s %s\n' "$target" "$mode"; fi
 }
 
-usage() { printf 'Usage: %s {status|activate <40-char-sha>|off}\n' "$0" >&2; }
+usage() { printf 'Usage: %s {status|activate <40-char-sha> [prefix|root]|off}\n' "$0" >&2; }
 [ "$#" -ge 1 ] || { usage; exit 2; }
 action=$1
-case "$action" in status|off) [ "$#" -eq 1 ] || { usage; exit 2; } ;; activate) [ "$#" -eq 2 ] || { usage; exit 2; } ;; *) usage; exit 2 ;; esac
+mode=prefix
+case "$action" in status|off) [ "$#" -eq 1 ] || { usage; exit 2; } ;; activate)
+	[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || { usage; exit 2; }
+	if [ "$#" -eq 3 ]; then mode=$3; fi
+	case "$mode" in prefix|root) ;; *) usage; exit 2 ;; esac
+	;; *) usage; exit 2 ;; esac
 for command_name in awk curl df docker find flock grep install mktemp python3 readlink sha256sum stat; do require "$command_name"; done
 host_preflight
 root_only_file "$SERVER_ROOT/.selectel-deploy.lock"
 exec 9>"$SERVER_ROOT/.selectel-deploy.lock"
 flock -n 9 || die 'another Selectel deployment is running'
-if [ "$action" = status ]; then active_sha; exit 0; fi
-switch_route "${2:-off}"
+if [ "$action" = status ]; then active_state; exit 0; fi
+switch_route "${2:-off}" "$mode"

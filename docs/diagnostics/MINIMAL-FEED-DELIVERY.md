@@ -1,5 +1,15 @@
 # Minimal feed experiment delivery
 
+## Owner-authorized root test
+
+The owner subsequently confirmed that there are no other users and explicitly requested the temporary experiment at the ordinary `https://app.memoly.ru/` entry, followed by rollback on their request. This overrides the earlier prefix-only delivery restriction. The original static container and its files remain the rollback source; APIs, database, media access and workers remain unchanged.
+
+The updated helper accepts `activate <full-sha> root` to serve the diagnostic document internally at `/`, preserving the browser URL, query and fragment for MAX/PWA launches. Prefix-only activation remains the default. `off` restores the canonical root; `status` reports both SHA and mode. Old artifacts without root support can still be selected in prefix mode. Root mode requires a fresh artifact and root-capable sidecar configuration.
+
+The diagnostic entry now uses the existing MAX browser-link methods directly for code creation, status and redemption, so authentication stays on that page. MAX confirmation uses the existing signed challenge parser, forced host authentication and explicit approval action. No auth endpoint or protocol has changed. No rollback will run automatically while the owner is testing.
+
+The sections below record the initial prefix-only deployment, before the owner's root-test request.
+
 This helper exposes the isolated UI at `https://app.memoly.ru/__experiments/minimal-feed/diagnostic.html` while leaving the normal `/` app, backend, database, and existing static container in place. It does not run a product release or migration.
 
 Before activation, the operator stages the reviewed build under `/opt/memoly/experiments/minimal-feed/releases/<full-git-sha>/` with `dist/` and a standard `SHA256SUMS` file whose three entries are relative to that release directory (`dist/diagnostic.html`, one `dist/assets/index-*.js`, and one `dist/assets/diagnostic-feed-*.css`). All release paths and files must be root-owned and not writable by group or other users. The helper rejects symlinks, extra files, unexpected checksum entries, and checksum mismatches. It writes a root-only `release.env` with the source SHA, the immutable image ID captured from `memoly-static-1`, artifact hashes, and preparation time; the image ID is reused when that SHA is reactivated.

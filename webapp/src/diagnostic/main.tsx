@@ -8,6 +8,8 @@ import { useAuth } from '@/features/auth/use-auth'
 import { shouldKeepHostAuthPreloader, useHostAuthHandoff } from '@/features/auth/host-auth-handoff'
 import { loadFamily, loadFamilyHome } from '@/features/family/api'
 import { DiagnosticFeed } from './DiagnosticFeed'
+import { DiagnosticMaxLogin } from './DiagnosticMaxLogin'
+import { DiagnosticMaxApproval } from './DiagnosticMaxApproval'
 import { ApiRequestError } from '@/platform/api'
 import { createHostBridge, type HostBridge } from '@/platform/host-bridge'
 import {
@@ -16,6 +18,7 @@ import {
   removePrivateFamilyCache,
 } from '@/platform/persistence/private-cache'
 import type { FamilyHomeResponse } from '@web-app-demo/contracts'
+import { maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 
 import './diagnostic-feed.css'
 
@@ -61,8 +64,10 @@ class StartupErrorBoundary extends Component<PropsWithChildren, { failed: boolea
 function DiagnosticApp({ hostBridge }: { hostBridge: HostBridge }) {
   const auth = useAuth()
   const initData = hostBridge.rawAuthData()
+  const maxChallengeId = hostBridge.kind === 'max' ? maxBrowserLinkChallengeId(window) : null
   const provider = hostBridge.kind === 'max' || hostBridge.kind === 'telegram' ? hostBridge.kind : null
-  const handoff = useHostAuthHandoff({ auth, provider, initData, isHostAvailable: hostBridge.isAvailable })
+  const forceAuth = Boolean(maxChallengeId)
+  const handoff = useHostAuthHandoff({ auth, provider, initData, isHostAvailable: hostBridge.isAvailable, forceAuth })
   const hostAuthState = provider ? {
     provider,
     hasStartedAuth: handoff.startedHostAuthKey === handoff.authAttemptKey,
@@ -72,15 +77,17 @@ function DiagnosticApp({ hostBridge }: { hostBridge: HostBridge }) {
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: handoff.isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
+    forceAuth,
   } : null
 
   if (auth.isBootstrapping || (hostAuthState && shouldKeepHostAuthPreloader(hostAuthState))) {
     return <main className="diagnostic-page"><p className="diagnostic-state" role="status">Восстанавливаем вход…</p></main>
   }
   if (auth.sessionError) return <main className="diagnostic-page" role="alert"><p>Не удалось восстановить вход. Проверьте соединение и обновите страницу.</p><ReportButton /></main>
+  if (maxChallengeId && initData && handoff.hostAuthError) return <main className="diagnostic-page" role="alert"><h1>Не удалось подтвердить MAX</h1><p>Откройте ссылку из браузера ещё раз, чтобы получить новый код.</p><button className="diagnostic-login" onClick={handoff.resetHostAuth} type="button">Повторить</button></main>
+  if (maxChallengeId && initData && auth.user) return <DiagnosticMaxApproval auth={auth} challengeId={maxChallengeId} initData={initData} />
   if (!auth.user || (hostBridge.kind === 'browser' && auth.externalIdentityProvider !== 'max')) {
-    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`
-    return <main className="diagnostic-page"><h1>Диагностическая лента</h1><p>Войдите через MAX в основном приложении, затем вернитесь по этому адресу:</p><a className="diagnostic-login" href={`/?returnTo=${encodeURIComponent(returnTo)}`}>Открыть основной экран входа</a><p>После завершения входа откройте адрес этого эксперимента снова в том же браузере.</p><ReportButton /></main>
+    return <DiagnosticMaxLogin auth={auth} />
   }
   return <FeedExperiment key={auth.user.id} hostBridge={hostBridge} userId={auth.user.id} displayName={auth.user.displayName ?? auth.user.id} transport={auth.transport} />
 }
