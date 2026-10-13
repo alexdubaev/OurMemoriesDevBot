@@ -32,3 +32,15 @@ sudo /opt/memoly/experiments/minimal-feed/minimal-feed-release.sh activate 78da6
 ```
 
 Original production interface rollback remains `minimal-feed-release.sh off`. No main merge or database rollback is part of this stage. Physical iPhone acceptance remains the owner's next step; no white-screen cause is established.
+
+## Delivery receipt — 2026-10-13 16:27 UTC
+
+- Active source SHA: `97a6fa2d623be9af6816fde3c40ef663155a0609`, mode `root`, ordinary address `https://app.memoly.ru/`. The artifact was rebuilt from that clean commit with the verified public MAX bot username; the same three checksums match the tested build. Branch `experiment/pwa-minimal-feed`; no PR or merge to main.
+- The unchanged existing helper validated the immutable artifact, Caddy configuration, route and public checksums and activated it with exit 0. Release path: `/opt/memoly/experiments/minimal-feed/releases/97a6fa2d623be9af6816fde3c40ef663155a0609/`.
+- A real server rollback to `78da662665a7ba3bd7487d884c37752bc57f4ed7 root` and reactivation of the header version both passed, exit 0. The carousel-only root returned its recorded HTML hash `5b12edbec2e52a33d25bed1b09406d3bce4eb69f1bef437c43792b77ea9ab5b2`. The 78 artifact passes checksum verification and its container remains running. The retired f6 directory and container remain absent.
+- Public root smoke passed, exit 0: HTTP 200, the MAX entry appears at the original URL, query/fragment preserved, one diagnostic stylesheet, no page errors. It did not use a production private session. The real authenticated header/feed scenario is the local API test described above; physical iPhone acceptance remains pending.
+- Health is `ok`. The existing service worker, runtime witness, public logo, helper, original product rollback files and all five normal service container/image identities match their pre-stage baselines. No backend, DB, ACL or MAX storage changes; no migrations.
+- Emitted checksums: HTML `67d1e503aea38939a8e2f2a55cf9e3393aa6bf5e1d61007435c3b1f466526f1d`; sole CSS `diagnostic-feed-2y1RzIbN.css` (3090 bytes) `5974556326e57b6da28f2492c2a0851dce9a3afe86d2c952545e2412a0449ef0`; JS `index-dPe6GVjm.js` `57af3726b96dd0366d112517a04459ae95feca857e5a37bd2f7bc5f454b549fd`.
+- Local operational evidence: `.scratch/minimal-feed/header-{retire,activate,version-rollback,reactivate,public-smoke}.log`, `header-production-after.txt`. This receipt is a documentation-only follow-up; no product source changed after its verified source SHA.
+
+Open or refresh the existing MAX/PWA entry on the owner's iPhone, select the same family and compare scrolling with the retained carousel checkpoint. Stop this stage here; do not add another UI component until the owner reports the physical result.
