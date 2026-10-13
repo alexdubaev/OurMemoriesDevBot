@@ -1,5 +1,7 @@
 # Minimal feed experiment delivery
 
+Current rollback policy for `MEMOLY-MINIMAL-UI-STAGE-1-HEADER`: preserve `78da662665a7ba3bd7487d884c37752bc57f4ed7` as the previous experiment and `off` as the original product rollback. The owner retired `f6db4c15a5fe486a996fd298f27d511c18723a2e`; its own container/artifact have been removed. References to f6 in the historical receipts below must not be used as current activation instructions. See `MINIMAL-UI-STAGE-1-HEADER.md`.
+
 ## Owner-authorized root test
 
 The owner subsequently confirmed that there are no other users and explicitly requested the temporary experiment at the ordinary `https://app.memoly.ru/` entry, followed by rollback on their request. This overrides the earlier prefix-only delivery restriction. The original static container and its files remain the rollback source; APIs, database, media access and workers remain unchanged.

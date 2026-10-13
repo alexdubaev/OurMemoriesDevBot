@@ -7,6 +7,7 @@ import { PrivateCacheGate } from '@/features/auth/private-cache-gate'
 import { useAuth } from '@/features/auth/use-auth'
 import { shouldKeepHostAuthPreloader, useHostAuthHandoff } from '@/features/auth/host-auth-handoff'
 import { loadFamily, loadFamilyHome } from '@/features/family/api'
+import { DiagnosticHeader } from './DiagnosticHeader'
 import { DiagnosticFeed } from './DiagnosticFeed'
 import { DiagnosticMaxLogin } from './DiagnosticMaxLogin'
 import { DiagnosticMaxApproval } from './DiagnosticMaxApproval'
@@ -94,7 +95,7 @@ function DiagnosticApp({ hostBridge }: { hostBridge: HostBridge }) {
 
 function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBridge: HostBridge; userId: string; displayName: string; transport: ReturnType<typeof useAuth>['transport'] }) {
   const [home, setHome] = useState<FamilyHomeResponse | null>(null)
-  const [selected, setSelected] = useState<{ familyId: string; membershipEpoch: number; name: string } | null>(null)
+  const [selected, setSelected] = useState<{ familyId: string; membershipEpoch: number; name: string; child: Awaited<ReturnType<typeof loadFamily>>['child'] } | null>(null)
   const [homeError, setHomeError] = useState('')
   const [selectionBusy, setSelectionBusy] = useState(false)
   const queryClient = useQueryClient()
@@ -128,10 +129,10 @@ function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBr
     setSelectionBusy(true)
     setSelected(null)
     try {
-      await loadFamily(transport, familyId)
+      const family = await loadFamily(transport, familyId)
       if (!mounted.current || selectionGeneration.current !== generation) return
       allowPrivateFamilyCache(userId, familyId)
-      setSelected({ familyId, membershipEpoch, name })
+      setSelected({ familyId, membershipEpoch, name, child: family.child })
     } catch (error) {
       if (!mounted.current || selectionGeneration.current !== generation) return
       if (error instanceof ApiRequestError && [403, 404].includes(error.status)) {
@@ -166,6 +167,7 @@ function FeedExperiment({ hostBridge, userId, displayName, transport }: { hostBr
       {homeError ? <p className="diagnostic-error" role="alert">{homeError}</p> : null}
       {selected ? <section aria-label={`Лента семьи ${selected.name}`}>
         <h2>{selected.name}</h2>
+        <DiagnosticHeader child={selected.child} familyId={selected.familyId} transport={transport} userId={userId} />
         <DiagnosticFeed familyId={selected.familyId} hostBridge={hostBridge} membershipEpoch={selected.membershipEpoch} userId={userId} transport={transport} onAccessRevoked={() => window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId, familyId: selected.familyId } }))} />
       </section> : null}
     </main>

@@ -3,7 +3,7 @@ import { createPrisma } from '../../backend/src/db'
 import { createRefreshToken, hashRefreshToken, hashRefreshTokenFamily } from '../../backend/src/modules/auth/infrastructure/refresh-tokens'
 import { jpegImage } from './helpers/images'
 import { expect, test } from '@playwright/test'
-import { uploadFamilyPhoto } from '../src/features/family/api'
+import { completeChildProfile, uploadChildAvatar, uploadFamilyPhoto } from '../src/features/family/api'
 import sharp from 'sharp'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { z } from 'zod'
@@ -92,6 +92,16 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
   const { accessToken } = await authenticated.json() as { accessToken: string }
   await expect(page.getByText(/Вы вошли как Synthetic MAX user/)).toBeVisible()
   const transport = testTransport(accessToken)
+  const avatarBytes = await sharp({ create: { width: 240, height: 240, channels: 3, background: '#8a6454' } }).jpeg().toBuffer()
+  const avatarMediaId = await uploadChildAvatar(transport, familyId, new File([avatarBytes], 'diagnostic-child-avatar.jpg', { type: 'image/jpeg' }), 'image/jpeg')
+  await completeChildProfile(transport, familyId, {
+    name: 'Synthetic diagnostic child',
+    birthDate: '2020-01-01',
+    sex: 'boy',
+    avatarMediaId,
+    avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    expectedVersion: 1,
+  })
   const file = new File([jpegImage.buffer], 'diagnostic-photo.jpg', { type: 'image/jpeg' })
   const assetId = await uploadFamilyPhoto(transport, familyId, file, 'image/jpeg', 'memory')
   const portraitBytes = await sharp({ create: { width: 240, height: 360, channels: 3, background: '#547890' } }).jpeg().toBuffer()
@@ -135,8 +145,22 @@ test('MAX identity opens the plain family feed with private photo, cursor paging
     }, { preconnect: originalFetch.preconnect }) as typeof fetch
     window.fetch = wrappedFetch
   }, secondAssetId)
+  let familyMetadataRequests = 0
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (request.method() === 'GET' && url.pathname === `/api/v1/families/${familyId}`) familyMetadataRequests += 1
+  })
   await page.getByRole('button', { name: /Synthetic diagnostic family/ }).click()
   await expect(page.getByRole('heading', { name: 'Synthetic diagnostic family' })).toBeVisible()
+  await expect(page.getByText('Synthetic diagnostic child', { exact: true })).toBeVisible()
+  const logo = page.getByRole('img', { name: 'memoLy' })
+  await expect(logo).toBeVisible()
+  await expect.poll(() => logo.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+  const childAvatar = page.getByRole('img', { name: 'Synthetic diagnostic child — фотография' })
+  await expect(childAvatar).toBeVisible()
+  await expect.poll(() => childAvatar.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0), { timeout: 20_000 }).toBe(true)
+  expect(familyMetadataRequests).toBe(1)
+  await page.screenshot({ path: testInfo.outputPath('diagnostic-feed-header-viewport.png') })
   await expect(page.getByText(photoBody)).toBeVisible()
   const images = page.getByRole('img', { name: 'Фотография воспоминания' })
   await expect(images).toHaveCount(1)

@@ -17,11 +17,12 @@ function diagnosticHtml(): Plugin {
       const localRuntimeAssets = new Map([
         ['/private-media-sw.js', path.resolve(root, 'public/private-media-sw.js')],
         ['/pwa-runtime-witness-v1.js', path.resolve(root, 'public/pwa-runtime-witness-v1.js')],
+        ['/assets/brand/memoly-logo-correct.webp', path.resolve(root, 'public/assets/brand/memoly-logo-correct.webp')],
       ])
       server.middlewares.use((request, response, next) => {
         const assetPath = request.url ? localRuntimeAssets.get(new URL(request.url, 'http://localhost').pathname) : undefined
         if (!assetPath) { next(); return }
-        response.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+        response.setHeader('Content-Type', assetPath.endsWith('.webp') ? 'image/webp' : 'text/javascript; charset=utf-8')
         response.setHeader('Cache-Control', 'no-store')
         response.end(readFileSync(assetPath))
       })
@@ -30,11 +31,12 @@ function diagnosticHtml(): Plugin {
       const localRuntimeAssets = new Map([
         ['/private-media-sw.js', path.resolve(root, 'public/private-media-sw.js')],
         ['/pwa-runtime-witness-v1.js', path.resolve(root, 'public/pwa-runtime-witness-v1.js')],
+        ['/assets/brand/memoly-logo-correct.webp', path.resolve(root, 'public/assets/brand/memoly-logo-correct.webp')],
       ])
       server.middlewares.use((request, response, next) => {
         const assetPath = request.url ? localRuntimeAssets.get(new URL(request.url, 'http://localhost').pathname) : undefined
         if (!assetPath) { next(); return }
-        response.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+        response.setHeader('Content-Type', assetPath.endsWith('.webp') ? 'image/webp' : 'text/javascript; charset=utf-8')
         response.setHeader('Cache-Control', 'no-store')
         response.end(readFileSync(assetPath))
       })

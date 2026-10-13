@@ -6,7 +6,7 @@ The owner reported that the first physical run of the root experiment did not ha
 
 Acceptance follows the previous fixes `f712f20` and `ac33098`: full card width with natural media proportions, no cropping, distortion or fixed small frame, dot navigation beneath the media, and retained per-attachment aspect ratios while an unknown video poster loads and when revisiting slides. The experiment keeps its independent CSS/import graph, the existing `usePrivateImageUrl` lifecycle, private media access, API/query scope and worker.
 
-The authorized delivery remains temporary root mode. Previous experiment source `f6db4c15a5fe486a996fd298f27d511c18723a2e` remains available through `activate <sha> root`; `off` restores the original product. No backend, schema, auth, ACL, MAX storage or standard UI source changes are part of this continuation.
+The authorized delivery remains temporary root mode; `off` restores the original product. For the subsequent header stage, `78da662665a7ba3bd7487d884c37752bc57f4ed7` is the retained carousel checkpoint. The owner retired f6 and its server artifact/container were removed; historical f6 receipts below are no longer activation instructions. No backend, schema, auth, ACL, MAX storage or standard UI source changes are part of this continuation.
 
 The carousel uses the existing CSS-free Embla controller with its own plain viewport, track and dots. Selection by dots and focused keyboard navigation jumps directly; swipe uses the existing controller. No product visual component or stylesheet is imported. The build's CSS/module allowlist remains the acceptance boundary.
 

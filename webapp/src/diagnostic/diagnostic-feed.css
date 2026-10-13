@@ -15,6 +15,13 @@ button { color: inherit; }
 .diagnostic-header h1 { margin: 0; font-size: 1.2rem; }
 .diagnostic-report { min-height: 40px; padding: 7px 12px; border: 1px solid #aaa; border-radius: 4px; background: white; }
 .diagnostic-main { padding-top: 16px; }
+.diagnostic-identity-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-bottom: 1px solid #ddd; }
+.diagnostic-wordmark { display: block; width: min(120px, 38%); height: auto; }
+.diagnostic-child-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.diagnostic-child-avatar { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; object-fit: contain; }
+.diagnostic-child-initials { background: #eee; color: #202020; font-weight: 600; }
+.diagnostic-child-name { overflow-wrap: anywhere; font-weight: 600; }
+.diagnostic-child-unavailable { margin: 0; color: #555; }
 .diagnostic-family-picker { display: grid; gap: 8px; margin-bottom: 20px; }
 .diagnostic-family-picker button, .diagnostic-login { min-height: 44px; padding: 8px 12px; border: 1px solid #999; border-radius: 4px; background: white; text-align: left; }
 .diagnostic-family-picker button[aria-pressed="true"] { border-color: #333; background: #f3f3f3; }
