@@ -1,8 +1,6 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { MemberAvatarImage } from '@/features/avatar'
-import { AvatarPhoto } from '@/features/avatar/AvatarPhoto'
-import type { AvatarCrop } from '@/features/avatar/avatar-crop'
+import { AvatarPhoto, MemberAvatarImage, type AvatarCrop } from '@/features/avatar'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { eligiblePrivateImage, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import type { AuthenticatedTransport } from '@/platform/api'
