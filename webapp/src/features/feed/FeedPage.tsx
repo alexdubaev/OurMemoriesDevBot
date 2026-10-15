@@ -939,12 +939,18 @@ function MaxVideoPreviewContent({ autoplay = false, durationMs, fullscreen = fal
       {!started && !failed && !sourceFailed && readinessState !== 'processing' && readinessState !== 'unknown' && readinessState !== 'unavailable' && readinessState !== 'check-error' ? <button aria-label="Смотреть видео" className="absolute inset-0 z-20 flex items-center justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={!src && !onRequestSource} onClick={() => void (async () => {
         const element = video.current
         if (!element) return
+        if (src && loadedSource.current === src && element.src) {
+          pendingPlay.current = false
+          activate()
+          try { await element.play() } catch (error) { if ((error as Error)?.name !== 'NotAllowedError' && (error as Error)?.name !== 'AbortError') setFailed(true) }
+          return
+        }
         activate()
         pendingPlay.current = true
         setSourceRequested(true)
         onRequestSource?.()
         if (!src) return
-        try { await element.play() } catch { setFailed(true) }
+        try { await element.play() } catch (error) { if ((error as Error)?.name !== 'NotAllowedError' && (error as Error)?.name !== 'AbortError') setFailed(true) }
       })()} type="button">
         <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-black/65 shadow-sm backdrop-blur-[1px]"><WebpIcon decorative name="play" size={24} state="white" /></span>
       </button> : null}
@@ -1160,7 +1166,7 @@ function PrivateVideo({ attachment, autoplay = false, fullscreen = false, memory
   }, [autoplay, activate])
   return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'} ref={stage} style={videoFrameStyle(intrinsicDimensions.width, intrinsicDimensions.height, fullscreen)}><video aria-label="Видео воспоминания" className="h-full w-full" onEnded={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onError={() => { if (!sourceRequested) return; setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => { if (sourceRequested) setPreviewReady(true) }} onLoadedMetadata={(e) => { if (!sourceRequested) return; setDuration(e.currentTarget.duration); const { videoWidth, videoHeight } = e.currentTarget; if (videoWidth > 0 && videoHeight > 0) setMeasuredDimensions({ key: dimensionKey, width: videoWidth, height: videoHeight }) }} onPause={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onPlay={(e) => { if (!sourceRequested) { e.currentTarget.pause(); releaseVideoSource(e.currentTarget); return }; setFailed(false); setStarted(true); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline poster={started ? undefined : posterUrl ?? undefined} preload="none" ref={video} src={url ?? undefined} />
     {!started ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : null}</div> : null}
-    {!started && viewerState !== 'error' ? <button aria-label="Воспроизвести видео" className="memoly-private-video-v2-play" disabled={!playablePath} onClick={() => { const element = video.current; if (!element) return; activate(); pendingPlay.current = true; if (source.resolved) source.retry(); setSourceRequested(true); if (url) void element.play().catch(() => setFailed(true)) }} type="button"><WebpIcon decorative name="play" size={24} state="white" /></button> : null}
+    {!started && viewerState !== 'error' ? <button aria-label="Воспроизвести видео" className="memoly-private-video-v2-play" disabled={!playablePath} onClick={() => { const element = video.current; if (!element) return; if (url && source.resolved && element.getAttribute('src') === url) { pendingPlay.current = false; activate(); void element.play().catch((error) => { if ((error as Error)?.name !== 'NotAllowedError' && (error as Error)?.name !== 'AbortError') setFailed(true) }); return }; activate(); pendingPlay.current = true; if (source.resolved) source.retry(); setSourceRequested(true); if (url) void element.play().catch((error) => { if ((error as Error)?.name !== 'NotAllowedError' && (error as Error)?.name !== 'AbortError') setFailed(true) }) }} type="button"><WebpIcon decorative name="play" size={24} state="white" /></button> : null}
     {!started ? <Typography as="span" className="memoly-private-video-v2-duration" variant="memoryMeta">{formatDuration(effective.durationMs)}</Typography> : null}
     {viewerState === 'loading' ? <Typography as="p" className="memoly-private-video-v2-state" role="status" variant="memoryMeta">{renditionStatus === 'pending' ? 'Подготавливаем видео…' : 'Загружаем видео…'}</Typography> : null}
     {viewerState === 'error' ? <div className="memoly-private-video-v2-state" role="alert"><Typography as="p" variant="memoryBodyMedium">Не удалось загрузить видео</Typography>{playablePath ? <Button onClick={() => { setFailed(false); source.retry(); video.current?.load() }} type="button">Повторить</Button> : null}</div> : null}
