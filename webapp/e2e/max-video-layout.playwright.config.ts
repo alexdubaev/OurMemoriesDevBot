@@ -17,4 +17,3 @@ export default defineConfig({
     cwd: fileURLToPath(new URL('..', import.meta.url)),
   },
 })
-

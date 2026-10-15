@@ -14,5 +14,3 @@ test('standalone MAX video reserves its intrinsic frame in the v2 feed', async (
   await expect(page.getByRole('button', { name: 'Смотреть видео' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Кадр видео' })).toBeVisible()
 })
-
-
