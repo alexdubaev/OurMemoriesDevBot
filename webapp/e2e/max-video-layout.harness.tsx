@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryCardPresentation } from '@/features/feed/presentation/MemoryCardPresentation'
 import { MaxVideoPreview } from '@/features/feed/FeedPage'
 
-function Harness() {
+export function Harness() {
   return <div className="memoly-app-root" data-ui-version="v2"><main data-memoly-feed=""><MemoryCardPresentation
     actions={null} authorInitials="S" authorName="Synthetic" body="A synthetic MAX video post" kind="video"
     reactionCounts={{}} currentUserReaction={null} memoryId="synthetic-max-video"
