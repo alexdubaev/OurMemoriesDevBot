@@ -34,8 +34,18 @@ const photoAlbumAttachments = [attachments[2], attachments[3],
   { ...attachments[3], id: '44444444-4444-4444-8444-444444444446', previewPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444446', 'original') },
 ]
 const photoAlbumMemory = { ...memory, id: '22222222-2222-4222-8222-222222222224', kind: 'photo', body: 'Synthetic photo album', attachments: photoAlbumAttachments }
+const lifecycleMemories = Array.from({ length: 60 }, (_, index) => {
+  const suffix = String(index + 10).padStart(12, '0')
+  const id = `66666666-6666-4666-8666-${suffix}`
+  const attachmentId = `77777777-7777-4777-8777-${suffix}`
+  return { ...memory, id, body: `Lifecycle video ${index + 1}`, kind: 'video', attachments: [{ ...attachments[0], id: attachmentId, previewPath: mediaPath(attachmentId, 'photos'), playbackPath: mediaPath(attachmentId, 'videos') + '/content' }] }
+})
+const maxVideoId = '99999999-9999-4999-8999-999999999999'
+const maxAttachmentId = '99999999-9999-4999-8999-999999999998'
+const maxPlaybackPath = `/api/v1/families/${familyId}/media/max-videos/${maxVideoId}/content`
+const maxVideoMemory = { ...memory, id: maxAttachmentId, kind: 'video', body: 'Lifecycle MAX video', attachments: [{ id: maxVideoId, source: 'max', kind: 'video', width: 720, height: 1280, durationMs: 5000, playbackPath: maxPlaybackPath, posterState: 'ready', posterPath: maxPlaybackPath.replace('/content', '/poster') }] }
 const transport = {
-  request: async () => ({ items: [memory, singlePhotoMemory, photoAlbumMemory], nextCursor: null }),
+  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: [memory, singlePhotoMemory, photoAlbumMemory, ...lifecycleMemories, maxVideoMemory], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('44444444-4444-4444-8444-444444444442') && window.__fixedCarouselProbe?.delayed) await new Promise<void>((resolve) => delayedPosterWaiters.push(resolve))

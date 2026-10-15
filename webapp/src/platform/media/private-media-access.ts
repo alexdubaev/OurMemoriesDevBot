@@ -8,9 +8,11 @@ export function syncPrivateMediaAccessToken(accessToken: string | null, userId: 
   void ensurePrivateMediaAccess()
 }
 
-export async function privateMediaSource(path: string) {
+export async function privateMediaSource(path: string, signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   await ensurePrivateMediaAccess()
-  return currentAccessToken && await bootstrapMediaSession(path) ? path : null
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  return currentAccessToken && await bootstrapMediaSession(path, signal) ? path : null
 }
 
 async function ensurePrivateMediaAccess() {
@@ -52,7 +54,7 @@ async function sendToken(registration: ServiceWorkerRegistration, token: string 
   })))
 }
 
-async function bootstrapMediaSession(path: string) {
+async function bootstrapMediaSession(path: string, signal?: AbortSignal) {
   const familyId = /^\/api\/v1\/families\/([0-9a-f-]{36})\/media\//i.exec(path)?.[1]
   if (!familyId || !currentAccessToken) return false
   try {
@@ -60,9 +62,11 @@ async function bootstrapMediaSession(path: string) {
       method: 'POST',
       headers: { Authorization: `Bearer ${currentAccessToken}` },
       credentials: 'include',
+      signal,
     })
     return response.ok
   } catch {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     return false
   }
 }
