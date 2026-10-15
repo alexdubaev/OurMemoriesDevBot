@@ -5,18 +5,27 @@ import { PlaybackContext, type PlaybackCoordinator } from './playback-context'
 
 /** One feed-scoped owner prevents two HTMLMediaElements from playing at the same time. */
 export function MediaPlaybackCoordinator({ active = true, children }: PropsWithChildren<{ active?: boolean }>) {
-  const players = useRef(new Map<symbol, () => void>())
-  const activeToken = useRef<symbol | null>(null)
+  const owner = useRef<{ token: symbol; stop: () => void } | null>(null)
   const value = useMemo<PlaybackCoordinator>(() => ({
-    activate(token) {
-      players.current.forEach((pause, playerToken) => { if (playerToken !== token) pause() })
-      activeToken.current = token
+    activate(token, stop) {
+      const previous = owner.current
+      if (previous?.token === token) return
+      owner.current = null
+      previous?.stop()
+      owner.current = { token, stop }
     },
     pauseAll() {
-      players.current.forEach((pause) => pause())
-      activeToken.current = null
+      const previous = owner.current
+      owner.current = null
+      previous?.stop()
     },
-    register(token, pause) { players.current.set(token, pause); return () => { players.current.delete(token) } },
+    release(token) {
+      if (owner.current?.token !== token) return
+      const previous = owner.current
+      owner.current = null
+      previous.stop()
+    },
+    clear(token) { if (owner.current?.token === token) owner.current = null },
   }), [])
   useEffect(() => {
     if (!active) value.pauseAll()

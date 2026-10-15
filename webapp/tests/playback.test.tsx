@@ -75,23 +75,25 @@ test('audio play reports real failures as paused and allows a later valid play',
   expect(states).toEqual([false, true, false])
 })
 
-test('hiding the Mini App pauses registered media and visibility never autoplays it', async () => {
+test('hiding the Mini App pauses only the active owner and visibility never autoplays it', async () => {
   const browser = installBrowser()
   const first = mediaElement()
   const second = mediaElement()
   const root = createRoot(detachedContainer(browser.window))
+  let activateFirst = () => undefined
 
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, null,
-      createElement(PlayerProbe, { id: 'first', media: first }),
+      createElement(PlayerProbe, { id: 'first', media: first, onActivate: (activate) => { activateFirst = activate } }),
       createElement(PlayerProbe, { id: 'second', media: second }),
     ))
   })
 
+  activateFirst()
   browser.setHidden(true)
   browser.dispatch('visibilitychange')
   expect(first.pauseCalls).toBe(1)
-  expect(second.pauseCalls).toBe(1)
+  expect(second.pauseCalls).toBe(0)
 
   browser.setHidden(false)
   browser.dispatch('visibilitychange')
@@ -102,21 +104,23 @@ test('hiding the Mini App pauses registered media and visibility never autoplays
   browser.restore()
 })
 
-test('unmounting an authenticated feed pauses every mounted local player before unregistering it', async () => {
+test('unmounting the active feed player pauses it before releasing its owner reference', async () => {
   const browser = installBrowser()
   const card = mediaElement()
   const detail = mediaElement()
   const root = createRoot(detachedContainer(browser.window))
+  let activateCard = () => undefined
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, null,
-      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card, onActivate: (activate) => { activateCard = activate } }),
       createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail }),
     ))
   })
 
+  activateCard()
   await act(async () => root.unmount())
   expect(card.pauseCalls).toBe(1)
-  expect(detail.pauseCalls).toBe(1)
+  expect(detail.pauseCalls).toBe(0)
   browser.restore()
 })
 
@@ -124,12 +128,14 @@ test('deactivating a warm feed pauses registered media and reactivation never re
   const browser = installBrowser()
   const video = mediaElement()
   const root = createRoot(detachedContainer(browser.window))
+  let activate = () => undefined
 
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, { active: true },
-      createElement(PlayerProbe, { id: 'warm-video', media: video }),
+      createElement(PlayerProbe, { id: 'warm-video', media: video, onActivate: (next) => { activate = next } }),
     ))
   })
+  activate()
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, { active: false },
       createElement(PlayerProbe, { id: 'warm-video', media: video }),
@@ -178,7 +184,7 @@ test('card and detail players for the same media pause each other as separate mo
   browser.restore()
 })
 
-test('unmounting detail keeps the same-media card registered for hidden pause', async () => {
+test('unmounting an inactive detail does not retain or stop a different active owner', async () => {
   const browser = installBrowser()
   const card = mediaElement()
   const detail = mediaElement()
@@ -198,8 +204,8 @@ test('unmounting detail keeps the same-media card registered for hidden pause', 
 
   browser.setHidden(true)
   browser.dispatch('visibilitychange')
-  expect(detail.pauseCalls).toBe(1)
-  expect(card.pauseCalls).toBe(1)
+  expect(detail.pauseCalls).toBe(0)
+  expect(card.pauseCalls).toBe(0)
 
   await act(async () => root.unmount())
   browser.restore()
@@ -248,7 +254,7 @@ test('different media instances retain ordinary one-local-media-at-a-time behavi
   })
 
   activateFirst()
-  expect(second.pauseCalls).toBe(1)
+  expect(second.pauseCalls).toBe(0)
   activateSecond()
   expect(first.pauseCalls).toBe(1)
 
@@ -262,7 +268,7 @@ function PlayerProbe({ id, media, onActivate }: {
   onActivate?: (activate: () => void) => void
 }) {
   const ref = useRef(media as unknown as HTMLMediaElement)
-  const activate = usePlaybackRegistration(id, ref)
+  const { activate } = usePlaybackRegistration(id, ref)
   onActivate?.(activate)
   return null
 }
