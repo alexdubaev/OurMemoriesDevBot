@@ -151,7 +151,7 @@
 [data-memoly-feed] .memoly-mixed-track { display: flex; align-items: stretch; }
 [data-memoly-feed] .memoly-mixed-slide { position: relative; min-width: 0; min-height: 0; flex: 0 0 100%; aspect-ratio: var(--memoly-carousel-aspect, auto); overflow: hidden; background: var(--ui-v2-color-field, var(--theme-surface-lo, #eee6df)); }
 [data-memoly-feed] .memoly-mixed-slide-media { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; }
-[data-memoly-feed] .memoly-mixed-slide-poster img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
+[data-memoly-feed] .memoly-mixed-slide-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 [data-memoly-feed] .memoly-mixed-slide-poster button { position: relative; display: grid; width: 100%; height: 100%; place-items: center; overflow: hidden; background: var(--ui-v2-color-field, var(--theme-surface-lo, #eee6df)); }
 [data-memoly-feed] .memoly-carousel-video-play { position: absolute; display: grid; width: 56px; height: 56px; place-items: center; border-radius: 50%; background: rgb(24 22 25 / 64%); }
 [data-memoly-feed] .memoly-carousel-video-loading { color: var(--ui-v2-color-muted, var(--theme-text-muted)); }

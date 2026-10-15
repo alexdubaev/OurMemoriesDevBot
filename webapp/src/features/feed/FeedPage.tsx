@@ -373,7 +373,7 @@ export function FeedPage({
           reactionCounts={memory.reactionCounts}
           currentUserReaction={memory.currentUserReaction}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
-            ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onViewerIndexChange={(index) => { mixedIndexes.current.set(memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} />
+            ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onViewerIndexChange={(index) => { mixedIndexes.current.set(memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           reactionScopeKey={`${familyId}:${accountId}:${membershipEpoch ?? 0}`}
@@ -442,7 +442,7 @@ export function FeedPage({
   )
 }
 
-function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onViewerIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, transport }: {
+function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onViewerIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, returnFocusRef, transport }: {
   hostBridge: HostBridge
   initialIndex: number
   memory: MemoryDto
@@ -451,6 +451,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   onPhotoUrlChange: (attachmentId: string, url: string | null) => void
   onOpen: (index: number, trigger: HTMLElement, photoUrl?: string) => void
   registerFullscreen?: (element: HTMLElement | null) => void
+  returnFocusRef: RefObject<HTMLElement | null>
   transport: AuthenticatedTransport
 }) {
   const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
@@ -484,6 +485,10 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     if (!embla || embla.selectedScrollSnap() === initialIndex) return
     embla.scrollTo(Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
   }, [embla, initialIndex, memory.attachments.length])
+  useLayoutEffect(() => {
+    const target = root.current?.querySelector<HTMLElement>(`[data-carousel-position="${index + 1}"] button`)
+    if (target) returnFocusRef.current = target
+  }, [index, returnFocusRef])
   useEffect(() => {
     const closeViewer = () => photoViewerSession.current?.abort()
     document.addEventListener('memoly:feed-inactive', closeViewer)
@@ -528,6 +533,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     return () => { slide.removeEventListener('load', measure, true); slide.removeEventListener('loadedmetadata', measure, true) }
   }, [activeAttachment.id, isCarousel])
   const open = (at: number, trigger: HTMLElement, photoUrl?: string) => {
+    returnFocusRef.current = trigger
     root.current?.querySelectorAll('video').forEach((video) => video.pause())
     if (memory.kind === 'photo') {
       photoViewerSession.current?.abort()
@@ -535,7 +541,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
       photoViewerSession.current = session
       setPhotoViewerError(false)
       const photos = memory.attachments.filter((attachment): attachment is Extract<MemoryAttachment, { source: 'private_storage' }> => attachment.source === 'private_storage' && attachment.kind === 'photo')
-      void showPrivatePhotoAlbum(photos, at, transport, trigger, hostBridge, session.signal, registerFullscreen, onViewerIndexChange)
+      void showPrivatePhotoAlbum(photos, at, transport, trigger, hostBridge, session.signal, registerFullscreen, onViewerIndexChange, returnFocusRef)
         .catch(() => { if (!session.signal.aborted && photoViewerSession.current === session) setPhotoViewerError(true) })
         .finally(() => { if (photoViewerSession.current === session) photoViewerSession.current = null })
       return
@@ -616,18 +622,19 @@ function MixedMediaViewer({ hostBridge, index: initialIndex, initialPhotoUrl, me
   return <DialogPrimitive.Root onOpenChange={(open) => { if (!open) onClose() }} open>
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="memoly-mixed-viewer-overlay" />
-      <DialogPrimitive.Content aria-describedby={undefined} className="memoly-mixed-viewer" data-memoly-feed data-mixed-viewer="" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onKeyDown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); navigate(index - 1) } if (event.key === 'ArrowRight') { event.preventDefault(); navigate(index + 1) } }} ref={root}>
+      <DialogPrimitive.Content aria-describedby={undefined} className="memoly-mixed-viewer" data-memoly-feed data-mixed-viewer="" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onKeyDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === 'range') return; if (event.key === 'ArrowLeft') { event.preventDefault(); navigate(index - 1) } if (event.key === 'ArrowRight') { event.preventDefault(); navigate(index + 1) } }} ref={root}>
         <DialogPrimitive.Title className="sr-only">Медиа воспоминания</DialogPrimitive.Title>
         <div className="memoly-mixed-viewer-bar"><Typography as="span" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography><button aria-label="Закрыть просмотр" onClick={onClose} type="button"><Typography as="span" variant="memoryMeta">Закрыть</Typography></button></div>
-        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-seen-active-index={index} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
+        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-seen-active-index={index} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
         <div className="memoly-mixed-viewer-nav"><button disabled={index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={index === memory.attachments.length - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   </DialogPrimitive.Root>
 }
 
-function Attachment({ attachment, borrowedPhotoUrl, fullscreen = false, hostBridge, memory, photoAlbum = [], photoIndex = 0, registerFullscreen, onOpenPhoto, onPhotoUrlChange, photoInteractive = true, transport }: {
+function Attachment({ attachment, autoplay = false, borrowedPhotoUrl, fullscreen = false, hostBridge, memory, photoAlbum = [], photoIndex = 0, registerFullscreen, onOpenPhoto, onPhotoUrlChange, photoInteractive = true, transport }: {
   attachment: MemoryAttachment
+  autoplay?: boolean
   borrowedPhotoUrl?: string
   fullscreen?: boolean
   hostBridge: HostBridge
@@ -641,10 +648,10 @@ function Attachment({ attachment, borrowedPhotoUrl, fullscreen = false, hostBrid
   transport: AuthenticatedTransport
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
-  if (attachment.source === 'max') return <MaxVideo attachment={attachment} fullscreen={fullscreen} hostBridge={hostBridge} transport={transport} />
+  if (attachment.source === 'max') return <MaxVideo attachment={attachment} autoplay={autoplay} fullscreen={fullscreen} hostBridge={hostBridge} transport={transport} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} borrowedUrl={borrowedPhotoUrl} hostBridge={hostBridge} onOpenPhoto={onOpenPhoto} onUrlChange={onPhotoUrlChange} photoAlbum={photoAlbum.length > 0 ? photoAlbum : [attachment]} photoIndex={photoIndex} registerFullscreen={registerFullscreen} interactive={photoInteractive} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
-  return <PrivateVideo attachment={attachment} fullscreen={fullscreen} memory={memory} transport={transport} />
+  return <PrivateVideo attachment={attachment} autoplay={autoplay} fullscreen={fullscreen} memory={memory} transport={transport} />
 }
 
 export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
@@ -776,8 +783,9 @@ export function TelegramVideoPoster({ durationMs, posterUrl, posterReady = false
   </button>
 }
 
-function MaxVideo({ attachment, fullscreen, hostBridge, transport }: {
+function MaxVideo({ attachment, autoplay = false, fullscreen, hostBridge, transport }: {
   attachment: Extract<MemoryAttachment, { source: 'max' }>
+  autoplay?: boolean
   fullscreen?: boolean
   hostBridge: HostBridge
   transport: AuthenticatedTransport
@@ -831,10 +839,11 @@ function MaxVideo({ attachment, fullscreen, hostBridge, transport }: {
   })
   const readinessState = !readinessPath ? 'unknown' : readiness.data?.state ?? (readiness.isError ? 'check-error' : 'checking')
   const source = useMaxVideoSource(readinessState === 'ready' ? attachment.playbackPath : null)
-  return <div className="memoly-max-video-readiness" ref={root}><MaxVideoPreview durationMs={attachment.durationMs} fullscreen={fullscreen} height={attachment.height} onCheckReadiness={readinessPath ? () => void readiness.refetch() : undefined} onOpen={() => hostBridge.openBot()} onRetry={readinessState === 'ready' ? source.retry : undefined} poster={posterUrl ?? undefined} readinessState={readinessState} sourceStatus={readinessState === 'ready' ? source.status : 'loading'} src={readinessState === 'ready' ? source.url : null} width={attachment.width} /></div>
+  return <div className="memoly-max-video-readiness" ref={root}><MaxVideoPreview autoplay={autoplay} durationMs={attachment.durationMs} fullscreen={fullscreen} height={attachment.height} onCheckReadiness={readinessPath ? () => void readiness.refetch() : undefined} onOpen={() => hostBridge.openBot()} onRetry={readinessState === 'ready' ? source.retry : undefined} poster={posterUrl ?? undefined} readinessState={readinessState} sourceStatus={readinessState === 'ready' ? source.status : 'loading'} src={readinessState === 'ready' ? source.url : null} width={attachment.width} /></div>
 }
 
 type MaxVideoPreviewProps = {
+  autoplay?: boolean
   durationMs: number | null
   fullscreen?: boolean
   height: number | null
@@ -852,7 +861,7 @@ export function MaxVideoPreview(props: MaxVideoPreviewProps) {
   return <MaxVideoPreviewContent key={props.src ?? 'missing'} {...props} />
 }
 
-function MaxVideoPreviewContent({ durationMs, fullscreen = false, height, onCheckReadiness, onOpen, onRetry, poster, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
+function MaxVideoPreviewContent({ autoplay = false, durationMs, fullscreen = false, height, onCheckReadiness, onOpen, onRetry, poster, readinessState, sourceStatus, src, width }: MaxVideoPreviewProps) {
   const video = useRef<HTMLVideoElement | null>(null)
   const stage = useRef<HTMLDivElement | null>(null)
   const activate = usePlaybackRegistration(`max-video:${src ?? 'missing'}`, video)
@@ -877,6 +886,11 @@ function MaxVideoPreviewContent({ durationMs, fullscreen = false, height, onChec
     const element = video.current
     if (element) loadedSource.current = loadMaxVideoSourceOnce(element, src, loadedSource.current)
   }, [src])
+  useEffect(() => {
+    if (!autoplay || !src) return
+    const element = video.current
+    if (element) void element.play().catch(() => undefined)
+  }, [autoplay, src])
   return <div aria-label="Видео" className="ml-media-slot memoly-video-viewer-v2 w-full" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState: viewerState === 'ready' || viewerState === 'error' ? viewerState : 'loading', previewReady: previewReady || decodedPosterUrl === poster })} data-video-started={started} data-video-viewer-state={viewerState}>
     <div className="relative isolate max-h-[75dvh] w-full overflow-hidden memoly-video-viewer-v2-frame" data-media-error-code={mediaErrorCode} data-slot="max-video-frame" ref={stage} style={frameStyle}>
       <video aria-label="Предпросмотр видео" className="absolute inset-0 z-10 size-full object-contain" onEnded={(event) => { setCurrent(event.currentTarget.currentTime); setPlaying(false) }} onError={(event) => { const code = event.currentTarget.error?.code; const sanitizedCode = typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code : 0; setMediaErrorCode(sanitizedCode); setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(event) => {
@@ -1037,7 +1051,7 @@ function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; d
   </div>
 }
 
-function PrivateVideo({ attachment, fullscreen = false, memory, transport }: { attachment: Extract<MemoryAttachment, { source: 'private_storage' }>; fullscreen?: boolean; memory: MemoryDto; transport: AuthenticatedTransport }) {
+function PrivateVideo({ attachment, autoplay = false, fullscreen = false, memory, transport }: { attachment: Extract<MemoryAttachment, { source: 'private_storage' }>; autoplay?: boolean; fullscreen?: boolean; memory: MemoryDto; transport: AuthenticatedTransport }) {
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const rendition = useQuery({
     queryKey: pendingVideoQueryKey(memory.familyId, accountId, membershipEpoch, memory.id),
@@ -1071,6 +1085,11 @@ function PrivateVideo({ attachment, fullscreen = false, memory, transport }: { a
   const [previewReady, setPreviewReady] = useState(false)
   const [started, setStarted] = useState(false)
   const viewerState = renditionStatus === 'pending' ? 'loading' : renditionStatus === 'failed' || failed || source.status === 'error' ? 'error' : source.status
+  useEffect(() => {
+    if (!autoplay || !url) return
+    const element = video.current
+    if (element) void element.play().catch(() => undefined)
+  }, [autoplay, url])
   return <div className="ml-video-row memoly-private-video-v2" data-seen-ready={mediaCardSeenReady({ kind: 'video', viewerState, previewReady })} data-video-viewer-state={viewerState}><div className="memoly-private-video-v2-frame" data-video-poster-state={posterUrl ? 'ready' : 'pending'} ref={stage} style={videoFrameStyle(intrinsicDimensions.width, intrinsicDimensions.height, fullscreen)}><video aria-label="Видео воспоминания" className="h-full w-full" onEnded={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onError={() => { setFailed(true); setPlaying(false); setPreviewReady(false) }} onLoadedData={() => setPreviewReady(true)} onLoadedMetadata={(e) => { setDuration(e.currentTarget.duration); const { videoWidth, videoHeight } = e.currentTarget; if (videoWidth > 0 && videoHeight > 0) setMeasuredDimensions({ key: dimensionKey, width: videoWidth, height: videoHeight }) }} onPause={(e) => { setCurrent(e.currentTarget.currentTime); setPlaying(false) }} onPlay={() => { setFailed(false); setStarted(true); activate(); setPlaying(true) }} onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} playsInline poster={started ? undefined : posterUrl ?? undefined} preload="metadata" ref={video} src={url ?? undefined} />
     {!started ? <div aria-hidden="true" className="memoly-private-video-v2-poster" data-slot="private-video-poster">{posterUrl ? <img alt="" className="size-full object-contain" src={posterUrl} /> : null}</div> : null}
     {!started && viewerState !== 'error' ? <button aria-label="Воспроизвести видео" className="memoly-private-video-v2-play" disabled={!url} onClick={() => void (async () => { const element = video.current; if (!element) return; try { await element.play() } catch { setFailed(true) } })()} type="button"><WebpIcon decorative name="play" size={24} state="white" /></button> : null}
@@ -1137,9 +1156,11 @@ async function showPrivatePhotoAlbum(
   signal: AbortSignal,
   registerFullscreen?: (element: HTMLElement | null) => void,
   onIndexChange?: (index: number) => void,
+  returnFocusRef?: RefObject<HTMLElement | null>,
 ) {
   const scrollY = window.scrollY
   const slides: Array<{ src: string; width?: number; height?: number }> = []
+  let selectedIndex = index
   try {
     for (const attachment of attachments) {
       const path = attachment.displayPath ?? attachment.originalDownloadPath
@@ -1152,11 +1173,19 @@ async function showPrivatePhotoAlbum(
       })
       if (signal.aborted) return
     }
-    await showPhoto(slides, index, hostBridge, signal, registerFullscreen, onIndexChange)
+    await showPhoto(slides, index, hostBridge, signal, registerFullscreen, (next) => {
+      selectedIndex = next
+      onIndexChange?.(next)
+    })
   } finally {
     slides.forEach(({ src }) => URL.revokeObjectURL(src))
     window.scrollTo({ top: scrollY })
-    if (trigger.isConnected) trigger.focus({ preventScroll: true })
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const carousel = trigger.closest<HTMLElement>('[data-carousel-memory]')
+    const selectedTarget = carousel?.querySelector<HTMLElement>(`[data-carousel-position="${selectedIndex + 1}"] button`)
+    const focusTarget = selectedTarget ?? returnFocusRef?.current
+    if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
+    else if (trigger.isConnected) trigger.focus({ preventScroll: true })
   }
 }
 
@@ -1170,7 +1199,7 @@ async function showPhoto(
 ) {
   const { default: PhotoSwipe } = await import('photoswipe')
   if (signal.aborted) return
-  const gallery = new PhotoSwipe({ dataSource: slides, index, showHideAnimationType: 'none' })
+  const gallery = new PhotoSwipe({ dataSource: slides, index, returnFocus: false, showHideAnimationType: 'none' })
   let closingFromHistory = false
   await new Promise<void>((resolve) => {
     let initialized = false

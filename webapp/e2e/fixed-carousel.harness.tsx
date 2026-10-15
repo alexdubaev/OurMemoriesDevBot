@@ -29,8 +29,13 @@ const attachments = [
 ]
 const memory = { id: memoryId, familyId, childId: '55555555-5555-4555-8555-555555555555', author: { id: userId, name: 'Synthetic author', avatarPath: null, avatarCrop: null }, kind: 'media', body: 'Synthetic carousel caption', occurredAt: '2026-10-14T10:00:00.000Z', firstPublishedAt: '2026-10-14T10:00:00.000Z', sourcePublishedAt: null, createdAt: '2026-10-14T10:00:00.000Z', version: 1, status: 'published', attachments, reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
 const singlePhotoMemory = { ...memory, id: '22222222-2222-4222-8222-222222222223', body: 'Single photo natural ratio', attachments: [attachments[3]] }
+const photoAlbumAttachments = [attachments[2], attachments[3],
+  { ...attachments[2], id: '44444444-4444-4444-8444-444444444445', width: 360, height: 640, previewPath: mediaPath('44444444-4444-4444-8444-444444444445', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444445', 'photos'), originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444445', 'original') },
+  { ...attachments[3], id: '44444444-4444-4444-8444-444444444446', previewPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444446', 'original') },
+]
+const photoAlbumMemory = { ...memory, id: '22222222-2222-4222-8222-222222222224', kind: 'photo', body: 'Synthetic photo album', attachments: photoAlbumAttachments }
 const transport = {
-  request: async () => ({ items: [memory, singlePhotoMemory], nextCursor: null }),
+  request: async () => ({ items: [memory, singlePhotoMemory, photoAlbumMemory], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('44444444-4444-4444-8444-444444444442') && window.__fixedCarouselProbe?.delayed) await new Promise<void>((resolve) => delayedPosterWaiters.push(resolve))
