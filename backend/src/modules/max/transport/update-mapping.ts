@@ -215,15 +215,22 @@ function normalizeMessage(input: Record<string, unknown>, occurredAt: string, ra
     const original = forwardLink.message
     const originalMessageId = isRecord(original) ? original.mid : null
     if (!isForwardMessageId(originalMessageId)) throw new Error('Invalid MAX forward identity')
+    const originalAttachments = isRecord(original) && Array.isArray(original.attachments) ? original.attachments : undefined
+    const hasMixedAudio = originalAttachments?.some((attachment) => isRecord(attachment) && attachment.type === 'audio') === true &&
+      originalAttachments.length !== 1
+    const forwardedAttachments = originalAttachments
+      ? originalAttachments.filter((attachment, index, all) => isRecord(attachment) &&
+        (attachment.type === 'image' || attachment.type === 'video' || (attachment.type === 'audio' && all.length === 1 && index === 0)))
+        .map((attachment) => normalizeAttachment(attachment, true)) as MaxInboundAttachment[]
+      : undefined
+    if (hasMixedAudio && forwardedAttachments) forwardedAttachments.push({ kind: 'file', providerAttachmentId: 'unsupported:mixed-audio', filename: null, declaredSize: null })
     return {
       kind: 'message_created', senderId: sender ? String(sender.user_id) : '0',
       recipientId: isChannel ? channelChatId! : String(message.recipient.user_id),
       messageId: body.mid as string, occurredAt, text: null, attachments: [],
       forwardedFrom: { messageId: originalMessageId,
         ...(isRecord(original) && isNonNegativeSafeInteger(original.timestamp) ? { timestamp: original.timestamp } : {}),
-        ...(isRecord(original) && Array.isArray(original.attachments) ? { attachments: original.attachments
-          .filter((attachment) => isRecord(attachment) && (attachment.type === 'image' || attachment.type === 'video'))
-          .map((attachment) => normalizeAttachment(attachment, true)) as MaxInboundAttachment[] } : {}) },
+        ...(forwardedAttachments ? { attachments: forwardedAttachments } : {}) },
       ...(isChannel ? { isChannel: true } : {}),
     }
   }

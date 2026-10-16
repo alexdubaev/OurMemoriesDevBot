@@ -229,6 +229,167 @@ maybeDescribe('MAX forward import integration', () => {
     }
   })
 
+  test('recovers one missing-original forwarded voice from encrypted ingress and deduplicates repeats', async () => {
+    const fixture = await familyFixture('7025', 'forward-ingress-voice')
+    const voice = await oggVoiceFixture()
+    try {
+      const event = forwardedVoiceEvent('7025', 'outer-ingress-voice', 'private-voice-original')
+      const accepted = await accept(event)
+      const inboxBefore = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })
+      expect(inboxBefore.encryptedPayload.byteLength).toBeGreaterThan(0)
+      const downloads: string[] = []
+      const sourceTime = Date.parse('2025-06-07T08:09:10.000Z')
+      const api = apiFor(async (messageId) => {
+        if (messageId === 'private-voice-original') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+        return { messageId, senderId: '7025', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(),
+          forwardedFrom: { messageId: 'private-voice-original', timestamp: sourceTime }, attachments: [] }
+      })
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api,
+        download: async (url) => {
+          downloads.push(url)
+          return { bytes: voice.bytes, contentType: 'audio/ogg', contentLength: voice.bytes.byteLength }
+        } })
+
+      await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+
+      const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId }, include: { attachments: true } })
+      const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId }, include: { media: { include: { asset: true } } } })
+      const inboxAfter = await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })
+      expect(source).toMatchObject({ status: 'published', senderSubject: '7025', originalMessageId: 'private-voice-original', originalChannelId: null })
+      expect(source.attachments).toHaveLength(1)
+      expect(source.attachments[0]).toMatchObject({ providerKind: 'file', providerAttachmentId: '703' })
+      expect(source.attachments[0]).not.toHaveProperty('url')
+      expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'voice' })
+      expect(memory.media).toHaveLength(1)
+      expect(memory.media[0]!.asset).toMatchObject({ sourceKind: 'max', mediaKind: 'voice', originalStatus: 'stored', verifiedMime: 'audio/ogg' })
+      expect(inboxAfter.status).toBe('processed')
+      expect(inboxAfter.encryptedPayload.byteLength).toBe(0)
+      expect(inboxAfter.encryptionIv.byteLength).toBe(0)
+      expect(inboxAfter.encryptionAuthTag.byteLength).toBe(0)
+      expect(downloads).toEqual(['https://voice.example.invalid/forwarded-audio'])
+      expect(await prisma.maxMemoryBackup.count()).toBe(0)
+
+      const duplicate = await accept(forwardedVoiceEvent('7025', 'outer-ingress-voice-repeat', 'private-voice-original'))
+      await expect(processor({ inboxId: duplicate.inboxId })).resolves.toBe('done')
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: duplicate.inboxId } })).toMatchObject({ status: 'denied', rejectionCode: 'duplicate' })
+      expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(1)
+      expect(downloads).toHaveLength(1)
+    } finally {
+      await voice.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  test('accepts provider-confirmed forwarded voice only when its identity matches ingress', async () => {
+    const fixture = await familyFixture('7027', 'forward-provider-voice')
+    const voice = await oggVoiceFixture()
+    try {
+      const accepted = await accept(forwardedVoiceEvent('7027', 'outer-provider-voice', 'private-provider-voice-original'))
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: apiFor(async (messageId) => messageId === 'private-provider-voice-original'
+          ? Promise.reject(new MaxProviderError(undefined, false, 404, 'message_not_found'))
+          : { messageId, senderId: '7027', recipientId: '900', recipientType: 'dialog',
+            forwardedFrom: { messageId: 'private-provider-voice-original' }, attachments: [],
+            forwardedAttachments: [{ kind: 'voice', providerAttachmentId: '703', url: 'https://voice.example.invalid/provider-confirmed' }] }),
+        download: async () => ({ bytes: voice.bytes, contentType: 'audio/ogg', contentLength: voice.bytes.byteLength }) })
+      await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+      expect(source).toMatchObject({ status: 'published', originalMessageId: 'private-provider-voice-original', originalChannelId: null })
+      expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'voice' } })).toBe(1)
+    } finally {
+      await voice.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
+  test('does not recover ingress audio after authorization failure or an unverified outer identity', async () => {
+    const fixture = await familyFixture('7026', 'forward-voice-identity')
+    const download = async () => { throw new Error('denied forward must not download ingress media') }
+    try {
+      const authorizationFailure = await accept(forwardedVoiceEvent('7026', 'outer-voice-auth-failure', 'private-voice-auth-failure'))
+      const authProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+        if (messageId === 'private-voice-auth-failure') throw new MaxProviderError(undefined, false, 403, 'not_authorized')
+        return { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          forwardedFrom: { messageId: 'private-voice-auth-failure' }, attachments: [] }
+      }), download })
+      await expect(authProcessor({ inboxId: authorizationFailure.inboxId })).resolves.toBe('done')
+
+      const outerVariants: Array<{ messageId?: string; senderId?: string; recipientId?: string; originalMessageId?: string }>= [
+        { messageId: 'wrong-outer-mid' }, { senderId: '9999' }, { recipientId: '901' }, { originalMessageId: 'different-original' },
+      ]
+      for (const [index, variant] of outerVariants.entries()) {
+        const originalId = `private-voice-mismatch-${index}`
+        const outerId = `outer-voice-mismatch-${index}`
+        const accepted = await accept(forwardedVoiceEvent('7026', outerId, originalId))
+        const mismatchProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+          if (messageId === originalId) throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+          return { messageId: variant.messageId ?? messageId, senderId: variant.senderId ?? '7026',
+            recipientId: variant.recipientId ?? '900', recipientType: 'dialog',
+            forwardedFrom: { messageId: variant.originalMessageId ?? originalId }, attachments: [] }
+        }), download })
+        await expect(mismatchProcessor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+        expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
+      }
+
+      const conflictingProvider = await accept(forwardedVoiceEvent('7026', 'outer-voice-provider-conflict', 'private-voice-provider-conflict'))
+      const conflictingProviderProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+        if (messageId === 'private-voice-provider-conflict') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+        return { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          forwardedFrom: { messageId: 'private-voice-provider-conflict' }, attachments: [], forwardedAttachments: [
+            { kind: 'voice', providerAttachmentId: 'different-voice-id', url: 'https://voice.example.invalid/conflict' },
+            { kind: 'image', providerAttachmentId: 'extra-image', url: 'https://image.example.invalid/conflict' },
+          ] }
+      }), download })
+      await expect(conflictingProviderProcessor({ inboxId: conflictingProvider.inboxId })).resolves.toBe('done')
+
+      const explicitlyEmpty = await accept(forwardedVoiceEvent('7026', 'outer-voice-explicitly-empty', 'private-voice-explicitly-empty'))
+      const emptyProviderProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+        if (messageId === 'private-voice-explicitly-empty') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+        return { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          forwardedFrom: { messageId: 'private-voice-explicitly-empty' }, attachments: [], forwardedAttachments: [] }
+      }), download })
+      await expect(emptyProviderProcessor({ inboxId: explicitlyEmpty.inboxId })).resolves.toBe('done')
+
+      const mixedIngressEvent = forwardedVoiceEvent('7026', 'outer-voice-mixed-ingress', 'private-voice-mixed-ingress')
+      mixedIngressEvent.forwardedFrom!.attachments = [
+        { kind: 'image', providerAttachmentId: 'mixed-image' },
+        { kind: 'file', providerAttachmentId: 'unsupported:mixed-audio', filename: null, declaredSize: null },
+      ]
+      const mixedIngress = await accept(mixedIngressEvent)
+      const mixedIngressProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+        if (messageId === 'private-voice-mixed-ingress') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+        return { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          forwardedFrom: { messageId: 'private-voice-mixed-ingress' }, attachments: [],
+          forwardedAttachments: [{ kind: 'image', providerAttachmentId: 'mixed-image', url: 'https://image.example.invalid/mixed' }] }
+      }), download })
+      await expect(mixedIngressProcessor({ inboxId: mixedIngress.inboxId })).resolves.toBe('done')
+
+      const missingOuter = await accept(forwardedVoiceEvent('7026', 'outer-voice-missing', 'private-voice-outer-missing'))
+      const missingOuterProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
+        if (messageId === 'private-voice-outer-missing') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+        throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      }), download })
+      await expect(missingOuterProcessor({ inboxId: missingOuter.inboxId })).resolves.toBe('done')
+
+      const foreignChannel = await accept(forwardedVoiceEvent('7026', 'outer-voice-foreign-channel', 'foreign-voice-channel-original'))
+      const foreignChannelProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => messageId === 'foreign-voice-channel-original'
+        ? { messageId, senderId: '0', recipientId: '-123987', recipientType: 'channel', timestamp: Date.now(), attachments: [] }
+        : { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          forwardedFrom: { messageId: 'foreign-voice-channel-original' }, attachments: [] }), download })
+      await expect(foreignChannelProcessor({ inboxId: foreignChannel.inboxId })).resolves.toBe('done')
+
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: authorizationFailure.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: conflictingProvider.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: explicitlyEmpty.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: mixedIngress.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: missingOuter.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: foreignChannel.inboxId } })).toMatchObject({ status: 'denied' })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   test('reuses the canonical staged media identity after a transient download failure', async () => {
     const fixture = await familyFixture('7006', 'forward-media-retry')
     const accepted = await accept(forwardEvent('7006', 'outer-media-retry', 'original-photo-retry'))
@@ -863,6 +1024,18 @@ function forwardedUpdate(timestamp: number) {
     link: { type: 'forward', chat_id: -123456, message: { mid: 'original-mid-synthetic', seq: 7, sender: { user_id: 9999 },
       text: 'Nested untrusted caption', attachments: [{ type: 'video', payload: { id: 456, token: 'nested-token', url: 'https://video.example.invalid/nested' }, duration: 29 }] } },
   } }
+}
+
+function forwardedVoiceEvent(senderId: string, outerMessageId: string, originalMessageId: string): Extract<MaxInboundEvent, { kind: 'message_created' }> {
+  const event = normalizeMaxUpdate({ update_type: 'message_created', timestamp: Date.parse('2026-10-02T10:00:00.000Z'), message: {
+    sender: { user_id: Number(senderId) }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
+    body: { mid: outerMessageId, seq: 21, text: '' }, link: { type: 'forward', chat_id: -123456, message: {
+      mid: originalMessageId, seq: 7, attachments: [{ type: 'audio', payload: { id: 703, token: 'synthetic-audio-token',
+        url: 'https://voice.example.invalid/forwarded-audio' } }],
+    } },
+  } })
+  if (event.kind !== 'message_created') throw new Error('Expected a synthetic forwarded voice event')
+  return event
 }
 
 function forwardEvent(senderId: string, messageId: string, originalMessageId: string): Extract<MaxInboundEvent, { kind: 'message_created' }> {
