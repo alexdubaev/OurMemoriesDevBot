@@ -20,7 +20,7 @@ Grid `44px minmax(0, 1fr)` держит кнопку слева от волны.
 
 Измеренные 48 peaks используются по-прежнему. Если peaks отсутствуют, показывается одна стабильная декоративная волна с тем же реальным прогрессом. Перемотку по нажатию/drag и с клавиатуры выполняет существующий native range поверх волны (высота hit area 44 px).
 
-HTMLAudioElement, его event handlers, playback attempt guard, media coordinator и очистка ресурсов сохранены. Новых аудиообъектов, таймеров, глобальных менеджеров, зависимостей или runtime-генерации нет. Backend, MAX import, private media/auth, schema, миграции, контракты, фото, видео и карусели не менялись.
+HTMLAudioElement, его event handlers, playback attempt guard, media coordinator и очистка ресурсов сохранены. Новых аудиообъектов, таймеров, глобальных менеджеров или зависимостей нет. Backend, MAX import, private media/auth, schema, миграции, контракты, фото, видео и карусели не менялись.
 
 ## Проверки
 
