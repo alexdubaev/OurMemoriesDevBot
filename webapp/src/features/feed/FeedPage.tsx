@@ -1063,6 +1063,8 @@ export function PhotoImage({ alt, height, onError, onLoad, src, width }: {
   return <img alt={alt} className="block h-auto w-full" height={height ?? undefined} onError={onError} onLoad={onLoad} src={src} width={width ?? undefined} />
 }
 
+const VOICE_FALLBACK_WAVEFORM = Array.from({ length: 48 }, (_, index) => 0.18 + ((index * 7) % 11) / 20)
+
 function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null; path: string | null; waveform: number[] | null }) {
   const { url } = usePrivateMediaSource(path)
   const audio = useRef<HTMLAudioElement | null>(null)
@@ -1078,20 +1080,19 @@ function AudioPlayer({ durationMs, path, waveform }: { durationMs: number | null
   const updateDuration = (element: HTMLAudioElement) => { if (Number.isFinite(element.duration) && element.duration >= 0) setDuration(element.duration) }
   const syncCurrent = (element: HTMLAudioElement) => setCurrent(element.currentTime)
   return <div className="ml-audio p-4" data-seen-ready={mediaCardSeenReady({ kind: 'voice', objectUrl: url })}><audio onDurationChange={(e) => updateDuration(e.currentTarget)} onEnded={(e) => { if (!e.currentTarget.ended) return; if (Number.isFinite(e.currentTarget.duration)) setCurrent(e.currentTarget.duration); playbackAttempt.current += 1; setPlaying(false) }} onLoadedMetadata={(e) => updateDuration(e.currentTarget)} onPause={(e) => { if (!e.currentTarget.paused) return; playbackAttempt.current += 1; setPlaying(false) }} onPlay={(e) => { if (e.currentTarget.paused) return; activate(); syncCurrent(e.currentTarget); setPlaying(true) }} onSeeking={(e) => syncCurrent(e.currentTarget)} onTimeUpdate={(e) => syncCurrent(e.currentTarget)} preload="none" ref={audio} src={url ?? undefined} />
-    <div className="flex items-center gap-3"><Button disabled={!url} onClick={() => { const element = audio.current; if (!element) return; const attempt = ++playbackAttempt.current; void toggleAudioPlayback(element, () => playbackAttempt.current === attempt, setPlaying) }} type="button">{playing ? 'Пауза' : 'Слушать'}</Button><Typography tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div>
-    <VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position; setCurrent(position) }} waveform={waveform} />
+    <div className="memoly-voice-player" data-slot="voice-player"><Button aria-label={playing ? 'Приостановить голосовое' : 'Воспроизвести голосовое'} className="memoly-voice-play" disabled={!url} onClick={() => { const element = audio.current; if (!element) return; const attempt = ++playbackAttempt.current; void toggleAudioPlayback(element, () => playbackAttempt.current === attempt, setPlaying) }} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={24} state="white" /></Button><div className="memoly-voice-track"><VoiceSeek current={current} duration={duration} onSeek={(position) => { if (audio.current) audio.current.currentTime = position; setCurrent(position) }} waveform={waveform} /><Typography className="memoly-voice-time" tone="muted" variant="memoryMeta">{seconds(current)} / {roundedSeconds(duration)}</Typography></div></div>
   </div>
 }
 
 function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; duration: number; onSeek: (position: number) => void; waveform: number[] | null }) {
-  if (!waveform || waveform.length !== 48) return <div className="mt-3"><input aria-label="Позиция голосового сообщения" className="w-full" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.target.value))} step="0.1" type="range" value={current} /></div>
+  const peaks = waveform?.length === 48 ? waveform : VOICE_FALLBACK_WAVEFORM
   const progress = voiceWaveformProgress(current, duration)
-  return <div className="relative mt-3 flex h-10 items-center gap-px" data-slot="voice-waveform">
-    {waveform.map((peak, index) => {
-      const played = isVoiceWaveformPeakPlayed(index, waveform.length, progress)
+  return <div className="relative flex h-10 items-center gap-px" data-slot="voice-waveform">
+    {peaks.map((peak, index) => {
+      const played = isVoiceWaveformPeakPlayed(index, peaks.length, progress)
       return <span aria-hidden="true" className="min-h-1 flex-1 rounded-full" data-waveform-peak="" data-waveform-played={played} key={index} style={{ backgroundColor: played ? 'var(--memory-accent-strong)' : 'var(--memory-line)', height: `${Math.max(10, Math.min(100, peak * 100))}%` }} />
     })}
-    <div className="absolute inset-0 flex items-center opacity-0 focus-within:opacity-100"><input aria-label="Позиция голосового сообщения" className="w-full" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.target.value))} step="0.1" type="range" value={current} /></div>
+    <div className="absolute inset-0 flex h-11 items-center opacity-0 focus-within:opacity-100"><input aria-label="Позиция голосового сообщения" className="h-11 w-full" max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.target.value))} step="0.1" type="range" value={current} /></div>
   </div>
 }
 
