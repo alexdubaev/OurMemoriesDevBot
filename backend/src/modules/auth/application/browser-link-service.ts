@@ -11,6 +11,7 @@ import type {
   Clock,
   ProjectUser,
   RefreshTokens,
+  BrowserSessionReplacementProof,
   VerifiedMaxInitData,
 } from './ports'
 
@@ -21,6 +22,8 @@ type BrowserLinkServiceDependencies = {
   clock: Clock
   projectUser: ProjectUser
   refreshTokenTtlDays: number
+  refreshReuseGraceSeconds: number
+  sessionAbsoluteTtlDays: number
   refreshTokens: RefreshTokens
   repository: BrowserLinkRepository
   verifyInitData(rawInitData: string): VerifiedMaxInitData
@@ -97,16 +100,35 @@ export class BrowserLinkService {
     return { approved: true as const }
   }
 
-  async redeem(id: string, verifier: string | undefined, metadata: SessionMetadata) {
+  async redeem(
+    id: string,
+    verifier: string | undefined,
+    presentedRefreshToken: string | undefined,
+    metadata: SessionMetadata,
+  ) {
     if (!verifier) {
       throw new AuthFailure('browser_link_invalid', 'Browser login challenge is invalid')
     }
 
     const now = this.dependencies.clock.now()
     const refreshToken = this.dependencies.refreshTokens.create()
+    const predecessor: BrowserSessionReplacementProof | undefined = presentedRefreshToken
+      ? {
+          refreshTokenHash: this.dependencies.refreshTokens.hash(presentedRefreshToken),
+          refreshTokenFamilyHash: this.dependencies.refreshTokens.familyHash(presentedRefreshToken),
+          now,
+          createdAfter: new Date(
+            now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 24 * 60 * 60 * 1000,
+          ),
+          reuseGraceAfter: new Date(
+            now.getTime() - this.dependencies.refreshReuseGraceSeconds * 1000,
+          ),
+        }
+      : undefined
     const redeemed = await this.dependencies.repository.redeemBrowserLoginChallenge({
       id,
       verifierHash: hashVerifier(verifier),
+      predecessor,
       now,
       refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
       refreshTokenFamilyHash: this.dependencies.refreshTokens.familyHash(refreshToken),

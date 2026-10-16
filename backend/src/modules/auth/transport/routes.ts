@@ -254,6 +254,7 @@ export function createAuthRoutes({ env, service, telegramService, maxService, br
     const result = await executeAuth(() => browserLinkService.redeem(
       challengeId,
       getBrowserLinkCookie(c),
+      getRefreshCookie(c),
       requestMetadata(c, env),
     ))
     setRefreshCookie(c, result.refreshTokenToSet, env)

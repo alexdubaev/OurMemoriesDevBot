@@ -8,6 +8,7 @@ import { enqueueTask } from '../../../outbox'
 import type {
   AuthRepository,
   BrowserLinkRepository,
+  BrowserSessionReplacementProof,
   MaxAuthRepository,
   TelegramAuthRepository,
 } from '../application/ports'
@@ -409,6 +410,10 @@ export function createPrismaMaxAuthRepository(
           await tx.$executeRaw(
             Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`max-auth:${input.identity.provider}:${input.identity.subject}`}, 0))`,
           )
+          const predecessor = input.predecessor
+            ? await lockBrowserSessionPredecessor(tx, input.predecessor)
+            : { state: 'absent' as const, session: null, canReplay: false }
+          if (predecessor.state === 'invalid') return { state: 'invalid_session' as const }
           await tx.maxAuthReplay.deleteMany({
             where: { expiresAt: { lte: input.now } },
           })
@@ -417,12 +422,12 @@ export function createPrismaMaxAuthRepository(
             select: { sessionId: true },
           })
           if (replay) {
-            if (!input.existingSessionId || replay.sessionId !== input.existingSessionId) {
+            if (!predecessor.session || !predecessor.canReplay || replay.sessionId !== predecessor.session.id) {
               return { state: 'replayed' as const }
             }
             const existing = await tx.authSession.findFirst({
               where: {
-                id: input.existingSessionId,
+                id: predecessor.session.id,
                 revokedAt: null,
                 expiresAt: { gt: input.now },
               },
@@ -474,6 +479,13 @@ export function createPrismaMaxAuthRepository(
               expiresAt: input.replayExpiresAt,
             },
           })
+          if (predecessor.session) {
+            const revoked = await tx.authSession.updateMany({
+              where: { id: predecessor.session.id, revokedAt: null },
+              data: { revokedAt: input.now },
+            })
+            if (revoked.count !== 1) throw new Error('Browser session replacement lost its locked predecessor')
+          }
           return { state: 'issued' as const, user: externalIdentity.user, session }
         }, userAuthenticationSessionTransactionOptions)
       } catch (error) {
@@ -604,6 +616,11 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
 
         await acquireUserAuthenticationAuthorityLock(tx, challenge.approvedUserId)
 
+        const predecessor = input.predecessor
+          ? await lockBrowserSessionPredecessor(tx, input.predecessor)
+          : { state: 'absent' as const, session: null, canReplay: false }
+        if (predecessor.state === 'invalid') return null
+
         const identity = await tx.externalIdentity.findFirst({
           where: {
             id: challenge.approvedExternalIdentityId,
@@ -620,6 +637,14 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
         })
         if (consumed.count !== 1) throw new Error('Browser login challenge consume race')
 
+        if (predecessor.session) {
+          const revoked = await tx.authSession.updateMany({
+            where: { id: predecessor.session.id, revokedAt: null },
+            data: { revokedAt: input.now },
+          })
+          if (revoked.count !== 1) throw new Error('Browser session replacement lost its locked predecessor')
+        }
+
         const session = await tx.authSession.create({
           data: {
             userId: identity.userId,
@@ -635,6 +660,58 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
         return { user: identity.user, session }
       }, userAuthenticationSessionTransactionOptions)
     },
+  }
+}
+
+async function lockBrowserSessionPredecessor(
+  tx: Prisma.TransactionClient,
+  proof: BrowserSessionReplacementProof,
+): Promise<{ state: 'absent' | 'valid' | 'invalid'; session: { id: string } | null; canReplay: boolean }> {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT id
+      FROM auth_sessions
+     WHERE refresh_token_family_hash = ${proof.refreshTokenFamilyHash}
+        OR refresh_token_hash = ${proof.refreshTokenHash}
+        OR previous_refresh_token_hash = ${proof.refreshTokenHash}
+     ORDER BY id
+     FOR UPDATE
+  `)
+
+  const candidate = await tx.authSession.findFirst({
+    where: {
+      OR: [
+        { refreshTokenFamilyHash: proof.refreshTokenFamilyHash },
+        { refreshTokenHash: proof.refreshTokenHash },
+        { previousRefreshTokenHash: proof.refreshTokenHash },
+      ],
+    },
+    select: {
+      id: true,
+      refreshTokenHash: true,
+      previousRefreshTokenHash: true,
+      refreshRotatedAt: true,
+      revokedAt: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  })
+  if (!candidate) return { state: 'absent', session: null, canReplay: false }
+
+  const exactCurrent = candidate.refreshTokenHash === proof.refreshTokenHash
+  const exactPreviousWithinGrace =
+    candidate.previousRefreshTokenHash === proof.refreshTokenHash &&
+    candidate.refreshRotatedAt !== null &&
+    candidate.refreshRotatedAt >= proof.reuseGraceAfter
+  if ((!exactCurrent && !exactPreviousWithinGrace) || candidate.revokedAt !== null) {
+    return { state: 'invalid', session: null, canReplay: false }
+  }
+
+  // An expired or absolute-expired, unrevoked exact credential can still identify the browser
+  // row for a newly verified login. It cannot authorize replay of a previously issued session.
+  return {
+    state: 'valid',
+    session: { id: candidate.id },
+    canReplay: candidate.expiresAt > proof.now && candidate.createdAt > proof.createdAfter,
   }
 }
 

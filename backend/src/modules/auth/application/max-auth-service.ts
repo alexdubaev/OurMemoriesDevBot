@@ -42,7 +42,19 @@ export class MaxAuthService {
     verified = this.verifyInitData(rawInitData)
 
     const now = this.dependencies.clock.now()
-    const existingSessionId = await this.currentSessionId(presentedRefreshToken, now)
+    const predecessor = presentedRefreshToken
+      ? {
+          refreshTokenHash: this.dependencies.refreshTokens.hash(presentedRefreshToken),
+          refreshTokenFamilyHash: this.dependencies.refreshTokens.familyHash(presentedRefreshToken),
+          now,
+          createdAfter: new Date(
+            now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 24 * 60 * 60 * 1000,
+          ),
+          reuseGraceAfter: new Date(
+            now.getTime() - this.dependencies.refreshReuseGraceSeconds * 1000,
+          ),
+        }
+      : undefined
     const refreshToken = this.dependencies.refreshTokens.create()
     const exchanged = await this.dependencies.repository.exchangeMaxIdentity({
       identity: verified.identity,
@@ -50,7 +62,7 @@ export class MaxAuthService {
       replayExpiresAt: new Date(
         (verified.authDateSeconds + maxAuthDataMaxAgeSeconds + maxAuthReplayBoundaryPaddingSeconds) * 1000,
       ),
-      existingSessionId,
+      predecessor,
       now,
       session: {
         refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
@@ -67,6 +79,10 @@ export class MaxAuthService {
       )
     }
 
+    if (exchanged.state === 'invalid_session') {
+      throw new AuthFailure('refresh_session_invalid', 'Browser session is no longer valid')
+    }
+
     return {
       user: await this.dependencies.projectUser(exchanged.user),
       accessToken: await this.dependencies.accessTokens.sign({
@@ -77,20 +93,4 @@ export class MaxAuthService {
     }
   }
 
-  private async currentSessionId(refreshToken: string | undefined, now: Date) {
-    if (!refreshToken) return undefined
-
-    const session = await this.dependencies.repository.findActiveRefreshSession({
-      refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
-      refreshTokenFamilyHash: this.dependencies.refreshTokens.familyHash(refreshToken),
-      now,
-      createdAfter: new Date(
-        now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 24 * 60 * 60 * 1000,
-      ),
-      reuseGraceAfter: new Date(
-        now.getTime() - this.dependencies.refreshReuseGraceSeconds * 1000,
-      ),
-    })
-    return session?.credentialState === 'current' ? session.id : undefined
-  }
 }
