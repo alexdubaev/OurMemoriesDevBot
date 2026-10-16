@@ -121,8 +121,8 @@ export class AuthApi {
         method: 'POST', body: payload, signal: options.signal, timeoutMs: 15000,
       })
       ensureHostAuthAttemptCurrent(options)
-      this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return { data, sessionEpoch: sessionEvent.epoch }
     }, { timeoutMs: 15000, signal: options.signal })
   }
@@ -232,8 +232,8 @@ export class AuthApi {
       const data = await this.http.request(`/api/v1/auth/browser-link/${challengeId}/redeem`, cookieAuthResponseSchema, {
         method: 'POST',
       })
-      this.options.setAccessToken(data.accessToken)
       publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return data
     })
   }

@@ -1,5 +1,5 @@
 import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
@@ -60,10 +60,12 @@ export function FamilyScreen({
   onOpenInstall?: () => void
 }) {
   const [error, setError] = useState<Error | null>(null)
+  const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [inviteError, setInviteError] = useState(false)
   const [busy, setBusy] = useState(false)
   const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string; inviteeDisplayName?: string } | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [now, setNow] = useState(() => Date.now())
   const [usage, setUsage] = useState<{ usedBytes: number; quotaBytes: number | null } | null>(null)
   const [usageFailed, setUsageFailed] = useState(false)
   const current = members.find((member) => member.userId === currentUserId)
@@ -73,6 +75,23 @@ export function FamilyScreen({
   const maxChannel = useFamilyMaxChannelStatus(transport, familyResponse.family.id, currentUserId, current?.role ?? null)
   const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
   const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
+  const activeInvites = useMemo(() => invites.filter((invite) => Date.parse(invite.expiresAt) > now), [invites, now])
+
+  useEffect(() => {
+    const refreshClock = () => setNow(Date.now())
+    const nextExpiry = activeInvites.reduce<number | null>((next, invite) => {
+      const expiry = Date.parse(invite.expiresAt)
+      return next === null || expiry < next ? expiry : next
+    }, null)
+    const timer = nextExpiry === null ? null : window.setTimeout(refreshClock, Math.max(0, nextExpiry - Date.now()))
+    document.addEventListener('visibilitychange', refreshClock)
+    window.addEventListener('online', refreshClock)
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', refreshClock)
+      window.removeEventListener('online', refreshClock)
+    }
+  }, [activeInvites, now])
 
   const refreshUsage = useCallback(() => void loadFamilyUsage(transport, familyResponse.family.id).then((next) => {
     setUsage(next)
@@ -84,12 +103,23 @@ export function FamilyScreen({
   async function run(action: () => Promise<unknown>, throwOnError = false) {
     setBusy(true)
     setError(null)
+    setSavedRefreshFailed(false)
     try {
-      await action()
-      await onRefresh({ failureMode: 'throw' })
-    } catch (reason) {
-      setError(reason instanceof Error ? reason : new Error('Не удалось обновить семью.'))
-      if (throwOnError) throw reason
+      try {
+        await action()
+      } catch (reason) {
+        setError(reason instanceof Error ? reason : new Error('Не удалось обновить семью.'))
+        if (throwOnError) throw reason
+        return
+      }
+      try {
+        await onRefresh({ failureMode: 'throw' })
+        setSavedRefreshFailed(false)
+      } catch (reason) {
+        const refreshError = new Error('Изменение сохранено, но данные семьи не удалось обновить.', { cause: reason })
+        setError(refreshError)
+        setSavedRefreshFailed(true)
+      }
     } finally {
       setBusy(false)
     }
@@ -123,9 +153,10 @@ export function FamilyScreen({
           currentUserId={currentUserId}
           hostBridge={hostBridge}
           hasError={Boolean(error)}
+          savedRefreshFailed={savedRefreshFailed}
           inviteError={inviteError}
           inviteReady={inviteReady}
-          invites={invites}
+          invites={activeInvites}
           memberActions={memberActions}
           members={members}
           maxChannelStatus={maxChannel.status}
@@ -150,8 +181,19 @@ export function FamilyScreen({
             setInviteError(false)
             try {
               const result = await createInviteResult({
-                create: () => createInvite(transport, familyResponse.family.id, input),
-                refresh: () => onRefresh({ failureMode: 'throw' }),
+                create: () => createInvite(transport, familyResponse.family.id, {
+                  role: input.role,
+                  inviteeDisplayName: input.inviteeDisplayName,
+                }, input.idempotencyKey),
+                refresh: async () => {
+                  try {
+                    await onRefresh({ failureMode: 'throw' })
+                    setSavedRefreshFailed(false)
+                  } catch (reason) {
+                    setSavedRefreshFailed(true)
+                    throw reason
+                  }
+                },
                 toUrl: createInviteLink,
               })
               setInviteReady({ ...result, inviteeDisplayName: input.inviteeDisplayName })
@@ -173,7 +215,7 @@ export function FamilyScreen({
             if (!current) return
             await run(() => leaveFamily(transport, familyResponse.family.id, currentUserId, current.version), true)
           }}
-          onRefresh={() => { void onRefresh() }}
+          onRefresh={() => { void onRefresh(savedRefreshFailed ? { failureMode: 'throw' } : undefined).then(() => { setSavedRefreshFailed(false); setError(null) }).catch(() => setSavedRefreshFailed(true)) }}
           onRefreshUsage={refreshUsage}
           onRemoveMember={async (member) => run(() => leaveFamily(
             transport, familyResponse.family.id, member.userId, member.version,
