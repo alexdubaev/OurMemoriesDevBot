@@ -203,6 +203,7 @@ export function createMaxTaskProcessor(options: {
       }
       let identity: ReturnType<typeof validateMaxForwardedMessage>
       let forwardStage: 'provider_lookup' | 'channel_binding' = 'provider_lookup'
+      let originalMissing = false
       try {
         verifiedForward = await options.api.getMessage(forwardedFrom.messageId, signal)
         identity = validateMaxForwardedMessage(verifiedForward, forwardedFrom.messageId)
@@ -238,16 +239,19 @@ export function createMaxTaskProcessor(options: {
         await prisma.$transaction((tx) => assertMaxForwardBinding(tx, targetResult.target.familyId, identity.channelId))
       } catch (error) {
         if (signal?.aborted) throw error
+        originalMissing = forwardStage === 'provider_lookup' && error instanceof MaxProviderError && error.code === 'message_not_found'
         reportMaxForwardDiagnostic(forwardStage, error, { sourceId: source.id, inboxId: inbox.id,
           outerMessageId: event.messageId, originalMessageId: forwardedFrom.messageId })
         if (error instanceof MaxProviderError && error.retryable) throw error
         if (error instanceof MaxProviderError || isExpectedAuthorizationFailure(error)) {
-          const outer = envelopeFallback ? verifiedForward : await getVerifiedEnvelope(options.api, event, forwardedFrom.messageId, signal)
+          const outer = envelopeFallback ? verifiedForward : await getVerifiedEnvelope(options.api, event, forwardedFrom.messageId, signal, originalMissing)
           if (!outer) return denyForward()
           verifiedForward = outer
           verifiedForwardChannelId = undefined
           envelopeFallback = true
-          const canonicalAttachments = outer.attachments.filter((attachment) => attachment.kind === 'image' || attachment.kind === 'video').map(toInboundAttachment)
+          const canonicalAttachments = outer.attachments
+            .filter((attachment) => attachment.kind === 'image' || attachment.kind === 'video' || (attachment.kind === 'voice' && outer.attachments.length === 1))
+            .map(toInboundAttachment)
           if (canonicalAttachments.length === 0 || outer.attachments.length !== canonicalAttachments.length) return denyForward()
           const timestamp = validForwardTimestamp(outer.forwardedFrom?.timestamp) ?? inbox.receivedAt.getTime()
           event = { ...event, forwardedFrom: undefined, text: null, occurredAt: new Date(timestamp).toISOString(), attachments: canonicalAttachments }
@@ -437,7 +441,7 @@ async function claimMaxEnvelopeSource(db: DbClient, source: MaxSource, familyId:
       throw new MaxProviderError(undefined, true, 503, 'envelope_claim_lost')
     }
     if (currentRows.length === 0) await tx.maxSourceAttachment.createMany({ data: attachments.map((attachment, position) => ({
-      sourceId: source.id, position, providerKind: attachment.kind === 'image' ? 'image' : 'video',
+      sourceId: source.id, position, providerKind: envelopeProviderKind(attachment),
       providerAttachmentId: attachment.providerAttachmentId, plannedMediaId: randomUUID(),
     })) })
     return { kind: 'claimed' as const }
@@ -447,19 +451,35 @@ async function claimMaxEnvelopeSource(db: DbClient, source: MaxSource, familyId:
 function sameEnvelopeAttachments(rows: Array<{ providerKind: string; providerAttachmentId: string }>, attachments: MaxInboundAttachment[]) {
   return rows.length === attachments.length && rows.every((row, index) => {
     const attachment = attachments[index]!
-    return row.providerKind === attachment.kind && row.providerAttachmentId === attachment.providerAttachmentId
+    return row.providerKind === envelopeProviderKind(attachment) && row.providerAttachmentId === attachment.providerAttachmentId
   })
 }
 
-async function getVerifiedEnvelope(api: MaxApiPort | undefined, event: Extract<MaxInboundEvent, { kind: 'message_created' }>, originalMessageId: string, signal?: AbortSignal) {
+function envelopeProviderKind(attachment: MaxInboundAttachment) {
+  return attachment.kind === 'image' ? 'image' : attachment.kind === 'video' ? 'video' : 'file'
+}
+
+async function getVerifiedEnvelope(api: MaxApiPort | undefined, event: Extract<MaxInboundEvent, { kind: 'message_created' }>, originalMessageId: string,
+  signal?: AbortSignal, allowMissingVoice = false) {
   if (!api?.getMessage || event.isChannel || event.senderId === '0') return null
   try {
     const outer = await api.getMessage(event.messageId, signal)
     const attachments = outer.forwardedAttachments
-    if (outer.messageId !== event.messageId || outer.senderId !== event.senderId || outer.recipientType !== 'dialog' || outer.recipientId !== event.recipientId ||
-        outer.forwardedFrom?.messageId !== originalMessageId || !attachments?.length || attachments.some((attachment) => attachment.kind !== 'image' && attachment.kind !== 'video') ||
-        new Set(attachments.map((attachment) => attachment.providerAttachmentId)).size !== attachments.length) return null
     const ingress = event.forwardedFrom?.attachments ?? []
+    const ingressVoice = ingress.length === 1 && ingress[0]?.kind === 'voice' ? ingress[0] : undefined
+    const identityMatches = outer.messageId === event.messageId && outer.senderId === event.senderId && outer.recipientType === 'dialog' &&
+      outer.recipientId === event.recipientId && outer.forwardedFrom?.messageId === originalMessageId
+    if (!identityMatches) return null
+    if (attachments === undefined) {
+      if (!allowMissingVoice || !ingressVoice || outer.attachments.length > 0) return null
+      return { ...outer, attachments: [ingressVoice] }
+    }
+    if (attachments.length === 0) return null
+    if (attachments.some((attachment) => attachment.kind !== 'image' && attachment.kind !== 'video' && attachment.kind !== 'voice') ||
+        new Set(attachments.map((attachment) => attachment.providerAttachmentId)).size !== attachments.length) return null
+    if (attachments.some((attachment) => attachment.kind === 'voice') &&
+        (!allowMissingVoice || outer.attachments.length > 0 || attachments.length !== 1 || !ingressVoice || attachments[0]!.kind !== 'voice' ||
+          attachments[0]!.providerAttachmentId !== ingressVoice.providerAttachmentId)) return null
     if (ingress.length > 0 && (ingress.length !== attachments.length || ingress.some((item, index) => item.kind !== attachments[index]!.kind || item.providerAttachmentId !== attachments[index]!.providerAttachmentId))) return null
     return { ...outer, attachments }
   } catch (error) {

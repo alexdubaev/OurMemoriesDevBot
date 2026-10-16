@@ -20,6 +20,46 @@ describe('MAX forward import boundary', () => {
     })
   })
 
+  test('retains one strictly validated forwarded audio locator from the MAX link message', () => {
+    const update = (url: string, attachments: unknown[] = [{ type: 'audio', payload: {
+      id: 703, token: 'synthetic-audio-token', url,
+    } }]) => ({
+      update_type: 'message_created', timestamp: Date.parse('2026-10-02T10:00:00.000Z'),
+      message: { sender: { user_id: 7001 }, recipient: { chat_type: 'dialog', chat_id: 9001, user_id: 9001 },
+        body: { mid: 'outer-mid-synthetic', seq: 21, text: '' },
+        link: { type: 'forward', chat_id: -123456, message: { mid: 'original-mid-synthetic', seq: 7,
+          attachments } } },
+    })
+
+    const event = normalizeMaxUpdate(update('https://voice.example.invalid/forwarded-audio'))
+
+    expect(event.kind).toBe('message_created')
+    if (event.kind !== 'message_created') throw new Error('Expected a forwarded message')
+    expect(event.forwardedFrom?.attachments).toEqual([{
+      kind: 'voice', providerAttachmentId: '703', url: 'https://voice.example.invalid/forwarded-audio',
+    }])
+
+    expect(() => normalizeMaxUpdate(update('not-a-url'))).toThrow()
+    const mixed = normalizeMaxUpdate(update('https://voice.example.invalid/forwarded-audio', [
+      { type: 'audio', payload: { id: 703, token: 'synthetic-audio-token', url: 'https://voice.example.invalid/forwarded-audio' } },
+      { type: 'file', payload: { fileId: 'unsupported-file', token: 'synthetic-file-token', url: 'https://file.example.invalid/file' } },
+    ]))
+    if (mixed.kind !== 'message_created') throw new Error('Expected a forwarded message')
+    expect(mixed.forwardedFrom?.attachments).toEqual([{
+      kind: 'file', providerAttachmentId: 'unsupported:mixed-audio', filename: null, declaredSize: null,
+    }])
+
+    const mixedImage = normalizeMaxUpdate(update('https://voice.example.invalid/forwarded-audio', [
+      { type: 'audio', payload: { id: 703, token: 'synthetic-audio-token', url: 'https://voice.example.invalid/forwarded-audio' } },
+      { type: 'image', payload: { photo_id: '704', token: 'synthetic-image-token', url: 'https://image.example.invalid/photo' } },
+    ]))
+    if (mixedImage.kind !== 'message_created') throw new Error('Expected a forwarded message')
+    expect(mixedImage.forwardedFrom?.attachments).toEqual([
+      { kind: 'image', providerAttachmentId: '704' },
+      { kind: 'file', providerAttachmentId: 'unsupported:mixed-audio', filename: null, declaredSize: null },
+    ])
+  })
+
   test('acknowledges a forward for import even when the outer message contains no content', () => {
     const event = normalizeMaxUpdate(forwardedUpdate())
     if (event.kind !== 'message_created') throw new Error('Expected a forwarded message')
