@@ -86,7 +86,7 @@ Lead при проверке сопряжённого lock protocol нашёл P
 
 ## PR #176 и release gate
 
-Отдельный draft PR публикуется из этой ветки; ссылка будет внесена после подтверждённого создания. Merge/deploy не разрешены этим отчётом.
+Опубликован отдельный draft [PR #177](https://github.com/alexdubaev/OurMemoriesDevBot/pull/177) из этой ветки. Audited product commit указан выше; последующие commits — только отчёт/план. Merge/deploy не разрешены этим отчётом.
 
 Это независимое исправление от main; код PR #176 не копировался, не cherry-pick/merge и его branch/worktree не менялись. У #176 backend изменения только families; клиентские auth epoch corrections находятся в webapp. Файлы production этого PR с ним не пересекаются. Рекомендуемый безопасный порядок владельцу: отдельно принять P1 server fix, затем после своей приёмки #176; после обоих выполнить совместный MAX/browser-link smoke на актуальном source. Слияния этой задачей не выполняются.
 
