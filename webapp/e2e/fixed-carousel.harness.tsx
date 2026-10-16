@@ -45,8 +45,15 @@ const maxAttachmentId = '99999999-9999-4999-8999-999999999998'
 const maxPlaybackPath = `/api/v1/families/${familyId}/media/max-videos/${maxVideoId}/content`
 const maxVideoMemory = { ...memory, id: maxAttachmentId, kind: 'video', body: 'Lifecycle MAX video', attachments: [{ id: maxVideoId, source: 'max', kind: 'video', width: 720, height: 1280, durationMs: 5000, playbackPath: maxPlaybackPath, posterState: 'ready', posterPath: maxPlaybackPath.replace('/content', '/poster') }] }
 const lifecycleMode = new URLSearchParams(window.location.search).has('lifecycle')
+const voiceMode = new URLSearchParams(window.location.search).has('voice')
+const voiceId = '88888888-8888-4888-8888-888888888888'
+const voicePath = mediaPath(voiceId, 'voices') + '/content'
+const voiceMemory = { ...memory, id: '22222222-2222-4222-8222-222222222225', kind: 'voice', body: 'Synthetic voice recording', attachments: [{ id: voiceId, source: 'private_storage', kind: 'voice', width: null, height: null, durationMs: 5000, renditionStatus: 'ready', previewPath: null, displayPath: null, playbackPath: voicePath, originalDownloadPath: mediaPath(voiceId, 'original'), waveform: Array.from({ length: 48 }, (_, index) => .2 + (index % 6) * .12) }] }
+const maxVoiceId = '88888888-8888-4888-8888-888888888887'
+const maxVoicePath = mediaPath(maxVoiceId, 'voices') + '/content'
+const missingWaveformVoice = { ...voiceMemory, id: '22222222-2222-4222-8222-222222222227', body: 'Synthetic MAX voice', attachments: [{ ...voiceMemory.attachments[0], id: maxVoiceId, playbackPath: maxVoicePath, waveform: null }] }
 const transport = {
-  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: [memory, singlePhotoMemory, photoAlbumMemory, ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
+  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: [memory, singlePhotoMemory, photoAlbumMemory, ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('44444444-4444-4444-8444-444444444442') && window.__fixedCarouselProbe?.delayed) await new Promise<void>((resolve) => delayedPosterWaiters.push(resolve))
