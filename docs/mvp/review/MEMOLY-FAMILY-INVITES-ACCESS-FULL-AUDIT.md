@@ -7,6 +7,7 @@
 - Fresh main / base: `e383d79269a3595f4c6cabedf167335aea042cf3` (16 октября 2026).
 - Предыдущий ориентир `3abaaa1bcb5011a7cbd99d547f978fdefd5ca71e` проверен по Git: после него в main принят голосовой плеер #175. R1–R5 на fresh main ещё присутствовали.
 - Ветка: `fix/family-invites-access-audit`.
+- Draft PR: [#176](https://github.com/alexdubaev/OurMemoriesDevBot/pull/176), base `main`; OPEN / draft, не merged. Исходный код и доказательства сохранены в двух коммитах `62f0a7f` и `032b93e`; последующее добавление ссылки PR — только документация.
 - Audited product/test source commit: `62f0a7f1961bbe84b9a836f3d63971111b5f7b66`. Проверки выполнены на его неизменённом product tree перед commit; следующие коммиты содержат только отчёты/синтетические screenshots. Fresh main при финальной сверке остался `e383d79269a3595f4c6cabedf167335aea042cf3`.
 - Worktree: `D:/codex/TG_OurMemoriesDevBot/OurMemoriesDevBot/.worktrees/family-invites-access-audit`.
 - Lead: GPT-6 Codex; discovery/implementation/review делегируются отдельным агентам согласно teamlead-development. Чужие ветки и незакоммиченные изменения не изменялись.
