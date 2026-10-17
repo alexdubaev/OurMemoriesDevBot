@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import test from 'node:test'
+import test, { after } from 'node:test'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
@@ -233,9 +234,102 @@ test('UI rollback restores the previously running static image after public read
 })
 
 const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
-const currentCandidate = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-const backendBaselineId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
-const webappBaselineId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
+const candidateRuntimeSha = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
+const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
+const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
+const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
+const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
+const candidateWebappId = 'sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66'
+const runtimeFingerprints = {
+  legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
+  candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
+}
+const fixtureWorktrees = []
+const fixtureSourceCache = new Map()
+
+function runtimeFingerprint(cwd, revision) {
+  const result = spawnSync('git', ['ls-tree', '-rz', '--full-tree', '--format=%(objectmode) %(objecttype) %(objectname)%x09%(path)', revision,
+    '--', 'backend', 'webapp', 'packages', 'package.json', 'bun.lock', 'bunfig.toml'], { cwd, encoding: null })
+  if (result.status !== 0) throw new Error(result.stderr.toString())
+  const records = result.stdout.toString('binary').split('\0').filter(Boolean)
+  const kept = records.filter((record) => !/^\d+ \w+ [0-9a-f]+\tbackend\/scripts\/(?:[^/]+\.test\.ts$|test-support\/|test-integration\.mjs$)/.test(record))
+  return createHash('sha256').update(kept.join('\0') + '\0').digest('hex')
+}
+
+function productionRuntimeFingerprint(cwd) {
+  const result = spawnSync('bash', ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(cwd)}\nrollback_runtime_fingerprint HEAD\n`,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  return result.stdout.trim().split('\n').at(-1)
+}
+
+function gitFixtureCommit(cwd, message) {
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  for (const args of [['init', '--quiet'], ['add', '.'], ['commit', '--quiet', '-m', message]]) {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  }
+}
+
+function rollbackSource(role) {
+	if (fixtureSourceCache.has(role)) return fixtureSourceCache.get(role)
+  const expected = runtimeFingerprints[role]
+  const currentSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
+  const currentStatus = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim()
+  if (!currentStatus && runtimeFingerprint(root, currentSha) === expected) {
+    const source = { root, sha: currentSha }
+    fixtureSourceCache.set(role, source)
+    return source
+  }
+
+  const fallback = role === 'candidate' ? candidateRuntimeSha : rollback180
+  assert.equal(runtimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', `rollback-${role}-worktree-`))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, fallback], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).stdout.trim()
+  assert.equal(head, fallback)
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: directory, encoding: 'utf8' }).stdout.trim(), '')
+  assert.equal(runtimeFingerprint(directory, head), expected)
+  const source = { root: directory, sha: head }
+  fixtureSourceCache.set(role, source)
+  return source
+}
+
+function createSourceWorktree(role) {
+  const source = rollbackSource(role)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', `rollback-mutation-${role}-`))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, source.sha], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  return { root: directory, sha: source.sha }
+}
+
+function commitSourceChange(source, relativePath, contents, message) {
+  appendFileSync(resolve(source.root, relativePath), contents)
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '-am', message], { cwd: source.root, env, encoding: 'utf8' })
+  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
+  return { ...source, sha }
+}
+
+after(() => {
+  for (const directory of fixtureWorktrees.reverse()) {
+    const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  }
+})
 const redeployDefinitions = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8')
   .replaceAll('\r\n', '\n').replace(/\nmain "\$@"\s*$/, '\n')
 
@@ -258,23 +352,33 @@ function runApplicationRollback(options = {}) {
   ].join('\n'), { mode: 0o600 })
   if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
   if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
+  const source = options.sourceRootOverride
+    ? { root: options.sourceRootOverride, sha: options.sourceShaOverride }
+    : rollbackSource(options.source ?? 'legacy')
+  const target = options.target ?? rollbackBaseline
+  const candidatePair = target === rollback180
+  const targetLabel = options.badLabel ? 'wrong' : target
   const events = resolve(fixture, 'events')
   const env = {
-    SERVER_ROOT: server, APP_ROOT: root, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
+    SERVER_ROOT: server, APP_ROOT: source.root, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
     COMPOSE_FILE: resolve(server, 'compose.yml'), ROLLBACK_ENV: resolve(server, 'rollback.env'),
     CONFIG_BACKUP_MARKER: resolve(server, '.selectel-config-backup'),
     SERVER_EDGE_CADDYFILE: resolve(server, 'gateway/Caddyfile'), SERVER_STATIC_CADDYFILE: resolve(server, 'Caddyfile.static'),
     FORWARD_MARKER: resolve(server, 'b2.marker'), MM0_FORWARD_MARKER: resolve(server, 'mm0.marker'),
-    MEMOLY_PRODUCT_SHA: options.producer ?? currentCandidate,
+    MEMOLY_PRODUCT_SHA: options.producer ?? source.sha,
+    MAX_BOT_TOKEN: '', MAX_WEBHOOK_SECRET: '', MAX_INBOX_ENCRYPTION_KEY: '',
     MEMOLY_PUBLIC_HOST: 'example.invalid', PUBLIC_URL: 'http://example.invalid',
     FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
     FIXTURE_STATE_ERROR: String(options.stateError ?? false),
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
-    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : backendBaselineId,
-    FIXTURE_WEBAPP_ID: webappBaselineId, FIXTURE_LABEL: options.badLabel ? 'wrong' : rollbackBaseline,
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (candidatePair ? candidateBackendId : legacyBackendId),
+    FIXTURE_WEBAPP_ID: candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
+    FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
+    FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
+    ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
   }
   const mocks = [
-    'load_runtime_secrets() { :; }',
+    'load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }',
     'gateway_preflight() { :; }',
     'docker() {',
     ' case "$*" in',
@@ -285,18 +389,21 @@ function runApplicationRollback(options = {}) {
     ' esac',
     '}',
     'compose() {',
+    ' if [[ "$*" == *config* || "$1" = up ]]; then',
+    '   [ -n "${MAX_BOT_TOKEN:-}" ] && [ -n "${MAX_WEBHOOK_SECRET:-}" ] && [ -n "${MAX_INBOX_ENCRYPTION_KEY:-}" ] || { echo COMPOSE_SECRET_MISSING >> "$FIXTURE_EVENTS"; return 1; }',
+    ' fi',
     ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
     ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
     '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
     '   [ "$FIXTURE_STATE_ERROR" = false ]; return',
     ' fi',
-    ' if [ "$1" = up ]; then echo "UP:$MEMOLY_BACKEND_IMAGE_TAG:$*" >> "$FIXTURE_EVENTS";',
+    ' if [ "$1" = up ]; then echo "UP:$MEMOLY_BACKEND_IMAGE_TAG:$*" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_PROMOTION_FAIL" = false ];',
     ' elif [ "$1" = ps ]; then printf "backend\\nworker\\nscheduler\\nstatic\\n"; fi',
     '}',
     'activate_gateway() { cp "$EDGE_CANDIDATE" "$SERVER_EDGE_CADDYFILE"; echo GATE >> "$FIXTURE_EVENTS"; }',
     'curl() {',
     ' if [[ "$*" == *"/api/v1/auth/max"* ]]; then',
-    '  if grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 405; fi',
+    '  if [ -n "$FIXTURE_AUTH_RESPONSE" ]; then printf "%s" "$FIXTURE_AUTH_RESPONSE"; elif grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 404; fi',
     ' fi',
     ' return 0',
     '}',
@@ -307,7 +414,7 @@ function runApplicationRollback(options = {}) {
     'bash() { if [ "$2" = rollback ]; then ( rollback ); else command bash "$@"; fi; }',
     'trap release_failure EXIT',
     '(exit 42)',
-  ].join('\n') : 'rollback'
+  ].join('\n') : (options.action ?? 'rollback')
   const assignments = Object.entries(env).map(([name, value]) => name + '=' + shellQuote(value)).join('\n')
   try {
     const result = spawnSync('bash', ['-s'], {
@@ -318,6 +425,93 @@ function runApplicationRollback(options = {}) {
       caddy: readFileSync(resolve(server, 'gateway/Caddyfile'), 'utf8') }
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 }
+
+test('candidate to #180 uses its exact runtime attestation and normal auth routing', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', operatorGate: 'true' })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
+  assert.match(result.output, /normal authentication routing/)
+  assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+})
+
+test('rollback-readiness runs the attestation without changing services or gateway', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', action: 'rollback_readiness' })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.output, /readiness verified; no services were changed/)
+  assert.doesNotMatch(result.events, /UP:|GATE/)
+  assert.equal(result.caddy, 'before\n')
+})
+
+test('runtime fingerprint excludes only the declared test-support files', () => {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'runtime-fingerprint-'))
+  try {
+    for (const [path, body] of [
+      ['backend/src/app.ts', 'export const app = 1\n'],
+      ['backend/scripts/real.test.ts', 'export const test = 1\n'],
+      ['backend/scripts/test-support/probe.mjs', 'export const support = 1\n'],
+      ['backend/scripts/test-integration.mjs', 'export const integration = 1\n'],
+      ['backend/scripts/real.test.ts.production', 'export const production = 1\n'],
+      ['webapp/src/app.ts', 'export const web = 1\n'],
+      ['packages/contracts/index.ts', 'export const contract = 1\n'],
+      ['package.json', '{}\n'], ['bun.lock', 'lock\n'], ['bunfig.toml', '[install]\n'],
+    ]) {
+      const pathOnDisk = resolve(fixture, path)
+      mkdirSync(resolve(pathOnDisk, '..'), { recursive: true })
+      writeFileSync(pathOnDisk, body)
+    }
+    gitFixtureCommit(fixture, 'initial runtime fixture')
+    const initial = productionRuntimeFingerprint(fixture)
+
+    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts'), 'export const test = 2\n')
+    writeFileSync(resolve(fixture, 'backend/scripts/test-support/probe.mjs'), 'export const support = 2\n')
+    writeFileSync(resolve(fixture, 'backend/scripts/test-integration.mjs'), 'export const integration = 2\n')
+    gitFixtureCommit(fixture, 'change excluded test support')
+    assert.equal(productionRuntimeFingerprint(fixture), initial)
+
+    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts.production'), 'export const production = 2\n')
+    gitFixtureCommit(fixture, 'change runtime-shaped test filename')
+    assert.notEqual(productionRuntimeFingerprint(fixture), initial)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rollback guard reaches runtime and service-configuration incompatibility checks', () => {
+  const runtimeSource = commitSourceChange(createSourceWorktree('candidate'), 'backend/src/worker.ts',
+    '\n// synthetic rollback guard fixture\n', 'mutate runtime source')
+  const runtime = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: runtimeSource.root, sourceShaOverride: runtimeSource.sha })
+  assert.notEqual(runtime.status, 0, runtime.output)
+  assert.match(runtime.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(runtime.events, /UP:|GATE/)
+
+  const configSource = commitSourceChange(createSourceWorktree('candidate'), 'deploy/selectel/Caddyfile.edge.template',
+    '\n# synthetic rollback guard fixture\n', 'mutate service configuration')
+  const config = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: configSource.root, sourceShaOverride: configSource.sha })
+  assert.notEqual(config.status, 0, config.output)
+  assert.match(config.output, /rollback schema, dependencies or service configuration are incompatible/)
+  assert.doesNotMatch(config.events, /UP:|GATE/)
+})
+
+test('rollback guard reports unknown and dirty source states before promotion', () => {
+  const unknown = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    source: 'candidate', producer: 'f'.repeat(40) })
+  assert.notEqual(unknown.status, 0, unknown.output)
+  assert.match(unknown.output, /rollback compatibility revision is unavailable/)
+  assert.doesNotMatch(unknown.events, /UP:|GATE/)
+
+  const source = createSourceWorktree('candidate')
+  const untracked = resolve(source.root, 'backend/src/rollback-untracked-fixture.ts')
+  writeFileSync(untracked, 'export {}\n')
+  const dirty = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha })
+  rmSync(untracked)
+  assert.notEqual(dirty.status, 0, dirty.output)
+  assert.match(dirty.output, /rollback source checkout is not clean/)
+  assert.doesNotMatch(dirty.events, /UP:|GATE/)
+})
 
 for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
   test('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
@@ -352,6 +546,24 @@ test('real ci-release failure branch completes guarded application restoration a
   assert.equal(failed.status, 42, failed.output)
   assert.match(failed.output, /automatic application rollback failed/)
   assert.doesNotMatch(failed.events, /UP:/)
+
+  const candidate = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180, webappTarget: rollback180 })
+  assert.equal(candidate.status, 42, candidate.output)
+  assert.match(candidate.output, /Application rollback complete/)
+  assert.doesNotMatch(candidate.caddy, /rollback_auth_maintenance/)
+  assert.match(candidate.events, /GATE\nUP:.*backend worker scheduler static/)
+
+  const blocked = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180,
+    webappTarget: rollback180, badAuthResponse: true })
+  assert.equal(blocked.status, 42, blocked.output)
+  assert.match(blocked.output, /normal authentication routing is not active/)
+  assert.doesNotMatch(blocked.events, /UP:/)
+
+  const restorationFailure = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180,
+    webappTarget: rollback180, promotionFail: true })
+  assert.equal(restorationFailure.status, 42, restorationFailure.output)
+  assert.match(restorationFailure.output, /automatic application rollback failed/)
+  assert.match(restorationFailure.events, /GATE\nUP:/)
 })
 
 test('normal promotion requires compatibility and a fresh validated backup before service changes', () => {
