@@ -254,7 +254,8 @@ export function createMaxTaskProcessor(options: {
             .map(toInboundAttachment)
           if (canonicalAttachments.length === 0 || outer.attachments.length !== canonicalAttachments.length) return denyForward()
           const timestamp = validForwardTimestamp(outer.forwardedFrom?.timestamp) ?? inbox.receivedAt.getTime()
-          event = { ...event, forwardedFrom: undefined, text: null, occurredAt: new Date(timestamp).toISOString(), attachments: canonicalAttachments }
+          event = { ...event, forwardedFrom: undefined, text: outer.forwardedText ?? null,
+            occurredAt: new Date(timestamp).toISOString(), attachments: canonicalAttachments }
         }
         else throw error
       }
@@ -472,7 +473,7 @@ async function getVerifiedEnvelope(api: MaxApiPort | undefined, event: Extract<M
     if (!identityMatches) return null
     if (attachments === undefined) {
       if (!allowMissingVoice || !ingressVoice || outer.attachments.length > 0) return null
-      return { ...outer, attachments: [ingressVoice] }
+      return { ...outer, attachments: [ingressVoice], forwardedText: null }
     }
     if (attachments.length === 0) return null
     if (attachments.some((attachment) => attachment.kind !== 'image' && attachment.kind !== 'video' && attachment.kind !== 'voice') ||
@@ -481,7 +482,7 @@ async function getVerifiedEnvelope(api: MaxApiPort | undefined, event: Extract<M
         (!allowMissingVoice || outer.attachments.length > 0 || attachments.length !== 1 || !ingressVoice || attachments[0]!.kind !== 'voice' ||
           attachments[0]!.providerAttachmentId !== ingressVoice.providerAttachmentId)) return null
     if (ingress.length > 0 && (ingress.length !== attachments.length || ingress.some((item, index) => item.kind !== attachments[index]!.kind || item.providerAttachmentId !== attachments[index]!.providerAttachmentId))) return null
-    return { ...outer, attachments }
+    return { ...outer, attachments, forwardedText: outer.forwardedText ?? null }
   } catch (error) {
     if (signal?.aborted) throw error
     if (error instanceof MaxProviderError && error.retryable) throw error

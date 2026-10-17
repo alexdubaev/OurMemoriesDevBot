@@ -222,6 +222,38 @@ describe('MAX API client', () => {
       attachments: [], forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'token-only-video', currentToken: 'provider-confirmed-token' }],
     })
   })
+  test('keeps linked caption text separate from outer message text in direct and wrapped forward responses', async () => {
+    const payload = { message: {
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 },
+      body: { mid: 'outer-caption-forward', text: 'Outer comment must never become the caption', attachments: [] },
+      link: { type: 'forward', message: { mid: 'private-caption-original', text: '  Original caption\n💛  ',
+        attachments: [{ type: 'video', payload: { id: 456, token: 'provider-confirmed-token' } }] } },
+    } }
+    const bodyLinkCompatibility = { message: {
+      sender: payload.message.sender, recipient: payload.message.recipient,
+      body: { ...payload.message.body, link: payload.message.link },
+    } }
+    for (const wrap of [(value: typeof payload) => value, (value: typeof payload) => ({ messages: [value.message] }),
+      () => bodyLinkCompatibility]) {
+      const api = createMaxApi(token, { fetch: async () => response(wrap(payload)) })
+      await expect(api.getMessage('outer-caption-forward')).resolves.toMatchObject({
+        text: 'Outer comment must never become the caption',
+        forwardedFrom: { messageId: 'private-caption-original' },
+        forwardedText: '  Original caption\n💛  ',
+        forwardedAttachments: [{ kind: 'video', providerAttachmentId: '456' }],
+      })
+    }
+  })
+
+  test('rejects a malformed linked caption safely', async () => {
+    const api = createMaxApi(token, { fetch: async () => response({ messages: [{
+      sender: { user_id: 42 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 99 },
+      body: { mid: 'outer-malformed-caption', text: 'Outer text is untrusted' },
+      link: { type: 'forward', message: { mid: 'private-malformed-caption', text: { unsafe: true },
+        attachments: [{ type: 'video', payload: { id: 456, token: 'provider-confirmed-token' } }] } },
+    }] }) })
+    await expect(api.getMessage('outer-malformed-caption')).rejects.toBeInstanceOf(MaxProviderError)
+  })
 
   test('returns a text-only channel original when attachments are omitted and preserves its timestamp', async () => {
     const timestamp = 1_702_000_000_123
