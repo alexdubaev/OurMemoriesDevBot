@@ -14,4 +14,4 @@ Allowed production paths: `backend/src/modules/max/application/ports.ts`, `backe
 
 Forbidden: ACL/F12, other messengers, schema/migrations, downloader/transcoding, duplicate claim algorithms, existing production memories. Stop for storage-model changes, production-data risk, unexpected source drift or unavailable mandatory checks. Production repair of an existing memory requires a separate exact owner confirmation.
 
-Primary focused checks: `bun test ./backend/src/modules/max/max-api.test.ts`; `bun run test:backend:integration -- src/modules/max/forward-import.integration.test.ts`. Release gate: `bun run verify:full -- --base 3fce2739205da927b95eb3379b1d066b61282965` (confirm runner argument syntax before execution).
+Primary focused checks: `bun test ./backend/src/modules/max/max-api.test.ts`; `bun run test:backend:integration -- src/modules/max/forward-import.integration.test.ts`. Release gate: `bun run verify:full --base 3fce2739205da927b95eb3379b1d066b61282965`.

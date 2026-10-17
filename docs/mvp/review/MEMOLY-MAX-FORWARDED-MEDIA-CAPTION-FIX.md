@@ -1,12 +1,12 @@
 # MEMOLY-MAX-FORWARDED-MEDIA-CAPTION-FIX
 
-Status: REVIEW / release BLOCKED by local test infrastructure.
+Status: release BLOCKED by local test infrastructure; draft PR [#181](https://github.com/alexdubaev/OurMemoriesDevBot/pull/181).
 
-Model: GPT-6 Codex lead; GPT-6 Luna implementation; one independent read-only review to be recorded in the PR.
+Model: GPT-6 Codex lead; GPT-6 Luna implementation; one fresh GPT-6 Luna independent read-only review.
 Base: `3fce2739205da927b95eb3379b1d066b61282965`.
 Branch: `fix/max-forwarded-media-caption`.
 Worktree: `D:/codex/TG_OurMemoriesDevBot/OurMemoriesDevBot/.worktrees/max-forwarded-media-caption`.
-The PR records the exact published head SHA and review result.
+Reviewed implementation SHA: `00f4fb99c924747f8b11c5800ba623a75a0a7838`. The final follow-up changes only this task's documentation; product checks are not repeated for documentation-only changes. The PR records the current published head SHA.
 
 ## Confirmed cause and source
 
@@ -34,9 +34,11 @@ No public contracts, ACL/F12, schema/migrations, download/transcoding, duplicate
 | PostgreSQL RED, personally reproduced by lead | 0 pass / 1 fail, exit 1: video Memory persisted `body: ""` instead of synthetic caption |
 | API GREEN, personally run by lead | 42 pass / 0 fail, 159 assertions, exit 0 |
 | Backend typecheck, personally run by lead | exit 0 |
-| Two focused PostgreSQL caption cases, worker-run before outage | 2 pass / 0 fail, exit 0: exact text, 8,000 boundary, 8,001 denial, no-caption isolation and repeat-forward dedupe |
+| Two focused PostgreSQL caption cases, worker-run before outage | 2 pass / 0 fail, exit 0: exact text, 8,000 boundary, 8,001 denial, no-caption isolation and repeat-forward dedupe. The final expanded fixtures, including an added explicit-null variant, have not run |
 | Complete final forward-import integration suite | BLOCKED: task-owned PostgreSQL became unavailable (P1001); this is not a test pass |
 | FULL release gate | BLOCKED; not completed. No merge or deployment permitted on this evidence |
+
+Independent review of the complete implementation diff against the base: no P0/P1/P2 findings. It was read-only and ran no tests. The reviewer explicitly recorded unavailable final integration/FULL evidence as a remaining risk; a clean code review does not make this release ready. No second review cycle was launched.
 
 All database tests used a newly created isolated `memoly_caption_test` database, PostgreSQL 18, loopback port 56592, and temporary filesystem storage. Compose could not create another network because its address pools were exhausted; the supported explicit external test-database mode was used instead. During Linux FULL environment preparation, the local C drive exhausted free space and Docker returned `input/output error`. Even removal of the task's own verification container failed. No global prune, deletion of others' resources, or Docker restart was performed.
 
