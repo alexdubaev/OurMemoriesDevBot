@@ -89,6 +89,7 @@ export type MaxResolvedMessage = {
   attachments: MaxResolvedAttachment[]
   forwardedFrom?: { messageId: string; timestamp?: number }
   forwardedAttachments?: MaxResolvedAttachment[]
+  forwardedText?: string | null
 }
 
 export type MaxVideoRendition = {

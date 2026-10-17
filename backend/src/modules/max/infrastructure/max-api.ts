@@ -189,6 +189,9 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBo
   if (messageLink && bodyLink) throw new MaxProviderError()
   const linkedLink = messageLink ?? bodyLink
   const linkedMessage = linkedLink && isRecord(linkedLink.message) ? linkedLink.message : null
+  if (linkedMessage && linkedMessage.text !== undefined && linkedMessage.text !== null && typeof linkedMessage.text !== 'string') {
+    throw new MaxProviderError()
+  }
   const attachments = Array.isArray(candidate.body.attachments) ? candidate.body.attachments.map((attachment) => normalizeResolvedAttachment(attachment)) : []
   const forwardedAttachments = linkedMessage && Array.isArray(linkedMessage.attachments)
     ? linkedMessage.attachments.map((attachment) => normalizeResolvedAttachment(attachment, true)) : undefined
@@ -205,7 +208,8 @@ function normalizeMessageLookup(value: unknown, expectedMessageId: string, rawBo
     ...(timestamp === undefined || timestamp === null ? {} : { timestamp: timestamp as number }), attachments,
     ...(linkedMessage && typeof linkedMessage.mid === 'string' ? { forwardedFrom: { messageId: linkedMessage.mid,
       ...(Number.isSafeInteger(linkedMessage.timestamp) && (linkedMessage.timestamp as number) >= 0 ? { timestamp: linkedMessage.timestamp as number } : {}) } } : {}),
-    ...(forwardedAttachments ? { forwardedAttachments } : {}) }
+    ...(forwardedAttachments ? { forwardedAttachments } : {}),
+    ...(linkedMessage ? { forwardedText: typeof linkedMessage.text === 'string' ? linkedMessage.text : null } : {}) }
 }
 
 function exactRawChannelRecipientId(rawBody: string, idPath: Array<string | number>, typePath: Array<string | number>, parsedId: unknown): string | null {
