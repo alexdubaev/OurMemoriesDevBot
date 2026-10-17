@@ -234,6 +234,8 @@ test('UI rollback restores the previously running static image after public read
 
 const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const currentCandidate = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
+const candidateRuntimeSha = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
+const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
 const backendBaselineId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const webappBaselineId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const redeployDefinitions = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8')
@@ -318,6 +320,13 @@ function runApplicationRollback(options = {}) {
       caddy: readFileSync(resolve(server, 'gateway/Caddyfile'), 'utf8') }
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 }
+
+test('candidate to #180 is rejected until its exact runtime attestation is implemented', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, producer: candidateRuntimeSha })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.output, /rollback target pair has no verified runtime compatibility attestation/)
+  assert.doesNotMatch(result.events, /UP:/)
+})
 
 for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
   test('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
