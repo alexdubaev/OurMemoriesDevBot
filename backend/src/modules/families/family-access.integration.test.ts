@@ -28,6 +28,7 @@ maybeDescribe('Family access and invitations', () => {
     await prisma.taskOutbox.deleteMany()
     await prisma.idempotencyRecord.deleteMany()
     await prisma.familyInvite.deleteMany()
+    await prisma.memory.deleteMany()
     await prisma.child.deleteMany()
     await prisma.mediaVariant.deleteMany()
     await prisma.uploadReservation.deleteMany()
