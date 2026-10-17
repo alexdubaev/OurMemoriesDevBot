@@ -844,7 +844,8 @@ rollback() {
 	else
 		[ "$gate_status" = 405 ] || die 'normal authentication routing is not active for the verified rollback target'
 	fi
-	compose up -d --no-deps --force-recreate backend worker scheduler static
+	compose up -d --no-deps --force-recreate backend worker scheduler static ||
+		die 'application rollback service promotion failed'
 	wait_backend_internal
 	verify_static_internal
 	docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile
