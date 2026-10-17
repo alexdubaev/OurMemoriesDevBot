@@ -393,17 +393,28 @@ fails, it attempts to restore and verify the static image that was running when
 the command began. B2/MM0 forward-only markers block this action; use the guarded
 forward-recovery release flow instead.
 
-## Consolidated F12 release: measured application rollback compatibility
+## Measured application rollback compatibility
 
-The only attested application rollback pair is backend + webapp
-`e383d79269a3595f4c6cabedf167335aea042cf3`, with the exact production image IDs
-pinned in `verify_application_rollback`. Its producer application tree must match
-the tested integration `d4b69a5ce73a03eceb632f23fb9eb17801343ff9`; a squash SHA
-is accepted only with the same runtime tree. This is not a date/descendant allowlist.
-Any future application change or different target requires new compatibility
-evidence and a reviewed attestation. Both tags, OCI labels, Git objects, a clean
-source checkout, schema/dependencies/service configuration, completed migrations,
-and protected configuration artifacts are checked. Unknown state fails closed.
+The guarded rollback supports two exact measured backend + webapp pairs:
+
+- `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image
+  IDs pinned in `verify_application_rollback` and the runtime fingerprint
+  measured from integration `d4b69a5ce73a03eceb632f23fb9eb17801343ff9`.
+- `3fce2739205da927b95eb3379b1d066b61282965` (#180), with backend image ID
+  `sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c`,
+  webapp image ID
+  `sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66`,
+  and the runtime fingerprint measured from candidate
+  `39e8af7bb9e9a5949ada3c32dad31d38f9439505`.
+
+The runtime fingerprint hashes deterministic NUL-delimited Git tree records
+for the backend, webapp, packages, root manifest, and Bun lock/config files,
+excluding only the existing backend test/support paths. It survives squash
+without depending on producer commit reachability; it is not a date/descendant
+allowlist. The exact target SHA, immutable image IDs and OCI revision labels remain
+required. Any other source or target requires new compatibility evidence and a
+reviewed attestation. Schema, dependency, service configuration, migration,
+database, and protected-artifact checks remain fail-closed.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
@@ -418,19 +429,20 @@ using the existing backup procedure, in addition to the protected configuration
 backup, before changing application services. Dumps are recovery artifacts only;
 application rollback never restores or edits database contents.
 
-The old runtime reintroduces F12 for newly issued browser sessions. Therefore
-rollback first installs and verifies a temporary gateway maintenance gate:
-`/api/v1/auth/*` returns 503 except `me` and `logout`. Only then are backend,
-worker, scheduler and static restored. Existing sessions, ACL and revoked-session
-checks continue to work; new MAX/browser-link login is unavailable during recovery.
-Keep this gate until a reviewed F12-capable forward release passes internal health
-and restores the normal gateway configuration. Do not remove it manually to make
-login work on the old runtime. No blanket session revocation or SQL repair is used.
+The legacy `e383…` runtime reintroduces F12 for newly issued browser sessions. That
+exact pair first installs and verifies a temporary gateway maintenance gate:
+`/api/v1/auth/*` returns 503 except `me` and `logout`, then restores backend,
+worker, scheduler and static. The measured #180 pair uses normal authentication
+routing after its gateway response is verified. Gate policy is derived from the
+validated pair and cannot be selected by an operator environment variable.
+
+After deployment, `bash deploy/selectel/redeploy.sh rollback-readiness` runs the
+same locked, read-only compatibility check without promoting or restoring services.
 
 The failure-branch regression invokes the real `ci-release.sh` failure handler and
-`redeploy.sh rollback`, verifies gate-before-service ordering, restoration of all
-four services, and retention of the original failed-release exit status. Docker
-and database failures remain fail-closed. Production readiness must also confirm
+`redeploy.sh rollback` for both pairs, verifies pair-specific gateway policy before
+service restoration, restoration of all four services, and retention of the original
+failed-release exit status. Docker and database failures remain fail-closed. Production readiness must also confirm
 that the attested images and configuration backup actually exist on that host.
 
 ## B7 unread activation after a healthy compatible release

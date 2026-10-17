@@ -688,6 +688,39 @@ readiness() {
 	wait_public /
 }
 
+rollback_runtime_fingerprint() {
+	local revision=$1
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
+		ls-tree -rz --full-tree --format='%(objectmode) %(objecttype) %(objectname)%x09%(path)' "$revision" -- \
+		backend webapp packages package.json bun.lock bunfig.toml |
+		grep -zEv $'\tbackend/scripts/([^/]+\\.test\\.ts|test-support/|test-integration\\.mjs)' |
+		sha256sum | awk '{print $1}'
+}
+
+rollback_auth_gate_for_verified_pair() {
+	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
+	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
+	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} expected_runtime gate source_runtime
+	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
+	case "$target" in
+		"$legacy_target")
+			expected_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
+			gate=true
+			;;
+		"$candidate_target")
+			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
+			gate=false
+			;;
+		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
+	esac
+	[[ "${MEMOLY_PRODUCT_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
+	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse HEAD)" = "$MEMOLY_PRODUCT_SHA" ] ||
+		die 'rollback source differs from the checked-out release'
+	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
+	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
+	printf '%s\n' "$gate"
+}
+
 verify_application_rollback() {
 	(
 	[ ! -e "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
@@ -706,13 +739,26 @@ verify_application_rollback() {
 	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG"; then
 		die 'FORWARD_FIX_REQUIRED: rollback target predates the MM0 runtime and cannot publish against this database'
 	fi
-	# This attestation is intentionally a single measured pair, not an ancestry/date whitelist.
-	local target=e383d79269a3595f4c6cabedf167335aea042cf3
-	local producer=d4b69a5ce73a03eceb632f23fb9eb17801343ff9
-	[ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$target" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$target" ] ||
-		die 'rollback target pair has no verified runtime compatibility attestation'
+	# Exact targets are independently measured; source trees are pinned by content
+	# so squash commits do not need to retain unreachable producer objects.
+	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
+	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
+	local target expected_runtime expected_target_runtime
+	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
+		"$legacy_target:$legacy_target")
+			target=$legacy_target
+			expected_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
+			expected_target_runtime=$expected_runtime
+			;;
+		"$candidate_target:$candidate_target")
+			target=$candidate_target
+			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
+			expected_target_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
+			;;
+		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
+	esac
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
-	for revision in "$target" "$producer" "$MEMOLY_PRODUCT_SHA"; do
+	for revision in "$target" "$MEMOLY_PRODUCT_SHA"; do
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$revision^{commit}" 2>/dev/null ||
 			die 'rollback compatibility revision is unavailable'
 	done
@@ -722,15 +768,11 @@ verify_application_rollback() {
 	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
 	[ -z "$source_status" ] ||
 		die 'rollback source checkout is not clean'
-	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$producer" "$MEMOLY_PRODUCT_SHA" ||
-		# Squash releases preserve the validated tree without preserving producer ancestry.
-		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
-		die 'rollback source is outside the validated release lineage'
-	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$producer" "$MEMOLY_PRODUCT_SHA" -- \
-		backend webapp packages package.json bun.lock bunfig.toml \
-		':(exclude)backend/scripts/*.test.ts' ':(exclude)backend/scripts/test-support' \
-		':(exclude)backend/scripts/test-integration.mjs' ||
-		die 'application runtime differs from the validated rollback producer'
+	local source_runtime target_runtime
+	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
+	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
+	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
+	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 		backend/prisma backend/Dockerfile backend/package.json packages/contracts bun.lock bunfig.toml \
 		deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
@@ -743,9 +785,20 @@ verify_application_rollback() {
 	esac
 	load_runtime_secrets
 	validate_inputs rollback
-	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9 ] ||
+	local expected_backend_id expected_webapp_id
+	case "$target" in
+		"$legacy_target")
+			expected_backend_id=sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9
+			expected_webapp_id=sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a
+			;;
+		"$candidate_target")
+			expected_backend_id=sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c
+			expected_webapp_id=sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66
+			;;
+	esac
+	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
 		die 'rollback backend image differs from the verified production artifact'
-	[ "$(docker image inspect --format '{{.Id}}' "memoly-webapp:$target")" = sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a ] ||
+	[ "$(docker image inspect --format '{{.Id}}' "memoly-webapp:$target")" = "$expected_webapp_id" ] ||
 		die 'rollback webapp image differs from the verified production artifact'
 	for image in "memoly-backend:$target" "memoly-webapp:$target"; do
 		[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$target" ] ||
@@ -779,14 +832,18 @@ rollback() {
 		fi
 	fi
 	compose config >/dev/null
-	# Restore availability without allowing the known F12 defect to create new browser sessions.
-	# Install and verify the gate BEFORE any old application process is promoted.
-	ROLLBACK_AUTH_GATE=true render_edge_candidate
+	local gate_policy gate_status
+	gate_policy=$(rollback_auth_gate_for_verified_pair) || die 'application rollback gate policy could not be verified'
+	# Install and verify this exact pair's gateway policy before promoting application processes.
+	ROLLBACK_AUTH_GATE=$gate_policy render_edge_candidate
 	activate_gateway
-	local gate_status
 	gate_status=$(curl --silent --show-error --max-time 5 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/v1/auth/max") ||
 		die 'cannot verify rollback authentication maintenance'
-	[ "$gate_status" = 503 ] || die 'rollback authentication maintenance is not active'
+	if [ "$gate_policy" = true ]; then
+		[ "$gate_status" = 503 ] || die 'rollback authentication maintenance is not active'
+	else
+		[ "$gate_status" = 405 ] || die 'normal authentication routing is not active for the verified rollback target'
+	fi
 	compose up -d --no-deps --force-recreate backend worker scheduler static
 	wait_backend_internal
 	verify_static_internal
@@ -794,7 +851,11 @@ rollback() {
 	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
 	cleanup_candidate
 	readiness
-	printf 'Application rollback complete; additive migrations remain applied. Auth maintenance remains until a healthy F12 forward release.\n'
+	if [ "$gate_policy" = true ]; then
+		printf 'Application rollback complete; additive migrations remain applied. Auth maintenance remains until a healthy F12 forward release.\n'
+	else
+		printf 'Application rollback complete; additive migrations remain applied with normal authentication routing.\n'
+	fi
 }
 
 read_static_rollback_tag() {
@@ -933,9 +994,14 @@ deploy() {
 	printf 'Promotion complete. Previous images remain available for rollback.\n'
 }
 
+rollback_readiness() {
+	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	printf 'Application rollback readiness verified; no services were changed.\n'
+}
+
 usage() {
 	cat <<'EOF'
-Usage: redeploy.sh {preflight|backup-migration|migrate|deploy|rollback|rollback-static|migration-status|quiesce-legacy|quiesce-all}
+Usage: redeploy.sh {preflight|backup-migration|migrate|deploy|rollback|rollback-readiness|rollback-static|migration-status|quiesce-legacy|quiesce-all}
 
 Environment: SERVER_ROOT COMPOSE_FILE ROLLBACK_ENV COMPOSE_PROJECT
 GATEWAY_CONTAINER MEMOLY_EDGE_NETWORK MEMOLY_PRODUCT_SHA MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG PUBLIC_URL
@@ -954,6 +1020,7 @@ main() {
 		preflight) preflight ;;
 		deploy) deploy ;;
 		rollback) rollback ;;
+		rollback-readiness) require_command docker; rollback_readiness ;;
 		rollback-static) require_command docker; rollback_static ;;
 		migration-status) require_command docker; load_runtime_secrets; validate_inputs; migration_status ;;
 		backup-migration) require_command docker; guard_membership_transition backup; backup_migration ;;
