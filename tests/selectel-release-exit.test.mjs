@@ -366,6 +366,7 @@ function runApplicationRollback(options = {}) {
     SERVER_EDGE_CADDYFILE: resolve(server, 'gateway/Caddyfile'), SERVER_STATIC_CADDYFILE: resolve(server, 'Caddyfile.static'),
     FORWARD_MARKER: resolve(server, 'b2.marker'), MM0_FORWARD_MARKER: resolve(server, 'mm0.marker'),
     MEMOLY_PRODUCT_SHA: options.producer ?? source.sha,
+    MAX_BOT_TOKEN: '', MAX_WEBHOOK_SECRET: '', MAX_INBOX_ENCRYPTION_KEY: '',
     MEMOLY_PUBLIC_HOST: 'example.invalid', PUBLIC_URL: 'http://example.invalid',
     FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
     FIXTURE_STATE_ERROR: String(options.stateError ?? false),
@@ -377,7 +378,7 @@ function runApplicationRollback(options = {}) {
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
   }
   const mocks = [
-    'load_runtime_secrets() { :; }',
+    'load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }',
     'gateway_preflight() { :; }',
     'docker() {',
     ' case "$*" in',
@@ -388,6 +389,9 @@ function runApplicationRollback(options = {}) {
     ' esac',
     '}',
     'compose() {',
+    ' if [[ "$*" == *config* || "$1" = up ]]; then',
+    '   [ -n "${MAX_BOT_TOKEN:-}" ] && [ -n "${MAX_WEBHOOK_SECRET:-}" ] && [ -n "${MAX_INBOX_ENCRYPTION_KEY:-}" ] || { echo COMPOSE_SECRET_MISSING >> "$FIXTURE_EVENTS"; return 1; }',
+    ' fi',
     ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
     ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
     '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
