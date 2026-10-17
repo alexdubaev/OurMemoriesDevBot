@@ -507,8 +507,8 @@ maybeDescribe('personal unread memories', () => {
 
   async function user(name: string, subject: string) {
     const record = await prisma.user.create({ data: { displayName: name } })
-    const identity = await prisma.externalIdentity.create({ data: { userId: record.id, provider: 'telegram', subject } })
-    await prisma.pilotAdmission.create({ data: { provider: 'telegram', subject } })
+    const identity = await prisma.externalIdentity.create({ data: { userId: record.id, provider: 'max', subject } })
+    await prisma.pilotAdmission.create({ data: { provider: 'max', subject } })
     const session = await prisma.authSession.create({ data: {
       userId: record.id, externalIdentityId: identity.id, refreshTokenHash: `hash-${subject}`,
       refreshTokenFamilyHash: `family-${subject}`, expiresAt: new Date(Date.now() + 60_000),

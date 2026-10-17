@@ -84,7 +84,7 @@ maybeDescribe('Family access and invitations', () => {
   })
 
   test('two own-family creates with distinct keys yield one owner even with the gate on', async () => {
-    const actor = await admittedUser('Browser actor', '191006', 'user', false, 'telegram', false)
+    const actor = await admittedUser('Browser actor', '191006', 'user', false, false)
     const requests = await Promise.all([
       enabledJsonRequest('/api/v1/families', actor.token, 'POST',
         { name: 'Первая', timezone: 'Europe/Moscow' }),
@@ -132,7 +132,7 @@ maybeDescribe('Family access and invitations', () => {
   test('two concurrent invite accepts and a concurrent own creation serialize for one actor', async () => {
     const firstOwner = await admittedUser('First owner', '191021')
     const secondOwner = await admittedUser('Second owner', '191022')
-    const actor = await admittedUser('Browser actor', '191023', 'user', false, 'telegram', false)
+    const actor = await admittedUser('Browser actor', '191023', 'user', false, false)
     const first = await createFamily(firstOwner.token, 'Семья A')
     const second = await createFamily(secondOwner.token, 'Семья B')
     const firstInvite = await jsonRequest(`/api/v1/families/${first.body.family.id}/invites`,
@@ -1213,37 +1213,39 @@ maybeDescribe('Family access and invitations', () => {
     expect(expiredPreview.body.error.code).toBe('INVITE_EXPIRED')
   })
 
-  test('admits only the provider and subject bound to the current session', async () => {
-    const maxOwner = await admittedUser('MAX owner', '14001', 'user', true, 'max')
-    const telegramOwner = await admittedUser('Telegram owner', '14002')
+  test('admits only a MAX identity with a matching subject-bound admission', async () => {
+    const maxOwner = await admittedUser('MAX owner', '14001')
     expect((await createFamily(maxOwner.token, 'MAX family')).response.status).toBe(201)
-    expect((await createFamily(telegramOwner.token, 'Telegram family')).response.status).toBe(201)
-
-    const telegramOnly = await userWithProviderIdentities('Telegram admission only', '14003', 'max', ['telegram'])
-    const telegramOnlyDenied = await createFamily(telegramOnly.token, 'MAX denied by Telegram-only admission')
-    expect(telegramOnlyDenied.response.status).toBe(403)
-    expect(telegramOnlyDenied.body.error.code).toBe('ROLE_FORBIDDEN')
-
-    const maxOnly = await userWithProviderIdentities('MAX admission only', '14004', 'telegram', ['max'])
-    const maxOnlyDenied = await createFamily(maxOnly.token, 'Telegram denied by MAX-only admission')
-    expect(maxOnlyDenied.response.status).toBe(403)
-    expect(maxOnlyDenied.body.error.code).toBe('ROLE_FORBIDDEN')
-
-    const maxBound = await userWithProviderIdentities('MAX bound', '14005', 'max', ['telegram', 'max'])
-    const telegramBound = await userWithProviderIdentities('Telegram bound', '14006', 'telegram', ['telegram', 'max'])
-    expect((await createFamily(maxBound.token, 'MAX exact family')).response.status).toBe(201)
-    expect((await createFamily(telegramBound.token, 'Telegram exact family')).response.status).toBe(201)
+    const mismatched = await admittedUser('MAX subject mismatch', '14003', 'user', false)
+    await prisma.pilotAdmission.create({ data: { provider: 'max', subject: '14004' } })
+    const denied = await createFamily(mismatched.token, 'Mismatched MAX admission')
+    expect(denied.response.status).toBe(403)
+    expect(denied.body.error.code).toBe('ROLE_FORBIDDEN')
   })
 
-  test('denies null-provenance and revoked-admission sessions without inventing a provider', async () => {
-    const legacy = await admittedUser('Legacy session', '14007', 'user', true, 'telegram', false)
+  // Historical cross-provider coverage is intentionally retained but excluded from the
+  // supported MAX-only verification profile.
+  test('historical Telegram and MAX admissions remain isolated by provider and subject', async () => {
+    const telegram = await userWithProviderIdentities('Telegram legacy', '14002', 'telegram', ['telegram'])
+    const max = await userWithProviderIdentities('MAX legacy', '14004', 'max', ['max'])
+    expect((await createFamily(telegram.token, 'Telegram legacy family')).response.status).toBe(201)
+    expect((await createFamily(max.token, 'MAX legacy family')).response.status).toBe(201)
+
+    const mismatched = await userWithProviderIdentities('Legacy mismatch', '14005', 'telegram', ['max'])
+    const denied = await createFamily(mismatched.token, 'Legacy mismatch denied')
+    expect(denied.response.status).toBe(403)
+    expect(denied.body.error.code).toBe('ROLE_FORBIDDEN')
+  })
+
+  test('denies MAX sessions with null identity provenance and revoked MAX admissions', async () => {
+    const legacy = await admittedUser('Legacy session', '14007', 'user', true, false)
     const legacyDenied = await createFamily(legacy.token, 'Legacy denied')
     expect(legacyDenied.response.status).toBe(403)
     expect(legacyDenied.body.error.code).toBe('ROLE_FORBIDDEN')
 
     const revoked = await admittedUser('Revoked admission', '14008')
     await prisma.pilotAdmission.updateMany({
-      where: { provider: 'telegram', subject: '14008' },
+      where: { provider: 'max', subject: '14008' },
       data: { revokedAt: new Date() },
     })
     const revokedDenied = await createFamily(revoked.token, 'Revoked denied')
@@ -1278,8 +1280,8 @@ maybeDescribe('Family access and invitations', () => {
     subject: string,
     role: 'user' | 'admin' = 'user',
     admitted = true,
-    provider: 'telegram' | 'max' = 'telegram',
     bindSession = true,
+    provider: 'telegram' | 'max' = 'max',
   ) {
     const user = await prisma.user.create({ data: { email: null, displayName, role } })
     const identity = await prisma.externalIdentity.create({ data: { userId: user.id, provider, subject } })
@@ -1318,28 +1320,13 @@ maybeDescribe('Family access and invitations', () => {
       prisma.externalIdentity.create({ data: { userId: user.id, provider: 'telegram', subject } }),
       prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } }),
     ])
-    for (const provider of admittedProviders) {
-      await prisma.pilotAdmission.create({ data: { provider, subject } })
-    }
+    for (const provider of admittedProviders) await prisma.pilotAdmission.create({ data: { provider, subject } })
     const session = await prisma.authSession.create({
-      data: {
-        userId: user.id,
-        refreshTokenHash: `hash-${boundProvider}-${subject}`,
-        refreshTokenFamilyHash: `family-${boundProvider}-${subject}`,
-        expiresAt: new Date(Date.now() + 60_000),
-      },
+      data: { userId: user.id, refreshTokenHash: `hash-${boundProvider}-${subject}`, refreshTokenFamilyHash: `family-${boundProvider}-${subject}`, expiresAt: new Date(Date.now() + 60_000) },
     })
     const identity = identities.find((candidate) => candidate.provider === boundProvider)!
-    await prisma.$executeRaw`
-      UPDATE auth_sessions
-         SET external_identity_id = ${identity.id}::uuid
-       WHERE id = ${session.id}::uuid
-    `
-    return {
-      userId: user.id,
-      sessionId: session.id,
-      token: await signAccessToken({ sub: user.id, sessionId: session.id }, env),
-    }
+    await prisma.$executeRaw`UPDATE auth_sessions SET external_identity_id = ${identity.id}::uuid WHERE id = ${session.id}::uuid`
+    return { userId: user.id, sessionId: session.id, token: await signAccessToken({ sub: user.id, sessionId: session.id }, env) }
   }
 
   async function createFamily(token: string, name: string) {

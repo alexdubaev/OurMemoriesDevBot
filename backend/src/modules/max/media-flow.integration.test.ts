@@ -66,7 +66,7 @@ maybeDescribe('app media to MAX backup and Feed', () => {
       const fixture: { userId: string; familyId?: string } = { userId: user.id }
       fixtures.add(fixture)
       const identity = await prisma.externalIdentity.create({ data: {
-        userId: user.id, provider: 'telegram', subject: scenario.order.length === 5 ? '88501' : '88502',
+        userId: user.id, provider: 'max', subject: scenario.order.length === 5 ? '88501' : '88502',
       } })
       const session = await prisma.authSession.create({ data: {
         userId: user.id, externalIdentityId: identity.id,

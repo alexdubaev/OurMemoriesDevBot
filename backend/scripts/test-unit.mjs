@@ -14,7 +14,13 @@ import { backendTestFiles, selectBackendTestRun } from './test-files.mjs'
  */
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 
-const { unit: discoveredUnitTestFiles } = backendTestFiles(backendRoot)
+const args = process.argv.slice(2)
+const maxOnly = args.includes('--max-only')
+const bunArgs = args.filter((argument) => argument !== '--max-only')
+const { unit: allUnitTestFiles } = backendTestFiles(backendRoot)
+const discoveredUnitTestFiles = maxOnly
+  ? allUnitTestFiles.filter((file) => !file.includes('/modules/telegram/') && !/\/telegram-[^/]+\.test\./.test(`/${file}`) && file !== 'scripts/docker-smoke.test.mjs')
+  : allUnitTestFiles
 
 if (discoveredUnitTestFiles.length === 0) {
   console.error('No backend unit tests found. That is almost certainly a glob or layout problem.')
@@ -25,7 +31,7 @@ let selectedTestRun
 try {
   selectedTestRun = selectBackendTestRun(
     discoveredUnitTestFiles,
-    process.argv.slice(2),
+    bunArgs,
   )
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))

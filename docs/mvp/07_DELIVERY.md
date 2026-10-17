@@ -4,19 +4,16 @@
 Нормативные правила Git находятся в корневом `AGENTS.md`, порядок в `TASK_INDEX.md` и `PARALLEL_WORK.md`. GitHub Actions CI/CD не используется.
 
 ## Профили проверок
-| Изменение | Обязательный минимальный набор |
-|---|---|
-| Только docs | Markdown links, scope consistency, пути файлов |
-| UI карточка | компонент/логика, web typecheck, targeted visual, затронутый journey |
-| Контракты | validators + backend producer + frontend consumers + typecheck |
-| Auth/семьи | unit + real DB auth/IDOR + revoke/role integration + session browser flow |
-| Медиа | storage contract + HEAD/Range/permissions + quota/retry/delete + browser playback |
-| Schema/migration | migration test на чистой и существующей тестовой БД + зависимые домены |
-| Worker/бот | retry/idempotency/late message/permissions + реальная локальная DB |
-| Shared config/unknown | безопасное расширение вплоть до FULL; явно объяснить |
-| Релиз | FULL активных surfaces + ручной Telegram iOS/Android + restore smoke |
 
-Перед каждой публикацией в `main`, включая PR merge, запускается `bun run verify:local`; в отчёт записываются команда, результат, source SHA и ограничения среды. Hook `.githooks/pre-push` запускает gate на main/master pushes после проверки совпадения SHA и чистоты worktree; PR merge не вызывает локальные hooks, поэтому результат для merge SHA фиксируется отдельно. Нужны Linux/Bash, Bun 1.4.0, Node.js, Docker и Playwright Chromium. Для изолированной тестовой PostgreSQL можно задать `TEST_DATABASE_URL` с именем `*_test` и `TEST_SKIP_DOCKER=1 E2E_SKIP_DOCKER=1`. Тесты выбираются по предотвращаемым сбоям и стоимости поддержки; при concrete fix запускается узкая проверка, полный suite не повторяется автоматически.
+| Профиль | Когда | Минимальный набор |
+|---|---|---|
+| FAST | Цвета, отступы, иконки, тексты, локальный CSS, docs-only | `git diff --check`, быстрые проверки затронутого участка; production UI дополнительно собирается и при необходимости визуально проверяется |
+| STANDARD | Обычные React-компоненты, формы, навигация и некритичная backend-логика | Typecheck, применимый lint/build, unit tests затронутого модуля, узкий integration/browser test по изменению |
+| FULL | Auth/session, семейные роли и ACL, приватные медиа, schema/data, критические транзакции, публичные контракты и инфраструктура | Architecture, dependency audit, TypeScript/lint/build, активные MAX и платформонезависимые tests, PostgreSQL integration, MAX/Web/PWA browser journeys и Selectel safety |
+
+Профиль задаётся наиболее рискованной частью diff. Неизвестные пути требуют FULL; `--profile` не может понизить автоматически определённый минимум. Команды `bun run verify:local --profile fast|standard|full`; dry-run доступен через `--dry-run`, показывает только план и не считается PASS. Перед merge в PR фиксируются профиль, причина, фактические команды, результат и source SHA. Pre-push hook повторно классифицирует публикуемый diff main/master относительно SHA, полученного от Git. PR merge не вызывает локальный hook, поэтому проверка на точном source SHA прикладывается отдельно. Перед production deploy запускается FULL на точном итоговом релизном SHA, который включает совместное состояние ранее слитых PR.
+
+Текущий полный продуктовый профиль требует Bun 1.4, Node >=22.12.0 (Astro), PostgreSQL с именем `*_test`, браузерную инфраструктуру Playwright и необходимые Selectel guard dependencies. Недоступная обязательная инфраструктура означает BLOCKED/FAIL; пропущенная проверка не становится PASS. Для отдельного worktree используй отдельные тестовую БД, Compose project, порты и storage. Проверяется только MAX Bot, MAX Mini App, Web/PWA с MAX authentication и browser-link MAX. Каталог исключает `auth/telegram-auth`, Telegram-only backend modules, provider-only тесты и legacy `critical-smoke.spec.ts`; shared ACL/media fixtures запускаются на синтетическом MAX principal. Исторический код сохраняется и не удаляется ради профиля. FULL дополняет, а не отменяет backup, readiness, migration guards, health checks и другие меры релиза. Не повторяй широкие suite/review без нового изменения, ошибки или установленного риска.
 
 ## Воспроизводимость
 Pin upstream SHA, Bun, lockfile, контейнерные digest после проверки. Тестовые среды отделены от разработки и production. Для двух worktrees отдельные порты/БД/Compose project; teardown удаляет только ресурсы своего run. Не `docker compose down -v` для общего стека.

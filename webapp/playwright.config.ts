@@ -41,11 +41,14 @@ const backendEnv = normalizeEnv({
   EMAIL_POSTBOX_ACCESS_KEY_ID: '',
   EMAIL_POSTBOX_SECRET_ACCESS_KEY: '',
   EMAIL_POSTBOX_CONFIGURATION_SET: '',
-  // The E2E host uses only a fixed synthetic token to sign Mini App initData. The backend
-  // entrypoint disables Telegram polling in NODE_ENV=test, so the run never reaches Telegram.
-  TELEGRAM_BOT_TOKEN: '123456:web-e2e-synthetic-token',
-  TELEGRAM_INBOX_ENCRYPTION_KEY: 'A'.repeat(43),
-  TELEGRAM_BOT_MODE: 'polling',
+  // MAX E2E uses a fixed synthetic signing token and never connects to a real messenger.
+  MAX_ENABLED: 'true',
+  MAX_BOT_TOKEN: '987654:max-e2e-synthetic-token',
+  MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+  MAX_WEBHOOK_URL: 'https://api.example.com/webhooks/max',
+  MAX_WEBHOOK_SECRET: 'M'.repeat(43),
+  MAX_INBOX_ENCRYPTION_KEY: 'B'.repeat(43),
+  MAX_MINI_APP_URL: 'https://app.example.com',
   AUTH_RATE_LIMIT_MAX: process.env.E2E_AUTH_RATE_LIMIT_MAX ?? '120',
   // Keeps filesystem-driver uploads inside the run's artifacts instead of accumulating in
   // backend/.storage.
