@@ -98,7 +98,9 @@ function buildBrowserLinkService({
     },
     clock,
     projectUser,
+    refreshReuseGraceSeconds: env.REFRESH_REUSE_GRACE_SECONDS,
     refreshTokenTtlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
     refreshTokens: {
       create: () => createRefreshToken(env.JWT_SECRET),
       hash: hashRefreshToken,

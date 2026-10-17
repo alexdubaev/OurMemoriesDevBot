@@ -139,7 +139,7 @@ export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'>
     identity: MaxIdentity
     fingerprintHash: string
     replayExpiresAt: Date
-    existingSessionId?: string
+    predecessor?: BrowserSessionReplacementProof
     now: Date
     session: {
       refreshTokenHash: string
@@ -149,6 +149,7 @@ export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'>
     }
   }): Promise<
     | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
+    | { state: 'invalid_session' }
     | { state: 'replayed' }
   >
 }
@@ -177,12 +178,21 @@ export type BrowserLinkRepository = {
   redeemBrowserLoginChallenge(input: {
     id: string
     verifierHash: string
+    predecessor?: BrowserSessionReplacementProof
     now: Date
     refreshTokenHash: string
     refreshTokenFamilyHash: string
     expiresAt: Date
     metadata: SessionMetadata
   }): Promise<{ user: AuthUserRecord; session: { id: string } } | null>
+}
+
+export type BrowserSessionReplacementProof = {
+  refreshTokenHash: string
+  refreshTokenFamilyHash: string
+  now: Date
+  createdAfter: Date
+  reuseGraceAfter: Date
 }
 
 export type AccessTokens = {

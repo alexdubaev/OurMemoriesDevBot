@@ -1,7 +1,7 @@
 import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode, RefObject } from 'react'
+import type { CSSProperties, ReactNode, RefObject, TouchEvent as ReactTouchEvent } from 'react'
 import 'photoswipe/style.css'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import useEmblaCarousel from 'embla-carousel-react'
@@ -599,14 +599,35 @@ function MixedMediaViewer({ hostBridge, index: initialIndex, initialPhotoUrl, me
   const [index, setIndex] = useState(initialIndex)
   const media = memory.attachments[index]
   const root = useRef<HTMLDivElement | null>(null)
+  const swipeStart = useRef<{ id: number; x: number; y: number } | null>(null)
   const onCloseRef = useRef(onClose)
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
   const navigate = (next: number) => {
     if (next < 0 || next >= memory.attachments.length) return
+    swipeStart.current = null
     root.current?.querySelectorAll('video').forEach((video) => video.pause())
     setIndex(next)
     onIndexChange(next)
+  }
+  const onMediaTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (event.touches.length !== 1 || !(target instanceof Element) || target.closest('button, input, select, textarea, a, [role="slider"]') || target.closest('video[controls]')) {
+      swipeStart.current = null
+      return
+    }
+    const touch = event.touches[0]
+    swipeStart.current = { id: touch.identifier, x: touch.clientX, y: touch.clientY }
+  }
+  const onMediaTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const start = swipeStart.current
+    swipeStart.current = null
+    if (!start || event.touches.length !== 0 || event.changedTouches.length !== 1 || event.changedTouches[0].identifier !== start.id) return
+    const touch = event.changedTouches[0]
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.3) return
+    navigate(index + (dx < 0 ? 1 : -1))
   }
   useEffect(() => {
     const close = () => onCloseRef.current()
@@ -626,7 +647,7 @@ function MixedMediaViewer({ hostBridge, index: initialIndex, initialPhotoUrl, me
       <DialogPrimitive.Content aria-describedby={undefined} className="memoly-mixed-viewer" data-memoly-feed data-mixed-viewer="" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onKeyDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === 'range') return; if (event.key === 'ArrowLeft') { event.preventDefault(); navigate(index - 1) } if (event.key === 'ArrowRight') { event.preventDefault(); navigate(index + 1) } }} ref={root}>
         <DialogPrimitive.Title className="sr-only">Медиа воспоминания</DialogPrimitive.Title>
         <div className="memoly-mixed-viewer-bar"><Typography as="span" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography><button aria-label="Закрыть просмотр" onClick={onClose} type="button"><Typography as="span" variant="memoryMeta">Закрыть</Typography></button></div>
-        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-seen-active-index={index} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
+        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null }} onTouchEnd={onMediaTouchEnd} onTouchMove={(event) => { if (event.touches.length !== 1) { swipeStart.current = null; return }; const touch = event.touches[0]; const start = swipeStart.current; if (start && Math.abs(touch.clientY - start.y) > 24 && Math.abs(touch.clientY - start.y) > Math.abs(touch.clientX - start.x) * 1.3) swipeStart.current = null }} onTouchStart={onMediaTouchStart} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
         <div className="memoly-mixed-viewer-nav"><button disabled={index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={index === memory.attachments.length - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
@@ -1275,7 +1296,7 @@ async function showPhoto(
 ) {
   const { default: PhotoSwipe } = await import('photoswipe')
   if (signal.aborted) return
-  const gallery = new PhotoSwipe({ dataSource: slides, index, returnFocus: false, showHideAnimationType: 'none' })
+  const gallery = new PhotoSwipe({ dataSource: slides, index, loop: false, returnFocus: false, showHideAnimationType: 'none' })
   let closingFromHistory = false
   await new Promise<void>((resolve) => {
     let initialized = false

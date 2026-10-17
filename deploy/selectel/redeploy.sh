@@ -114,7 +114,7 @@ validate_rollback_file() {
 	[ "$(stat -c '%a' "$ROLLBACK_ENV")" = 600 ] || die 'rollback env must have mode 0600'
 }
 
-restore_configuration_backup() {
+configuration_backup_dir() {
 	local backup_dir marker_mode
 	[ -f "$CONFIG_BACKUP_MARKER" ] || die "configuration backup marker is missing: $CONFIG_BACKUP_MARKER"
 	[ ! -L "$CONFIG_BACKUP_MARKER" ] || die 'configuration backup marker must be a regular file'
@@ -129,6 +129,12 @@ restore_configuration_backup() {
 	[ -f "$backup_dir/compose.yml" ] || die 'configuration backup is missing: compose.yml'
 	[ -f "$backup_dir/Caddyfile" ] || die 'configuration backup is missing: Caddyfile'
 	[ -f "$backup_dir/Caddyfile.static" ] || die 'configuration backup is missing: Caddyfile.static'
+	printf '%s\n' "$backup_dir"
+}
+
+restore_configuration_backup() {
+	local backup_dir
+	backup_dir=$(configuration_backup_dir) || die 'configuration backup is unavailable'
 	cp -p -- "$backup_dir/compose.yml" "$COMPOSE_FILE"
 	cp -p -- "$backup_dir/Caddyfile" "$SERVER_EDGE_CADDYFILE"
 	cp -p -- "$backup_dir/Caddyfile.static" "$SERVER_STATIC_CADDYFILE"
@@ -153,6 +159,28 @@ render_edge_candidate() {
 	cleanup_candidate
 	EDGE_CANDIDATE=$(mktemp)
 	sed "s|$edge_pattern|$MEMOLY_PUBLIC_HOST|g" "$SCRIPT_DIR/Caddyfile.edge.template" > "$EDGE_CANDIDATE"
+	if [ "${ROLLBACK_AUTH_GATE:-false}" = true ]; then
+		local gated
+		gated=$(mktemp)
+		awk '
+			/^[[:space:]]*handle \/api\/\* \{/ {
+				print "\t# rollback_auth_maintenance: old runtime must not reintroduce F12."
+				print "\thandle /api/v1/auth/* {"
+				print "\t\t@rollback_safe_auth path /api/v1/auth/me /api/v1/auth/logout"
+				print "\t\thandle @rollback_safe_auth {"
+				print "\t\t\treverse_proxy memoly-backend-1:3000"
+				print "\t\t}"
+				print "\t\thandle {"
+				print "\t\t\trespond \"Authentication temporarily unavailable during safe recovery\" 503"
+				print "\t\t}"
+				print "\t}"
+				inserted=1
+			}
+			{ print }
+			END { if (!inserted) exit 1 }
+		' "$EDGE_CANDIDATE" > "$gated" || { rm -f -- "$gated"; die 'cannot render rollback authentication gate'; }
+		mv -- "$gated" "$EDGE_CANDIDATE"
+	fi
 }
 
 validate_candidate_caddy() {
@@ -660,8 +688,9 @@ readiness() {
 	wait_public /
 }
 
-rollback() {
-	[ ! -e "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
+verify_application_rollback() {
+	(
+	[ ! -e "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
 	[ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] ||
 		die 'FORWARD_FIX_REQUIRED: MM0 migration may have applied; rollback is forbidden'
 	validate_rollback_file
@@ -677,6 +706,36 @@ rollback() {
 	if ! git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$MM0_RUNTIME_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG"; then
 		die 'FORWARD_FIX_REQUIRED: rollback target predates the MM0 runtime and cannot publish against this database'
 	fi
+	# This attestation is intentionally a single measured pair, not an ancestry/date whitelist.
+	local target=e383d79269a3595f4c6cabedf167335aea042cf3
+	local producer=d4b69a5ce73a03eceb632f23fb9eb17801343ff9
+	[ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$target" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$target" ] ||
+		die 'rollback target pair has no verified runtime compatibility attestation'
+	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
+	for revision in "$target" "$producer" "$MEMOLY_PRODUCT_SHA"; do
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$revision^{commit}" 2>/dev/null ||
+			die 'rollback compatibility revision is unavailable'
+	done
+	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse HEAD)" = "$MEMOLY_PRODUCT_SHA" ] ||
+		die 'rollback source differs from the checked-out release'
+	local source_status
+	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
+	[ -z "$source_status" ] ||
+		die 'rollback source checkout is not clean'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$producer" "$MEMOLY_PRODUCT_SHA" ||
+		# Squash releases preserve the validated tree without preserving producer ancestry.
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
+		die 'rollback source is outside the validated release lineage'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$producer" "$MEMOLY_PRODUCT_SHA" -- \
+		backend webapp packages package.json bun.lock bunfig.toml \
+		':(exclude)backend/scripts/*.test.ts' ':(exclude)backend/scripts/test-support' \
+		':(exclude)backend/scripts/test-integration.mjs' ||
+		die 'application runtime differs from the validated rollback producer'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
+		backend/prisma backend/Dockerfile backend/package.json packages/contracts bun.lock bunfig.toml \
+		deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
+		deploy/selectel/Caddyfile.edge.template deploy/selectel/Caddyfile.static.template deploy/selectel/in-place-file.sh ||
+		die 'rollback schema, dependencies or service configuration are incompatible'
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
@@ -684,9 +743,30 @@ rollback() {
 	esac
 	load_runtime_secrets
 	validate_inputs rollback
-	if ! compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) OR EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS incompatible"); await client.end(); process.exit(result.rows[0]?.incompatible ? 1 : 0) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1; then
-		die 'rollback is forbidden after unread activation, multiple memberships, or an unreadable compatibility state; use a forward fix'
-	fi
+	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9 ] ||
+		die 'rollback backend image differs from the verified production artifact'
+	[ "$(docker image inspect --format '{{.Id}}' "memoly-webapp:$target")" = sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a ] ||
+		die 'rollback webapp image differs from the verified production artifact'
+	for image in "memoly-backend:$target" "memoly-webapp:$target"; do
+		[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$target" ] ||
+			die 'rollback image revision label mismatch'
+	done
+	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
+	migration_status >/dev/null 2>&1 || die 'rollback target cannot confirm completed migrations'
+	# Both capabilities are proven by the current -> old -> current PostgreSQL probe.
+	# Missing tables, unknown result types, unfinished migrations and read errors fail closed.
+	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
+		die 'rollback data compatibility state is unknown or migration is unfinished'
+	)
+}
+
+rollback() {
+	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	set -a
+	. "$ROLLBACK_ENV"
+	set +a
+	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
+	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	gateway_preflight
 	if [ "${SELECTEL_CI_RELEASE:-false}" = true ]; then
 		restore_configuration_backup
@@ -699,18 +779,22 @@ rollback() {
 		fi
 	fi
 	compose config >/dev/null
+	# Restore availability without allowing the known F12 defect to create new browser sessions.
+	# Install and verify the gate BEFORE any old application process is promoted.
+	ROLLBACK_AUTH_GATE=true render_edge_candidate
+	activate_gateway
+	local gate_status
+	gate_status=$(curl --silent --show-error --max-time 5 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/v1/auth/max") ||
+		die 'cannot verify rollback authentication maintenance'
+	[ "$gate_status" = 503 ] || die 'rollback authentication maintenance is not active'
 	compose up -d --no-deps --force-recreate backend worker scheduler static
 	wait_backend_internal
 	verify_static_internal
-	if [ "${SELECTEL_CI_RELEASE:-false}" = true ] || [ -f "$CONFIG_BACKUP_MARKER" ]; then
-		docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile
-		docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
-	else
-		activate_gateway
-	fi
+	docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile
+	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
 	cleanup_candidate
 	readiness
-	printf 'Application rollback complete; additive migrations remain applied.\n'
+	printf 'Application rollback complete; additive migrations remain applied. Auth maintenance remains until a healthy F12 forward release.\n'
 }
 
 read_static_rollback_tag() {
@@ -831,6 +915,12 @@ rollback_static() {
 deploy() {
 	guard_membership_transition
 	preflight
+	backup_server_state
+	if [ "${MM0_BOUNDARY:-false}" != true ] && [ ! -e "$FORWARD_MARKER" ]; then
+		verify_application_rollback || die 'application recovery readiness failed before promotion'
+		validate_database_target
+		backup_database
+	fi
 	prepare_configuration
 	migration_status
 	promote_backend

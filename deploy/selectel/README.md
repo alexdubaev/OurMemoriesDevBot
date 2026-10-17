@@ -75,7 +75,8 @@ and does not restore the pre-B2 application. A later accepted descendant SHA
 can resume the guarded forward fix after inspecting the actual host state.
 Do not remove the marker manually; the entry point clears it after successful
 public smoke and release manifest creation. Direct rollback refuses pre-B2
-images and any rollback after unread activation or multiple memberships.
+images. Activated unread tracking and multiple memberships are assessed against
+the specific runtime attestation described below, rather than rejected globally.
 Invoke it manually with the exact accepted `main` SHA and explicit `DEPLOY`
 confirmation; enable migration only when that release contains a pending migration.
 The B7 release has pending B1–B4 migrations and must use the migration input.
@@ -195,8 +196,8 @@ Caddy ownership, or migration preflight fails. Do not substitute `prisma db push
 direct SQL, `docker compose up` against the gateway, or an ad-hoc migration command.
 If promotion fails after a compatible migration and the prior runtime is already
 B2-compatible, use the configured immutable rollback tags only when the guarded
-rollback compatibility check passes. The first pre-B2 transition and any release
-after unread activation require forward recovery. Database rollback is not part
+rollback compatibility check passes. The first pre-B2/MM0 transitions and any
+unattested runtime/data combination require forward recovery. Database rollback is not part
 of application rollback.
 
 ## Ownership model
@@ -391,6 +392,46 @@ running backend, jobs, database, and gateway. If static promotion or readiness
 fails, it attempts to restore and verify the static image that was running when
 the command began. B2/MM0 forward-only markers block this action; use the guarded
 forward-recovery release flow instead.
+
+## Consolidated F12 release: measured application rollback compatibility
+
+The only attested application rollback pair is backend + webapp
+`e383d79269a3595f4c6cabedf167335aea042cf3`, with the exact production image IDs
+pinned in `verify_application_rollback`. Its producer application tree must match
+the tested integration `d4b69a5ce73a03eceb632f23fb9eb17801343ff9`; a squash SHA
+is accepted only with the same runtime tree. This is not a date/descendant allowlist.
+Any future application change or different target requires new compatibility
+evidence and a reviewed attestation. Both tags, OCI labels, Git objects, a clean
+source checkout, schema/dependencies/service configuration, completed migrations,
+and protected configuration artifacts are checked. Unknown state fails closed.
+
+The PostgreSQL roundtrip probe runs the new, old, then new actual application
+modules on one synthetic `*_test` database and separate storage. It exercises
+activated unread state, multiple active families, Owner/Full/Viewer boundaries,
+memory reads/writes/ordinals, invite acceptance, outbox publication, private media,
+revoked sessions and an independent device. No production data is used. The SQL
+compatibility read remains mandatory; read errors and unfinished migrations
+still forbid restoration. B2/MM0 forward-only markers remain unconditional blocks.
+
+Normal compatible promotion creates and validates a fresh PostgreSQL custom dump
+using the existing backup procedure, in addition to the protected configuration
+backup, before changing application services. Dumps are recovery artifacts only;
+application rollback never restores or edits database contents.
+
+The old runtime reintroduces F12 for newly issued browser sessions. Therefore
+rollback first installs and verifies a temporary gateway maintenance gate:
+`/api/v1/auth/*` returns 503 except `me` and `logout`. Only then are backend,
+worker, scheduler and static restored. Existing sessions, ACL and revoked-session
+checks continue to work; new MAX/browser-link login is unavailable during recovery.
+Keep this gate until a reviewed F12-capable forward release passes internal health
+and restores the normal gateway configuration. Do not remove it manually to make
+login work on the old runtime. No blanket session revocation or SQL repair is used.
+
+The failure-branch regression invokes the real `ci-release.sh` failure handler and
+`redeploy.sh rollback`, verifies gate-before-service ordering, restoration of all
+four services, and retention of the original failed-release exit status. Docker
+and database failures remain fail-closed. Production readiness must also confirm
+that the attested images and configuration backup actually exist on that host.
 
 ## B7 unread activation after a healthy compatible release
 

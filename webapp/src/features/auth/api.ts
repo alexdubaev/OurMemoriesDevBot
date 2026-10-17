@@ -116,13 +116,15 @@ export class AuthApi {
   authenticateMax(initData: string, options: HostAuthAttemptOptions = {}): Promise<BrowserSessionTransition<CookieAuthResponse>> {
     const payload = maxAuthRequestSchema.parse({ initData })
     return this.authCoordinator(async () => {
+      const attemptEpoch = currentBrowserSessionEpoch()
+      if (!isBrowserSessionEpochCurrent(attemptEpoch)) {
+        throw new BrowserSessionEpochChangedError('Browser auth session changed')
+      }
       options.signal?.throwIfAborted()
-      const data = await this.http.request('/api/v1/auth/max', cookieAuthResponseSchema, {
-        method: 'POST', body: payload, signal: options.signal, timeoutMs: 15000,
-      })
+      const data = await this.exchangeMaxWithStaleCookieRecovery(payload, options, attemptEpoch)
       ensureHostAuthAttemptCurrent(options)
-      this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return { data, sessionEpoch: sessionEvent.epoch }
     }, { timeoutMs: 15000, signal: options.signal })
   }
@@ -172,7 +174,10 @@ export class AuthApi {
         })
       } catch (error) {
         if (error instanceof ApiRequestError && error.status === 401) {
-          await this.expireSessionWithinMutation(expectedEpoch)
+          if (this.isSessionEpochCurrent(expectedEpoch)) {
+            await this.clearRejectedRefreshCookieWithinMutation(expectedEpoch)
+            await this.expireSessionWithinMutation(expectedEpoch)
+          }
         }
         throw error
       }
@@ -232,8 +237,8 @@ export class AuthApi {
       const data = await this.http.request(`/api/v1/auth/browser-link/${challengeId}/redeem`, cookieAuthResponseSchema, {
         method: 'POST',
       })
-      this.options.setAccessToken(data.accessToken)
       publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return data
     })
   }
@@ -339,6 +344,72 @@ export class AuthApi {
     this.options.setAccessToken(null)
     await this.options.onAuthExpired?.()
     return true
+  }
+
+  private async exchangeMaxWithStaleCookieRecovery(
+    payload: ReturnType<typeof maxAuthRequestSchema.parse>,
+    options: HostAuthAttemptOptions,
+    attemptEpoch: string,
+  ) {
+    const exchange = () => this.http.request('/api/v1/auth/max', cookieAuthResponseSchema, {
+      method: 'POST', body: payload, signal: options.signal, timeoutMs: 15000,
+    })
+
+    try {
+      return await exchange()
+    } catch (exchangeError) {
+      if (!(exchangeError instanceof ApiRequestError) || exchangeError.status !== 401) throw exchangeError
+      this.ensureAuthRecoveryCurrent(options, attemptEpoch)
+
+      // A failed MAX request can mean bad/replayed initData while the browser session remains
+      // active. Confirm the HttpOnly refresh cookie is rejected before clearing it.
+      let rejectedRefreshCookie = false
+      try {
+        await this.http.request('/api/v1/auth/refresh', cookieRefreshResponseSchema, {
+          method: 'POST', body: cookieRefreshRequestSchema.parse({}), signal: options.signal, timeoutMs: 15000,
+        })
+      } catch (refreshError) {
+        if (refreshError instanceof ApiRequestError && refreshError.status === 401) rejectedRefreshCookie = true
+        else throw exchangeError
+      }
+      if (!rejectedRefreshCookie) throw exchangeError
+
+      this.ensureAuthRecoveryCurrent(options, attemptEpoch)
+      await this.clearRejectedRefreshCookieWithinMutation(attemptEpoch, options.signal)
+      this.ensureAuthRecoveryCurrent(options, attemptEpoch)
+      try {
+        const retryData = await exchange()
+        this.ensureAuthRecoveryCurrent(options, attemptEpoch)
+        return retryData
+      } catch (retryError) {
+        if (
+          retryError instanceof ApiRequestError &&
+          retryError.status === 401 &&
+          isBrowserSessionEpochCurrent(attemptEpoch)
+        ) {
+          await this.expireSessionWithinMutation(attemptEpoch)
+        }
+        throw retryError
+      }
+    }
+  }
+
+  private ensureAuthRecoveryCurrent(options: HostAuthAttemptOptions, epoch: string) {
+    ensureHostAuthAttemptCurrent(options)
+    if (!isBrowserSessionEpochCurrent(epoch)) {
+      throw new BrowserSessionEpochChangedError('Browser auth session changed')
+    }
+  }
+
+  private async clearRejectedRefreshCookieWithinMutation(epoch: string, signal?: AbortSignal) {
+    if (!this.isSessionEpochCurrent(epoch)) return false
+    await this.http.raw('/api/v1/auth/logout', {
+      method: 'POST',
+      body: cookieLogoutRequestSchema.parse({}),
+      signal,
+      timeoutMs: 15000,
+    })
+    return this.isSessionEpochCurrent(epoch)
   }
 }
 

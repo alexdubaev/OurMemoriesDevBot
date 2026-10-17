@@ -231,3 +231,152 @@ test('UI rollback restores the previously running static image after public read
   ])
   assert.match(result.output, /previously running static image was restored/)
 })
+
+const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
+const currentCandidate = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
+const backendBaselineId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
+const webappBaselineId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
+const redeployDefinitions = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8')
+  .replaceAll('\r\n', '\n').replace(/\nmain "\$@"\s*$/, '\n')
+
+function runApplicationRollback(options = {}) {
+  const fixture = mkdtempSync(resolve(root, '.scratch/rollback-guard-'))
+  const server = resolve(fixture, 'server')
+  const backup = resolve(server, 'backups/compose.pre-selectel-fixture')
+  mkdirSync(backup, { recursive: true })
+  mkdirSync(resolve(server, 'gateway'))
+  for (const [name, content] of [['compose.yml', 'services: {}\n'], ['Caddyfile', 'before\n'], ['Caddyfile.static', 'static\n']]) {
+    writeFileSync(resolve(backup, name), content)
+  }
+  writeFileSync(resolve(server, '.selectel-config-backup'), backup + '\n', { mode: 0o600 })
+  writeFileSync(resolve(server, 'gateway/Caddyfile'), 'before\n')
+  writeFileSync(resolve(server, 'compose.yml'), 'services: {}\n')
+  writeFileSync(resolve(server, 'rollback.env'), [
+    'PREVIOUS_BACKEND_IMAGE_TAG=' + (options.target ?? rollbackBaseline),
+    'PREVIOUS_WEBAPP_IMAGE_TAG=' + (options.webappTarget ?? rollbackBaseline),
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'), { mode: 0o600 })
+  if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
+  if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
+  const events = resolve(fixture, 'events')
+  const env = {
+    SERVER_ROOT: server, APP_ROOT: root, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
+    COMPOSE_FILE: resolve(server, 'compose.yml'), ROLLBACK_ENV: resolve(server, 'rollback.env'),
+    CONFIG_BACKUP_MARKER: resolve(server, '.selectel-config-backup'),
+    SERVER_EDGE_CADDYFILE: resolve(server, 'gateway/Caddyfile'), SERVER_STATIC_CADDYFILE: resolve(server, 'Caddyfile.static'),
+    FORWARD_MARKER: resolve(server, 'b2.marker'), MM0_FORWARD_MARKER: resolve(server, 'mm0.marker'),
+    MEMOLY_PRODUCT_SHA: options.producer ?? currentCandidate,
+    MEMOLY_PUBLIC_HOST: 'example.invalid', PUBLIC_URL: 'http://example.invalid',
+    FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
+    FIXTURE_STATE_ERROR: String(options.stateError ?? false),
+    FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : backendBaselineId,
+    FIXTURE_WEBAPP_ID: webappBaselineId, FIXTURE_LABEL: options.badLabel ? 'wrong' : rollbackBaseline,
+  }
+  const mocks = [
+    'load_runtime_secrets() { :; }',
+    'gateway_preflight() { :; }',
+    'docker() {',
+    ' case "$*" in',
+    ' *"image inspect --format {{.Id}}"*memoly-backend*) echo "$FIXTURE_BACKEND_ID" ;;',
+    ' *"image inspect --format {{.Id}}"*memoly-webapp*) echo "$FIXTURE_WEBAPP_ID" ;;',
+    ' *"image inspect --format "*org.opencontainers.image.revision*) echo "$FIXTURE_LABEL" ;;',
+    ' *) return 0 ;;',
+    ' esac',
+    '}',
+    'compose() {',
+    ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
+    ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
+    '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
+    '   [ "$FIXTURE_STATE_ERROR" = false ]; return',
+    ' fi',
+    ' if [ "$1" = up ]; then echo "UP:$MEMOLY_BACKEND_IMAGE_TAG:$*" >> "$FIXTURE_EVENTS";',
+    ' elif [ "$1" = ps ]; then printf "backend\\nworker\\nscheduler\\nstatic\\n"; fi',
+    '}',
+    'activate_gateway() { cp "$EDGE_CANDIDATE" "$SERVER_EDGE_CADDYFILE"; echo GATE >> "$FIXTURE_EVENTS"; }',
+    'curl() {',
+    ' if [[ "$*" == *"/api/v1/auth/max"* ]]; then',
+    '  if grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 405; fi',
+    ' fi',
+    ' return 0',
+    '}',
+  ].join('\n')
+  const trigger = options.failure ? [
+    releaseFailure,
+    'LEGACY_MEMBERSHIP_RUNTIME=false; LEGACY_MM0_RUNTIME=false; QUIESCE_STARTED=false; PROMOTION_STARTED=true',
+    'bash() { if [ "$2" = rollback ]; then ( rollback ); else command bash "$@"; fi; }',
+    'trap release_failure EXIT',
+    '(exit 42)',
+  ].join('\n') : 'rollback'
+  const assignments = Object.entries(env).map(([name, value]) => name + '=' + shellQuote(value)).join('\n')
+  try {
+    const result = spawnSync('bash', ['-s'], {
+      input: [redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: 30_000,
+    })
+    return { ...result, output: result.stdout + result.stderr,
+      events: existsSync(events) ? readFileSync(events, 'utf8') : '',
+      caddy: readFileSync(resolve(server, 'gateway/Caddyfile'), 'utf8') }
+  } finally { rmSync(fixture, { recursive: true, force: true }) }
+}
+
+for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
+  test('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
+    const result = runApplicationRollback(flags)
+    assert.equal(result.status, 0, result.output)
+    assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
+    assert.match(result.output, /Application rollback complete/)
+    assert.match(result.caddy, /rollback_auth_maintenance/)
+  })
+}
+
+test('application rollback fails closed for unknown, incompatible, image, migration, DB and artifact states', () => {
+  for (const options of [
+    { target: 'f'.repeat(40) }, { producer: rollbackBaseline }, { target: 'f2731e02547fb1118e233c99c47b4ec7c5fc8ba6' },
+    { webappTarget: 'a'.repeat(40) }, { stateError: true }, { pending: true },
+    { marker: 'b2.marker' }, { marker: 'mm0.marker' }, { badImage: true }, { badLabel: true }, { noBackup: true },
+  ]) {
+    const result = runApplicationRollback(options)
+    assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
+    assert.doesNotMatch(result.events, /UP:/, JSON.stringify(options) + result.events)
+  }
+})
+
+test('real ci-release failure branch completes guarded application restoration and retains failure status', () => {
+  const result = runApplicationRollback({ failure: true })
+  assert.equal(result.status, 42, result.output)
+  assert.match(result.output, /attempting application rollback/)
+  assert.match(result.output, /Application rollback complete/)
+  assert.doesNotMatch(result.output, /automatic application rollback failed/)
+  assert.match(result.events, /GATE\nUP:.*backend worker scheduler static/)
+  const failed = runApplicationRollback({ failure: true, stateError: true })
+  assert.equal(failed.status, 42, failed.output)
+  assert.match(failed.output, /automatic application rollback failed/)
+  assert.doesNotMatch(failed.events, /UP:/)
+})
+
+test('normal promotion requires compatibility and a fresh validated backup before service changes', () => {
+  const start = redeployDefinitions.indexOf('\ndeploy() {')
+  const end = redeployDefinitions.indexOf('\n}\n', start)
+  assert.ok(start > 0 && end > start)
+  for (const failure of ['none', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
+    const result = spawnSync('bash', ['-s'], { encoding: 'utf8', input: [
+      'set -euo pipefail',
+      'MM0_BOUNDARY=false; FORWARD_MARKER=/nonexistent-selectel-marker',
+      'die() { echo "DIE:$*"; exit 19; }',
+      ...['guard_membership_transition', 'preflight', 'backup_server_state', 'verify_application_rollback',
+        'validate_database_target', 'backup_database', 'prepare_configuration', 'migration_status',
+        'promote_backend', 'wait_backend_internal', 'promote_jobs', 'promote_static',
+        'verify_static_internal', 'activate_gateway', 'readiness'].map((name) =>
+        name + '() { echo STEP:' + name + '; return ' + (name === failure ? 42 : 0) + '; }'),
+      redeployDefinitions.slice(start, end + 2), 'deploy',
+    ].join('\n') })
+    const output = result.stdout + result.stderr
+    if (failure === 'none') {
+      assert.equal(result.status, 0, output)
+      assert.match(output, /STEP:verify_application_rollback\nSTEP:validate_database_target\nSTEP:backup_database\nSTEP:prepare_configuration/)
+    } else {
+      assert.notEqual(result.status, 0, output)
+      assert.doesNotMatch(output, /STEP:promote_backend/)
+    }
+  }
+})

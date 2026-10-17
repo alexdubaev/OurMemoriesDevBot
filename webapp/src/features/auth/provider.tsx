@@ -26,13 +26,14 @@ import {
 } from './queries'
 import { AuthContext, type AuthContextValue, type HostAuthAttemptOptions, type HostAuthProvider } from './context'
 import { bootstrapAuthSession } from './bootstrap'
-import { subscribeToBrowserSessionChanges } from './session-coordinator'
+import { currentBrowserSessionEpoch, subscribeToBrowserSessionChanges } from './session-coordinator'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
 import { updateProfileResponseSchema, type MemolyTheme } from '@web-app-demo/contracts'
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient()
   const [accessToken, setAccessTokenState] = useState<string | null>(null)
+  const [apiSessionEpoch, setApiSessionEpoch] = useState(() => currentBrowserSessionEpoch())
   const [isRestoringSession, setIsRestoringSession] = useState(true)
   const [bootstrapError, setBootstrapError] = useState<Error | null>(null)
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0)
@@ -59,6 +60,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(
     () =>
       subscribeToBrowserSessionChanges((sessionEvent) => {
+        setApiSessionEpoch(sessionEvent.epoch)
         const generation = ++bootstrapGeneration.current
         const shouldBootstrap = sessionEvent.state === 'authenticated'
         setBootstrapError(null)
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setAccessToken,
         onAuthExpired: handleAuthExpired,
       }),
-    [accessToken, handleAuthExpired, setAccessToken],
+    [accessToken, apiSessionEpoch, handleAuthExpired, setAccessToken],
   )
 
   useEffect(() => {
@@ -165,12 +167,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     options.signal?.throwIfAborted()
     if (options.isCurrent?.() === false) return
     setBootstrapError(null)
+    if (provider === 'max') setApiSessionEpoch(result.sessionEpoch)
     setAccessToken(result.data.accessToken)
     queryClient.setQueryData(authQueryKeys.me(), {
       user: result.data.user,
       externalIdentityProvider: provider,
     })
-  }, [api, queryClient, setAccessToken])
+  }, [api, queryClient, setAccessToken, setApiSessionEpoch])
 
   const authenticateTelegram = useCallback((initData: string) => authenticateHost('telegram', initData), [authenticateHost])
   const authenticateMax = useCallback((initData: string) => authenticateHost('max', initData), [authenticateHost])
@@ -180,8 +183,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const approveBrowserLink = useCallback((id: string, initData: string) => api.approveBrowserLink(id, initData).then(() => undefined), [api])
   const redeemBrowserLink = useCallback(async (id: string) => {
     const data = await api.redeemBrowserLink(id)
+    setApiSessionEpoch(currentBrowserSessionEpoch())
     queryClient.setQueryData(authQueryKeys.me(), { user: data.user, externalIdentityProvider: 'max' })
-  }, [api, queryClient])
+  }, [api, queryClient, setApiSessionEpoch])
 
   const requestPasswordReset = useCallback(
     async (input: PasswordResetRequest) => {
