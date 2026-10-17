@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test, { after } from 'node:test'
@@ -302,9 +302,31 @@ function rollbackSource(role) {
   return source
 }
 
+function createSourceWorktree(role) {
+  const source = rollbackSource(role)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', `rollback-mutation-${role}-`))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, source.sha], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  return { root: directory, sha: source.sha }
+}
+
+function commitSourceChange(source, relativePath, contents, message) {
+  appendFileSync(resolve(source.root, relativePath), contents)
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '-am', message], { cwd: source.root, env, encoding: 'utf8' })
+  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
+  return { ...source, sha }
+}
+
 after(() => {
   for (const directory of fixtureWorktrees.reverse()) {
-    const result = spawnSync('git', ['worktree', 'remove', '--force', directory], { cwd: root, encoding: 'utf8' })
+    const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
 })
@@ -330,7 +352,9 @@ function runApplicationRollback(options = {}) {
   ].join('\n'), { mode: 0o600 })
   if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
   if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
-  const source = rollbackSource(options.source ?? 'legacy')
+  const source = options.sourceRootOverride
+    ? { root: options.sourceRootOverride, sha: options.sourceShaOverride }
+    : rollbackSource(options.source ?? 'legacy')
   const target = options.target ?? rollbackBaseline
   const candidatePair = target === rollback180
   const targetLabel = options.badLabel ? 'wrong' : target
@@ -447,6 +471,42 @@ test('runtime fingerprint excludes only the declared test-support files', () => 
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
+})
+
+test('rollback guard reaches runtime and service-configuration incompatibility checks', () => {
+  const runtimeSource = commitSourceChange(createSourceWorktree('candidate'), 'backend/src/worker.ts',
+    '\n// synthetic rollback guard fixture\n', 'mutate runtime source')
+  const runtime = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: runtimeSource.root, sourceShaOverride: runtimeSource.sha })
+  assert.notEqual(runtime.status, 0, runtime.output)
+  assert.match(runtime.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(runtime.events, /UP:|GATE/)
+
+  const configSource = commitSourceChange(createSourceWorktree('candidate'), 'deploy/selectel/Caddyfile.edge.template',
+    '\n# synthetic rollback guard fixture\n', 'mutate service configuration')
+  const config = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: configSource.root, sourceShaOverride: configSource.sha })
+  assert.notEqual(config.status, 0, config.output)
+  assert.match(config.output, /rollback schema, dependencies or service configuration are incompatible/)
+  assert.doesNotMatch(config.events, /UP:|GATE/)
+})
+
+test('rollback guard reports unknown and dirty source states before promotion', () => {
+  const unknown = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    source: 'candidate', producer: 'f'.repeat(40) })
+  assert.notEqual(unknown.status, 0, unknown.output)
+  assert.match(unknown.output, /rollback compatibility revision is unavailable/)
+  assert.doesNotMatch(unknown.events, /UP:|GATE/)
+
+  const source = createSourceWorktree('candidate')
+  const untracked = resolve(source.root, 'backend/src/rollback-untracked-fixture.ts')
+  writeFileSync(untracked, 'export {}\n')
+  const dirty = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha })
+  rmSync(untracked)
+  assert.notEqual(dirty.status, 0, dirty.output)
+  assert.match(dirty.output, /rollback source checkout is not clean/)
+  assert.doesNotMatch(dirty.events, /UP:|GATE/)
 })
 
 for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
