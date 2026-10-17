@@ -128,6 +128,96 @@ maybeDescribe('MAX forward import integration', () => {
     expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: retry.inboxId, kind: 'saved' } })).toBe(1)
   })
 
+  test('imports the caption from a provider-confirmed forwarded video envelope when private original lookup is unavailable', async () => {
+    const fixture = await familyFixture('7006', 'forward-video-caption')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    const outerId = 'outer-envelope-caption'
+    const originalId = 'private-envelope-caption-original'
+    const caption = '  Original caption\n💛👨‍👩‍👧‍👦  '
+    const event = normalizeMaxUpdate({ update_type: 'message_created', timestamp: Date.parse('2026-10-02T10:00:00.000Z'), message: {
+      sender: { user_id: 7006 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
+      body: { mid: outerId, text: 'Outer comment must never be published', attachments: [] },
+      link: { type: 'forward', chat_id: Number(channelId), message: { mid: originalId, text: caption,
+        attachments: [{ type: 'video', payload: { id: 456, token: 'synthetic-video-token', duration: 2 } }] } },
+    } })
+    if (event.kind !== 'message_created') throw new Error('Expected a synthetic forwarded video event')
+    const accepted = await accept(event)
+    const videoApi = createMaxApi('synthetic-max-api-token', { fetch: async (input) => {
+      const requested = new URL(String(input)).searchParams.get('message_ids')
+      if (requested === originalId) return new Response(JSON.stringify({ messages: [] }), {
+        status: 404, headers: { 'content-type': 'application/json' },
+      })
+      return new Response(JSON.stringify({ messages: [{
+        sender: { user_id: 7006 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+        body: { mid: outerId, text: 'Outer comment must never be published', attachments: [] },
+        link: { type: 'forward', message: { mid: originalId, text: caption,
+          attachments: [{ type: 'video', payload: { id: 456, token: 'synthetic-video-token', duration: 2 } }] } },
+      }] }), { headers: { 'content-type': 'application/json' } })
+    } })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(videoApi.getMessage, {
+      getVideo: async () => ({ width: 320, height: 240, durationMs: 2_000,
+        renditions: [{ url: 'https://maxvd123.okcdn.ru/synthetic.mp4', width: 320, height: 240, contentLength: 4 }] }),
+    }) })
+    await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+    const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId } })
+    expect(memory).toMatchObject({ kind: 'video', body: caption })
+  })
+
+  test('preserves the 8000-code-point linked caption, deduplicates repeats, and never borrows outer text when caption is absent', async () => {
+    const fixture = await familyFixture('7007', 'forward-video-caption-boundary')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    const maxCaption = `  ${'💛'.repeat(7_996)}  `
+    const cases: Array<{ suffix: string; originalId: string; caption: string | null; includeText?: boolean; expected: string | null }> = [
+      { suffix: 'max', originalId: 'private-caption-max', caption: maxCaption, expected: maxCaption },
+      { suffix: 'none-omitted', originalId: 'private-caption-none-omitted', caption: null, includeText: false, expected: '' },
+      { suffix: 'none-null', originalId: 'private-caption-none-null', caption: null, includeText: true, expected: '' },
+      { suffix: 'too-long', originalId: 'private-caption-too-long', caption: '💛'.repeat(8_001), expected: null },
+    ]
+    const processorFor = (outerId: string, originalId: string, caption: string | null, includeText = false) => {
+      const api = createMaxApi('synthetic-max-api-token', { fetch: async (input) => {
+        const requested = new URL(String(input)).searchParams.get('message_ids')
+        if (requested === originalId) return new Response(JSON.stringify({ messages: [] }), {
+          status: 404, headers: { 'content-type': 'application/json' },
+        })
+        return new Response(JSON.stringify({ messages: [{
+          sender: { user_id: 7007 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+          body: { mid: outerId, text: 'Untrusted outer comment', attachments: [] },
+          link: { type: 'forward', message: { mid: originalId, ...(caption === null && !includeText ? {} : { text: caption }),
+            attachments: [{ type: 'video', payload: { id: 567, token: `synthetic-token-${outerId}`, duration: 2 } }] } },
+        }] }), { headers: { 'content-type': 'application/json' } })
+      } })
+      return createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(api.getMessage, {
+        getVideo: async () => ({ width: 320, height: 240, durationMs: 2_000,
+          renditions: [{ url: 'https://maxvd123.okcdn.ru/synthetic.mp4', width: 320, height: 240, contentLength: 4 }] }),
+      }) })
+    }
+    for (const item of cases) {
+      const outerId = `outer-caption-${item.suffix}`
+      const event = normalizeMaxUpdate({ update_type: 'message_created', timestamp: Date.parse('2026-10-02T10:00:00.000Z'), message: {
+        sender: { user_id: 7007 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
+        body: { mid: outerId, text: 'Webhook text is untrusted', attachments: [] },
+        link: { type: 'forward', chat_id: Number(channelId), message: { mid: item.originalId,
+          ...(item.caption === null && !item.includeText ? {} : { text: item.caption }),
+          attachments: [{ type: 'video', payload: { id: 567, token: 'synthetic-ingress-token', duration: 2 } }] } },
+      } })
+      if (event.kind !== 'message_created') throw new Error('Expected a synthetic forwarded video event')
+      const accepted = await accept(event)
+      const processor = processorFor(outerId, item.originalId, item.caption, item.includeText)
+      await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+      if (item.expected === null) {
+        expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(3)
+        expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
+        continue
+      }
+      const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId, body: item.expected } })
+      expect(memory.kind).toBe('video')
+    }
+    const duplicate = await accept(forwardEvent('7007', 'outer-caption-max-duplicate', 'private-caption-max'))
+    await expect(processorFor('outer-caption-max-duplicate', 'private-caption-max', maxCaption)({ inboxId: duplicate.inboxId })).resolves.toBe('done')
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(3)
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: duplicate.inboxId } })).toMatchObject({ status: 'denied', rejectionCode: 'duplicate' })
+  })
+
   test('serializes concurrent different actors importing one original to one Memory', async () => {
     const fixture = await familyFixture('7002', 'forward-race')
     const secondActor = await prisma.user.create({ data: { displayName: 'Synthetic second importer' } })
@@ -229,6 +319,65 @@ maybeDescribe('MAX forward import integration', () => {
     }
   })
 
+  test('imports linked captions for forwarded photo albums and mixed photo/video through the real MAX API normalizer', async () => {
+    const fixture = await familyFixture('7008', 'forward-caption-album-mixed')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    const video = await mp4VideoFixture()
+    try {
+      const cases: Array<{ suffix: string; originalId: string; caption: string; attachments: Array<Record<string, unknown>>;
+        kinds: Array<'photo' | 'video'>; memoryKind: 'photo' | 'media' }> = [
+        { suffix: 'album', originalId: 'private-caption-album', caption: 'Album provider caption', attachments: [
+          { type: 'image', payload: { photo_id: 811, token: 'synthetic-photo-811', url: 'https://i.oneme.ru/photo-811' } },
+          { type: 'image', payload: { photo_id: 812, token: 'synthetic-photo-812', url: 'https://i.oneme.ru/photo-812' } },
+        ], kinds: ['photo', 'photo'], memoryKind: 'photo' },
+        { suffix: 'mixed', originalId: 'private-caption-mixed', caption: 'Mixed provider caption', attachments: [
+          { type: 'image', payload: { photo_id: 813, token: 'synthetic-photo-813', url: 'https://i.oneme.ru/photo-813' } },
+          { type: 'video', payload: { id: 814, token: 'synthetic-video-814', duration: 1 } },
+        ], kinds: ['photo', 'video'], memoryKind: 'media' },
+      ]
+      for (const item of cases) {
+        const outerId = `outer-caption-${item.suffix}`
+        const update = { update_type: 'message_created', timestamp: Date.parse('2026-10-02T10:00:00.000Z'), message: {
+          sender: { user_id: 7008 }, recipient: { chat_type: 'dialog', chat_id: 900, user_id: 900 },
+          body: { mid: outerId, text: 'Untrusted webhook comment', attachments: [] },
+          link: { type: 'forward', chat_id: Number(channelId), message: {
+            mid: item.originalId, text: 'Untrusted webhook link caption', attachments: item.attachments,
+          } },
+        } }
+        const event = normalizeMaxUpdate(update)
+        if (event.kind !== 'message_created') throw new Error('Expected a synthetic forwarded media event')
+        const accepted = await accept(event)
+        const api = createMaxApi('synthetic-max-api-token', { fetch: async (input) => {
+          const requested = new URL(String(input)).searchParams.get('message_ids')
+          if (requested === item.originalId) return new Response(JSON.stringify({ messages: [] }), {
+            status: 404, headers: { 'content-type': 'application/json' },
+          })
+          return new Response(JSON.stringify({ messages: [{
+            sender: { user_id: 7008 }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 },
+            body: { mid: outerId, text: 'Untrusted provider outer comment', attachments: [] },
+            link: { type: 'forward', message: { mid: item.originalId, text: item.caption, attachments: item.attachments } },
+          }] }), { headers: { 'content-type': 'application/json' } })
+        } })
+        const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+          api: apiFor(api.getMessage, { getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000,
+            renditions: [{ url: 'https://maxvd123.okcdn.ru/caption-mixed.mp4', width: 320, height: 240, contentLength: video.bytes.byteLength }] }) }),
+          download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+          videoDownload: async () => videoStream(video.bytes),
+        })
+        await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+        const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId, body: item.caption },
+          include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } } })
+        expect(memory.kind).toBe(item.memoryKind)
+        expect(memory.media.map(({ position }) => position)).toEqual(item.kinds.map((_, index) => index))
+        expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(item.kinds)
+      }
+      expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(2)
+    } finally {
+      await video.cleanup()
+      await fixture.cleanup()
+    }
+  })
+
   test('recovers one missing-original forwarded voice from encrypted ingress and deduplicates repeats', async () => {
     const fixture = await familyFixture('7025', 'forward-ingress-voice')
     const voice = await oggVoiceFixture()
@@ -320,21 +469,24 @@ maybeDescribe('MAX forward import integration', () => {
       for (const [index, variant] of outerVariants.entries()) {
         const originalId = `private-voice-mismatch-${index}`
         const outerId = `outer-voice-mismatch-${index}`
-        const accepted = await accept(forwardedVoiceEvent('7026', outerId, originalId))
+        const accepted = await accept({ ...forwardedVoiceEvent('7026', outerId, originalId), text: 'Untrusted webhook caption' })
         const mismatchProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
           if (messageId === originalId) throw new MaxProviderError(undefined, false, 404, 'message_not_found')
           return { messageId: variant.messageId ?? messageId, senderId: variant.senderId ?? '7026',
             recipientId: variant.recipientId ?? '900', recipientType: 'dialog',
+            text: 'Untrusted provider outer text', forwardedText: 'Unverified linked caption',
             forwardedFrom: { messageId: variant.originalMessageId ?? originalId }, attachments: [] }
         }), download })
         await expect(mismatchProcessor({ inboxId: accepted.inboxId })).resolves.toBe('done')
         expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })).toMatchObject({ status: 'denied' })
       }
 
-      const conflictingProvider = await accept(forwardedVoiceEvent('7026', 'outer-voice-provider-conflict', 'private-voice-provider-conflict'))
+      const conflictingProvider = await accept({ ...forwardedVoiceEvent('7026', 'outer-voice-provider-conflict', 'private-voice-provider-conflict'),
+        text: 'Untrusted webhook caption' })
       const conflictingProviderProcessor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media, api: apiFor(async (messageId) => {
         if (messageId === 'private-voice-provider-conflict') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
         return { messageId, senderId: '7026', recipientId: '900', recipientType: 'dialog',
+          text: 'Untrusted provider outer text', forwardedText: 'Unverified linked caption',
           forwardedFrom: { messageId: 'private-voice-provider-conflict' }, attachments: [], forwardedAttachments: [
             { kind: 'voice', providerAttachmentId: 'different-voice-id', url: 'https://voice.example.invalid/conflict' },
             { kind: 'image', providerAttachmentId: 'extra-image', url: 'https://image.example.invalid/conflict' },
@@ -578,10 +730,11 @@ maybeDescribe('MAX forward import integration', () => {
 
   test('rejects envelope media when provider re-fetch does not confirm the authenticated forward identity', async () => {
     const fixture = await familyFixture('7020', 'forward-envelope-forged')
-    const accepted = await accept(forwardEvent('7020', 'outer-envelope-forged', 'private-original-expected'))
+    const accepted = await accept({ ...forwardEvent('7020', 'outer-envelope-forged', 'private-original-expected'), text: 'Untrusted webhook caption' })
     const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
       if (messageId === 'private-original-expected') throw new MaxProviderError(undefined, false, 404, 'message_not_found')
       return { messageId, senderId: '9999', recipientId: '900', recipientType: 'dialog',
+        text: 'Untrusted outer text', forwardedText: 'Unverified linked caption',
         forwardedFrom: { messageId: 'some-other-original' }, attachments: [],
         forwardedAttachments: [{ kind: 'video', providerAttachmentId: 'forged-id', currentToken: 'forged-token', inboundDurationSeconds: null, width: null, height: null }] }
     }, { getVideo: async () => { throw new Error('unconfirmed envelope must not fetch media') } }) })
@@ -594,7 +747,7 @@ maybeDescribe('MAX forward import integration', () => {
 
   test('uses only provider-confirmed outer media for an accessible private-dialog original', async () => {
     const fixture = await familyFixture('7024', 'forward-envelope-private-dialog')
-    const accepted = await accept(forwardEvent('7024', 'outer-private-dialog', 'private-dialog-original'))
+    const accepted = await accept({ ...forwardEvent('7024', 'outer-private-dialog', 'private-dialog-original'), text: 'Untrusted webhook caption' })
     const lookups: string[] = []
     const originalVideo = { kind: 'video' as const, providerAttachmentId: 'private-original-video', currentToken: 'private-original-token',
       inboundDurationSeconds: null, width: null, height: null }
@@ -603,8 +756,10 @@ maybeDescribe('MAX forward import integration', () => {
     const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: apiFor(async (messageId) => {
       lookups.push(messageId)
       return messageId === 'private-dialog-original'
-        ? { messageId, senderId: '8033', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(), attachments: [originalVideo] }
+        ? { messageId, senderId: '8033', recipientId: '900', recipientType: 'dialog', timestamp: Date.now(),
+            text: 'Untrusted original from mismatched identity', attachments: [originalVideo] }
         : { messageId, senderId: '7024', recipientId: '900', recipientType: 'dialog',
+            text: 'Untrusted provider outer text', forwardedText: 'Provider linked caption',
             forwardedFrom: { messageId: 'private-dialog-original' }, attachments: [],
             forwardedAttachments: [envelopeVideo] }
     }, { getVideo: async (token) => {
@@ -618,7 +773,7 @@ maybeDescribe('MAX forward import integration', () => {
     const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
     expect(source).toMatchObject({ status: 'published', senderSubject: '7024', originalChannelId: null,
       originalMessageId: 'private-dialog-original' })
-    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video' })
+    expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video', body: 'Provider linked caption' })
     expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({
       providerAttachmentId: 'confirmed-envelope-video',
     })
@@ -811,7 +966,7 @@ maybeDescribe('MAX forward import integration', () => {
     const original: MaxResolvedMessage = { messageId: 'bound-video-original', senderId: '0', recipientId: channelId.toString(),
       recipientType: 'channel', text: 'Bound video caption', timestamp: originalDate,
       attachments: [{ kind: 'video', providerAttachmentId: 'bound-456', currentToken: 'bound-token', inboundDurationSeconds: 12, width: 1920, height: 1080 }] }
-    const accepted = await accept(forwardEvent('7005', 'bound-video-forward', 'bound-video-original'))
+    const accepted = await accept({ ...forwardEvent('7005', 'bound-video-forward', 'bound-video-original'), text: 'Untrusted forwarded-message decoy' })
     const videoApi = createMaxApi('synthetic-max-api-token', { fetch: async () => new Response(JSON.stringify({
       urls: { mp4_1080: 'https://maxvd123.okcdn.ru/bound.mp4?sig=synthetic' }, duration: 12_000,
     }), { status: 200, headers: { 'content-type': 'application/json' } }) })
@@ -819,6 +974,7 @@ maybeDescribe('MAX forward import integration', () => {
     await expect(createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api })({ inboxId: accepted.inboxId })).resolves.toBe('done')
     const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
     expect(source).toMatchObject({ status: 'published', originalMessageId: 'bound-video-original', originalChannelId: channelId })
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })).toMatchObject({ body: 'Bound video caption' })
     expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate) } })).toBe(1)
     expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({ width: 1920, height: 1080, durationMs: 12_000 })
     expect(await prisma.maxMemoryBackup.count()).toBe(0)
