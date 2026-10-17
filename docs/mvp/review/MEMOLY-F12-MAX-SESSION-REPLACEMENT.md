@@ -103,3 +103,31 @@ BLOCKED: физических устройств и разрешённого dep
 ## Rollback
 
 До merge — закрыть draft PR. После отдельно разрешённого merge — revert code commit через новый PR с целевыми локальными проверками. Нет schema migration/DB restore. Уже отозванные session rows не оживлять SQL-операцией; их владельцы проходят обычный новый MAX-вход. Production deploy/migrations/data writes не выполнялись.
+
+## Closure 2026-10-17 — MEMOLY-F12-CLOSURE-AND-RISK-BASED-VERIFICATION
+
+Эта секция уточняет предыдущее состояние: найден и исправлен дополнительный клиентский дефект. Product commit closure: `383d95e56f5af881ad3d15aff7dda7d26206c999` (после опубликованного `c308bcbbcc8dba821a7c2ffd4578acd67143d0d2`). Ветка и base прежние; allowed paths: auth client API, его узкие тесты, существующий F12 integration и этот отчёт. Schema/migrations, семейные ACL и server auth production code в closure не менялись.
+
+### Подтверждённая причина и исправление
+
+Потерянный ответ с новой Set-Cookie оставлял в браузере доказанную, но уже отозванную predecessor cookie. Fresh signed MAX exchange правильно отказывал (401), однако обычный refresh/bootstrap не удалял HttpOnly cookie. Новые входы повторяли тот же отказ. Red: A→B replacement→fresh A с сохранённой revoked cookie дал 401 вместо восстановления.
+
+Теперь AuthApi после authoritative refresh 401 удаляет cookie через существующий logout, удерживая существующий auth coordinator и проверяя session epoch. Normal bootstrap затем допускает новый browser-link flow. Для прямого MAX entry есть один ограниченный recovery/retry после отдельного подтверждения refresh 401. Active refresh session при отказе MAX не удаляется. Серверный отказ для replay/revoked/stale proof сохранён. Запоздалые ответы не применяют token к новому epoch; abort/network/5xx не считаются подтверждённым истечением сессии.
+
+### Проверки и границы доказательств
+
+- Новый integration использует настоящие AuthApi/HttpClient/bootstrap, Hono, Prisma/PostgreSQL и синтетический cookie jar: `/max 401 → refresh 401 → logout 204 → max 200`, затем normal bootstrap `refresh 401 → logout 204 → browser-link start/approve/redeem 200`. Проверены cookie progression и `/me 200` без ручной очистки browser storage.
+- Lead: `bun test src/modules/auth/max-session-replacement.integration.test.ts` из backend: **10 pass / 0 fail / 132 assertions, exit 0, 1.57s**; `.scratch/lead-f12-closure-integration-final.log` в корне worktree. Выполнено на том же product tree до commit; после этого изменена только обработка abort/5xx retry, проверенная узко ниже.
+- Lead после review fix: `bun test webapp/tests/max-auth-stale-cookie-recovery.test.ts`: **8 pass / 0 fail / 24 assertions, exit 0, 73ms**; `.scratch/lead-f12-client-review-closure.log`.
+- Worker: backend typecheck, webapp typecheck/build/lint — exit 0. После P2 исправления web typecheck — exit 0. `git diff --check` / staged diff check — exit 0.
+- Expired browser-link: redeem отказал, прежняя действующая session сохранилась, новый flow завершился. Отменённый сценарий — отказ пользователя/оставленный pending challenge до redeem: session не заменяется, новый flow работает. Отдельного cancel endpoint в текущем механизме нет. Узкий временный proof с существующими helpers: **11 pass / 135 assertions / exit 0, 1.639s**. Старые семь E2E не повторялись.
+- PR #176 auth epoch test: **1 pass / 4 assertions / exit 0**. Read-only сравнение актуального closure product commit с #176 `6b796b6a9776535a33323e8e39022d17c7bd5369`: merge preview exit 0, conflict markers 0. Оба изменения auth/api сохраняются; shared/public contracts не меняются. MAX-вход предшествует invite acceptance, browser-link выдаёт обычную MAX session; F12 не меняет family roles/membership epoch, family reopen или независимые устройства. Это подтверждение стыка diff и узких тестов, не FULL совместно слитого source.
+- Один свежий независимый reviewer проверил только новый diff. Найденный P2: retry abort/5xx ошибочно очищал auth state. Один bounded fix и узкая closure: P2 закрыт, новых блокирующих findings нет. Старый server F12 повторно не ревьюился.
+
+Integration guard теперь требует одинаковые явно назначенные DATABASE_URL и TEST_DATABASE_URL, loopback host, явный port, имя `*_test`, schema public. Это позволяет будущему FULL запускать тест на своей изолированной БД вместо жёстко заданной старой task DB. Секреты не входят в Git; owned environment handoff находится в ignored `backend/.scratch/f12-closure-env.json`.
+
+### Статус принятия
+
+PR #177 остаётся **draft / REVIEW**, не Ready и не merged. Реальный дефект исправлен, узкие проверки зелёные; к рассмотрению результата готов. **Разрешение merge и подтверждение FULL на точном актуальном source ещё требуются.** Новый verification gate готовится отдельным PR; его не считаем уже вступившим в силу. #176 не изменён. Порядок: отдельное решение владельца о новой системе → применимые FULL для точных актуальных SHA #177 и #176 → отдельные разрешения merge #177, затем #176 с обновлением от main и проверкой стыка → FULL итогового совместного release SHA перед отдельно разрешённым production deploy. Backup/migration/readiness и Selectel safeguards сохраняются.
+
+Физическая приёмка iPhone/MAX, Android/MAX, Web/PWA: stale-cookie повторный вход, browser-link cancel/expiry/retry, A→B/logout, независимое устройство, invite→family reopen. В этой задаче нет разрешённого deployment или физических устройств; локальная synthetic проверка не выдаётся за такую приёмку.
