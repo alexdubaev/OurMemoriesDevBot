@@ -240,11 +240,33 @@ try {
       equal(revokedCookieAttempt.response.headers.get('set-cookie'), null)
       const recoveredC = await actor(maxC)
       equal((await request('/auth/me', recoveredC.token)).status, 200)
-      const malformedCookieAttempt = await request('/auth/max', null, 'POST', { initData: signed(maxD) }, 'web_app_demo_refresh=malformed')
-      equal(malformedCookieAttempt.status, 401)
-      equal(malformedCookieAttempt.response.headers.get('set-cookie'), null)
-      const recoveredD = await actor(maxD)
-      equal((await request('/auth/me', recoveredD.token)).status, 200)
+      const protectedSessionIds = [independentSessionId, bSessionId, await sessionFromMaxReplay(recoveredC)]
+      const protectedSessions = await prisma.authSession.findMany({ where: { id: { in: protectedSessionIds } } })
+      equal(protectedSessions.length, protectedSessionIds.length)
+      const sessionsBeforeMalformedCookie = await prisma.authSession.count()
+      const maxDInitData = signed(maxD)
+      const malformedCookieAttempt = await request('/auth/max', null, 'POST', { initData: maxDInitData }, 'web_app_demo_refresh=malformed')
+      equal(malformedCookieAttempt.status, 200)
+      equal(/^web_app_demo_refresh=.+/.test(malformedCookieAttempt.response.headers.get('set-cookie') ?? ''), true)
+      equal((await prisma.authSession.count()), sessionsBeforeMalformedCookie + 1)
+      const recoveredDSessionId = await sessionFromMaxReplay({ initData: maxDInitData })
+      equal(recoveredDSessionId !== replacedSessionId && recoveredDSessionId !== independentSessionId && recoveredDSessionId !== bSessionId, true)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: recoveredDSessionId } })).revokedAt, null)
+      const recoveredDMe = await request('/auth/me', malformedCookieAttempt.body.accessToken)
+      equal(recoveredDMe.status, 200)
+      const recoveredDIdentity = await prisma.externalIdentity.findUniqueOrThrow({
+        where: { provider_subject: { provider: 'max', subject: String(maxD) } }, select: { userId: true },
+      })
+      equal(recoveredDMe.body.user.id, recoveredDIdentity.userId)
+      const sessionsAfterMalformedCookie = await prisma.authSession.findMany({ where: { id: { in: protectedSessionIds } } })
+      equal(sessionsAfterMalformedCookie.every(({ revokedAt }) => revokedAt === null), true)
+
+      const countBeforeInvalidData = await prisma.authSession.count()
+      const invalidData = signed(maxD + 10).replace(/hash=[^&]+/, 'hash=bad')
+      const invalidSignedCookieAttempt = await request('/auth/max', null, 'POST', { initData: invalidData }, 'web_app_demo_refresh=malformed')
+      equal(invalidSignedCookieAttempt.status, 401)
+      equal(invalidSignedCookieAttempt.response.headers.get('set-cookie'), null)
+      equal(await prisma.authSession.count(), countBeforeInvalidData)
 
       const browserId = Date.now() + 200
       const approverId = browserId + 1
