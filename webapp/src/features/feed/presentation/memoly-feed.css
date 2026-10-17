@@ -198,7 +198,7 @@
 [data-memoly-feed] .memoly-mixed-viewer-bar, [data-memoly-feed] .memoly-mixed-viewer-nav { display: flex; width: min(100%, 600px); align-items: center; justify-content: space-between; gap: 12px; }
 [data-memoly-feed] .memoly-mixed-viewer button { min-width: 70px; min-height: 44px; padding: 0 12px; border-radius: 12px; color: var(--theme-text, var(--memoly-ink)); background: var(--theme-surface-hi, white); }
 [data-memoly-feed] .memoly-mixed-viewer button:disabled { opacity: .35; }
-[data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media { display: grid; width: 100%; min-height: 0; flex: 1; place-items: center; }
+[data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media { display: grid; width: 100%; min-height: 0; flex: 1; place-items: center; touch-action: pan-y pinch-zoom; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media > div { display: flex; width: 100%; height: 100%; min-height: 0; align-items: center; justify-content: center; overflow: visible; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media [data-carousel-active] > * { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; align-items: center; justify-content: center; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media img,
