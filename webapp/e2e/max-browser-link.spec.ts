@@ -41,7 +41,7 @@ test('MAX browser-link approval redeems a browser challenge into an HttpOnly ses
     })
   }, signedMaxInitData(challenge.startParam))
   await maxPage.goto('/')
-  await expect(maxPage.getByText('Подтвердить вход')).toBeVisible()
+  await expect(maxPage.getByRole('heading', { name: 'Подтвердить вход' })).toBeVisible()
 
   const redeemResponse = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/auth/browser-link/${challenge.challengeId}/redeem`)
@@ -50,7 +50,7 @@ test('MAX browser-link approval redeems a browser challenge into an HttpOnly ses
   await maxPage.getByRole('button', { name: 'Подтвердить вход' }).click()
   const redeemed = await redeemResponse
   expect(redeemed.status()).toBe(200)
-  const cookies = await page.context().cookies(page.url())
+  const cookies = await page.context().cookies()
   expect(cookies.some((cookie) => cookie.name === 'web_app_demo_refresh' && cookie.httpOnly)).toBe(true)
   const restored = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/me'))
   await page.reload()
@@ -73,5 +73,5 @@ test('MAX Mini App signs in with verified initData and loads the current session
   await page.goto('/')
   expect((await exchange).status()).toBe(200)
   expect((await currentUser).status()).toBe(200)
-  expect((await page.context().cookies(page.url())).some((cookie) => cookie.name === 'web_app_demo_refresh' && cookie.httpOnly)).toBe(true)
+  expect((await page.context().cookies()).some((cookie) => cookie.name === 'web_app_demo_refresh' && cookie.httpOnly)).toBe(true)
 })

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { fileURLToPath } from 'node:url'
 
 import { backendTestFiles } from './test-files'
-import { expectedMaxHistoricalExclusions, runBackendIntegration, selectMaxVerificationIntegration } from './test-integration'
+import { expectedMaxHistoricalExclusions, integrationChildProcessTimeoutMs, runBackendIntegration, selectMaxVerificationIntegration } from './test-integration'
 
 describe('MAX PostgreSQL verification catalog', () => {
   test('keeps MAX auth, neutral data and migration checks while excluding messenger-specific suites', () => {
@@ -61,6 +61,10 @@ describe('MAX PostgreSQL verification catalog', () => {
     expect(expectedMaxHistoricalExclusions('src/modules/families/family-access.integration.test.ts')).toBe(1)
     expect(expectedMaxHistoricalExclusions('src/modules/families/family-review-fixes.integration.test.ts')).toBe(0)
     expect(expectedMaxHistoricalExclusions('src/modules/max/media-flow.integration.test.ts')).toBe(0)
+  })
+
+  test('caps each integration Bun process independently of its per-test timeout', () => {
+    expect(integrationChildProcessTimeoutMs).toBe(180_000)
   })
 
   test('missing PostgreSQL infrastructure is a hard failure before any Docker or Prisma command', async () => {

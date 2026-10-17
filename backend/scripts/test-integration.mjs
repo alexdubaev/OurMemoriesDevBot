@@ -30,6 +30,7 @@ const repositoryRoot = resolve(backendRoot, '..')
  * transaction and the request answers 500 - rather than by the harness as a bare timeout.
  */
 export const integrationTestTimeoutMs = 60_000
+export const integrationChildProcessTimeoutMs = 180_000
 
 class CommandFailure extends Error {
   constructor(command, args, exitCode) {
@@ -88,11 +89,17 @@ export async function runBackendIntegration({
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: options.stdio ?? 'pipe',
+      ...(command === 'bun' && args[0] === 'test'
+        ? { timeout: integrationChildProcessTimeoutMs }
+        : {}),
     })
 
     if (result.stdout) process.stdout.write(result.stdout)
     if (result.stderr) process.stderr.write(result.stderr)
 
+    if (result.error?.code === 'ETIMEDOUT') {
+      throw new Error(`Integration test process exceeded ${integrationChildProcessTimeoutMs}ms: ${args.at(-1)}`)
+    }
     if (result.status !== 0) {
       throw new CommandFailure(command, args, result.status ?? 1)
     }
