@@ -1,7 +1,7 @@
 // Runs only inside the roundtrip integration test's private *_test database.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { createHmac, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
@@ -58,12 +58,19 @@ const signed = (id, startParam) => {
   return params.toString()
 }
 async function actor(id, cookie) {
-  const auth = await request('/auth/max', null, 'POST', { initData: signed(id) }, cookie)
+  const initData = signed(id)
+  const auth = await request('/auth/max', null, 'POST', { initData }, cookie)
   equal(auth.status, 200)
   await prisma.pilotAdmission.upsert({ where: { provider_subject: { provider: 'max', subject: String(id) } },
     create: { provider: 'max', subject: String(id) }, update: {} })
-  return { id: auth.body.user.id, token: auth.body.accessToken,
+  return { id: auth.body.user.id, token: auth.body.accessToken, initData,
     cookie: auth.response.headers.get('set-cookie').split(';')[0] }
+}
+async function sessionFromMaxReplay(actor) {
+  const hash = new URLSearchParams(actor.initData).get('hash')
+  const fingerprintHash = createHash('sha256').update(hash.toLowerCase()).digest('hex')
+  const replay = await prisma.maxAuthReplay.findUniqueOrThrow({ where: { fingerprintHash }, select: { sessionId: true } })
+  return replay.sessionId
 }
 async function family(owner) {
   const created = await request('/families', owner.token, 'POST', { name: 'Synthetic family', timezone: 'Europe/Moscow' })
@@ -88,8 +95,8 @@ const note = (who, fam, text) => request('/families/' + fam.id + '/memories', wh
 const assertVideoMemory = async (id, familyId, token, caption, referenceId) => {
   const result = await request('/families/' + familyId + '/memories/' + id, token)
   equal(result.status, 200)
-  equal(result.body.memory.body, caption)
-  equal(result.body.memory.attachments.map(({ id: attachmentId, source, kind }) => ({ id: attachmentId, source, kind })),
+  equal(result.body.body, caption)
+  equal(result.body.attachments.map(({ id: attachmentId, source, kind }) => ({ id: attachmentId, source, kind })),
     [{ id: referenceId, source: 'max', kind: 'video' }])
 }
 try {
@@ -123,11 +130,19 @@ try {
     equal(photo.status, 201)
     let video, videoReference, videoCaption
     if (attested) {
-      videoCaption = 'Видео MAX: подпись сохранена точно — ёжик 🦔'
-      video = await prisma.memory.create({ data: { familyId: first.id, childId: first.childId, authorId: owner.id,
-        kind: 'video', body: videoCaption, occurredAt: new Date('2026-10-01T10:00:00.000Z'), status: 'published' } })
-      videoReference = await prisma.maxVideoReference.create({ data: { familyId: first.id, memoryId: video.id,
-        attachmentPosition: 0, providerAttachmentId: 'synthetic-max-video-' + randomUUID(), width: 320, height: 240, durationMs: 3000 } })
+      videoCaption = 'Видео MAX: первая строка\n\nПродолжение — ёжик 🦔'
+      const videoId = randomUUID()
+      const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
+      const sessionId = await sessionFromMaxReplay(owner)
+      await publisher.publish({ familyId: first.id, principal: { userId: owner.id, sessionId } }, {
+        id: videoId, childId: first.childId, kind: 'video', body: videoCaption,
+        occurredAt: new Date('2026-10-01T10:00:00.000Z'), sourcePublishedAt: new Date('2026-10-01T10:00:00.000Z'),
+        mediaIds: [], externalAttachment: 'max-video',
+      }, async (tx, memoryId) => {
+        videoReference = await tx.maxVideoReference.create({ data: { familyId: first.id, memoryId,
+          attachmentPosition: 0, providerAttachmentId: 'synthetic-max-video-' + randomUUID(), width: 320, height: 240, durationMs: 3000 } })
+      })
+      video = { id: videoId }
     }
     const playback = await request('/families/' + first.id + '/media/playback-session', owner.token, 'POST', {})
     equal(playback.status, 204)
@@ -153,11 +168,11 @@ try {
     equal(hub.body.items.every((item) => item.unreadState === 'ready'), true)
     const noteResult = await request('/families/' + first.id + '/memories/' + state.initialNoteId, viewer.token)
     equal(noteResult.status, 200)
-    equal(noteResult.body.memory.body, state.videoId ? 'Кандидат: заметка с точной подписью' : 'new version note')
+    equal(noteResult.body.body, state.videoId ? 'Кандидат: заметка с точной подписью' : 'new version note')
     const photoResult = await request('/families/' + first.id + '/memories/' + state.photoId, independent.token)
     equal(photoResult.status, 200)
     if (state.videoId) {
-      equal(photoResult.body.memory.body, 'Фото: подпись ✓')
+      equal(photoResult.body.body, 'Фото: подпись ✓')
       await assertVideoMemory(state.videoId, first.id, independent.token, state.videoCaption, state.videoReferenceId)
     }
     equal((await request('/families/' + first.id + '/memories', outsider.token)).status, state.outsiderAdmitted ? 200 : 404)
@@ -173,9 +188,8 @@ try {
       const maxD = maxA + 3
       const aFirst = await actor(maxA)
       const aIndependent = await actor(maxA)
-      const sessionFor = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).sessionId
-      const replacedSessionId = sessionFor(aFirst.token)
-      const independentSessionId = sessionFor(aIndependent.token)
+      const replacedSessionId = await sessionFromMaxReplay(aFirst)
+      const independentSessionId = await sessionFromMaxReplay(aIndependent)
       equal(replacedSessionId !== independentSessionId, true)
       const b = await actor(maxB, aFirst.cookie)
       equal((await request('/auth/me', aFirst.token)).status, 401)
@@ -184,7 +198,8 @@ try {
       const replacedSession = await prisma.authSession.findUniqueOrThrow({ where: { id: replacedSessionId } })
       equal(replacedSession.revokedAt !== null, true)
       equal((await prisma.authSession.findUniqueOrThrow({ where: { id: independentSessionId } })).revokedAt, null)
-      const bSession = await prisma.authSession.findFirstOrThrow({ where: { userId: b.id, revokedAt: null } })
+      const bSessionId = await sessionFromMaxReplay(b)
+      const bSession = await prisma.authSession.findUniqueOrThrow({ where: { id: bSessionId } })
       equal(bSession.id !== replacedSessionId && bSession.id !== independentSessionId, true)
 
       const revokedCookieAttempt = await request('/auth/max', null, 'POST', { initData: signed(maxC) }, aFirst.cookie)
@@ -202,8 +217,8 @@ try {
       const approverId = browserId + 1
       const browser = await actor(browserId)
       const approver = await actor(approverId)
-      const browserSession = await prisma.authSession.findFirstOrThrow({ where: { userId: browser.id, revokedAt: null } })
-      const approverSession = await prisma.authSession.findFirstOrThrow({ where: { userId: approver.id, revokedAt: null } })
+      const browserSessionId = await sessionFromMaxReplay(browser)
+      const approverSessionId = await sessionFromMaxReplay(approver)
       const start = await app.request('/api/v1/auth/browser-link/start', { method: 'POST', headers: { Origin: 'http://localhost:5173' } })
       equal(start.status, 200)
       const challenge = await start.json()
@@ -221,16 +236,21 @@ try {
       equal((await request('/auth/me', browser.token)).status, 401)
       equal((await request('/auth/me', approver.token)).status, 200)
       equal((await request('/auth/me', aIndependent.token)).status, 200)
-      equal((await request('/auth/me', linked.accessToken)).status, 200)
-      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: browserSession.id } })).revokedAt !== null, true)
-      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: approverSession.id } })).revokedAt, null)
-      equal((await prisma.authSession.findMany({ where: { userId: approver.id, revokedAt: null } })).length, 1)
-      equal(await prisma.authSession.count({ where: { userId: browser.id, revokedAt: null } }), 1)
+      const linkedMe = await request('/auth/me', linked.accessToken)
+      equal(linkedMe.status, 200)
+      equal(linkedMe.body.user.id, approver.id)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: browserSessionId } })).revokedAt !== null, true)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: approverSessionId } })).revokedAt, null)
+      const approverSessions = await prisma.authSession.findMany({ where: { userId: approver.id, revokedAt: null } })
+      equal(approverSessions.length, 2)
+      equal(approverSessions.some(({ id }) => id === approverSessionId), true)
+      equal(approverSessions.some(({ id }) => id !== approverSessionId && id !== browserSessionId), true)
+      equal(await prisma.authSession.count({ where: { userId: browser.id, revokedAt: null } }), 0)
       const written = await note(independent, second, 'old version full-role write')
       equal(written.status, 201)
       state.oldNoteId = written.body.id
       const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
-      const sessionId = sessionFor(independent.token)
+      const sessionId = await sessionFromMaxReplay(independent)
       const drained = await drainTaskOutbox({ prisma }, { handlers: { 'rollback:publish': { run: async ({ payload }) => {
         await publisher.publish({ familyId: payload.familyId, principal: { userId: payload.authorId, sessionId } },
           { id: payload.memoryId, childId: payload.childId, kind: 'note', body: 'old worker publication',
