@@ -12,7 +12,7 @@ import '@/styles/composer-skin.css'
 const historyMarker = 'our-memories:add-sheet'
 
 export type AddSheetPresentationProps = {
-  hostBridge: Pick<HostBridge, 'onBack'>
+  hostBridge: Pick<HostBridge, 'onBack' | 'openBot'>
   onNote: () => void
   onOpenChange: (open: boolean) => void
   onPhoto: () => void
@@ -79,6 +79,7 @@ export function AddSheetPresentation({
       /> : <VoiceOrVideoPanel
         onBack={() => setLevel('add')}
         onClose={close}
+        onOpenBot={() => hostBridge.openBot()}
         onVideo={() => { close(); onVideo() }}
       />}
     </MemolyBottomSheet>
@@ -140,7 +141,7 @@ export function MediaChoiceAction({ icon, label, name, onClick, title, copy }: {
   </button>
 }
 
-export function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => void; onClose: () => void; onVideo: () => void }) {
+export function VoiceOrVideoPanel({ onBack, onClose, onOpenBot, onVideo }: { onBack: () => void; onClose: () => void; onOpenBot: () => void; onVideo: () => void }) {
   return <div aria-describedby="memoly-voice-video-description" className="memoly-sheet-content" data-slot="memoly-voice-video-sheet">
     <div className="flex min-h-11 items-center gap-3">
       <Button aria-label="Назад" className="size-11" onClick={onBack} size="icon" type="button" variant="ghost"><WebpIcon decorative name="chevron" size={24} /></Button>
@@ -149,7 +150,7 @@ export function VoiceOrVideoPanel({ onBack, onClose, onVideo }: { onBack: () => 
     </div>
     <div className="media-choice-body">
       <MediaChoiceAction copy={<>Готовый видеофайл<br />с устройства</>} icon="video" label="Выбрать видео" name="video" onClick={onVideo} title="Выбрать видео" />
-      <div className="media-choice-card memoly-voice-handoff" data-add-action="audio"><span className="media-choice-icon"><WebpIcon decorative name="voice" size={34} state="active" /></span><span className="media-choice-copy"><Typography as="strong" variant="memoryBodyMedium">Голосовые — через бот</Typography><Typography as="span" tone="muted" variant="memoryMeta">Добавление аудио в приложении пока недоступно</Typography><a href="https://t.me/OurMemoriesDevBot"><Typography as="span" variant="memoryButton">Открыть бота</Typography></a></span></div>
+      <div className="media-choice-card memoly-voice-handoff" data-add-action="audio"><span className="media-choice-icon"><WebpIcon decorative name="voice" size={34} state="active" /></span><span className="media-choice-copy"><Typography as="strong" variant="memoryBodyMedium">Голосовые — через бот</Typography><Typography as="span" tone="muted" variant="memoryMeta">Добавление аудио в приложении пока недоступно</Typography><Button onClick={onOpenBot} type="button" variant="link">Открыть MAX</Button></span></div>
     </div>
     <DrawerDescription className="mt-4 text-left" id="memoly-voice-video-description"><Typography as="span" variant="memoryMeta">Материалы увидят участники вашей семьи</Typography></DrawerDescription>
   </div>

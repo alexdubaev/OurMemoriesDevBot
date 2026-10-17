@@ -30,10 +30,6 @@ import type { AuthenticatedTransport } from '@/platform/api'
 
 const startupRequest = { timeoutMs: 15000 } as const
 
-function idempotencyHeaders() {
-  return { 'Idempotency-Key': crypto.randomUUID() }
-}
-
 export function loadFamilyMe(transport: AuthenticatedTransport) {
   return transport.request('/api/v1/me', familyMeResponseSchema, startupRequest)
 }
@@ -235,10 +231,12 @@ export function createInvite(
   transport: AuthenticatedTransport,
   familyId: string,
   input: CreateInviteRequest,
+  idempotencyKey: string = crypto.randomUUID(),
 ) {
+  const parsedInput = createInviteRequestSchema.parse(input)
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/invites`, createInviteResponseSchema,
-    { method: 'POST', body: createInviteRequestSchema.parse(input), headers: idempotencyHeaders() },
+    { method: 'POST', body: parsedInput, headers: { 'Idempotency-Key': idempotencyKey } },
   )
 }
 

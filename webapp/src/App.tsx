@@ -216,8 +216,11 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [openAddFromFamily, setOpenAddFromFamily] = useState(false)
   const [filter, setFilter] = useState<FeedFilter>(() => savedPresentation?.filter ?? 'all')
   const [selectedMembershipEpoch, setSelectedMembershipEpoch] = useState<number | null>(() => savedPresentation?.membershipEpoch ?? null)
+  const lastSelectedRole = useRef<{ familyId: string; epoch: number; role: 'full' | 'viewer' } | null>(null)
+  const roleRefreshVersion = useRef(0)
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
+  const [dismissedInviteToken, setDismissedInviteToken] = useState<string | null>(null)
   const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
   const maxVideoPendingRef = useRef(maxVideoUploadAcceptance)
@@ -284,6 +287,15 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       if (version !== homeRefreshVersion.current) return null
       homeRef.current = result
       setHome(result)
+      const selectedFamilyId = selectedFamilyIdRef.current
+      const selectedSummary = selectedFamilyId
+        ? result.items.find((item) => item.familyId === selectedFamilyId)
+        : undefined
+      if (selectedSummary) {
+        setMembers((current) => current.map((member) => member.userId === currentUserId
+          ? { ...member, role: selectedSummary.role, isOwner: selectedSummary.isOwner }
+          : member))
+      }
       return result
     } catch {
       if (version !== homeRefreshVersion.current) return null
@@ -299,7 +311,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     } finally {
       if (version === homeRefreshVersion.current) setHomeLoading(false)
     }
-  }, [transport])
+  }, [currentUserId, transport])
 
   useEffect(() => {
     const queue = new SeenBatchQueue(currentUserId, transport,
@@ -380,6 +392,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       setSelectedMembershipEpoch(summary.membershipEpoch)
       setMembers(nextMembers.items)
       setInvites(nextInvites.items)
+      lastSelectedRole.current = { familyId, epoch: summary.membershipEpoch, role: summary.role }
       setScreen(response.child ? 'feed' : 'family')
     } catch (reason) {
       if (version !== selectionVersion.current) return
@@ -399,6 +412,30 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     }
   }, [currentUserId, queryClient, refreshHome, transport])
 
+  useEffect(() => {
+    const familyId = selectedFamilyIdRef.current
+    if (!familyId || selectedMembershipEpoch === null || !home) {
+      lastSelectedRole.current = null
+      return
+    }
+    const summary = home.items.find((item) => item.familyId === familyId)
+    if (!summary) return
+    const previous = lastSelectedRole.current
+    const next = { familyId, epoch: selectedMembershipEpoch, role: summary.role }
+    lastSelectedRole.current = next
+    if (!previous || previous.familyId !== familyId || previous.epoch !== selectedMembershipEpoch || previous.role === summary.role) return
+    const roleRefresh = ++roleRefreshVersion.current
+    // Project the current role immediately, then replace stale member versions from the server.
+    setMembers((current) => current.map((member) => member.userId === currentUserId
+      ? { ...member, role: summary.role, isOwner: summary.isOwner }
+      : member))
+    const selection = selectionVersion.current
+    void loadFamilyMembers(transport, familyId).then((response) => {
+      if (selectedFamilyIdRef.current !== familyId || selectionVersion.current !== selection || roleRefreshVersion.current !== roleRefresh) return
+      setMembers(response.items)
+    }).catch(() => undefined)
+  }, [currentUserId, home, selectedMembershipEpoch, transport])
+
   const returnHome = useCallback((message?: string, revokedFamilyId?: string) => {
     if (revokedFamilyId) {
       const updated = homeRef.current && { ...homeRef.current, items: homeRef.current.items.filter((item) => item.familyId !== revokedFamilyId) }
@@ -410,6 +447,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     surfaceScroll.current = { feed: 0, family: 0 }
     selectedFamilyIdRef.current = null
     setSelectedMembershipEpoch(null)
+    lastSelectedRole.current = null
     setFamilyResponse(null)
     setMembers([])
     setInvites([])
@@ -445,31 +483,35 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     return () => window.removeEventListener(privateFamilyAccessRevokedEvent, onFamilyAccessRevoked)
   }, [currentUserId, queryClient, returnHome])
 
-  const refreshSelected = useCallback(async () => {
+  const refreshSelected = useCallback(async (options?: { failureMode?: 'global' | 'throw' }) => {
     const familyId = familyResponse?.family.id
-    if (!familyId) return
+    if (!familyId || selectedFamilyIdRef.current !== familyId) return
     const version = selectionVersion.current
+    const isCurrentSelection = () => selectedFamilyIdRef.current === familyId && version === selectionVersion.current
     try {
       const response = await loadFamily(transport, familyId)
-      if (version !== selectionVersion.current) return
+      if (!isCurrentSelection()) return
       setFamilyResponse(response)
       if (response.child) {
         const [nextMembers, nextInvites] = await Promise.all([
           loadFamilyMembers(transport, familyId),
           loadFamilyInvites(transport, familyId).catch(() => ({ items: [] as FamilyInviteDto[] })),
         ])
-        if (version !== selectionVersion.current) return
+        if (!isCurrentSelection()) return
         setMembers(nextMembers.items)
         setInvites(nextInvites.items)
       }
     } catch (reason) {
-      if (version !== selectionVersion.current) return
+      if (!isCurrentSelection()) return
       if (reason instanceof ApiRequestError && [403, 404].includes(reason.status)) returnHome('Доступ к этой семье закрыт.', familyId)
-      else setNotice('Не удалось обновить семью. Повторите попытку.')
+      else setNotice(options?.failureMode === 'throw'
+        ? 'Изменения сохранены, но данные семьи не удалось обновить.'
+        : 'Не удалось обновить семью. Повторите попытку.')
+      if (options?.failureMode === 'throw') throw reason
     }
   }, [familyResponse?.family.id, returnHome, transport])
 
-  const refreshSelectedEvent = useEffectEvent(refreshSelected)
+  const refreshSelectedEvent = useEffectEvent((options?: { failureMode?: 'global' | 'throw' }) => refreshSelected(options))
 
   useEffect(() => {
     const familyId = selectedFamilyIdRef.current
@@ -522,7 +564,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         if (cancelled) return
       }
       setWelcomeGateComplete(true)
-      if (inviteToken) {
+      if (inviteToken && inviteToken !== dismissedInviteToken) {
         try {
           const preview = await previewInvite(transport, inviteToken)
           if (cancelled) return
@@ -589,7 +631,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       welcomeResolve.current = null
       resolve?.()
     }
-  }, [currentUserId, hostBridge.kind, installIntent, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
+  }, [currentUserId, dismissedInviteToken, hostBridge.kind, installIntent, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
 
   const loadMore = async () => {
     if (!home?.nextCursor || loadingMore) return
@@ -641,7 +683,17 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (welcomeVisible) return <WelcomeSplash onComplete={finishWelcome} />
   if (welcomeClaimError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><BrandLogo className="w-[148px]" /><div className="mt-8"><InlineError onRetry={() => { setWelcomeClaimError(false); setWelcomeClaimRetry((count) => count + 1) }} /></div></main>
   if (!welcomeGateComplete || invitePending) return <BootPreloader style={insetsStyle} />
-  if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onRetry={async () => {
+  if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onMyFamilies={() => {
+    if (inviteToken) setDismissedInviteToken(inviteToken)
+    setInviteIssue(null)
+    setInvitePreview(null)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('startapp')
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+    returnHome()
+  }} onRetry={async () => {
     setInviteIssue(null)
     setInvitePending(true)
     try { setInvitePreview(await previewInvite(transport, inviteToken ?? '')) }

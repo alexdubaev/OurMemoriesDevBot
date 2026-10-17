@@ -22,31 +22,35 @@ export function buildInvitePayload(role: Role, inviteeDisplayName: string) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- tested invitation submit contract.
-export function submitInvite(busy: boolean, role: Role, inviteeDisplayName: string, onCreate: (role: Role, inviteeDisplayName?: string) => Promise<void>) {
+export function submitInvite(busy: boolean, role: Role, inviteeDisplayName: string, onCreate: (role: Role, inviteeDisplayName?: string, idempotencyKey?: string) => Promise<void>, idempotencyKey?: string) {
   if (busy) return undefined
   const payload = buildInvitePayload(role, inviteeDisplayName)
-  return onCreate(payload.role, payload.inviteeDisplayName)
+  return onCreate(payload.role, payload.inviteeDisplayName, idempotencyKey)
 }
 
-function InvitationHeader({ title, onBack }: { title: string; onBack?: () => void }) {
+function InvitationHeader({ title, onBack, backDisabled = false }: { title: string; onBack?: () => void; backDisabled?: boolean }) {
   return <div className="invitation-header">
-    {onBack ? <button aria-label="Назад" className="invitation-back" onClick={onBack} type="button"><WebpIcon decorative name="chevron" size={22} /></button> : <span />}
+    {onBack ? <button aria-label="Назад" className="invitation-back" disabled={backDisabled} onClick={onBack} type="button"><WebpIcon decorative name="chevron" size={22} /></button> : <span />}
     <h1>{title}</h1><span />
   </div>
 }
 
-export function InviteFlow({ busy, errorMessage, hasError, onBack, onCreate, onRefresh }: { busy: boolean; errorMessage?: string | null; hasError: boolean; onBack: () => void; onCreate: (role: Role, inviteeDisplayName?: string) => Promise<void>; onRefresh: () => void }) {
+export function InviteFlow({ busy, errorMessage, hasError, onBack, onCreate, onRefresh }: { busy: boolean; errorMessage?: string | null; hasError: boolean; onBack: () => void; onCreate: (role: Role, inviteeDisplayName?: string, idempotencyKey?: string) => Promise<void>; onRefresh: () => void }) {
   const [role, setRole] = useState<Role>('viewer')
   const [name, setName] = useState('')
   const submitting = useRef(false)
+  const operation = useRef<{ payload: string; key: string } | null>(null)
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (busy || submitting.current) return
     submitting.current = true
-    void Promise.resolve(submitInvite(busy, role, name, onCreate)).finally(() => { submitting.current = false })
+    const payload = buildInvitePayload(role, name)
+    const payloadKey = JSON.stringify(payload)
+    if (operation.current?.payload !== payloadKey) operation.current = { payload: payloadKey, key: crypto.randomUUID() }
+    void Promise.resolve(submitInvite(busy, role, name, onCreate, operation.current.key)).finally(() => { submitting.current = false })
   }
   return <section aria-label="Пригласить родственника" className="invitation-screen invitation-create">
-    <InvitationHeader onBack={onBack} title="Пригласить родственника" />
+    <InvitationHeader backDisabled={busy} onBack={() => { if (busy || submitting.current) return; operation.current = null; onBack() }} title="Пригласить родственника" />
     <p className="invitation-hint">Имя можно заполнить заранее или оставить пустым.</p>
     {errorMessage ? <p className="invitation-alert" role="alert">{errorMessage}</p> : hasError ? <div className="invitation-alert"><InlineError onRetry={onRefresh} /></div> : null}
     <form onSubmit={handleSubmit}>
@@ -100,8 +104,8 @@ export function IncomingInvite({ preview, style, onAccept }: { preview: InvitePr
 
 const terminalCodes = new Set(['OTHER_FAMILY', 'ALREADY_IN_FAMILY', 'INVITE_EXPIRED', 'INVITE_REVOKED', 'INVITE_USED', 'NOT_FOUND'])
 
-export function IncomingInviteIssue({ code, onRetry, style }: { code: string; onRetry: () => Promise<void>; style: CSSProperties }) {
+export function IncomingInviteIssue({ code, onRetry, onMyFamilies, style }: { code: string; onRetry: () => Promise<void>; onMyFamilies: () => void; style: CSSProperties }) {
   const [busy, setBusy] = useState(false)
   const title = code === 'INVITE_EXPIRED' ? 'Ссылка устарела' : code === 'INVITE_REVOKED' ? 'Приглашение отозвано' : code === 'OTHER_FAMILY' || code === 'ALREADY_IN_FAMILY' ? 'Вы уже в семье' : 'Приглашение недоступно'
-  return <main className="invitation-screen invitation-incoming" style={style}><BrandLogo className="invitation-brand" /><div className="invitation-result-symbol" aria-hidden="true"><WebpIcon decorative name="lock" size={40} /></div><h2>{title}</h2><p className="invitation-result-copy">{inviteIssueMessage(code)}</p>{!terminalCodes.has(code) ? <button className="invitation-primary" disabled={busy} onClick={() => { setBusy(true); void onRetry().finally(() => setBusy(false)) }} type="button">{busy ? 'Проверяем…' : 'Повторить'}</button> : null}</main>
+  return <main className="invitation-screen invitation-incoming" style={style}><BrandLogo className="invitation-brand" /><div className="invitation-result-symbol" aria-hidden="true"><WebpIcon decorative name="lock" size={40} /></div><h2>{title}</h2><p className="invitation-result-copy">{inviteIssueMessage(code)}</p>{!terminalCodes.has(code) ? <button className="invitation-primary" disabled={busy} onClick={() => { setBusy(true); void onRetry().finally(() => setBusy(false)) }} type="button">{busy ? 'Проверяем…' : 'Повторить'}</button> : null}<button className="invitation-secondary" onClick={onMyFamilies} type="button">Мои семьи</button></main>
 }

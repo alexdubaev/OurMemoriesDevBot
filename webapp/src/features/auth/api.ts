@@ -123,8 +123,8 @@ export class AuthApi {
       options.signal?.throwIfAborted()
       const data = await this.exchangeMaxWithStaleCookieRecovery(payload, options, attemptEpoch)
       ensureHostAuthAttemptCurrent(options)
-      this.options.setAccessToken(data.accessToken)
       const sessionEvent = publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return { data, sessionEpoch: sessionEvent.epoch }
     }, { timeoutMs: 15000, signal: options.signal })
   }
@@ -237,8 +237,8 @@ export class AuthApi {
       const data = await this.http.request(`/api/v1/auth/browser-link/${challengeId}/redeem`, cookieAuthResponseSchema, {
         method: 'POST',
       })
-      this.options.setAccessToken(data.accessToken)
       publishBrowserSessionState('authenticated')
+      this.options.setAccessToken(data.accessToken)
       return data
     })
   }
