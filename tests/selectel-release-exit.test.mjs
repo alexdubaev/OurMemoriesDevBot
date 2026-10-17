@@ -256,6 +256,25 @@ function runtimeFingerprint(cwd, revision) {
   return createHash('sha256').update(kept.join('\0') + '\0').digest('hex')
 }
 
+function productionRuntimeFingerprint(cwd) {
+  const result = spawnSync('bash', ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(cwd)}\nrollback_runtime_fingerprint HEAD\n`,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  return result.stdout.trim().split('\n').at(-1)
+}
+
+function gitFixtureCommit(cwd, message) {
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  for (const args of [['init', '--quiet'], ['add', '.'], ['commit', '--quiet', '-m', message]]) {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  }
+}
+
 function rollbackSource(role) {
 	if (fixtureSourceCache.has(role)) return fixtureSourceCache.get(role)
   const expected = runtimeFingerprints[role]
@@ -356,7 +375,7 @@ function runApplicationRollback(options = {}) {
     'activate_gateway() { cp "$EDGE_CANDIDATE" "$SERVER_EDGE_CADDYFILE"; echo GATE >> "$FIXTURE_EVENTS"; }',
     'curl() {',
     ' if [[ "$*" == *"/api/v1/auth/max"* ]]; then',
-    '  if [ -n "$FIXTURE_AUTH_RESPONSE" ]; then printf "%s" "$FIXTURE_AUTH_RESPONSE"; elif grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 405; fi',
+    '  if [ -n "$FIXTURE_AUTH_RESPONSE" ]; then printf "%s" "$FIXTURE_AUTH_RESPONSE"; elif grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 404; fi',
     ' fi',
     ' return 0',
     '}',
@@ -393,6 +412,41 @@ test('rollback-readiness runs the attestation without changing services or gatew
   assert.match(result.output, /readiness verified; no services were changed/)
   assert.doesNotMatch(result.events, /UP:|GATE/)
   assert.equal(result.caddy, 'before\n')
+})
+
+test('runtime fingerprint excludes only the declared test-support files', () => {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'runtime-fingerprint-'))
+  try {
+    for (const [path, body] of [
+      ['backend/src/app.ts', 'export const app = 1\n'],
+      ['backend/scripts/real.test.ts', 'export const test = 1\n'],
+      ['backend/scripts/test-support/probe.mjs', 'export const support = 1\n'],
+      ['backend/scripts/test-integration.mjs', 'export const integration = 1\n'],
+      ['backend/scripts/real.test.ts.production', 'export const production = 1\n'],
+      ['webapp/src/app.ts', 'export const web = 1\n'],
+      ['packages/contracts/index.ts', 'export const contract = 1\n'],
+      ['package.json', '{}\n'], ['bun.lock', 'lock\n'], ['bunfig.toml', '[install]\n'],
+    ]) {
+      const pathOnDisk = resolve(fixture, path)
+      mkdirSync(resolve(pathOnDisk, '..'), { recursive: true })
+      writeFileSync(pathOnDisk, body)
+    }
+    gitFixtureCommit(fixture, 'initial runtime fixture')
+    const initial = productionRuntimeFingerprint(fixture)
+
+    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts'), 'export const test = 2\n')
+    writeFileSync(resolve(fixture, 'backend/scripts/test-support/probe.mjs'), 'export const support = 2\n')
+    writeFileSync(resolve(fixture, 'backend/scripts/test-integration.mjs'), 'export const integration = 2\n')
+    gitFixtureCommit(fixture, 'change excluded test support')
+    assert.equal(productionRuntimeFingerprint(fixture), initial)
+
+    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts.production'), 'export const production = 2\n')
+    gitFixtureCommit(fixture, 'change runtime-shaped test filename')
+    assert.notEqual(productionRuntimeFingerprint(fixture), initial)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {

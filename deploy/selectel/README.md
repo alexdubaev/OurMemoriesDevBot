@@ -398,14 +398,17 @@ forward-recovery release flow instead.
 The guarded rollback supports two exact measured backend + webapp pairs:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image
-  IDs pinned in `verify_application_rollback` and the runtime fingerprint
+  IDs pinned in `verify_application_rollback`, target fingerprint
+  `b12190f9bd6e568b544d89d4c4beec8198ad7626b03bdd9164cf76890d440a4e`, and
+  source fingerprint `3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857`
   measured from integration `d4b69a5ce73a03eceb632f23fb9eb17801343ff9`.
 - `3fce2739205da927b95eb3379b1d066b61282965` (#180), with backend image ID
   `sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c`,
   webapp image ID
   `sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66`,
-  and the runtime fingerprint measured from candidate
-  `39e8af7bb9e9a5949ada3c32dad31d38f9439505`.
+  target fingerprint `3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857`,
+  and source fingerprint `5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107`
+  measured from candidate `39e8af7bb9e9a5949ada3c32dad31d38f9439505`.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
@@ -433,8 +436,9 @@ The legacy `e383…` runtime reintroduces F12 for newly issued browser sessions.
 exact pair first installs and verifies a temporary gateway maintenance gate:
 `/api/v1/auth/*` returns 503 except `me` and `logout`, then restores backend,
 worker, scheduler and static. The measured #180 pair uses normal authentication
-routing after its gateway response is verified. Gate policy is derived from the
-validated pair and cannot be selected by an operator environment variable.
+routing after a read-only `GET /api/v1/auth/max` returns the expected 404.
+Gate policy is derived from the validated pair and cannot be selected by an
+operator environment variable.
 
 After deployment, `bash deploy/selectel/redeploy.sh rollback-readiness` runs the
 same locked, read-only compatibility check without promoting or restoring services.

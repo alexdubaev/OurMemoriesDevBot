@@ -693,7 +693,7 @@ rollback_runtime_fingerprint() {
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
 		ls-tree -rz --full-tree --format='%(objectmode) %(objecttype) %(objectname)%x09%(path)' "$revision" -- \
 		backend webapp packages package.json bun.lock bunfig.toml |
-		grep -zEv $'\tbackend/scripts/([^/]+\\.test\\.ts|test-support/|test-integration\\.mjs)' |
+		grep -zEv $'\tbackend/scripts/([^/]+\\.test\\.ts$|test-support/|test-integration\\.mjs$)' |
 		sha256sum | awk '{print $1}'
 }
 
@@ -716,6 +716,8 @@ rollback_auth_gate_for_verified_pair() {
 	[[ "${MEMOLY_PRODUCT_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
 	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse HEAD)" = "$MEMOLY_PRODUCT_SHA" ] ||
 		die 'rollback source differs from the checked-out release'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
+		die 'rollback source is outside the exact target release lineage'
 	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	printf '%s\n' "$gate"
@@ -764,6 +766,8 @@ verify_application_rollback() {
 	done
 	[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse HEAD)" = "$MEMOLY_PRODUCT_SHA" ] ||
 		die 'rollback source differs from the checked-out release'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
+		die 'rollback source is outside the exact target release lineage'
 	local source_status
 	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
 	[ -z "$source_status" ] ||
@@ -842,7 +846,7 @@ rollback() {
 	if [ "$gate_policy" = true ]; then
 		[ "$gate_status" = 503 ] || die 'rollback authentication maintenance is not active'
 	else
-		[ "$gate_status" = 405 ] || die 'normal authentication routing is not active for the verified rollback target'
+		[ "$gate_status" = 404 ] || die 'normal authentication routing is not active for the verified rollback target'
 	fi
 	compose up -d --no-deps --force-recreate backend worker scheduler static ||
 		die 'application rollback service promotion failed'
