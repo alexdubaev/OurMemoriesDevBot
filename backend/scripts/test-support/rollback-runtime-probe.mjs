@@ -48,9 +48,10 @@ async function request(path, token, method = 'GET', body, cookie) {
   const text = await response.text()
   return { response, status: response.status, body: text ? JSON.parse(text) : null }
 }
-const signed = (id) => {
+const signed = (id, startParam) => {
   const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)),
     query_id: randomUUID(), user: JSON.stringify({ id, first_name: 'Synthetic rollback' }) })
+  if (startParam) params.set('start_param', startParam)
   const check = [...params].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + v).join('\n')
   const secret = createHmac('sha256', 'WebAppData').update(botToken).digest()
   params.set('hash', createHmac('sha256', secret).update(check).digest('hex'))
@@ -84,8 +85,16 @@ async function invite(owner, target, fam, role) {
 }
 const note = (who, fam, text) => request('/families/' + fam.id + '/memories', who.token, 'POST',
   { kind: 'note', childId: fam.childId, body: text, occurredAt: '2026-10-01T10:00:00.000Z' })
+const assertVideoMemory = async (id, familyId, token, caption, referenceId) => {
+  const result = await request('/families/' + familyId + '/memories/' + id, token)
+  equal(result.status, 200)
+  equal(result.body.memory.body, caption)
+  equal(result.body.memory.attachments.map(({ id: attachmentId, source, kind }) => ({ id: attachmentId, source, kind })),
+    [{ id: referenceId, source: 'max', kind: 'video' }])
+}
 try {
-  if (phase === 'new') {
+  if (phase === 'new' || phase === 'candidate-new') {
+    const attested = phase === 'candidate-new'
     const baseId = Date.now()
     const owner = await actor(baseId)
     const independent = await actor(baseId)
@@ -96,7 +105,7 @@ try {
     const second = await family(secondOwner)
     await invite(secondOwner, owner, second, 'full')
     await invite(owner, viewer, first, 'viewer')
-    const initialNote = await note(owner, first, 'new version note')
+    const initialNote = await note(owner, first, attested ? 'Кандидат: заметка с точной подписью' : 'new version note')
     equal(initialNote.status, 201)
     equal((await note(owner, second, 'new full-role note')).status, 201)
     equal((await note(viewer, first, 'denied')).status, 403)
@@ -109,9 +118,17 @@ try {
     equal((await request('/families/' + first.id + '/uploads/' + reserved.body.upload.uploadId + '/finalize',
       owner.token, 'POST')).status, 200)
     const photo = await request('/families/' + first.id + '/memories', owner.token, 'POST',
-      { kind: 'photo', childId: first.childId, body: '', occurredAt: '2026-10-01T10:00:00.000Z',
+      { kind: 'photo', childId: first.childId, body: attested ? 'Фото: подпись ✓' : '', occurredAt: '2026-10-01T10:00:00.000Z',
         mediaIds: [reserved.body.assetId] })
     equal(photo.status, 201)
+    let video, videoReference, videoCaption
+    if (attested) {
+      videoCaption = 'Видео MAX: подпись сохранена точно — ёжик 🦔'
+      video = await prisma.memory.create({ data: { familyId: first.id, childId: first.childId, authorId: owner.id,
+        kind: 'video', body: videoCaption, occurredAt: new Date('2026-10-01T10:00:00.000Z'), status: 'published' } })
+      videoReference = await prisma.maxVideoReference.create({ data: { familyId: first.id, memoryId: video.id,
+        attachmentPosition: 0, providerAttachmentId: 'synthetic-max-video-' + randomUUID(), width: 320, height: 240, durationMs: 3000 } })
+    }
     const playback = await request('/families/' + first.id + '/media/playback-session', owner.token, 'POST', {})
     equal(playback.status, 204)
     const mediaCookie = playback.response.headers.get('set-cookie').split(';')[0]
@@ -124,7 +141,8 @@ try {
     await enqueueTask(prisma, { type: 'rollback:publish', dedupeKey: queued.memoryId, payload: queued },
       { 'rollback:publish': { run: async () => {} } })
     const state = { owner, independent, viewer, outsider, first, second, queued,
-      initialNoteId: initialNote.body.id, photoId: photo.body.id, mediaPath, mediaCookie }
+      initialNoteId: initialNote.body.id, photoId: photo.body.id, ...(video && { videoId: video.id, videoCaption,
+        videoReferenceId: videoReference.id }), mediaPath, mediaCookie }
     writeFileSync(stateFile, JSON.stringify(state))
   } else {
     const state = JSON.parse(readFileSync(stateFile, 'utf8'))
@@ -133,14 +151,102 @@ try {
     equal(hub.status, 200)
     equal(hub.body.items.length, 2)
     equal(hub.body.items.every((item) => item.unreadState === 'ready'), true)
-    equal((await request('/families/' + first.id + '/memories/' + state.initialNoteId, viewer.token)).status, 200)
+    const noteResult = await request('/families/' + first.id + '/memories/' + state.initialNoteId, viewer.token)
+    equal(noteResult.status, 200)
+    equal(noteResult.body.memory.body, state.videoId ? 'Кандидат: заметка с точной подписью' : 'new version note')
+    const photoResult = await request('/families/' + first.id + '/memories/' + state.photoId, independent.token)
+    equal(photoResult.status, 200)
+    if (state.videoId) {
+      equal(photoResult.body.memory.body, 'Фото: подпись ✓')
+      await assertVideoMemory(state.videoId, first.id, independent.token, state.videoCaption, state.videoReferenceId)
+    }
     equal((await request('/families/' + first.id + '/memories', outsider.token)).status, state.outsiderAdmitted ? 200 : 404)
     equal((await request('/auth/me', owner.token)).status, 401)
     equal((await request('/auth/me', independent.token)).status, 200)
     equal((await app.request(state.mediaPath, { headers: { Cookie: state.mediaCookie } })).status, 401)
     equal((await app.request(state.mediaPath, { headers: { Authorization: 'Bearer ' + independent.token } })).status, 200)
     equal((await note(viewer, first, 'still denied')).status, 403)
-    if (phase === 'old') {
+    if (phase === 'candidate-old') {
+      const maxA = Date.now() + 100
+      const maxB = maxA + 1
+      const maxC = maxA + 2
+      const maxD = maxA + 3
+      const aFirst = await actor(maxA)
+      const aIndependent = await actor(maxA)
+      const sessionFor = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).sessionId
+      const replacedSessionId = sessionFor(aFirst.token)
+      const independentSessionId = sessionFor(aIndependent.token)
+      equal(replacedSessionId !== independentSessionId, true)
+      const b = await actor(maxB, aFirst.cookie)
+      equal((await request('/auth/me', aFirst.token)).status, 401)
+      equal((await request('/auth/me', aIndependent.token)).status, 200)
+      equal((await request('/auth/me', b.token)).status, 200)
+      const replacedSession = await prisma.authSession.findUniqueOrThrow({ where: { id: replacedSessionId } })
+      equal(replacedSession.revokedAt !== null, true)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: independentSessionId } })).revokedAt, null)
+      const bSession = await prisma.authSession.findFirstOrThrow({ where: { userId: b.id, revokedAt: null } })
+      equal(bSession.id !== replacedSessionId && bSession.id !== independentSessionId, true)
+
+      const revokedCookieAttempt = await request('/auth/max', null, 'POST', { initData: signed(maxC) }, aFirst.cookie)
+      equal(revokedCookieAttempt.status, 401)
+      equal(revokedCookieAttempt.response.headers.get('set-cookie'), null)
+      const recoveredC = await actor(maxC)
+      equal((await request('/auth/me', recoveredC.token)).status, 200)
+      const malformedCookieAttempt = await request('/auth/max', null, 'POST', { initData: signed(maxD) }, 'web_app_demo_refresh=malformed')
+      equal(malformedCookieAttempt.status, 401)
+      equal(malformedCookieAttempt.response.headers.get('set-cookie'), null)
+      const recoveredD = await actor(maxD)
+      equal((await request('/auth/me', recoveredD.token)).status, 200)
+
+      const browserId = Date.now() + 200
+      const approverId = browserId + 1
+      const browser = await actor(browserId)
+      const approver = await actor(approverId)
+      const browserSession = await prisma.authSession.findFirstOrThrow({ where: { userId: browser.id, revokedAt: null } })
+      const approverSession = await prisma.authSession.findFirstOrThrow({ where: { userId: approver.id, revokedAt: null } })
+      const start = await app.request('/api/v1/auth/browser-link/start', { method: 'POST', headers: { Origin: 'http://localhost:5173' } })
+      equal(start.status, 200)
+      const challenge = await start.json()
+      const verifierCookie = start.headers.get('set-cookie').split(';')[0]
+      const approve = await app.request('/api/v1/auth/browser-link/' + challenge.challengeId + '/approve', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + approver.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: true, initData: signed(approverId, challenge.startParam) }),
+      })
+      equal(approve.status, 200)
+      const redeemed = await app.request('/api/v1/auth/browser-link/' + challenge.challengeId + '/redeem', {
+        method: 'POST', headers: { Origin: 'http://localhost:5173', Cookie: verifierCookie + '; ' + browser.cookie },
+      })
+      equal(redeemed.status, 200)
+      const linked = await redeemed.json()
+      equal((await request('/auth/me', browser.token)).status, 401)
+      equal((await request('/auth/me', approver.token)).status, 200)
+      equal((await request('/auth/me', aIndependent.token)).status, 200)
+      equal((await request('/auth/me', linked.accessToken)).status, 200)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: browserSession.id } })).revokedAt !== null, true)
+      equal((await prisma.authSession.findUniqueOrThrow({ where: { id: approverSession.id } })).revokedAt, null)
+      equal((await prisma.authSession.findMany({ where: { userId: approver.id, revokedAt: null } })).length, 1)
+      equal(await prisma.authSession.count({ where: { userId: browser.id, revokedAt: null } }), 1)
+      const written = await note(independent, second, 'old version full-role write')
+      equal(written.status, 201)
+      state.oldNoteId = written.body.id
+      const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
+      const sessionId = sessionFor(independent.token)
+      const drained = await drainTaskOutbox({ prisma }, { handlers: { 'rollback:publish': { run: async ({ payload }) => {
+        await publisher.publish({ familyId: payload.familyId, principal: { userId: payload.authorId, sessionId } },
+          { id: payload.memoryId, childId: payload.childId, kind: 'note', body: 'old worker publication',
+            occurredAt: new Date('2026-10-01'), sourcePublishedAt: new Date(), mediaIds: [] })
+      } } } })
+      equal(drained.done, 1)
+      equal((await prisma.memory.findUniqueOrThrow({ where: { id: state.queued.memoryId } })).status, 'published')
+      await invite(independent, outsider, first, 'viewer')
+      equal((await request('/families/' + first.id + '/memories', outsider.token)).status, 200)
+      equal((await note(outsider, first, 'still viewer')).status, 403)
+      equal((await request('/families/' + first.id + '/memories/seen', viewer.token, 'POST', {
+        memoryIds: [state.initialNoteId, state.photoId, ...(state.videoId ? [state.videoId] : []), state.queued.memoryId], expectedMembershipEpoch: 1 })).status, 204)
+      equal((await request('/me/families', viewer.token)).body.items[0].unreadCount, 0)
+      state.outsiderAdmitted = true
+      writeFileSync(stateFile, JSON.stringify(state))
+    } else if (phase === 'old') {
       const written = await note(independent, second, 'old version full-role write')
       equal(written.status, 201)
       state.oldNoteId = written.body.id
@@ -158,7 +264,7 @@ try {
       // That participant is now legitimately admitted; retain a separate denied-viewer write check.
       equal((await note(outsider, first, 'still viewer')).status, 403)
       equal((await request('/families/' + first.id + '/memories/seen', viewer.token, 'POST', {
-        memoryIds: [state.initialNoteId, state.photoId, state.queued.memoryId], expectedMembershipEpoch: 1 })).status, 204)
+        memoryIds: [state.initialNoteId, state.photoId, ...(state.videoId ? [state.videoId] : []), state.queued.memoryId], expectedMembershipEpoch: 1 })).status, 204)
       const viewerHub = await request('/me/families', viewer.token)
       equal(viewerHub.body.items[0].unreadCount, 0)
       state.outsiderAdmitted = true
@@ -166,8 +272,9 @@ try {
     } else {
       equal((await request('/families/' + second.id + '/memories/' + state.oldNoteId, independent.token)).status, 200)
       equal((await prisma.taskOutbox.findFirstOrThrow({ where: { dedupeKey: state.queued.memoryId } })).status, 'done')
-      equal(await prisma.memorySeen.count({ where: { userId: viewer.id, familyId: first.id } }), 3)
+      equal(await prisma.memorySeen.count({ where: { userId: viewer.id, familyId: first.id } }), state.videoId ? 4 : 3)
       equal((await request('/me/families', viewer.token)).body.items[0].unreadCount, 0)
+      if (state.videoId) await assertVideoMemory(state.videoId, first.id, independent.token, state.videoCaption, state.videoReferenceId)
     }
     const published = await prisma.memory.findMany({ where: { familyId: first.id, firstPublishedOrdinal: { not: null } } })
     equal(new Set(published.map((memory) => String(memory.firstPublishedOrdinal))).size, published.length)
