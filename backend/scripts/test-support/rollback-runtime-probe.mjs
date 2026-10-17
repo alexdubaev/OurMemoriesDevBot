@@ -15,6 +15,11 @@ const { pngFixture } = await load('storage/storage-contract.ts')
 const { enqueueTask, drainTaskOutbox } = await load('outbox/index.ts')
 const { createSourceMemoryPublisher } = await load('modules/memories/infrastructure/source-memory-publisher.ts')
 const { createPrismaFamilyAccess } = await load('modules/families/infrastructure/family-access.ts')
+const { createMaxAcceptUpdate } = await load('modules/max/application/accept-update.ts')
+const { createMaxPayloadCrypto } = await load('modules/max/infrastructure/payload-crypto.ts')
+const { PrismaMaxRepository } = await load('modules/max/infrastructure/prisma-max-repository.ts')
+const { createMaxTaskProcessor } = await load('modules/max/infrastructure/process-task.ts')
+const { MaxProviderError } = await load('modules/max/infrastructure/max-api.ts')
 const databaseUrl = process.env.TEST_DATABASE_URL
 const address = new URL(databaseUrl)
 assert.equal(process.env.DATABASE_URL, databaseUrl)
@@ -72,6 +77,45 @@ async function sessionFromMaxReplay(actor) {
   const replay = await prisma.maxAuthReplay.findUniqueOrThrow({ where: { fingerprintHash }, select: { sessionId: true } })
   return replay.sessionId
 }
+async function captureSyntheticMaxVideo(owner, familyRecord, senderId, caption) {
+  const providerAttachmentId = 'synthetic-max-video-' + randomUUID()
+  const originalMessageId = 'rollback-original-' + randomUUID()
+  const outerMessageId = 'rollback-forward-' + randomUUID()
+  const originalTimestamp = Date.parse('2026-10-01T10:00:00.000Z')
+  const event = {
+    kind: 'message_created', senderId: String(senderId), recipientId: '900', messageId: outerMessageId,
+    occurredAt: '2026-10-01T10:01:00.000Z', text: null, attachments: [],
+    forwardedFrom: { messageId: originalMessageId, timestamp: originalTimestamp,
+      attachments: [{ kind: 'video', providerAttachmentId, durationSeconds: 3, width: 320, height: 240 }] },
+  }
+  const crypto = createMaxPayloadCrypto(env.MAX_INBOX_ENCRYPTION_KEY)
+  const accept = createMaxAcceptUpdate({ botId: '900', repository: new PrismaMaxRepository(prisma), encrypt: crypto.encrypt })
+  const accepted = await accept(event)
+  const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process', dedupeKey: 'max-process:' + accepted.inboxId } })
+  const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+  const processor = createMaxTaskProcessor({ runtime: { env, prisma }, crypto, api: {
+    getMessage: async (messageId) => {
+      if (messageId === originalMessageId) throw new MaxProviderError(undefined, false, 404, 'message_not_found')
+      return { messageId: outerMessageId, senderId: event.senderId, recipientId: event.recipientId,
+        recipientType: 'dialog', text: null, attachments: [],
+        forwardedFrom: { messageId: originalMessageId, timestamp: originalTimestamp },
+        forwardedAttachments: [{ kind: 'video', providerAttachmentId, currentToken: 'synthetic-video-token',
+          inboundDurationSeconds: 3, width: 320, height: 240 }], forwardedText: caption }
+    },
+    getVideo: async () => ({ width: 320, height: 240, durationMs: 3000, renditions: [{
+      url: 'https://maxvd123.okcdn.ru/synthetic.mp4', width: 320, height: 240, contentLength: 12,
+    }] }),
+  } })
+  equal(await processor(task.payload), 'done')
+  const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
+  const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })
+  equal(memory.familyId, familyRecord.id)
+  equal(memory.authorId, owner.id)
+  equal(memory.body, caption)
+  equal(memory.status, 'published')
+  equal(reference.providerAttachmentId, providerAttachmentId)
+  return { id: memory.id, referenceId: reference.id }
+}
 async function family(owner) {
   const created = await request('/families', owner.token, 'POST', { name: 'Synthetic family', timezone: 'Europe/Moscow' })
   equal(created.status, 201)
@@ -109,6 +153,11 @@ try {
     const viewer = await actor(baseId + 2)
     const outsider = await actor(baseId + 3)
     const first = await family(owner)
+    let video, videoCaption
+    if (attested) {
+      videoCaption = 'Видео MAX: первая строка\n\nПродолжение — ёжик 🦔'
+      video = await captureSyntheticMaxVideo(owner, first, baseId, videoCaption)
+    }
     const second = await family(secondOwner)
     await invite(secondOwner, owner, second, 'full')
     await invite(owner, viewer, first, 'viewer')
@@ -128,22 +177,6 @@ try {
       { kind: 'photo', childId: first.childId, body: attested ? 'Фото: подпись ✓' : '', occurredAt: '2026-10-01T10:00:00.000Z',
         mediaIds: [reserved.body.assetId] })
     equal(photo.status, 201)
-    let video, videoReference, videoCaption
-    if (attested) {
-      videoCaption = 'Видео MAX: первая строка\n\nПродолжение — ёжик 🦔'
-      const videoId = randomUUID()
-      const publisher = createSourceMemoryPublisher(prisma, createPrismaFamilyAccess(prisma))
-      const sessionId = await sessionFromMaxReplay(owner)
-      await publisher.publish({ familyId: first.id, principal: { userId: owner.id, sessionId } }, {
-        id: videoId, childId: first.childId, kind: 'video', body: videoCaption,
-        occurredAt: new Date('2026-10-01T10:00:00.000Z'), sourcePublishedAt: new Date('2026-10-01T10:00:00.000Z'),
-        mediaIds: [], externalAttachment: 'max-video',
-      }, async (tx, memoryId) => {
-        videoReference = await tx.maxVideoReference.create({ data: { familyId: first.id, memoryId,
-          attachmentPosition: 0, providerAttachmentId: 'synthetic-max-video-' + randomUUID(), width: 320, height: 240, durationMs: 3000 } })
-      })
-      video = { id: videoId }
-    }
     const playback = await request('/families/' + first.id + '/media/playback-session', owner.token, 'POST', {})
     equal(playback.status, 204)
     const mediaCookie = playback.response.headers.get('set-cookie').split(';')[0]
@@ -157,7 +190,7 @@ try {
       { 'rollback:publish': { run: async () => {} } })
     const state = { owner, independent, viewer, outsider, first, second, queued,
       initialNoteId: initialNote.body.id, photoId: photo.body.id, ...(video && { videoId: video.id, videoCaption,
-        videoReferenceId: videoReference.id }), mediaPath, mediaCookie }
+        videoReferenceId: video.referenceId }), mediaPath, mediaCookie }
     writeFileSync(stateFile, JSON.stringify(state))
   } else {
     const state = JSON.parse(readFileSync(stateFile, 'utf8'))
