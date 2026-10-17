@@ -45,10 +45,18 @@ export async function runBackendIntegration({
   spawn = spawnSync,
   writeError = (message) => process.stderr.write(`${message}\n`),
 } = {}) {
-  const discoveredTestFiles = integrationTestFiles ?? backendTestFiles(backendRoot).integration
+  const maxOnly = testArgs.includes('--max-only')
+  const selectedArgs = testArgs.filter((argument) => argument !== '--max-only')
+  const allIntegrationFiles = integrationTestFiles ?? backendTestFiles(backendRoot).integration
+  const discoveredTestFiles = maxOnly
+    ? selectMaxVerificationIntegration(allIntegrationFiles)
+    : allIntegrationFiles
   const selectedTestRun = discoveredTestFiles.length > 0
-    ? selectBackendTestRun(discoveredTestFiles, testArgs)
+    ? selectBackendTestRun(discoveredTestFiles, selectedArgs)
     : undefined
+  if (maxOnly && selectedTestRun) {
+    selectedTestRun.bunTestArgs.push('--test-name-pattern', '^(?!.*(?:Telegram|telegram)).*$')
+  }
 
   const managesDocker = environment.TEST_SKIP_DOCKER !== '1'
   if (!managesDocker && !environment.TEST_DATABASE_URL) {
@@ -77,11 +85,25 @@ export async function runBackendIntegration({
     const result = spawn(command, args, {
       cwd: options.cwd ?? backendRoot,
       env: options.env ?? environment,
-      stdio: options.stdio ?? 'inherit',
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: options.stdio ?? 'pipe',
     })
+
+    if (result.stdout) process.stdout.write(result.stdout)
+    if (result.stderr) process.stderr.write(result.stderr)
 
     if (result.status !== 0) {
       throw new CommandFailure(command, args, result.status ?? 1)
+    }
+    if (command === 'bun' && args[0] === 'test') {
+      const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+      const summary = parseBunSummary(output)
+      const testFile = args.at(-1)?.replaceAll('\\', '/')
+      const expectedFiltered = maxOnly ? expectedMaxHistoricalExclusions(testFile) : 0
+      if (!summary || summary.passed === 0 || summary.skipped !== 0 || summary.filtered !== expectedFiltered) {
+        throw new Error(`Required integration evidence invalid for ${testFile ?? '(unknown test file)'}: ${JSON.stringify(summary)}`)
+      }
     }
   }
 
@@ -165,7 +187,7 @@ export async function runBackendIntegration({
       throw new Error('No *.integration.test.* files found under backend/src or backend/scripts')
     }
     for (const testFile of selectedTestRun.testFiles) {
-      run('bun', ['test', testFile, ...withIntegrationDefaults(selectedTestRun.bunTestArgs)], { env })
+      run('bun', ['test', ...withIntegrationDefaults(selectedTestRun.bunTestArgs), testFile], { env })
     }
   } catch (error) {
     primaryFailure = error
@@ -185,6 +207,78 @@ export async function runBackendIntegration({
 
   if (primaryFailure) throw primaryFailure
 }
+
+export function expectedMaxHistoricalExclusions(testFile) {
+  return [
+    'src/modules/auth/max-auth.integration.test.ts',
+    'src/modules/families/family-access.integration.test.ts',
+  ].includes(testFile) ? 1 : 0
+}
+
+function parseBunSummary(output) {
+  const ran = [...output.matchAll(/Ran\s+\d+\s+tests?\s+across\s+\d+\s+files?\b[^\n]*/gi)].at(-1)
+  if (!ran) return null
+  const end = ran.index + ran[0].length
+  const before = output.slice(0, ran.index)
+  const pass = [...before.matchAll(/\b(\d+)\s+pass\b/gi)].at(-1)
+  if (!pass) return null
+  const block = output.slice(pass.index, end)
+  return {
+    passed: Number(pass[1]),
+    skipped: Number(block.match(/\b(\d+)\s+skip\b/i)?.[1] ?? 0),
+    filtered: Number(block.match(/\b(\d+)\s+filtered out\b/i)?.[1] ?? 0),
+  }
+}
+
+function isMaxVerificationIntegration(file) {
+  return [
+    'src/modules/auth/max-auth.integration.test.ts',
+    'src/db.integration.test.ts', 'src/outbox/outbox.integration.test.ts',
+    'src/modules/families/family-access.integration.test.ts',
+    'src/modules/families/family-review-fixes.integration.test.ts',
+    'src/modules/max/backup-media.integration.test.ts', 'src/modules/max/capture.integration.test.ts',
+    'src/modules/max/direct-video-upload.integration.test.ts', 'src/modules/max/forward-import.integration.test.ts',
+    'src/modules/max/media-flow.integration.test.ts', 'src/modules/media/media-access.integration.test.ts',
+    'src/modules/media/infrastructure/reservation-race.integration.test.ts',
+    'src/modules/uploads/uploads.integration.test.ts', 'src/modules/users/users.integration.test.ts',
+    'src/modules/memories/memories.integration.test.ts', 'src/modules/memories/unread.integration.test.ts',
+    'scripts/deploy-database.integration.test.ts', 'scripts/welcome-migration.integration.test.ts',
+    'scripts/block01-upgrade.integration.test.ts', 'scripts/block02-upgrade.integration.test.ts',
+    'scripts/block03-upgrade.integration.test.ts', 'scripts/block08-upgrade.integration.test.ts',
+    'scripts/mm4-upgrade.integration.test.ts', 'scripts/memory-reactions-upgrade.integration.test.ts',
+    'scripts/t0951-b4-upgrade.integration.test.ts', 'scripts/int1-max-upgrade.integration.test.ts',
+  ].includes(file)
+    || /^src\/modules\/auth\/max-[^/]+\.integration\.test\.ts$/.test(file)
+    || /^src\/modules\/max\/.*\.integration\.test\.ts$/.test(file)
+    || /^src\/modules\/families\/[^/]*max[^/]*\.integration\.test\.ts$/i.test(file)
+}
+
+export function selectMaxVerificationIntegration(allIntegrationFiles) {
+  const missing = requiredMaxVerificationFiles.filter((file) => !allIntegrationFiles.includes(file))
+  if (missing.length) throw new Error(`MAX verification catalog is incomplete; missing required integration files: ${missing.join(', ')}`)
+  return allIntegrationFiles.filter(isMaxVerificationIntegration)
+}
+
+const requiredMaxVerificationFiles = [
+  'src/modules/auth/max-auth.integration.test.ts',
+  'src/db.integration.test.ts',
+  'src/outbox/outbox.integration.test.ts',
+  'src/modules/families/family-access.integration.test.ts',
+  'src/modules/media/media-access.integration.test.ts',
+  'src/modules/uploads/uploads.integration.test.ts',
+  'src/modules/users/users.integration.test.ts',
+  'src/modules/max/media-flow.integration.test.ts',
+  'scripts/deploy-database.integration.test.ts',
+  'scripts/welcome-migration.integration.test.ts',
+  'scripts/block01-upgrade.integration.test.ts',
+  'scripts/block02-upgrade.integration.test.ts',
+  'scripts/block03-upgrade.integration.test.ts',
+  'scripts/block08-upgrade.integration.test.ts',
+  'scripts/mm4-upgrade.integration.test.ts',
+  'scripts/memory-reactions-upgrade.integration.test.ts',
+  'scripts/t0951-b4-upgrade.integration.test.ts',
+  'scripts/int1-max-upgrade.integration.test.ts',
+]
 
 function withIntegrationDefaults(bunTestArgs) {
   const defaults = [...bunTestArgs]

@@ -1,91 +1,327 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { readdirSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 
-const root = process.cwd()
-const testFileCount = (path, pattern) => {
-  const absolutePath = resolve(root, path)
-  if (statSync(absolutePath).isFile()) return pattern.test(path) ? 1 : 0
-  return readdirSync(absolutePath, { withFileTypes: true }).reduce((total, entry) => {
-    if (entry.isDirectory() && ['.artifacts', 'node_modules', 'dist', 'build'].includes(entry.name)) {
-      return total
+const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/|webapp\/src\/(?:App|main)\.tsx$|webapp\/src\/platform\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
+const CRITICAL_UI = /(^|\/)(auth|session|invite|family|media|storage|cache|offline|service-worker)(\/|\.|-)/i
+const STANDARD = /(^|\/)(backend\/|webapp\/|website\/)/i
+const DOCS = /(^|\/)(docs\/|references\/|templates\/)|(^|\/)(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$/i
+const FAST_SAFE = /\.(css|scss|sass|less|md|mdx|txt)$/i
+const FRONTEND_ASSET = /^(webapp\/(?:public\/assets|src\/assets)\/|website\/public\/|assets\/)/i
+const RASTER_ASSET = /\.(webp|png|jpe?g|avif|ico)$/i
+
+function isFastSafe(path) {
+  return FAST_SAFE.test(path) || (FRONTEND_ASSET.test(path) && RASTER_ASSET.test(path))
+}
+
+function git(args, options = {}) {
+  const result = spawnSync('git', args, { encoding: 'utf8', ...options })
+  if (result.status !== 0) throw new Error(result.stderr?.trim() || `git ${args.join(' ')} failed`)
+  return result.stdout.trim()
+}
+
+export function executePlan(plan, runner = spawnSync) {
+  const results = []
+  for (const [name, [command, args]] of plan) {
+    console.log(`\n==> ${name}`)
+    const started = performance.now()
+    const result = runner(command, args, {
+      encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+    })
+    if (result.stdout) process.stdout.write(result.stdout)
+    if (result.stderr) process.stderr.write(result.stderr)
+    const evidenceError = result.status === 0 && isTestStage(name) && !name.includes('PostgreSQL integration')
+      ? testEvidenceError(name, `${result.stdout ?? ''}\n${result.stderr ?? ''}`)
+      : null
+    const durationSeconds = Number(((performance.now() - started) / 1000).toFixed(1))
+    const status = result.error || evidenceError ? 1 : result.status ?? 1
+    console.log(`<== ${name} ${status === 0 ? 'passed' : 'FAILED'} (${durationSeconds}s)`)
+    results.push({ name, status, error: result.error?.message ?? evidenceError ?? undefined, durationSeconds })
+    if (result.error || result.status !== 0 || evidenceError) break
+  }
+  return results
+}
+
+function isTestStage(name) {
+  return /\btests?\b|\bintegration\b|\bjourneys\b/i.test(name)
+}
+
+function testEvidenceError(name, output) {
+  if (/journeys/i.test(name)) {
+    const passed = Number(output.match(/(\d+)\s+passed\b/i)?.[1] ?? 0)
+    const skipped = Number(output.match(/(\d+)\s+skipped\b/i)?.[1] ?? 0)
+    const notRun = Number(output.match(/(\d+)\s+(?:did not run|not run)\b/i)?.[1] ?? 0)
+    if (skipped || notRun) return `${name} reported skipped or unrun required journeys.`
+    return passed > 0 ? null : `${name} did not report any executed passing journeys.`
+  }
+  // Read only the final Bun summary. The runner's own regression tests intentionally
+  // execute child fixtures that print skip/failure summaries inside their output.
+  const parsed = bunSummary(output)
+  if (!parsed) return `${name} did not report a recognized Bun test summary.`
+  const { passed, skipped, filtered } = parsed
+  if (skipped > 0) return `${name} reported ${skipped} skipped required test(s).`
+  if (/\btodo\b|\(todo\)/i.test(output.slice(parsed.start, parsed.end))) return `${name} reported a TODO test.`
+  const expectedFiltered = name === 'MAX and platform-neutral shared contract tests' ? 3
+    : 0
+  if (filtered !== expectedFiltered) return `${name} reported ${filtered} filtered test(s); expected ${expectedFiltered} declared historical exclusions.`
+  if (passed === 0) return `${name} did not report any executed passing tests.`
+  return null
+}
+
+function bunSummary(output) {
+  const ran = [...output.matchAll(/Ran\s+\d+\s+tests?\s+across\s+\d+\s+files?\b[^\n]*/gi)].at(-1)
+  if (!ran) return null
+  const end = ran.index + ran[0].length
+  const before = output.slice(0, ran.index)
+  const pass = [...before.matchAll(/\b(\d+)\s+pass\b/gi)].at(-1)
+  if (!pass) return null
+  const start = pass.index
+  const block = output.slice(start, end)
+  return {
+    passed: Number(pass[1]),
+    skipped: Number(block.match(/\b(\d+)\s+skip\b/i)?.[1] ?? 0),
+    filtered: Number(block.match(/\b(\d+)\s+filtered out\b/i)?.[1] ?? 0),
+    start, end,
+  }
+}
+
+export function classifyChanges(paths) {
+  if (!paths.length) return 'full'
+  if (paths.some((path) => !isFastSafe(path) && (CRITICAL.test(path) || (path.startsWith('webapp/') && CRITICAL_UI.test(path))))) return 'full'
+  if (paths.every((path) => DOCS.test(path) || isFastSafe(path))) return 'fast'
+  if (paths.every((path) => DOCS.test(path) || isFastSafe(path) || STANDARD.test(path))) return 'standard'
+  return 'full'
+}
+
+const rank = { fast: 0, standard: 1, full: 2 }
+function assertProfile(value) {
+  if (typeof value !== 'string' || !Object.hasOwn(rank, value)) throw new Error(`Unknown verification profile "${value}"; use fast, standard, or full.`)
+  return value
+}
+
+function sourceSnapshot() {
+  const sha = git(['rev-parse', 'HEAD'])
+  const diff = git(['diff', '--binary', 'HEAD', '--'])
+  const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean).sort()
+  const hash = createHash('sha256').update(diff)
+  for (const file of untracked) {
+    hash.update(`\0${file}\0`)
+    try { hash.update(readFileSync(file)) } catch { hash.update('<unreadable>') }
+  }
+  const dirty = Boolean(diff || untracked.length)
+  return { sha, dirty, treeHash: hash.digest('hex') }
+}
+
+export function selectProfile({ paths, requested }) {
+  const required = classifyChanges(paths)
+  const selected = requested ? assertProfile(requested) : required
+  if (rank[selected] < rank[required]) {
+    throw new Error(`Profile downgrade refused: ${selected} was requested but changes require ${required}.`)
+  }
+  return { profile: selected, required, paths }
+}
+
+export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') {
+  const commands = [['Git whitespace and patch validation', ['git', ['diff', '--check', `${base}...HEAD`]]], ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]]]
+  if (profile === 'fast') {
+    if (paths.some((path) => /^(webapp\/(?:public\/assets|src\/assets)\/|assets\/)/i.test(path) && RASTER_ASSET.test(path))) {
+      commands.push(['Frontend production build', ['bun', ['run', 'build:webapp']]])
     }
-    const child = resolve(absolutePath, entry.name)
-    if (entry.isDirectory()) return total + testFileCount(child, pattern)
-    return total + (entry.isFile() && pattern.test(entry.name) ? 1 : 0)
-  }, 0)
-}
-
-const testSuites = [
-  ['shared contract', 'packages/contracts/src', /\.test\.[cm]?[jt]sx?$/],
-  ['web app unit', 'webapp/tests', /\.test\.[cm]?[jt]sx?$/],
-  ['website boundary', 'website/tests', /\.test\.[cm]?[jt]sx?$/],
-  ['browser journey', 'webapp/e2e', /\.spec\.[cm]?[jt]sx?$/],
-  ['repository environment', 'scripts/repo-env.test.mjs', /\.test\.[cm]?[jt]sx?$/],
-  ['Selectel operator guards', 'tests', /^selectel-.*\.test\.mjs$/],
-]
-let discovered = 0
-for (const [name, path, pattern] of testSuites) {
-  const count = testFileCount(path, pattern)
-  console.log(`${name}: ${count} test file(s)`)
-  if (count === 0) {
-    console.error(`No ${name} tests found; refusing to treat an empty suite as passed.`)
-    process.exitCode = 1
-    process.exit()
+    if (paths.some((path) => path.startsWith('website/public/') && RASTER_ASSET.test(path))) commands.push(['Website production build', ['bun', ['run', 'build:website']]])
+    if (paths.some((path) => path.startsWith('webapp/') && /\.(tsx?|jsx?|css|scss|sass|less)$/i.test(path))) {
+      commands.push(['Frontend typecheck', ['bun', ['run', 'typecheck:webapp']]])
+      commands.push(['Frontend production build', ['bun', ['run', 'build:webapp']]])
+    }
+    if (paths.some((path) => path.startsWith('website/') && /\.(css|scss|sass|less)$/i.test(path))) {
+      commands.push(['Website production build', ['bun', ['run', 'build:website']]])
+    }
+    return commands
   }
-  discovered += count
-}
-if (discovered === 0) {
-  console.error('No tests discovered; refusing to run an empty verification gate.')
-  process.exit(1)
+
+  if (paths.some((path) => path.startsWith('backend/'))) {
+    commands.push(['Backend typecheck and Prisma generation', ['bun', ['run', 'typecheck:backend']]])
+    const testFiles = relatedBackendTests(paths)
+    const unit = testFiles.filter((path) => !path.includes('.integration.test.') && !path.includes('.live.test.'))
+    const integration = testFiles.filter((path) => path.includes('.integration.test.'))
+    if (unit.length) commands.push(['Changed backend unit tests', ['bun', ['test', ...unit.map((path) => `./backend/${path}`)]]])
+    if (integration.length) commands.push(['Changed backend PostgreSQL integration tests', ['bun', ['run', 'test:backend:integration', '--', ...integration]]])
+    if (!unit.length && !integration.length && paths.some((path) => path.includes('.test.'))) {
+      throw new Error(`No backend tests discovered for changed paths: ${paths.join(', ')}`)
+    }
+  }
+  if (paths.some((path) => path.startsWith('webapp/'))) {
+    commands.push(['Web app typecheck', ['bun', ['run', 'typecheck:webapp']]])
+    commands.push(['Web app lint', ['bun', ['run', 'lint']]])
+    commands.push(['Web app production build', ['bun', ['run', 'build:webapp']]])
+    const tests = relatedWebappTests(paths)
+    if (tests.length) commands.push(['Changed web app unit tests', ['bun', ['test', ...tests]]])
+    else console.log('No targeted Web app unit test maps to these paths; typecheck, lint, and production build remain required.')
+  }
+  if (paths.some((path) => path.startsWith('website/'))) {
+    commands.push(['Website typecheck and build', ['bun', ['run', 'typecheck:website']]])
+    commands.push(['Website production build', ['bun', ['run', 'build:website']]])
+    commands.push(['Website boundary tests', ['bun', ['run', 'test:website']]])
+  }
+  if (paths.some((path) => path.startsWith('packages/contracts/'))) {
+    commands.push(['Shared contracts typecheck', ['bun', ['run', '--cwd', 'packages/contracts', 'typecheck']]])
+    commands.push(['Shared contract tests', ['bun', ['run', 'test:contracts']]])
+    commands.push(['Backend typecheck and Prisma generation', ['bun', ['run', 'typecheck:backend']]])
+    commands.push(['Web app typecheck', ['bun', ['run', 'typecheck:webapp']]])
+  }
+  if (paths.some((path) => path.includes('verify-local'))) commands.push(['Verification runner tests', ['bun', ['test', 'scripts/verify-local.test.mjs']]])
+  if (profile === 'standard' && commands.length <= 2) {
+    commands.push(['Repository tool and Selectel guard tests', ['bun', ['run', 'test:tools']]])
+  }
+  if (profile === 'standard' && paths.some(isArchitectureBoundary)) {
+    commands.push(['Architecture boundaries', ['bun', ['run', 'architecture:check']]])
+  }
+  if (profile === 'full') {
+    return [
+      ['Committed diff whitespace validation', ['git', ['diff', '--check', `${base}...HEAD`]]],
+      ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]],
+      ['Architecture boundaries', ['bun', ['run', 'architecture:check']]],
+      ['Dependency audit', ['bun', ['run', 'audit']]],
+      ['Backend typecheck', ['bun', ['run', 'typecheck:backend']]],
+      ['Shared contracts typecheck', ['bun', ['run', '--cwd', 'packages/contracts', 'typecheck']]],
+      ['Web app typecheck', ['bun', ['run', 'typecheck:webapp']]],
+      ['Web app lint', ['bun', ['run', 'lint']]],
+      ['Web app production build', ['bun', ['run', 'build:webapp']]],
+      ['Website typecheck and build', ['bun', ['run', 'typecheck:website']]],
+      ['Website production build', ['bun', ['run', 'build:website']]],
+      ['Repository and Selectel safety tests', ['bun', ['run', 'test:tools']]],
+      ['Verification runner boundary tests', ['bun', ['test', 'scripts/verify-local.test.mjs']]],
+      ['MAX and platform-neutral shared contract tests', ['bun', ['run', 'test:contracts:max']]],
+      ['Backend unit tests (MAX/platform-neutral catalog)', ['bun', ['run', '--cwd', 'backend', 'test:unit', '--', '--max-only']]],
+      ['Web app unit tests', ['bun', ['run', 'test:webapp']]],
+      ['Website boundary tests', ['bun', ['run', 'test:website']]],
+      ['MAX auth/session PostgreSQL integration', ['bun', ['run', '--cwd', 'backend', 'test:integration', '--', '--max-only']]],
+      ['MAX Web/PWA browser journeys', ['bun', ['run', 'e2e:webapp:max']]],
+    ]
+  }
+  if (commands.length === 1) throw new Error(`No mandatory STANDARD checks mapped for changed paths: ${paths.join(', ') || '(none)'}`)
+  return commands
 }
 
-const stages = [
-  ['Architecture boundaries', ['run', 'architecture:check']],
-  ['Dependency audit', ['run', 'audit'], 5 * 60 * 1000],
-  ['Backend typecheck and Prisma generation', ['run', 'typecheck:backend']],
-  ['Shared contracts typecheck', ['run', '--cwd', 'packages/contracts', 'typecheck']],
-  ['Web app lint', ['run', 'lint']],
-  ['Web app typecheck, including E2E types', ['run', 'typecheck:webapp']],
-  ['Web app production bundling', ['run', '--cwd', 'webapp', 'vite', 'build']],
-  ['Website content/type check', ['run', 'typecheck:website']],
-  ['Website production build', ['run', 'build:website']],
-  ['Tool and Selectel guard tests', ['run', 'test:tools']],
-  ['Shared contract tests', ['run', 'test:contracts']],
-  ['Backend unit tests', ['run', 'test:backend:unit']],
-  ['Web app unit tests', ['run', 'test:webapp']],
-  ['Website boundary tests', ['run', 'test:website']],
-  ['Backend PostgreSQL integration tests', ['run', 'test:backend:integration']],
-  ['Critical browser journeys', ['run', 'e2e:webapp']],
-]
+function relatedBackendTests(paths) {
+  const files = new Set()
+  for (const changed of paths.filter((path) => path.startsWith('backend/'))) {
+    if (/\.test\.[cm]?[jt]sx?$/i.test(changed)) {
+      files.add(changed.replace(/^backend\//, ''))
+      continue
+    }
+    const normalized = changed.replaceAll('\\', '/')
+    const moduleMatch = normalized.match(/^(backend\/src\/modules\/[^/]+)/)
+    const testRoot = moduleMatch?.[1] ?? (normalized.startsWith('backend/src/') ? normalized.slice(0, normalized.lastIndexOf('/')) : null)
+    if (!testRoot) continue
+    collectBackendTests(resolve(process.cwd(), testRoot), files)
+  }
+  return [...files].sort()
+}
 
-let failed = false
-for (const [name, args, timeoutMs] of stages) {
+function relatedWebappTests(paths) {
+  let candidates = []
+  try { candidates = readdirSync(resolve(process.cwd(), 'webapp/tests')).filter((file) => /\.test\.[jt]sx?$/i.test(file)) } catch { return [] }
+  const changedTests = paths.filter((path) => /^webapp\/tests\/.*\.test\.[jt]sx?$/i.test(path)).map((path) => `./${path}`)
+  if (changedTests.length) return changedTests
+  const sourceStems = paths.filter((path) => path.startsWith('webapp/src/')).map((path) => path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+  const matches = candidates.filter((file) => sourceStems.some((stem) => stem && (file.toLowerCase().includes(stem) || stem.includes(file.replace(/\.test\.[jt]sx?$/i, '').toLowerCase()))))
+  return matches.map((file) => `./webapp/tests/${file}`)
+}
+
+function isArchitectureBoundary(path) {
+  return /(^|\/)(modules|contracts|platform|composition)(\/|\.)/i.test(path)
+}
+
+function collectBackendTests(directory, files) {
+  let entries
+  try { entries = readdirSync(directory, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name)
+    if (entry.isDirectory()) collectBackendTests(path, files)
+    else if (entry.isFile() && /\.test\.[cm]?[jt]sx?$/i.test(entry.name)) {
+      files.add(relative(resolve(process.cwd(), 'backend'), path).replaceAll('\\', '/'))
+    }
+  }
+}
+
+function parseArgs(args) {
+  const out = { profile: undefined, base: undefined, dryRun: false }
+  const seen = new Set()
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--dry-run') {
+      if (seen.has('dry-run')) throw new Error('--dry-run may only be provided once.')
+      seen.add('dry-run')
+      out.dryRun = true
+    }
+    else if (args[i] === '--profile' || args[i] === '--base') {
+      const flag = args[i].slice(2)
+      if (seen.has(flag)) throw new Error(`${args[i]} may only be provided once.`)
+      seen.add(flag)
+      const value = args[++i]
+      if (!value || value.startsWith('--')) throw new Error(`${args[i - 1]} requires a value.`)
+      if (flag === 'profile') out.profile = value
+      else out.base = value
+    }
+    else throw new Error(`Unknown argument: ${args[i]}`)
+  }
+  if (seen.has('profile')) assertProfile(out.profile)
+  return out
+}
+
+function changedPaths(requestedBase) {
+  const remote = git(['rev-parse', '--verify', 'refs/remotes/origin/main'])
+  const trustedBase = git(['merge-base', remote, 'HEAD'])
+  let base = trustedBase
+  if (requestedBase) {
+    const resolved = git(['rev-parse', '--verify', `${requestedBase}^{commit}`])
+    const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', resolved, 'HEAD'])
+    if (ancestor.status !== 0) throw new Error('--base must be an ancestor of the verified HEAD.')
+    const expandsTrustedRange = spawnSync('git', ['merge-base', '--is-ancestor', resolved, trustedBase])
+    if (expandsTrustedRange.status === 0) base = resolved
+  }
+  const committed = git(['diff', '--name-only', `${base}...HEAD`]).split('\n').filter(Boolean)
+  const local = git(['diff', '--name-only', 'HEAD']).split('\n').filter(Boolean)
+  const staged = git(['diff', '--cached', '--name-only']).split('\n').filter(Boolean)
+  const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean)
+  return { base, paths: [...new Set([...committed, ...local, ...staged, ...untracked].map((p) => p.replaceAll('\\', '/')))].sort() }
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2))
+  const { base, paths } = changedPaths(options.base)
+  const selection = selectProfile({ paths, requested: options.profile })
+  const snapshot = sourceSnapshot()
+  const plan = planFor(selection.profile, paths, base)
+  console.log(`Profile: ${selection.profile} (minimum required: ${selection.required})`)
+  console.log(`Source SHA: ${snapshot.sha}`)
+  console.log(`Comparison base SHA: ${base}`)
+  console.log(`Working tree: ${snapshot.dirty ? `dirty; SHA256 ${snapshot.treeHash}` : `clean; tree ${git(['rev-parse', 'HEAD^{tree}'])}`}`)
+  console.log(`Changed paths: ${paths.length}`)
+  for (const [name, [command, args]] of plan) console.log(`PLAN ${name}: ${command} ${args.join(' ')}`)
+  if (options.dryRun) {
+    console.log('DRY RUN: plan only; no checks ran and this is not a PASS.')
+    process.exitCode = 2
+    return
+  }
   const started = performance.now()
-  console.log(`\n==> ${name}`)
-  const result = spawnSync('bun', args, {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-    ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
-  })
-  const elapsed = ((performance.now() - started) / 1000).toFixed(1)
-  if (result.error) {
-    const reason = result.error.code === 'ETIMEDOUT'
-      ? `timed out after ${timeoutMs / 1000}s`
-      : `could not start: ${result.error.message}`
-    console.error(`<== ${name} FAILED (${reason}, ${elapsed}s)`)
-    failed = true
-    break
+  const results = executePlan(plan)
+  const failure = results.find((result) => result.status !== 0 || result.error)
+  if (results.length !== plan.length || failure) {
+    process.exitCode = failure?.status || 1
+    return
   }
-  if (result.status !== 0) {
-    console.error(`<== ${name} FAILED (exit ${result.status ?? result.signal ?? 'unknown'}, ${elapsed}s)`)
-    failed = true
-    break
+  const after = sourceSnapshot()
+  if (after.sha !== snapshot.sha || after.dirty !== snapshot.dirty || after.treeHash !== snapshot.treeHash) {
+    console.error('Source changed while verification was running; results do not apply to the final tree.')
+    process.exitCode = 1
+    return
   }
-  console.log(`<== ${name} passed (${elapsed}s)`)
+  console.log(`\n${selection.profile.toUpperCase()} verification passed (${((performance.now() - started) / 1000).toFixed(1)}s).`)
 }
 
-if (failed) process.exitCode = 1
-else console.log('\nLocal publication verification passed.')
+if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/verify-local.mjs')) {
+  main().catch((error) => { console.error(error.message); process.exitCode = 1 })
+}

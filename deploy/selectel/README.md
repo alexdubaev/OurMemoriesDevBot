@@ -157,12 +157,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before any publication to `main`, including PR merge, run `bun run verify:local`
-on the exact source SHA and record its command, result, and environment limits.
-Run it on Linux/Bash with Bun 1.4.0, Node.js, Docker, and Playwright Chromium. The
-pre-push hook runs it for main/master pushes; PR merges do not invoke local hooks,
-so record a separate result for the merge SHA. Production releases are separate manual operations and require an explicit
-owner request. With owner-provisioned SSH access, confirm the accepted clean SHA,
+Before PR merge, run the risk-appropriate FAST, STANDARD, or FULL profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Before production deployment, run FULL on the exact final release SHA, including the combined state of all included PRs. This FULL check does not replace the guarded backup, migration, readiness, health, and rollback steps below. Production deployment remains a separate manual operation and requires an explicit owner request. With owner-provisioned SSH access, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh

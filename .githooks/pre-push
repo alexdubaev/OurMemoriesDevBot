@@ -4,6 +4,7 @@ set -euo pipefail
 target_push=0
 target_local_ref=
 target_local_sha=
+target_remote_sha=
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/heads/main|refs/heads/master)
@@ -14,6 +15,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       target_push=1
       target_local_ref=$local_ref
       target_local_sha=$local_sha
+      target_remote_sha=$remote_sha
       ;;
   esac
 done
@@ -39,6 +41,10 @@ if [[ "$target_local_sha" =~ ^0+$ ]]; then
   echo "Refusing main/master deletion." >&2
   exit 1
 fi
+if [[ -z "$target_remote_sha" || "$target_remote_sha" =~ ^0+$ ]]; then
+  echo "Refusing main/master publication without an existing protected baseline SHA." >&2
+  exit 1
+fi
 head_sha=$(git rev-parse HEAD)
 if [[ "$target_local_sha" != "$head_sha" ]]; then
   echo "Refusing publication: pushed SHA does not match checked-out HEAD." >&2
@@ -49,5 +55,5 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-echo "Running local publication verification for $head_sha..."
-bun run verify:local
+echo "Running risk-based local publication verification for $head_sha against $target_remote_sha..."
+bun run verify:local --base "$target_remote_sha"
