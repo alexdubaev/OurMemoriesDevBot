@@ -239,6 +239,7 @@ function parseBunSummary(output) {
 
 function isMaxVerificationIntegration(file) {
   return [
+    'scripts/selectel-rollback-compatibility.integration.test.ts',
     'src/modules/auth/max-auth.integration.test.ts',
     'src/db.integration.test.ts', 'src/outbox/outbox.integration.test.ts',
     'src/modules/families/family-access.integration.test.ts',
@@ -267,6 +268,7 @@ export function selectMaxVerificationIntegration(allIntegrationFiles) {
 }
 
 const requiredMaxVerificationFiles = [
+  'scripts/selectel-rollback-compatibility.integration.test.ts',
   'src/modules/auth/max-auth.integration.test.ts',
   'src/db.integration.test.ts',
   'src/outbox/outbox.integration.test.ts',

@@ -237,7 +237,7 @@ verify_mm0_spike_stopped() { :; }
 ${functionBody(redeploy, 'validate_forward_marker')}
 ${functionBody(redeploy, 'verify_no_legacy_writers')}
 ${functionBody(redeploy, 'guard_membership_transition')}
-for step in preflight prepare_configuration migration_status promote_backend wait_backend_internal promote_jobs promote_static verify_static_internal activate_gateway readiness; do
+for step in preflight backup_server_state prepare_configuration migration_status promote_backend wait_backend_internal promote_jobs promote_static verify_static_internal activate_gateway readiness; do
   eval "$step() { printf 'STEP:$step\\n'; }"
 done
 ${functionBody(redeploy, 'deploy')}
