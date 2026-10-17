@@ -748,7 +748,7 @@ verify_application_rollback() {
 		"$legacy_target:$legacy_target")
 			target=$legacy_target
 			expected_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
-			expected_target_runtime=$expected_runtime
+			expected_target_runtime=b12190f9bd6e568b544d89d4c4beec8198ad7626b03bdd9164cf76890d440a4e
 			;;
 		"$candidate_target:$candidate_target")
 			target=$candidate_target
