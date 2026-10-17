@@ -824,6 +824,7 @@ rollback() {
 	set +a
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
+	load_runtime_secrets
 	gateway_preflight
 	if [ "${SELECTEL_CI_RELEASE:-false}" = true ]; then
 		restore_configuration_backup
@@ -835,7 +836,7 @@ rollback() {
 			validate_candidate_caddy
 		fi
 	fi
-	compose config >/dev/null
+	compose config >/dev/null || die 'Compose configuration validation failed before application rollback'
 	local gate_policy gate_status
 	gate_policy=$(rollback_auth_gate_for_verified_pair) || die 'application rollback gate policy could not be verified'
 	# Install and verify this exact pair's gateway policy before promoting application processes.
