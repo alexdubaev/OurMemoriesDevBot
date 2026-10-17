@@ -17,14 +17,14 @@ const storageRoot = resolve('.scratch', `f12-session-replacement-storage-${rando
 
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for this owned integration test')
 const testDbUrl = new URL(databaseUrl)
+const allowedTestHostnames = new Set(['127.0.0.1', 'localhost', '::1'])
 if (
-  testDbUrl.hostname !== '127.0.0.1' ||
-  testDbUrl.port !== '56570' ||
-  testDbUrl.username !== 'memoly_f12' ||
-  testDbUrl.pathname !== '/memoly_f12_sessions_20261017_a91f_test' ||
+  !allowedTestHostnames.has(testDbUrl.hostname) ||
+  !testDbUrl.port ||
+  !testDbUrl.pathname.slice(1).endsWith('_test') ||
   testDbUrl.searchParams.get('schema') !== 'public' ||
   process.env.DATABASE_URL !== databaseUrl
-) throw new Error('F12 test requires its exact owned loopback database URL')
+) throw new Error('F12 test requires matching DATABASE_URL and TEST_DATABASE_URL for an explicit loopback *_test database')
 
 describe('MAX browser session replacement', () => {
   const env = loadEnv({
@@ -50,6 +50,117 @@ describe('MAX browser session replacement', () => {
 
   afterAll(async () => {
     await prisma.$disconnect()
+  })
+
+  test('MAX re-entry clears a revoked browser cookie and restores through the normal browser client', async () => {
+    const suffix = randomUUID()
+    const maxId = Date.now() + 800
+    const firstInitData = signedMaxInitData({ id: maxId, first_name: `F12 restore A ${suffix}` }, `restore-a-${suffix}`)
+    const first = await exchange(firstInitData)
+    expect(first.response.status).toBe(200)
+    const staleCookie = cookiePair(first.response)
+    const oldSessionId = await sessionFromMaxReplay(firstInitData)
+
+    const replacing = await exchange(
+      signedMaxInitData({ id: maxId + 1, first_name: `F12 restore B ${suffix}` }, `restore-b-${suffix}`),
+      staleCookie,
+    )
+    expect(replacing.response.status).toBe(200)
+    expect((await prisma.authSession.findUniqueOrThrow({ where: { id: oldSessionId } })).revokedAt).not.toBeNull()
+
+    let authApiPath: string = '../../../../webapp/src/features/auth/api'
+    let httpClientPath: string = '../../../../webapp/src/platform/api'
+    const { AuthApi } = await import(authApiPath)
+    const { HttpClient } = await import(httpClientPath)
+    const originalFetch = globalThis.fetch
+    const browserCookies = new Map<string, string>([[staleCookie.split('=', 1)[0]!, staleCookie]])
+    const requests: Array<{ path: string; hadCookie: boolean }> = []
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const requestUrl = new URL(String(input), origin)
+      const headers = new Headers(init.headers)
+      headers.set('Origin', origin)
+      const cookieHeader = [...browserCookies.values()].join('; ')
+      if (cookieHeader) headers.set('Cookie', cookieHeader)
+      else headers.delete('Cookie')
+      requests.push({ path: requestUrl.pathname, hadCookie: Boolean(cookieHeader) })
+      const response = await app.request(new Request(requestUrl, { ...init, headers }))
+      const combinedSetCookie = response.headers.get('set-cookie')
+      const setCookies = response.headers.getSetCookie?.() ?? (combinedSetCookie ? combinedSetCookie.split(/, (?=[^;,]+=)/) : [])
+      for (const setCookie of setCookies) {
+        const [pair, ...attributes] = setCookie.split(';')
+        const cookieName = pair!.split('=', 1)[0]!
+        if (attributes.some((attribute) => attribute.trim().toLowerCase() === 'max-age=0')) browserCookies.delete(cookieName)
+        else browserCookies.set(cookieName, pair!)
+      }
+      return response
+    } })
+
+    try {
+      let accessToken: string | null = first.body.accessToken
+      const api = new AuthApi({
+        getAccessToken: () => accessToken,
+        setAccessToken: (value: string | null) => { accessToken = value },
+        onAuthExpired: () => undefined,
+      }, new HttpClient(origin))
+      const freshInitData = signedMaxInitData({ id: maxId, first_name: `F12 restore A ${suffix}` }, `restore-a-again-${suffix}`)
+      const restored = await api.authenticateMax(freshInitData)
+
+      expect(requests.map(({ path }) => path)).toEqual([
+        '/api/v1/auth/max', '/api/v1/auth/refresh', '/api/v1/auth/logout', '/api/v1/auth/max',
+      ])
+      expect(requests.map(({ hadCookie }) => hadCookie)).toEqual([true, true, true, false])
+      expect(browserCookies.get('web_app_demo_refresh')).toContain('web_app_demo_refresh=')
+      expect((await app.request('/api/v1/auth/me', { headers: { Authorization: `Bearer ${restored.data.accessToken}` } })).status).toBe(200)
+      expect((await prisma.authSession.findUniqueOrThrow({ where: { id: oldSessionId } })).revokedAt).not.toBeNull()
+
+      const replacedRestored = await exchange(
+        signedMaxInitData({ id: maxId + 2, first_name: `F12 restore C ${suffix}` }, `restore-c-${suffix}`),
+        browserCookies.get('web_app_demo_refresh'),
+      )
+      expect(replacedRestored.response.status).toBe(200)
+      browserCookies.set('web_app_demo_refresh', staleCookie)
+
+      let bootstrapPath: string = '../../../../webapp/src/features/auth/bootstrap'
+      const { bootstrapAuthSession } = await import(bootstrapPath)
+      const bootstrapApi = new AuthApi({
+        getAccessToken: () => null,
+        setAccessToken: (value: string | null) => { accessToken = value },
+        onAuthExpired: () => undefined,
+      }, new HttpClient(origin))
+      await bootstrapAuthSession({
+        api: bootstrapApi,
+        shouldApply: () => true,
+        setAccessToken: (value: string | null) => { accessToken = value },
+      })
+      expect(accessToken).toBeNull()
+      expect(browserCookies.has('web_app_demo_refresh')).toBe(false)
+
+      const browserLink = await bootstrapApi.startBrowserLink()
+      expect(browserCookies.has('web_app_demo_browser_link')).toBe(true)
+      const approval = await app.request(`/api/v1/auth/browser-link/${browserLink.challengeId}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${replacedRestored.body.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approved: true,
+          initData: signedMaxInitData(
+            { id: maxId + 2, first_name: `F12 restore C ${suffix}` },
+            `restore-c-approval-${suffix}`,
+            browserLink.startParam,
+          ),
+        }),
+      })
+      expect(approval.status).toBe(200)
+      const linked = await bootstrapApi.redeemBrowserLink(browserLink.challengeId)
+      expect(requests.slice(-4).map(({ path }) => path)).toEqual([
+        '/api/v1/auth/refresh', '/api/v1/auth/logout', '/api/v1/auth/browser-link/start',
+        `/api/v1/auth/browser-link/${browserLink.challengeId}/redeem`,
+      ])
+      expect(requests.slice(-4).map(({ hadCookie }) => hadCookie)).toEqual([true, true, false, true])
+      expect(browserCookies.has('web_app_demo_refresh')).toBe(true)
+      expect((await app.request('/api/v1/auth/me', { headers: { Authorization: `Bearer ${linked.accessToken}` } })).status).toBe(200)
+    } finally {
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: originalFetch })
+    }
   })
 
   test('MAX identity B replaces the proven A browser session and invalidates its playback cookie', async () => {
