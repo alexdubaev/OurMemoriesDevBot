@@ -20,12 +20,14 @@ the guarded database migration, promotion, smoke checks, and rollback, lives in 
 from chat history or run an invented migration command.
 
 Access is provisioned by the owner outside Git using a secure store or SSH agent.
-GitHub Actions CI/CD is not used. Before publication to `main`, including PR
-merge, run `bun run verify:local` against the exact source SHA and record the
-command, result, and environment limits. The pre-push hook runs it for main/master
-pushes; a PR merge does not invoke local hooks and requires a separately recorded
-result. Production deployment remains a separate manual operation, only
-when explicitly requested by the owner. The guarded host entry point builds
+GitHub Actions CI/CD is not used. Before PR merge, run FAST, STANDARD, or FULL
+according to the highest-risk diff and record the reason, commands, outcome, and
+exact source SHA. The main/master pre-push hook runs risk-based verification against the pushed
+remote SHA; PR merge does not run local hooks. Before production deployment, run
+FULL on the exact final release SHA, including the combined state of all included
+PRs. FULL supplements the existing backup, migration, readiness, health, and
+rollback safeguards. Production deployment remains a separate manual operation,
+only when explicitly requested by the owner. The guarded host entry point builds
 immutable SHA images, prepares rollback, applies only the selected guarded
 migration, checks readiness, and writes a protected nonsecret release manifest.
 Never store private key paths, key values, database passwords, MAX tokens,
