@@ -27,7 +27,8 @@ import { createMaxVideoPosterProcessor, enqueueMaxVideoPoster } from './infrastr
 import { Hono } from 'hono'
 import type { AuthHttpEnv } from '../auth'
 import { createMaxChannelAvatarRoutes } from './transport/channel-avatar-routes'
-import { createMaxPosterDownload, type MaxDownloadedMedia } from './infrastructure/media-download'
+import { createMaxPosterDownload } from './infrastructure/media-download'
+import type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
 import type { FamilyScope } from '../families'
 
 export { createMaxVideoPlayback }
@@ -38,7 +39,7 @@ export function createMaxModule(options: {
   api?: MaxApiPort
   channelVerifier?: (chatId: bigint) => Promise<{ title: string | null }>
   channelActorAdminVerifier?: (chatId: bigint, actorSubject: bigint) => Promise<boolean>
-  channelAvatarReader?: (scope: FamilyScope, chatId: bigint, signal?: AbortSignal) => Promise<MaxDownloadedMedia | null>
+  channelAvatarReader?: (scope: FamilyScope, chatId: bigint, signal?: AbortSignal) => Promise<MaxChannelAvatarContent | null>
 }) {
   const env = options.runtime.env
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
@@ -156,4 +157,7 @@ export function createMaxTasks(runtime: BackendRuntime) {
 }
 
 export { createMaxApi, MaxProviderError } from './infrastructure/max-api'
+export { createMaxChannelAvatarReader } from './infrastructure/channel-avatar'
+export { createMaxChannelAvatarRoutes } from './transport/channel-avatar-routes'
+export type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
 export type { MaxApiPort, MaxBotIdentity, MaxInboundAttachment, MaxInboundEvent, MaxResolvedAttachment, MaxResolvedMessage, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput, MaxVideoResolution, MaxVideoRendition } from './application/ports'

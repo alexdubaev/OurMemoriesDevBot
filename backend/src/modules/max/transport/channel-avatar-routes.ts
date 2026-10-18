@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import type { AuthHttpEnv } from '../../auth'
 import type { FamilyScope } from '../../families'
-import type { MaxDownloadedMedia } from '../infrastructure/media-download'
+
+export type MaxChannelAvatarContent = { bytes: Uint8Array; contentType: string | null; contentLength: number }
 
 const avatarHeaders = {
   'Cache-Control': 'private, no-store',
@@ -13,7 +14,7 @@ const avatarHeaders = {
 
 export function createMaxChannelAvatarRoutes(options: {
   requireAuth: MiddlewareHandler<AuthHttpEnv>
-  read: (scope: FamilyScope, chatId: bigint, signal?: AbortSignal) => Promise<MaxDownloadedMedia | null>
+  read: (scope: FamilyScope, chatId: bigint, signal?: AbortSignal) => Promise<MaxChannelAvatarContent | null>
 }) {
   const routes = new Hono<AuthHttpEnv>()
   routes.use('/families/*', options.requireAuth)

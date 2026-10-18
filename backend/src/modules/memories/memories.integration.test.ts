@@ -12,8 +12,7 @@ import { signAccessToken } from '../auth'
 import { disabledEmailDelivery } from '../../email'
 import { createAuthModule } from '../auth'
 import { createPrismaFamilyAccess } from '../families'
-import { createMaxChannelAvatarReader } from '../max/infrastructure/channel-avatar'
-import { createMaxChannelAvatarRoutes } from '../max/transport/channel-avatar-routes'
+import { createMaxChannelAvatarReader, createMaxChannelAvatarRoutes } from '../max'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
