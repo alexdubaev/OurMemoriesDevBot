@@ -70,11 +70,11 @@ test('voice controls fit narrow cards in supported theme under light and dark sy
       const layout = await card.evaluate((node) => {
         const bounds = node.getBoundingClientRect(), player = node.querySelector('.memoly-voice-player')!, audio = node.querySelector('.ml-audio')!, button = node.querySelector('.memoly-voice-play')!.getBoundingClientRect(), seek = node.querySelector('[data-slot="voice-waveform"]')!.getBoundingClientRect(), time = node.querySelector('.memoly-voice-time')!.getBoundingClientRect()
         const playerBounds = player.getBoundingClientRect(), audioBounds = audio.getBoundingClientRect()
-        return { left: bounds.left, right: bounds.right, playerRight: playerBounds.right, audioRight: audioBounds.right, audioHeight: audioBounds.height, buttonLeft: button.left, buttonRight: button.right, buttonWidth: button.width, buttonHeight: button.height, buttonCenterY: button.top + button.height / 2, seekLeft: seek.left, seekCenterY: seek.top + seek.height / 2, seekRight: seek.right, timeTop: time.top, seekBottom: seek.bottom, documentWidth: document.documentElement.scrollWidth }
+        return { left: bounds.left, right: bounds.right, playerRight: playerBounds.right, audioRight: audioBounds.right, audioHeight: audioBounds.height, audioCenterY: audioBounds.top + audioBounds.height / 2, buttonLeft: button.left, buttonRight: button.right, buttonWidth: button.width, buttonHeight: button.height, buttonCenterY: button.top + button.height / 2, seekLeft: seek.left, seekCenterY: seek.top + seek.height / 2, seekRight: seek.right, timeTop: time.top, seekBottom: seek.bottom, documentWidth: document.documentElement.scrollWidth }
       })
       expect(layout.buttonWidth).toBeGreaterThanOrEqual(44)
       expect(layout.buttonHeight).toBeGreaterThanOrEqual(44)
-      expect(Math.abs(layout.buttonCenterY - layout.seekCenterY)).toBeLessThanOrEqual(1)
+      expect(Math.abs(layout.buttonCenterY - layout.audioCenterY)).toBeLessThanOrEqual(1)
       expect(layout.buttonRight).toBeLessThanOrEqual(layout.seekLeft)
       expect(layout.timeTop).toBeGreaterThanOrEqual(layout.seekBottom)
       expect(layout.playerRight).toBeLessThanOrEqual(layout.right)

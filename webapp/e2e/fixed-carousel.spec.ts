@@ -18,7 +18,7 @@ test('production feed carousel keeps a fixed frame through real drags and opens 
   await expect(page.getByText('Synthetic carousel caption')).toBeVisible()
   const singleViewport = page.locator('.memory-card').nth(1).locator('.memoly-mixed-viewport')
   await expect(singleViewport).toBeVisible()
-  await expect.poll(async () => { const box = await singleViewport.boundingBox(); return box ? box.height / box.width : 0 }).toBeCloseTo(1280 / 720, 2)
+  await expect.poll(async () => { const box = await singleViewport.boundingBox(); return box ? box.height / box.width : 0 }).toBeCloseTo(1 / 0.8, 2)
 
   const initial = await viewport.boundingBox()
   const portraitPoster = await card.locator('[data-carousel-position="1"] .memoly-mixed-slide-poster img[alt="Кадр видео"]').boundingBox()
@@ -96,6 +96,7 @@ test('production feed carousel keeps a fixed frame through real drags and opens 
   const viewer = page.locator('[data-mixed-viewer]')
   await expect(viewer).toBeVisible()
   await expect(viewer.getByText('2 / 4')).toBeVisible()
+  await expect(viewer.locator('.memoly-viewer-thumbnails button').nth(1)).toHaveAccessibleName('Перейти к вложению 2 из 4')
   await page.screenshot({ path: testInfo.outputPath('feed-v2-fullscreen-video.png') })
   const viewerVideo = viewer.locator('video')
   await expect.poll(() => viewerVideo.evaluate((video: HTMLVideoElement) => [video.videoWidth, video.videoHeight])).toEqual([640, 360])

@@ -1,0 +1,101 @@
+{
+  "method": "WCAG relative luminance; opaque computed button colors; header background raster with text hidden, worst pixel across actual text bounds. This is targeted evidence, not a full WCAG certification.",
+  "records": [
+    {
+      "theme": "mint",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 10.839,
+      "AA4_5": true
+    },
+    {
+      "theme": "mint",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 5.958,
+      "AA4_5": true
+    },
+    {
+      "theme": "rose",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 9.076,
+      "AA4_5": true
+    },
+    {
+      "theme": "rose",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 5.35,
+      "AA4_5": true
+    },
+    {
+      "theme": "sky",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 9.795,
+      "AA4_5": true
+    },
+    {
+      "theme": "sky",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 5.76,
+      "AA4_5": true
+    },
+    {
+      "theme": "lavender",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 9.556,
+      "AA4_5": true
+    },
+    {
+      "theme": "lavender",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 5.232,
+      "AA4_5": true
+    },
+    {
+      "theme": "apricot",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 9.359,
+      "AA4_5": true
+    },
+    {
+      "theme": "apricot",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 6.088,
+      "AA4_5": true
+    },
+    {
+      "theme": "sand",
+      "selector": ".ui-v2-child-name-text",
+      "minimumContrastAcrossTextBounds": 9.577,
+      "AA4_5": true
+    },
+    {
+      "theme": "sand",
+      "selector": ".ui-v2-child-subtitle",
+      "minimumContrastAcrossTextBounds": 5.276,
+      "AA4_5": true
+    },
+    {
+      "screen": "child-editor",
+      "button": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u0440\u043e\u0444\u0438\u043b\u044c",
+      "contrast": 5.91,
+      "AA4_5": true
+    },
+    {
+      "screen": "child-crop",
+      "button": "\u0413\u043e\u0442\u043e\u0432\u043e",
+      "contrast": 5.91,
+      "AA4_5": true
+    },
+    {
+      "screen": "child-editor-after-crop-cancel",
+      "button": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u043f\u0440\u043e\u0444\u0438\u043b\u044c",
+      "contrast": 5.91,
+      "AA4_5": true
+    },
+    {
+      "screen": "self-profile",
+      "button": "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0444\u043e\u0442\u043e\u0433\u0440\u0430\u0444\u0438\u044e",
+      "contrast": 5.91,
+      "AA4_5": true
+    }
+  ]
+}

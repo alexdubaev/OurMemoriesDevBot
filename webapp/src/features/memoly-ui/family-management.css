@@ -64,3 +64,40 @@
 .family-max-channel-fixture h1 { width: 100%; margin: 0; font-size: 14px; }
 .family-max-channel-fixture label { display: grid; gap: 3px; color: var(--ml-muted, #756a71); font-size: 11px; }
 .family-max-channel-fixture select, .family-max-channel-fixture button { min-height: 36px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--ml-line, #e8dfda); border-radius: 9px; color: var(--ml-ink, #302a2e); background: var(--ml-surface, #fff); font: inherit; font-size: 11px; }
+
+/* v4 family overview: keep the family route focused on people and the real
+   invitation/channel/archive states. */
+.memoly-app-root[data-ui-version='v2'] .family-overview-body { width: min(100%, 480px); max-width: 480px; padding: 25px 16px 24px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-section-head { min-height: 21px; justify-content: space-between; gap: 8px; margin: 0 0 9px; color: var(--ui-v2-color-text); font-size: 15px; font-weight: 650; line-height: 21px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-section-head h2 { margin: 0; font: inherit; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-count { min-width: 0; height: auto; display: inline; border-radius: 0; color: var(--ui-v2-color-muted); background: transparent; font-size: 11px; font-weight: 400; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-list { display: block; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-row { display: grid; min-height: 71px; grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px; padding: 9px 0; border: 0; border-bottom: 1px solid var(--ui-v2-color-line); border-radius: 0; color: var(--ui-v2-color-text); background: transparent; box-shadow: none; text-align: left; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-avatar { width: 36px; height: 36px; border: 0; border-radius: 50%; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-copy strong { color: var(--ui-v2-color-text); font-size: 13px; font-weight: 600; line-height: 17px; overflow-wrap: anywhere; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-copy span { margin: 0; color: var(--ui-v2-color-muted); font-size: 10px; line-height: 14px; overflow-wrap: anywhere; white-space: normal; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-role { max-width: 106px; padding: 0; color: var(--ui-v2-color-muted); background: transparent; font-size: 10px; line-height: 15px; white-space: normal; text-align: right; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-invite-btn { display: flex; min-height: 46px; gap: 9px; margin: 16px 0 32px; padding: 0 12px; border: 0; border-radius: 10px; color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); box-shadow: none; font-size: 13px; font-weight: 650; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-invite-plus { width: 18px; height: 18px; margin: 0; border-radius: 0; color: inherit; background: transparent; font-size: 20px; line-height: 18px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel { margin: 32px 0 14px; padding: 0; border: 0; border-radius: 0; color: var(--ui-v2-color-text); background: transparent; box-shadow: none; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel h2 { color: var(--ui-v2-color-muted); font-size: .75rem; font-weight: 550; line-height: 1.0625rem; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-row { display: flex; min-height: 69px; align-items: center; gap: 10px; margin-top: 13px; padding: 11px 0; border-bottom: 1px solid var(--ui-v2-color-line); }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-logo { display: block; width: 33px; height: 33px; flex: 0 0 33px; object-fit: contain; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-row > p { margin: 0; color: var(--ui-v2-color-muted); font-size: .625rem; line-height: .875rem; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-row p strong { color: var(--ui-v2-color-text); font-size: .75rem; line-height: 1rem; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-row > p:has(strong) { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel-row > p:has(strong) span { align-self: flex-end; margin-left: auto; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel p strong { color: var(--ui-v2-color-text); font-size: .75rem; line-height: 1rem; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-max-channel button { min-height: 44px; border-radius: 8px; color: var(--ui-v2-color-accent); background: var(--ui-v2-color-accent-soft); }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-management-invites-link { min-height: 58px; grid-template-columns: 24px minmax(0,1fr) auto 18px; gap: 9px; margin-top: 8px; padding: 7px 0; border: 0; border-top: 1px solid var(--ui-v2-color-line); border-radius: 0; color: var(--ui-v2-color-text); background: transparent; box-shadow: none; text-align: left; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-management-invites-link > span:first-child { width: 24px; height: 24px; color: var(--ui-v2-color-muted); background: transparent; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-management-invites-link strong { font-size: 12px; font-weight: 600; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-management-invites-link small { margin-top: 2px; color: var(--ui-v2-color-muted); font-size: 10px; line-height: 14px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-management-invites-link b { padding: 0; color: var(--ui-v2-color-accent); background: transparent; font-size: 11px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-usage { gap: 3px; margin-top: 8px; padding: 10px 0; border: 0; border-top: 1px solid var(--ui-v2-color-line); border-radius: 0; color: var(--ui-v2-color-text); background: transparent; box-shadow: none; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-usage strong { font-size: 12px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-usage span { color: var(--ui-v2-color-muted); font-size: 10px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-inline-action { min-height: 44px; color: var(--ui-v2-color-accent); }
+.memoly-app-root[data-ui-version='v2'] .family-overview-privacy-note { margin: 16px 0; color: var(--ui-v2-color-muted); font-size: 11px; line-height: 1.65; }
+@media (max-width: 349px) { .memoly-app-root[data-ui-version='v2'] .family-overview-body { padding-inline: 14px; } }

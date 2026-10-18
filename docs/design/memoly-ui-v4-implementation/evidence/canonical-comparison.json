@@ -1,0 +1,55 @@
+{
+  "reference": "c080dc1b2fc9530c18751c138f455600b407293a",
+  "browser": "151.0.7922.34",
+  "geometry": [
+    {
+      "selector": ".ui-v2-child-header",
+      "expected": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 96
+      },
+      "actual": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 96
+      },
+      "maxAbsCssDelta": 0
+    },
+    {
+      "selector": ".memory-card .memoly-mixed-viewport",
+      "expected": {
+        "x": 16,
+        "y": 175,
+        "width": 358,
+        "height": 216.1875
+      },
+      "actual": {
+        "x": 16,
+        "y": 175,
+        "width": 358,
+        "height": 216.1875
+      },
+      "maxAbsCssDelta": 0
+    },
+    {
+      "selector": "nav[data-bottom-navigation-appearance=\"memoly\"]",
+      "expected": {
+        "x": 0,
+        "y": 782,
+        "width": 390,
+        "height": 62
+      },
+      "actual": {
+        "x": 0,
+        "y": 782,
+        "width": 390,
+        "height": 62
+      },
+      "maxAbsCssDelta": 0
+    }
+  ],
+  "overlayRegion": "first530CSSpx; no alignment/masking; A1 darker secondary and A2 pagination +5px are visible; later entries use representative fixtures and are not pixel compared"
+}

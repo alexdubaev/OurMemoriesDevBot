@@ -54,7 +54,7 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
       <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect()
         onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
-      }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span">{triggerLabel}</Typography></UiV2Button>
+      }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span" variant="memoryMeta">{triggerLabel}</Typography></UiV2Button>
     </footer> : used.length ? <div className="actions"><div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">
       {used.map(({ value, emoji }) => <span className={`reaction-result${current === value ? ' is-mine' : ''}`} data-reaction={value} data-reaction-result="" key={value}>
         <Typography as="span" aria-hidden="true" className="reaction-result-emoji" variant="memoryMeta">{emoji}</Typography>
