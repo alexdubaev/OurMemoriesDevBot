@@ -52,7 +52,7 @@ const memories = entries.map((entry, index) => {
       avatarPath: avatarPath(params.has('attribution') && index === 1 ? 'aaa00000-0000-4000-8000-000000000013' : index ? 'aaa00000-0000-4000-8000-000000000014' : 'aaa00000-0000-4000-8000-000000000013'),
       avatarCrop: params.has('attribution') && index === 1 ? { x: 0.12, y: 0.08, width: 0.7, height: 0.76 } : null }
   const memory = { id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, '0')}`, familyId, childId, author,
-    kind: entry.kind ?? (entry.attachments.length ? 'media' : 'note'), body: entry.body, occurredAt: entry.at,
+      kind: channel ? 'media' : entry.kind ?? (entry.attachments.length ? 'media' : 'note'), body: entry.body, occurredAt: entry.at,
     firstPublishedAt: entry.at, sourcePublishedAt: null, createdAt: entry.at, version: 1, status: 'published',
     attachments: entry.attachments, reactionCounts: index === 0 ? { heart: 12 } : {}, currentUserReaction: null,
     likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }

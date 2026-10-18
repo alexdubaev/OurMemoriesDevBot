@@ -24,7 +24,9 @@ The PostgreSQL API regression covers direct posts, confirmed forwards, envelope 
 | `bun run lint` | Pass with one existing warning in `webapp/src/features/auth/provider.tsx:89`. |
 | `bun architecture:check` | Pass: 748 source files. |
 | `bun test --timeout=60000 --test-name-pattern 'opted-in list and detail resolve same-family publication provenance' backend/src/modules/memories/memories.integration.test.ts` | Pass against dedicated PostgreSQL: 1 test, 19 assertions. |
-| `bun run --cwd backend test:integration -- src/modules/memories/memories.integration.test.ts` | 17 tests completed successfully, then Bun 1.4.0 crashed with exit 3 before the file finished. This run is not a passing suite result. |
-| `bun run --cwd webapp e2e --config=e2e/memoly-v4.playwright.config.ts -g 'publication attribution renders channel glyph'` | Pass: 1 browser scenario, including image decode and avatar crop bounds. |
+| `bun run --cwd backend test:integration -- src/modules/memories/memories.integration.test.ts` | Final bounded-fix run: 22 tests, 191 assertions, exit 0. An earlier attempt crashed in Bun after 17 tests and was not counted as passing. |
+| `bun run --cwd webapp e2e --config=e2e/memoly-v4.playwright.config.ts -g 'publication attribution renders channel glyph'` | Pass: 1 browser scenario, including image decode, avatar crop bounds, channel label in the mixed viewer, next/previous navigation and close. |
 
 No migrations or generated source files were changed. PR 185 remains open; this worker did not commit, push, merge, or deploy.
+
+Independent review and bounded closure: [REVIEW.md](REVIEW.md). A published source with incomplete provenance now forces user fallback even alongside a known channel source. The mixed viewer uses the same display label as its card. Final Linux FULL evidence belongs to the exact final committed source and is recorded separately in PR185.

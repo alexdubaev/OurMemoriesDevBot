@@ -108,12 +108,17 @@ maybeDescribe('Memories API', () => {
     const familyNamedUser = await createNote(dad.token, family.body.family.id, family.body.child.id, 'Семейное имя папы')
     const profileFallback = await createNote(profileUser.token, family.body.family.id, family.body.child.id, 'Профиль без семейного имени')
     const appBackup = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Резервная копия приложения')
+    const directPlusUncertain = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Источник с неполными данными')
     const otherFamilyMemory = await createNote(otherOwner.token, otherFamily.body.family.id, otherFamily.body.child.id, 'Свой канал')
     await prisma.memory.update({ where: { id: appBackup.body.id }, data: { sourcePublishedAt: new Date('2026-09-01T10:00:00.000Z') } })
     await prisma.maxMemoryBackup.create({ data: { familyId: family.body.family.id, memoryId: appBackup.body.id,
       body: 'Резервная копия приложения', state: 'pending', channelChatId: channelId } })
     await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, direct.body.id,
       { recipientId: channelId, originalChannelId: null, originalMessageId: null })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, directPlusUncertain.body.id,
+      { recipientId: channelId, originalChannelId: null, originalMessageId: null })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, directPlusUncertain.body.id,
+      { recipientId: 778n, originalChannelId: null, originalMessageId: 'incomplete-shared-envelope' })
     await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, forwarded.body.id,
       { recipientId: 777n, originalChannelId: channelId, originalMessageId: 'original-1' })
     await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, envelope.body.id,
@@ -137,6 +142,7 @@ maybeDescribe('Memories API', () => {
     const byId = new Map<string, any>(optedIn.body.items.map((item: any) => [item.id, item]))
     expect(byId.get(direct.body.id)).toMatchObject({ author: { id: owner.userId, name: 'Профильное имя' },
       publicationAttribution: { kind: 'channel', name: 'Наш канал' } })
+    expect(byId.get(directPlusUncertain.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
     expect(byId.get(forwarded.body.id).publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
     expect(byId.get(envelope.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
     expect(byId.get(blankTitle.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })

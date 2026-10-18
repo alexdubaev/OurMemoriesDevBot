@@ -48,12 +48,16 @@ export class PrismaMemoryRepository implements MemoryRepository {
         }),
       ])
       const sourceChannelIds = new Map<string, Set<bigint>>()
+      const uncertainSourceMemoryIds = new Set<string>()
       for (const source of sources) {
         if (!source.memoryId) continue
-        const channelId = source.originalChannelId !== null
-          ? source.originalMessageId !== null ? source.originalChannelId : null
-          : source.originalMessageId === null ? source.recipientId : null
-        if (channelId === null) continue
+        const isDirect = source.originalChannelId === null && source.originalMessageId === null
+        const isConfirmedForward = source.originalChannelId !== null && source.originalMessageId !== null
+        if (!isDirect && !isConfirmedForward) {
+          uncertainSourceMemoryIds.add(source.memoryId)
+          continue
+        }
+        const channelId = isConfirmedForward ? source.originalChannelId! : source.recipientId
         const ids = sourceChannelIds.get(source.memoryId) ?? new Set<bigint>()
         ids.add(channelId)
         sourceChannelIds.set(source.memoryId, ids)
@@ -68,7 +72,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
 
       return memories.map((memory) => {
         const ids = sourceChannelIds.get(memory.id)
-        const channelTitle = ids?.size === 1 ? titleByChannel.get([...ids][0]!) : undefined
+        const channelTitle = !uncertainSourceMemoryIds.has(memory.id) && ids?.size === 1
+          ? titleByChannel.get([...ids][0]!)
+          : undefined
         if (channelTitle) return { ...memory, publicationAttribution: { kind: 'channel', name: channelTitle } }
         const familyName = familyNameByAuthor.get(memory.author.id)
         const profileName = memory.author.name.trim()
