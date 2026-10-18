@@ -25,6 +25,7 @@ export const apiCorsAllowedHeaders = [
   'Idempotency-Key',
   'If-Match',
   'X-Private-Media-Purpose',
+  'X-Memoly-Publication-Attribution',
 ]
 
 export type FilesystemStorageConfig = {

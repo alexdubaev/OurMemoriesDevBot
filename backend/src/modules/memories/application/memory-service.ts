@@ -50,7 +50,7 @@ export class MemoryService {
     })
   }
 
-  async list(scope: FamilyScope, query: ListMemoriesQuery): Promise<MemoryPage> {
+  async list(scope: FamilyScope, query: ListMemoriesQuery, includePublicationAttribution = false): Promise<MemoryPage> {
     await this.access.requireMember(scope)
     const filters: MemoryCursorFilters = {
       childId: query.childId ?? null,
@@ -73,7 +73,10 @@ export class MemoryService {
         unreadContext = firstPage
       }
       const last = page.items.at(-1)
-      return { items: page.items, nextCursor: page.hasNext && last
+      const items = includePublicationAttribution
+        ? await this.repository.addPublicationAttribution(scope, page.items)
+        : page.items
+      return { items, nextCursor: page.hasNext && last
         ? encodeUnreadMemoryCursor({
           familyId: scope.familyId, userId: scope.principal.userId, filters,
           snapshotPublicationOrdinal: unreadContext.snapshotPublicationOrdinal,
@@ -106,8 +109,11 @@ export class MemoryService {
       snapshotWatermark = firstPage.snapshotWatermark
     }
     const last = page.items.at(-1)
+    const items = includePublicationAttribution
+      ? await this.repository.addPublicationAttribution(scope, page.items)
+      : page.items
     return {
-      items: page.items,
+      items,
       nextCursor: page.hasNext && last
         ? encodeMemoryCursor({
             familyId: scope.familyId,
@@ -120,9 +126,11 @@ export class MemoryService {
     }
   }
 
-  async get(scope: FamilyScope, memoryId: string): Promise<MemoryDto> {
+  async get(scope: FamilyScope, memoryId: string, includePublicationAttribution = false): Promise<MemoryDto> {
     await this.access.requireMember(scope)
-    return this.repository.get(scope, memoryId)
+    const memory = await this.repository.get(scope, memoryId)
+    if (!includePublicationAttribution) return memory
+    return (await this.repository.addPublicationAttribution(scope, [memory]))[0]!
   }
 
   async update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto> {

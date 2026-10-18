@@ -26,7 +26,7 @@ export function loadFeed(
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories?${query.toString()}`,
     memoryPageSchema,
-    { signal },
+    { signal, headers: { 'X-Memoly-Publication-Attribution': '1' } },
   )
 }
 
@@ -34,7 +34,7 @@ export function loadMemory(transport: AuthenticatedTransport, familyId: string, 
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}`,
     memoryDtoSchema,
-    { signal },
+    { signal, headers: { 'X-Memoly-Publication-Attribution': '1' } },
   )
 }
 

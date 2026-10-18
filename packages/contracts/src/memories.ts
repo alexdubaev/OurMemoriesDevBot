@@ -192,6 +192,7 @@ export const memoryDtoSchema = z.object({
   familyId: uuid,
   childId: uuid,
   author: z.object({ id: uuid, name: z.string(), avatarPath: backendMediaPathSchema.nullable(), avatarCrop: avatarCropSchema.nullable().optional() }).strict(),
+  publicationAttribution: z.object({ kind: z.enum(['channel', 'user']), name: z.string().trim().min(1) }).strict().optional(),
   kind: memoryKindSchema,
   body: z.string(),
   occurredAt: z.string().datetime(),

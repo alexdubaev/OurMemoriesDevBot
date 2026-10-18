@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type Pointer
 import type { MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
 
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
 import { FeedAuthorAvatar } from '../shared-author-avatars'
 import { NoteStoryPresentation } from './NoteStoryPresentation'
@@ -15,6 +16,7 @@ export type MemoryCardPresentationProps = {
   authorName: string
   authorAvatarPath?: string | null
   authorAvatarCrop?: { x: number; y: number; width: number; height: number } | null
+  authorKind?: 'channel' | 'user'
   childName?: string
   childAvatarUrl?: string | null
   childAvatarCrop?: ChildAvatarCrop | null
@@ -40,6 +42,7 @@ export function MemoryCardPresentation({
   authorName,
   authorAvatarPath,
   authorAvatarCrop,
+  authorKind = 'user',
   body,
   kind,
   reactionCounts,
@@ -233,7 +236,9 @@ export function MemoryCardPresentation({
     <article aria-describedby={interactive ? `reaction-help-${memoryId}` : undefined} aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind} onClickCapture={onCardClickCapture} onKeyDown={onCardKeyDown} onLostPointerCapture={cancelPending} onPointerCancel={cancelPending} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} ref={articleRef} tabIndex={interactive ? 0 : undefined}>
       {interactive ? <Typography as="span" className="sr-only" id={`reaction-help-${memoryId}`} variant="memoryMeta">Удерживайте свободную область, чтобы выбрать реакцию. Shift+F10 открывает выбор с клавиатуры.</Typography> : null}
       <header className="memory-header" data-slot="memoly-author-row">
-        <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
+        {authorKind === 'channel'
+          ? <span aria-hidden="true" className="author-avatar publication-channel-avatar"><WebpIcon decorative name="channel" size={22} /></span>
+          : <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />}
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>

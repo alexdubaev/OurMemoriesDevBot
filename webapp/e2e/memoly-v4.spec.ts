@@ -158,6 +158,37 @@ test('actual feed shell matches canonical responsive geometry and captures compu
   await writeFile(`${evidenceDir}/feed-geometry.json`, JSON.stringify({ sourceHead: head, workingTreeDirty: Boolean(status.trim()), browsers: 'Playwright Chromium', records }, null, 2))
 })
 
+test('publication attribution renders channel glyph, cropped member avatar, and legacy author fallback', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/memoly-v4.harness.html?attribution')
+  const cards = page.locator('.memory-card')
+  await expect(cards).toHaveCount(6)
+
+  const channelCard = cards.nth(0)
+  await expect(channelCard.locator('.author-name')).toHaveText('Канал прогулок')
+  const channelGlyph = channelCard.locator('.publication-channel-avatar img')
+  await expect(channelGlyph).toHaveAttribute('src', /channel-default@2x\.webp$/)
+  await expect.poll(() => channelGlyph.evaluate((element) => {
+    const image = element as HTMLImageElement
+    return image.complete && image.naturalWidth > 0
+  })).toBe(true)
+  const channelAvatarPath = '/api/v1/families/11111111-1111-4111-8111-111111111111/media/aaa00000-0000-4000-8000-000000000015/content?variant=display'
+  const userCard = cards.nth(1)
+  await expect(userCard.locator('.author-name')).toHaveText('Мама семьи')
+  const userAvatar = userCard.locator('.author-avatar img')
+  await expect(userAvatar).toBeVisible()
+  await expect.poll(() => userAvatar.evaluate((element) => {
+    const image = element as HTMLImageElement
+    return image.complete && image.naturalWidth > 0
+  })).toBe(true)
+  await expect.poll(() => userAvatar.evaluate((image) =>
+    Number.parseFloat(getComputedStyle(image).width) > image.parentElement!.clientWidth)).toBe(true)
+  const requests = await page.evaluate(() => (window as typeof window & { __memolyV4RawRequests?: string[] }).__memolyV4RawRequests ?? [])
+  expect(requests).not.toContain(channelAvatarPath)
+  await expect(cards.nth(2).locator('.author-name')).toHaveText('Профильный папа')
+  await page.screenshot({ path: testInfo.outputPath('publication-attribution.png'), fullPage: false })
+})
+
 test('family presentation keeps canonical geometry, role variants, long names and settings artwork', async ({ page }, testInfo) => {
   for (const query of ['?family=1&role=owner&members=2', '?family=1&role=full&members=10', '?family=1&role=viewer&members=2']) {
     await page.setViewportSize({ width: 390, height: 844 })

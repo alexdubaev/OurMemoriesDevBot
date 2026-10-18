@@ -1,5 +1,6 @@
 export const webpIconNames = [
   'calendar',
+  'channel',
   'chevron',
   'clock',
   'close',

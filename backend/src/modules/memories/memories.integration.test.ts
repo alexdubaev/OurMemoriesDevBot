@@ -76,6 +76,89 @@ maybeDescribe('Memories API', () => {
     expect(denied.response.status).toBe(403)
   })
 
+  test('opted-in list and detail resolve same-family publication provenance; legacy reads stay unchanged', async () => {
+    const owner = await admittedUser('Профильное имя', '31901')
+    const dad = await admittedUser('Папа из профиля', '31902')
+    const profileUser = await admittedUser('Гость из профиля', '31904')
+    const otherOwner = await admittedUser('Другой владелец', '31903')
+    const family = await createFamily(owner.token, 'Семья публикации')
+    const otherFamily = await createFamily(otherOwner.token, 'Другая семья')
+    await inviteMember(owner.token, dad.token, family.body.family.id, 'full')
+    await inviteMember(owner.token, profileUser.token, family.body.family.id, 'full')
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: family.body.family.id, userId: dad.userId } },
+      data: { familyDisplayName: 'Папа' } })
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: family.body.family.id, userId: owner.userId } },
+      data: { familyDisplayName: 'Мама' } })
+    const channelId = -79560265048692n
+    await prisma.maxChannelBinding.create({ data: { chatId: channelId, familyId: family.body.family.id, title: '  Наш канал  ' } })
+    const blankTitleId = -79560265048693n
+    const foreignChannelId = -79560265048694n
+    const otherChannelId = -79560265048695n
+    await prisma.maxChannelBinding.create({ data: { chatId: blankTitleId, familyId: family.body.family.id, title: '   ' } })
+    await prisma.maxChannelBinding.create({ data: { chatId: foreignChannelId, familyId: otherFamily.body.family.id, title: 'Не наша семья' } })
+    await prisma.maxChannelBinding.create({ data: { chatId: otherChannelId, familyId: family.body.family.id, title: 'Второй канал' } })
+    const otherFamilyChannelId = -79560265048696n
+    await prisma.maxChannelBinding.create({ data: { chatId: otherFamilyChannelId, familyId: otherFamily.body.family.id, title: 'Канал другой семьи' } })
+    const direct = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Из канала')
+    const forwarded = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Переслано')
+    const envelope = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Без подтверждения')
+    const blankTitle = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Название пустое')
+    const foreignBinding = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Связь другой семьи')
+    const ambiguous = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Два источника')
+    const familyNamedUser = await createNote(dad.token, family.body.family.id, family.body.child.id, 'Семейное имя папы')
+    const profileFallback = await createNote(profileUser.token, family.body.family.id, family.body.child.id, 'Профиль без семейного имени')
+    const appBackup = await createNote(owner.token, family.body.family.id, family.body.child.id, 'Резервная копия приложения')
+    const otherFamilyMemory = await createNote(otherOwner.token, otherFamily.body.family.id, otherFamily.body.child.id, 'Свой канал')
+    await prisma.memory.update({ where: { id: appBackup.body.id }, data: { sourcePublishedAt: new Date('2026-09-01T10:00:00.000Z') } })
+    await prisma.maxMemoryBackup.create({ data: { familyId: family.body.family.id, memoryId: appBackup.body.id,
+      body: 'Резервная копия приложения', state: 'pending', channelChatId: channelId } })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, direct.body.id,
+      { recipientId: channelId, originalChannelId: null, originalMessageId: null })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, forwarded.body.id,
+      { recipientId: 777n, originalChannelId: channelId, originalMessageId: 'original-1' })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, envelope.body.id,
+      { recipientId: 777n, originalChannelId: null, originalMessageId: 'envelope-1' })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, blankTitle.body.id,
+      { recipientId: blankTitleId, originalChannelId: null, originalMessageId: null })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, foreignBinding.body.id,
+      { recipientId: 777n, originalChannelId: foreignChannelId, originalMessageId: 'foreign-forward' })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, ambiguous.body.id,
+      { recipientId: channelId, originalChannelId: null, originalMessageId: null })
+    await createPublishedSource(family.body.family.id, family.body.child.id, owner.userId, ambiguous.body.id,
+      { recipientId: 777n, originalChannelId: otherChannelId, originalMessageId: 'ambiguous-forward' })
+    await createPublishedSource(otherFamily.body.family.id, otherFamily.body.child.id, otherOwner.userId, otherFamilyMemory.body.id,
+      { recipientId: otherFamilyChannelId, originalChannelId: null, originalMessageId: null })
+
+    const path = `/api/v1/families/${family.body.family.id}/memories`
+    const legacy = await request(path, owner.token, 'GET', undefined)
+    expect(legacy.response.status).toBe(200)
+    expect(legacy.body.items.every((item: any) => !('publicationAttribution' in item))).toBe(true)
+    const optedIn = await request(path, owner.token, 'GET', undefined, undefined, { 'X-Memoly-Publication-Attribution': '1' })
+    const byId = new Map<string, any>(optedIn.body.items.map((item: any) => [item.id, item]))
+    expect(byId.get(direct.body.id)).toMatchObject({ author: { id: owner.userId, name: 'Профильное имя' },
+      publicationAttribution: { kind: 'channel', name: 'Наш канал' } })
+    expect(byId.get(forwarded.body.id).publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
+    expect(byId.get(envelope.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
+    expect(byId.get(blankTitle.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
+    expect(byId.get(foreignBinding.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
+    expect(byId.get(ambiguous.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
+    expect(byId.get(familyNamedUser.body.id)).toMatchObject({ author: { id: dad.userId, name: 'Папа из профиля' },
+      publicationAttribution: { kind: 'user', name: 'Папа' } })
+    expect(byId.get(profileFallback.body.id)).toMatchObject({ author: { id: profileUser.userId, name: 'Гость из профиля' },
+      publicationAttribution: { kind: 'user', name: 'Гость из профиля' } })
+    expect(byId.get(appBackup.body.id)).toMatchObject({ sourcePublishedAt: '2026-09-01T10:00:00.000Z',
+      publicationAttribution: { kind: 'user', name: 'Мама' } })
+    const otherFamilyOptedIn = await request(`/api/v1/families/${otherFamily.body.family.id}/memories/${otherFamilyMemory.body.id}`,
+      otherOwner.token, 'GET', undefined, undefined, { 'X-Memoly-Publication-Attribution': '1' })
+    expect(otherFamilyOptedIn.body.publicationAttribution).toEqual({ kind: 'channel', name: 'Канал другой семьи' })
+    expect(byId.get(envelope.body.id).sourcePublishedAt).toBeNull()
+    const detail = await request(`${path}/${direct.body.id}`, owner.token, 'GET', undefined, undefined,
+      { 'X-Memoly-Publication-Attribution': '1' })
+    expect(detail.body.publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
+    const legacyDetail = await request(`${path}/${direct.body.id}`, owner.token, 'GET', undefined)
+    expect(legacyDetail.body).not.toHaveProperty('publicationAttribution')
+  })
+
   test('an invited full member has the same memory mutations as the owner', async () => {
     const owner = await admittedUser('Владелец', '31501')
     const full = await admittedUser('Полный доступ', '31502')
@@ -826,6 +909,10 @@ maybeDescribe('Memories API', () => {
   })
 
   async function clearFixtures() {
+    await prisma.maxSource.deleteMany()
+    await prisma.maxInbox.deleteMany()
+    await prisma.maxMemoryBackup.deleteMany()
+    await prisma.maxChannelBinding.deleteMany()
     await prisma.idempotencyRecord.deleteMany()
     await prisma.memoryLike.deleteMany()
     await prisma.memoryMedia.deleteMany()
@@ -972,6 +1059,20 @@ maybeDescribe('Memories API', () => {
   function createNote(token: string, familyId: string, childId: string, body: string, occurredAt = Date.now() - 30_000) {
     return request(`/api/v1/families/${familyId}/memories`, token, 'POST',
       noteInput(childId, body, occurredAt), randomUUID())
+  }
+
+  async function createPublishedSource(familyId: string, childId: string, userId: string, memoryId: string,
+    source: { recipientId: bigint; originalChannelId: bigint | null; originalMessageId: string | null }) {
+    const inbox = await prisma.maxInbox.create({ data: {
+      eventKey: randomUUID(), botId: 900n, eventKind: 'message_created',
+      encryptedPayload: Buffer.from([1]), encryptionIv: Buffer.from([1]), encryptionAuthTag: Buffer.from([1]),
+    } })
+    return prisma.maxSource.create({ data: {
+      inboxId: inbox.id, botId: 900n, senderSubject: '31901', recipientId: source.recipientId,
+      messageId: randomUUID(), originalChannelId: source.originalChannelId,
+      originalMessageId: source.originalMessageId, status: 'published', plannedMemoryId: randomUUID(),
+      memoryId, userId, familyId, childId,
+    } })
   }
 
   function createMemoryAsset(familyId: string, uploaderId: string, mediaKind: 'photo' | 'video' | 'voice', originalStatus: 'stored' | 'pending' = 'stored') {

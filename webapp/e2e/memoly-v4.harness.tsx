@@ -44,7 +44,22 @@ const entries = [
   { id: 'mixed', body: 'Фото, ролик и ещё одно фото', at: '2026-10-15T12:00:00.000Z', attachments: [makeAttachment('aaa00000-0000-4000-8000-000000000007', 616, 372), makeAttachment('aaa00000-0000-4000-8000-000000000008', 720, 1280, 'video'), makeAttachment('aaa00000-0000-4000-8000-000000000009', 354, 354)] },
   { id: 'note', body: 'Алиса сказала: «ещё пять минут»', at: '2026-10-14T09:00:00.000Z', attachments: [] },
 ]
-const memories = entries.map((entry, index) => ({ id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, '0')}`, familyId, childId, author: { id: userId, name: index ? 'Мама' : 'Папа', avatarPath: avatarPath(index ? 'aaa00000-0000-4000-8000-000000000014' : 'aaa00000-0000-4000-8000-000000000013'), avatarCrop: null }, kind: entry.kind ?? (entry.attachments.length ? 'media' : 'note'), body: entry.body, occurredAt: entry.at, firstPublishedAt: entry.at, sourcePublishedAt: null, createdAt: entry.at, version: 1, status: 'published', attachments: entry.attachments, reactionCounts: index === 0 ? { heart: 12 } : {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }))
+const memories = entries.map((entry, index) => {
+  const channel = params.has('attribution') && index === 0
+  const author = channel
+    ? { id: '44444444-4444-4444-8444-444444444444', name: 'Профильный автор', avatarPath: avatarPath('aaa00000-0000-4000-8000-000000000015'), avatarCrop: null }
+    : { id: userId, name: params.has('attribution') && index === 2 ? 'Профильный папа' : index ? 'Мама' : 'Папа',
+      avatarPath: avatarPath(params.has('attribution') && index === 1 ? 'aaa00000-0000-4000-8000-000000000013' : index ? 'aaa00000-0000-4000-8000-000000000014' : 'aaa00000-0000-4000-8000-000000000013'),
+      avatarCrop: params.has('attribution') && index === 1 ? { x: 0.12, y: 0.08, width: 0.7, height: 0.76 } : null }
+  const memory = { id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, '0')}`, familyId, childId, author,
+    kind: entry.kind ?? (entry.attachments.length ? 'media' : 'note'), body: entry.body, occurredAt: entry.at,
+    firstPublishedAt: entry.at, sourcePublishedAt: null, createdAt: entry.at, version: 1, status: 'published',
+    attachments: entry.attachments, reactionCounts: index === 0 ? { heart: 12 } : {}, currentUserReaction: null,
+    likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
+  if (channel) return { ...memory, publicationAttribution: { kind: 'channel', name: 'Канал прогулок' } }
+  if (params.has('attribution') && index === 1) return { ...memory, publicationAttribution: { kind: 'user', name: 'Мама семьи' } }
+  return memory
+})
 const transport = {
   request: async (url: string) => {
     if (url.includes('/readiness')) return { state: 'ready', recheckable: false }

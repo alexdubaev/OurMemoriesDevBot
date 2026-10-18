@@ -54,6 +54,22 @@ describe('memory contracts', () => {
     expect(() => backendMediaPathSchema.parse(path.replace('/content', '/extra/content'))).toThrow()
     expect(() => backendMediaPathSchema.parse(`https://example.test${path}`)).toThrow()
   })
+  test('accepts optional publication attribution while preserving legacy DTOs', () => {
+    const base = {
+      id: '018f01d8-0c2a-7c25-bf83-ae68985c7e90',
+      familyId: '018f01d8-0c2a-7c25-bf83-ae68985c7e91',
+      childId: '018f01d8-0c2a-7c25-bf83-ae68985c7e92',
+      author: { id: '018f01d8-0c2a-7c25-bf83-ae68985c7e93', name: 'Профиль', avatarPath: null },
+      kind: 'note', body: 'Запись', occurredAt: '2026-09-09T10:00:00.000Z',
+      firstPublishedAt: null, sourcePublishedAt: null, createdAt: '2026-09-09T10:00:00.000Z', version: 1,
+      status: 'published', attachments: [], reactionCounts: {}, currentUserReaction: null,
+      likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true },
+    } as const
+    expect(memoryDtoSchema.parse(base)).not.toHaveProperty('publicationAttribution')
+    expect(memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'channel', name: 'Домашний канал' } }))
+      .toHaveProperty('publicationAttribution', { kind: 'channel', name: 'Домашний канал' })
+    expect(() => memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'channel', name: ' ' } })).toThrow()
+  })
   test('accepts a note with up to 8,000 Unicode code points and preserves plain text', () => {
     const prefix = `<img src=x onerror=alert('xss')>`
     const body = `${prefix}${'💛'.repeat(8_000 - [...prefix].length)}`

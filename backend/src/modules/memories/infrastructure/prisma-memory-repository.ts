@@ -32,6 +32,53 @@ export class PrismaMemoryRepository implements MemoryRepository {
     private readonly idempotency: IdempotencyExecutor<PrismaTransactionClient>,
   ) {}
 
+  async addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]> {
+    if (memories.length === 0) return memories
+    return this.db.$transaction(async (tx) => {
+      await lockMember(tx, scope, 'member')
+      const memoryIds = memories.map(({ id }) => id)
+      const [sources, memberships] = await Promise.all([
+        tx.maxSource.findMany({
+        where: { familyId: scope.familyId, memoryId: { in: memoryIds }, status: 'published' },
+        select: { memoryId: true, recipientId: true, originalChannelId: true, originalMessageId: true },
+        }),
+        tx.familyMember.findMany({
+        where: { familyId: scope.familyId, revokedAt: null, userId: { in: [...new Set(memories.map(({ author }) => author.id))] } },
+        select: { userId: true, familyDisplayName: true },
+        }),
+      ])
+      const sourceChannelIds = new Map<string, Set<bigint>>()
+      for (const source of sources) {
+        if (!source.memoryId) continue
+        const channelId = source.originalChannelId !== null
+          ? source.originalMessageId !== null ? source.originalChannelId : null
+          : source.originalMessageId === null ? source.recipientId : null
+        if (channelId === null) continue
+        const ids = sourceChannelIds.get(source.memoryId) ?? new Set<bigint>()
+        ids.add(channelId)
+        sourceChannelIds.set(source.memoryId, ids)
+      }
+      const channelIds = [...new Set([...sourceChannelIds.values()].flatMap((ids) => [...ids]))]
+      const bindings = channelIds.length ? await tx.maxChannelBinding.findMany({
+        where: { familyId: scope.familyId, chatId: { in: channelIds } },
+        select: { chatId: true, title: true },
+      }) : []
+      const titleByChannel = new Map(bindings.map(({ chatId, title }) => [chatId, title?.trim() ?? '']))
+      const familyNameByAuthor = new Map(memberships.map(({ userId, familyDisplayName }) => [userId, familyDisplayName?.trim() ?? '']))
+
+      return memories.map((memory) => {
+        const ids = sourceChannelIds.get(memory.id)
+        const channelTitle = ids?.size === 1 ? titleByChannel.get([...ids][0]!) : undefined
+        if (channelTitle) return { ...memory, publicationAttribution: { kind: 'channel', name: channelTitle } }
+        const familyName = familyNameByAuthor.get(memory.author.id)
+        const profileName = memory.author.name.trim()
+        return { ...memory, publicationAttribution: {
+          kind: 'user', name: familyName || profileName || 'Участник семьи',
+        } }
+      })
+    })
+  }
+
   async create(
     scope: FamilyScope,
     input: CreateMemoryRequest,
