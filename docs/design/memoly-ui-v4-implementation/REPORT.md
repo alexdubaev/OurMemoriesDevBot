@@ -20,7 +20,7 @@ Allowed paths: presentation/style/typography в `webapp/src/components`, `featur
 
 Перенесены компактная шапка и нижняя панель, дата/автор/подпись/реакции/заметка/голос, семейный обзор и общие primitives существующих форм. Имена, роли, «Вы», количество участников и состояния MAX берутся из прежних props. Темы продолжают выбирать прежние изображения через существующий provider. Управление семьёй, приглашениями и профилями доступно через существующие callbacks.
 
-Рамка резервируется по имеющимся metadata: clamp ratio 0.8–2.4, первая фотография в фотоальбоме, 0.8 для mixed video и fallback. Локальный ref фиксирует рамку по составу публикации; readiness, metadata event и активный слайд не меняют её. Нет БД, localStorage или растущего Map для размеров.
+Рамка резервируется по имеющимся metadata: clamp ratio 0.8–2.4, первая фотография в фотоальбоме, 0.8 для mixed video и fallback. Локальный state snapshot фиксирует рамку по составу публикации; readiness, metadata event и активный слайд не меняют её. Нет БД, localStorage или растущего Map для размеров.
 
 Сохранены Embla, PhotoSwipe, MixedMediaViewer, выбранный индекс, history/MAX Back, private-media endpoints/SW, avatar loading, playback coordinator и lifecycle. Из `loadedmetadata` убран только sizing state; duration и media events остаются. Полная дата доступна в деталях; timezone/grouping и исходная подпись не изменены. В PhotoSwipe добавлены caption/thumbnails через штатный UI API с уже загруженными URL.
 
