@@ -60,7 +60,9 @@ test('actual feed shell matches canonical responsive geometry and captures compu
       if (!mediaButton) throw new Error('Missing media button')
       if (!reactionLabel) throw new Error('Missing reaction label')
       if (!activeNavLabel) throw new Error('Missing active navigation label')
-      return { viewport: { width: innerWidth, height: innerHeight }, header: rect('.ui-v2-child-header'), firstMedia: rect('.memory-card .memoly-mixed-viewport'), navigation: rect('nav[data-bottom-navigation-appearance="memoly"]'), navHitTargets, navBackground: getComputedStyle(nav).backgroundColor, appCanvas: getComputedStyle(document.querySelector('.memoly-app-root')!).backgroundColor, navPanelBackground: getComputedStyle(nav.firstElementChild!).backgroundColor, controls: box(controls), mediaBackground: getComputedStyle(mediaButton).backgroundColor, reactionFontSize: getComputedStyle(reactionLabel).fontSize, activeNavFontWeight: getComputedStyle(activeNavLabel).fontWeight, activeIndicator: { width: getComputedStyle(activeNav, '::before').width, height: getComputedStyle(activeNav, '::before').height, content: getComputedStyle(activeNav, '::before').content }, navGlyphSize: box(homeIcon.getBoundingClientRect()), addCircleColor: getComputedStyle(addCircle).color, addCircleBackground: getComputedStyle(addCircle).backgroundColor, addIconColor: getComputedStyle(addIcon).backgroundColor, addGlyphSize: box(addIcon.getBoundingClientRect()), addLabelSize: getComputedStyle(addLabel).fontSize, childNameText: { fontSize: getComputedStyle(childNameText).fontSize, lineHeight: getComputedStyle(childNameText).lineHeight, weight: getComputedStyle(childNameText).fontWeight, letterSpacing: getComputedStyle(childNameText).letterSpacing }, sheetRadius: getComputedStyle(document.documentElement).getPropertyValue('--ui-v2-radius-sheet').trim(), identity: box(identity), gear: box(gear), theme: document.documentElement.dataset.memolyTheme, role: 'full', insets: { top: 0, bottom: 0 } }
+      const navStyle = getComputedStyle(nav)
+      const navPanelStyle = getComputedStyle(nav.firstElementChild!)
+      return { viewport: { width: innerWidth, height: innerHeight }, header: rect('.ui-v2-child-header'), firstMedia: rect('.memory-card .memoly-mixed-viewport'), navigation: rect('nav[data-bottom-navigation-appearance="memoly"]'), navHitTargets, navBackground: navStyle.backgroundColor, appCanvas: getComputedStyle(document.querySelector('.memoly-app-root')!).backgroundColor, navPanelBackground: navPanelStyle.backgroundColor, navDivider: { width: navStyle.borderTopWidth, style: navStyle.borderTopStyle, color: navStyle.borderTopColor }, navPanelDivider: { width: navPanelStyle.borderTopWidth, style: navPanelStyle.borderTopStyle }, controls: box(controls), mediaBackground: getComputedStyle(mediaButton).backgroundColor, reactionFontSize: getComputedStyle(reactionLabel).fontSize, activeNavFontWeight: getComputedStyle(activeNavLabel).fontWeight, activeIndicator: { width: getComputedStyle(activeNav, '::before').width, height: getComputedStyle(activeNav, '::before').height, content: getComputedStyle(activeNav, '::before').content }, navGlyphSize: box(homeIcon.getBoundingClientRect()), addCircleColor: getComputedStyle(addCircle).color, addCircleBackground: getComputedStyle(addCircle).backgroundColor, addIconColor: getComputedStyle(addIcon).backgroundColor, addGlyphSize: box(addIcon.getBoundingClientRect()), addLabelSize: getComputedStyle(addLabel).fontSize, childNameText: { fontSize: getComputedStyle(childNameText).fontSize, lineHeight: getComputedStyle(childNameText).lineHeight, weight: getComputedStyle(childNameText).fontWeight, letterSpacing: getComputedStyle(childNameText).letterSpacing }, sheetRadius: getComputedStyle(document.documentElement).getPropertyValue('--ui-v2-radius-sheet').trim(), identity: box(identity), gear: box(gear), theme: document.documentElement.dataset.memolyTheme, role: 'full', insets: { top: 0, bottom: 0 } }
     })
     records.push(geometry)
     expect(geometry.navigation!.height).toBe(50)
@@ -70,7 +72,9 @@ test('actual feed shell matches canonical responsive geometry and captures compu
       expect(h.x).toBe(0); expect(h.y).toBe(0); expect(h.width).toBe(390); expect(h.height).toBe(96)
       expect(m.x).toBe(16); expect(m.width).toBe(358); expect(m.height).toBeCloseTo(216.19, 0); expect(m.y).toBeGreaterThanOrEqual(175); expect(m.y).toBeLessThanOrEqual(176)
       expect(n.x).toBe(0); expect(n.y).toBe(794); expect(n.height).toBe(50)
-      expect(geometry.navBackground).toBe(geometry.appCanvas)
+      expect(geometry.navBackground).toBe(geometry.navPanelBackground)
+      expect(geometry.navDivider).toMatchObject({ width: '1px', style: 'solid' })
+      expect(geometry.navPanelDivider.width).toBe('0px')
       expect(geometry.navPanelBackground).toBe('rgb(255, 254, 250)')
       expect(geometry.controls.height).toBe(24)
       expect(geometry.mediaBackground).toBe('rgb(233, 237, 230)')
@@ -115,11 +119,16 @@ test('actual feed shell matches canonical responsive geometry and captures compu
     const safeGeometry = await page.evaluate(() => {
       const nav = document.querySelector('nav[data-bottom-navigation-appearance="memoly"]')!
       const app = document.querySelector('[data-memoly-feed] .app')!
-      return { navHeight: nav.getBoundingClientRect().height, panelHeight: nav.firstElementChild!.getBoundingClientRect().height, navBackground: getComputedStyle(nav).backgroundColor, appCanvas: getComputedStyle(document.querySelector('.memoly-app-root')!).backgroundColor, appPaddingBottom: Number.parseFloat(getComputedStyle(app).paddingBottom) }
+      const navDividerWidth = Number.parseFloat(getComputedStyle(nav).borderTopWidth)
+      const gridHeight = nav.firstElementChild!.getBoundingClientRect().height
+      return { navHeight: nav.getBoundingClientRect().height, panelHeight: gridHeight + navDividerWidth, gridHeight, navBackground: getComputedStyle(nav).backgroundColor, navPanelBackground: getComputedStyle(nav.firstElementChild!).backgroundColor, navDividerWidth, navPanelDividerWidth: getComputedStyle(nav.firstElementChild!).borderTopWidth, appPaddingBottom: Number.parseFloat(getComputedStyle(app).paddingBottom) }
     })
     expect(safeGeometry.navHeight).toBe(expectedNav)
     expect(safeGeometry.panelHeight).toBe(50)
-    expect(safeGeometry.navBackground).toBe(safeGeometry.appCanvas)
+    expect(safeGeometry.gridHeight).toBe(49)
+    expect(safeGeometry.navBackground).toBe(safeGeometry.navPanelBackground)
+    expect(safeGeometry.navDividerWidth).toBe(1)
+    expect(safeGeometry.navPanelDividerWidth).toBe('0px')
     expect(safeGeometry.appPaddingBottom).toBe(78 + Math.max(hostBottom, 20))
   }
   for (const [width, height] of [[320, 844], [390, 844], [430, 932]] as const) {
@@ -128,9 +137,10 @@ test('actual feed shell matches canonical responsive geometry and captures compu
     await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
     const safeNav = await page.locator('nav[data-bottom-navigation-appearance="memoly"]').evaluate((nav) => {
       const r = nav.getBoundingClientRect(); const panel = nav.firstElementChild!.getBoundingClientRect()
-      return { x: r.x, y: r.y, width: r.width, height: r.height, panelHeight: panel.height }
+      return { x: r.x, y: r.y, width: r.width, height: r.height, panelHeight: panel.height + Number.parseFloat(getComputedStyle(nav).borderTopWidth), gridHeight: panel.height }
     })
     expect(safeNav).toMatchObject({ x: 0, y: height - 84, width, height: 84, panelHeight: 50 })
+    expect(safeNav.gridHeight).toBe(49)
   }
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/memoly-v4.harness.html?bottom=34')

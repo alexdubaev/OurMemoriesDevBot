@@ -50,12 +50,12 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
   left: 0 !important; right: 0 !important; bottom: 0 !important;
   box-sizing: border-box; width: 100% !important; height: auto !important; min-height: calc(var(--layout-bottom-nav) + var(--ui-v2-effective-bottom-inset)) !important;
   transform: none; padding: 0 0 var(--ui-v2-effective-bottom-inset) !important;
-  border: 0 !important;
+  border: 0 !important; border-top: 1px solid var(--ui-v2-color-line) !important;
   border-radius: 0 !important;
-  background: var(--ui-v2-color-canvas) !important;
+  background: var(--ui-v2-color-surface) !important;
   box-shadow: none !important;
 }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { box-sizing: border-box; width: 100%; height: auto; min-height: calc(var(--layout-bottom-nav) - 1px); padding: 0 calc(12px + var(--host-inset-right)) 0 calc(12px + var(--host-inset-left)); border-top: 1px solid var(--ui-v2-color-line); background: var(--ui-v2-color-surface); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { box-sizing: border-box; width: 100%; height: auto; min-height: calc(var(--layout-bottom-nav) - 1px); padding: 0 calc(12px + var(--host-inset-right)) 0 calc(12px + var(--host-inset-left)); border-top: 0; background: var(--ui-v2-color-surface); }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] { position: relative; min-height: calc(var(--layout-bottom-nav) - 1px); color: var(--ui-v2-color-muted) !important; border-radius: 0; font-weight: 400; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home']::before,.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family']::before { position: absolute; top: 0; width: 22px; height: 2px; border-radius: 2px; background: var(--ui-v2-color-accent); content: ''; display: none; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > [data-slot='webp-icon'] { width: 20px !important; height: 20px !important; }
