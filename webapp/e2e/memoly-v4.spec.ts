@@ -56,27 +56,32 @@ test('actual feed shell matches canonical responsive geometry and captures compu
       const homeIcon = activeNav.querySelector<HTMLElement>('[data-slot="webp-icon"]')!
       const childNameText = document.querySelector<HTMLElement>('.ui-v2-child-name-text')!
       const box = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height })
+      const navHitTargets = [...nav.querySelectorAll<HTMLElement>('[data-nav-position]')].map((element) => ({ position: element.dataset.navPosition, ...box(element.getBoundingClientRect()) }))
       if (!mediaButton) throw new Error('Missing media button')
       if (!reactionLabel) throw new Error('Missing reaction label')
       if (!activeNavLabel) throw new Error('Missing active navigation label')
-      return { viewport: { width: innerWidth, height: innerHeight }, header: rect('.ui-v2-child-header'), firstMedia: rect('.memory-card .memoly-mixed-viewport'), navigation: rect('nav[data-bottom-navigation-appearance="memoly"]'), controls: box(controls), mediaBackground: getComputedStyle(mediaButton).backgroundColor, reactionFontSize: getComputedStyle(reactionLabel).fontSize, activeNavFontWeight: getComputedStyle(activeNavLabel).fontWeight, activeIndicator: { width: getComputedStyle(activeNav, '::before').width, height: getComputedStyle(activeNav, '::before').height, content: getComputedStyle(activeNav, '::before').content }, navGlyphSize: box(homeIcon.getBoundingClientRect()), addCircleColor: getComputedStyle(addCircle).color, addCircleBackground: getComputedStyle(addCircle).backgroundColor, addIconColor: getComputedStyle(addIcon).backgroundColor, addGlyphSize: box(addIcon.getBoundingClientRect()), addLabelSize: getComputedStyle(addLabel).fontSize, childNameText: { fontSize: getComputedStyle(childNameText).fontSize, lineHeight: getComputedStyle(childNameText).lineHeight, weight: getComputedStyle(childNameText).fontWeight, letterSpacing: getComputedStyle(childNameText).letterSpacing }, sheetRadius: getComputedStyle(document.documentElement).getPropertyValue('--ui-v2-radius-sheet').trim(), identity: box(identity), gear: box(gear), theme: document.documentElement.dataset.memolyTheme, role: 'full', insets: { top: 0, bottom: 0 } }
+      return { viewport: { width: innerWidth, height: innerHeight }, header: rect('.ui-v2-child-header'), firstMedia: rect('.memory-card .memoly-mixed-viewport'), navigation: rect('nav[data-bottom-navigation-appearance="memoly"]'), navHitTargets, navBackground: getComputedStyle(nav).backgroundColor, appCanvas: getComputedStyle(document.querySelector('.memoly-app-root')!).backgroundColor, navPanelBackground: getComputedStyle(nav.firstElementChild!).backgroundColor, controls: box(controls), mediaBackground: getComputedStyle(mediaButton).backgroundColor, reactionFontSize: getComputedStyle(reactionLabel).fontSize, activeNavFontWeight: getComputedStyle(activeNavLabel).fontWeight, activeIndicator: { width: getComputedStyle(activeNav, '::before').width, height: getComputedStyle(activeNav, '::before').height, content: getComputedStyle(activeNav, '::before').content }, navGlyphSize: box(homeIcon.getBoundingClientRect()), addCircleColor: getComputedStyle(addCircle).color, addCircleBackground: getComputedStyle(addCircle).backgroundColor, addIconColor: getComputedStyle(addIcon).backgroundColor, addGlyphSize: box(addIcon.getBoundingClientRect()), addLabelSize: getComputedStyle(addLabel).fontSize, childNameText: { fontSize: getComputedStyle(childNameText).fontSize, lineHeight: getComputedStyle(childNameText).lineHeight, weight: getComputedStyle(childNameText).fontWeight, letterSpacing: getComputedStyle(childNameText).letterSpacing }, sheetRadius: getComputedStyle(document.documentElement).getPropertyValue('--ui-v2-radius-sheet').trim(), identity: box(identity), gear: box(gear), theme: document.documentElement.dataset.memolyTheme, role: 'full', insets: { top: 0, bottom: 0 } }
     })
     records.push(geometry)
+    expect(geometry.navigation!.height).toBe(50)
+    expect(geometry.navHitTargets.every((target) => target.width >= 44 && target.height >= 44)).toBe(true)
     if (viewport.width === 390) {
       const h = geometry.header!, m = geometry.firstMedia!, n = geometry.navigation!
       expect(h.x).toBe(0); expect(h.y).toBe(0); expect(h.width).toBe(390); expect(h.height).toBe(96)
       expect(m.x).toBe(16); expect(m.width).toBe(358); expect(m.height).toBeCloseTo(216.19, 0); expect(m.y).toBeGreaterThanOrEqual(175); expect(m.y).toBeLessThanOrEqual(176)
-      expect(n.x).toBe(0); expect(n.y).toBe(782); expect(n.height).toBe(62)
+      expect(n.x).toBe(0); expect(n.y).toBe(794); expect(n.height).toBe(50)
+      expect(geometry.navBackground).toBe(geometry.appCanvas)
+      expect(geometry.navPanelBackground).toBe('rgb(255, 254, 250)')
       expect(geometry.controls.height).toBe(24)
       expect(geometry.mediaBackground).toBe('rgb(233, 237, 230)')
       expect(geometry.reactionFontSize).toBe('11px')
       expect(geometry.activeNavFontWeight).toBe('700')
       expect(geometry.activeIndicator).toMatchObject({ width: '22px', height: '2px', content: '""' })
-      expect(geometry.navGlyphSize).toMatchObject({ width: 21, height: 21 })
+      expect(geometry.navGlyphSize).toMatchObject({ width: 20, height: 20 })
       expect(geometry.addCircleColor).toBe('rgb(255, 255, 255)')
       expect(contrastRatio(geometry.addCircleColor, geometry.addCircleBackground)).toBeGreaterThanOrEqual(4.5)
       expect(geometry.addIconColor).toBe('rgb(255, 255, 255)')
-      expect(geometry.addGlyphSize).toMatchObject({ width: 21, height: 21 })
+      expect(geometry.addGlyphSize).toMatchObject({ width: 20, height: 20 })
       expect(geometry.addLabelSize).toBe('10px')
       expect(geometry.childNameText).toMatchObject({ fontSize: '20px', lineHeight: '22px', weight: '680', letterSpacing: '-0.6px' })
       expect(geometry.sheetRadius).toBe('19px')
@@ -102,19 +107,41 @@ test('actual feed shell matches canonical responsive geometry and captures compu
   })
   expect(insetGeometry.header.y).toBe(12)
   expect(insetGeometry.media.y).toBe(187)
-  expect(insetGeometry.nav).toMatchObject({ y: 762, height: 82 })
-  for (const [hostBottom, expectedNav] of [[0, 82], [12, 82], [30, 92]] as const) {
+  expect(insetGeometry.nav).toMatchObject({ y: 774, height: 70 })
+  for (const [hostBottom, expectedNav] of [[0, 70], [12, 70], [34, 84]] as const) {
     await page.goto(`/e2e/memoly-v4.harness.html?bottom=${hostBottom}`)
     await expect(page.locator('nav[data-bottom-navigation-appearance="memoly"]')).toBeVisible()
     await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
     const safeGeometry = await page.evaluate(() => {
       const nav = document.querySelector('nav[data-bottom-navigation-appearance="memoly"]')!
       const app = document.querySelector('[data-memoly-feed] .app')!
-      return { navHeight: nav.getBoundingClientRect().height, appPaddingBottom: Number.parseFloat(getComputedStyle(app).paddingBottom) }
+      return { navHeight: nav.getBoundingClientRect().height, panelHeight: nav.firstElementChild!.getBoundingClientRect().height, navBackground: getComputedStyle(nav).backgroundColor, appCanvas: getComputedStyle(document.querySelector('.memoly-app-root')!).backgroundColor, appPaddingBottom: Number.parseFloat(getComputedStyle(app).paddingBottom) }
     })
     expect(safeGeometry.navHeight).toBe(expectedNav)
-    expect(safeGeometry.appPaddingBottom).toBe(90 + Math.max(hostBottom, 20))
+    expect(safeGeometry.panelHeight).toBe(50)
+    expect(safeGeometry.navBackground).toBe(safeGeometry.appCanvas)
+    expect(safeGeometry.appPaddingBottom).toBe(78 + Math.max(hostBottom, 20))
   }
+  for (const [width, height] of [[320, 844], [390, 844], [430, 932]] as const) {
+    await page.setViewportSize({ width, height })
+    await page.goto('/e2e/memoly-v4.harness.html?bottom=34')
+    await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
+    const safeNav = await page.locator('nav[data-bottom-navigation-appearance="memoly"]').evaluate((nav) => {
+      const r = nav.getBoundingClientRect(); const panel = nav.firstElementChild!.getBoundingClientRect()
+      return { x: r.x, y: r.y, width: r.width, height: r.height, panelHeight: panel.height }
+    })
+    expect(safeNav).toMatchObject({ x: 0, y: height - 84, width, height: 84, panelHeight: 50 })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/memoly-v4.harness.html?bottom=34')
+  await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
+  await page.locator('.memory-card').last().scrollIntoViewIfNeeded()
+  const lastCardClearance = await page.evaluate(() => {
+    const card = document.querySelectorAll<HTMLElement>('.memory-card').item(5).getBoundingClientRect()
+    const nav = document.querySelector('nav[data-bottom-navigation-appearance="memoly"]')!.getBoundingClientRect()
+    return { cardBottom: card.bottom, navTop: nav.top }
+  })
+  expect(lastCardClearance.cardBottom).toBeLessThanOrEqual(lastCardClearance.navTop - 28 + 1)
   await mkdir(evidenceDir, { recursive: true })
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8' }).trim()
   const status = execFileSync('git', ['status', '--short'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8' })
@@ -128,10 +155,16 @@ test('family presentation keeps canonical geometry, role variants, long names an
     await expect(page.locator('.family-screen')).toBeVisible()
     await expect(page.locator('.ui-v2-family-toolbar')).toBeVisible()
     await expect(page.getByText('Подключён')).toBeVisible()
+    const familyNav = page.locator('nav[data-bottom-navigation-appearance="memoly"]')
+    expect((await familyNav.boundingBox())?.height).toBe(50)
+    const familyTargets = await familyNav.locator('[data-nav-position]').evaluateAll((items) => items.map((item) => { const r = item.getBoundingClientRect(); return { width: r.width, height: r.height } }))
+    expect(familyTargets.every((target) => target.width >= 44 && target.height >= 44)).toBe(true)
     await expect(page.locator('.family-member-row')).toHaveCount(query.includes('members=10') ? 10 : 2)
     const canWrite = !query.includes('role=viewer')
     await expect(page.locator('.family-invite-btn')).toHaveCount(canWrite ? 1 : 0)
     await expect(page.locator('[data-nav-position="viewer"]')).toHaveCount(canWrite ? 0 : 1)
+    if (canWrite) await expect(familyNav.getByRole('button', { name: 'Добавить' })).toBeVisible()
+    else await expect(familyNav.getByRole('img', { name: 'Режим просмотра' })).toBeVisible()
     if (query.includes('role=full')) {
       await expect(page.getByText('Полный доступ').first()).toBeVisible()
       await expect(page.locator('.family-leave-action')).toBeVisible()
@@ -173,7 +206,7 @@ test('family presentation keeps canonical geometry, role variants, long names an
   expect(insetFamilyHeader?.y).toBe(12)
   expect(insetFamilyProfile?.y).toBe(82)
   await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
-  expect(await page.locator('.family-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(82)
+  expect(await page.locator('.family-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(70)
 })
 
 test('pagination controls remain 24px targets and 200% text has no horizontal overflow', async ({ page }) => {
@@ -192,15 +225,16 @@ test('pagination controls remain 24px targets and 200% text has no horizontal ov
     const row = nav.querySelector<HTMLElement>('[data-nav-position="home"]')!
     const label = row.querySelector<HTMLElement>(':scope > span')!
     const rowRect = row.getBoundingClientRect(); const labelRect = label.getBoundingClientRect()
-    return { navHeight: nav.getBoundingClientRect().height, rowHeight: rowRect.height, rowScrollHeight: row.scrollHeight, labelBottom: labelRect.bottom, rowBottom: rowRect.bottom }
+      return { navHeight: nav.getBoundingClientRect().height, rowHeight: rowRect.height, rowScrollHeight: row.scrollHeight, labelBottom: labelRect.bottom, rowBottom: rowRect.bottom }
   })
   expect(navFit.labelBottom).toBeLessThanOrEqual(navFit.rowBottom)
+  expect(navFit.navHeight).toBeGreaterThanOrEqual(68)
   expect(navFit.rowScrollHeight).toBeLessThanOrEqual(navFit.rowHeight)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await page.goto('/e2e/memoly-v4.harness.html?top=12&bottom=20')
   await expect(page.locator('.ui-v2-child-header')).toBeVisible()
   const insetNav = await page.locator('nav[data-bottom-navigation-appearance="memoly"]').boundingBox()
-  expect(insetNav).toMatchObject({ y: 762, height: 82 })
+  expect(insetNav).toMatchObject({ y: 774, height: 70 })
 })
 
 test('PhotoSwipe photo-only viewer reuses its loaded slide URLs for caption and thumbnail navigation', async ({ page }) => {
@@ -251,10 +285,10 @@ test('family overview opens the existing child profile presentation', async ({ p
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/memoly-v4.harness.html?family=1')
   await page.addStyleTag({ content: '.memoly-app-root { --ui-v2-browser-safe-area-bottom: 20px !important; }' })
-  expect(await page.locator('.family-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(82)
+  expect(await page.locator('.family-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(70)
   await page.getByRole('button', { name: /Открыть профиль ребёнка/ }).click()
   await expect(page.locator('.child-profile')).toBeVisible()
-  expect(await page.locator('.family-screen.child-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(132)
+  expect(await page.locator('.family-screen.child-screen').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBe(120)
   await expect(page.getByText('Алиса')).toBeVisible()
 })
 

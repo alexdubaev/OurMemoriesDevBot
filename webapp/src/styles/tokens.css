@@ -468,7 +468,7 @@ nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-viewer {
   --radius-card: var(--ui-v2-radius-surface);
   --radius-field: var(--ui-v2-radius-field);
   --radius-sheet: var(--ui-v2-radius-sheet);
-  --layout-bottom-nav: 62px;
+  --layout-bottom-nav: max(50px, calc(32px + 1.125rem));
 }
 
 @media (max-width: 355px) {

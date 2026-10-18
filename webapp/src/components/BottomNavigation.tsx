@@ -41,6 +41,7 @@ export function BottomNavigation({
       )}>
         <NavButton
           active={active === 'feed'}
+          appearance={appearance}
           icon="home"
           label="Лента"
           onClick={onFeed}
@@ -49,7 +50,8 @@ export function BottomNavigation({
           <button
             aria-label="Добавить"
             className={cn(
-              'group flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]',
+              'group flex min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]',
+              appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
               appearance === 'memoly' && 'memoly-nav-add',
             )}
             data-nav-position="add"
@@ -71,7 +73,8 @@ export function BottomNavigation({
           <div
             aria-label="Режим просмотра"
             className={cn(
-              'flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground',
+              'flex min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground',
+              appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
               appearance === 'memoly' && 'memoly-nav-viewer',
             )}
             data-nav-position="viewer"
@@ -84,6 +87,7 @@ export function BottomNavigation({
         )}
         <NavButton
           active={active === 'family'}
+          appearance={appearance}
           icon="family"
           label="Семья"
           onClick={onFamily}
@@ -94,11 +98,13 @@ export function BottomNavigation({
 }
 function NavButton({
   active,
+  appearance,
   icon,
   label,
   onClick,
 }: {
   active: boolean
+  appearance: 'default' | 'memoly'
   icon: 'family' | 'home'
   label: string
   onClick: () => void
@@ -107,7 +113,8 @@ function NavButton({
     <button
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex min-h-[60px] min-w-0 flex-col items-center justify-center gap-0.5 transition-colors duration-[var(--duration-standard)]',
+        'flex min-w-0 flex-col items-center justify-center gap-0.5 transition-colors duration-[var(--duration-standard)]',
+        appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
         active ? 'text-primary' : 'text-muted-foreground',
       )}
       data-nav-position={icon}
