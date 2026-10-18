@@ -1,0 +1,109 @@
+{
+  "engine": "desktop WebKit; NOT physical iPhone/MAX",
+  "records": [
+    {
+      "name": "feed-390-inset0",
+      "total": 50,
+      "grid": 49,
+      "topBorder": "1px",
+      "gridBorder": "0px",
+      "background": "rgb(255, 254, 250)",
+      "gridBackground": "rgb(255, 254, 250)",
+      "padding": "0px",
+      "hits": [
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ]
+      ],
+      "maxLabelBottom": 843.5,
+      "overflow": false
+    },
+    {
+      "name": "feed-390-inset34",
+      "total": 84,
+      "grid": 49,
+      "topBorder": "1px",
+      "gridBorder": "0px",
+      "background": "rgb(255, 254, 250)",
+      "gridBackground": "rgb(255, 254, 250)",
+      "padding": "34px",
+      "hits": [
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ]
+      ],
+      "maxLabelBottom": 812.5,
+      "overflow": false
+    },
+    {
+      "name": "family-390-inset0",
+      "total": 50,
+      "grid": 49,
+      "topBorder": "1px",
+      "gridBorder": "0px",
+      "background": "rgb(255, 254, 250)",
+      "gridBackground": "rgb(255, 254, 250)",
+      "padding": "0px",
+      "hits": [
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ]
+      ],
+      "maxLabelBottom": 843.5,
+      "overflow": false
+    },
+    {
+      "name": "family-390-inset34",
+      "total": 84,
+      "grid": 49,
+      "topBorder": "1px",
+      "gridBorder": "0px",
+      "background": "rgb(255, 254, 250)",
+      "gridBackground": "rgb(255, 254, 250)",
+      "padding": "34px",
+      "hits": [
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ],
+        [
+          122,
+          49
+        ]
+      ],
+      "maxLabelBottom": 812.5,
+      "overflow": false
+    }
+  ]
+}

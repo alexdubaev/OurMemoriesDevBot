@@ -247,6 +247,112 @@ test('pagination controls remain 24px targets and 200% text has no horizontal ov
   expect(insetNav).toMatchObject({ y: 774, height: 70 })
 })
 
+test('bottom navigation visuals follow the effective inset while preserving hit-area geometry', async ({ page }) => {
+  const insetCases = [
+    { host: 0, browser: 0, effective: 0 },
+    { host: 1, browser: 0, effective: 1 },
+    { host: 2, browser: 0, effective: 2 },
+    { host: 3, browser: 0, effective: 3 },
+    { host: 34, browser: 0, effective: 34 },
+    { host: 0, browser: 1, effective: 1 },
+    { host: 0, browser: 2, effective: 2 },
+    { host: 0, browser: 3, effective: 3 },
+    { host: 0, browser: 34, effective: 34 },
+    { host: 3, browser: 1, effective: 3 },
+    { host: 1, browser: 3, effective: 3 },
+    { host: 34, browser: 3, effective: 34 },
+    { host: 3, browser: 34, effective: 34 },
+  ]
+  const views = [
+    { name: 'feed', query: '' },
+    { name: 'family', query: '&family=1&role=owner&members=2' },
+    { name: 'viewer', query: '&family=1&role=viewer&members=2' },
+  ]
+
+  for (const width of [320, 390, 430]) {
+    const height = width === 430 ? 932 : 844
+    await page.setViewportSize({ width, height })
+    for (const view of views) {
+      for (const inset of insetCases) {
+        const coreInset = (inset.host === 0 && inset.browser === 0) || (inset.host === 34 && inset.browser === 0)
+        if (view.name === 'viewer' && (width !== 390 || !coreInset)) continue
+        if (view.name === 'family' && !coreInset) continue
+        if (view.name === 'feed' && width !== 390 && !coreInset) continue
+        await page.goto(`/e2e/memoly-v4.harness.html?bottom=${inset.host}${view.query}`)
+        await page.addStyleTag({ content: `.memoly-app-root { --ui-v2-browser-safe-area-bottom: ${inset.browser}px !important; }` })
+        const geometry = await page.locator('nav[data-bottom-navigation-appearance="memoly"]').evaluate((nav) => {
+          const box = (element: Element) => {
+            const rect = element.getBoundingClientRect()
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          }
+          const positions = [...nav.querySelectorAll<HTMLElement>('[data-nav-position]')]
+          const visualElements = positions.flatMap((position) => [...position.children].flatMap((child) => {
+            const nodes: HTMLElement[] = []
+            if (child instanceof HTMLElement && child.matches('[data-slot="webp-icon"], [data-slot="typography"], .memoly-nav-add-circle')) nodes.push(child)
+            if (child instanceof HTMLElement && child.matches('.memoly-nav-add-circle')) {
+              const icon = child.querySelector<HTMLElement>('[data-slot="webp-icon"]')
+              if (icon) nodes.push(icon)
+            }
+            return nodes.map((element) => ({
+              element,
+              position: position.dataset.navPosition,
+              slot: element.classList.contains('memoly-nav-add-circle') ? 'circle' : element.dataset.slot === 'webp-icon' && element.parentElement?.classList.contains('memoly-nav-add-circle') ? 'add-icon' : element.dataset.slot,
+            }))
+          }))
+          const collect = () => ({
+            nav: box(nav),
+            panel: box(nav.firstElementChild!),
+            paddingBottom: getComputedStyle(nav).paddingBottom,
+            divider: { width: getComputedStyle(nav).borderTopWidth, style: getComputedStyle(nav).borderTopStyle, color: getComputedStyle(nav).borderTopColor },
+            buttons: positions.map((position) => ({
+              position: position.dataset.navPosition,
+              box: box(position),
+              indicator: (() => {
+                const style = getComputedStyle(position, '::before')
+                return { display: style.display, top: style.top, width: style.width, height: style.height, content: style.content }
+              })(),
+            })),
+            visuals: visualElements.map((visual) => ({ position: visual.position, slot: visual.slot, box: box(visual.element), fontSize: getComputedStyle(visual.element).fontSize, lineHeight: getComputedStyle(visual.element).lineHeight })),
+          })
+          const savedStyles = visualElements.map(({ element }) => ({ element, top: element.style.getPropertyValue('top'), priority: element.style.getPropertyPriority('top') }))
+          for (const { element } of visualElements) element.style.setProperty('top', '0px', 'important')
+          const baseline = collect()
+          for (const saved of savedStyles) {
+            if (saved.top) saved.element.style.setProperty('top', saved.top, saved.priority)
+            else saved.element.style.removeProperty('top')
+          }
+          return { baseline, aligned: collect(), viewportHeight: innerHeight }
+        })
+
+        expect(geometry.aligned.nav.height).toBe(50 + inset.effective)
+        expect(geometry.aligned.panel.height).toBe(49)
+        expect(geometry.aligned.nav).toEqual(geometry.baseline.nav)
+        expect(geometry.aligned.panel).toEqual(geometry.baseline.panel)
+        expect(geometry.aligned.paddingBottom).toBe(geometry.baseline.paddingBottom)
+        expect(geometry.aligned.divider).toEqual(geometry.baseline.divider)
+        expect(geometry.aligned.buttons).toEqual(geometry.baseline.buttons)
+        expect(geometry.aligned.buttons.every((button) => button.box.width >= 44 && button.box.height >= 44)).toBe(true)
+
+        const expectedOffset = Math.min(5, 2 + inset.effective)
+        expect(geometry.aligned.visuals).toHaveLength(geometry.baseline.visuals.length)
+        for (let index = 0; index < geometry.aligned.visuals.length; index += 1) {
+          const before = geometry.baseline.visuals[index]
+          const after = geometry.aligned.visuals[index]
+          expect(after.position).toBe(before.position)
+          expect(after.slot).toBe(before.slot)
+          expect(after.box.x).toBe(before.box.x)
+          expect(after.box.width).toBe(before.box.width)
+          expect(after.box.height).toBe(before.box.height)
+          expect(after.box.y - before.box.y).toBe(expectedOffset)
+          expect(after.fontSize).toBe(before.fontSize)
+          expect(after.lineHeight).toBe(before.lineHeight)
+          if (after.slot === 'typography') expect(after.box.y + after.box.height).toBeLessThanOrEqual(geometry.viewportHeight)
+        }
+      }
+    }
+  }
+})
+
 test('PhotoSwipe photo-only viewer reuses its loaded slide URLs for caption and thumbnail navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/memoly-v4.harness.html')

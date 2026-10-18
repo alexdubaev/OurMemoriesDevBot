@@ -1,0 +1,74 @@
+[
+  {
+    "name": "feed-320-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "feed-320-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-320-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-320-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "feed-390-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "feed-390-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-390-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-390-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "feed-430-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "feed-430-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-430-inset0",
+    "offset": 2,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  },
+  {
+    "name": "family-430-inset34",
+    "offset": 5,
+    "geometryUnchanged": true,
+    "viewportOverflow": []
+  }
+]

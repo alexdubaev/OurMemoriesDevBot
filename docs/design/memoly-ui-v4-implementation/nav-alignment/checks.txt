@@ -1,0 +1,21 @@
+MEMOLY-V4-BOTTOM-NAV-ALIGNMENT
+Worktree: D:/codex/TG_OurMemoriesDevBot/worktrees/memoly-ui-v4-implementation
+Branch: feat/memoly-ui-v4-implementation
+Base/HEAD (no commit): 6217ed499e0f54253b95e28a22e21927c14131cb
+Tracked changes: webapp/src/components/ui-v2/shared-skin.css; webapp/e2e/memoly-v4.spec.ts
+
+Behavior
+- Visual children use top: min(5px, calc(2px + var(--ui-v2-effective-bottom-inset))). This yields offsets 2/3/4/5px at effective insets 0/1/2/3px and remains capped at 5px through 34px.
+- The focused spec compares each child at top:0 against its aligned position, while requiring the nav, panel, button hit areas, divider, active indicators, child dimensions and typography to remain unchanged. Its final 25-case matrix checks core 0/34 insets across feed/family owner at widths 320/390/430, viewer at 390, and additional host/browser maxima 1/2/3 at feed 390.
+- Existing 200% fit assertions are unchanged.
+
+Checks
+- `bun run typecheck` from `webapp`: exit 0.
+- `bun run e2e --grep "actual feed shell|family presentation|pagination controls|bottom navigation visuals"` from `webapp`: runner failed before tests; backend startup stopped at `MAX startup failed`.
+- Before final matrix reduction, `bunx playwright test --config=.scratch/memoly-nav-alignment/playwright.config.ts --grep "actual feed shell|family presentation|pagination controls|bottom navigation visuals"` against the existing harness at 127.0.0.1:5219 passed 4 tests (54.5s), including the then-117-configuration matrix (44.5s).
+- Final bounded test-only refinement: `bunx playwright test --config=.scratch/memoly-nav-alignment/playwright.config.ts --grep "bottom navigation visuals follow the effective inset"`: 1 passed (10.3s), with the reduced 25-case matrix.
+- `git diff --check`: exit 0 (Git emitted its existing LF-to-CRLF working-copy warning for memoly-v4.spec.ts).
+- Earlier operator mock check: `bash -n .scratch/memoly-nav-alignment/operator/operator.sh .scratch/memoly-nav-alignment/operator/operator.test.sh`; `bash .scratch/memoly-nav-alignment/operator/operator.test.sh` — syntax passed and mocked stage/activate/static-only rollback/failure recovery passed. No service changed.
+- Operator SHA-256: operator.sh `13C3F4746E2F08EA4004A6ACB06C1FDEF138516A45E5E81D145E45332CBFCC65`; operator.test.sh `39B852979B5CD76E49CDACD80104215FAFC98A2D617934FFCA585D2BE8A0E103`.
+
+No commit, push, SSH, full suite, or deployment performed. The lead reports independent Chromium and Desktop WebKit geometry captures passed with captions visible, including bottom 843.5/844 at zero inset.
