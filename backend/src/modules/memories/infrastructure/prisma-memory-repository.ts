@@ -32,7 +32,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
     private readonly idempotency: IdempotencyExecutor<PrismaTransactionClient>,
   ) {}
 
-  async addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]> {
+  async addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[], includeChannelAvatar = false): Promise<MemoryDto[]> {
     if (memories.length === 0) return memories
     return this.db.$transaction(async (tx) => {
       await lockMember(tx, scope, 'member')
@@ -75,7 +75,14 @@ export class PrismaMemoryRepository implements MemoryRepository {
         const channelTitle = !uncertainSourceMemoryIds.has(memory.id) && ids?.size === 1
           ? titleByChannel.get([...ids][0]!)
           : undefined
-        if (channelTitle) return { ...memory, publicationAttribution: { kind: 'channel', name: channelTitle } }
+        if (channelTitle) {
+          const chatId = [...ids!][0]!
+          const binding = bindings.find((candidate) => candidate.chatId === chatId)
+          const avatarPath = includeChannelAvatar && binding
+            ? `/api/v1/families/${scope.familyId}/media/max-channels/${chatId.toString()}/avatar`
+            : undefined
+          return { ...memory, publicationAttribution: { kind: 'channel', name: channelTitle, ...(avatarPath ? { avatarPath } : {}) } }
+        }
         const familyName = familyNameByAuthor.get(memory.author.id)
         const profileName = memory.author.name.trim()
         return { ...memory, publicationAttribution: {

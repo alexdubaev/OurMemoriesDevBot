@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   backendMediaPathSchema,
+  channelAvatarPathSchema,
   createMemoryRequestSchema,
   listMemoriesQuerySchema,
   mediaDtoSchema,
@@ -54,6 +55,17 @@ describe('memory contracts', () => {
     expect(() => backendMediaPathSchema.parse(path.replace('/content', '/extra/content'))).toThrow()
     expect(() => backendMediaPathSchema.parse(`https://example.test${path}`)).toThrow()
   })
+  test('accepts only a family-scoped decimal MAX channel avatar path', () => {
+    const familyId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
+    const path = `/api/v1/families/${familyId}/media/max-channels/9223372036854775807/avatar`
+    expect(channelAvatarPathSchema.parse(path)).toBe(path)
+    for (const invalid of [
+      `https://i.oneme.ru/${familyId}/avatar`,
+      `/api/v1/families/${familyId}/media/max-channels/9223372036854775808/avatar`,
+      `/api/v1/families/${familyId}/media/max-channels/123/avatar/../other`,
+      `/api/v1/families/${familyId}/media/max-channels/12/avatar?url=https://i.oneme.ru/icon`,
+    ]) expect(channelAvatarPathSchema.safeParse(invalid).success).toBe(false)
+  })
   test('accepts optional publication attribution while preserving legacy DTOs', () => {
     const base = {
       id: '018f01d8-0c2a-7c25-bf83-ae68985c7e90',
@@ -68,6 +80,10 @@ describe('memory contracts', () => {
     expect(memoryDtoSchema.parse(base)).not.toHaveProperty('publicationAttribution')
     expect(memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'channel', name: 'Домашний канал' } }))
       .toHaveProperty('publicationAttribution', { kind: 'channel', name: 'Домашний канал' })
+    const avatarPath = `/api/v1/families/${base.familyId}/media/max-channels/123/avatar`
+    expect(memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'channel', name: 'Домашний канал', avatarPath } }))
+      .toHaveProperty('publicationAttribution.avatarPath', avatarPath)
+    expect(() => memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'user', name: 'Участник', avatarPath } })).toThrow()
     expect(() => memoryDtoSchema.parse({ ...base, publicationAttribution: { kind: 'channel', name: ' ' } })).toThrow()
   })
   test('accepts a note with up to 8,000 Unicode code points and preserves plain text', () => {

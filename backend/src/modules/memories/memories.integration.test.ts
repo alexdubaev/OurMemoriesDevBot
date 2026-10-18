@@ -9,6 +9,11 @@ import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import { Prisma } from '../../generated/prisma/client'
 import { signAccessToken } from '../auth'
+import { disabledEmailDelivery } from '../../email'
+import { createAuthModule } from '../auth'
+import { createPrismaFamilyAccess } from '../families'
+import { createMaxChannelAvatarReader } from '../max/infrastructure/channel-avatar'
+import { createMaxChannelAvatarRoutes } from '../max/transport/channel-avatar-routes'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const maybeDescribe = databaseUrl ? describe : describe.skip
@@ -22,12 +27,23 @@ maybeDescribe('Memories API', () => {
     AUTH_RATE_LIMIT_MAX: '10000',
   })
   const app = createApp({ env, prisma })
+  let avatarProviderCalls = 0
+  const avatarReader = createMaxChannelAvatarReader({
+    db: prisma,
+    familyAccess: createPrismaFamilyAccess(prisma),
+    getAvatarUrl: async () => { avatarProviderCalls += 1; return 'https://i.oneme.ru/synthetic-channel.png' },
+    download: async () => ({ bytes: Uint8Array.of(0x89, 0x50, 0x4e, 0x47), contentType: 'image/png', contentLength: 4 }),
+  })
+  app.route('/api/v1', createMaxChannelAvatarRoutes({
+    requireAuth: createAuthModule({ db: prisma, emailDelivery: disabledEmailDelivery, env }).requireAuth,
+    read: avatarReader,
+  }))
   // A separate pool makes lifecycle writes observable at PostgreSQL rather than queueing behind
   // the memory request inside the same adapter connection.
   const lifecyclePrisma = createPrisma(databaseUrl!)
   const lifecycleApp = createApp({ env, prisma: lifecyclePrisma })
 
-  beforeEach(clearFixtures)
+  beforeEach(async () => { avatarProviderCalls = 0; await clearFixtures() })
   afterAll(async () => {
     await clearFixtures()
     await prisma.$disconnect()
@@ -142,6 +158,7 @@ maybeDescribe('Memories API', () => {
     const byId = new Map<string, any>(optedIn.body.items.map((item: any) => [item.id, item]))
     expect(byId.get(direct.body.id)).toMatchObject({ author: { id: owner.userId, name: 'Профильное имя' },
       publicationAttribution: { kind: 'channel', name: 'Наш канал' } })
+    expect(byId.get(direct.body.id).publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
     expect(byId.get(directPlusUncertain.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
     expect(byId.get(forwarded.body.id).publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
     expect(byId.get(envelope.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
@@ -161,8 +178,47 @@ maybeDescribe('Memories API', () => {
     const detail = await request(`${path}/${direct.body.id}`, owner.token, 'GET', undefined, undefined,
       { 'X-Memoly-Publication-Attribution': '1' })
     expect(detail.body.publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал' })
+    const v2 = await request(path, owner.token, 'GET', undefined, undefined, { 'X-Memoly-Publication-Attribution': '2' })
+    const v2ById = new Map<string, any>(v2.body.items.map((item: any) => [item.id, item]))
+    expect(v2ById.get(direct.body.id).publicationAttribution).toEqual({ kind: 'channel', name: 'Наш канал',
+      avatarPath: `/api/v1/families/${family.body.family.id}/media/max-channels/${channelId.toString()}/avatar` })
+    expect(v2ById.get(familyNamedUser.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Папа' })
+    expect(v2ById.get(foreignBinding.body.id).publicationAttribution).toEqual({ kind: 'user', name: 'Мама' })
     const legacyDetail = await request(`${path}/${direct.body.id}`, owner.token, 'GET', undefined)
     expect(legacyDetail.body).not.toHaveProperty('publicationAttribution')
+  })
+
+  test('channel avatar route serves only the same-family binding and rechecks revoked members after cache warmup', async () => {
+    const owner = await admittedUser('Аватар владелец', '31911')
+    const viewer = await admittedUser('Аватар зритель', '31912')
+    const foreignOwner = await admittedUser('Аватар другая семья', '31913')
+    const family = await createFamily(owner.token, 'Семья аватара')
+    const foreignFamily = await createFamily(foreignOwner.token, 'Чужая семья аватара')
+    await inviteMember(owner.token, viewer.token, family.body.family.id, 'viewer')
+    const chatId = -79560265048791n
+    const foreignChatId = -79560265048792n
+    await prisma.maxChannelBinding.create({ data: { chatId, familyId: family.body.family.id, title: 'Канал семьи', state: 'disconnected' } })
+    await prisma.maxChannelBinding.create({ data: { chatId: foreignChatId, familyId: foreignFamily.body.family.id, title: 'Чужой канал' } })
+    const path = `/api/v1/families/${family.body.family.id}/media/max-channels/${chatId.toString()}/avatar`
+    const ownerResponse = await app.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })
+    expect(ownerResponse.status).toBe(200)
+    expect(ownerResponse.headers.get('cache-control')).toBe('private, no-store')
+    expect(ownerResponse.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(ownerResponse.headers.get('cross-origin-resource-policy')).toBe('same-origin')
+    expect(new Uint8Array(await ownerResponse.arrayBuffer())).toEqual(Uint8Array.of(0x89, 0x50, 0x4e, 0x47))
+    const viewerResponse = await app.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })
+    expect(viewerResponse.status).toBe(200)
+    expect(avatarProviderCalls).toBe(1)
+
+    const foreignPath = `/api/v1/families/${family.body.family.id}/media/max-channels/${foreignChatId.toString()}/avatar`
+    expect((await app.request(foreignPath, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
+    const foreignFamilyPath = `/api/v1/families/${foreignFamily.body.family.id}/media/max-channels/${chatId.toString()}/avatar`
+    expect((await app.request(foreignFamilyPath, { headers: { Authorization: `Bearer ${foreignOwner.token}` } })).status).toBe(404)
+    expect(avatarProviderCalls).toBe(1)
+
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId: family.body.family.id, userId: viewer.userId } }, data: { revokedAt: new Date() } })
+    expect((await app.request(path, { headers: { Authorization: `Bearer ${viewer.token}` } })).status).toBe(404)
+    expect(avatarProviderCalls).toBe(1)
   })
 
   test('an invited full member has the same memory mutations as the owner', async () => {

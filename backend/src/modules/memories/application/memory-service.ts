@@ -50,7 +50,7 @@ export class MemoryService {
     })
   }
 
-  async list(scope: FamilyScope, query: ListMemoriesQuery, includePublicationAttribution = false): Promise<MemoryPage> {
+  async list(scope: FamilyScope, query: ListMemoriesQuery, includePublicationAttribution = false, includeChannelAvatar = false): Promise<MemoryPage> {
     await this.access.requireMember(scope)
     const filters: MemoryCursorFilters = {
       childId: query.childId ?? null,
@@ -74,7 +74,7 @@ export class MemoryService {
       }
       const last = page.items.at(-1)
       const items = includePublicationAttribution
-        ? await this.repository.addPublicationAttribution(scope, page.items)
+        ? await this.repository.addPublicationAttribution(scope, page.items, includeChannelAvatar)
         : page.items
       return { items, nextCursor: page.hasNext && last
         ? encodeUnreadMemoryCursor({
@@ -110,7 +110,7 @@ export class MemoryService {
     }
     const last = page.items.at(-1)
     const items = includePublicationAttribution
-      ? await this.repository.addPublicationAttribution(scope, page.items)
+      ? await this.repository.addPublicationAttribution(scope, page.items, includeChannelAvatar)
       : page.items
     return {
       items,
@@ -126,11 +126,11 @@ export class MemoryService {
     }
   }
 
-  async get(scope: FamilyScope, memoryId: string, includePublicationAttribution = false): Promise<MemoryDto> {
+  async get(scope: FamilyScope, memoryId: string, includePublicationAttribution = false, includeChannelAvatar = false): Promise<MemoryDto> {
     await this.access.requireMember(scope)
     const memory = await this.repository.get(scope, memoryId)
     if (!includePublicationAttribution) return memory
-    return (await this.repository.addPublicationAttribution(scope, [memory]))[0]!
+    return (await this.repository.addPublicationAttribution(scope, [memory], includeChannelAvatar))[0]!
   }
 
   async update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto> {

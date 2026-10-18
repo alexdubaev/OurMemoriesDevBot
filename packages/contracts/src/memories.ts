@@ -117,6 +117,21 @@ export const backendMediaPathSchema = z.string().superRefine((value, context) =>
   }
 })
 
+/** Stable app-local path for a currently bound MAX channel avatar. */
+export const channelAvatarPathSchema = z.string().superRefine((value, context) => {
+  const match = /^\/api\/v1\/families\/([0-9a-fA-F-]{36})\/media\/max-channels\/(-?[0-9]{1,19})\/avatar$/.exec(value)
+  if (!match || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(match[1]!)) {
+    context.addIssue({ code: 'custom', message: 'Channel avatar path must target the authenticated MAX channel endpoint' })
+    return
+  }
+  try {
+    const id = BigInt(match[2]!)
+    if (id < -(1n << 63n) || id > (1n << 63n) - 1n) throw new Error('out of range')
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Channel avatar ID must be a signed int64' })
+  }
+})
+
 export const mediaDtoSchema = z.object({
   id: uuid,
   source: z.literal('private_storage'),
@@ -192,7 +207,10 @@ export const memoryDtoSchema = z.object({
   familyId: uuid,
   childId: uuid,
   author: z.object({ id: uuid, name: z.string(), avatarPath: backendMediaPathSchema.nullable(), avatarCrop: avatarCropSchema.nullable().optional() }).strict(),
-  publicationAttribution: z.object({ kind: z.enum(['channel', 'user']), name: z.string().trim().min(1) }).strict().optional(),
+  publicationAttribution: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('channel'), name: z.string().trim().min(1), avatarPath: channelAvatarPathSchema.optional() }).strict(),
+    z.object({ kind: z.literal('user'), name: z.string().trim().min(1) }).strict(),
+  ]).optional(),
   kind: memoryKindSchema,
   body: z.string(),
   occurredAt: z.string().datetime(),

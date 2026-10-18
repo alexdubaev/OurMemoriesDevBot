@@ -208,6 +208,8 @@ export function eligiblePrivateImage(path: string) {
   if (avatarMatch && parsed.searchParams.size === 0) return { familyId: avatarMatch[1]!, key: parsed.pathname }
   const posterMatch = /^\/api\/v1\/families\/([0-9a-f-]{36})\/media\/max-videos\/([0-9a-f-]{36})\/poster$/i.exec(parsed.pathname)
   if (posterMatch && parsed.searchParams.size === 0) return { familyId: posterMatch[1]!, key: parsed.pathname }
+  const channelAvatarMatch = /^\/api\/v1\/families\/([0-9a-f-]{36})\/media\/max-channels\/-?[0-9]{1,19}\/avatar$/i.exec(parsed.pathname)
+  if (channelAvatarMatch && parsed.searchParams.size === 0) return { familyId: channelAvatarMatch[1]!, key: parsed.pathname }
   return null
 }
 

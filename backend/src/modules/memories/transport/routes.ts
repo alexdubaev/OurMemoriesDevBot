@@ -103,7 +103,8 @@ export function createMemoryRoutes({
   routes.use('/families/*', requireAuth)
   routes.openapi(listRoute, async (c) => c.json(await executeMemory(() =>
     service.list(scope(c.var.user, c.req.valid('param').familyId), c.req.valid('query'),
-      c.req.header('X-Memoly-Publication-Attribution') === '1'),
+      ['1', '2'].includes(c.req.header('X-Memoly-Publication-Attribution') ?? ''),
+      c.req.header('X-Memoly-Publication-Attribution') === '2'),
   )))
   routes.openapi(createRouteDefinition, async (c) => {
     const result = await executeMemory(() => service.create(
@@ -120,7 +121,8 @@ export function createMemoryRoutes({
   routes.openapi(getRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')
     return service.get(scope(c.var.user, params.familyId), params.memoryId,
-      c.req.header('X-Memoly-Publication-Attribution') === '1')
+      ['1', '2'].includes(c.req.header('X-Memoly-Publication-Attribution') ?? ''),
+      c.req.header('X-Memoly-Publication-Attribution') === '2')
   })))
   routes.openapi(updateRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')

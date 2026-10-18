@@ -341,7 +341,7 @@ export function FeedPage({
 
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
-    <FeedSharedAuthorAvatars authors={visibleItems.filter((memory) => memory.publicationAttribution?.kind !== 'channel').map((memory) => ({ path: memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
+    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
@@ -366,8 +366,8 @@ export function FeedPage({
           authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
           authorName={memory.publicationAttribution?.name ?? memory.author.name}
           authorKind={memory.publicationAttribution?.kind ?? 'user'}
-          authorAvatarPath={memory.author.avatarPath}
-          authorAvatarCrop={memory.author.avatarCrop}
+          authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath}
+          authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
           childName={memory.childId === childId ? childName : undefined}
           childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
@@ -740,8 +740,8 @@ function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTime
       authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
       authorName={memory.publicationAttribution?.name ?? memory.author.name}
       authorKind={memory.publicationAttribution?.kind ?? 'user'}
-      authorAvatarPath={memory.author.avatarPath}
-      authorAvatarCrop={memory.author.avatarCrop}
+      authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath}
+      authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
       body={memory.body}
       kind={memory.kind}
       reactionCounts={memory.reactionCounts}

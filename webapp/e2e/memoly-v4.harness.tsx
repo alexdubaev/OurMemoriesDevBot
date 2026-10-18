@@ -28,6 +28,7 @@ Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: u
 syncPrivateMediaAccessToken('synthetic-memoly-v4-token', userId)
 const path = (id: string) => `/api/v1/families/${familyId}/media/photos/${id}`
 const avatarPath = (id: string) => `/api/v1/families/${familyId}/media/${id}/content?variant=display`
+const channelAvatarPath = `/api/v1/families/${familyId}/media/max-channels/1234567890123456789/avatar`
 const fixtureBySuffix: Record<string, keyof typeof memolyV4ReferenceImages> = {
   '000000000001': 'park-wide', '000000000002': 'park-portrait', '000000000003': 'garden-play',
   '000000000004': 'park-wide', '000000000005': 'park-portrait', '000000000006': 'garden-play',
@@ -45,7 +46,7 @@ const entries = [
   { id: 'note', body: 'Алиса сказала: «ещё пять минут»', at: '2026-10-14T09:00:00.000Z', attachments: [] },
 ]
 const memories = entries.map((entry, index) => {
-  const channel = params.has('attribution') && index === 0
+  const channel = params.has('attribution') && [0, 3, 4].includes(index)
   const author = channel
     ? { id: '44444444-4444-4444-8444-444444444444', name: 'Профильный автор', avatarPath: avatarPath('aaa00000-0000-4000-8000-000000000015'), avatarCrop: null }
     : { id: userId, name: params.has('attribution') && index === 2 ? 'Профильный папа' : index ? 'Мама' : 'Папа',
@@ -56,7 +57,8 @@ const memories = entries.map((entry, index) => {
     firstPublishedAt: entry.at, sourcePublishedAt: null, createdAt: entry.at, version: 1, status: 'published',
     attachments: entry.attachments, reactionCounts: index === 0 ? { heart: 12 } : {}, currentUserReaction: null,
     likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
-  if (channel) return { ...memory, publicationAttribution: { kind: 'channel', name: 'Канал прогулок' } }
+  if (channel) return { ...memory, publicationAttribution: { kind: 'channel', name: 'Канал прогулок',
+    ...(index === 0 || index === 4 ? { avatarPath: channelAvatarPath } : {}) } }
   if (params.has('attribution') && index === 1) return { ...memory, publicationAttribution: { kind: 'user', name: 'Мама семьи' } }
   return memory
 })
@@ -74,6 +76,10 @@ const transport = {
     const requests = (window as typeof window & { __memolyV4RawRequests?: string[] }).__memolyV4RawRequests ?? []
     requests.push(url)
     Object.assign(window, { __memolyV4RawRequests: requests })
+    if (url === channelAvatarPath) {
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F2sAAAAASUVORK5CYII='), (char) => char.charCodeAt(0))
+      return new Response(new Blob([bytes], { type: 'image/png' }), { status: 200, headers: { 'Content-Type': 'image/png' } })
+    }
     const photoControl = (window as typeof window & { __memolyV4PhotoRawControl?: { target: string; holdNext: boolean; started: boolean; failOnRelease: boolean; release?: () => void } }).__memolyV4PhotoRawControl
     if (photoControl && url.endsWith(photoControl.target) && photoControl.holdNext) {
       photoControl.holdNext = false
@@ -106,7 +112,7 @@ function HarnessApp() {
   const [showFamily, setShowFamily] = useState(isFamily)
   const [settingsRequest, setSettingsRequest] = useState(0)
   const openSettingsFromFeed = () => { setShowFamily(true); setSettingsRequest((value) => value + 1) }
-  return <AuthContext.Provider value={{ user: { id: userId, theme }, transport, updateTheme: async () => undefined } as never}><ThemeProvider><QueryClientProvider client={queryClient}>{showFamily ? childEditor ? <FamilyOnboarding familyId={familyId} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={childEditor === 'photo'} transport={transport} onCancel={() => setChildEditor(null)} onCompleted={async () => undefined} /> : <div style={insetsStyle}><FamilyScreen childProfileOpen={childProfileOpen} familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userId} onAdd={() => undefined} onAllFamilies={() => undefined} onEditChild={() => setChildEditor('profile')} onChangeChildPhoto={() => setChildEditor('photo')} onOpenChild={() => setChildProfileOpen(true)} onCloseChild={() => setChildProfileOpen(false)} onFeed={() => setShowFamily(false)} onRefresh={async () => undefined} createInviteLink={() => 'https://example.invalid/invite'} settingsRequest={settingsRequest} onSettingsRequestHandled={() => setSettingsRequest(0)} /></div> : <FeedPage active accountId={userId} childId={childId} childName={long ? 'Алиса с очень длинным синтетическим именем для проверки переноса строк' : 'Алиса'} childSubtitle="2 года 9 месяцев" childAvatarMediaId={childAvatarId} childAvatarCrop={null} familyId={familyId} familyName="Семья Алисы" familyTimezone="Europe/Moscow" filter="all" hostBridge={hostBridge} insets={insets} isAppBootstrapped membershipEpoch={1} unreadCount={params.has('unread') ? 3 : null} unreadState={params.has('unread') ? 'ready' : 'not_enabled'} onAccessLost={() => undefined} onAllFamilies={() => setShowFamily(true)} onFamily={() => { setShowFamily(true); setSettingsRequest(0) }} onFilterChange={() => undefined} onOpenSettings={openSettingsFromFeed} role="full" transport={transport} />}</QueryClientProvider></ThemeProvider></AuthContext.Provider>
+  return <AuthContext.Provider value={{ user: { id: userId, theme }, transport, updateTheme: async () => undefined } as never}><ThemeProvider><QueryClientProvider client={queryClient}>{showFamily ? childEditor ? <FamilyOnboarding familyId={familyId} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={childEditor === 'photo'} transport={transport} onCancel={() => setChildEditor(null)} onCompleted={async () => undefined} /> : <div style={insetsStyle}><FamilyScreen childProfileOpen={childProfileOpen} familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userId} onAdd={() => undefined} onAllFamilies={() => undefined} onEditChild={() => setChildEditor('profile')} onChangeChildPhoto={() => setChildEditor('photo')} onOpenChild={() => setChildProfileOpen(true)} onCloseChild={() => setChildProfileOpen(false)} onFeed={() => setShowFamily(false)} onRefresh={async () => undefined} createInviteLink={() => 'https://example.invalid/invite'} settingsRequest={settingsRequest} onSettingsRequestHandled={() => setSettingsRequest(0)} /></div> : <FeedPage active accountId={userId} childId={childId} childName={long ? 'Алиса с очень длинным синтетическим именем для проверки переноса строк' : 'Алиса'} childSubtitle="2 года 9 месяцев" childAvatarMediaId={childAvatarId} childAvatarCrop={null} familyId={familyId} familyName="Семья Алисы" familyTimezone="Europe/Moscow" filter="all" hostBridge={hostBridge} insets={insets} isAppBootstrapped membershipEpoch={1} unreadCount={params.has('unread') ? 3 : null} unreadState={params.has('unread') ? 'ready' : 'not_enabled'} onAccessLost={() => undefined} onAllFamilies={() => setShowFamily(true)} onFamily={() => { setShowFamily(true); setSettingsRequest(0) }} onFilterChange={() => undefined} onOpenSettings={openSettingsFromFeed} role={role === 'viewer' ? 'viewer' : 'full'} transport={transport} />}</QueryClientProvider></ThemeProvider></AuthContext.Provider>
 }
 const app = <HarnessApp />
 createRoot(document.getElementById('root')!).render(app)
