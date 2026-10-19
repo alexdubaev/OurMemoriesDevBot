@@ -224,6 +224,37 @@ test('publication attribution renders the shared channel avatar, glyph fallback,
   await page.screenshot({ path: testInfo.outputPath('publication-attribution.png'), fullPage: false })
 })
 
+test('viewer author name stays contained beside avatar, counter and close at compact widths', async ({ page }) => {
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('/e2e/memoly-v4.harness.html?attribution&role=viewer')
+    await page.locator('.memory-card').first().locator('[data-carousel-position="1"] button').click()
+    const viewer = page.locator('[data-mixed-viewer]')
+    const authorName = viewer.locator('.memoly-viewer-author-copy > [data-slot="typography"]').first()
+    await expect(authorName).toBeVisible()
+    await authorName.evaluate((element) => { element.textContent = 'СверхдлинноеИмяАвтораБезПробелов'.repeat(3) })
+    const geometry = await viewer.evaluate((element) => {
+      const author = element.querySelector<HTMLElement>('.memoly-viewer-author')!
+      const copy = element.querySelector<HTMLElement>('.memoly-viewer-author-copy')!
+      const name = copy.querySelector<HTMLElement>('[data-slot="typography"]')!
+      const time = copy.querySelector<HTMLElement>('[data-slot="typography"]:nth-child(2)')!
+      const avatar = author.querySelector<HTMLElement>('.author-avatar')!
+      const counter = element.querySelector<HTMLElement>('.memoly-viewer-count')!
+      const close = element.querySelector<HTMLElement>('.memoly-viewer-close')!
+      const rect = (node: HTMLElement) => { const { left, right, width, height } = node.getBoundingClientRect(); return { left, right, width, height } }
+      return { name: rect(name), time: rect(time), avatar: rect(avatar), counter: rect(counter), close: rect(close), nameOverflow: name.scrollWidth > name.clientWidth, nameWhiteSpace: getComputedStyle(name).whiteSpace }
+    })
+    expect(geometry.nameOverflow).toBe(true)
+    expect(geometry.nameWhiteSpace).toBe('nowrap')
+    expect(geometry.avatar.width).toBe(32)
+    expect(geometry.close.width).toBe(44)
+    expect(geometry.name.right).toBeLessThanOrEqual(geometry.counter.left)
+    expect(geometry.time.right).toBeLessThanOrEqual(geometry.counter.left)
+    expect(geometry.counter.right).toBeLessThanOrEqual(geometry.close.left)
+    await viewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
+  }
+})
+
 test('heart icon keeps its intended size and stays centered in the reaction button', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/memoly-v4.harness.html')
