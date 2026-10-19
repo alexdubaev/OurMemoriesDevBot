@@ -264,6 +264,11 @@
 .reaction-picker { z-index: 80; width: max-content; max-width: calc(100vw - 24px); padding: 3px; border: 0; border-radius: 14px; color: var(--memoly-accent-text); background: var(--theme-surface, #fff); box-shadow: 0 8px 28px rgb(31 41 35 / 18%); }
 .reaction-picker { --tw-ring-offset-shadow: 0 0 #0000; --tw-ring-shadow: 0 0 #0000; }
 [data-memoly-feed] .memory-card:focus-visible { outline: 2px solid var(--theme-accent-text, var(--memoly-accent-text)); outline-offset: 3px; }
+[data-memoly-feed] .memory-card[data-reaction-enabled],
+[data-memoly-feed] .memory-card[data-reaction-enabled] :where(*) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+[data-memoly-feed] .memory-card[data-reaction-enabled] :is(input, select, textarea, a, [role='button'], [role='slider'], [role='textbox'], [role='combobox'], [contenteditable]:not([contenteditable='false'])) ,
+[data-memoly-feed] .memory-card[data-reaction-enabled] :is(a, [contenteditable]:not([contenteditable='false'])) :where(*) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+[data-memoly-feed] .memory-card[data-reaction-enabled] button:not([data-memoly-note-gradient]):not(.caption-open):not(.ml-media-button) { -webkit-user-select: auto; user-select: auto; -webkit-touch-callout: default; }
 [data-memoly-feed] .memory-media-slot .ml-media-button { -webkit-touch-callout: none; }
 [data-memoly-feed] .caption { min-width: 0; padding: 5px 5px 0; color: var(--memoly-ink); font-size: 17px; line-height: 1.35; letter-spacing: -.1px; overflow-wrap: anywhere; }
 [data-memoly-feed] .caption-open { width: 100%; min-width: 0; padding: 0; color: inherit; text-align: left; }
@@ -300,14 +305,14 @@
   text-align: start;
   text-transform: none;
   letter-spacing: -.15px;
-  -webkit-user-select: text;
-  user-select: text;
+  -webkit-user-select: auto;
+  user-select: auto;
 }
 [data-memoly-feed] [data-memoly-note-gradient]::before,
 [data-memoly-feed] [data-memoly-note-gradient]::after { content: ""; position: absolute; z-index: 0; display: block; pointer-events: none; }
 [data-memoly-feed] [data-memoly-note-gradient]::before { inline-size: 50px; block-size: 70px; inset-block-start: 0; inset-inline-end: 0; border-radius: 0 0 0 100% / 0 0 0 86%; background: linear-gradient(145deg, var(--note-corner-cool), rgb(203 240 249 / 40%)); }
 [data-memoly-feed] [data-memoly-note-gradient]::after { inline-size: 50px; block-size: 54px; inset-block-end: 0; inset-inline-start: 0; border-radius: 0 100% 0 0 / 0 86% 0 0; background: linear-gradient(130deg, rgb(214 210 255 / 40%), var(--note-corner-warm)); }
-[data-memoly-feed] [data-memoly-note-gradient] .memoly-note-gradient__text { position: relative; z-index: 1; display: block; min-inline-size: 0; margin: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-align: inherit; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; -webkit-user-select: text; user-select: text; }
+[data-memoly-feed] [data-memoly-note-gradient] .memoly-note-gradient__text { position: relative; z-index: 1; display: block; min-inline-size: 0; margin: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-align: inherit; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; -webkit-user-select: auto; user-select: auto; }
 [data-memoly-feed] button[data-memoly-note-gradient] { cursor: pointer; }
 [data-memoly-feed] [data-memoly-note-gradient]:focus-visible { outline: 3px solid var(--theme-accent-text, #698e7b); outline-offset: 3px; }
 @media (max-width: 355px) { [data-memoly-feed] [data-memoly-note-gradient] { padding: 24px 20px; } }
