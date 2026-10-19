@@ -157,7 +157,7 @@
 [data-memoly-feed] .memoly-mixed-track { display: flex; align-items: stretch; }
 [data-memoly-feed] .memoly-mixed-slide { position: relative; min-width: 0; min-height: 0; flex: 0 0 100%; aspect-ratio: var(--memoly-carousel-aspect, auto); overflow: hidden; background: var(--ui-v2-color-field, var(--theme-surface-lo, #eee6df)); }
 [data-memoly-feed] .memoly-mixed-slide-media { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; }
-[data-memoly-feed] .memoly-mixed-slide-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+[data-memoly-feed] .memoly-mixed-slide-poster > button > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 [data-memoly-feed] .memoly-mixed-slide-poster button { position: relative; display: grid; width: 100%; height: 100%; place-items: center; overflow: hidden; background: var(--ui-v2-color-field, var(--theme-surface-lo, #eee6df)); }
 [data-memoly-feed] .memoly-carousel-video-play { position: absolute; display: grid; width: 56px; height: 56px; place-items: center; border-radius: 50%; background: rgb(24 22 25 / 64%); }
 [data-memoly-feed] .memoly-carousel-video-loading { color: var(--ui-v2-color-muted, var(--theme-text-muted)); }
@@ -199,6 +199,7 @@
 [data-memoly-feed].memoly-mixed-viewer button { min-width: 70px; min-height: 44px; padding: 0 12px; border-radius: 12px; color: var(--theme-text, var(--memoly-ink)); background: var(--theme-surface-hi, white); }
 [data-memoly-feed].memoly-mixed-viewer button:disabled { opacity: .35; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media { display: grid; width: 100%; min-height: 0; flex: 1; place-items: center; touch-action: pan-y pinch-zoom; }
+[data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media[data-media-kind='photo'] { touch-action: pinch-zoom; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media > div { display: flex; width: 100%; height: 100%; min-height: 0; align-items: center; justify-content: center; overflow: visible; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media [data-carousel-active] > * { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; align-items: center; justify-content: center; }
 [data-memoly-feed].memoly-mixed-viewer .memoly-mixed-viewer-media img,
@@ -516,8 +517,8 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button:focus-visible { outline-c
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .reaction-result-emoji { font-size: 1rem; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .reaction-result-count { color: inherit; font-size: .6875rem; line-height: 1rem; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-reaction-button { min-height: var(--ui-v2-target-minimum); gap: .375rem; padding: 0; font-size: .6875rem; }
-.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card .ui-v2-reaction-button > span { font-size: .6875rem; line-height: 1rem; }
-.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-reaction-button [data-slot='webp-icon'] { width: 1.0625rem; height: 1.0625rem; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memory-card .ui-v2-reaction-button > [data-slot='typography'] { display: inline-flex; align-items: center; gap: .375rem; font-size: .6875rem; line-height: 1rem; }
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-reaction-button [data-slot='webp-icon'] { width: 1.125rem; height: 1.125rem; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ml-audio { display: block; min-height: 4.875rem; margin: 0; padding: .8125rem; border: 1px solid #e0e9dc; border-radius: .75rem; color: var(--ui-v2-color-text); background: #eaf0e7; box-shadow: none; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-voice-player { grid-template-columns: 2.75rem minmax(0, 1fr); align-items: center; gap: .75rem; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-voice-play { align-self: center; }
@@ -531,8 +532,13 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button:focus-visible { outline-c
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .memoly-private-video-v2-duration { right: .625rem; bottom: .625rem; padding: .25rem .375rem; border-radius: .3125rem; background: #182019bb; font-size: .6875rem; line-height: .9375rem; }
 html[data-ui-version='v2'] .memoly-mixed-viewer { justify-content: initial; gap: .75rem; padding: max(6px, env(safe-area-inset-top)) 13px max(14px, env(safe-area-inset-bottom)); color: #fff; background: #141915; }
 html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-mixed-viewer-bar { min-height: 57px; flex: 0 0 57px; padding: 6px 0; color: #fff; }
-html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-close { display: grid; width: 44px; min-width: 44px; height: 44px; min-height: 44px; place-items: center; padding: 0; border-radius: 50%; color: #fff; background: rgb(255 255 255 / 12%); font-size: 1.5rem; }
-html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-author { display: flex; min-width: 0; flex: 1; flex-direction: column; color: #fff; font-size: .75rem; line-height: 1.125rem; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-close { display: grid; width: 44px; min-width: 44px; height: 44px; min-height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #fff; background: rgb(255 255 255 / 12%); font-size: 1.5rem; line-height: 1; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-close-glyph { font-size: inherit; line-height: 1; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-author { display: flex; min-width: 0; flex: 1; align-items: center; gap: .5rem; color: #fff; font-size: .75rem; line-height: 1.125rem; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-author-copy { display: flex; min-width: 0; flex-direction: column; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-author .author-avatar { display: grid; width: 2rem; height: 2rem; flex: 0 0 2rem; place-items: center; overflow: hidden; margin: 0; border: 0; border-radius: 50%; box-shadow: none; font-size: .75rem; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-author img.author-avatar { display: block; object-fit: cover; }
+html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-count { flex: 0 0 auto; font-size: .6875rem; line-height: 1rem; white-space: nowrap; }
 html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-caption { width: min(100%, 600px); max-height: 4.5rem; flex: 0 0 auto; overflow-y: auto; color: #fff; font-size: .75rem; line-height: 1.2rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-thumbnails { display: flex; width: min(100%, 600px); min-height: 47px; flex: 0 0 47px; justify-content: center; gap: 7px; overflow-x: auto; }
 html[data-ui-version='v2'] .memoly-mixed-viewer .memoly-viewer-thumbnail { display: grid; width: 47px; min-width: 47px; height: 47px; min-height: 47px; place-items: center; overflow: hidden; padding: 0; border: 1px solid rgb(255 255 255 / 20%); border-radius: 6px; color: #fff; background: rgb(255 255 255 / 10%); font-size: .625rem; }

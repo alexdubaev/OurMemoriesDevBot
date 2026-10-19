@@ -198,15 +198,50 @@ test('publication attribution renders the shared channel avatar, glyph fallback,
   await channelCard.locator('[data-carousel-position="1"] button').click()
   const mixedViewer = page.locator('[data-mixed-viewer]')
   await expect(mixedViewer).toBeVisible()
-  await expect(mixedViewer.locator('.memoly-viewer-author span').first()).toHaveText('Канал прогулок')
+  await expect(mixedViewer.locator('.memoly-viewer-author-copy > [data-slot="typography"]').first()).toHaveText('Канал прогулок')
+  const viewerChannelAvatar = mixedViewer.locator('.memoly-viewer-author .publication-channel-avatar img')
+  await expect(viewerChannelAvatar).toBeVisible()
+  expect(await viewerChannelAvatar.getAttribute('style')).toBeNull()
+  expect((await page.evaluate((path) => (window as typeof window & { __memolyV4RawRequests?: string[] }).__memolyV4RawRequests?.filter((request) => request === path).length ?? 0, channelAvatarPath))).toBe(1)
   await page.keyboard.press('ArrowRight')
-  await expect(mixedViewer.locator('.memoly-mixed-viewer-bar span').last()).toHaveText('2 / 3')
+  await expect(mixedViewer.locator('.memoly-viewer-count')).toHaveText('2 / 3')
   await page.keyboard.press('ArrowLeft')
-  await expect(mixedViewer.locator('.memoly-mixed-viewer-bar span').last()).toHaveText('1 / 3')
+  await expect(mixedViewer.locator('.memoly-viewer-count')).toHaveText('1 / 3')
   await mixedViewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
   await expect(mixedViewer).toHaveCount(0)
   await expect(channelCard).toBeVisible()
+  await fallbackChannel.locator('[data-carousel-position="1"] button').click()
+  const fallbackViewer = page.locator('[data-mixed-viewer]')
+  await expect(fallbackViewer.locator('.memoly-viewer-author .publication-channel-avatar img')).toHaveAttribute('src', /channel-default@2x\.webp$/)
+  await fallbackViewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
+  await userCard.locator('[data-carousel-position="1"] button').click()
+  const memberViewer = page.locator('[data-mixed-viewer]')
+  const feedCropStyle = await userAvatar.getAttribute('style')
+  const viewerMemberAvatar = memberViewer.locator('.memoly-viewer-author .author-avatar img')
+  await expect(viewerMemberAvatar).toBeVisible()
+  expect(await viewerMemberAvatar.getAttribute('style')).toBe(feedCropStyle)
+  await memberViewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
   await page.screenshot({ path: testInfo.outputPath('publication-attribution.png'), fullPage: false })
+})
+
+test('heart icon keeps its intended size and stays centered in the reaction button', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/memoly-v4.harness.html')
+  const reaction = page.locator('.memory-card').first().locator('.ui-v2-reaction-button')
+  const icon = reaction.locator('[data-slot="webp-icon"]')
+  await expect(icon).toBeVisible()
+  const geometry = await page.evaluate(() => {
+    const button = document.querySelector<HTMLElement>('.memory-card .ui-v2-reaction-button')!
+    const icon = button.querySelector<HTMLElement>('[data-slot="webp-icon"]')!
+    const label = button.querySelector<HTMLElement>('[data-slot="typography"] > [data-slot="typography"]')!
+    const buttonRect = button.getBoundingClientRect()
+    const iconRect = icon.getBoundingClientRect()
+    const labelRect = label.getBoundingClientRect()
+    return { iconWidth: iconRect.width, iconHeight: iconRect.height, centerDeltaY: Math.abs((labelRect.top + labelRect.bottom) / 2 - (iconRect.top + iconRect.bottom) / 2), buttonHeight: buttonRect.height }
+  })
+  expect(geometry.iconWidth).toBe(18)
+  expect(geometry.iconHeight).toBe(18)
+  expect(geometry.centerDeltaY).toBeLessThanOrEqual(1)
 })
 
 test('family presentation keeps canonical geometry, role variants, long names and settings artwork', async ({ page }, testInfo) => {

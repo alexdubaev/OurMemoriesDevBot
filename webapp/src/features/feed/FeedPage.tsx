@@ -42,7 +42,7 @@ import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { mediaCardSeenReady } from './seen-visibility'
 import { VideoPlaybackControls } from './video-presentation'
-import { FeedSharedAuthorAvatars } from './shared-author-avatars'
+import { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
 import { releaseVideoSource, useVideoViewportLifecycle } from './video-lifecycle'
 import { getMediaFrameRatio, useMediaFrameRatio } from './media-ratio'
 
@@ -578,8 +578,16 @@ function MixedSlideMedia({ attachment, hostBridge, memory, multi, onOpen, onPhot
 function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport }: { familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
   const [index, setIndex] = useState(initialIndex)
   const media = memory.attachments[index]
+  const attribution = memory.publicationAttribution
+  const authorName = attribution?.name ?? memory.author.name
+  const isChannelAuthor = attribution?.kind === 'channel'
+  const authorAvatarPath = attribution?.kind === 'channel' ? attribution.avatarPath : memory.author.avatarPath
+  const authorAvatarCrop = isChannelAuthor ? null : memory.author.avatarCrop
+  const authorAvatarFallback = isChannelAuthor
+    ? <span aria-hidden="true" className="author-avatar publication-channel-avatar"><WebpIcon decorative name="channel" size={22} /></span>
+    : <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{initials(authorName)}</Typography></span>
   const root = useRef<HTMLDivElement | null>(null)
-  const swipeStart = useRef<{ id: number; x: number; y: number } | null>(null)
+  const swipeStart = useRef<{ id: number; x: number; y: number; axis: 'undecided' | 'horizontal' | 'vertical' | 'cancelled'; direction: -1 | 1 | null } | null>(null)
   const onCloseRef = useRef(onClose)
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
@@ -592,22 +600,42 @@ function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, ini
   }
   const onMediaTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
     const target = event.target
-    if (event.touches.length !== 1 || !(target instanceof Element) || target.closest('button, input, select, textarea, a, [role="slider"]') || target.closest('video[controls]')) {
+    if (event.touches.length !== 1 || (window.visualViewport?.scale ?? 1) > 1 || !(target instanceof Element) || target.closest('button, input, select, textarea, a, [role="slider"]') || target.closest('video[controls]')) {
       swipeStart.current = null
       return
     }
     const touch = event.touches[0]
-    swipeStart.current = { id: touch.identifier, x: touch.clientX, y: touch.clientY }
+    swipeStart.current = { id: touch.identifier, x: touch.clientX, y: touch.clientY, axis: 'undecided', direction: null }
+  }
+  const onMediaTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const start = swipeStart.current
+    if (!start) return
+    if (event.touches.length !== 1 || (window.visualViewport?.scale ?? 1) > 1 || event.touches[0].identifier !== start.id) {
+      start.axis = 'cancelled'
+      return
+    }
+    const dx = event.touches[0].clientX - start.x
+    const dy = event.touches[0].clientY - start.y
+    if (start.axis === 'undecided') {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) <= 12) return
+      if (Math.abs(dx) >= Math.abs(dy) * 1.25) { start.axis = 'horizontal'; start.direction = dx < 0 ? -1 : 1 }
+      else if (Math.abs(dy) >= Math.abs(dx) * 1.25) { start.axis = 'vertical'; start.direction = dy < 0 ? -1 : 1 }
+      else start.axis = 'cancelled'
+      return
+    }
+    const primary = start.axis === 'horizontal' ? dx : dy
+    const cross = start.axis === 'horizontal' ? dy : dx
+    if (start.axis === 'cancelled' || (start.direction !== null && primary * start.direction < -8) || Math.abs(cross) > Math.abs(primary) * 1.25) start.axis = 'cancelled'
   }
   const onMediaTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
     const start = swipeStart.current
     swipeStart.current = null
-    if (!start || event.touches.length !== 0 || event.changedTouches.length !== 1 || event.changedTouches[0].identifier !== start.id) return
+    if (!start || start.axis === 'cancelled' || (window.visualViewport?.scale ?? 1) > 1 || event.touches.length !== 0 || event.changedTouches.length !== 1 || event.changedTouches[0].identifier !== start.id) return
     const touch = event.changedTouches[0]
     const dx = touch.clientX - start.x
     const dy = touch.clientY - start.y
-    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.3) return
-    navigate(index + (dx < 0 ? 1 : -1))
+    if (start.axis === 'horizontal' && start.direction !== null && Math.abs(dx) >= 48 && Math.abs(dx) >= Math.abs(dy) * 1.3 && Math.sign(dx) === start.direction) navigate(index - start.direction)
+    if (media.kind === 'photo' && start.axis === 'vertical' && start.direction === 1 && dy >= 96 && dy >= Math.abs(dx) * 1.3) onCloseRef.current()
   }
   useEffect(() => {
     const close = () => onCloseRef.current()
@@ -626,8 +654,20 @@ function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, ini
       <DialogPrimitive.Overlay className="memoly-mixed-viewer-overlay" />
       <DialogPrimitive.Content aria-describedby={undefined} className="memoly-mixed-viewer" data-memoly-feed data-mixed-viewer="" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onKeyDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === 'range') return; if (event.key === 'ArrowLeft') { event.preventDefault(); navigate(index - 1) } if (event.key === 'ArrowRight') { event.preventDefault(); navigate(index + 1) } }} ref={root}>
         <DialogPrimitive.Title className="sr-only">Медиа воспоминания</DialogPrimitive.Title>
-        <div className="memoly-mixed-viewer-bar"><button aria-label="Закрыть просмотр" className="memoly-viewer-close" onClick={onClose} type="button"><WebpIcon decorative name="close" size={18} state="white" /></button><div className="memoly-viewer-author"><Typography as="span" variant="memoryMeta">{memory.publicationAttribution?.name ?? memory.author.name}</Typography><Typography as="span" variant="memoryMeta">{timeLabel(memory.occurredAt, familyTimezone)}</Typography></div><Typography as="span" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography></div>
-        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null }} onTouchEnd={onMediaTouchEnd} onTouchMove={(event) => { if (event.touches.length !== 1) { swipeStart.current = null; return }; const touch = event.touches[0]; const start = swipeStart.current; if (start && Math.abs(touch.clientY - start.y) > 24 && Math.abs(touch.clientY - start.y) > Math.abs(touch.clientX - start.x) * 1.3) swipeStart.current = null }} onTouchStart={onMediaTouchStart} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
+        <div className="memoly-mixed-viewer-bar">
+          <div className="memoly-viewer-author">
+            <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className={`author-avatar${isChannelAuthor ? ' publication-channel-avatar' : ''}`} name={authorName} fallback={authorAvatarFallback} />
+            <div className="memoly-viewer-author-copy">
+              <Typography as="span" variant="memoryMeta">{authorName}</Typography>
+              <Typography as="span" variant="memoryMeta">{timeLabel(memory.occurredAt, familyTimezone)}</Typography>
+            </div>
+          </div>
+          <Typography as="span" className="memoly-viewer-count" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography>
+          <button aria-label="Закрыть просмотр" className="memoly-viewer-close" onClick={onClose} type="button">
+            <Typography as="span" aria-hidden="true" className="memoly-viewer-close-glyph" variant="memoryMeta">×</Typography>
+          </button>
+        </div>
+        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null }} onTouchEnd={onMediaTouchEnd} onTouchMove={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true"><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
         {memory.body.trim() ? <Typography className="memoly-viewer-caption" variant="memoryMeta">{memory.body}</Typography> : null}
         {memory.attachments.length > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={thumbnailIndex + 1} total={memory.attachments.length} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div> : null}
         <div className="memoly-mixed-viewer-nav"><button disabled={index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={index === memory.attachments.length - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div>
