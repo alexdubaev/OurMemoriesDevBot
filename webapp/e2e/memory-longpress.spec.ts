@@ -147,4 +147,3 @@ test('carousel swipe changes slide, photo opens viewer, and video controls stay 
   await retry.click()
   await expect(page.locator('.reaction-picker')).toHaveCount(0)
 })
-
