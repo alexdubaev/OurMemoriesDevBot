@@ -268,7 +268,7 @@
 [data-memoly-feed] .memory-card[data-reaction-enabled] :where(*) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 [data-memoly-feed] .memory-card[data-reaction-enabled] :is(input, select, textarea, a, [role='button'], [role='slider'], [role='textbox'], [role='combobox'], [contenteditable]:not([contenteditable='false'])) ,
 [data-memoly-feed] .memory-card[data-reaction-enabled] :is(a, [contenteditable]:not([contenteditable='false'])) :where(*) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
-[data-memoly-feed] .memory-card[data-reaction-enabled] button:not([data-memoly-note-gradient]):not(.caption-open):not(.ml-media-button) { -webkit-user-select: auto; user-select: auto; -webkit-touch-callout: default; }
+[data-memoly-feed] .memory-card[data-reaction-enabled] button:not([data-memoly-note-gradient]):not(.ml-media-button) { -webkit-user-select: auto; user-select: auto; -webkit-touch-callout: default; }
 [data-memoly-feed] .memory-media-slot .ml-media-button { -webkit-touch-callout: none; }
 [data-memoly-feed] .caption { min-width: 0; padding: 5px 5px 0; color: var(--memoly-ink); font-size: 17px; line-height: 1.35; letter-spacing: -.1px; overflow-wrap: anywhere; }
 [data-memoly-feed] .caption-open { width: 100%; min-width: 0; padding: 0; color: inherit; text-align: left; }

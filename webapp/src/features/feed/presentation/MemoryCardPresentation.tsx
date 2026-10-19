@@ -17,7 +17,7 @@ function isHoldEligibleTarget(target: Element, article: HTMLElement, x: number, 
   const editable = target.closest('[contenteditable]')
   const editableValue = editable?.getAttribute('contenteditable')?.toLowerCase()
   if (target.closest(INTERACTIVE_HOLD_EXCLUSIONS) || (editable && editableValue !== 'false')) return false
-  if (target.closest('[data-memoly-note-gradient], .caption-open')) return true
+  if (target.closest('[data-memoly-note-gradient]')) return true
   if (target.closest('.memory-media-slot, .memoly-mixed-slide-media')) {
     const videoSurface = kind === 'video' || target.closest('[data-media-kind="video"]') !== null
     if (target.closest('.ml-media-button')) return !videoSurface
@@ -34,7 +34,7 @@ function isHoldEligibleTarget(target: Element, article: HTMLElement, x: number, 
       if (video) return y <= video.getBoundingClientRect().bottom - 44
       return false
     }
-    return Boolean(target.closest('img, .memoly-private-video-v2-frame, .memoly-video-viewer-v2-frame, .memoly-mixed-slide, .memoly-private-video-v2, .memoly-video-viewer-v2'))
+    return Boolean(target.closest('img, .ml-audio, .memoly-private-video-v2-frame, .memoly-video-viewer-v2-frame, .memoly-mixed-slide, .memoly-private-video-v2, .memoly-video-viewer-v2'))
   }
   return !target.closest('button, video, audio') && article.contains(target)
 }

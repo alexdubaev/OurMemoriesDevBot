@@ -1,4 +1,11 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
+
+async function computedUserSelect(locator: Locator) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return style.getPropertyValue('user-select') || style.getPropertyValue('-webkit-user-select')
+  })
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/e2e/memoly-v4.harness.html')
@@ -20,6 +27,19 @@ test('a stationary hold on note text opens reactions and suppresses the note cli
   await expect(page.getByRole('heading', { name: 'Воспоминание' })).toHaveCount(0)
   await text.click()
   await expect(page.getByRole('heading', { name: 'Воспоминание' })).toBeVisible()
+})
+
+test('holding the caption action preserves its normal media-open click', async ({ page }) => {
+  const caption = page.locator('[data-memory-kind="photo"] .caption-open').first()
+  await caption.scrollIntoViewIfNeeded()
+  const box = await caption.boundingBox()
+  if (!box) throw new Error('caption action is not visible')
+  await page.mouse.move(box.x + 20, box.y + 12)
+  await page.mouse.down()
+  await page.waitForTimeout(550)
+  await expect(page.locator('.reaction-picker')).toHaveCount(0)
+  await page.mouse.up()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
 })
 
 test('micro drift still opens reactions while a vertical drag scrolls the feed without opening them', async ({ page }) => {
@@ -54,7 +74,11 @@ test('micro drift still opens reactions while a vertical drag scrolls the feed w
 test('native selection and context menus are cancelled on publication content but controls remain available', async ({ page }) => {
   const note = page.locator('[data-memory-kind="note"]')
   const surface = note.locator('[data-memoly-note-gradient]')
-  await expect(surface).toHaveCSS('user-select', 'none')
+  expect(await computedUserSelect(surface)).toBe('none')
+  const supportsTouchCallout = await page.evaluate(() => CSS.supports('-webkit-touch-callout', 'none'))
+  if (supportsTouchCallout) {
+    expect(await surface.evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-touch-callout'))).toBe('none')
+  }
   const nativeEvents = await surface.locator('.memoly-note-gradient__text').evaluate((element) => {
     const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })
     element.dispatchEvent(context)
@@ -67,7 +91,7 @@ test('native selection and context menus are cancelled on publication content bu
   })
   expect(nativeEvents).toEqual({ context: true, selection: true })
   const button = page.getByRole('button', { name: 'Действия с воспоминанием' }).first()
-  await expect(button).toHaveCSS('user-select', 'auto')
+  expect(await computedUserSelect(button)).not.toBe('none')
   const controlContextWasCancelled = await button.evaluate((element) => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
     element.dispatchEvent(event)
@@ -97,18 +121,18 @@ test('native selection and context menus are cancelled on publication content bu
   const input = surface.locator('input')
   const link = surface.locator('a')
   const editor = surface.locator('[contenteditable="true"]')
-  await expect(input).toHaveCSS('user-select', 'text')
+  expect(await computedUserSelect(input)).toBe('text')
   await input.fill('input still works')
   await link.click()
   await expect(link).toHaveAttribute('data-activated', 'true')
-  await expect(editor).toHaveCSS('user-select', 'text')
+  expect(await computedUserSelect(editor)).toBe('text')
   await editor.fill('editor still works')
   await expect(editor).toHaveText('editor still works')
   await expect(editor).toHaveAttribute('data-selection-prevented', 'false')
   await expect(editor).toHaveAttribute('data-context-prevented', 'false')
 })
 
-test('carousel swipe changes slide, photo opens viewer, and video controls stay interactive', async ({ page }) => {
+test('carousel swipe changes slide, photo opens viewer, and video retry control stays interactive', async ({ page }) => {
   const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Фото, ролик и ещё одно фото' })
   const viewport = card.locator('.memoly-mixed-viewport').first()
   await viewport.scrollIntoViewIfNeeded()
