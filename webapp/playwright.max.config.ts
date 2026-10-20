@@ -6,7 +6,7 @@ const webServer = Array.isArray(baseConfig.webServer)
     ? {
       ...server,
       command: 'bun run scripts/max-verification-server.ts',
-      env: { ...server.env, TEST_DATABASE_URL: server.env?.DATABASE_URL ?? '' },
+      env: { ...server.env, TEST_DATABASE_URL: server.env?.DATABASE_URL ?? '', MULTI_FAMILY_ACTIVATION: 'on' },
     }
     : server)
   : baseConfig.webServer
@@ -14,7 +14,10 @@ const webServer = Array.isArray(baseConfig.webServer)
 export default {
   ...baseConfig,
   webServer,
+  metadata: { ...baseConfig.metadata, commentsServerMode: 'dev-strict' },
   testMatch: [
     '**/max-browser-link.spec.ts',
+    '**/comments.spec.ts',
+    '**/comments-state.spec.ts',
   ],
 }
