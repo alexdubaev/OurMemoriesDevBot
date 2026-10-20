@@ -84,9 +84,9 @@ function Harness() {
 }
 
 function CardGallery() {
-  const types: MemoryDto['kind'][] = ['note', 'photo', 'video', 'voice', 'mixed']
+  const types: MemoryDto['kind'][] = ['note', 'photo', 'video', 'voice', 'media']
   const reactions: Partial<Record<MemoryReaction, number>> = { heart: 123, love: 99, laugh: 81, touched: 32, wow: 24, clap: 11 }
-  return <div className="memoly-app-root" data-ui-version="v2"><div data-memoly-feed>{types.map((kind, index) => <MemoryCardPresentation actions={<span />} authorInitials="T" authorName={index === 4 ? 'MAX channel attribution' : 'Synthetic author'} authorKind={index === 4 ? 'channel' : 'user'} body={`Synthetic ${kind} memory`} kind={kind} memoryId={`card-${kind}`} media={<div aria-hidden="true" className="card-fixture-media" />} onOpen={() => undefined} onReaction={() => undefined} occurredTime="12:00" reactionCounts={index === 1 ? reactions : {}} currentUserReaction={index === 1 ? 'heart' : null} commentCount={index === 0 ? 0 : index === 1 ? 12 : undefined} onComments={() => undefined} key={kind} />)}</div></div>
+  return <div className="memoly-app-root" data-ui-version="v2"><div data-memoly-feed>{types.map((kind, index) => <MemoryCardPresentation actions={<span />} authorInitials="T" authorName={index === 4 ? 'MAX channel attribution' : 'Synthetic author'} authorKind={index === 4 ? 'channel' : 'user'} body={`Synthetic ${kind} memory`} kind={kind} memoryId={`card-${kind}`} media={<div aria-hidden="true" className="card-fixture-media" />} onOpen={() => undefined} onReaction={() => undefined} occurredTime="12:00" reactionCounts={index === 1 ? reactions : {}} currentUserReaction={index === 1 ? 'heart' : null} commentCount={index === 0 ? 0 : index === 1 ? 12 : undefined} onComments={() => { document.body.dataset.lastCommentsTarget = `card-${kind}` }} key={kind} />)}</div></div>
 }
 
 activatePrivateCacheIdentity(A.accountId)

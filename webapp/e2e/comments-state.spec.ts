@@ -37,7 +37,7 @@ test('comment entry handles all memory kinds, known counts, reactions and channe
   await page.goto('/e2e/comments-cards.harness.html')
   const cards = page.locator('.memory-card')
   await expect(cards).toHaveCount(5)
-  await expect(cards.nth(0).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии')
+  await expect(cards.nth(0).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии, 0')
   await expect(cards.nth(1).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии, 12')
   await expect(cards.nth(2).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии')
   await expect(cards.nth(4).locator('.author-name')).toHaveText('MAX channel attribution')
@@ -46,13 +46,17 @@ test('comment entry handles all memory kinds, known counts, reactions and channe
     const box = button.getBoundingClientRect()
     const children = [...button.children].map((child) => child.getBoundingClientRect())
     const results = card.querySelectorAll('[data-reaction-result]').length
-    return { width: box.width, height: box.height, centers: children.map((child) => child.left + child.width / 2), results, documentWidth: document.documentElement.scrollWidth }
+    return { width: box.width, height: box.height, centers: children.map((child) => child.top + child.height / 2), results, documentWidth: document.documentElement.scrollWidth }
   })
   expect(measure.width).toBeGreaterThanOrEqual(44)
   expect(measure.height).toBeGreaterThanOrEqual(44)
   expect(measure.centers.every((center) => Math.abs(center - measure.centers[0]!) < 2)).toBe(true)
   expect(measure.results).toBe(6)
   expect(measure.documentWidth).toBeLessThanOrEqual(320)
+  for (const [index, kind] of ['note', 'photo', 'video', 'voice', 'media'].entries()) {
+    await cards.nth(index).locator('.comments-entry').click()
+    await expect.poll(() => page.evaluate(() => document.body.dataset.lastCommentsTarget)).toBe(`card-${kind}`)
+  }
 })
 
 for (const context of ['account', 'family', 'epoch', 'logout', 'revoke'] as const) {
