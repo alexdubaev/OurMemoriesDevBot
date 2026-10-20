@@ -26,6 +26,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   const lease = useRef(true)
   const listRef = useRef<HTMLDivElement>(null)
   const historyEntry = useRef<string | null>(null)
+  const historySetupGeneration = useRef(0)
   const closingFromHistory = useRef(false)
   const [closeChoice, setCloseChoice] = useState<'dirty' | 'pending' | null>(null)
   const [draft, setDraft] = useState('')
@@ -77,12 +78,16 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   }, [])
 
   useLayoutEffect(() => {
+    const setupGeneration = ++historySetupGeneration.current
     lease.current = open
     if (!open) return
-    const token = `comments:${crypto.randomUUID()}`
-    const previous = window.history.state
-    historyEntry.current = token
-    window.history.pushState({ ...(previous && typeof previous === 'object' ? previous : {}), __memolyComments: token }, '')
+    let token = historyEntry.current
+    if (!token || window.history.state?.__memolyComments !== token) {
+      token = `comments:${crypto.randomUUID()}`
+      const previous = window.history.state
+      historyEntry.current = token
+      window.history.pushState({ ...(previous && typeof previous === 'object' ? previous : {}), __memolyComments: token }, '')
+    }
     const onPopState = () => {
       if (!historyEntry.current) return
       closingFromHistory.current = true
@@ -93,10 +98,14 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     return () => {
       lease.current = false
       window.removeEventListener('popstate', onPopState)
-      if (historyEntry.current && window.history.state?.__memolyComments === historyEntry.current) {
-        historyEntry.current = null
-        window.history.back()
-      }
+      const ownedToken = historyEntry.current
+      queueMicrotask(() => {
+        if (historySetupGeneration.current !== setupGeneration || !ownedToken || historyEntry.current !== ownedToken) return
+        if (window.history.state?.__memolyComments === ownedToken) {
+          historyEntry.current = null
+          window.history.back()
+        }
+      })
     }
   // This effect owns one history entry per panel mount.
   }, [open])
