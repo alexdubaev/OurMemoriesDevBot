@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 type Metrics = {
   calls: Array<{ path: string; method: string; ids?: number }>
-  gates: Array<{ kind: string; path: string; body?: string; aborted: boolean }>
+  gates: Array<{ kind: string; path: string; body?: string; aborted: boolean; completed: boolean }>
   holdNext: 'list' | 'create' | 'summary' | null
   patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'
   configure: (action: string) => void
