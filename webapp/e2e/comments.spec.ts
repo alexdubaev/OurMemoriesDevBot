@@ -93,7 +93,7 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
     if (new URL(request.url()).pathname === commentPath && request.method() === 'GET') listRequests.push(request.url())
   })
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
-  const entry = card.getByRole('button', { name: /Комментарии/ })
+  const entry = card.locator('.comments-entry')
   await expect(entry).toBeVisible()
   const productionIcon = await page.request.get('/assets/icons/comments-default@2x.webp')
   expect(productionIcon.status()).toBe(200)
@@ -178,7 +178,7 @@ test('initial comments 404 stays local and retry works; a later lost target clos
     await route.continue()
   })
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
-  const entry = card.getByRole('button', { name: /Комментарии/ })
+  const entry = card.locator('.comments-entry')
   await entry.click()
   const panel = page.locator('.comments-panel')
   await expect(panel).toBeVisible()
@@ -195,7 +195,7 @@ test('initial comments 404 stays local and retry works; a later lost target clos
 test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 CSS pixels', async ({ page }, testInfo) => {
   const { memoryId } = await signInAndSeed(page)
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
-  const entry = card.getByRole('button', { name: /Комментарии/ })
+  const entry = card.locator('.comments-entry')
   const footer = page.getByTestId('bottom-navigation')
   await expect(entry).toBeVisible()
   for (const width of widths) {
