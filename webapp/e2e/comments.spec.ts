@@ -43,9 +43,10 @@ async function signInAndSeed(page: Page) {
   })
   expect(familyResponse.status()).toBe(201)
   const familyId = (await familyResponse.json() as FamilyResult).family.id
+  const avatarMediaId = await uploadPng(page, token, familyId)
   const childResponse = await page.request.put(`/api/v1/families/${familyId}/child`, {
     headers: { Authorization: `Bearer ${token}` },
-    data: { name: 'Синтетический ребёнок', birthDate: '2024-01-02', sex: 'girl', avatarMediaId: null, avatarCrop: null, expectedVersion: null },
+    data: { name: 'Синтетический ребёнок', birthDate: '2024-01-02', sex: 'girl', avatarMediaId, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
   })
   expect(childResponse.status()).toBe(200)
   const childId = (await childResponse.json() as ChildResult).child.id
@@ -62,6 +63,24 @@ async function signInAndSeed(page: Page) {
   await familyButton.click()
   await expect(page.locator(`[data-memory-id="${memoryId}"]`)).toBeVisible({ timeout: 20_000 })
   return { familyId, memoryId, token }
+}
+
+async function uploadPng(page: Page, token: string, familyId: string) {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const reserve = await page.request.post(`/api/v1/families/${familyId}/uploads`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { purpose: 'child_avatar', kind: 'photo', contentType: 'image/png', byteSize: bytes.byteLength },
+  })
+  expect(reserve.status()).toBe(201)
+  const ticket = await reserve.json() as { assetId: string; upload: { uploadId: string; url: string; headers: Record<string, string> } }
+  const signed = new URL(ticket.upload.url)
+  const upload = await page.request.put(`${signed.origin}${signed.pathname}${signed.search}`, { headers: ticket.upload.headers, data: bytes })
+  expect(upload.status()).toBe(200)
+  const finalized = await page.request.post(`/api/v1/families/${familyId}/uploads/${ticket.upload.uploadId}/finalize`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(finalized.status()).toBe(200)
+  return ticket.assetId
 }
 
 test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }) => {
