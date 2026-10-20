@@ -88,7 +88,7 @@ export class CommentService {
     await this.access.requireMember(scope)
     const normalized = createCommentRequestSchema.parse(input)
     return this.repository.create(scope, memoryId, normalized, {
-      key,
+      key: key.toLowerCase(),
       payloadHash: createHash('sha256')
         .update(JSON.stringify({ memoryId, body: normalized.body }))
         .digest('hex'),

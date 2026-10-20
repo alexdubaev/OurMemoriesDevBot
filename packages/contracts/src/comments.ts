@@ -31,11 +31,21 @@ export const updateCommentRequestSchema = z
   })
   .strict()
 export const deleteCommentHeadersSchema = ifMatchVersionHeadersSchema
+const commentUuidSchema = z.uuid().toLowerCase()
 export const commentsParamsSchema = memoryParamsSchema
-export const commentParamsSchema = memoryParamsSchema
-  .extend({ commentId: z.uuid() })
+  .extend({
+    familyId: commentUuidSchema,
+    memoryId: commentUuidSchema,
+  })
+  .strict()
+export const commentParamsSchema = commentsParamsSchema
+  .extend({ commentId: commentUuidSchema })
   .strict()
 export const commentSummariesParamsSchema = memoriesFamilyParamsSchema
+  .extend({
+    familyId: commentUuidSchema,
+  })
+  .strict()
 export const listCommentsQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -45,7 +55,7 @@ export const listCommentsQuerySchema = z
 export const commentSummariesRequestSchema = z
   .object({
     memoryIds: z
-      .array(z.uuid())
+      .array(commentUuidSchema)
       .min(1)
       .max(50)
       .refine(

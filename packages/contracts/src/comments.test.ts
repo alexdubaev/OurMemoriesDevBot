@@ -6,9 +6,43 @@ import {
   listCommentsQuerySchema,
   commentSummariesRequestSchema,
   updateCommentRequestSchema,
+  commentsParamsSchema,
+  commentParamsSchema,
+  commentSummariesParamsSchema,
 } from './comments'
 
 describe('comment contracts', () => {
+  test('canonicalizes comment UUID inputs before duplicate detection', () => {
+    const familyId = randomUUID(),
+      memoryId = randomUUID(),
+      commentId = randomUUID()
+    expect(
+      commentsParamsSchema.parse({
+        familyId: familyId.toUpperCase(),
+        memoryId: memoryId.toUpperCase(),
+      }),
+    ).toEqual({ familyId, memoryId })
+    expect(
+      commentParamsSchema.parse({
+        familyId: familyId.toUpperCase(),
+        memoryId: memoryId.toUpperCase(),
+        commentId: commentId.toUpperCase(),
+      }),
+    ).toEqual({ familyId, memoryId, commentId })
+    expect(
+      commentSummariesParamsSchema.parse({ familyId: familyId.toUpperCase() }),
+    ).toEqual({ familyId })
+    expect(
+      commentSummariesRequestSchema.parse({
+        memoryIds: [memoryId.toUpperCase()],
+      }).memoryIds,
+    ).toEqual([memoryId])
+    expect(
+      commentSummariesRequestSchema.safeParse({
+        memoryIds: [memoryId, memoryId.toUpperCase()],
+      }).success,
+    ).toBe(false)
+  })
   test('normalizes once and counts Unicode code points at the text boundaries', () => {
     for (const body of ['', ' \r\n ', 'x'.repeat(2001), 'a\0b'])
       expect(createCommentRequestSchema.safeParse({ body }).success).toBe(false)

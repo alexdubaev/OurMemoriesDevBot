@@ -6,6 +6,73 @@ const suite = process.env.TEST_DATABASE_URL ? describe : describe.skip
 suite('COM-1 idempotency and lifecycle races', () => {
   const f = commentFixtures()
   afterAll(f.cleanup)
+  test('UUID case variants preserve replay, cursor scope, batch counts and concurrent conflicts', async () => {
+    const owner = await f.user(),
+      family = await f.family(owner),
+      memory = await f.memory(family, owner),
+      key = randomUUID()
+    const path = f.path(family.id, memory.id),
+      upperPath = f.path(family.id.toUpperCase(), memory.id.toUpperCase())
+    const first = await f.request(
+      path,
+      owner.token,
+      'POST',
+      { body: 'same' },
+      key,
+    )
+    const replay = await f.request(
+      upperPath,
+      owner.token,
+      'POST',
+      { body: 'same' },
+      key.toUpperCase(),
+    )
+    expect(first.response.status).toBe(201)
+    expect(replay.response.status).toBe(200)
+    expect(replay.body.comment.id).toBe(first.body.comment.id)
+    const batchPath = `/api/v1/families/${family.id.toUpperCase()}/memories/comment-summaries`
+    const batch = await f.request(batchPath, owner.token, 'POST', {
+      memoryIds: [memory.id.toUpperCase()],
+    })
+    expect(batch.body.items).toEqual([
+      {
+        memoryId: memory.id,
+        count: 1,
+        capabilities: { read: true, create: true },
+      },
+    ])
+    expect(
+      (
+        await f.request(batchPath, owner.token, 'POST', {
+          memoryIds: [memory.id, memory.id.toUpperCase()],
+        })
+      ).response.status,
+    ).toBe(400)
+    await f.request(path, owner.token, 'POST', { body: 'second' }, randomUUID())
+    const page = await f.request(upperPath + '?limit=1', owner.token)
+    expect(
+      (
+        await f.request(
+          path + '?cursor=' + encodeURIComponent(page.body.nextCursor),
+          owner.token,
+        )
+      ).response.status,
+    ).toBe(200)
+    const concurrentKey = randomUUID()
+    const concurrent = await Promise.all([
+      f.request(path, owner.token, 'POST', { body: 'left' }, concurrentKey),
+      f.request(
+        upperPath,
+        owner.token,
+        'POST',
+        { body: 'right' },
+        concurrentKey.toUpperCase(),
+      ),
+    ])
+    expect(concurrent.map((row) => row.response.status).sort()).toEqual([
+      201, 409,
+    ])
+  })
   test('idempotency_parallel and durable replay resolve the current row without old snapshots', async () => {
     const owner = await f.user(),
       family = await f.family(owner),
