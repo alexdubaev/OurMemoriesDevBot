@@ -7,7 +7,7 @@ type Metrics = {
   patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'
   configure: (action: string) => void
   release: (kind: 'list' | 'create') => void
-  snapshot: () => { keys: unknown[][]; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number }
+  snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number }
 }
 declare global { interface Window { __commentsState: Metrics } }
 

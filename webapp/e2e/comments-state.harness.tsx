@@ -14,10 +14,10 @@ import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
 type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: () => void }
-type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => { keys: unknown[][]; data: unknown[]; open: boolean; scope: typeof A; summaries: number } }
+type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number } }
 declare global { interface Window { __commentsState: Metrics } }
 
-const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => [] }
+const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], open: false, scope: A, summaries: 0 }) }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
 window.__commentsState = metrics
 
