@@ -90,8 +90,16 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await page.setViewportSize({ width: 390, height: 844 })
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
   const listRequests: string[] = []
+  const listResponses: number[] = []
+  const failedListRequests: string[] = []
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === commentPath && request.method() === 'GET') listRequests.push(request.url())
+  })
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === commentPath && response.request().method() === 'GET') listResponses.push(response.status())
+  })
+  page.on('requestfailed', (request) => {
+    if (new URL(request.url()).pathname === commentPath && request.method() === 'GET') failedListRequests.push(request.failure()?.errorText ?? 'failed')
   })
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
   const entry = card.locator('.comments-entry')
@@ -109,7 +117,18 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await expect.poll(() => listRequests.length).toBe(0)
   await entry.click()
   await expect(page.getByRole('dialog').getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
-  await expect.poll(() => listRequests.length).toBe(1)
+  await expect.poll(() => listResponses.filter((status) => status === 200).length).toBe(1)
+  const commentsServerMode = testInfo.project.metadata.commentsServerMode
+  if (commentsServerMode === 'preview') {
+    expect(listRequests).toHaveLength(1)
+    expect(failedListRequests).toHaveLength(0)
+  } else {
+    expect(commentsServerMode).toBe('dev-strict')
+    await expect.poll(() => failedListRequests.length + listResponses.length).toBe(listRequests.length)
+    expect(listRequests.length).toBeLessThanOrEqual(2)
+    expect(failedListRequests.length).toBeLessThanOrEqual(1)
+    expect(listResponses).toEqual([200])
+  }
 
   const firstKeys: string[] = []
   let firstPost = true
@@ -185,11 +204,10 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
 test('initial comments 404 stays local and retry works; a later lost target closes only its panel', async ({ page }) => {
   const { familyId, memoryId } = await signInAndSeed(page)
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
-  let listReads = 0
+  let readPhase: 'initial-missing' | 'readable' | 'lost' = 'initial-missing'
   await page.route(`**${commentPath}*`, async (route) => {
     if (route.request().method() !== 'GET') return route.continue()
-    listReads += 1
-    if (listReads === 1 || listReads === 3) {
+    if (readPhase === 'initial-missing' || readPhase === 'lost') {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'synthetic missing comment target' } }) })
       return
     }
@@ -202,8 +220,10 @@ test('initial comments 404 stays local and retry works; a later lost target clos
   await expect(panel).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Повторить' })).toBeVisible()
   await expect(card).toBeVisible()
+  readPhase = 'readable'
   await panel.getByRole('button', { name: 'Повторить' }).click()
   await expect(panel.getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
+  readPhase = 'lost'
   await panel.getByRole('button', { name: 'Обновить' }).click()
   await expect(panel).toBeHidden()
   await expect(card).toBeVisible()

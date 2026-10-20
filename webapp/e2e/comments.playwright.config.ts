@@ -16,6 +16,7 @@ const inheritedWebServers = Array.isArray(maxConfig.webServer)
 // config-relative paths here because Playwright uses this nested file as the config root.
 export default defineConfig({
   ...maxConfig,
+  metadata: { ...maxConfig.metadata, commentsServerMode: 'preview' },
   webServer: inheritedWebServers,
   globalSetup: resolve(webappRoot, 'e2e/global-setup.ts'),
   globalTeardown: resolve(webappRoot, 'e2e/global-teardown.ts'),

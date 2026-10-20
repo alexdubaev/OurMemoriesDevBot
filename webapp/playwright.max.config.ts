@@ -14,6 +14,7 @@ const webServer = Array.isArray(baseConfig.webServer)
 export default {
   ...baseConfig,
   webServer,
+  metadata: { ...baseConfig.metadata, commentsServerMode: 'dev-strict' },
   testMatch: [
     '**/max-browser-link.spec.ts',
     '**/comments.spec.ts',
