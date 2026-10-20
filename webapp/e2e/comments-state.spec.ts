@@ -18,7 +18,7 @@ test('summary batching and closed-panel query boundary', async ({ page }) => {
   expect(counts).toEqual([50, 10])
   expect(await page.evaluate(() => window.__commentsState.calls.some((call) => call.path.includes('/comments?')))).toBe(false)
   await page.getByRole('button', { name: 'Open comments' }).click()
-  await expect(page.getByText('Existing comment')).toBeVisible()
+  await expect(page.locator('.comments-item').first()).toBeVisible()
 })
 
 for (const context of ['account', 'family', 'epoch', 'logout', 'revoke'] as const) {

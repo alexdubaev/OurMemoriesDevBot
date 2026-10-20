@@ -14,7 +14,7 @@ import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
 type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: () => void }
-type Metrics = { calls: Array<{ path: string; method: string; ids?: number[] }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => unknown }
+type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => unknown }
 declare global { interface Window { __commentsState: Metrics } }
 
 const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => [] }
@@ -31,7 +31,7 @@ function Harness() {
   const [scope, setScope] = useState(A)
   const [open, setOpen] = useState(false)
   const [active] = useState(true)
-  const transport = useMemo<AuthenticatedTransport>(() => ({ request: (async (path: string, _schema: unknown, options?: { method?: string; body?: { memoryIds?: string[]; body?: string }; signal?: AbortSignal }) => {
+  const transport = useMemo<AuthenticatedTransport>(() => ({ raw: async () => new Response('', { status: 404 }), request: (async (path: string, _schema: unknown, options?: { method?: string; body?: { memoryIds?: string[]; body?: string }; signal?: AbortSignal }) => {
     const method = options?.method ?? 'GET'
     metrics.calls.push({ path, method, ...(options?.body?.memoryIds ? { ids: options.body.memoryIds.length } : {}) })
     if ((method === 'PATCH' || method === 'DELETE') && metrics.patchMode !== 'none') {
@@ -61,7 +61,7 @@ function Harness() {
       return { comment: fixture(gate.body ?? 'Late private body', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'), summary: { memoryId: A.memoryId, count: 2, capabilities: { read: true, create: true } } }
     }
     if (method === 'PATCH') return { comment: fixture(options?.body?.body ?? 'Saved edit', 'cccccccc-cccc-4ccc-8ccc-000000000001', 3), summary: { memoryId: A.memoryId, count: 1, capabilities: { read: true, create: true } } }
-    if (path.endsWith('/comments/summaries')) return { items: (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: 1, capabilities: { read: true, create: true } })) }
+    if (path.endsWith('/comment-summaries')) return { items: (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: 1, capabilities: { read: true, create: true } })) }
     throw new Error(`Unexpected comments harness request ${method} ${path}`)
   }) as AuthenticatedTransport['request'] }), [])
   const summaries = useCommentSummaries(transport, scope.familyId, scope.accountId, scope.membershipEpoch, Array.from({ length: 60 }, (_, i) => `90000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`), active)
@@ -73,7 +73,7 @@ function Harness() {
     if (action === 'open') setOpen(true)
   }
   metrics.snapshot = () => ({ keys: queryClient.getQueryCache().getAll().map((query) => query.queryKey), data: queryClient.getQueryCache().getAll().map((query) => query.state.data), open, scope, summaries: summaries.size })
-  metrics.release = (kind) => { metrics.gates.filter((gate) => gate.kind === kind).forEach((gate) => gate.resolve(undefined)) }
+  metrics.release = (kind) => { metrics.gates.filter((gate) => gate.kind === kind).forEach((gate) => gate.resolve()) }
   return <main><button onClick={() => setOpen(true)}>Open comments</button><output data-testid="summary-count">{summaries.size}</output>{open ? <CommentsPanel familyTimezone="UTC" hostBridge={{ onBack: () => () => undefined }} onClose={() => setOpen(false)} open scope={scope} transport={transport} returnFocusRef={{ current: null }} /> : null}</main>
 }
 
