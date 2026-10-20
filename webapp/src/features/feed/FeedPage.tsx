@@ -388,8 +388,8 @@ export function FeedPage({
           reactionCounts={memory.reactionCounts}
           currentUserReaction={memory.currentUserReaction}
           commentCount={commentSummaries.get(memory.id)}
-          onComments={() => {
-            detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          onComments={(trigger) => {
+            detailReturnFocusRef.current = trigger
             setCommentsSelection({ memoryId: memory.id, familyId, accountId, membershipEpoch: membershipEpoch ?? 0 })
           }}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)

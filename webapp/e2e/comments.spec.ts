@@ -36,33 +36,35 @@ async function signInAndSeed(page: Page) {
   await page.getByRole('button', { name: 'Продолжить' }).click()
   const auth = await authPromise
   const token = (await auth.json() as { accessToken: string }).accessToken
-
-  const familyResponse = await page.request.post('/api/v1/families', {
-    headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': randomUUID() },
-    data: { name: `Comments ${randomUUID().slice(0, 8)}`, timezone: 'Europe/Moscow' },
+  let seeded: { familyId: string; memoryId: string; token: string } | null = null
+  let familyPostIntercepted = false
+  await page.route('**/api/v1/families', async (route) => {
+    if (route.request().method() !== 'POST' || familyPostIntercepted) return route.continue()
+    familyPostIntercepted = true
+    const familyResponse = await route.fetch()
+    expect(familyResponse.status()).toBe(201)
+    const familyId = ((await familyResponse.json()) as FamilyResult).family.id
+    const tokenFromRequest = (await route.request().allHeaders()).authorization?.replace(/^Bearer\s+/i, '') ?? token
+    const avatarMediaId = await uploadPng(page, tokenFromRequest, familyId)
+    const childResponse = await page.request.put(`/api/v1/families/${familyId}/child`, {
+      headers: { Authorization: `Bearer ${tokenFromRequest}` },
+      data: { name: 'Синтетический ребёнок', birthDate: '2024-01-02', sex: 'girl', avatarMediaId, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
+    })
+    expect(childResponse.status()).toBe(200)
+    const childId = (await childResponse.json() as ChildResult).child.id
+    const memoryResponse = await page.request.post(`/api/v1/families/${familyId}/memories`, {
+      headers: { Authorization: `Bearer ${tokenFromRequest}`, 'Idempotency-Key': randomUUID() },
+      data: { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
+    })
+    expect(memoryResponse.status()).toBe(201)
+    seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, token: tokenFromRequest }
+    await route.fulfill({ response: familyResponse })
   })
-  expect(familyResponse.status()).toBe(201)
-  const familyId = (await familyResponse.json() as FamilyResult).family.id
-  const avatarMediaId = await uploadPng(page, token, familyId)
-  const childResponse = await page.request.put(`/api/v1/families/${familyId}/child`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { name: 'Синтетический ребёнок', birthDate: '2024-01-02', sex: 'girl', avatarMediaId, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
-  })
-  expect(childResponse.status()).toBe(200)
-  const childId = (await childResponse.json() as ChildResult).child.id
-  const memoryResponse = await page.request.post(`/api/v1/families/${familyId}/memories`, {
-    headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': randomUUID() },
-    data: { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
-  })
-  expect(memoryResponse.status()).toBe(201)
-  const memoryId = (await memoryResponse.json() as MemoryResult).id
-
-  await page.reload()
-  const familyButton = page.locator('.family-hub-card').first()
-  await expect(familyButton).toBeVisible()
-  await familyButton.click()
+  await page.getByRole('button', { name: 'Создать свою семью' }).click()
+  await expect.poll(() => seeded).not.toBeNull()
+  const { familyId, memoryId } = seeded!
   await expect(page.locator(`[data-memory-id="${memoryId}"]`)).toBeVisible({ timeout: 20_000 })
-  return { familyId, memoryId, token }
+  return { familyId, memoryId, token: seeded!.token }
 }
 
 async function uploadPng(page: Page, token: string, familyId: string) {
@@ -229,6 +231,7 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
       await page.screenshot({ path: testInfo.outputPath(`comments-panel-${width}-${theme}.png`), fullPage: true })
       await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
       await expect(panel).toBeHidden()
+      await expect(entry).toBeFocused()
     }
   }
 })

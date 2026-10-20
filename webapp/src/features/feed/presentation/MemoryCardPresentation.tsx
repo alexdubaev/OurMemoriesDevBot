@@ -64,7 +64,7 @@ export type MemoryCardPresentationProps = {
   onOpen: () => void
   seenContentRef?: Ref<HTMLDivElement>
   commentCount?: number
-  onComments?: () => void
+  onComments?: (trigger: HTMLButtonElement) => void
 }
 
 export function MemoryCardPresentation({

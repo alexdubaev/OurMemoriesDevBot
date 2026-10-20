@@ -28,7 +28,7 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   onOpenFromTrigger: (point: { x: number; y: number }) => void
   onHaptic?: (style: ReactionHapticStyle) => void
   returnFocusRef: React.RefObject<HTMLElement | null>
-  onComments?: () => void
+  onComments?: (trigger: HTMLButtonElement) => void
   commentCount?: number
 }) {
   const firstChoice = useRef<HTMLButtonElement>(null)
@@ -82,9 +82,9 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   </>
 }
 
-function CommentAction({ count, onClick }: { count?: number; onClick: () => void }) {
+function CommentAction({ count, onClick }: { count?: number; onClick: (trigger: HTMLButtonElement) => void }) {
   const label = count === undefined ? 'Открыть комментарии' : `Открыть комментарии, ${count}`
-  return <button aria-label={label} className="comments-entry" onClick={onClick} type="button"><WebpIcon decorative monochrome name="comments" size={22} />{count && count > 0 ? <Typography as="span" aria-hidden="true" variant="memoryMeta">{count}</Typography> : null}</button>
+  return <button aria-label={label} className="comments-entry" onClick={(event) => onClick(event.currentTarget)} type="button"><WebpIcon decorative monochrome name="comments" size={22} />{count && count > 0 ? <Typography as="span" aria-hidden="true" variant="memoryMeta">{count}</Typography> : null}</button>
 }
 
 function collisionPadding() {
