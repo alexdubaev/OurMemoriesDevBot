@@ -59,6 +59,37 @@ test('comment entry handles all memory kinds, known counts, reactions and channe
   }
 })
 
+test('comment capabilities follow owner, moderator and viewer projections; long draft stays in a mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto('/e2e/comments-state.harness.html')
+  await page.getByRole('button', { name: 'Open comments' }).click()
+  let first = page.locator('.comments-item').first()
+  await expect(first.getByRole('button', { name: 'Изменить' })).toBeVisible()
+  await expect(first.getByRole('button', { name: 'Удалить' })).toBeVisible()
+
+  for (const [mode, edit, remove] of [['moderator', false, true], ['viewer', false, false]] as const) {
+    await page.evaluate((next) => window.__commentsState.configure(next), mode)
+    await page.getByRole('button', { name: 'Обновить' }).click()
+    first = page.locator('.comments-item').first()
+    await expect(first.getByRole('button', { name: 'Изменить' })).toHaveCount(edit ? 1 : 0)
+    await expect(first.getByRole('button', { name: 'Удалить' })).toHaveCount(remove ? 1 : 0)
+  }
+
+  await page.evaluate(() => window.__commentsState.configure('owner'))
+  await page.getByRole('button', { name: 'Обновить' }).click()
+  const editor = page.getByRole('textbox', { name: 'Написать комментарий' })
+  const longDraft = `${'👨‍👩‍👧‍👦'.repeat(200)}\n${'строка\n'.repeat(200)}`
+  await editor.fill(longDraft)
+  const mobile = await editor.evaluate((element) => ({
+    fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+    width: document.documentElement.scrollWidth,
+    composerBottom: element.closest('.comments-composer')!.getBoundingClientRect().bottom,
+  }))
+  expect(mobile.fontSize).toBeGreaterThanOrEqual(16)
+  expect(mobile.width).toBeLessThanOrEqual(320)
+  expect(mobile.composerBottom).toBeLessThanOrEqual(640)
+})
+
 for (const context of ['account', 'family', 'epoch', 'logout', 'revoke'] as const) {
   test(`late list response cannot restore comments after ${context} changes`, async ({ page }) => {
     await page.goto('/e2e/comments-state.harness.html')
@@ -179,6 +210,14 @@ test('pagination preserves the visible scroll anchor and dirty Back can continue
   expect(Math.abs(afterAnchorY - anchorY)).toBeLessThan(3)
 
   await page.getByRole('textbox', { name: 'Написать комментарий' }).fill('Unsaved back draft')
+  await page.evaluate(() => window.__commentsState.configure('host-back'))
+  await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'Комментарии' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Написать комментарий' })).toHaveValue('Unsaved back draft')
+  await page.locator('.comments-panel').click({ position: { x: 2, y: 2 } })
+  await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toHaveCount(0)
   await page.goBack()
   await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toBeVisible()
   await page.getByRole('button', { name: 'Продолжить писать' }).click()

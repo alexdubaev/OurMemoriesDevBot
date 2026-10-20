@@ -16,6 +16,9 @@ import { MemoryCardPresentation } from '@/features/feed/presentation/MemoryCardP
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
 type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: () => void }
+type CapabilityMode = 'owner' | 'moderator' | 'viewer'
+let capabilityMode: CapabilityMode = 'owner'
+let hostBack: (() => void) | null = null
 type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; denyFamily: boolean; currentBody: string | null; deleted: boolean; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; entries: Array<{ key: readonly unknown[]; data: unknown }>; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number } }
 const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', denyFamily: false, currentBody: null, deleted: false, configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], entries: [], open: false, scope: A, summaries: 0 }) }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
@@ -25,7 +28,10 @@ function fixture(body = 'Existing comment', id = 'cccccccc-cccc-4ccc-8ccc-cccccc
   const time = new Date(Date.UTC(2026, 9, 1, 12, ordinal)).toISOString()
   return { id, familyId: A.familyId, memoryId: A.memoryId, author: { id: A.accountId, name: 'Тест', avatarPath: null, avatarCrop: null }, body, createdAt: time, updatedAt: time, version, capabilities: { edit: true, delete: true } }
 }
-function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, 1, i)), nextCursor: string | null = null): CommentPage { return { items, nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } } }
+function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, 1, i)), nextCursor: string | null = null): CommentPage {
+  const capabilities = capabilityMode === 'owner' ? { edit: true, delete: true } : capabilityMode === 'moderator' ? { edit: false, delete: true } : { edit: false, delete: false }
+  return { items: items.map((item) => ({ ...item, capabilities })), nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } }
+}
 
 function Harness() {
   const [scope, setScope] = useState(A)
@@ -72,6 +78,8 @@ function Harness() {
   }) as AuthenticatedTransport['request'] }), [])
   const summaries = useCommentSummaries(transport, scope.familyId, scope.accountId, scope.membershipEpoch, [A.memoryId, ...Array.from({ length: 59 }, (_, i) => `90000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`)], active)
   metrics.configure = (action) => {
+    if (action === 'host-back') { hostBack?.(); return }
+    if (action === 'owner' || action === 'moderator' || action === 'viewer') { capabilityMode = action; return }
     if (action === 'family') { setOpen(false); void removePrivateFamilyCache(queryClient, scope.accountId, scope.familyId); const next = { ...B, accountId: scope.accountId }; allowPrivateFamilyCache(next.accountId, next.familyId); window.setTimeout(() => { setScope(next); setOpen(true) }, 50) }
     if (action === 'epoch') { setOpen(false); void removePrivateFamilyCache(queryClient, scope.accountId, scope.familyId); allowPrivateFamilyCache(scope.accountId, scope.familyId); window.setTimeout(() => { setScope((current) => ({ ...current, membershipEpoch: current.membershipEpoch + 1 })); setOpen(true) }, 50) }
     if (action === 'account' || action === 'logout') { setOpen(false); window.setTimeout(() => { activatePrivateCacheIdentity(action === 'logout' ? null : B.accountId); queryClient.clear(); setScope({ ...B, accountId: action === 'logout' ? '' : B.accountId }); setOpen(action !== 'logout') }, 50) }
@@ -80,7 +88,7 @@ function Harness() {
   }
   metrics.snapshot = () => ({ keys: queryClient.getQueryCache().getAll().map((query) => query.queryKey), data: queryClient.getQueryCache().getAll().map((query) => query.state.data), entries: queryClient.getQueryCache().getAll().map((query) => ({ key: query.queryKey, data: query.state.data })), open, scope, summaries: summaries.size })
   metrics.release = (kind) => { metrics.gates.filter((gate) => gate.kind === kind).forEach((gate) => gate.resolve()) }
-  return <main><button onClick={() => setOpen(true)}>Open comments</button><output data-testid="summary-count">{summaries.size}</output>{open ? <CommentsPanel familyTimezone="UTC" hostBridge={{ onBack: () => () => undefined }} onClose={() => setOpen(false)} open scope={scope} transport={transport} returnFocusRef={{ current: null }} /> : null}</main>
+  return <main><button onClick={() => setOpen(true)}>Open comments</button><output data-testid="summary-count">{summaries.size}</output>{open ? <CommentsPanel familyTimezone="UTC" hostBridge={{ onBack: (callback) => { hostBack = callback; return () => { if (hostBack === callback) hostBack = null } } }} onClose={() => setOpen(false)} open scope={scope} transport={transport} returnFocusRef={{ current: null }} /> : null}</main>
 }
 
 function CardGallery() {
