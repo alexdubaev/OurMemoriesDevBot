@@ -36,6 +36,7 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
       data: { familyId: family.id, userId: viewer.id, role: 'viewer' },
     })
     const key = randomUUID(), path = f.path(family.id, memory.id)
+    const memoryBefore = await f.db.memory.findUniqueOrThrow({ where: { id: memory.id } })
     const created = await f.request(path, viewer.token, 'POST', { body: 'original' }, key)
     expect(created.response.status).toBe(201)
     expect(created.body.comment.capabilities).toEqual({ edit: true, delete: true })
@@ -48,9 +49,16 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
       body: 'edited\n text', version: created.body.comment.version + 1,
       author: { id: viewer.id }, capabilities: { edit: true, delete: true },
     })
+    const stored = await f.db.memoryComment.findUniqueOrThrow({ where: { id: created.body.comment.id } })
+    expect(stored).toMatchObject({
+      authorId: viewer.id, createdAt: new Date(created.body.comment.createdAt),
+      createRequestId: key.toLowerCase(), initialPayloadHash: expect.any(String),
+    })
+    expect(await f.db.memory.findUniqueOrThrow({ where: { id: memory.id } })).toEqual(memoryBefore)
     expect(Date.parse(updated.body.comment.updatedAt)).toBeGreaterThanOrEqual(
       Date.parse(created.body.comment.updatedAt),
     )
+    await f.db.idempotencyRecord.deleteMany({ where: { actorUserId: viewer.id } })
     const replay = await f.request(path, viewer.token, 'POST', { body: 'original' }, key)
     expect(replay.response.status).toBe(200)
     expect(replay.body.comment.body).toBe('edited\n text')
@@ -85,11 +93,18 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
 
     const foreign = await f.request(path, viewer.token, 'POST', { body: 'foreign' }, randomUUID())
     const foreignId = foreign.body.comment.id
+    const ownerView = await f.request(path, owner.token)
+    expect(ownerView.body.items.find((item: { id: string }) => item.id === foreignId).capabilities).toEqual({ edit: false, delete: true })
+    const fullView = await f.request(path, full.token)
+    expect(fullView.body.items.find((item: { id: string }) => item.id === foreignId).capabilities).toEqual({ edit: false, delete: false })
     expect((await mutate(`${path}/${foreignId}`, full.token, 'DELETE', undefined, 1)).response.status).toBe(403)
     expect((await mutate(`${path}/${foreignId}`, owner.token, 'PATCH', { body: 'owner cannot edit', expectedVersion: 1 })).response.status).toBe(403)
     const deleted = await mutate(`${path}/${foreignId}`, owner.token, 'DELETE', undefined, 1)
     expect(deleted.response.status).toBe(200)
     expect(deleted.body.summary.count).toBe(0)
+    expect(await f.db.memoryComment.findUniqueOrThrow({ where: { id: foreignId } })).toMatchObject({ body: '', version: 2, deletedAt: expect.any(Date) })
+    await f.db.idempotencyRecord.deleteMany({ where: { actorUserId: viewer.id } })
+    expect((await f.request(path, viewer.token, 'POST', { body: 'foreign' }, (await f.db.memoryComment.findUniqueOrThrow({ where: { id: foreignId } })).createRequestId)).response.status).toBe(409)
     expect(deleted.response.headers.get('cache-control')).toBe('private, no-store')
     expect((await mutate(`${path}/${foreignId}`, owner.token, 'DELETE', undefined, 1)).response.status).toBe(200)
   })
@@ -124,5 +139,7 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
     const otherOwner = await f.user(), otherFamily = await f.family(otherOwner), otherMemory = await f.memory(otherFamily, otherOwner)
     const foreign = await f.request(f.path(otherFamily.id, otherMemory.id), otherOwner.token, 'POST', { body: 'foreign family' }, randomUUID())
     expect((await mutate(`${path}/${foreign.body.comment.id}`, owner.token, 'DELETE', undefined, 1)).response.status).toBe(404)
+    await f.db.familyMember.create({ data: { familyId: otherFamily.id, userId: owner.id, role: 'full' } })
+    expect((await mutate(`${f.path(otherFamily.id, otherMemory.id)}/${foreign.body.comment.id}`, owner.token, 'DELETE', undefined, 1)).response.status).toBe(403)
   })
 })
