@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "assets" / "icons"
+PUBLIC_OUT_DIR = ROOT / "webapp" / "public" / "assets" / "icons"
 MANIFEST = ROOT / "assets" / "manifest.json"
 COLORS = {"default": (117, 106, 113), "active": (168, 55, 80), "white": (255, 255, 255)}
 
@@ -75,15 +76,18 @@ def main() -> None:
     parser.add_argument("--preview-dir", type=Path, help="Optional directory for light/dark review previews")
     args = parser.parse_args()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    PUBLIC_OUT_DIR.mkdir(parents=True, exist_ok=True)
     new_items = []
     rendered: dict[str, Image.Image] = {}
     for state, color in COLORS.items():
         for density, pixels in ((2, 48), (3, 72)):
             name = f"comments-{state}@{density}x.webp"
             path = OUT_DIR / name
+            public_path = PUBLIC_OUT_DIR / name
             image = render(pixels, color)
             image.save(path, "WEBP", lossless=True, method=6, exact=True)
             raw = path.read_bytes()
+            public_path.write_bytes(raw)
             new_items.append({
                 "path": f"assets/icons/{name}", "usage": "runtime-icon",
                 "width": pixels, "height": pixels, "alpha": True,

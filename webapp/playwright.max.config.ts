@@ -16,5 +16,6 @@ export default {
   webServer,
   testMatch: [
     '**/max-browser-link.spec.ts',
+    '**/comments.spec.ts',
   ],
 }
