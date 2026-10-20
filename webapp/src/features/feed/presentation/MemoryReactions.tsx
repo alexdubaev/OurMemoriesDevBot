@@ -53,11 +53,13 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
         <Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography>
       </span>)}
       </div> : <span aria-hidden="true" className="memory-reactions-empty" />}
-      {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
-      <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect()
-        onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
-      }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span" variant="memoryMeta">{triggerLabel}</Typography></UiV2Button>
+      <div className="memory-comment-actions">
+        {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
+        <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
+        }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span" variant="memoryMeta">{triggerLabel}</Typography></UiV2Button>
+      </div>
     </footer> : null}
     {!uiV2 && (used.length || onComments) ? <div className="actions">
       {used.length ? <div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">

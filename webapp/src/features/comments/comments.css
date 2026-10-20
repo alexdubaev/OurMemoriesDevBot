@@ -4,17 +4,17 @@
 .comments-header-actions { display: flex; align-items: center; gap: 4px; }
 .comments-refresh { min-height: 44px; padding: 0 8px; color: var(--memory-accent-strong, #a83750); background: transparent; font-size: 12px; }
 .comments-header [data-radix-dialog-title] { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.35; }
-.comments-header [data-radix-dialog-description] { margin-top: 2px; color: var(--memory-muted, #756a71); font-size: 12px; }
+.comments-header [data-radix-dialog-description] { margin-top: 2px; color: var(--memory-text-muted, #756a71); font-size: 12px; }
 .comments-close { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 999px; color: inherit; background: transparent; font-size: 28px; line-height: 1; }
 .comments-list { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 14px; overflow: auto; overscroll-behavior: contain; padding: 14px 0; }
-.comments-state { margin: auto; max-width: 290px; color: var(--memory-muted, #756a71); text-align: center; font-size: 14px; line-height: 1.5; }
+.comments-state { margin: auto; max-width: 290px; color: var(--memory-text-muted, #756a71); text-align: center; font-size: 14px; line-height: 1.5; }
 .comments-state button, .comments-older { min-height: 44px; align-self: center; padding: 0 14px; color: var(--memory-accent-strong, #a83750); background: transparent; }
 .comments-error { margin: 8px 0 0; color: var(--memory-danger, #a52635); font-size: 13px; }
 .comments-item { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
 .comments-avatar, .comments-avatar-fallback { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; overflow: hidden; border-radius: 50%; background: var(--memory-surface-inset, #f2eeeb); object-fit: cover; }
 .comments-item-body { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .comments-item-body header { display: flex; min-height: 24px; align-items: baseline; flex-wrap: wrap; gap: 8px; font-size: 13px; }
-.comments-item-body time, .comments-item-body header > span { color: var(--memory-muted, #756a71); font-size: 11px; }
+.comments-item-body time, .comments-item-body header > span { color: var(--memory-text-muted, #756a71); font-size: 11px; }
 .comments-item-body p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
 .comments-item-actions { display: flex; gap: 4px; margin: 2px 0 0 -8px; }
 .comments-item-actions button, .comments-composer button { min-width: 44px; min-height: 44px; padding: 0 12px; color: var(--memory-accent-strong, #a83750); background: transparent; font-size: 13px; }
@@ -23,11 +23,11 @@
 .comments-composer > button, .comments-composer div button:last-child { min-height: 48px; border-radius: 12px; color: white; background: var(--memory-accent-strong, #a83750); font-weight: 600; }
 .comments-composer > button:disabled, .comments-composer div button:disabled { opacity: .55; }
 .comments-composer div { display: flex; flex: 1 1 100%; justify-content: flex-end; gap: 8px; }
-.comments-status { flex: 1 1 100%; margin: 0; color: var(--memory-muted, #756a71); font-size: 12px; line-height: 1.4; }
+.comments-status { flex: 1 1 100%; margin: 0; color: var(--memory-text-muted, #756a71); font-size: 12px; line-height: 1.4; }
 .comments-confirm-overlay { position: fixed; inset: 0; z-index: 80; background: rgb(20 18 20 / .42); }
 .comments-confirm { position: fixed; z-index: 81; top: 50%; left: 50%; width: min(calc(100vw - 32px), 360px); transform: translate(-50%, -50%); border-radius: 18px; background: var(--memory-surface, white); padding: 20px; box-shadow: 0 12px 36px rgb(0 0 0 / .2); }
 .comments-confirm [data-radix-dialog-title] { font-weight: 650; }
-.comments-confirm p { color: var(--memory-muted, #756a71); font-size: 14px; line-height: 1.45; }
+.comments-confirm p { color: var(--memory-text-muted, #756a71); font-size: 14px; line-height: 1.45; }
 .comments-confirm > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .comments-confirm button { min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--memory-accent-strong, #a83750); background: transparent; }
 .comments-confirm button:last-child { background: var(--memory-accent-strong, #a83750); color: white; }
