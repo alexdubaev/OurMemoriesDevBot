@@ -217,7 +217,7 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
   const footer = page.locator('[data-memoly-feed="true"] [data-testid="bottom-navigation"]')
   await expect(entry).toBeVisible()
   for (const theme of themes) {
-    await page.locator('.ui-v2-settings').click()
+    await page.locator('[data-memoly-feed="true"] .ui-v2-settings').click()
     await page.getByRole('button', { name: 'Оформление шапки профиля' }).click()
     await page.locator(`[data-theme-choice="${theme}"]`).click()
     await expect(page.locator('.memoly-app-root')).toHaveAttribute('data-memoly-theme', theme)
