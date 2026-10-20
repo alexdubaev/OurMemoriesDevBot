@@ -99,7 +99,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       }
     }
   // This effect owns one history entry per panel mount.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => {
