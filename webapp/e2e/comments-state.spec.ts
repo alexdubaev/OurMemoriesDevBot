@@ -228,8 +228,11 @@ test('pagination preserves the visible scroll anchor and dirty Back can continue
 
   await page.getByRole('textbox', { name: 'Написать комментарий' }).fill('Unsaved back draft')
   await page.evaluate(() => window.__commentsState.configure('host-back'))
-  await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toBeVisible()
-  await page.getByRole('dialog', { name: 'Черновик не сохранён' }).press('Escape')
+  const dirtyPrompt = page.getByRole('dialog', { name: 'Черновик не сохранён' })
+  await expect(dirtyPrompt).toBeVisible()
+  await dirtyPrompt.focus()
+  expect(await dirtyPrompt.evaluate((node) => node.contains(document.activeElement))).toBe(true)
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toHaveCount(0)
   await expect(page.getByRole('dialog', { name: 'Комментарии' })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Написать комментарий' })).toHaveValue('Unsaved back draft')
