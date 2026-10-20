@@ -14,6 +14,12 @@ export { createSourceMemoryPublisher } from './infrastructure/source-memory-publ
 export type { SourceMemoryInput } from './infrastructure/source-memory-publisher'
 export { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 import { createMemoryRoutes } from './transport/routes'
+import { CommentService } from './application/comment-service'
+import { PrismaCommentRepository } from './infrastructure/prisma-comment-repository'
+import { createCommentRoutes } from './transport/comment-routes'
+export { commentPrivacyMiddleware } from './transport/comment-routes'
+export { CommentService } from './application/comment-service'
+export type { CommentRepository, CommentPosition } from './application/comment-ports'
 
 export function createMemoriesModule({
   db,
@@ -35,7 +41,10 @@ export function createMemoriesModule({
   const repository = new PrismaMemoryRepository(db, idempotencyExecutor)
   const service = new MemoryService(familyAccess, repository, mediaCatalog, idempotencySecret)
   const telegramVideoDelivery = new TelegramVideoDeliveryService(db, familyAccess, telegramBotUsername)
-  return { routes: createMemoryRoutes({ requireAuth, service, telegramVideoDelivery }) }
+  const commentService = new CommentService(familyAccess, new PrismaCommentRepository(db, idempotencyExecutor), idempotencySecret)
+  const routes = createCommentRoutes({ requireAuth, service: commentService })
+  routes.route('/', createMemoryRoutes({ requireAuth, service, telegramVideoDelivery }))
+  return { routes }
 }
 
 export type { MediaMemoryCatalog, MemoryRepository } from './application/ports'
