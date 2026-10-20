@@ -40,7 +40,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   const list = useCommentsList(transport, scope, open, lease)
   const comments = useMemo(() => mergeCommentPages((list.data?.pages ?? []).map((page) => page.items)), [list.data])
   const currentScope = useRef(scope)
-  currentScope.current = scope
+  useLayoutEffect(() => { currentScope.current = scope }, [scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
   const identityGeneration = privateCacheIdentityGeneration()
   const familyGeneration = privateFamilyCacheGeneration(scope.accountId, scope.familyId)
   const leaseIsCurrent = () => isCurrentCommentScope(scope, currentScope.current, lease.current) &&
@@ -111,13 +111,13 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     lease.current = false
     mutationController.current?.abort()
     const key = commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
-    void queryClient.cancelQueries({ queryKey: key, exact: true }).finally(() => queryClient.removeQueries({ queryKey: key, exact: true }))
+    queryClient.removeQueries({ queryKey: key, exact: true })
   }, [queryClient, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
 
   useEffect(() => {
     if (open) return
     void queryClient.cancelQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
-  }, [open, queryClient, scope])
+  }, [open, queryClient, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
 
   useEffect(() => {
     if (scrollRestore && listRef.current) {
@@ -202,7 +202,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   return <DialogPrimitive.Root onOpenChange={(next) => { if (!next) requestClose() }} open={open}>
     <DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-overlay" />
       <DialogPrimitive.Content aria-describedby="comments-description" className="comments-panel" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }}>
-        <header className="comments-header"><div><DialogPrimitive.Title>Комментарии</DialogPrimitive.Title><DialogPrimitive.Description id="comments-description">Обсуждение семейного воспоминания</DialogPrimitive.Description></div><div className="comments-header-actions"><button className="comments-refresh" disabled={list.isFetching} onClick={() => void list.refetch()} type="button">Обновить</button><button aria-label="Закрыть комментарии" className="comments-close" onClick={() => requestClose()} type="button">×</button></div></header>
+        <header className="comments-header"><div><DialogPrimitive.Title>Комментарии</DialogPrimitive.Title><DialogPrimitive.Description id="comments-description">Обсуждение семейного воспоминания</DialogPrimitive.Description></div><div className="comments-header-actions"><button className="comments-refresh" disabled={list.isFetching} onClick={() => void list.refetch()} type="button"><Typography as="span" variant="memoryButton">Обновить</Typography></button><button aria-label="Закрыть комментарии" className="comments-close" onClick={() => requestClose()} type="button"><Typography as="span" aria-hidden="true" variant="memoryToolbar">×</Typography></button></div></header>
         {error ? <Typography as="p" className="comments-error" role="alert" variant="bodyXs">{error}</Typography> : null}
         <div aria-live="polite" className="comments-list" ref={listRef}>
           {list.isPending ? <Typography as="p" className="comments-state" variant="bodySm">Загрузка комментариев…</Typography> : null}

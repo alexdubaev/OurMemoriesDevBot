@@ -1,5 +1,7 @@
 import { CancelledError, useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useLayoutEffect, useRef } from 'react'
+import type { InfiniteData } from '@tanstack/react-query'
+import type { CommentPage } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { privateCacheIdentityGeneration, privateFamilyCacheGeneration, isActivePrivateCacheIdentity } from '@/platform/persistence/private-cache'
 import { loadCommentSummaries, loadComments } from './api'
@@ -12,9 +14,21 @@ export const commentsQueryKeys = {
 }
 
 export function useCommentSummaries(transport: AuthenticatedTransport, familyId: string, accountId: string, membershipEpoch: number, memoryIds: string[], active: boolean) {
+  const client = useQueryClient()
   const activeRef = useRef(active)
   const scopeRef = useRef({ familyId, accountId, membershipEpoch })
-  useLayoutEffect(() => { activeRef.current = active; scopeRef.current = { familyId, accountId, membershipEpoch } }, [active, accountId, familyId, membershipEpoch])
+  useLayoutEffect(() => {
+    const previous = scopeRef.current
+    if (previous.familyId !== familyId || previous.accountId !== accountId || previous.membershipEpoch !== membershipEpoch || !active) {
+      removeCommentScopeQueries(client, previous.familyId, previous.accountId, previous.membershipEpoch)
+    }
+    activeRef.current = active
+    scopeRef.current = { familyId, accountId, membershipEpoch }
+    return () => {
+      activeRef.current = false
+      removeCommentScopeQueries(client, familyId, accountId, membershipEpoch)
+    }
+  }, [active, accountId, client, familyId, membershipEpoch])
   const groups: string[][] = []
   for (let index = 0; index < memoryIds.length; index += 50) groups.push(memoryIds.slice(index, index + 50))
   const queries = useQueries({ queries: groups.map((ids) => {
@@ -42,7 +56,7 @@ export function useCommentSummaries(transport: AuthenticatedTransport, familyId:
 export function useCommentsList(transport: AuthenticatedTransport, scope: CommentScope, enabled: boolean, lease: { current: boolean }) {
   const identity = privateCacheIdentityGeneration()
   const familyGeneration = privateFamilyCacheGeneration(scope.accountId, scope.familyId)
-  return useInfiniteQuery({
+  return useInfiniteQuery<CommentPage, Error, InfiniteData<CommentPage>, ReturnType<typeof commentsQueryKeys.list>, string | null>({
     queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId),
     enabled,
     initialPageParam: null as string | null,
@@ -77,4 +91,9 @@ export function writeCommentSummary(client: import('@tanstack/react-query').Quer
 export function invalidateCommentSummaryForMemory(client: import('@tanstack/react-query').QueryClient, scope: CommentScope) {
   const queries = client.getQueryCache().findAll({ queryKey: [...commentsQueryKeys.all, scope.familyId, scope.accountId, scope.membershipEpoch, 'summaries'] })
   return Promise.all(queries.filter((query) => query.queryKey.slice(6).includes(scope.memoryId)).map((query) => client.invalidateQueries({ queryKey: query.queryKey, exact: true })))
+}
+
+export function removeCommentScopeQueries(client: import('@tanstack/react-query').QueryClient, familyId: string, accountId: string, epoch: number) {
+  client.removeQueries({ predicate: ({ queryKey }) => queryKey[0] === 'session' && queryKey[1] === 'comments' &&
+    queryKey[2] === familyId && queryKey[3] === accountId && queryKey[4] === epoch })
 }

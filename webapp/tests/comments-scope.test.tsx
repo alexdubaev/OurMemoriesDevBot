@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 
-import { commentsQueryKeys } from '../src/features/comments/queries'
+import { commentsQueryKeys, removeCommentScopeQueries } from '../src/features/comments/queries'
 import { isCurrentCommentScope } from '../src/features/comments/state'
 import { isPersistableQueryKey, removePrivateFamilyQueries } from '../src/platform/persistence/private-cache'
 
@@ -28,6 +28,10 @@ describe('comments privacy scope', () => {
     await removePrivateFamilyQueries(client, 'family-a')
     expect(client.getQueryData(a)).toBeUndefined()
     expect(client.getQueryData(b)).toEqual({ items: ['other family'] })
+    const summary = commentsQueryKeys.summaries('family-a', 'account-a', 4, ['memory-a'])
+    client.setQueryData(summary, [{ memoryId: 'memory-a', count: 1 }])
+    removeCommentScopeQueries(client, 'family-a', 'account-a', 4)
+    expect(client.getQueryData(summary)).toBeUndefined()
     await client.cancelQueries()
     client.clear()
   })

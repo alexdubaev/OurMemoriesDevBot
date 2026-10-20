@@ -16,7 +16,7 @@ export function normalizeCommentBody(body: string) {
   return commentBodySchema.parse(body)
 }
 
-export function createCommentAttempt(body: string, idempotencyKey = crypto.randomUUID()): CommentCreateAttempt {
+export function createCommentAttempt(body: string, idempotencyKey: string = crypto.randomUUID()): CommentCreateAttempt {
   return Object.freeze({ body: normalizeCommentBody(body), idempotencyKey })
 }
 

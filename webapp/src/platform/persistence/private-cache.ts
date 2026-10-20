@@ -173,7 +173,6 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
 export async function removePrivateFamilyQueries(queryClient: QueryClient, familyId: string) {
   const matchesFamilyPrivateQuery = ({ queryKey }: { queryKey: readonly unknown[] }) => queryKey[0] === 'session' &&
     ((queryKey[1] === 'feed' && queryKey[2] === familyId) || (queryKey[1] === 'comments' && queryKey[2] === familyId))
-  await queryClient.cancelQueries({ predicate: matchesFamilyPrivateQuery })
   queryClient.removeQueries({ predicate: matchesFamilyPrivateQuery })
 }
 
