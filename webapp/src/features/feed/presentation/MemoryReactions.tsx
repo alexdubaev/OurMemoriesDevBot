@@ -17,7 +17,7 @@ const reactionOptions: Array<{ value: MemoryReaction; emoji: string; label: stri
   { value: 'clap', emoji: '👏', label: 'Аплодисменты' },
 ]
 
-export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onOpenFromTrigger, onHaptic, returnFocusRef }: {
+export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onOpenFromTrigger, onHaptic, returnFocusRef, onComments, commentCount }: {
   counts: Partial<Record<MemoryReaction, number>>
   current: MemoryReaction | null
   interactive: boolean
@@ -28,6 +28,8 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   onOpenFromTrigger: (point: { x: number; y: number }) => void
   onHaptic?: (style: ReactionHapticStyle) => void
   returnFocusRef: React.RefObject<HTMLElement | null>
+  onComments?: () => void
+  commentCount?: number
 }) {
   const firstChoice = useRef<HTMLButtonElement>(null)
   const uiV2 = readUiVersion() === 'v2'
@@ -51,6 +53,7 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
         <Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography>
       </span>)}
       </div> : <span aria-hidden="true" className="memory-reactions-empty" />}
+      {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
       <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect()
         onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
@@ -60,7 +63,13 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
         <Typography as="span" aria-hidden="true" className="reaction-result-emoji" variant="memoryMeta">{emoji}</Typography>
         <Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography>
       </span>)}
-    </div></div> : null}
+    </div> : null}
+    {!uiV2 && (used.length || onComments) ? <div className="actions">
+      {used.length ? <div aria-label={`Реакции: ${used.map(({ value, label }) => `${label} ${counts[value]}${current === value ? ', ваша реакция' : ''}`).join(', ')}`} className="memory-reactions" data-slot="memory-reactions" role="group">
+        {used.map(({ value, emoji }) => <span className={`reaction-result${current === value ? ' is-mine' : ''}`} data-reaction={value} data-reaction-result="" key={value}><Typography as="span" aria-hidden="true" className="reaction-result-emoji" variant="memoryMeta">{emoji}</Typography><Typography as="span" className="reaction-result-count" variant="memoryMeta">{counts[value]}{current === value ? <span aria-hidden="true" className="reaction-own-dot" /> : null}</Typography></span>)}
+      </div> : null}
+      {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
+    </div> : null}
     {interactive ? <Popover onOpenChange={onOpenChange} open={open}>
       <PopoverAnchor asChild><span aria-hidden="true" className="reaction-anchor" style={{ left: point.x, top: point.y }} /></PopoverAnchor>
       <PopoverContent align="center" aria-label="Выбрать реакцию" className="reaction-picker" collisionPadding={collisionPadding()} onCloseAutoFocus={(event) => { event.preventDefault(); if (interactive && returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onEscapeKeyDown={() => onOpenChange(false)} onOpenAutoFocus={(event) => event.preventDefault()} onPointerDownOutside={() => onOpenChange(false)} side="top" sideOffset={14}>
@@ -74,6 +83,11 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
       </PopoverContent>
     </Popover> : null}
   </>
+}
+
+function CommentAction({ count, onClick }: { count?: number; onClick: () => void }) {
+  const label = count === undefined ? 'Открыть комментарии' : `Открыть комментарии, ${count}`
+  return <button aria-label={label} className="comments-entry" onClick={onClick} type="button"><WebpIcon decorative monochrome name="comments" size={22} />{count && count > 0 ? <span aria-hidden="true">{count}</span> : null}</button>
 }
 
 function collisionPadding() {

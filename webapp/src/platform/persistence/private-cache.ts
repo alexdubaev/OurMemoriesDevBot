@@ -151,7 +151,7 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
   const scopeKey = familyCacheScopeKey(userId, familyId)
   revokedFamilyCache.add(scopeKey)
   familyCacheGeneration.set(scopeKey, (familyCacheGeneration.get(scopeKey) ?? 0) + 1)
-  queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] === 'session' && queryKey[1] === 'feed' && queryKey[2] === familyId })
+  await removePrivateFamilyQueries(queryClient, familyId)
   queryClient.setQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(userId), (current) => {
     if (!current) return current
     const home = current.home && typeof current.home === 'object'
@@ -168,6 +168,13 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
   })
   await removePrivateFamilyImages(userId, familyId)
   await persistPrivateQueryCache(queryClient, userId, identityGeneration)
+}
+
+export async function removePrivateFamilyQueries(queryClient: QueryClient, familyId: string) {
+  const matchesFamilyPrivateQuery = ({ queryKey }: { queryKey: readonly unknown[] }) => queryKey[0] === 'session' &&
+    ((queryKey[1] === 'feed' && queryKey[2] === familyId) || (queryKey[1] === 'comments' && queryKey[2] === familyId))
+  await queryClient.cancelQueries({ predicate: matchesFamilyPrivateQuery })
+  queryClient.removeQueries({ predicate: matchesFamilyPrivateQuery })
 }
 
 export async function removePrivateFamilyImages(userId: string, familyId: string) {

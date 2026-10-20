@@ -45,6 +45,8 @@ import { VideoPlaybackControls } from './video-presentation'
 import { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
 import { releaseVideoSource, useVideoViewportLifecycle } from './video-lifecycle'
 import { getMediaFrameRatio, useMediaFrameRatio } from './media-ratio'
+import { CommentsPanel } from '@/features/comments'
+import { useCommentSummaries } from '@/features/comments/queries'
 
 type Props = {
   active?: boolean
@@ -129,6 +131,7 @@ export function FeedPage({
   const deletion = useMemoryDelete(transport, familyId, () => undefined)
   const sentinel = useRef<HTMLDivElement | null>(null)
   const [detail, setDetail] = useState<MemoryDto | null>(null)
+  const [commentsSelection, setCommentsSelection] = useState<{ memoryId: string; familyId: string; accountId: string; membershipEpoch: number } | null>(null)
   const [mixedViewer, setMixedViewer] = useState<{ memory: MemoryDto; index: number; photoUrl?: string } | null>(null)
   const mixedIndexes = useRef(new Map<string, number>())
   const [, setMixedIndexRevision] = useState(0)
@@ -137,7 +140,7 @@ export function FeedPage({
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
   const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
-  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget), (id) => onSeenCandidate?.(id))
+  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget || commentsSelection), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle }), [familyId, unreadOnly, unreadCycle])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
@@ -156,6 +159,9 @@ export function FeedPage({
     }
     return [...unique.values()]
   }, [feed.data])
+  const commentSummaries = useCommentSummaries(transport, familyId, accountId, membershipEpoch ?? 0, items.map((memory) => memory.id), active && isAppBootstrapped)
+  const currentCommentsSelection = commentsSelection && commentsSelection.familyId === familyId && commentsSelection.accountId === accountId && commentsSelection.membershipEpoch === (membershipEpoch ?? 0) && items.some((memory) => memory.id === commentsSelection.memoryId) ? commentsSelection : null
+  const commentsOpen = Boolean(active && currentCommentsSelection)
   const [nearbyPendingVideoIds, setNearbyPendingVideoIds] = useState<string[]>([])
   useEffect(() => {
     if (!active) return
@@ -213,6 +219,10 @@ export function FeedPage({
   useEffect(() => {
     knownFirstId.current = null
   }, [familyId, accountId, membershipEpoch])
+
+  useEffect(() => {
+    setCommentsSelection(null)
+  }, [familyId, accountId, membershipEpoch, active])
 
   useEffect(() => {
     if (!unreadOnly && !knownFirstId.current && items[0]) knownFirstId.current = items[0].id
@@ -342,7 +352,7 @@ export function FeedPage({
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
-    <MediaPlaybackCoordinator active={active}>
+    <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onAllFamilies={onAllFamilies} onFamily={onFamily} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
@@ -375,6 +385,11 @@ export function FeedPage({
           kind={memory.kind}
           reactionCounts={memory.reactionCounts}
           currentUserReaction={memory.currentUserReaction}
+          commentCount={commentSummaries.get(memory.id)}
+          onComments={() => {
+            detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+            setCommentsSelection({ memoryId: memory.id, familyId, accountId, membershipEpoch: membershipEpoch ?? 0 })
+          }}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
             ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onViewerIndexChange={(index) => { mixedIndexes.current.set(memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
@@ -394,6 +409,7 @@ export function FeedPage({
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {active && currentMixedViewer ? <MixedMediaViewer familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
