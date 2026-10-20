@@ -17,5 +17,6 @@ export default {
   testMatch: [
     '**/max-browser-link.spec.ts',
     '**/comments.spec.ts',
+    '**/comments-state.spec.ts',
   ],
 }
