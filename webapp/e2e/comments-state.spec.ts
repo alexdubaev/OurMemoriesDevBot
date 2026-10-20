@@ -98,6 +98,7 @@ test('403 mutation rechecks read access and only closes when the list is also fo
   await page.evaluate(() => { window.__commentsState.patchMode = 'forbidden-denied' })
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByRole('dialog', { name: 'Комментарии' })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().keys.some((key) => key[0] === 'session' && key[1] === 'comments' && key[2] === '11111111-1111-4111-8111-111111111111'))).toBe(false)
   const snapshot = await page.evaluate(() => JSON.stringify(window.__commentsState.snapshot()))
   expect(snapshot).not.toContain('Existing comment')
 })

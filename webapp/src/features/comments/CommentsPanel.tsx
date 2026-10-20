@@ -8,7 +8,7 @@ import { CommentComposer } from './CommentComposer'
 import { CommentItem } from './CommentItem'
 import { FeedSharedAuthorAvatars } from '@/features/feed/shared-author-avatars'
 import { createComment, deleteComment, updateComment } from './api'
-import { commentsQueryKeys, invalidateCommentSummaryForMemory, useCommentsList, writeCommentSummary } from './queries'
+import { commentsQueryKeys, invalidateCommentSummaryForMemory, removeCommentScopeQueries, useCommentsList, writeCommentSummary } from './queries'
 import { createCommentAttempt, isCurrentCommentScope, mergeCommentPages, normalizeCommentBody, type CommentCreateAttempt, type CommentScope } from './state'
 import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import './comments.css'
@@ -233,7 +233,11 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   }
 
   const readAccessLost = Boolean(list.data && list.error instanceof ApiRequestError && [403, 404].includes(list.error.status))
-  useEffect(() => { if (readAccessLost && open) onClose() }, [onClose, open, readAccessLost])
+  useEffect(() => {
+    if (!readAccessLost || !open) return
+    removeCommentScopeQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch)
+    onClose()
+  }, [onClose, open, queryClient, readAccessLost, scope.accountId, scope.familyId, scope.membershipEpoch])
 
   return <DialogPrimitive.Root onOpenChange={(next) => { if (!next) requestClose() }} open={open}>
     <DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-overlay" />
