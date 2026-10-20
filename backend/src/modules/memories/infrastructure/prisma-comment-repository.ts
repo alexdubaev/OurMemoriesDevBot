@@ -198,7 +198,8 @@ export class PrismaCommentRepository implements CommentRepository {
         where: { id: commentId, familyId: scope.familyId, memoryId },
       })
       if (!row) throw missing()
-      assertMutationPermission(row.authorId, scope, familyOwnerId)
+      if (row.authorId !== scope.principal.userId)
+        throw new MemoryFailure('forbidden', 'Можно изменять только свой комментарий')
       if (row.deletedAt) throw new MemoryFailure('conflict', 'Комментарий уже удалён')
       const now = new Date()
       const changed = await tx.memoryComment.updateMany({

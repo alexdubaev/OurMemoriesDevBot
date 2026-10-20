@@ -35,7 +35,7 @@ const errors = {
   401: { content: json(apiErrorSchema), description: 'Session required' },
   404: { content: json(apiErrorSchema), description: 'Unavailable target' },
   403: { content: json(apiErrorSchema), description: 'Operation is not permitted' },
-  409: { content: json(apiErrorSchema), description: 'Idempotency conflict' },
+  409: { content: json(apiErrorSchema), description: 'Version, deletion, or idempotency conflict' },
   413: { content: json(apiErrorSchema), description: 'Body too large' },
   429: { content: json(apiErrorSchema), description: 'Rate limit' },
 } as const

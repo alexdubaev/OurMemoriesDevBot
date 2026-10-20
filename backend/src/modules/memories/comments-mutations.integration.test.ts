@@ -86,6 +86,7 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
     const foreign = await f.request(path, viewer.token, 'POST', { body: 'foreign' }, randomUUID())
     const foreignId = foreign.body.comment.id
     expect((await mutate(`${path}/${foreignId}`, full.token, 'DELETE', undefined, 1)).response.status).toBe(403)
+    expect((await mutate(`${path}/${foreignId}`, owner.token, 'PATCH', { body: 'owner cannot edit', expectedVersion: 1 })).response.status).toBe(403)
     const deleted = await mutate(`${path}/${foreignId}`, owner.token, 'DELETE', undefined, 1)
     expect(deleted.response.status).toBe(200)
     expect(deleted.body.summary.count).toBe(0)
@@ -103,5 +104,25 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
     const stale = await mutate(`${path}/${id}`, owner.token, 'DELETE', undefined, 9)
     expect(stale.response.status).toBe(409)
     expect(stale.response.headers.get('cache-control')).toBe('private, no-store')
+  })
+
+  test('Owner, Full and Viewer can each edit and delete their own comments, with family isolation', async () => {
+    const owner = await f.user(), family = await f.family(owner), memory = await f.memory(family, owner)
+    const full = await f.user(), viewer = await f.user()
+    await f.db.familyMember.createMany({ data: [
+      { familyId: family.id, userId: full.id, role: 'full' },
+      { familyId: family.id, userId: viewer.id, role: 'viewer' },
+    ] })
+    const path = f.path(family.id, memory.id)
+    for (const actor of [owner, full, viewer]) {
+      const created = await f.request(path, actor.token, 'POST', { body: 'own' }, randomUUID())
+      const edited = await mutate(`${path}/${created.body.comment.id}`, actor.token, 'PATCH', { body: 'edited', expectedVersion: 1 })
+      expect(edited.response.status).toBe(200)
+      expect(edited.body.comment.capabilities).toEqual({ edit: true, delete: true })
+      expect((await mutate(`${path}/${created.body.comment.id}`, actor.token, 'DELETE', undefined, 2)).response.status).toBe(200)
+    }
+    const otherOwner = await f.user(), otherFamily = await f.family(otherOwner), otherMemory = await f.memory(otherFamily, otherOwner)
+    const foreign = await f.request(f.path(otherFamily.id, otherMemory.id), otherOwner.token, 'POST', { body: 'foreign family' }, randomUUID())
+    expect((await mutate(`${path}/${foreign.body.comment.id}`, owner.token, 'DELETE', undefined, 1)).response.status).toBe(404)
   })
 })

@@ -1,5 +1,6 @@
 import type {
   CommentDto,
+  CommentMutationResponse,
   CommentSummary,
   CreateCommentRequest,
 } from '@web-app-demo/contracts'
