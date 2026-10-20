@@ -170,7 +170,7 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
   const { memoryId } = await signInAndSeed(page)
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
   const entry = card.getByRole('button', { name: /Комментарии/ })
-  const footer = page.locator('.ui-v2-bottom-nav, .bottom-navigation, nav').first()
+  const footer = page.getByTestId('bottom-navigation')
   await expect(entry).toBeVisible()
   for (const width of widths) {
     await page.setViewportSize({ width, height: 844 })
@@ -186,9 +186,15 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
         const documentWidth = document.documentElement.scrollWidth
         return { box: { width: box.width, height: box.height }, icon: icon ? { width: icon.width, height: icon.height } : null, documentWidth }
       })
+      const navMeasure = await footer.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { width: rect.width, height: rect.height, right: rect.right }
+      })
       expect(footerMeasure.box.height).toBeGreaterThanOrEqual(44)
       expect(footerMeasure.icon?.width).toBe(22)
       expect(footerMeasure.documentWidth).toBeLessThanOrEqual(width)
+      expect(navMeasure.height).toBeGreaterThanOrEqual(44)
+      expect(navMeasure.right).toBeLessThanOrEqual(width + 1)
       await page.screenshot({ path: testInfo.outputPath(`comments-footer-${width}-${theme}.png`), fullPage: true })
       await entry.click()
       const panel = page.locator('.comments-panel')
