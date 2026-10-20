@@ -22,7 +22,7 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
-import { createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
+import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
@@ -114,6 +114,7 @@ export function createApp({
   })
 
   app.use('*', createRequestContext())
+  app.use('*', commentPrivacyMiddleware)
   app.use(secureHeaders())
   app.use(
     '*',

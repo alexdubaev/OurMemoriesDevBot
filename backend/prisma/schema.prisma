@@ -433,6 +433,7 @@ model FamilyMember {
   memoryLikes       MemoryLike[]
   seenMemories      MemorySeen[]
   authoredMemories  Memory[]            @relation("MemoryAuthorMembership")
+  authoredComments MemoryComment[]
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
   captionRequests  CaptionRequest[]
@@ -523,6 +524,7 @@ model Memory {
   author           User          @relation("MemoryAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "memories_author_id_fkey")
   authorMembership FamilyMember  @relation("MemoryAuthorMembership", fields: [familyId, authorId], references: [familyId, userId], onDelete: Restrict, map: "memories_author_membership_fkey")
   likes            MemoryLike[]
+  comments         MemoryComment[]
   seenByMembers    MemorySeen[]
   media            MemoryMedia[]
   captionRequests  CaptionRequest[]
@@ -535,6 +537,26 @@ model Memory {
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
   @@index([familyId, kind, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_kind_feed_idx")
   @@map("memories")
+}
+
+model MemoryComment {
+  id                 String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId           String       @map("family_id") @db.Uuid
+  memoryId           String       @map("memory_id") @db.Uuid
+  authorId           String       @map("author_id") @db.Uuid
+  body               String
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version            Int          @default(1)
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createRequestId    String       @map("create_request_id") @db.Uuid
+  initialPayloadHash String       @map("initial_payload_hash")
+  memory             Memory       @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_comments_memory_id_family_id_fkey")
+  authorMembership   FamilyMember @relation(fields: [familyId, authorId], references: [familyId, userId], onDelete: Cascade, map: "memory_comments_author_membership_fkey")
+
+  @@unique([familyId, authorId, createRequestId], map: "memory_comments_create_marker_key")
+  @@index([familyId, memoryId, deletedAt, createdAt(sort: Desc), id(sort: Desc)], map: "memory_comments_read_idx")
+  @@map("memory_comments")
 }
 
 model MemorySeen {

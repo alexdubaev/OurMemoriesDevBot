@@ -19,6 +19,8 @@ describe('MAX PostgreSQL verification catalog', () => {
       'src/modules/users/users.integration.test.ts',
       'src/modules/memories/memories.integration.test.ts',
       'src/modules/memories/unread.integration.test.ts',
+      'src/modules/memories/comments.integration.test.ts',
+      'src/modules/memories/comments-idempotency.integration.test.ts',
       'scripts/deploy-database.integration.test.ts',
       'scripts/welcome-migration.integration.test.ts',
       'scripts/block01-upgrade.integration.test.ts',
@@ -35,6 +37,8 @@ describe('MAX PostgreSQL verification catalog', () => {
     expect(selected).toContain('src/modules/auth/max-auth.integration.test.ts')
     expect(selected).toContain('src/db.integration.test.ts')
     expect(selected).toContain('scripts/int1-max-upgrade.integration.test.ts')
+    expect(selected).toContain('src/modules/memories/comments.integration.test.ts')
+    expect(selected).toContain('src/modules/memories/comments-idempotency.integration.test.ts')
     expect(selected).not.toContain('src/modules/auth/telegram-auth.integration.test.ts')
   })
 
@@ -86,6 +90,8 @@ function requiredFixtures() {
     'src/outbox/outbox.integration.test.ts', 'src/modules/families/family-access.integration.test.ts',
     'src/modules/media/media-access.integration.test.ts', 'src/modules/uploads/uploads.integration.test.ts',
     'src/modules/users/users.integration.test.ts', 'src/modules/max/media-flow.integration.test.ts',
+    'src/modules/memories/comments.integration.test.ts',
+    'src/modules/memories/comments-idempotency.integration.test.ts',
     'scripts/deploy-database.integration.test.ts', 'scripts/welcome-migration.integration.test.ts',
     'scripts/block01-upgrade.integration.test.ts', 'scripts/block02-upgrade.integration.test.ts',
     'scripts/block03-upgrade.integration.test.ts', 'scripts/block08-upgrade.integration.test.ts',
