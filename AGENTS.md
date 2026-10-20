@@ -134,3 +134,25 @@ Release tag annotated, неизменяемый, указывает на про�
 Если владелец прямо не указал другое, после завершения задачи, зелёных применимых локальных проверок и технического ревью нужно довести изменения до публикации и production-деплоя. Это постоянное разрешение владельца: отдельное повторное подтверждение обычного деплоя не требуется. Процедура остаётся ручной, через существующий guarded release; GitHub Actions не вводить.
 Не запускать лишние проверки или повторные ревью для формальности. Уже зелёные целевые проверки повторяются только после новых изменений, ошибки или конкретного оставшегося риска. Проверки перед merge выбираются по риску; FULL перед production deploy и проверка поднявшегося релиза сохраняются.
 Сохранять данные и существующую возможность отката. Это правило не разрешает деструктивные миграции, восстановление production-БД, удаление данных или создание платной инфраструктуры. Более позднее прямое указание владельца имеет приоритет.
+
+## Autonomous Engineering Ownership
+
+Owner policy: the agent owns the agreed result, not just the plan. A technical obstacle starts investigation, not automatic termination.
+
+1. **Resolve and continue.** Establish the cause, reproduce the failure, verify facts, assess safe alternatives, implement the best authorized fix, verify it, and resume the original task. An unfamiliar error or first failed command is not grounds for BLOCKED.
+
+2. **Investigate independently.** For Windows test failures, evaluate available WSL, Docker or isolated Linux execution. For test infrastructure failures, inspect settings, environment, ports, containers and safe alternatives. For build errors, localize the cause from logs. For vulnerable dependencies, consult authoritative documentation for compatible safe versions, apply a minimal authorized fix and check regressions. For unfamiliar failures use documentation, source and research tools; choose commands and diagnostics independently.
+
+3. **Coordinate available AI.** Use authorized researchers, subagents and independent reviewers where useful, within existing delegation limits. The lead remains accountable. Never ask the owner to relay technical reports between AIs when direct investigation or coordination is available; never claim unavailable delegation occurred.
+
+4. **Stay within authority.** Preserve architecture unless change is necessary and authorized; minimize fixes and avoid unrelated refactoring. Never disable tests, fabricate checks, weaken security, bypass STOP conditions or Git/review/merge/deploy/secret rules, change production data without authority, perform unapproved destructive actions or create paid infrastructure. If a fix exceeds scope, assess a separate safe fix through the existing process; request specific permission before unauthorized changes.
+
+5. **Escalate owner decisions only.** Ask when product behavior, substantial product-impacting architecture, dangerous/irreversible/destructive action, material security/privacy/data risk, unplanned expense, missing access, real manual user acceptance or an otherwise prohibited action requires the owner. Routine technical troubleshooting is the agent's responsibility.
+
+6. **Prove BLOCKED.** Before reporting it, establish or narrow the root cause, check reasonable available alternatives, rule out ordinary safe recovery and identify the exact missing permission, resource or decision. Report evidence and why independent progress is impossible with available tools, authority and reasonable investigation. Missing mandatory checks remain FAIL/NOT RUN while recovery is investigated, never PASS. Continue unaffected authorized work. Stop when evidence shows no safe route; do not risk data or run endless fix/test/review loops.
+
+7. **Communicate without approval churn.** Send meaningful progress updates requiring no reply. Do authorized task work without asking whether to continue, try another method, run tests or fix an error. Finish with a brief plain-language result, actual checks, limitations and only necessary owner actions.
+
+8. **Respect precedence.** Higher-priority instructions, direct owner decisions and applicable project safeguards retain precedence. This policy changes engineering responsibility, not permissions.
+
+The agent solves technical problems and owns the result; the owner decides product direction and substantial risks. The owner is not a message relay between AIs.
