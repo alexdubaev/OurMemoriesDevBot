@@ -3,9 +3,10 @@
 .comments-header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--memory-line, #e8dfda); }
 .comments-header-actions { display: flex; align-items: center; gap: 4px; }
 .comments-refresh { min-height: 44px; padding: 0 8px; color: var(--memory-accent-strong, #a83750); background: transparent; font-size: 12px; }
-.comments-header [data-radix-dialog-title] { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.35; }
-.comments-header [data-radix-dialog-description] { margin-top: 2px; color: var(--memory-text-muted, #756a71); font-size: 12px; }
+.comments-title { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.35; }
+.comments-subtitle { display: block; margin-top: 2px; color: var(--memory-text-muted, #756a71); font-size: 12px; }
 .comments-close { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 999px; color: inherit; background: transparent; font-size: 28px; line-height: 1; }
+.comments-close > [data-slot='typography'] { font-size: 24px; line-height: 1; }
 .comments-list { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 14px; overflow: auto; overscroll-behavior: contain; padding: 14px 0; }
 .comments-state { margin: auto; max-width: 290px; color: var(--memory-text-muted, #756a71); text-align: center; font-size: 14px; line-height: 1.5; }
 .comments-state button, .comments-older { min-height: 44px; align-self: center; padding: 0 14px; color: var(--memory-accent-strong, #a83750); background: transparent; }
@@ -26,7 +27,7 @@
 .comments-status { flex: 1 1 100%; margin: 0; color: var(--memory-text-muted, #756a71); font-size: 12px; line-height: 1.4; }
 .comments-confirm-overlay { position: fixed; inset: 0; z-index: 80; background: rgb(20 18 20 / .42); }
 .comments-confirm { position: fixed; z-index: 81; top: 50%; left: 50%; width: min(calc(100vw - 32px), 360px); transform: translate(-50%, -50%); border-radius: 18px; background: var(--memory-surface, white); padding: 20px; box-shadow: 0 12px 36px rgb(0 0 0 / .2); }
-.comments-confirm [data-radix-dialog-title] { font-weight: 650; }
+.comments-confirm-title { font-weight: 650; }
 .comments-confirm p { color: var(--memory-text-muted, #756a71); font-size: 14px; line-height: 1.45; }
 .comments-confirm > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .comments-confirm button { min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--memory-accent-strong, #a83750); background: transparent; }

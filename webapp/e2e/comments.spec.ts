@@ -87,6 +87,7 @@ async function uploadPng(page: Page, token: string, familyId: string) {
 
 test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }, testInfo) => {
   const { familyId, memoryId, token } = await signInAndSeed(page)
+  await page.setViewportSize({ width: 390, height: 844 })
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
   const listRequests: string[] = []
   page.on('request', (request) => {
@@ -160,6 +161,9 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await expect(title).toBeVisible()
   const titleFontSize = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
   expect(titleFontSize).toBeGreaterThanOrEqual(18)
+  const closeGlyph = page.getByRole('button', { name: 'Закрыть комментарии' }).locator('[data-slot="typography"]')
+  const closeGlyphFontSize = await closeGlyph.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(closeGlyphFontSize).toBeGreaterThanOrEqual(24)
   await page.screenshot({ path: testInfo.outputPath('comments-panel-confirmed-edited.png'), fullPage: false })
   await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
   await expect(panel).toBeHidden()
