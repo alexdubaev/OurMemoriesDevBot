@@ -45,8 +45,7 @@ import { VideoPlaybackControls } from './video-presentation'
 import { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
 import { releaseVideoSource, useVideoViewportLifecycle } from './video-lifecycle'
 import { getMediaFrameRatio, useMediaFrameRatio } from './media-ratio'
-import { CommentsPanel } from '@/features/comments'
-import { useCommentSummaries } from '@/features/comments/queries'
+import { CommentsPanel, useCommentSummaries } from '@/features/comments'
 
 type Props = {
   active?: boolean

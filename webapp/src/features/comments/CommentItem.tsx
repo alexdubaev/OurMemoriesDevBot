@@ -1,5 +1,5 @@
 import type { CommentDto } from '@web-app-demo/contracts'
-import { FeedAuthorAvatar } from '@/features/feed/shared-author-avatars'
+import { FeedAuthorAvatar } from '@/features/feed'
 import { Typography } from '@/components/typography'
 
 export function CommentItem({ comment, familyTimezone, onEdit, onDelete }: {
