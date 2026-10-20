@@ -144,7 +144,7 @@ test('pagination preserves the visible scroll anchor and dirty Back can continue
   await list.evaluate((node) => { node.scrollTop = 80 })
   const older = page.getByRole('button', { name: 'Показать более ранние' })
   await older.scrollIntoViewIfNeeded()
-  const anchor = page.locator('.comments-item').first()
+  const anchor = page.locator('.comments-item').filter({ has: page.getByText('Existing comment 1', { exact: true }) })
   const anchorY = await anchor.evaluate((node) => node.getBoundingClientRect().top)
   await older.click()
   await expect(page.locator('.comments-item')).toHaveCount(40)
