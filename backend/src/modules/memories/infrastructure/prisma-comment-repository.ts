@@ -34,6 +34,12 @@ const conflict = () =>
     'idempotency_conflict',
     'Этот Idempotency-Key уже использован или комментарий удалён',
   )
+const versionConflict = () =>
+  new MemoryFailure('version_conflict', 'Комментарий был изменён или удалён')
+function assertMutationPermission(authorId: string, scope: FamilyScope, familyOwnerId: string) {
+  if (authorId !== scope.principal.userId && familyOwnerId !== scope.principal.userId)
+    throw new MemoryFailure('forbidden', 'Недостаточно прав для изменения комментария')
+}
 
 export class PrismaCommentRepository implements CommentRepository {
   constructor(
@@ -47,7 +53,7 @@ export class PrismaCommentRepository implements CommentRepository {
     before?: CommentPosition,
   ) {
     return this.db.$transaction(async (tx) => {
-      await lockScope(tx, scope)
+      const familyOwnerId = await lockScope(tx, scope)
       await lockMemory(tx, scope, memoryId)
       const rows = await tx.memoryComment.findMany({
         where: {
@@ -70,7 +76,7 @@ export class PrismaCommentRepository implements CommentRepository {
         take: limit + 1,
       })
       return {
-        items: await project(tx, scope, rows.slice(0, limit)),
+        items: await project(tx, scope, rows.slice(0, limit), familyOwnerId),
         hasNext: rows.length > limit,
         summary: await summary(tx, scope, memoryId),
       }
@@ -139,7 +145,7 @@ export class PrismaCommentRepository implements CommentRepository {
     // Snapshots deliberately contain no text. Both executor replay paths resolve fresh data
     // under the same family/member/memory locks as an ordinary authorized read.
     return this.db.$transaction(async (tx) => {
-      await lockScope(tx, scope)
+      const familyOwnerId = await lockScope(tx, scope)
       await lockMemory(tx, scope, memoryId)
       const row = await tx.memoryComment.findFirst({
         where: {
@@ -151,7 +157,7 @@ export class PrismaCommentRepository implements CommentRepository {
         },
       })
       if (!row) throw conflict()
-      const [comment] = await project(tx, scope, [row])
+      const [comment] = await project(tx, scope, [row], familyOwnerId)
       return {
         comment: comment!,
         summary: await summary(tx, scope, memoryId),
@@ -183,6 +189,50 @@ export class PrismaCommentRepository implements CommentRepository {
       }
     })
   }
+
+  async update(scope: FamilyScope, memoryId: string, commentId: string, input: import('@web-app-demo/contracts').UpdateCommentRequest) {
+    return this.db.$transaction(async (tx) => {
+      const familyOwnerId = await lockScope(tx, scope)
+      await lockMemory(tx, scope, memoryId, true)
+      const row = await tx.memoryComment.findFirst({
+        where: { id: commentId, familyId: scope.familyId, memoryId },
+      })
+      if (!row) throw missing()
+      if (row.authorId !== scope.principal.userId)
+        throw new MemoryFailure('forbidden', 'Можно изменять только свой комментарий')
+      if (row.deletedAt) throw new MemoryFailure('conflict', 'Комментарий уже удалён')
+      const now = new Date()
+      const changed = await tx.memoryComment.updateMany({
+        where: { id: commentId, familyId: scope.familyId, memoryId, version: input.expectedVersion, deletedAt: null },
+        data: { body: input.body, version: { increment: 1 }, updatedAt: now },
+      })
+      if (!changed.count) throw versionConflict()
+      const updated = await tx.memoryComment.findUniqueOrThrow({ where: { id: commentId } })
+      const [comment] = await project(tx, scope, [updated], familyOwnerId)
+      return { comment: comment!, summary: await summary(tx, scope, memoryId) }
+    })
+  }
+
+  async delete(scope: FamilyScope, memoryId: string, commentId: string, expectedVersion: number) {
+    return this.db.$transaction(async (tx) => {
+      const familyOwnerId = await lockScope(tx, scope)
+      await lockMemory(tx, scope, memoryId, true)
+      const row = await tx.memoryComment.findFirst({
+        where: { id: commentId, familyId: scope.familyId, memoryId },
+      })
+      if (!row) throw missing()
+      assertMutationPermission(row.authorId, scope, familyOwnerId)
+      if (!row.deletedAt) {
+        const now = new Date()
+        const changed = await tx.memoryComment.updateMany({
+          where: { id: commentId, familyId: scope.familyId, memoryId, version: expectedVersion, deletedAt: null },
+          data: { body: '', deletedAt: now, updatedAt: now, version: { increment: 1 } },
+        })
+        if (!changed.count) throw versionConflict()
+      }
+      return { deletedId: commentId, summary: await summary(tx, scope, memoryId) }
+    })
+  }
 }
 
 async function lockScope(tx: PrismaTransactionClient, scope: FamilyScope) {
@@ -191,13 +241,14 @@ async function lockScope(tx: PrismaTransactionClient, scope: FamilyScope) {
   >`SELECT id FROM users WHERE id=${scope.principal.userId}::uuid FOR SHARE`
   if (!user.length) throw missing()
   const family = await tx.$queryRaw<
-    Array<{ id: string }>
-  >`SELECT id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
+    Array<{ id: string; owner_user_id: string }>
+  >`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
   if (!family.length) throw missing()
   const members = await tx.$queryRaw<
     Array<{ user_id: string }>
   >`SELECT user_id FROM family_members WHERE family_id=${scope.familyId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL FOR SHARE`
   if (!members.length) throw missing()
+  return family[0]!.owner_user_id
 }
 async function lockMemory(
   tx: PrismaTransactionClient,
@@ -229,6 +280,7 @@ async function project(
   tx: PrismaTransactionClient,
   scope: FamilyScope,
   rows: CommentRow[],
+  familyOwnerId: string,
 ): Promise<CommentDto[]> {
   if (!rows.length) return []
   const members = await tx.familyMember.findMany({
@@ -265,7 +317,10 @@ async function project(
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       version: row.version,
-      capabilities: { edit: false, delete: false },
+      capabilities: {
+        edit: row.authorId === scope.principal.userId,
+        delete: row.authorId === scope.principal.userId || familyOwnerId === scope.principal.userId,
+      },
       author: {
         id: row.authorId,
         name:

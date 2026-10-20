@@ -1,5 +1,6 @@
 import type {
   CommentDto,
+  CommentMutationResponse,
   CommentSummary,
   CreateCommentRequest,
 } from '@web-app-demo/contracts'
@@ -23,6 +24,18 @@ export interface CommentRepository {
     summary: CommentSummary
     replayed: boolean
   }>
+  update(
+    scope: FamilyScope,
+    memoryId: string,
+    commentId: string,
+    input: import('@web-app-demo/contracts').UpdateCommentRequest,
+  ): Promise<CommentMutationResponse>
+  delete(
+    scope: FamilyScope,
+    memoryId: string,
+    commentId: string,
+    expectedVersion: number,
+  ): Promise<{ deletedId: string; summary: CommentSummary }>
   summaries(
     scope: FamilyScope,
     memoryIds: string[],

@@ -139,7 +139,7 @@ suite('COM-1 comments', () => {
           id: actor.id,
           name: role === 'owner' ? 'Человек' : 'Семейное имя',
         },
-        capabilities: { edit: false, delete: false },
+        capabilities: { edit: true, delete: true },
       })
       if (role === 'viewer')
         expect(
