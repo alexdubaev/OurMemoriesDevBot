@@ -28,7 +28,7 @@
         "dotenv": "^17.4.2",
         "grammy": "1.46.0",
         "heic-decode": "2.1.0",
-        "hono": "4.13.7",
+        "hono": "4.13.11",
         "jose": "^6.2.7",
         "pg": "^8.20.0",
         "prisma": "7.9.0",
@@ -156,7 +156,7 @@
     "esbuild": "^0.28.1",
     "fast-uri": "^3.1.8",
     "find-my-way": "^9.7.0",
-    "hono": "4.13.7",
+    "hono": "4.13.11",
     "http-cache-semantics": "4.3.0",
     "js-yaml": "4.3.2",
     "mysql2": "^3.24.3",
@@ -1448,7 +1448,7 @@
 
     "hermes-parser": ["hermes-parser@0.25.1", "", { "dependencies": { "hermes-estree": "0.25.1" } }, "sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA=="],
 
-    "hono": ["hono@4.13.7", "", {}, "sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ=="],
+    "hono": ["hono@4.13.11", "", {}, "sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg=="],
 
     "html-escaper": ["html-escaper@3.0.3", "", {}, "sha512-RuMffC89BOWQoY0WKGpIhn5gX3iI54O6nRA0yC124NYVtzjmFWBIiFd8M0x+ZdX0P9R4lADg1mgP8C7PxGOWuQ=="],
 

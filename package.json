@@ -20,7 +20,7 @@
     "esbuild": "^0.28.1",
     "fast-uri": "^3.1.8",
     "find-my-way": "^9.7.0",
-    "hono": "4.13.7",
+    "hono": "4.13.11",
     "http-cache-semantics": "4.3.0",
     "js-yaml": "4.3.2",
     "mysql2": "^3.24.3",
