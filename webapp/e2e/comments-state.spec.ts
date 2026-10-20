@@ -32,6 +32,29 @@ test('summary batching and closed-panel query boundary', async ({ page }) => {
   }
 })
 
+test('comment entry handles all memory kinds, known counts, reactions and channel attribution at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.goto('/e2e/comments-cards.harness.html')
+  const cards = page.locator('.memory-card')
+  await expect(cards).toHaveCount(5)
+  await expect(cards.nth(0).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии')
+  await expect(cards.nth(1).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии, 12')
+  await expect(cards.nth(2).locator('.comments-entry')).toHaveAttribute('aria-label', 'Открыть комментарии')
+  await expect(cards.nth(4).locator('.author-name')).toHaveText('MAX channel attribution')
+  const measure = await cards.nth(1).evaluate((card) => {
+    const button = card.querySelector<HTMLButtonElement>('.comments-entry')!
+    const box = button.getBoundingClientRect()
+    const children = [...button.children].map((child) => child.getBoundingClientRect())
+    const results = card.querySelectorAll('[data-reaction-result]').length
+    return { width: box.width, height: box.height, centers: children.map((child) => child.left + child.width / 2), results, documentWidth: document.documentElement.scrollWidth }
+  })
+  expect(measure.width).toBeGreaterThanOrEqual(44)
+  expect(measure.height).toBeGreaterThanOrEqual(44)
+  expect(measure.centers.every((center) => Math.abs(center - measure.centers[0]!) < 2)).toBe(true)
+  expect(measure.results).toBe(6)
+  expect(measure.documentWidth).toBeLessThanOrEqual(320)
+})
+
 for (const context of ['account', 'family', 'epoch', 'logout', 'revoke'] as const) {
   test(`late list response cannot restore comments after ${context} changes`, async ({ page }) => {
     await page.goto('/e2e/comments-state.harness.html')

@@ -10,6 +10,8 @@ import { CommentsPanel } from '@/features/comments'
 import { useCommentSummaries } from '@/features/comments/queries'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache, privateFamilyAccessRevokedEvent, removePrivateFamilyCache } from '@/platform/persistence/private-cache'
 import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
+import type { MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
+import { MemoryCardPresentation } from '@/features/feed/presentation/MemoryCardPresentation'
 
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
@@ -81,6 +83,12 @@ function Harness() {
   return <main><button onClick={() => setOpen(true)}>Open comments</button><output data-testid="summary-count">{summaries.size}</output>{open ? <CommentsPanel familyTimezone="UTC" hostBridge={{ onBack: () => () => undefined }} onClose={() => setOpen(false)} open scope={scope} transport={transport} returnFocusRef={{ current: null }} /> : null}</main>
 }
 
+function CardGallery() {
+  const types: MemoryDto['kind'][] = ['note', 'photo', 'video', 'voice', 'mixed']
+  const reactions: Partial<Record<MemoryReaction, number>> = { heart: 123, love: 99, laugh: 81, touched: 32, wow: 24, clap: 11 }
+  return <div className="memoly-app-root" data-ui-version="v2"><div data-memoly-feed>{types.map((kind, index) => <MemoryCardPresentation actions={<span />} authorInitials="T" authorName={index === 4 ? 'MAX channel attribution' : 'Synthetic author'} authorKind={index === 4 ? 'channel' : 'user'} body={`Synthetic ${kind} memory`} kind={kind} memoryId={`card-${kind}`} media={<div aria-hidden="true" className="card-fixture-media" />} onOpen={() => undefined} onReaction={() => undefined} occurredTime="12:00" reactionCounts={index === 1 ? reactions : {}} currentUserReaction={index === 1 ? 'heart' : null} commentCount={index === 0 ? 0 : index === 1 ? 12 : undefined} onComments={() => undefined} key={kind} />)}</div></div>
+}
+
 activatePrivateCacheIdentity(A.accountId)
 allowPrivateFamilyCache(A.accountId, A.familyId)
-createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><Harness /></QueryClientProvider>)
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}>{location.pathname.endsWith('/comments-cards.harness.html') ? <CardGallery /> : <Harness />}</QueryClientProvider>)

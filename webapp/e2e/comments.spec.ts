@@ -85,7 +85,7 @@ async function uploadPng(page: Page, token: string, familyId: string) {
   return ticket.assetId
 }
 
-test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }) => {
+test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }, testInfo) => {
   const { familyId, memoryId, token } = await signInAndSeed(page)
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
   const listRequests: string[] = []
@@ -155,6 +155,18 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await expect(page.getByText('Исправленный синтетический комментарий', { exact: true })).toBeVisible()
   item = page.locator('.comments-item').filter({ hasText: 'Исправленный синтетический комментарий' })
   await expect(item.getByText('изменено', { exact: true })).toBeVisible()
+  const panel = page.locator('.comments-panel')
+  const title = panel.getByRole('heading', { name: 'Комментарии' })
+  await expect(title).toBeVisible()
+  const titleFontSize = await title.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(titleFontSize).toBeGreaterThanOrEqual(18)
+  await page.screenshot({ path: testInfo.outputPath('comments-panel-confirmed-edited.png'), fullPage: false })
+  await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await expect(panel).toBeHidden()
+  await expect(entry).toHaveAttribute('aria-label', 'Открыть комментарии, 1')
+  await page.screenshot({ path: testInfo.outputPath('comments-footer-positive-count.png'), fullPage: false })
+  await entry.click()
+  await expect(page.getByText('Исправленный синтетический комментарий', { exact: true })).toBeVisible()
 
   await item.getByRole('button', { name: 'Удалить' }).click()
   await expect(page.getByRole('dialog').getByText('Удалить комментарий?')).toBeVisible()
