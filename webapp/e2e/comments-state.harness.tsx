@@ -67,6 +67,7 @@ function Harness() {
       const gate: Gate = { kind: 'create', path, body: options?.body?.body, aborted: false, completed: false, resolve: () => undefined }
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
       if (metrics.holdNext === 'create') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }); gate.completed = true }
+      if (!gate.aborted) metrics.currentBody = gate.body ?? 'Late private body'
       return { comment: fixture(gate.body ?? 'Late private body', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'), summary: { memoryId: A.memoryId, count: 2, capabilities: { read: true, create: true } } }
     }
     if (method === 'PATCH') { metrics.currentBody = options?.body?.body ?? 'Saved edit'; return { comment: fixture(metrics.currentBody, 'cccccccc-cccc-4ccc-8ccc-000000000001', 3), summary: { memoryId: A.memoryId, count: 1, capabilities: { read: true, create: true } } } }
