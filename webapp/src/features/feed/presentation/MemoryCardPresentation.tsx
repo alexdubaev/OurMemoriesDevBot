@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type Pointer
 import type { MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
 
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import type { ChildAvatarCrop } from '@/components/ChildHeader'
 import { FeedAuthorAvatar } from '../shared-author-avatars'
 import { NoteStoryPresentation } from './NoteStoryPresentation'
@@ -9,12 +10,42 @@ import { MemoryReactions } from './MemoryReactions'
 import type { ReactionHapticStyle } from '@/platform/reaction-haptics'
 import { installRetargetedTouchClickGuard } from './retargeted-touch-click-guard'
 
+const HOLD_SLOP_PX = 12
+const INTERACTIVE_HOLD_EXCLUSIONS = 'input, select, textarea, a, [data-slot="memory-actions"], [data-reaction-result], [role="button"], [role="slider"], [role="textbox"], [role="combobox"], .reaction-picker, .memoly-mixed-controls, .memoly-private-video-v2-controls, .memoly-video-viewer-v2-controls, [data-slot="voice-waveform"], .ml-audio button, .ml-audio input, .voice-control'
+
+function isHoldEligibleTarget(target: Element, article: HTMLElement, x: number, y: number, kind: MemoryDto['kind']) {
+  const editable = target.closest('[contenteditable]')
+  const editableValue = editable?.getAttribute('contenteditable')?.toLowerCase()
+  if (target.closest(INTERACTIVE_HOLD_EXCLUSIONS) || (editable && editableValue !== 'false')) return false
+  if (target.closest('[data-memoly-note-gradient]')) return true
+  if (target.closest('.memory-media-slot, .memoly-mixed-slide-media')) {
+    const videoSurface = kind === 'video' || target.closest('[data-media-kind="video"]') !== null
+    if (target.closest('.ml-media-button')) return !videoSurface
+    const posterButton = target.closest('button[aria-label="Смотреть видео"], button[aria-label="Смотреть видео в Telegram"]')
+    if (posterButton) {
+      const rect = posterButton.getBoundingClientRect()
+      if (Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2)) < 48) return false
+      if (y > rect.bottom - 48 && x > rect.right - 76) return false
+      return true
+    }
+    if (target.closest('.memoly-private-video-v2-controls, .memoly-video-viewer-v2-controls, .memoly-mixed-controls, [data-slot="voice-waveform"], .ml-audio button, .ml-audio input, .voice-control')) return false
+    if (target.closest('button, video, audio')) {
+      const video = target.closest('video')
+      if (video) return y <= video.getBoundingClientRect().bottom - 44
+      return false
+    }
+    return Boolean(target.closest('img, .ml-audio, .memoly-private-video-v2-frame, .memoly-video-viewer-v2-frame, .memoly-mixed-slide, .memoly-private-video-v2, .memoly-video-viewer-v2'))
+  }
+  return !target.closest('button, video, audio') && article.contains(target)
+}
+
 export type MemoryCardPresentationProps = {
   actions: ReactNode
   authorInitials: string
   authorName: string
   authorAvatarPath?: string | null
   authorAvatarCrop?: { x: number; y: number; width: number; height: number } | null
+  authorKind?: 'channel' | 'user'
   childName?: string
   childAvatarUrl?: string | null
   childAvatarCrop?: ChildAvatarCrop | null
@@ -40,6 +71,7 @@ export function MemoryCardPresentation({
   authorName,
   authorAvatarPath,
   authorAvatarCrop,
+  authorKind = 'user',
   body,
   kind,
   reactionCounts,
@@ -83,6 +115,15 @@ export function MemoryCardPresentation({
   useEffect(() => {
     pickerOpenRef.current = false
     const cancelOnScroll = () => { cancelPending(); setPickerOpen(false) }
+    const article = articleRef.current
+    const blockNativePublicationMenu = (event: Event) => {
+      const eventTarget = event.target instanceof Element ? event.target : event.target instanceof Node ? event.target.parentElement : null
+      const target = eventTarget instanceof Element ? eventTarget : null
+      const pointer = pointerRef.current
+      const x = event instanceof MouseEvent ? event.clientX : pointer?.x ?? 0
+      const y = event instanceof MouseEvent ? event.clientY : pointer?.y ?? 0
+      if (interactive && article && target && isHoldEligibleTarget(target, article, x, y, kind)) event.preventDefault()
+    }
     const clearReleasedHoldLatch = (event: PointerEvent) => {
       if (event.isPrimary === false || event.button !== 0 || !holdClickTargetRef.current) return
       didHoldRef.current = false
@@ -95,7 +136,7 @@ export function MemoryCardPresentation({
     }
     const cancelOnGlobalMove = (event: PointerEvent) => {
       const pointer = pointerRef.current
-      if (pointer && pointer.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) cancelPending()
+      if (pointer && pointer.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > HOLD_SLOP_PX) cancelPending()
     }
     const cancelReleasedPointer = (event: PointerEvent) => {
       const pointer = pointerRef.current?.id === event.pointerId ? pointerRef.current : null
@@ -121,6 +162,7 @@ export function MemoryCardPresentation({
       cancelPending()
     }
     document.addEventListener('scroll', cancelOnScroll, true)
+    if (interactive) { article?.addEventListener('selectstart', blockNativePublicationMenu); article?.addEventListener('contextmenu', blockNativePublicationMenu) }
     document.addEventListener('pointerdown', clearReleasedHoldLatch, true)
     document.addEventListener('pointerdown', cancelOtherPointer, true)
     document.addEventListener('pointermove', cancelOnGlobalMove, true)
@@ -132,48 +174,14 @@ export function MemoryCardPresentation({
     return () => {
       const pendingTouch = pointerRef.current?.pointerType === 'touch' ? pointerRef.current : null
       if (pendingTouch) installRetargetedTouchClickGuard(document, window, pendingTouch.id, pendingTouch.x, pendingTouch.y)
-      document.removeEventListener('scroll', cancelOnScroll, true); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current)
+      document.removeEventListener('scroll', cancelOnScroll, true); article?.removeEventListener('selectstart', blockNativePublicationMenu); article?.removeEventListener('contextmenu', blockNativePublicationMenu); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current)
     }
-  }, [cancelPending, memoryId, reactionScopeKey, setPickerOpen])
+  }, [cancelPending, interactive, kind, memoryId, reactionScopeKey, setPickerOpen])
 
   const eligible = (event: ReactPointerEvent<HTMLElement>) => {
-    if (event.button !== 0 || event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) return false
+    if (event.button !== 0 || event.isPrimary === false) return false
     const target = event.target instanceof Element ? event.target : null
-    if (!target || target.closest('[data-reaction-result], [data-slot="memory-actions"], a, input, select, textarea, [contenteditable="true"]')) return false
-    const note = target.closest('[data-memoly-note-gradient]')
-    if (note) {
-      const text = note.querySelector('.memoly-note-gradient__text')
-      if (text && target.closest('.memoly-note-gradient__text')) return false
-      if (text) {
-        const rect = text.getBoundingClientRect()
-        if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) return false
-      }
-      return true
-    }
-    const media = target.closest('.memory-media-slot, .memoly-mixed-slide-media')
-    if (media) {
-      const videoSurface = kind === 'video' || target.closest('[data-media-kind="video"]') !== null
-      if (target.closest('.ml-media-button')) return !videoSurface
-      if (target.closest('.memoly-private-video-v2-controls, .memoly-video-viewer-v2-controls, .memoly-mixed-controls, [data-slot="voice-waveform"], .ml-audio button, .ml-audio input, .voice-control')) return false
-      const posterButton = target.closest('button[aria-label="Смотреть видео"], button[aria-label="Смотреть видео в Telegram"]')
-      if (posterButton) {
-        const rect = posterButton.getBoundingClientRect()
-        if (Math.hypot(event.clientX - (rect.left + rect.width / 2), event.clientY - (rect.top + rect.height / 2)) < 48) return false
-        if (event.clientY > rect.bottom - 48 && event.clientX > rect.right - 76) return false
-        return true
-      }
-      if (target.closest('button, input, [role="button"]')) return false
-      const video = target.closest('video')
-      if (video) {
-        const rect = video.getBoundingClientRect()
-        if (event.clientY > rect.bottom - 44) return false
-        return true
-      }
-      if (target.closest('audio')) return false
-      return target.closest('img, .memoly-private-video-v2-frame, .memoly-video-viewer-v2-frame, .memoly-mixed-slide, .ml-audio, .memoly-private-video-v2, .memoly-video-viewer-v2') !== null
-    }
-    if (target.closest('button, video, audio, [role="button"]')) return false
-    return Boolean(articleRef.current?.contains(target))
+    return Boolean(target && articleRef.current && isHoldEligibleTarget(target, articleRef.current, event.clientX, event.clientY, kind))
   }
 
   const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
@@ -187,9 +195,6 @@ export function MemoryCardPresentation({
     timerRef.current = setTimeout(() => {
       const pointer = pointerRef.current
       if (!pointer || pointer.id !== event.pointerId) return
-      const selection = document.getSelection()
-      const noteText = (pointer.target instanceof Element ? pointer.target : null)?.closest('.memoly-note-gradient__text')
-      if (selection && !selection.isCollapsed && noteText && selection.anchorNode && selection.focusNode && noteText.contains(selection.anchorNode) && noteText.contains(selection.focusNode)) { cancelPending(); return }
       didHoldRef.current = true
       recognizedPointerRef.current = { id: pointer.id, target: pointer.target }
       setPickerPoint({ x: pointer.x, y: pointer.y })
@@ -200,7 +205,7 @@ export function MemoryCardPresentation({
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const pointer = pointerRef.current
     if (!pointer || pointer.id !== event.pointerId) return
-    if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) cancelPending()
+    if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > HOLD_SLOP_PX) cancelPending()
   }
   const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
     if (pointerRef.current?.id === event.pointerId) {
@@ -230,10 +235,12 @@ export function MemoryCardPresentation({
   }
 
   return (
-    <article aria-describedby={interactive ? `reaction-help-${memoryId}` : undefined} aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind} onClickCapture={onCardClickCapture} onKeyDown={onCardKeyDown} onLostPointerCapture={cancelPending} onPointerCancel={cancelPending} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} ref={articleRef} tabIndex={interactive ? 0 : undefined}>
+    <article aria-describedby={interactive ? `reaction-help-${memoryId}` : undefined} aria-hidden={mode === 'delete-preview' || isDeleteSource || undefined} className={`memory-card surface-raised${mode === 'delete-preview' ? ' memoly-memory-delete-preview' : ''}${isDeleteSource ? ' memoly-memory-delete-source' : ''}`} data-memory-id={memoryId} data-memory-kind={kind} data-reaction-enabled={interactive ? '' : undefined} onClickCapture={onCardClickCapture} onKeyDown={onCardKeyDown} onLostPointerCapture={cancelPending} onPointerCancel={cancelPending} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} ref={articleRef} tabIndex={interactive ? 0 : undefined}>
       {interactive ? <Typography as="span" className="sr-only" id={`reaction-help-${memoryId}`} variant="memoryMeta">Удерживайте свободную область, чтобы выбрать реакцию. Shift+F10 открывает выбор с клавиатуры.</Typography> : null}
       <header className="memory-header" data-slot="memoly-author-row">
-        <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
+        <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorKind === 'channel' ? null : authorAvatarCrop} className={`author-avatar${authorKind === 'channel' ? ' publication-channel-avatar' : ''}`} name={authorName} fallback={authorKind === 'channel'
+          ? <span aria-hidden="true" className="author-avatar publication-channel-avatar"><WebpIcon decorative name="channel" size={22} /></span>
+          : <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>

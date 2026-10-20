@@ -21,10 +21,15 @@ import { createMaxDirectVideoUploadRoutes } from './transport/direct-video-uploa
 import { disabledEmailDelivery } from '../../email'
 import { createMaxMemoryBackupProcessor, createPrismaMaxMemoryBackupRepository } from './infrastructure/backup-media'
 import { createMaxChannelProvider } from './infrastructure/max-channel-provider'
+import { createMaxChannelAvatarReader } from './infrastructure/channel-avatar'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
 import { createMaxVideoPosterProcessor, enqueueMaxVideoPoster } from './infrastructure/video-poster'
 import { Hono } from 'hono'
 import type { AuthHttpEnv } from '../auth'
+import { createMaxChannelAvatarRoutes } from './transport/channel-avatar-routes'
+import { createMaxPosterDownload } from './infrastructure/media-download'
+import type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
+import type { FamilyScope } from '../families'
 
 export { createMaxVideoPlayback }
 
@@ -34,6 +39,7 @@ export function createMaxModule(options: {
   api?: MaxApiPort
   channelVerifier?: (chatId: bigint) => Promise<{ title: string | null }>
   channelActorAdminVerifier?: (chatId: bigint, actorSubject: bigint) => Promise<boolean>
+  channelAvatarReader?: (scope: FamilyScope, chatId: bigint, signal?: AbortSignal) => Promise<MaxChannelAvatarContent | null>
 }) {
   const env = options.runtime.env
   if (!env.MAX_BOT_TOKEN || !env.MAX_WEBHOOK_SECRET || !env.MAX_INBOX_ENCRYPTION_KEY) throw new Error('MAX adapter is not configured')
@@ -76,6 +82,12 @@ export function createMaxModule(options: {
     offerActorChannelConnection: channelOnboarding.offerActorChannelConnection,
   })
   const requireAuth = createAuthModule({ db: options.runtime.prisma, emailDelivery: options.runtime.emailDelivery ?? disabledEmailDelivery, env }).requireAuth
+  const channelAvatarReader = options.channelAvatarReader ?? createMaxChannelAvatarReader({
+    db: options.runtime.prisma,
+    familyAccess: access,
+    getAvatarUrl: channelProvider.getChannelAvatarUrl,
+    download: createMaxPosterDownload(),
+  })
   const channelStatusRoutes = new Hono<AuthHttpEnv>()
   channelStatusRoutes.use('/families/*', requireAuth)
   channelStatusRoutes.get('/families/:familyId/max-channel', async (c) => {
@@ -93,7 +105,8 @@ export function createMaxModule(options: {
       secret: env.MAX_WEBHOOK_SECRET,
       bodyLimitBytes: env.MAX_WEBHOOK_BODY_LIMIT_BYTES,
       acceptUpdate,
-    }).route('/api/v1', directVideoUploadRoutes).route('/api/v1', channelStatusRoutes),
+    }).route('/api/v1', directVideoUploadRoutes).route('/api/v1', channelStatusRoutes)
+      .route('/api/v1', createMaxChannelAvatarRoutes({ requireAuth, read: channelAvatarReader })),
   }
 }
 
@@ -144,4 +157,7 @@ export function createMaxTasks(runtime: BackendRuntime) {
 }
 
 export { createMaxApi, MaxProviderError } from './infrastructure/max-api'
+export { createMaxChannelAvatarReader } from './infrastructure/channel-avatar'
+export { createMaxChannelAvatarRoutes } from './transport/channel-avatar-routes'
+export type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
 export type { MaxApiPort, MaxBotIdentity, MaxInboundAttachment, MaxInboundEvent, MaxResolvedAttachment, MaxResolvedMessage, MaxSendMessageInput, MaxSubscription, MaxSubscriptionInput, MaxVideoResolution, MaxVideoRendition } from './application/ports'

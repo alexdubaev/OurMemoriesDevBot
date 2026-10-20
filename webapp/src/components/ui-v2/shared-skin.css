@@ -33,6 +33,9 @@ html[data-ui-version='v2'] :where([data-slot='memoly-add-sheet-panel'], [data-sl
 .memoly-app-root[data-ui-version='v2'] .memoly-video-v2 .memoly-video-v2-action.secondary { min-height: var(--ui-v2-target-minimum) !important; border-radius: var(--ui-v2-button-radius) !important; color: var(--ui-v2-color-text) !important; background: var(--ui-v2-color-field) !important; box-shadow: none !important; font-family: var(--ui-v2-font-family); }
 .memoly-app-root[data-ui-version='v2'] .ui-v2-field { min-height: var(--ui-v2-target-primary); padding: var(--ui-v2-space-md); border: 1px solid var(--ui-v2-color-line); border-radius: var(--ui-v2-radius-field); color: var(--ui-v2-color-text); background: var(--ui-v2-color-surface); font: inherit; }
 .memoly-app-root[data-ui-version='v2'] :where([data-slot='input'], [data-slot='textarea'], [data-slot='select-trigger']) { border-radius: var(--ui-v2-radius-field); background-color: var(--ui-v2-color-surface); }
+.memoly-app-root[data-ui-version='v2'] :where([data-slot='input'], [data-slot='textarea'], [data-slot='select-trigger'], .family-management-fields input, .family-management-fields select, .member-account-form input, .member-profile-field input, .child-edit-v2-field input, .invite-alias-field input) { min-height: 48px; font-size: 1rem; }
+html[data-ui-version='v2'] :where(.memoly-add-sheet-panel .sheet-title, [role='dialog'] h2, [data-slot='sheet-content'] h2) { font-size: 1.0625rem; line-height: 1.4375rem; font-weight: 650; }
+html[data-ui-version='v2'] :where(.memoly-add-sheet-panel .sheet-subtitle) { font-size: .75rem; line-height: 1.2375rem; }
 .memoly-app-root[data-ui-version='v2'] :where([data-memoly-feed] *, .family-screen *, .family-management-page *, .member-profile-screen *, .ml-settings-sheet *, [data-slot='child-profile'] *, .memoly-video-v2 *) { font-family: var(--ui-v2-font-family) !important; }
 html[data-ui-version='v2'] :where([role='dialog'], [data-slot='dialog-content'], [data-slot='sheet-content']) { color: var(--ui-v2-color-text); border-color: var(--ui-v2-color-line); background-color: var(--ui-v2-color-surface); }
 html[data-ui-version='v2'] .memoly-mixed-viewer { color: var(--ui-v2-color-white); background: var(--ui-v2-color-viewer); }
@@ -43,24 +46,45 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
 
 /* Existing controller-owned navigation, with its three positions and refs. */
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] {
-  left: 50% !important; right: auto !important;
-  bottom: max(8px, var(--host-inset-bottom)) !important;
-  width: min(calc(100% - 24px - var(--host-inset-left) - var(--host-inset-right)), 456px) !important;
-  min-height: 82px !important;
-  transform: translateX(-50%); padding: 0 !important;
-  border: 1px solid var(--ui-v2-color-line) !important;
-  border-radius: var(--ui-v2-radius-surface) !important;
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
+  left: 0 !important; right: 0 !important; bottom: 0 !important;
+  box-sizing: border-box; width: 100% !important; height: auto !important; min-height: calc(var(--layout-bottom-nav) + var(--ui-v2-effective-bottom-inset)) !important;
+  transform: none; padding: 0 0 var(--ui-v2-effective-bottom-inset) !important;
+  border: 0 !important; border-top: 1px solid var(--ui-v2-color-line) !important;
+  border-radius: 0 !important;
   background: var(--ui-v2-color-surface) !important;
-  box-shadow: var(--ui-v2-shadow-surface) !important;
+  box-shadow: none !important;
 }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { width: 100%; min-height: 82px; padding: 8px 14px; }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] { min-height: 60px; color: var(--ui-v2-color-muted) !important; border-radius: var(--ui-v2-radius-pill); font-weight: var(--ui-v2-weight-medium); }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] [data-variant='memoryNav'] { color: inherit; font-family: inherit; font-size: var(--ui-v2-font-caption); font-weight: inherit; }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] { color: var(--ui-v2-color-accent) !important; background: var(--ui-v2-color-accent-soft); }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] [data-variant='memoryNav'] { color: inherit; font-weight: var(--ui-v2-weight-strong); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { box-sizing: border-box; width: 100%; height: auto; min-height: calc(var(--layout-bottom-nav) - 1px); padding: 0 calc(12px + var(--host-inset-right)) 0 calc(12px + var(--host-inset-left)); border-top: 0; background: var(--ui-v2-color-surface); }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] { position: relative; min-height: calc(var(--layout-bottom-nav) - 1px); color: var(--ui-v2-color-muted) !important; border-radius: 0; font-weight: 400; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home']::before,.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family']::before { position: absolute; top: 0; width: 22px; height: 2px; border-radius: 2px; background: var(--ui-v2-color-accent); content: ''; display: none; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > [data-slot='webp-icon'] { width: 20px !important; height: 20px !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > span { color: inherit; font-family: inherit; font-size: .625rem; font-weight: inherit; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > :is([data-slot='webp-icon'], [data-slot='typography'], .memoly-nav-add-circle) { position: relative; top: min(5px, calc(2px + var(--ui-v2-effective-bottom-inset))); pointer-events: none; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] { color: var(--ui-v2-color-accent) !important; background: transparent; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true']::before { display: block !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] > span { color: inherit; font-weight: 700; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-add='true'] { color: var(--ui-v2-color-muted) !important; }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle { width: var(--ui-v2-nav-add-size); height: var(--ui-v2-nav-add-size); margin: 0; border-radius: var(--ui-v2-nav-add-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background) !important; box-shadow: var(--ui-v2-shadow-surface) !important; }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle [data-slot='webp-icon'] { width: 26px; height: 26px; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle { width: 31px; height: 31px; margin: 0; border-radius: 50%; color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background) !important; box-shadow: none !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle [data-slot='webp-icon'] { width: 20px !important; height: 20px !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle { color: var(--ui-v2-color-white) !important; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='add'] > [data-slot='typography'] { font-size: .625rem; }
+.memoly-app-root[data-ui-version='v2'] .family-screen:not(.child-screen) {
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
+  padding-bottom: calc(var(--layout-bottom-nav) + var(--ui-v2-effective-bottom-inset));
+}
+.memoly-app-root[data-ui-version='v2'] .family-screen.child-screen:has(.child-profile),
+.memoly-app-root[data-ui-version='v2'] .family-management-page {
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
+  padding-bottom: calc(var(--layout-bottom-nav) + 50px + var(--ui-v2-effective-bottom-inset));
+}
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .app {
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
+  padding-bottom: calc(var(--layout-bottom-nav) + 28px + var(--ui-v2-effective-bottom-inset));
+}
+.memoly-app-root[data-ui-version='v2'] .ui-v2-child-name .ui-v2-child-name-text { font: inherit; letter-spacing: inherit; }
+html[data-ui-version='v2'] .avatar-editor .avatar-editor-header > [data-slot='button'][data-variant='default'] { min-height: 48px; border-radius: var(--ui-v2-button-radius); color: var(--ui-v2-button-primary-color); background: var(--ui-v2-button-primary-background); }
+html[data-ui-version='v2'] .avatar-editor .avatar-editor-controls > [data-slot='button'][data-variant='outline'] { min-height: 44px; border-radius: var(--ui-v2-button-radius); }
 
 /* Shared control and surface variants keep presentation values in one place. */
 .memoly-app-root[data-ui-version='v2'] :where(.family-management-card, .family-management-invite-row, .family-member-row, .family-info-card, .family-usage, .family-pending, .family-member-actions, .family-permissions, .invite-role, .family-management-invites-link, .member-profile-hero, .member-profile-card, .child-profile .ds-card, .child-profile .child-age-card, .child-profile .child-action-list, .child-profile .child-more-actions, .ml-sheet-row, .ml-settings-copy, .ml-theme-choice, .family-max-channel) {
@@ -77,6 +101,19 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
   background: var(--ui-v2-color-field);
   box-shadow: none;
 }
+.memoly-app-root[data-ui-version='v2'] .ui-v2-family-profile-link { font-size: .6875rem; font-weight: 500; line-height: 1rem; }
+.memoly-app-root[data-ui-version='v2'] .family-management-fields label { font-size: 12px; line-height: 17px; }
+.memoly-app-root[data-ui-version='v2'] .family-management-fields p,
+.memoly-app-root[data-ui-version='v2'] .family-management-error,
+.memoly-app-root[data-ui-version='v2'] .member-account-form .member-profile-error { font-size: 12px; line-height: 17px; }
+.memoly-app-root[data-ui-version='v2'] .member-account-form { gap: 16px; }
+.memoly-app-root[data-ui-version='v2'] .family-management-fields label:not(:first-child) { margin-top: 16px; }
+.memoly-app-root[data-ui-version='v2'] .child-edit-v2-label { font-size: 12px; line-height: 17px; }
+.memoly-app-root[data-ui-version='v2'] .member-account-form label { font-size: 12px; line-height: 17px; }
+.memoly-app-root[data-ui-version='v2'] .family-management-error { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 18px; }
+.memoly-app-root[data-ui-version='v2'] .family-management-error button { min-height: 44px; }
+.memoly-app-root[data-ui-version='v2'] .member-profile-error { font-size: 12px; line-height: 17px; }
+.memoly-app-root[data-ui-version='v2'] .child-edit-v2-helper { font-size: 12px; line-height: 17px; }
 .memoly-app-root[data-ui-version='v2'] :where(.family-management-primary, .member-profile-save, .child-edit-v2-save, .child-profile .child-secondary) {
   min-height: var(--ui-v2-button-height);
   border: 0;
@@ -122,6 +159,12 @@ html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-them
 html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice.selected .ml-theme-radio-mark { border-color: var(--ui-v2-color-accent); }
 html[data-ui-version='v2'] .ml-theme-choices[data-appearance-mode='v2'] .ml-theme-choice.selected .ml-theme-radio-mark::after { background: var(--ui-v2-color-accent); }
 html[data-ui-version='v2'] [data-memoly-bottom-sheet='true']:has(.ml-settings-sheet[data-view='appearance']) { background: var(--ui-v2-color-canvas) !important; }
+html[data-ui-version='v2'] [data-memoly-bottom-sheet='true']:has(.ml-settings-sheet[data-view='menu']) { max-height: 90dvh; border-radius: 19px 19px 0 0; }
+html[data-ui-version='v2'] [data-memoly-bottom-sheet='true']:has(.ml-settings-sheet[data-view='menu']) > .memoly-bottom-sheet-body { max-height: calc(90dvh - 18px); overflow-y: auto; padding: 18px 20px calc(23px + var(--host-inset-bottom, 0px)); }
+html[data-ui-version='v2'] .ml-settings-sheet[data-view='menu'] .ml-settings-list { gap: 0; }
+html[data-ui-version='v2'] .ml-settings-sheet[data-view='menu'] .ml-sheet-row { min-height: 53px; grid-template-columns: 21px minmax(0, 1fr) 18px; gap: 12px; padding: 13px 0; border: 0; border-top: 1px solid var(--ui-v2-color-line); border-radius: 0; box-shadow: none; }
+html[data-ui-version='v2'] .ml-settings-sheet[data-view='menu'] .ml-sheet-row-icon { width: 21px; height: 21px; background: transparent; box-shadow: none; }
+html[data-ui-version='v2'] .ml-settings-sheet[data-view='menu'] .ml-sheet-row-copy strong { font-size: 13px; font-weight: 600; line-height: 17px; }
 html[data-ui-version='v2'] :where(.ml-settings-sheet, .ml-settings-sheet *, .member-remove-modal, .member-remove-modal *) { font-family: var(--ui-v2-font-family) !important; }
 html[data-ui-version='v2'] :where(.ml-settings-sheet, .ml-settings-sheet .ml-sheet-row, .ml-settings-sheet .ml-settings-copy, .ml-settings-sheet .ml-theme-choice, .member-remove-modal) { color: var(--ui-v2-color-text); background-color: var(--ui-v2-color-surface); }
 html[data-ui-version='v2'] :where(.ml-settings-sheet .ml-settings-subview-title, .ml-settings-sheet .ml-appearance-hero h2, .member-remove-modal h2) { color: var(--ui-v2-color-text); }

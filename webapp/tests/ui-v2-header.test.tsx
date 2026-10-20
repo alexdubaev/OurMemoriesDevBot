@@ -29,7 +29,7 @@ test('maps all six existing cover preferences to their owner supplied local artw
     ])
 })
 
-test('keeps the legacy header default byte-for-byte in markup and switches only on explicit override', () => {
+test('keeps the legacy header default and uses the compact v2 family shell on explicit override', () => {
   const legacy = renderToStaticMarkup(createElement(ChildHeader, props))
   const explicitLegacy = renderToStaticMarkup(createElement(ChildHeader, { ...props, uiVersion: 'legacy' }))
   const v2 = renderToStaticMarkup(createElement(ChildHeader, { ...props, uiVersion: 'v2' }))
@@ -41,9 +41,10 @@ test('keeps the legacy header default byte-for-byte in markup and switches only 
   expect(v2).toContain('1 год 4 месяца')
   expect(v2).toContain('src="blob:private-child-avatar"')
   expect(v2).toContain('aria-label="Настройки"')
-  expect(v2).toContain('aria-label="Все семьи"')
+  expect(v2).toContain('aria-label="Сменить семью"')
   expect(v2).toContain('aria-label="Открыть профиль ребёнка: Лилия Александровна с длинным именем"')
   expect(v2).toContain('/assets/ui-v2/icons/settings-gear@2x.webp')
+  expect(v2).not.toContain('Маленькие моменты')
   expect(v2).not.toContain('<svg')
 })
 

@@ -5,13 +5,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { AuthProvider, PrivateCacheGate } from './features/auth'
 import { BootPreloader, StartupBoundary } from './features/app'
-import { installAppZoomPrevention } from './platform/app-zoom'
 import { createHostBridge } from './platform/telegram'
 import { installPwaPromptListeners } from './platform/pwa-install'
 import './production.css'
 
 window.__MEMOLY_DIAGNOSTICS__?.record('module-ready')
-installAppZoomPrevention(document)
 installPwaPromptListeners(window)
 
 const root = createRoot(document.getElementById('root')!)

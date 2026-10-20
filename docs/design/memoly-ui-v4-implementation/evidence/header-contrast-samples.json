@@ -1,0 +1,152 @@
+[
+  {
+    "theme": "mint",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  },
+  {
+    "theme": "rose",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  },
+  {
+    "theme": "sky",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  },
+  {
+    "theme": "lavender",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  },
+  {
+    "theme": "apricot",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  },
+  {
+    "theme": "sand",
+    "samples": [
+      {
+        "selector": ".ui-v2-child-name-text",
+        "foreground": "rgb(48, 55, 70)",
+        "rect": {
+          "x": 72,
+          "y": 25.015625,
+          "width": 56.703125,
+          "height": 27
+        }
+      },
+      {
+        "selector": ".ui-v2-child-subtitle",
+        "foreground": "rgb(85, 91, 103)",
+        "rect": {
+          "x": 72,
+          "y": 52.015625,
+          "width": 85.453125,
+          "height": 15
+        }
+      }
+    ]
+  }
+]

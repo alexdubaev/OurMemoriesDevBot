@@ -1,0 +1,13 @@
+MEMOLY-V4-UNIFIED-NAV-SAFE-AREA worker checks
+Base: 74e5d5c504e28fae37441cc86cd199e651a045d2
+Branch/worktree: feat/memoly-ui-v4-implementation / D:/codex/TG_OurMemoriesDevBot/worktrees/memoly-ui-v4-implementation
+
+PASS (exit 0): bun run --cwd webapp typecheck
+PASS (exit 0): bun run --cwd webapp e2e -- --config e2e/memoly-v4.playwright.config.ts --grep "actual feed shell|family presentation|200% text" (3 passed; Chromium)
+PASS (exit 0): bash -n .scratch/memoly-nav-unified/operator.sh .scratch/memoly-nav-unified/operator.test.sh
+PASS (exit 0): bash .scratch/memoly-nav-unified/operator.test.sh (expected simulated failed-readiness path logged; static-only exact-image recovery assertion passed)
+PASS (exit 0): git diff --check
+
+The default Playwright config was tried once and could not start its backend because local MAX startup identity verification failed; the dedicated UI harness config then ran the three focused scenarios without that backend. No SSH, host access, deployment, commit, or publication was performed. Physical iPhone acceptance was not available to this worker.
+
+UI assertions retain 50px visible row and 50/70/84px total navigation geometries, verify the inner grid at 49px plus the 1px outer divider, verify equal outer/grid surfaces, and keep navigation hit targets >=44px. Operator mock constants use the reviewed 74e5d5c source, sha256:74a33d21dcf4618c7c4b34bf467fb35d7a39dc4dd231fc4669d83c1ede7ad669 static image, and index 998cfc2fe4dedc620f86f4999a4106c537ebf49639634f57ff5ab148dfa32a0c.

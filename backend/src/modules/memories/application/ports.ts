@@ -43,6 +43,7 @@ export type MemoryRepository = {
   }>
   listUnreadAfter(scope: FamilyScope, filters: MemoryCursorFilters,
     cursor: UnreadMemoryCursorClaims, limit: number): Promise<{ items: MemoryDto[]; hasNext: boolean }>
+  addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[], includeChannelAvatar?: boolean): Promise<MemoryDto[]>
   get(scope: FamilyScope, memoryId: string): Promise<MemoryDto>
   update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto>
   delete(scope: FamilyScope, memoryId: string, expectedVersion: number, now: Date): Promise<void>

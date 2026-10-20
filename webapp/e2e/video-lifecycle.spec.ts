@@ -104,7 +104,11 @@ test('production feed releases private video sources after scroll and remains bo
   let previousCheck: (() => Promise<void>) | null = null
   for (let index = 3; index < 63; index += 1) {
     const currentCard = page.locator('.memory-card').nth(index)
-    await currentCard.scrollIntoViewIfNeeded()
+    await currentCard.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' }))
+    if (index > 3) {
+      const previousCard = page.locator('.memory-card').nth(index - 1)
+      await expect.poll(() => previousCard.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0)
+    }
     if (previousCheck) await previousCheck()
     const sessionsBeforeClick = sessions
     await currentCard.getByRole('button', { name: 'Воспроизвести видео' }).click()
@@ -120,7 +124,9 @@ test('production feed releases private video sources after scroll and remains bo
     await expect.poll(async () => page.evaluate(() => document.querySelectorAll('video[src]').length)).toBeLessThanOrEqual(1)
   }
   const maxCard = page.locator('.memory-card').nth(63)
-  await maxCard.scrollIntoViewIfNeeded()
+  await page.addStyleTag({ content: 'body { padding-bottom: 300px !important; }' })
+  await maxCard.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' }))
+  await expect.poll(() => page.locator('.memory-card').nth(62).evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0)
   if (previousCheck) await previousCheck()
   await expect(maxCard.getByRole('button', { name: 'Смотреть видео' })).toBeVisible()
   const sessionsBeforeMaxClick = sessions

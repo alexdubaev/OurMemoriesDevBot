@@ -1,0 +1,8 @@
+{
+ "source":"f0a4e8ba3fa174f43c661ab2a70a6b744c6543f4",
+ "kind":"actual React FeedPage, unchanged fixed-carousel synthetic harness",
+ "viewport":{"width":390,"height":844,"deviceScaleFactor":1},
+ "rects":{"header":{"x":14,"y":0,"width":362,"height":206},"firstMedia":{"x":15,"y":300.6875,"width":360,"height":450},"navigation":{"x":12,"y":746,"width":366,"height":90}},
+ "errors":[],
+ "note":"Baseline rendered from git archive in task-owned adjacent extraction with task-installed dependencies and isolated Vite cache. Main checkout left unchanged. This fixture is not the canonical reference media fixture."
+}

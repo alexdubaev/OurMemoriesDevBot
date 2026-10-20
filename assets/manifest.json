@@ -461,6 +461,60 @@
       "sha256": "0cc638e2060f8793891d3940f9b52805231787442c2b99ed170e3698319fcd0d"
     },
     {
+      "path": "assets/icons/channel-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 124,
+      "sha256": "bd930918033df5249aa92142086cb823b48d6361f4e2a52472ef154bf1fbaa79"
+    },
+    {
+      "path": "assets/icons/channel-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 158,
+      "sha256": "25cb4eadbd03ea33e79bc3d2ebd7bd1a43adc289630e7e89c00ddde1f71fc471"
+    },
+    {
+      "path": "assets/icons/channel-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 124,
+      "sha256": "c18a42e306a747b559fabdc22b461249765781613bac0beea9b9842f91caaf36"
+    },
+    {
+      "path": "assets/icons/channel-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 158,
+      "sha256": "d2b4ce3721a558e7e067633faaf284e5646e50a05b1eb73cd00b29509c8650ac"
+    },
+    {
+      "path": "assets/icons/channel-white@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 124,
+      "sha256": "daa4ca21d3bcefca41dbc773c4a2b6e8604aade6be27b7a37e9760817e026525"
+    },
+    {
+      "path": "assets/icons/channel-white@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 158,
+      "sha256": "c5a77b61f3c705a879c541ab3454c6c29d266cd82edef56b6bf580134aa54163"
+    },
+    {
       "path": "assets/icons/heart-active@2x.webp",
       "usage": "runtime-icon",
       "width": 48,

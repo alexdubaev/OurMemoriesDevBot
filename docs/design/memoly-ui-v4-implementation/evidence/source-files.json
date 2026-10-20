@@ -1,0 +1,129 @@
+{
+  "base": "f0a4e8ba3fa174f43c661ab2a70a6b744c6543f4",
+  "sourceHead": "f0a4e8ba3fa174f43c661ab2a70a6b744c6543f4",
+  "dirty": true,
+  "normalizedTextLineEndings": "LF",
+  "fingerprint": "fc4e97c4f2ffe4e238abe9fa6d63d8f4ecf1a75b834124e8da4bed46ac0c63e7",
+  "files": [
+    {
+      "path": "webapp/e2e/fixed-carousel.spec.ts",
+      "sha256": "188d8eb7240ed5c2212e867663dc7290463b9b7408690e1a810111b20a056b67"
+    },
+    {
+      "path": "webapp/e2e/fixtures/memoly-v4-reference-images.ts",
+      "sha256": "0a6523ab37dcfe894ae91f7f49f3c854489d7e45a768681f03f2c61025b02f54"
+    },
+    {
+      "path": "webapp/e2e/max-video-layout.spec.ts",
+      "sha256": "34d489438396e4107624592265d063dc910fb354d566db5c06ab473257e07495"
+    },
+    {
+      "path": "webapp/e2e/memoly-v4.harness.html",
+      "sha256": "6ce81b2dc215f8a86fab2137ccf2d8fd30f009520e3cba2da54d7b97a0518e55"
+    },
+    {
+      "path": "webapp/e2e/memoly-v4.harness.tsx",
+      "sha256": "12270506ecbeacb4e0b5729e729f1c836ed4574de2264d8b58ba86a629f67923"
+    },
+    {
+      "path": "webapp/e2e/memoly-v4.playwright.config.ts",
+      "sha256": "63185a997290d7878a42c51b02655c30348840cce102a82eaf32bae28858eab4"
+    },
+    {
+      "path": "webapp/e2e/memoly-v4.spec.ts",
+      "sha256": "9d3af63a5d67c5a0bc0002c2d40b9e87696b6d6c94dfea1f1c1b1f85cf5c00d8"
+    },
+    {
+      "path": "webapp/e2e/video-lifecycle.spec.ts",
+      "sha256": "06112d5c07a0c5d836099129a188e5494b553f41aa0283b9255a2bb7c6f33760"
+    },
+    {
+      "path": "webapp/e2e/voice-player.spec.ts",
+      "sha256": "dd4efa17e2ed50566ef0650f922f5c06be93b2a7bfc436d3445629793dc55b0a"
+    },
+    {
+      "path": "webapp/index.html",
+      "sha256": "e210442b68335d24127dfebd7807cf24b79d03c2294714cf9c52ed92642ad1e0"
+    },
+    {
+      "path": "webapp/public/assets/ui-v2/brand/max-colored-66.webp",
+      "sha256": "97ad34d92aae2dcd0164c6e768d15980e9fa5d3168099c46917b63c228662ca6"
+    },
+    {
+      "path": "webapp/public/assets/ui-v2/brand/max-colored-99.webp",
+      "sha256": "12c91b89c12573fd520b6259dc38f2c212ae2fd020d2eb2ff3fd2e914459299d"
+    },
+    {
+      "path": "webapp/src/components/typography.tsx",
+      "sha256": "1a06def2965752a750371dc2e68f121be13a25af180e75e2438984aa16a25a16"
+    },
+    {
+      "path": "webapp/src/components/ui-v2/ChildHeaderV2.css",
+      "sha256": "e2fa9e2135f85f7f107b80b7c5902f445b69a726e180391a8a9b5ff5a05981ec"
+    },
+    {
+      "path": "webapp/src/components/ui-v2/ChildHeaderV2.tsx",
+      "sha256": "c58df580e4c530f7c98d4150e39155442152d133a28de3af93259c13a553aacb"
+    },
+    {
+      "path": "webapp/src/components/ui-v2/shared-skin.css",
+      "sha256": "32c274390f2228bc45930a80a0bab5481eb666637d3cd04c6602ff58fae25d5c"
+    },
+    {
+      "path": "webapp/src/features/feed/FeedPage.tsx",
+      "sha256": "0078a47a4c3b5f880a5a444cd67a54344c1501542f1962b02dc237a1d06bacf3"
+    },
+    {
+      "path": "webapp/src/features/feed/media-ratio.ts",
+      "sha256": "75d76e80c307f8f64da4351d6429daade3051dbc305069707d7583b7097db803"
+    },
+    {
+      "path": "webapp/src/features/feed/presentation/MemoryReactions.tsx",
+      "sha256": "9630633a136fc9a0c3a1123b661903c0e802b11b02ef851456362a9fc465201e"
+    },
+    {
+      "path": "webapp/src/features/feed/presentation/memoly-feed.css",
+      "sha256": "733e1ae8f41d711c5704237f58612f6ba641d419f124d7e533270018937af351"
+    },
+    {
+      "path": "webapp/src/features/memoly-ui/FamilyPresentation.tsx",
+      "sha256": "26c746f384f9b94c3504ff0be4bea688a5a3401e7eebba2248236657d69dc582"
+    },
+    {
+      "path": "webapp/src/features/memoly-ui/SettingsSheet.tsx",
+      "sha256": "4087b7be11b1fba4a0db4fa73b557517bd7ac58184b052e18e4433cc9108294e"
+    },
+    {
+      "path": "webapp/src/features/memoly-ui/family-management.css",
+      "sha256": "869e5fde86ed711369e6518bb71a63efd4d5c216fa71be12ba21d609a76683b0"
+    },
+    {
+      "path": "webapp/src/features/memoly-ui/memoly-ui.css",
+      "sha256": "27eafbc812e1740898a69ed0242ef3ebd3d7785f57e271d437d5c7085b7c424b"
+    },
+    {
+      "path": "webapp/src/index.css",
+      "sha256": "bb883f635639f1d8f76b4b0fc1eda6c661a1fe4d898ca46632fde39cc337e9d3"
+    },
+    {
+      "path": "webapp/src/main.tsx",
+      "sha256": "6e5c1e852c77c418e34b4fcfe90c7e96dbc2b17730dd60def8cbe93e0b610a16"
+    },
+    {
+      "path": "webapp/src/platform/app-zoom.ts",
+      "deleted": true
+    },
+    {
+      "path": "webapp/src/styles/tokens.css",
+      "sha256": "54e4456d7d39ab3f8ca4bc87a97e9519bb2a06814f73a53b082f6472cc6942cc"
+    },
+    {
+      "path": "webapp/tests/media-ratio.test.ts",
+      "sha256": "3a1c7ab6e3c36e6fd9f54ea11724297f49d09d94b4e4f12dc13868ad45188172"
+    },
+    {
+      "path": "webapp/tests/ui-v2-header.test.tsx",
+      "sha256": "53fbb601385e8d13ccc8fc659a2f2379d0b5499e89c4357edf3693499e926cd0"
+    }
+  ]
+}

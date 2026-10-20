@@ -40,6 +40,13 @@ export function createMaxChannelProvider(token: string, options: { fetch?: Fetch
       }
       return { chatId, title: typeof channel.title === 'string' ? channel.title : null }
     },
+    async getChannelAvatarUrl(chatId: bigint): Promise<string | null> {
+      const { value: channel, raw } = await get(`/chats/${chatId}`)
+      if (channel.type !== 'channel' || channel.status !== 'active' || channel.is_public !== false || readMaxRootInt64(raw, 'chat_id') !== chatId) {
+        throw new MaxChannelProviderError(404, 'MAX channel avatar is unavailable')
+      }
+      return isRecord(channel.icon) && typeof channel.icon.url === 'string' ? channel.icon.url : null
+    },
     async verifyActorAdmin(chatId: bigint, actorSubject: bigint): Promise<boolean> {
       if (chatId === 0n || actorSubject === 0n) throw new MaxChannelProviderError(400)
       const { value, raw } = await get(`/chats/${chatId}/members/admins`)

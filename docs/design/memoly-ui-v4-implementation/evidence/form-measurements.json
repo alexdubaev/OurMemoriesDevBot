@@ -1,0 +1,391 @@
+{
+  "records": [
+    {
+      "name": "child-profile",
+      "inputs": [],
+      "buttons": [],
+      "overflow": false
+    },
+    {
+      "name": "child-editor",
+      "inputs": [
+        {
+          "id": "child-avatar",
+          "type": "file",
+          "value": "",
+          "height": 1,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "child-name",
+          "type": "text",
+          "value": "Алиса",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "child-birth-date",
+          "type": "date",
+          "value": "2024-01-17",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "girl",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "boy",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "Изменить кадрирование",
+          "variant": "ghost",
+          "disabled": false,
+          "color": "rgb(43, 57, 52)",
+          "background": "rgb(255, 254, 250)",
+          "fontSize": "16px",
+          "height": 44
+        },
+        {
+          "label": "Сохранить профиль",
+          "variant": "default",
+          "disabled": false,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 48
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "child-crop",
+      "inputs": [
+        {
+          "id": "avatar-editor-zoom",
+          "type": "range",
+          "value": "1",
+          "height": 44,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "Отмена",
+          "variant": "ghost",
+          "disabled": false,
+          "color": "rgb(43, 57, 52)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "16px",
+          "height": 44
+        },
+        {
+          "label": "Готово",
+          "variant": "default",
+          "disabled": false,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 48
+        },
+        {
+          "label": "Сбросить",
+          "variant": "outline",
+          "disabled": false,
+          "color": "rgb(43, 57, 52)",
+          "background": "rgb(255, 255, 255)",
+          "fontSize": "16px",
+          "height": 44
+        },
+        {
+          "label": "Выбрать другое",
+          "variant": "outline",
+          "disabled": false,
+          "color": "rgb(43, 57, 52)",
+          "background": "rgb(255, 255, 255)",
+          "fontSize": "16px",
+          "height": 44
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "child-editor-after-crop-cancel",
+      "inputs": [
+        {
+          "id": "child-avatar",
+          "type": "file",
+          "value": "",
+          "height": 1,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "child-name",
+          "type": "text",
+          "value": "Алиса",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "child-birth-date",
+          "type": "date",
+          "value": "2024-01-17",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "girl",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "boy",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "Изменить кадрирование",
+          "variant": "ghost",
+          "disabled": false,
+          "color": "rgb(43, 57, 52)",
+          "background": "rgb(255, 254, 250)",
+          "fontSize": "16px",
+          "height": 44
+        },
+        {
+          "label": "Сохранить профиль",
+          "variant": "default",
+          "disabled": false,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 48
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "self-profile",
+      "inputs": [
+        {
+          "id": "",
+          "type": "file",
+          "value": "",
+          "height": 1,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "member-account-name",
+          "type": "text",
+          "value": "Папа",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "text",
+          "value": "Не задано",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "Добавить фотографию",
+          "variant": "default",
+          "disabled": false,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 48
+        },
+        {
+          "label": "Сохранить имя профиля",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 52
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "member-profile",
+      "inputs": [
+        {
+          "id": "",
+          "type": "text",
+          "value": "",
+          "height": 48,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "full",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "",
+          "type": "radio",
+          "value": "viewer",
+          "height": 13,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [
+        {
+          "label": "Сохранить изменения",
+          "variant": null,
+          "disabled": true,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(65, 109, 88)",
+          "fontSize": "16px",
+          "height": 52
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "invite-form",
+      "inputs": [
+        {
+          "id": "invitee-display-name",
+          "type": "text",
+          "value": "",
+          "height": 50,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "simpleRoleFull",
+          "type": "radio",
+          "value": "on",
+          "height": 17,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        },
+        {
+          "id": "simpleRoleView",
+          "type": "radio",
+          "value": "on",
+          "height": 17,
+          "fontSize": "16px",
+          "lineHeight": "24.8px"
+        }
+      ],
+      "buttons": [],
+      "overflow": false
+    },
+    {
+      "name": "settings-menu",
+      "inputs": [],
+      "buttons": [],
+      "overflow": false
+    },
+    {
+      "name": "settings-appearance",
+      "inputs": [],
+      "buttons": [],
+      "overflow": false
+    },
+    {
+      "name": "add-sheet",
+      "inputs": [],
+      "buttons": [
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        },
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        },
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        },
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        },
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        },
+        {
+          "label": "Добавить реакцию",
+          "variant": null,
+          "disabled": false,
+          "color": "rgb(65, 109, 88)",
+          "background": "rgba(0, 0, 0, 0)",
+          "fontSize": "11px",
+          "height": 44
+        }
+      ],
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "cropCancelReturnedToEditor": true
+}
