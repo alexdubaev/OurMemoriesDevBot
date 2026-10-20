@@ -4,6 +4,7 @@ type Metrics = {
   calls: Array<{ path: string; method: string; ids?: number }>
   gates: Array<{ kind: string; path: string; body?: string; aborted: boolean }>
   holdNext: 'list' | 'create' | null
+  patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'
   configure: (action: string) => void
   release: (kind: 'list' | 'create') => void
   snapshot: () => { keys: unknown[][]; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number }
@@ -12,8 +13,8 @@ declare global { interface Window { __commentsState: Metrics } }
 
 test('summary batching and closed-panel query boundary', async ({ page }) => {
   await page.goto('/e2e/comments-state.harness.html')
-  await expect.poll(() => page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.endsWith('/comments/summaries')).length)).toBe(2)
-  const counts = await page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.endsWith('/comments/summaries')).map((call) => call.ids))
+  await expect.poll(() => page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.endsWith('/comment-summaries')).length)).toBe(2)
+  const counts = await page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.endsWith('/comment-summaries')).map((call) => call.ids))
   expect(counts).toEqual([50, 10])
   expect(await page.evaluate(() => window.__commentsState.calls.some((call) => call.path.includes('/comments?')))).toBe(false)
   await page.getByRole('button', { name: 'Open comments' }).click()

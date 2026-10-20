@@ -1,7 +1,7 @@
 import type {} from '../src/platform/diagnostics/window'
 import '../src/production.css'
 document.documentElement.dataset.uiVersion = 'v2'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -13,7 +13,7 @@ import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
 
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
-type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: (value: unknown) => void }
+type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: () => void }
 type Metrics = { calls: Array<{ path: string; method: string; ids?: number[] }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => unknown }
 declare global { interface Window { __commentsState: Metrics } }
 
@@ -30,7 +30,7 @@ function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing com
 function Harness() {
   const [scope, setScope] = useState(A)
   const [open, setOpen] = useState(false)
-  const [active, setActive] = useState(true)
+  const [active] = useState(true)
   const transport = useMemo<AuthenticatedTransport>(() => ({ request: (async (path: string, _schema: unknown, options?: { method?: string; body?: { memoryIds?: string[]; body?: string }; signal?: AbortSignal }) => {
     const method = options?.method ?? 'GET'
     metrics.calls.push({ path, method, ...(options?.body?.memoryIds ? { ids: options.body.memoryIds.length } : {}) })
@@ -46,7 +46,7 @@ function Harness() {
       if (patchMode === 'forbidden-denied') throw new ApiRequestError(403, 'ROLE_FORBIDDEN', 'Synthetic read revoked')
       const gate: Gate = { kind: 'list', path, aborted: false, resolve: () => undefined }
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
-      if (metrics.holdNext === 'list') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = resolve }) }
+      if (metrics.holdNext === 'list') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }) }
       if (path.includes('cursor=older')) return { ...page(Array.from({ length: 20 }, (_, i) => fixture(`Earlier ${i + 1}`, `dddddddd-dddd-4ddd-8ddd-${String(i + 1).padStart(12, '0')}`, 1, i)), null) }
       if (patchMode === 'deleted-conflict') return page([], null)
       if (patchMode === 'version-conflict') return page([fixture('Server updated comment', 'cccccccc-cccc-4ccc-8ccc-000000000001', 2)], null)
@@ -57,7 +57,7 @@ function Harness() {
     if (create) {
       const gate: Gate = { kind: 'create', path, body: options?.body?.body, aborted: false, resolve: () => undefined }
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
-      if (metrics.holdNext === 'create') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = resolve }) }
+      if (metrics.holdNext === 'create') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }) }
       return { comment: fixture(gate.body ?? 'Late private body', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'), summary: { memoryId: A.memoryId, count: 2, capabilities: { read: true, create: true } } }
     }
     if (method === 'PATCH') return { comment: fixture(options?.body?.body ?? 'Saved edit', 'cccccccc-cccc-4ccc-8ccc-000000000001', 3), summary: { memoryId: A.memoryId, count: 1, capabilities: { read: true, create: true } } }
