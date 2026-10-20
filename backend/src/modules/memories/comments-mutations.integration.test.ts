@@ -114,11 +114,23 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
     const path = f.path(family.id, memory.id)
     const created = await f.request(path, owner.token, 'POST', { body: 'x' }, randomUUID())
     const id = created.body.comment.id
+    const unauthenticated = await f.app.request(`${path}/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'x', expectedVersion: 1 }),
+    })
+    expect(unauthenticated.status).toBe(401)
+    expect(unauthenticated.headers.get('cache-control')).toBe('private, no-store')
     expect((await mutate(`${path}/${id}`, owner.token, 'PATCH', { body: 'x', expectedVersion: 1, authorId: owner.id })).response.status).toBe(400)
     expect((await mutate(`${path}/${id}`, owner.token, 'DELETE')).response.status).toBe(400)
     const stale = await mutate(`${path}/${id}`, owner.token, 'DELETE', undefined, 9)
     expect(stale.response.status).toBe(409)
     expect(stale.response.headers.get('cache-control')).toBe('private, no-store')
+    const oversized = await f.app.request(`${path}/${id}`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${owner.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'x'.repeat(17000), expectedVersion: 1 }),
+    })
+    expect(oversized.status).toBe(413)
+    expect(oversized.headers.get('cache-control')).toBe('private, no-store')
   })
 
   test('Owner, Full and Viewer can each edit and delete their own comments, with family isolation', async () => {
