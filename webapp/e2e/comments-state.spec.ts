@@ -101,6 +101,23 @@ test('403 mutation rechecks read access and only closes when the list is also fo
   expect(snapshot).not.toContain('Existing comment')
 })
 
+test('delete version conflict closes the old confirmation before offering a fresh one', async ({ page }) => {
+  await page.goto('/e2e/comments-state.harness.html')
+  await page.getByRole('button', { name: 'Open comments' }).click()
+  const item = page.locator('.comments-item').first()
+  await item.getByRole('button', { name: 'Удалить' }).click()
+  await expect(page.getByRole('dialog', { name: 'Удалить комментарий?' })).toBeVisible()
+  await page.evaluate(() => { window.__commentsState.patchMode = 'delete-version-conflict' })
+  await page.getByRole('dialog', { name: 'Удалить комментарий?' }).getByRole('button', { name: 'Удалить' }).click()
+  await expect(page.getByRole('dialog', { name: 'Удалить комментарий?' })).toHaveCount(0)
+  await expect(page.getByRole('alert')).toContainText('подтвердите удаление ещё раз')
+  await expect(page.locator('.comments-item').first()).toContainText('Server updated comment')
+  await page.locator('.comments-item').first().getByRole('button', { name: 'Удалить' }).click()
+  await expect(page.getByRole('dialog', { name: 'Удалить комментарий?' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Удалить комментарий?' }).getByRole('button', { name: 'Удалить' }).click()
+  await expect(page.locator('.comments-item')).toHaveCount(19)
+})
+
 test('pagination preserves the visible scroll anchor and dirty Back can continue or discard once', async ({ page }) => {
   await page.goto('/e2e/comments-state.harness.html')
   const startingUrl = page.url()

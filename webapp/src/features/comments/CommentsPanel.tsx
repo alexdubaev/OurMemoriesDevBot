@@ -221,12 +221,12 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       if (!leaseIsCurrent()) return
       const conflict = cause instanceof ApiRequestError && cause.code === 'VERSION_CONFLICT'
       setError(conflict ? 'Комментарий изменён. Проверьте актуальную версию и подтвердите удаление ещё раз.' : 'Не удалось удалить комментарий.')
+      if (conflict) setDeleteTarget(null)
       const refreshed = await list.refetch()
       if (!leaseIsCurrent()) return
-      if (deleteTarget) {
+      if (deleteTarget && !conflict) {
         const latest = refreshed.data?.pages.flatMap((page) => page.items).find((item) => item.id === deleteTarget.id)
         if (!latest) setDeleteTarget(null)
-        else if (conflict) setDeleteTarget({ id: latest.id, version: latest.version })
       }
     }
     finally { if (mutationController.current === controller) mutationController.current = null; busyRef.current = false; setBusy(false) }

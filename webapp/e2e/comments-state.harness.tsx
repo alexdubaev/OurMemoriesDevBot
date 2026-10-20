@@ -14,7 +14,7 @@ import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
 const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111111', membershipEpoch: 1, memoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
 type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: (value: unknown) => void }
-type Metrics = { calls: Array<{ path: string; method: string; ids?: number[] }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => unknown }
+type Metrics = { calls: Array<{ path: string; method: string; ids?: number[] }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => unknown }
 declare global { interface Window { __commentsState: Metrics } }
 
 const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => [] }
@@ -34,9 +34,9 @@ function Harness() {
   const transport = useMemo<AuthenticatedTransport>(() => ({ request: (async (path: string, _schema: unknown, options?: { method?: string; body?: { memoryIds?: string[]; body?: string }; signal?: AbortSignal }) => {
     const method = options?.method ?? 'GET'
     metrics.calls.push({ path, method, ...(options?.body?.memoryIds ? { ids: options.body.memoryIds.length } : {}) })
-    if (method === 'PATCH' && metrics.patchMode !== 'none') {
+    if ((method === 'PATCH' || method === 'DELETE') && metrics.patchMode !== 'none') {
       const mode = metrics.patchMode
-      throw new ApiRequestError(mode === 'version-conflict' ? 409 : mode === 'deleted-conflict' ? 409 : 403, mode === 'version-conflict' ? 'VERSION_CONFLICT' : mode === 'deleted-conflict' ? 'CONFLICT' : 'ROLE_FORBIDDEN', 'Synthetic mutation failure')
+      throw new ApiRequestError(mode === 'version-conflict' || mode === 'deleted-conflict' || mode === 'delete-version-conflict' ? 409 : 403, mode === 'version-conflict' || mode === 'delete-version-conflict' ? 'VERSION_CONFLICT' : mode === 'deleted-conflict' ? 'CONFLICT' : 'ROLE_FORBIDDEN', 'Synthetic mutation failure')
     }
     const list = path.includes('/comments?')
     const create = method === 'POST' && path.endsWith('/comments')
@@ -50,8 +50,10 @@ function Harness() {
       if (path.includes('cursor=older')) return { ...page(Array.from({ length: 20 }, (_, i) => fixture(`Earlier ${i + 1}`, `dddddddd-dddd-4ddd-8ddd-${String(i + 1).padStart(12, '0')}`, 1, i)), null) }
       if (patchMode === 'deleted-conflict') return page([], null)
       if (patchMode === 'version-conflict') return page([fixture('Server updated comment', 'cccccccc-cccc-4ccc-8ccc-000000000001', 2)], null)
+      if (patchMode === 'delete-version-conflict') return page([fixture('Server updated comment', 'cccccccc-cccc-4ccc-8ccc-000000000001', 2)], null)
       return page(undefined, 'older')
     }
+    if (method === 'DELETE') return { deletedId: 'cccccccc-cccc-4ccc-8ccc-000000000001', summary: { memoryId: A.memoryId, count: 0, capabilities: { read: true, create: true } } }
     if (create) {
       const gate: Gate = { kind: 'create', path, body: options?.body?.body, aborted: false, resolve: () => undefined }
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
