@@ -167,6 +167,7 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await page.screenshot({ path: testInfo.outputPath('comments-panel-confirmed-edited.png'), fullPage: false })
   await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
   await expect(panel).toBeHidden()
+  await expect(entry).toBeFocused()
   await expect(entry).toHaveAttribute('aria-label', 'Открыть комментарии, 1')
   await page.screenshot({ path: testInfo.outputPath('comments-footer-positive-count.png'), fullPage: false })
   await entry.click()
@@ -215,13 +216,16 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
   const entry = card.locator('.comments-entry')
   const footer = page.getByTestId('bottom-navigation')
   await expect(entry).toBeVisible()
-  for (const width of widths) {
-    await page.setViewportSize({ width, height: 844 })
-    for (const theme of themes) {
-      await page.evaluate((nextTheme) => {
-        document.documentElement.dataset.memolyTheme = nextTheme
-        document.querySelector<HTMLElement>('.memoly-app-root')!.dataset.memolyTheme = nextTheme
-      }, theme)
+  for (const theme of themes) {
+    await page.locator('.ui-v2-settings').click()
+    await page.getByRole('button', { name: 'Оформление шапки профиля' }).click()
+    await page.locator(`[data-theme-choice="${theme}"]`).click()
+    await expect(page.locator('.memoly-app-root')).toHaveAttribute('data-memoly-theme', theme)
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.ml-settings-sheet')).toHaveCount(0)
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 844 })
       await expect(entry).toBeVisible()
       const footerMeasure = await entry.evaluate((button) => {
         const box = button.getBoundingClientRect()
