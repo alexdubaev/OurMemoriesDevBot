@@ -214,7 +214,7 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
   const { memoryId } = await signInAndSeed(page)
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
   const entry = card.locator('.comments-entry')
-  const footer = page.getByTestId('bottom-navigation')
+  const footer = page.locator('[data-memoly-feed="true"] [data-testid="bottom-navigation"]')
   await expect(entry).toBeVisible()
   for (const theme of themes) {
     await page.locator('.ui-v2-settings').click()
