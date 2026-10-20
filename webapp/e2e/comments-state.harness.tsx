@@ -15,11 +15,9 @@ const A = { accountId: 'account-a', familyId: '11111111-1111-4111-8111-111111111
 const B = { accountId: 'account-b', familyId: '22222222-2222-4222-8222-222222222222', membershipEpoch: 1, memoryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }
 type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boolean; resolve: () => void }
 type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number } }
-declare global { interface Window { __commentsState: Metrics } }
-
 const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], open: false, scope: A, summaries: 0 }) }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
-window.__commentsState = metrics
+;(window as Window & { __commentsState: Metrics }).__commentsState = metrics
 
 function fixture(body = 'Existing comment', id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', version = 1, ordinal = 1): CommentDto {
   const time = new Date(Date.UTC(2026, 9, 1, 12, ordinal)).toISOString()
