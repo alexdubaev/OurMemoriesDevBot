@@ -8,10 +8,14 @@ import {
   commentSummariesRequestSchema,
   commentSummariesResponseSchema,
   commentsParamsSchema,
+  commentParamsSchema,
+  deleteCommentHeadersSchema,
+  deleteCommentResponseSchema,
   commentSummariesParamsSchema,
   createCommentRequestSchema,
   idempotencyKeyHeadersSchema,
   listCommentsQuerySchema,
+  updateCommentRequestSchema,
 } from '@web-app-demo/contracts'
 import type { ZodType } from 'zod'
 import {
@@ -30,6 +34,7 @@ const errors = {
   400: { content: json(apiErrorSchema), description: 'Invalid input' },
   401: { content: json(apiErrorSchema), description: 'Session required' },
   404: { content: json(apiErrorSchema), description: 'Unavailable target' },
+  403: { content: json(apiErrorSchema), description: 'Operation is not permitted' },
   409: { content: json(apiErrorSchema), description: 'Idempotency conflict' },
   413: { content: json(apiErrorSchema), description: 'Body too large' },
   429: { content: json(apiErrorSchema), description: 'Rate limit' },
@@ -83,6 +88,29 @@ const summaries = createRoute({
     },
   },
 })
+const update = createRoute({
+  method: 'patch',
+  path: `${path}/{commentId}`,
+  security,
+  request: {
+    params: commentParamsSchema,
+    body: { content: json(updateCommentRequestSchema), required: true },
+  },
+  responses: {
+    ...errors,
+    200: { content: json(commentMutationResponseSchema), description: 'Updated comment' },
+  },
+})
+const remove = createRoute({
+  method: 'delete',
+  path: `${path}/{commentId}`,
+  security,
+  request: { params: commentParamsSchema, headers: deleteCommentHeadersSchema },
+  responses: {
+    ...errors,
+    200: { content: json(deleteCommentResponseSchema), description: 'Deleted or already deleted comment' },
+  },
+})
 
 export const commentPrivacyMiddleware: MiddlewareHandler<AuthHttpEnv> = async (
   c,
@@ -113,6 +141,7 @@ export function createCommentRoutes({
     },
   })
   routes.use('/families/:familyId/memories/:memoryId/comments', requireAuth)
+  routes.use('/families/:familyId/memories/:memoryId/comments/:commentId', requireAuth)
   routes.use('/families/:familyId/memories/comment-summaries', requireAuth)
   const limit = bodyLimit({
     maxSize: 16 * 1024,
@@ -127,6 +156,7 @@ export function createCommentRoutes({
       ),
   })
   routes.use('/families/:familyId/memories/:memoryId/comments', limit)
+  routes.use('/families/:familyId/memories/:memoryId/comments/:commentId', limit)
   routes.use('/families/:familyId/memories/comment-summaries', limit)
   const scope = (user: AuthHttpEnv['Variables']['user'], familyId: string) => ({
     principal: { userId: user.id, sessionId: user.sessionId },
@@ -168,6 +198,19 @@ export function createCommentRoutes({
       { comment: result.comment, summary: result.summary },
       result.replayed ? 200 : 201,
     )
+  })
+  routes.openapi(update, async (c) => {
+    const p = c.req.valid('param')
+    return c.json(await executeComment(() => service.update(
+      scope(c.var.user, p.familyId), p.memoryId, p.commentId, c.req.valid('json'),
+    )))
+  })
+  routes.openapi(remove, async (c) => {
+    const p = c.req.valid('param')
+    const result = await executeComment(() => service.delete(
+      scope(c.var.user, p.familyId), p.memoryId, p.commentId, c.req.valid('header')['if-match'],
+    ))
+    return c.json(result)
   })
   return routes
 }

@@ -2,10 +2,12 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import {
   createCommentRequestSchema,
+  updateCommentRequestSchema,
   type CreateCommentRequest,
   type ListCommentsQuery,
   type CommentPage,
   type CommentMutationResponse,
+  type UpdateCommentRequest,
 } from '@web-app-demo/contracts'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
@@ -98,6 +100,15 @@ export class CommentService {
   async summaries(scope: FamilyScope, memoryIds: string[]) {
     await this.access.requireMember(scope)
     return this.repository.summaries(scope, memoryIds)
+  }
+  async update(scope: FamilyScope, memoryId: string, commentId: string, input: UpdateCommentRequest) {
+    await this.access.requireMember(scope)
+    const normalized = updateCommentRequestSchema.parse(input)
+    return this.repository.update(scope, memoryId, commentId, normalized)
+  }
+  async delete(scope: FamilyScope, memoryId: string, commentId: string, expectedVersion: number) {
+    await this.access.requireMember(scope)
+    return this.repository.delete(scope, memoryId, commentId, expectedVersion)
   }
   private sign(payload: string) {
     return createHmac('sha256', this.secret)

@@ -19,7 +19,7 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(version !== undefined ? { 'If-Match': `"${version}"` } : {}),
+        ...(version !== undefined ? { 'If-Match': String(version) } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     })
@@ -90,7 +90,7 @@ suite('COM-2 comment mutation permissions and lifecycle', () => {
     expect(deleted.response.status).toBe(200)
     expect(deleted.body.summary.count).toBe(0)
     expect(deleted.response.headers.get('cache-control')).toBe('private, no-store')
-    expect((await mutate(`${path}/${foreignId}`, owner.token, 'DELETE')).response.status).toBe(200)
+    expect((await mutate(`${path}/${foreignId}`, owner.token, 'DELETE', undefined, 1)).response.status).toBe(200)
   })
 
   test('rejects malformed and stale mutation requests and scopes errors privately', async () => {
