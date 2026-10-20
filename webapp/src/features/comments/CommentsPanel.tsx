@@ -26,7 +26,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   const lease = useRef(true)
   const listRef = useRef<HTMLDivElement>(null)
   const historyEntry = useRef<string | null>(null)
-  const historySetupGeneration = useRef(0)
+  const historySetupGeneration = useRef({ generation: 0 })
   const closingFromHistory = useRef(false)
   const [closeChoice, setCloseChoice] = useState<'dirty' | 'pending' | null>(null)
   const [draft, setDraft] = useState('')
@@ -78,7 +78,8 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   }, [])
 
   useLayoutEffect(() => {
-    const setupGeneration = ++historySetupGeneration.current
+    const owner = historySetupGeneration.current
+    const setupGeneration = ++owner.generation
     lease.current = open
     if (!open) return
     let token = historyEntry.current
@@ -100,7 +101,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       window.removeEventListener('popstate', onPopState)
       const ownedToken = historyEntry.current
       queueMicrotask(() => {
-        if (historySetupGeneration.current !== setupGeneration || !ownedToken || historyEntry.current !== ownedToken) return
+        if (owner.generation !== setupGeneration || !ownedToken || historyEntry.current !== ownedToken) return
         if (window.history.state?.__memolyComments === ownedToken) {
           historyEntry.current = null
           window.history.back()

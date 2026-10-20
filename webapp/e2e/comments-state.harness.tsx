@@ -1,7 +1,7 @@
 import type {} from '../src/platform/diagnostics/window'
 import '../src/production.css'
 document.documentElement.dataset.uiVersion = 'v2'
-import { useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -33,7 +33,7 @@ function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing com
   return { items: items.map((item) => ({ ...item, capabilities })), nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } }
 }
 
-function Harness() {
+export function Harness() {
   const [scope, setScope] = useState(A)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(true)
@@ -82,7 +82,7 @@ function Harness() {
     throw new Error(`Unexpected comments harness request ${method} ${path}`)
   }) as AuthenticatedTransport['request'] }), [])
   const summaries = useCommentSummaries(transport, scope.familyId, scope.accountId, scope.membershipEpoch, [A.memoryId, ...Array.from({ length: 59 }, (_, i) => `90000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`)], active)
-  metrics.configure = (action) => {
+  const configure = useCallback((action: string) => {
     if (action === 'host-back') { hostBack?.(); return }
     if (action === 'summary-race') {
       metrics.holdNext = 'summary'
@@ -95,17 +95,22 @@ function Harness() {
     if (action === 'account' || action === 'logout') { setOpen(false); window.setTimeout(() => { activatePrivateCacheIdentity(action === 'logout' ? null : B.accountId); queryClient.clear(); setScope({ ...B, accountId: action === 'logout' ? '' : B.accountId }); setOpen(action !== 'logout') }, 50) }
     if (action === 'revoke') { setOpen(false); setActive(false); metrics.denyFamily = true; window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId: scope.accountId, familyId: scope.familyId } })); void removePrivateFamilyCache(queryClient, scope.accountId, scope.familyId) }
     if (action === 'open') setOpen(true)
-  }
-  metrics.snapshot = () => {
+  }, [scope])
+  const snapshot = useCallback(() => {
     const entries = queryClient.getQueryCache().getAll().map((query) => ({ key: query.queryKey, data: query.state.data }))
     const targetSummary = entries.flatMap(({ key, data }) => key[0] === 'session' && key[1] === 'comments' && key[5] === 'summaries' && Array.isArray(data) ? data as Array<{ memoryId: string; count: number }> : []).find((item) => item.memoryId === A.memoryId)
     return { keys: entries.map((entry) => entry.key), data: entries.map((entry) => entry.data), entries, open, scope, summaries: summaries.size, targetSummaryCount: targetSummary?.count }
-  }
-  metrics.release = (kind) => { metrics.gates.filter((gate) => gate.kind === kind).forEach((gate) => gate.resolve()) }
+  }, [open, scope, summaries.size])
+  const release = useCallback((kind: Gate['kind']) => { metrics.gates.filter((gate) => gate.kind === kind).forEach((gate) => gate.resolve()) }, [])
+  useLayoutEffect(() => {
+    metrics.configure = configure
+    metrics.snapshot = snapshot
+    metrics.release = release
+  }, [configure, snapshot, release])
   return <main><button onClick={() => setOpen(true)}>Open comments</button><output data-testid="summary-count">{summaries.size}</output>{open ? <CommentsPanel familyTimezone="UTC" hostBridge={{ onBack: (callback) => { hostBack = callback; return () => { if (hostBack === callback) hostBack = null } } }} onClose={() => setOpen(false)} open scope={scope} transport={transport} returnFocusRef={{ current: null }} /> : null}</main>
 }
 
-function CardGallery() {
+export function CardGallery() {
   const types: MemoryDto['kind'][] = ['note', 'photo', 'video', 'voice', 'media']
   const reactions: Partial<Record<MemoryReaction, number>> = { heart: 123, love: 99, laugh: 81, touched: 32, wow: 24, clap: 11 }
   return <div className="memoly-app-root" data-ui-version="v2"><div data-memoly-feed>{types.map((kind, index) => <MemoryCardPresentation actions={<span />} authorInitials="T" authorName={index === 4 ? 'MAX channel attribution' : 'Synthetic author'} authorKind={index === 4 ? 'channel' : 'user'} body={`Synthetic ${kind} memory`} kind={kind} memoryId={`card-${kind}`} media={<div aria-hidden="true" className="card-fixture-media" />} onOpen={() => undefined} onReaction={() => undefined} occurredTime="12:00" reactionCounts={index === 1 ? reactions : {}} currentUserReaction={index === 1 ? 'heart' : null} commentCount={index === 0 ? 0 : index === 1 ? 12 : undefined} onComments={() => { document.body.dataset.lastCommentsTarget = `card-${kind}` }} key={kind} />)}</div></div>
