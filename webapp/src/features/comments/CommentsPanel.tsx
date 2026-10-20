@@ -166,6 +166,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       if (cause instanceof ApiRequestError && cause.status >= 400 && cause.status < 500 && cause.status !== 408) {
         setError('Не удалось отправить комментарий. Проверьте текст и повторите попытку.')
         setUncertainAttempt(null)
+        if (cause.status === 403) await list.refetch()
       } else {
         setError('Неизвестно, удалось ли отправить комментарий. Повторите запрос, чтобы проверить результат.')
         setUncertainAttempt(captured)
@@ -193,7 +194,15 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
         const latest = refreshed.data?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
         if (latest && leaseIsCurrent()) setEdit((current) => current?.id === latest.id ? { ...current, version: latest.version } : current)
       }
-      else { setError('Не удалось изменить комментарий. Черновик сохранён.'); if (cause instanceof ApiRequestError && cause.status === 404) await list.refetch() }
+      else {
+        setError('Не удалось изменить комментарий. Черновик сохранён.')
+        if (cause instanceof ApiRequestError && (cause.status === 403 || cause.status === 404 || (cause.status === 409 && cause.code === 'CONFLICT'))) {
+          const refreshed = await list.refetch()
+          const latest = refreshed.data?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
+          if (!leaseIsCurrent()) return
+          if (!latest && cause.status === 409) setEdit(null)
+        }
+      }
     } finally { if (mutationController.current === controller) mutationController.current = null; busyRef.current = false; setBusy(false) }
   }
 
