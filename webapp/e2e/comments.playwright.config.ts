@@ -9,6 +9,8 @@ const webPort = process.env.E2E_WEB_PORT ?? '5173'
 const inheritedWebServers = Array.isArray(maxConfig.webServer)
   ? maxConfig.webServer.map((server) => server.name === 'web'
     ? { ...server, command: `bun run build && bunx vite preview --host 127.0.0.1 --port ${webPort} --strictPort` }
+    : server.name === 'backend'
+      ? { ...server, env: { ...server.env, MULTI_FAMILY_ACTIVATION: 'on' } }
     : server)
   : maxConfig.webServer
 
