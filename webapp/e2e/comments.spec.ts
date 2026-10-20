@@ -147,12 +147,13 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   expect(listBody.items.filter((item) => item.body === 'Синтетический комментарий для проверки')).toHaveLength(1)
   expect(listBody.items[0]?.capabilities).toMatchObject({ edit: true, delete: true })
 
-  const item = page.locator('.comments-item').filter({ hasText: 'Синтетический комментарий для проверки' })
+  let item = page.locator('.comments-item').filter({ hasText: 'Синтетический комментарий для проверки' })
   await item.getByRole('button', { name: 'Изменить' }).click()
   const editField = page.getByRole('textbox', { name: 'Изменить комментарий' })
   await editField.fill('Исправленный синтетический комментарий')
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByText('Исправленный синтетический комментарий', { exact: true })).toBeVisible()
+  item = page.locator('.comments-item').filter({ hasText: 'Исправленный синтетический комментарий' })
   await expect(item.getByText('изменено', { exact: true })).toBeVisible()
 
   await item.getByRole('button', { name: 'Удалить' }).click()
