@@ -8,7 +8,7 @@ import { CommentComposer } from './CommentComposer'
 import { CommentItem } from './CommentItem'
 import { FeedSharedAuthorAvatars } from '@/features/feed/shared-author-avatars'
 import { createComment, deleteComment, updateComment } from './api'
-import { commentsQueryKeys, invalidateCommentSummaryForMemory, removeCommentScopeQueries, useCommentsList, writeCommentSummary } from './queries'
+import { cancelCommentSummaryQueries, commentsQueryKeys, invalidateCommentSummaryForMemory, removeCommentScopeQueries, useCommentsList, writeCommentSummary } from './queries'
 import { createCommentAttempt, isCurrentCommentScope, mergeCommentPages, normalizeCommentBody, type CommentCreateAttempt, type CommentScope } from './state'
 import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import './comments.css'
@@ -157,6 +157,8 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       const result = await createComment(transport, scope.familyId, scope.memoryId, captured, controller.signal)
       if (!leaseIsCurrent()) return
       setUncertainAttempt(null); setDraft('')
+      await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
+      if (!leaseIsCurrent()) return
       writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => [result.comment, ...items.filter((item) => item.id !== result.comment.id)])
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
@@ -183,7 +185,9 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     try {
       const result = await updateComment(transport, scope.familyId, scope.memoryId, edit.id, { body, expectedVersion: edit.version }, controller.signal)
       if (!leaseIsCurrent()) return
-      setEdit(null); writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      setEdit(null); await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
+      if (!leaseIsCurrent()) return
+      writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => items.map((item) => item.id === result.comment.id ? result.comment : item))
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
     } catch (cause) {
@@ -214,6 +218,8 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       const result = await deleteComment(transport, scope.familyId, scope.memoryId, deleteTarget.id, deleteTarget.version, controller.signal)
       if (!leaseIsCurrent()) return
       setDeleteTarget(null); if (edit?.id === result.deletedId) setEdit(null)
+      await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
+      if (!leaseIsCurrent()) return
       writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => items.filter((item) => item.id !== result.deletedId))
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })

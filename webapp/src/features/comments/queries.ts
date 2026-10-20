@@ -78,6 +78,12 @@ export function useInvalidateComments() {
   return (scope: CommentScope) => client.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
 }
 
+export async function cancelCommentSummaryQueries(client: import('@tanstack/react-query').QueryClient, familyId: string, accountId: string, epoch: number, memoryId: string) {
+  const prefix = [...commentsQueryKeys.all, familyId, accountId, epoch, 'summaries']
+  const matching = client.getQueryCache().findAll({ queryKey: prefix }).filter((query) => query.queryKey.slice(6).includes(memoryId))
+  await Promise.all(matching.map((query) => client.cancelQueries({ queryKey: query.queryKey, exact: true })))
+}
+
 export function writeCommentSummary(client: import('@tanstack/react-query').QueryClient, familyId: string, accountId: string, epoch: number, summary: import('@web-app-demo/contracts').CommentSummary) {
   const entries = client.getQueriesData<import('@web-app-demo/contracts').CommentSummary[]>({ queryKey: [...commentsQueryKeys.all, familyId, accountId, epoch, 'summaries'] })
   for (const [key, data] of entries) {
