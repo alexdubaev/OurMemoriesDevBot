@@ -1728,6 +1728,60 @@
       "alpha": true,
       "bytes": 230,
       "sha256": "dd1bc46520c5efef1316de9e35a7aadb8aa0a86ec80cc8f0cbe127efd9cd92fe"
+    },
+    {
+      "path": "assets/icons/comments-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 1002,
+      "sha256": "0af4c4175cee8c507df45bb672a19cc5fe2bbad99375a8673990d7ae6d7647a9"
+    },
+    {
+      "path": "assets/icons/comments-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1288,
+      "sha256": "9c442e86dfcdf5a4b2c1dce8c6a7efb53f9e1d8fcb925b2e831ca6f0ecb94240"
+    },
+    {
+      "path": "assets/icons/comments-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 1044,
+      "sha256": "0e643ab1d3c14de0981d982b60fa6d54d3f01115bae37a80fb98d9f8e0452be6"
+    },
+    {
+      "path": "assets/icons/comments-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 1298,
+      "sha256": "fcd75820c2230bb2214c28beb089da35e5046a0aa510108961f0522d96369815"
+    },
+    {
+      "path": "assets/icons/comments-white@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 546,
+      "sha256": "22829e15820b22fa19a94accbc71d297791727587c4add39717e492a815df5be"
+    },
+    {
+      "path": "assets/icons/comments-white@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 800,
+      "sha256": "660e352678f299027190481fe4c6e783189472453ed286737bfa6cdf904707dd"
     }
   ]
 }

@@ -4,6 +4,7 @@ export const webpIconNames = [
   'chevron',
   'clock',
   'close',
+  'comments',
   'family',
   'fullscreen',
   'edit',
