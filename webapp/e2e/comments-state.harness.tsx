@@ -74,9 +74,10 @@ function Harness() {
     if (path.endsWith('/comment-summaries')) {
       if (metrics.denyFamily) throw new ApiRequestError(403, 'ROLE_FORBIDDEN', 'Synthetic summary read revoked')
       const gate: Gate = { kind: 'summary', path, aborted: false, completed: false, resolve: () => undefined }
+      const summaries = (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: memoryId === A.memoryId && metrics.currentBody ? 2 : 1, capabilities: { read: true, create: true } }))
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
       if (metrics.holdNext === 'summary') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }); gate.completed = true }
-      return { items: (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: 1, capabilities: { read: true, create: true } })) }
+      return { items: summaries }
     }
     throw new Error(`Unexpected comments harness request ${method} ${path}`)
   }) as AuthenticatedTransport['request'] }), [])

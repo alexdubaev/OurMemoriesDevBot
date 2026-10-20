@@ -160,6 +160,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
       if (!leaseIsCurrent()) return
       writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      void invalidateCommentSummaryForMemory(queryClient, { accountId, familyId, membershipEpoch, memoryId })
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => [result.comment, ...items.filter((item) => item.id !== result.comment.id)])
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
       requestAnimationFrame(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight })
@@ -188,6 +189,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       setEdit(null); await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
       if (!leaseIsCurrent()) return
       writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      void invalidateCommentSummaryForMemory(queryClient, { accountId, familyId, membershipEpoch, memoryId })
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => items.map((item) => item.id === result.comment.id ? result.comment : item))
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
     } catch (cause) {
@@ -221,6 +223,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, memoryId)
       if (!leaseIsCurrent()) return
       writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      void invalidateCommentSummaryForMemory(queryClient, { accountId, familyId, membershipEpoch, memoryId })
       updateCachedPages(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), (items) => items.filter((item) => item.id !== result.deletedId))
       await queryClient.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
     } catch (cause) {

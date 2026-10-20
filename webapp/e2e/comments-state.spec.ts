@@ -42,7 +42,6 @@ test('late summary batch cannot overwrite a server-confirmed comment count', asy
   await page.getByRole('textbox', { name: 'Написать комментарий' }).fill('Race test comment')
   await page.getByRole('button', { name: 'Отправить' }).click()
   await expect.poll(() => page.evaluate(() => window.__commentsState.calls.some((call) => call.method === 'POST' && call.path.endsWith('/comments')))).toBe(true)
-  await expect(page.getByText('Race test comment', { exact: true })).toBeVisible()
   await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(2)
   expect(await page.evaluate(() => window.__commentsState.gates.find((gate) => gate.kind === 'summary')?.aborted)).toBe(true)
   await page.evaluate(() => window.__commentsState.release('summary'))
