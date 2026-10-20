@@ -17,7 +17,7 @@ type Gate = { kind: 'list' | 'create'; path: string; body?: string; aborted: boo
 type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; configure: (action: string) => void; release: (kind: 'list' | 'create') => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number } }
 const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], open: false, scope: A, summaries: 0 }) }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
-;(window as Window & { __commentsState: Metrics }).__commentsState = metrics
+;(window as unknown as { __commentsState: Metrics }).__commentsState = metrics
 
 function fixture(body = 'Existing comment', id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', version = 1, ordinal = 1): CommentDto {
   const time = new Date(Date.UTC(2026, 9, 1, 12, ordinal)).toISOString()
