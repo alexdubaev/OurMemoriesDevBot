@@ -130,7 +130,7 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await textarea.press('End')
   await textarea.press('Enter')
   await expect(textarea).toHaveValue('Первая строка\n')
-  await expect(page.getByRole('button', { name: 'Отправить' })).toBeDisabled()
+  expect(firstKeys).toHaveLength(0)
   await textarea.fill('Синтетический комментарий для проверки')
   await page.getByRole('button', { name: 'Отправить' }).dblclick()
   await expect(page.getByRole('button', { name: 'Повторить отправку' })).toBeVisible()
