@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
+import { Typography } from '@/components/typography'
 import { CommentComposer } from './CommentComposer'
 import { CommentItem } from './CommentItem'
 import { FeedSharedAuthorAvatars } from '@/features/feed/shared-author-avatars'
@@ -45,6 +46,22 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   const leaseIsCurrent = () => isCurrentCommentScope(scope, currentScope.current, lease.current) &&
     isActivePrivateCacheIdentity(scope.accountId, identityGeneration) && privateFamilyCacheGeneration(scope.accountId, scope.familyId) === familyGeneration
 
+  const closeNow = useCallback((fromHistory = false) => {
+    setCloseChoice(null)
+    if (!fromHistory && historyEntry.current && window.history.state?.__memolyComments === historyEntry.current) {
+      closingFromHistory.current = true
+      historyEntry.current = null
+      window.history.back()
+    }
+    onClose()
+  }, [onClose])
+  const requestClose = useCallback((fromHistory = false) => {
+    const hasDraft = Boolean(draft.trim() || edit)
+    if (busyRef.current || uncertainAttempt) { setCloseChoice('pending'); return }
+    if (hasDraft) { setCloseChoice('dirty'); return }
+    closeNow(fromHistory)
+  }, [closeNow, draft, edit, uncertainAttempt])
+
   useLayoutEffect(() => {
     lease.current = open
     if (!open) return
@@ -74,11 +91,11 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   useEffect(() => {
     if (!open) return
     void invalidateCommentSummaryForMemory(queryClient, scope)
-    const refreshSummary = () => { if (!document.hidden && leaseIsCurrent()) void invalidateCommentSummaryForMemory(queryClient, scope) }
+    const refreshSummary = () => { if (!document.hidden) void invalidateCommentSummaryForMemory(queryClient, scope) }
     window.addEventListener('focus', refreshSummary)
     document.addEventListener('visibilitychange', refreshSummary)
     return () => { window.removeEventListener('focus', refreshSummary); document.removeEventListener('visibilitychange', refreshSummary) }
-  }, [open, queryClient, scope])
+  }, [open, queryClient, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
 
   useEffect(() => {
     if (!open) return
@@ -88,7 +105,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       if (historyEntry.current && window.history.state?.__memolyComments === historyEntry.current) window.history.back()
       else requestClose()
     })
-  }, [closeChoice, deleteTarget, hostBridge, open])
+  }, [closeChoice, deleteTarget, hostBridge, open, requestClose])
 
   useEffect(() => () => {
     lease.current = false
@@ -108,23 +125,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       setScrollRestore(null)
     }
   }, [list.data, scrollRestore])
-
-  function requestClose(fromHistory = false) {
-    const hasDraft = Boolean(draft.trim() || edit)
-    if (busyRef.current || uncertainAttempt) { setCloseChoice('pending'); return }
-    if (hasDraft) { setCloseChoice('dirty'); return }
-    closeNow(fromHistory)
-  }
-
-  function closeNow(fromHistory = false) {
-    setCloseChoice(null)
-    if (!fromHistory && historyEntry.current && window.history.state?.__memolyComments === historyEntry.current) {
-      closingFromHistory.current = true
-      historyEntry.current = null
-      window.history.back()
-    }
-    onClose()
-  }
 
   async function submitCreate(attempt: CommentCreateAttempt) {
     const captured = uncertainAttempt ?? createCommentAttempt(attempt.body, attempt.idempotencyKey)
@@ -203,19 +203,19 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     <DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-overlay" />
       <DialogPrimitive.Content aria-describedby="comments-description" className="comments-panel" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }}>
         <header className="comments-header"><div><DialogPrimitive.Title>Комментарии</DialogPrimitive.Title><DialogPrimitive.Description id="comments-description">Обсуждение семейного воспоминания</DialogPrimitive.Description></div><div className="comments-header-actions"><button className="comments-refresh" disabled={list.isFetching} onClick={() => void list.refetch()} type="button">Обновить</button><button aria-label="Закрыть комментарии" className="comments-close" onClick={() => requestClose()} type="button">×</button></div></header>
-        {error ? <p className="comments-error" role="alert">{error}</p> : null}
+        {error ? <Typography as="p" className="comments-error" role="alert" variant="bodyXs">{error}</Typography> : null}
         <div aria-live="polite" className="comments-list" ref={listRef}>
-          {list.isPending ? <p className="comments-state">Загрузка комментариев…</p> : null}
-          {list.isError ? <div className="comments-state" role="alert"><p>Не удалось загрузить комментарии.</p><button onClick={() => void list.refetch()} type="button">Повторить</button></div> : null}
-          {!list.isPending && !list.isError && comments.length === 0 ? <p className="comments-state">Пока нет комментариев. Напишите первым</p> : null}
-          {comments.length > 0 ? <button className="comments-older" disabled={!list.hasNextPage || list.isFetchingNextPage} onClick={() => { if (listRef.current) setScrollRestore({ height: listRef.current.scrollHeight, top: listRef.current.scrollTop }); void list.fetchNextPage() }} type="button">{list.isFetchingNextPage ? 'Загрузка…' : 'Показать более ранние'}</button> : null}
+          {list.isPending ? <Typography as="p" className="comments-state" variant="bodySm">Загрузка комментариев…</Typography> : null}
+          {list.isError ? <div className="comments-state" role="alert"><Typography as="p" variant="bodySm">Не удалось загрузить комментарии.</Typography><button onClick={() => void list.refetch()} type="button"><Typography as="span" variant="memoryButton">Повторить</Typography></button></div> : null}
+          {!list.isPending && !list.isError && comments.length === 0 ? <Typography as="p" className="comments-state" variant="bodySm">Пока нет комментариев. Напишите первым</Typography> : null}
+          {comments.length > 0 && list.hasNextPage ? <button className="comments-older" disabled={list.isFetchingNextPage} onClick={() => { if (listRef.current) setScrollRestore({ height: listRef.current.scrollHeight, top: listRef.current.scrollTop }); void list.fetchNextPage() }} type="button"><Typography as="span" variant="memoryButton">{list.isFetchingNextPage ? 'Загрузка…' : 'Показать более ранние'}</Typography></button> : null}
           <FeedSharedAuthorAvatars authors={comments.map((comment) => ({ path: comment.author.avatarPath }))} enabled={true} familyId={scope.familyId} membershipEpoch={scope.membershipEpoch} transport={transport} userId={scope.accountId}>
             {comments.map((comment) => <CommentItem comment={comment} familyTimezone={familyTimezone} key={comment.id} onDelete={(item) => setDeleteTarget({ id: item.id, version: item.version })} onEdit={(item) => { setError(null); setEdit({ id: item.id, version: item.version, body: item.body }) }} />)}
           </FeedSharedAuthorAvatars>
         </div>
-        {edit ? <form className="comments-composer" onSubmit={(event) => { event.preventDefault(); void saveEdit() }}><textarea aria-label="Изменить комментарий" disabled={busy} onChange={(event) => setEdit({ ...edit, body: event.currentTarget.value })} value={edit.body} /><div><button disabled={busy} type="button" onClick={() => setEdit(null)}>Отмена</button><button disabled={busy} type="submit">Сохранить</button></div></form> : <CommentComposer busy={busy} onChange={setDraft} onCreate={submitCreate} uncertainAttempt={uncertainAttempt} value={draft} />}
-        <DialogPrimitive.Root onOpenChange={(next) => { if (!next) setCloseChoice(null) }} open={closeChoice !== null}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-confirm-overlay" /><DialogPrimitive.Content className="comments-confirm"><DialogPrimitive.Title>{closeChoice === 'pending' ? 'Отправка может быть сохранена' : 'Черновик не сохранён'}</DialogPrimitive.Title><p>{closeChoice === 'pending' ? 'Запрос ещё не подтверждён. Закрыть обсуждение?' : 'Закрыть обсуждение и удалить черновик?'}</p><div><button onClick={() => { setCloseChoice(null); if (closingFromHistory.current) { const token = `comments:${crypto.randomUUID()}`; window.history.pushState({ ...(window.history.state ?? {}), __memolyComments: token }, ''); historyEntry.current = token } closingFromHistory.current = false }} type="button">Продолжить писать</button><button onClick={() => { setDraft(''); setEdit(null); setUncertainAttempt(null); mutationController.current?.abort(); closeNow(closingFromHistory.current); closingFromHistory.current = false }} type="button">Закрыть без сохранения</button></div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
-        <DialogPrimitive.Root onOpenChange={(next) => { if (!next) setDeleteTarget(null) }} open={deleteTarget !== null}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-confirm-overlay" /><DialogPrimitive.Content className="comments-confirm"><DialogPrimitive.Title>Удалить комментарий?</DialogPrimitive.Title><p>Это действие нельзя отменить.</p><div><button onClick={() => setDeleteTarget(null)} type="button">Отмена</button><button disabled={busy} onClick={() => void confirmDelete()} type="button">Удалить</button></div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
+        {edit ? <form className="comments-composer" onSubmit={(event) => { event.preventDefault(); void saveEdit() }}><textarea aria-label="Изменить комментарий" disabled={busy} onChange={(event) => setEdit({ ...edit, body: event.currentTarget.value })} value={edit.body} /><div><button disabled={busy} type="button" onClick={() => setEdit(null)}><Typography as="span" variant="memoryButton">Отмена</Typography></button><button disabled={busy} type="submit"><Typography as="span" variant="memoryButton">Сохранить</Typography></button></div></form> : <CommentComposer busy={busy} onChange={setDraft} onCreate={submitCreate} uncertainAttempt={uncertainAttempt} value={draft} />}
+        <DialogPrimitive.Root onOpenChange={(next) => { if (!next) setCloseChoice(null) }} open={closeChoice !== null}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-confirm-overlay" /><DialogPrimitive.Content className="comments-confirm"><DialogPrimitive.Title>{closeChoice === 'pending' ? 'Отправка может быть сохранена' : 'Черновик не сохранён'}</DialogPrimitive.Title><Typography as="p" variant="bodySm">{closeChoice === 'pending' ? 'Запрос ещё не подтверждён. Закрыть обсуждение?' : 'Закрыть обсуждение и удалить черновик?'}</Typography><div><button onClick={() => { setCloseChoice(null); if (closingFromHistory.current) { const token = `comments:${crypto.randomUUID()}`; window.history.pushState({ ...(window.history.state ?? {}), __memolyComments: token }, ''); historyEntry.current = token } closingFromHistory.current = false }} type="button"><Typography as="span" variant="memoryButton">Продолжить писать</Typography></button><button onClick={() => { setDraft(''); setEdit(null); setUncertainAttempt(null); mutationController.current?.abort(); closeNow(closingFromHistory.current); closingFromHistory.current = false }} type="button"><Typography as="span" variant="memoryButton">Закрыть без сохранения</Typography></button></div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
+        <DialogPrimitive.Root onOpenChange={(next) => { if (!next && !busy) setDeleteTarget(null) }} open={deleteTarget !== null}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-confirm-overlay" /><DialogPrimitive.Content className="comments-confirm"><DialogPrimitive.Title>Удалить комментарий?</DialogPrimitive.Title><Typography as="p" variant="bodySm">Это действие нельзя отменить.</Typography><div><button onClick={() => setDeleteTarget(null)} type="button"><Typography as="span" variant="memoryButton">Отмена</Typography></button><button disabled={busy} onClick={() => void confirmDelete()} type="button"><Typography as="span" variant="memoryButton">Удалить</Typography></button></div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   </DialogPrimitive.Root>

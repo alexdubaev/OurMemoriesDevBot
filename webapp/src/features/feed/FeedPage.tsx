@@ -221,6 +221,8 @@ export function FeedPage({
   }, [familyId, accountId, membershipEpoch])
 
   useEffect(() => {
+    // Reset transient selection when its private route scope changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCommentsSelection(null)
   }, [familyId, accountId, membershipEpoch, active])
 

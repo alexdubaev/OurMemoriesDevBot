@@ -1,5 +1,5 @@
 import { CancelledError, useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query'
-import { useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { privateCacheIdentityGeneration, privateFamilyCacheGeneration, isActivePrivateCacheIdentity } from '@/platform/persistence/private-cache'
 import { loadCommentSummaries, loadComments } from './api'
@@ -13,9 +13,8 @@ export const commentsQueryKeys = {
 
 export function useCommentSummaries(transport: AuthenticatedTransport, familyId: string, accountId: string, membershipEpoch: number, memoryIds: string[], active: boolean) {
   const activeRef = useRef(active)
-  activeRef.current = active
   const scopeRef = useRef({ familyId, accountId, membershipEpoch })
-  scopeRef.current = { familyId, accountId, membershipEpoch }
+  useLayoutEffect(() => { activeRef.current = active; scopeRef.current = { familyId, accountId, membershipEpoch } }, [active, accountId, familyId, membershipEpoch])
   const groups: string[][] = []
   for (let index = 0; index < memoryIds.length; index += 50) groups.push(memoryIds.slice(index, index + 50))
   const queries = useQueries({ queries: groups.map((ids) => {

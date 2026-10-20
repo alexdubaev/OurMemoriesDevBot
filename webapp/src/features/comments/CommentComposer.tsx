@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { CommentCreateAttempt } from './state'
 import { createCommentAttempt } from './state'
+import { Typography } from '@/components/typography'
 
 export function CommentComposer({ onCreate, busy, uncertainAttempt, value, onChange }: {
   onCreate: (attempt: CommentCreateAttempt) => Promise<void>
@@ -21,9 +22,9 @@ export function CommentComposer({ onCreate, busy, uncertainAttempt, value, onCha
     finally { inFlight.current = false }
   }
   return <form className="comments-composer" onSubmit={(event) => { event.preventDefault(); void submit() }}>
-    {validationError ? <p className="comments-status" role="alert">{validationError}</p> : null}
-    {uncertainAttempt ? <p className="comments-status" role="status">Не удалось подтвердить отправку. Повтор использует ту же попытку и текст.</p> : null}
+    {validationError ? <Typography as="p" className="comments-status" role="alert" variant="bodyXs">{validationError}</Typography> : null}
+    {uncertainAttempt ? <Typography as="p" className="comments-status" role="status" variant="bodyXs">Не удалось подтвердить отправку. Повтор использует ту же попытку и текст.</Typography> : null}
     <textarea aria-label="Написать комментарий" disabled={busy || Boolean(uncertainAttempt)} maxLength={4000} onChange={(event) => onChange(event.currentTarget.value)} placeholder="Написать комментарий…" value={uncertainAttempt?.body ?? value} />
-    <button disabled={busy || (!uncertainAttempt && !value.trim())} type="submit">{busy ? 'Отправка…' : uncertainAttempt ? 'Повторить отправку' : 'Отправить'}</button>
+    <button disabled={busy || (!uncertainAttempt && !value.trim())} type="submit"><Typography as="span" variant="memoryButton">{busy ? 'Отправка…' : uncertainAttempt ? 'Повторить отправку' : 'Отправить'}</Typography></button>
   </form>
 }
