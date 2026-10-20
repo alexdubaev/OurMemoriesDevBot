@@ -224,6 +224,8 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
     await page.keyboard.press('Escape')
     await page.keyboard.press('Escape')
     await expect(page.locator('.ml-settings-sheet')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Лента' }).click()
+    await expect(entry).toBeVisible()
     for (const width of widths) {
       await page.setViewportSize({ width, height: 844 })
       await expect(entry).toBeVisible()
