@@ -398,7 +398,7 @@ function runApplicationRollback(options = {}) {
     ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
     ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
     '   if [[ "$*" == *"migration_name"* && "$*" == *"checksum"* ]]; then',
-    '     if [[ "$*" == *"MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256="* ]]; then echo HISTORY_ATTESTATION:present >> "$FIXTURE_EVENTS"; else echo HISTORY_ATTESTATION:missing >> "$FIXTURE_EVENTS"; return 1; fi',
+    '     if [[ "$*" == *"MEMOLY_EXPECTED_MIGRATION_CHECKSUMS="* ]]; then echo HISTORY_ATTESTATION:present >> "$FIXTURE_EVENTS"; else echo HISTORY_ATTESTATION:missing >> "$FIXTURE_EVENTS"; return 1; fi',
     '     [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ] && [ "$FIXTURE_MIGRATION_HISTORY_ERROR" = false ]; return',
     '   fi',
     '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
@@ -457,6 +457,117 @@ test('comments rollback rejects unknown migration history and history query fail
     assert.match(result.events, /HISTORY_ATTESTATION:present/)
     assert.doesNotMatch(result.events, /UP:|GATE/)
   }
+})
+
+function migrationHistoryVerifierSource() {
+  const marker = "bun -e \"$(cat <<'MEMOLY_MIGRATION_HISTORY_JS'"
+  const start = redeployDefinitions.indexOf(marker)
+  assert.notEqual(start, -1, 'rollback executes the migration ledger verifier from its heredoc')
+  const bodyStart = redeployDefinitions.indexOf('\n', start) + 1
+  const end = redeployDefinitions.indexOf('\nMEMOLY_MIGRATION_HISTORY_JS', bodyStart)
+  assert.ok(end > bodyStart, 'migration ledger verifier heredoc is terminated')
+  return redeployDefinitions.slice(bodyStart, end)
+}
+
+function runMigrationHistoryVerifier({ expected, rows }) {
+  const verifier = migrationHistoryVerifierSource().replace(
+    'import { Client } from "pg";',
+    `const Client = class {
+      async connect() {}
+      async query() { return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+      async end() {}
+    };`,
+  )
+  return spawnSync('node', ['--input-type=module', '--eval', verifier], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      MEMOLY_EXPECTED_MIGRATION_CHECKSUMS: expected,
+      FIXTURE_MIGRATION_ROWS: JSON.stringify(rows),
+    },
+    timeout: 10_000,
+  })
+}
+
+test('comments migration catalog derives both Prisma newline checksums from committed SQL', () => {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const fixture = mkdtempSync(resolve(root, '.scratch/migration-checksum-fixture-'))
+  const repo = resolve(fixture, 'source')
+  mkdirSync(resolve(repo, 'backend/prisma/migrations/20261020100000_first'), { recursive: true })
+  mkdirSync(resolve(repo, 'backend/prisma/migrations/20261021120000_second'), { recursive: true })
+  const firstSql = 'CREATE TABLE first (id uuid);\n'
+  const secondSql = 'CREATE TABLE second (id uuid);\r\n'
+  writeFileSync(resolve(repo, 'backend/prisma/migrations/20261020100000_first/migration.sql'), firstSql)
+  writeFileSync(resolve(repo, 'backend/prisma/migrations/20261021120000_second/migration.sql'), secondSql)
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    return result.stdout.trim()
+  }
+  try {
+    git('init', '--quiet')
+    git('config', 'user.email', 'migration-checksums@example.invalid')
+    git('config', 'user.name', 'Migration checksum fixture')
+    git('add', 'backend/prisma/migrations')
+    git('commit', '--quiet', '-m', 'migration checksum fixture')
+    const hash = (sql) => createHash('sha256').update(sql).digest('hex')
+    const normalizedSecondSql = secondSql.replaceAll('\r\n', '\n')
+    const result = spawnSync('bash', ['-s'], {
+      cwd: repo,
+      input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(repo)}\nrollback_migration_catalog_checksums HEAD\n`,
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.stdout.trim(), [
+      `20261020100000_first:${hash(firstSql)}:${hash(firstSql.replaceAll('\n', '\r\n'))}`,
+      `20261021120000_second:${hash(normalizedSecondSql)}:${hash(secondSql)}`,
+    ].join('\n'))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('comments migration ledger accepts only exact source SQL with LF or CRLF checksums', () => {
+  const firstSql = 'CREATE TABLE memories (id uuid);\n'
+  const secondSql = 'CREATE TABLE comments (id uuid);\n'
+  const sha = (sql) => createHash('sha256').update(sql).digest('hex')
+  const expected = [
+    `20261020100000_memories:${sha(firstSql)}:${sha(firstSql.replaceAll('\n', '\r\n'))}`,
+    `20261021120000_comments:${sha(secondSql)}:${sha(secondSql.replaceAll('\n', '\r\n'))}`,
+  ].join('\n')
+  const result = runMigrationHistoryVerifier({
+    expected,
+    rows: [
+      { migration_name: '20261020100000_memories', checksum: sha(firstSql), finished_at: 'now', rolled_back_at: null },
+      { migration_name: '20261021120000_comments', checksum: sha(secondSql.replaceAll('\n', '\r\n')), finished_at: 'now', rolled_back_at: null },
+    ],
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
+test('comments migration ledger rejects SQL drift, missing or extra migrations, and unfinished entries', () => {
+  const sql = 'CREATE TABLE comments (id uuid);\n'
+  const sha = (value) => createHash('sha256').update(value).digest('hex')
+  const expected = `20261021120000_comments:${sha(sql)}:${sha(sql.replaceAll('\n', '\r\n'))}`
+  const row = { migration_name: '20261021120000_comments', checksum: sha(sql), finished_at: 'now', rolled_back_at: null }
+  for (const rows of [
+    [{ ...row, checksum: sha(sql.replace('uuid', 'text')) }],
+    [],
+    [row, { ...row, migration_name: '20261022120000_extra' }],
+    [{ ...row, migration_name: '20261021120000_different' }],
+    [{ ...row, finished_at: null }],
+  ]) {
+    const result = runMigrationHistoryVerifier({ expected, rows })
+    assert.notEqual(result.status, 0, `${JSON.stringify(rows)} unexpectedly passed`)
+  }
+  const secondSql = 'CREATE TABLE memories (id uuid);\n'
+  const secondExpected = [
+    expected,
+    `20261020100000_memories:${sha(secondSql)}:${sha(secondSql.replaceAll('\n', '\r\n'))}`,
+  ].join('\n')
+  const duplicate = runMigrationHistoryVerifier({ expected: secondExpected, rows: [row, row] })
+  assert.notEqual(duplicate.status, 0, 'duplicate completed migration names unexpectedly passed')
 })
 
 for (const [path, contents] of [

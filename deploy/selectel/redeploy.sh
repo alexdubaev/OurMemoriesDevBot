@@ -697,9 +697,10 @@ rollback_runtime_fingerprint() {
 		sha256sum | awk '{print $1}'
 }
 
-rollback_migration_catalog_fingerprint() {
-	local revision=$1 path name checksum records='' count=0
+rollback_migration_catalog_checksums() {
+	local revision=$1 path name lf_checksum crlf_checksum records='' count=0
 	local -a migration_paths=()
+	require_command perl
 	mapfile -t migration_paths < <(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
 		ls-tree -r --name-only "$revision" -- backend/prisma/migrations/ |
 		grep -E '/migration\.sql$' | LC_ALL=C sort)
@@ -707,13 +708,14 @@ rollback_migration_catalog_fingerprint() {
 	for path in "${migration_paths[@]}"; do
 		name=${path#backend/prisma/migrations/}
 		name=${name%/migration.sql}
-		checksum=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" show "$revision:$path" | sha256sum | awk '{print $1}') || return 1
-		[[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || return 1
-		records+="$name:$checksum"$'\n'
+		lf_checksum=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" show "$revision:$path" | perl -pe 's/\r?\n/\n/g' | sha256sum | awk '{print $1}') || return 1
+		crlf_checksum=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" show "$revision:$path" | perl -pe 's/\r?\n/\n/g; s/\n/\r\n/g' | sha256sum | awk '{print $1}') || return 1
+		[[ "$lf_checksum" =~ ^[0-9a-f]{64}$ && "$crlf_checksum" =~ ^[0-9a-f]{64}$ ]] || return 1
+		records+="$name:$lf_checksum:$crlf_checksum"$'\n'
 		count=$((count + 1))
 	done
 	[ "$count" -gt 0 ] || return 1
-	printf '%s' "$records" | sha256sum | awk '{print $1}'
+	printf '%s' "$records"
 }
 
 rollback_auth_gate_for_verified_pair() {
@@ -851,11 +853,44 @@ verify_application_rollback() {
 	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
 		die 'rollback data compatibility state is unknown or migration is unfinished'
 	if [ "$profile" = comments ]; then
-		local expected_migration_catalog
-		expected_migration_catalog=$(rollback_migration_catalog_fingerprint "$MEMOLY_PRODUCT_SHA") ||
+		local expected_migration_checksums
+		expected_migration_checksums=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") ||
 			die 'cannot fingerprint the verified comments migration catalog'
-		[[ "$expected_migration_catalog" =~ ^[0-9a-f]{64}$ ]] || die 'verified comments migration catalog fingerprint is invalid'
-		compose run --rm --no-deps -e "MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256=$expected_migration_catalog" backend bun -e 'import { createHash } from "node:crypto"; import { Client } from "pg"; const expected=process.env.MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256; const client=new Client({connectionString:process.env.DATABASE_URL}); try { if (!/^[0-9a-f]{64}$/.test(expected ?? "")) throw new Error("invalid expected migration catalog"); await client.connect(); const {rows}=await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name"); if (rows.some(row => !row.finished_at && !row.rolled_back_at)) throw new Error("unfinished migration"); const completed=rows.filter(row => row.finished_at && !row.rolled_back_at); if (completed.some(row => typeof row.migration_name !== "string" || typeof row.checksum !== "string")) throw new Error("invalid migration ledger row"); const actual=createHash("sha256").update(completed.map(row => `${row.migration_name}:${row.checksum}`).join("\n")+"\n").digest("hex"); await client.end(); process.exit(actual === expected ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
+		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
+		compose run --rm --no-deps -e "MEMOLY_EXPECTED_MIGRATION_CHECKSUMS=$expected_migration_checksums" backend bun -e "$(cat <<'MEMOLY_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+const expected = new Map();
+for (const line of (process.env.MEMOLY_EXPECTED_MIGRATION_CHECKSUMS ?? "").trim().split("\n")) {
+  const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+  if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+      !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") ||
+      expected.has(name)) process.exit(1);
+  expected.set(name, new Set([lfChecksum, crlfChecksum]));
+}
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  if (expected.size === 0) throw new Error("empty expected migration catalog");
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.some(row => !row.finished_at && !row.rolled_back_at)) throw new Error("unfinished migration");
+  const completed = rows.filter(row => row.finished_at && !row.rolled_back_at);
+  if (completed.length !== expected.size) throw new Error("migration count mismatch");
+  const seen = new Set();
+  for (const row of completed) {
+    if (typeof row.migration_name !== "string" || typeof row.checksum !== "string" || seen.has(row.migration_name)) throw new Error("invalid or duplicate migration ledger row");
+    const sourceChecksums = expected.get(row.migration_name);
+    if (!sourceChecksums || !sourceChecksums.has(row.checksum)) throw new Error("migration ledger differs from source SQL");
+    seen.add(row.migration_name);
+  }
+  if (seen.size !== expected.size) throw new Error("migration names differ from source catalog");
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1 ||
 			die 'comments rollback requires the exact completed migration history'
 	fi
 	)

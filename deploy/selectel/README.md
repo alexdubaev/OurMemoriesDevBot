@@ -422,8 +422,10 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   evidence. Backend and webapp Dockerfiles, Bun config and Selectel Compose/Caddy
   files must still match. Before any service change, rollback-readiness also compares every
   completed `_prisma_migrations` name and checksum with the catalog derived from
-  the checked-out source SQL, rejects unfinished rows, and fails closed on query
-  errors. It does not run a migration or restore database contents.
+  the checked-out source SQL. For each exact migration, it accepts Prisma's LF
+  or CRLF checksum; SQL-content changes, missing/extra migrations, unfinished
+  rows, and query errors still fail closed. It does not run a migration or
+  restore database contents.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
