@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { execFileSync, spawnSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { bashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r', '')
@@ -37,7 +38,7 @@ test('release ownership guard accepts a clean tree and stops on a root-owned anc
   const temp = mkdtempSync(resolve(tmpdir(), 'selectel-owner-'))
   try {
     const appRoot = resolve(temp, 'app root')
-    const bashAppRoot = appRoot.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+    const bashAppRoot = bashPath(appRoot)
     const trackedFile = resolve(appRoot, 'deploy path', 'source file')
     mkdirSync(resolve(appRoot, 'deploy path'), { recursive: true })
     writeFileSync(trackedFile, 'fixture')
@@ -84,7 +85,7 @@ test('modified tracked source fails closed and a clean target checkout updates s
   const checkout = release.match(/fetch_and_checkout\(\) \{[\s\S]*?\n\}/)?.[0]
   assert.ok(validate && guard && checkout)
   const fixture = createGitFixture()
-  const bashRoot = fixture.appRoot.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+  const bashRoot = bashPath(fixture.appRoot)
   try {
     const harness = `
 set -Eeuo pipefail

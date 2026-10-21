@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
+import { bashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (path) => readFileSync(resolve(root, path), 'utf8').replaceAll('\r\n', '\n')
@@ -19,7 +20,7 @@ const failureHandler = release.slice(release.indexOf('  release_failure() {'), r
 function failAt(stage, armed, quiesceFails = false) {
   const directory = mkdtempSync(resolve(root, 'tests/.selectel-mm0-inject-'))
   const marker = resolve(directory, 'forward-only')
-  const bashMarker = marker.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
+  const bashMarker = bashPath(marker)
   const injected = {
     preflight: 'preflight() { return 42; }; preflight',
     backup: `${functionBody(redeploy, 'backup_migration')}\npreflight() { :; }; validate_database_target() { :; }; backup_database() { return 42; }; backup_migration`,

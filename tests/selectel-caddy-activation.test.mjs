@@ -4,14 +4,10 @@ import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { bashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const helper = resolve(root, 'deploy/selectel/in-place-file.sh')
-const bashPath = (path) => {
-  if (process.platform !== 'win32') return path
-  const match = path.match(/^([A-Za-z]):[\\/](.*)$/)
-  return match ? `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll('\\', '/')}` : path.replaceAll('\\', '/')
-}
 const shellQuote = (value) => `'${bashPath(value).replaceAll("'", "'\\''")}'`
 
 const runHelper = (...args) => spawnSync('bash', [bashPath(helper), ...args.map(bashPath)], {

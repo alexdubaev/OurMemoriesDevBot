@@ -427,6 +427,14 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   or CRLF checksum; SQL-content changes, missing/extra migrations, unfinished
   rows, and query errors still fail closed. It does not run a migration or
   restore database contents.
+- The exact COM-UX runtime fingerprint
+  `9b0390d5eb79585c673829eaed792a486ac949fbb72def38f73c743d0e244196` may use
+  only the accepted v4 target `4b4edc0992803b84c919aadb835e8d2e21095c51` and its
+  pinned image pair. It was measured from frozen product source
+  `af86cf96d0d5e3deb84b06ca835d25d67b1147a6`; the source commit is evidence, while
+  the exact runtime fingerprint remains the compatibility pin across squash.
+  The synthetic current → accepted-v4 → current compatibility probe is required
+  on the final release source and has not yet been recorded as passing.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,

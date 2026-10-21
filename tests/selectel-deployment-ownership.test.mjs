@@ -1,8 +1,8 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { linuxPath, runLinuxRoot } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (relativePath) => readFileSync(resolve(root, relativePath), 'utf8').replaceAll('\r\n', '\n')
@@ -25,18 +25,13 @@ compose() {
   if [[ "$*" == *deploy-selectel-database.ts* ]]; then printf '%s' called > "$DB_DEPLOY_MARKER"; fi
   return 0
 }
-SERVER_ROOT=/tmp/memoly-selectel-test
-mkdir -p "$SERVER_ROOT"
+SERVER_ROOT=$(mktemp -d /tmp/memoly-selectel-test.XXXXXX)
 trap 'rm -rf -- "$SERVER_ROOT"' EXIT
 DB_DEPLOY_MARKER="$SERVER_ROOT/db-deploy-called"
 MEMOLY_PRODUCT_SHA=227e2149e66e3c3ac75ac235eb201f8154d7ceb3
 migrate
 `
-  const harnessPath = resolve(root, 'tests/.selectel-backup-harness.sh')
-  const bashHarnessPath = harnessPath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
-  writeFileSync(harnessPath, harness)
-  const result = spawnSync('bash', [bashHarnessPath], { encoding: 'utf8', timeout: 30_000 })
-  rmSync(harnessPath, { force: true })
+  const result = runLinuxRoot(harness, { timeout: 30_000 })
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /database backup failed; migration was not attempted/, `${result.stdout}${result.stderr}`)
   assert.doesNotMatch(result.stderr, /secret|DATABASE_URL|web_app_demo/)
@@ -62,18 +57,13 @@ compose() {
   if [[ "$*" == *deploy-selectel-database.ts* ]]; then printf '%s' called > "$DB_DEPLOY_MARKER"; fi
   return 0
 }
-SERVER_ROOT=/tmp/memoly-selectel-test
-mkdir -p "$SERVER_ROOT"
+SERVER_ROOT=$(mktemp -d /tmp/memoly-selectel-test.XXXXXX)
 trap 'rm -rf -- "$SERVER_ROOT"' EXIT
 DB_DEPLOY_MARKER="$SERVER_ROOT/db-deploy-called"
 MEMOLY_PRODUCT_SHA=91735e8b1c52cdcd42c0051dad945d96aa9f0db2
 migrate
 `
-  const harnessPath = resolve(root, 'tests/.selectel-empty-backup-harness.sh')
-  const bashHarnessPath = harnessPath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
-  writeFileSync(harnessPath, harness)
-  const result = spawnSync('bash', [bashHarnessPath], { encoding: 'utf8', timeout: 30_000 })
-  rmSync(harnessPath, { force: true })
+  const result = runLinuxRoot(harness, { timeout: 30_000 })
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /database backup validation failed; migration was not attempted/, `${result.stdout}${result.stderr}`)
   assert.doesNotMatch(result.stdout, /db-deploy-called/)
@@ -114,25 +104,19 @@ compose() {
   esac
   return 0
 }
-SERVER_ROOT=/tmp/memoly-selectel-test
-mkdir -p "$SERVER_ROOT"
+SERVER_ROOT=$(mktemp -d /tmp/memoly-selectel-test.XXXXXX)
 trap 'rm -rf -- "$SERVER_ROOT"' EXIT
 JOB_LOG_CAPTURE="$JOB_LOG_CAPTURE_PATH"
 JOB_LOG_MODE_CAPTURE="$JOB_LOG_MODE_CAPTURE_PATH"
 MEMOLY_PRODUCT_SHA=91735e8b1c52cdcd42c0051dad945d96aa9f0db2
 migrate
 `
-  const harnessPath = resolve(root, 'tests/.selectel-stage-harness.sh')
   const logCapturePath = resolve(root, 'tests/.selectel-stage-job.log')
   const modeCapturePath = resolve(root, 'tests/.selectel-stage-job.mode')
-  const bashHarnessPath = harnessPath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
-  const bashLogPath = logCapturePath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
-  const bashModePath = modeCapturePath.replace(/^([A-Za-z]):[\\/]/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replaceAll('\\', '/')
-  writeFileSync(harnessPath, harness.replace('$JOB_LOG_CAPTURE_PATH', bashLogPath).replace('$JOB_LOG_MODE_CAPTURE_PATH', bashModePath))
-  const result = spawnSync('bash', [bashHarnessPath], { encoding: 'utf8', timeout: 30_000 })
+  const linuxHarness = harness.replace('$JOB_LOG_CAPTURE_PATH', linuxPath(logCapturePath)).replace('$JOB_LOG_MODE_CAPTURE_PATH', linuxPath(modeCapturePath))
+  const result = runLinuxRoot(linuxHarness, { timeout: 30_000 })
   const privateOutput = readFileSync(logCapturePath, 'utf8')
   const mode = readFileSync(modeCapturePath, 'utf8').trim()
-  rmSync(harnessPath, { force: true })
   rmSync(logCapturePath, { force: true })
   rmSync(modeCapturePath, { force: true })
   assert.notEqual(result.status, 0)
