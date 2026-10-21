@@ -396,7 +396,7 @@ forward-recovery release flow instead.
 
 ## Measured application rollback compatibility
 
-The guarded rollback supports two exact measured backend + webapp pairs:
+The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image
   IDs pinned in `verify_application_rollback`, target fingerprint
@@ -437,6 +437,15 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   current → accepted-v4 → current compatibility probe against this combined
   runtime. Record that probe's passing command and result with the release PR;
   the fingerprint alone is not evidence that the probe passed.
+- The exact feed-photo comments UI runtime fingerprint
+  `9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda` may use
+  only the currently healthy target `33a0054c3c71372aa5509ee8ebfa4578ad512ea1`,
+  target fingerprint `ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87`,
+  and its exact backend/webapp image IDs `sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9` /
+  `sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74`.
+  The source pin is content-bound and limited to this frontend-only runtime;
+  the comments rollback profile still requires exact migration history and all
+  existing ancestry, configuration, image-label, and database-state checks.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
