@@ -168,7 +168,7 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     const commentItems = panel.locator('.comments-item')
     await expect(commentItems).toHaveCount(20)
     const anchorText = await commentItems.first().locator('.comments-item-body > p').innerText()
-    const anchorItem = commentItems.filter({ has: panel.getByText(anchorText, { exact: true }) })
+    const anchorItem = commentItems.filter({ has: page.getByText(anchorText, { exact: true }) })
     for (const expectedCount of [40, 41]) {
       await panel.locator('.comments-list').evaluate((list) => { list.scrollTop = 80 })
       const older = panel.getByRole('button', { name: 'Показать более ранние' })
