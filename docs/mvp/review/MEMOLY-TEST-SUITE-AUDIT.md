@@ -5,6 +5,12 @@ Base: `dc3201096998f366a88a296d13914abf6047604b` (fresh origin/main).
 Branch: `test/full-suite-audit`.
 Worktree: `D:/codex/TG_OurMemoriesDevBot/worktrees/test-suite-audit`.
 
+Owner amendment during this task: the initial production-deploy prohibition was explicitly
+revoked. After successful review, verification and squash merge, a normal guarded release on
+the exact final main SHA is authorized if all existing release/recovery guards pass. No unsafe
+migration, data restore, ACL weakening or guard bypass is authorized. Earlier no-deploy notes
+below describe the original scope and the actions actually taken at those checkpoints.
+
 ## Scope and implementation plan
 
 One implementation worker at a time in the task checkout; read-only discovery may run alongside it.
@@ -313,6 +319,41 @@ active MAX FULL profile. The Docker smoke unit harness remains in the unit catal
 no comparable before/after whole-FULL runtime, so this audit makes no numerical speedup claim.
 
 The final PR and handoff must record the tested clean commit/tree, complete FULL result,
-independent review and actual merge SHA. Intermediate failures and narrow passes above are
-preserved for traceability and do not substitute for that exact-source gate. Production deploy
-is prohibited for this task.
+independent review, actual merge SHA and production/recovery outcome. Intermediate failures
+and narrow passes above are preserved for traceability and do not substitute for that
+exact-source gate. A production release additionally requires FULL on its exact final main
+SHA, guarded backup/recovery readiness and smoke under the existing exclusive release lock.
+
+## Independent review and final source freeze
+
+A fresh reviewer started from committed `077fd88e9a836c3385816336e3b6f8cdb644a2f7`
+against the original base, without implementation history. The bounded correction pass fixed:
+
+- Native avatar pool timers used the pool as their browser receiver, causing an uncaught
+  `Illegal invocation` on loader release. Defaults now call the actual global timers through
+  wrappers. The real browser regression is part of mandatory MAX FULL (37 journeys / 8 files).
+- The avatar fixture omitted App's real family-cache invalidation boundary. It now calls
+  `removePrivateFamilyCache` and proves decoded scoped images and retired URLs, allowing both
+  valid epoch-cache reuse and refetch behavior. The poster locator selects user media, not an icon.
+- SQL identifiers decoded from a test URL were interpolated into two fixture GRANT statements.
+  A small quoted-identifier boundary now escapes embedded quotes; real integration behavior
+  remains checked by FULL, while focused identifier/database-isolation units passed 9/9.
+- Normal repeat releases overwrote the designated attested recovery pair with an unattested
+  captured running SHA. The preparation path now invokes the actual read-only verifier before
+  selection, preserves a revalidated designated target where appropriate and fails before
+  canonical-file mutation if neither target is valid. Legacy and forward-only decisions retain
+  captured writer tags. Two focused shell regressions passed.
+
+The actual timer fix requires a separate exact executable compatibility attestation for the
+existing immutable `33a0054` recovery artifact. Full source/image pins remain unchanged. The
+new content hash is anchored to the existing reachable `dc320109` full attestation; positive
+fixtures read an immutable Git blob rather than the current development source. Test-only
+changes still do not require changing production attestations, and other production drift fails.
+
+The two final targeted carousel/avatar browser specs passed (14.4 s and 3.2 s, total 21.9 s)
+after SHA256-matched snapshot copy. Whole-source exact-commit FULL and publication evidence
+must be read from the PR/final handoff; none of the intermediate results is presented as that gate.
+
+Read-only production preparation confirmed current checkout/images `dc320109`, a clean host,
+more than 4 GiB free, no concurrent release process, public root/live/ready HTTP 200 and existing
+`33a0054` rollback-readiness PASS. No services were promoted during these preparations.

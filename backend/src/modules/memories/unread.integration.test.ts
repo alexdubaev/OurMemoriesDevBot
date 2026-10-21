@@ -8,6 +8,7 @@ import { activateUnreadFamily } from '../../../scripts/activate-unread-tracking'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
+import { quotePostgresIdentifier } from '../../test-support/postgres-identifier'
 import { signAccessToken } from '../auth'
 import { createPrismaFamilyAccess } from '../families'
 import { createSourceMemoryPublisher } from './infrastructure/source-memory-publisher'
@@ -369,7 +370,7 @@ describe('personal unread memories', () => {
     let restrictedClient: Client | undefined
     try {
       await prisma.$executeRawUnsafe(`CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}'`)
-      await prisma.$executeRawUnsafe(`GRANT CONNECT ON DATABASE "${dbName}" TO "${roleName}"`)
+      await prisma.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${quotePostgresIdentifier(dbName)} TO "${roleName}"`)
       await prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${roleName}"`)
       await prisma.$executeRawUnsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${roleName}"`)
       await prisma.$executeRawUnsafe(`REVOKE SELECT ON TABLE memories, memory_seen FROM "${roleName}"`)

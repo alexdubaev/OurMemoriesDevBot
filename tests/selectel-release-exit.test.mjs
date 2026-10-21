@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
@@ -287,6 +287,7 @@ const runtimeFingerprints = {
   comux: 'ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87',
   feedPhoto: '9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda',
 }
+const reviewedAvatarTimerFixBlob = 'e97e72aebc8df97a90990a481de36fd78e77483e'
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -364,6 +365,26 @@ function commitSourceChange(source, relativePath, contents, message) {
   return { ...source, sha }
 }
 
+function commitSourceFile(source, relativePath, contents, message) {
+  writeFileSync(resolve(source.root, relativePath), contents)
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  const add = spawnSync('git', ['add', '--', relativePath], { cwd: source.root, env, encoding: 'utf8' })
+  if (add.status !== 0) throw new Error(add.stdout + add.stderr)
+  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '--quiet', '-m', message, '--', relativePath], { cwd: source.root, env, encoding: 'utf8' })
+  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
+  return { ...source, sha }
+}
+
+function frozenAvatarTimerFixSource() {
+  const result = spawnSync('git', ['cat-file', 'blob', reviewedAvatarTimerFixBlob], { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`frozen avatar timer fixture is unavailable: ${result.stderr}`)
+  return result.stdout
+}
+
 afterAll(() => {
   for (const directory of fixtureWorktrees.reverse()) {
     const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
@@ -378,6 +399,7 @@ function runApplicationRollback(options = {}) {
   const server = resolve(fixture, 'server')
   const backup = resolve(server, 'backups/compose.pre-selectel-fixture')
   mkdirSync(backup, { recursive: true })
+  chmodSync(resolve(server, 'backups'), 0o700)
   mkdirSync(resolve(server, 'gateway'))
   for (const [name, content] of [['compose.yml', 'services: {}\n'], ['Caddyfile', 'before\n'], ['Caddyfile.static', 'static\n']]) {
     writeFileSync(resolve(backup, name), content)
@@ -402,12 +424,14 @@ function runApplicationRollback(options = {}) {
   const targetLabel = options.badLabel ? 'wrong' : target
   const events = resolve(fixture, 'events')
   const env = {
-    SERVER_ROOT: server, APP_ROOT: source.root, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
+    SERVER_ROOT: server, APP_ROOT: source.root, BACKUPS_DIR: resolve(server, 'backups'), PRODUCT_SHA: source.sha, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
     COMPOSE_FILE: resolve(server, 'compose.yml'), ROLLBACK_ENV: resolve(server, 'rollback.env'),
     CONFIG_BACKUP_MARKER: resolve(server, '.selectel-config-backup'),
     SERVER_EDGE_CADDYFILE: resolve(server, 'gateway/Caddyfile'), SERVER_STATIC_CADDYFILE: resolve(server, 'Caddyfile.static'),
     FORWARD_MARKER: resolve(server, 'b2.marker'), MM0_FORWARD_MARKER: resolve(server, 'mm0.marker'),
     MEMOLY_PRODUCT_SHA: options.producer ?? source.sha,
+    RUNNING_BACKEND_IMAGE_TAG: options.runningBackend ?? rollbackBaseline,
+    RUNNING_WEBAPP_IMAGE_TAG: options.runningWebapp ?? rollbackBaseline,
     MAX_BOT_TOKEN: '', MAX_WEBHOOK_SECRET: '', MAX_INBOX_ENCRYPTION_KEY: '',
     MEMOLY_PUBLIC_HOST: 'example.invalid', PUBLIC_URL: 'http://example.invalid',
     FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
@@ -423,6 +447,8 @@ function runApplicationRollback(options = {}) {
   }
   const mocks = [
     'stat() { case "$2" in %u) printf "0\\n" ;; %a) printf "600\\n" ;; %i) printf "1\\n" ;; *) return 2 ;; esac; }',
+    'install() { local target=${!#}; if [ "$1" = -d ]; then mkdir -p "$target"; else : > "$target"; fi; }',
+    'chmod() { :; }',
     'load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }',
     'gateway_preflight() { :; }',
     'docker() {',
@@ -456,6 +482,14 @@ function runApplicationRollback(options = {}) {
     ' fi',
     ' return 0',
     '}',
+    ...(options.action === 'prepare_rollback' ? [
+      'bash() {',
+      ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
+      '   shift',
+      '   ( . "$APP_ROOT/deploy/selectel/redeploy.sh"; require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )',
+      ' else command bash "$@"; fi',
+      '}',
+    ] : []),
   ].join('\n')
   const trigger = options.failure ? [
     'LEGACY_MEMBERSHIP_RUNTIME=false; LEGACY_MM0_RUNTIME=false; QUIESCE_STARTED=false; PROMOTION_STARTED=true',
@@ -471,7 +505,9 @@ function runApplicationRollback(options = {}) {
     })
     return { ...result, output: result.stdout + result.stderr,
       events: existsSync(events) ? readFileSync(events, 'utf8') : '',
-      caddy: readFileSync(resolve(server, 'gateway/Caddyfile'), 'utf8') }
+      caddy: readFileSync(resolve(server, 'gateway/Caddyfile'), 'utf8'),
+      rollbackEnv: readFileSync(resolve(server, 'rollback.env'), 'utf8'),
+      rollbackBackups: readdirSync(resolve(server, 'backups')).filter((name) => name.startsWith('rollback-env.before-')) }
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 }
 
@@ -536,6 +572,60 @@ slowTest('test-only edits keep the verified runtime compatible with its immutabl
   assert.equal(result.status, 0, result.output)
   assert.match(result.output, /Application rollback complete/)
   assert.match(result.events, /GATE\nUP:.*backend worker scheduler static/)
+})
+
+slowTest('runtime timer fix has one exact 33a recovery compatibility attestation', () => {
+  let source = createSourceWorktree('feedPhoto')
+  source = commitSourceFile(source, 'webapp/src/platform/media/avatar-resource-pool.ts',
+    frozenAvatarTimerFixSource(),
+    'apply exact avatar timer binding fix')
+  source = commitSourceFile(source, 'deploy/selectel/redeploy.sh',
+    readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8'), 'apply attested rollback compatibility profile')
+
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness', processTimeoutMs: 60_000 })
+  assert.equal(compatible.status, 0, compatible.output)
+
+  const drifted = commitSourceChange(source, 'webapp/src/platform/media/avatar-resource-pool.ts',
+    '\n// unrelated executable drift\n', 'introduce unapproved runtime drift')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'rollback_readiness', processTimeoutMs: 60_000 })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+})
+
+slowTest('repeat release preserves the verified recovery pair and refuses an invalid prior pair before mutation', () => {
+  let source = createSourceWorktree('feedPhoto')
+  source = commitSourceFile(source, 'webapp/src/platform/media/avatar-resource-pool.ts',
+    frozenAvatarTimerFixSource(),
+    'apply exact avatar timer binding fix')
+  source = commitSourceFile(source, 'deploy/selectel/redeploy.sh',
+    readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8'), 'apply attested rollback compatibility profile')
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: 'dc3201096998f366a88a296d13914abf6047604b',
+    runningWebapp: 'dc3201096998f366a88a296d13914abf6047604b',
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', processTimeoutMs: 60_000 })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+
+  const unknown = 'cccccccccccccccccccccccccccccccccccccccc'
+  const rejected = runApplicationRollback({ target: unknown, webappTarget: unknown,
+    runningBackend: 'dc3201096998f366a88a296d13914abf6047604b',
+    runningWebapp: 'dc3201096998f366a88a296d13914abf6047604b',
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', processTimeoutMs: 60_000 })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /neither the running images nor the designated rollback pair passed recovery verification/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.doesNotMatch(rejected.output, /Rollback prepared:/)
+  assert.match(rejected.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${unknown}$`, 'm'))
+  assert.deepEqual(rejected.rollbackBackups, [])
 })
 
 test('the immutable Selectel source ref retains its comments compatibility profile', () => {

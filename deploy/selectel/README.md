@@ -65,6 +65,14 @@ promotion, and smoke; direct `redeploy.sh` actions cannot interleave with that
 release. If promotion or public smoke fails after services begin changing, the
 entry point attempts the prepared application rollback and preserves the original
 failure status if rollback also fails.
+
+For a normal release, captured running images and the designated recovery pair
+are separate facts. Before replacing `rollback.env`, the entry point checks the
+captured pair with the full `rollback-readiness` verifier. If that pair is not an
+attested recovery target, it preserves the existing designated pair only after
+the same verifier accepts it against the candidate source and current database.
+If neither pair passes, it stops before replacing the file or promoting services.
+Legacy/forward-only boundary decisions continue to use the captured running pair.
 For the first release crossing the B2 membership boundary, the entry point
 compares the running backend SHA with the accepted B2 runtime SHA. A pre-B2
 backend relies on the one-active-membership index that B2 removes. The entry
@@ -467,6 +475,15 @@ runtime configuration, manifests, dependencies, protected Selectel files, and
 the UI-v4 ancestry and artifact checks remain covered. A test refactor therefore
 does not rotate an immutable artifact pin, while any production-input drift still
 fails the compatibility comparison.
+
+The native browser avatar-timer binding fix has one additional exact executable
+compatibility hash, `bc01000a1b256cadea573095487added25afe54f29de56814a587246f8827a89`,
+for recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. It is anchored
+to the unchanged full-attested `dc320109` source above. This is a reviewed actual
+runtime fix, not a repin caused by a test edit. Existing recovery image IDs,
+source pins, migration/configuration checks and v4 ancestry remain mandatory.
+Its positive test fixture uses the immutable reviewed timer-source Git blob;
+it does not read the changing application's current file as a historical fixture.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises

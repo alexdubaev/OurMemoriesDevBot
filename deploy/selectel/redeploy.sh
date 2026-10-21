@@ -725,6 +725,7 @@ rollback_compatibility_fingerprint() {
 rollback_source_compatibility_profile() {
 	local revision=$1 target=$2 candidate_hash reference full_hash profile
 	local -a attestations=()
+	local -a exact_compatibility_attestations=()
 	candidate_hash=$(rollback_compatibility_fingerprint "$revision") || return 1
 	case "$target" in
 		e383d79269a3595f4c6cabedf167335aea042cf3)
@@ -737,13 +738,25 @@ rollback_source_compatibility_profile() {
 			attestations=("91f48719309e20456b1659092a1bf209c3aa3653:9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468:comments"
 				"33a0054c3c71372aa5509ee8ebfa4578ad512ea1:ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87:comments") ;;
 		33a0054c3c71372aa5509ee8ebfa4578ad512ea1)
-			attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:comments") ;;
+			attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:comments")
+			# The timer callback binding fix changes executable source while
+			# preserving this exact recovery profile. This content hash is anchored
+			# to the same full-attested dc320 source and applies only to target 33a.
+			exact_compatibility_attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:bc01000a1b256cadea573095487added25afe54f29de56814a587246f8827a89:comments") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
 		IFS=: read -r reference full_hash profile <<< "$attestation"
 		[ "$(rollback_runtime_fingerprint "$reference")" = "$full_hash" ] || continue
 		if [ "$(rollback_compatibility_fingerprint "$reference")" = "$candidate_hash" ]; then
+			printf '%s\n' "$profile"
+			return 0
+		fi
+	done
+	for attestation in "${exact_compatibility_attestations[@]}"; do
+		IFS=: read -r reference full_hash expected_hash profile <<< "$attestation"
+		[ "$(rollback_runtime_fingerprint "$reference")" = "$full_hash" ] || continue
+		if [ "$candidate_hash" = "$expected_hash" ]; then
 			printf '%s\n' "$profile"
 			return 0
 		fi

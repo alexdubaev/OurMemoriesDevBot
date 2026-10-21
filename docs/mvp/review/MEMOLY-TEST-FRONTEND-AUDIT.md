@@ -5,9 +5,9 @@ Branch: `test/full-suite-audit`
 
 ## Browser portfolio
 
-The MAX Playwright profile now discovers 36 scenarios across 7 spec files: comments and comments state (22), browser-link authentication (2), functional v4 navigation/profile/crop/viewer (8), voice playback (1), video lifecycle/privacy resource bounds (1), and MAX family scope/revocation (2). The family browser scenarios retain the browser-only stale-response and revoke/rejoin protections. API-heavy comment ACL, family isolation, and pagination setup was removed from the browser flow; those contracts are exercised by backend PostgreSQL integration tests.
+The final MAX Playwright profile contains 37 scenarios across 8 spec files: comments and comments state (22), browser-link authentication (2), functional v4 navigation/profile/crop/viewer (8), voice playback (1), video lifecycle/privacy resource bounds (1), shared private avatar lifecycle (1), and MAX family scope/revocation (2). The family browser scenarios retain the browser-only stale-response and revoke/rejoin protections. API-heavy comment ACL, family isolation, and pagination setup was removed from the browser flow; those contracts are exercised by backend PostgreSQL integration tests.
 
-The profile includes `comments.spec.ts`, `comments-state.spec.ts`, `max-browser-link.spec.ts`, `memoly-v4.spec.ts`, `voice-player.spec.ts`, `video-lifecycle.spec.ts`, and only the two tagged journeys in `max-family-audit.max-e2e.ts`. It avoids the broad legacy family audit and the PWA watchdog diagnostics spec. Private Service Worker behavior remains covered by `private-media-sw.test.ts` and cache units.
+The profile includes `comments.spec.ts`, `comments-state.spec.ts`, `max-browser-link.spec.ts`, `memoly-v4.spec.ts`, `voice-player.spec.ts`, `video-lifecycle.spec.ts`, `shared-author-avatar.spec.ts`, and only the two tagged journeys in `max-family-audit.max-e2e.ts`. It avoids the broad legacy family audit and the PWA watchdog diagnostics spec. Private Service Worker behavior remains covered by `private-media-sw.test.ts` and cache units.
 
 ## Refactored checks
 
@@ -20,7 +20,7 @@ The profile includes `comments.spec.ts`, `comments-state.spec.ts`, `max-browser-
 
 ## Retired visual-only suites
 
-Removed the five disconnected Playwright visual suites and their configs, along with the obsolete welcome parity HTML fixture and contrast baseline. Their useful AddSheet focus, Escape/focus-return, browser Back, family selection/return, and role behavior are represented by compact functional browser checks or the existing MAX family browser journeys. No frontend production source changed.
+Removed the five disconnected Playwright visual suites and their configs, along with the obsolete welcome parity HTML fixture and contrast baseline. Their useful AddSheet focus, Escape/focus-return, browser Back, family selection/return, and role behavior are represented by compact functional browser checks or the existing MAX family browser journeys. Visual product source remains unchanged; the confirmed native-timer bug found during browser verification is described below.
 
 ## E2E database safety
 
@@ -33,3 +33,28 @@ E2E port planning and global startup use the shared strict loopback test-databas
 - `bun run --cwd webapp typecheck`: passed, including the E2E Playwright config TypeScript project.
 - `bunx playwright test --config webapp/playwright.max.config.ts --list`: discovered 36 scenarios in 7 files. This is discovery only; no browser execution result is claimed here. The lead is running the real MAX browser portfolio on the isolated local PostgreSQL environment.
 - Comparable before/after runtime measurements were not available, so no suite speedup is claimed.
+
+## Actual browser closure and independent-review finding
+
+The first complete Linux Chromium portfolio run executed 36 scenarios: 32 passed and 4 failed.
+Narrow closure corrected a locator for the intentionally inert comments background, removed
+global PhotoSwipe request-count assumptions while proving a usable full slide uses its loaded
+URL, inherited the family server ports in worker reloads, and selected the intended family through
+the canonical chooser. The final two family journeys passed (35.0 s and 28.7 s), retaining the
+stale-feed response, role, revoke, offline-content, membership epoch, one-time invite and rejoin
+history checks. The PhotoSwipe and comments cases also passed their focused runs.
+
+The optional changed gesture/avatar run executed 9 scenarios, with 7 passed and 2 failed.
+Carousel's poster locator also matched a decorative icon; its focused correction passed. Avatar
+traces then exposed a real production failure: `AvatarResourcePool` called native browser timer
+functions with the pool as their receiver, throwing `TypeError: Illegal invocation` during loader
+release and collapsing the feed. Independent review applied wrapper calls to `globalThis` timers;
+the next run passed the epoch stage without a page error. A later failure exposed a harness gap:
+its revoke listener hid the feed but omitted App's real `removePrivateFamilyCache` boundary.
+The harness now invokes that boundary and retains explicit URL retirement checks. This single
+functional avatar scenario is included in mandatory MAX FULL; final exact-source execution and
+review closure are recorded in the PR/handoff rather than inferred from these earlier failures.
+
+The final timer-helper cleanup passed 13 focused units (47 assertions) and webapp typecheck.
+All browser copies used for the final family and optional checks were SHA256-matched to the
+source under test; an earlier stale snapshot's failure was not accepted as evidence for later code.

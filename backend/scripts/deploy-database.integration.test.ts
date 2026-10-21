@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
+import { quotePostgresIdentifier } from '../src/test-support/postgres-identifier'
 
 import { createPrisma } from '../src/db'
 import {
@@ -274,7 +275,8 @@ test('migration ownership preflight requires both public-schema privileges', asy
     await admin.$executeRawUnsafe(
       `CREATE ROLE "${username}" LOGIN PASSWORD '${password}'`,
     )
-    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE "${decodeURIComponent(parsed.pathname.slice(1))}" TO "${username}"`)
+    const databaseName = decodeURIComponent(parsed.pathname.slice(1))
+    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${quotePostgresIdentifier(databaseName)} TO "${username}"`)
     await admin.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${username}"`)
     await admin.$executeRawUnsafe(`REVOKE CREATE ON SCHEMA public FROM "${username}"`)
 

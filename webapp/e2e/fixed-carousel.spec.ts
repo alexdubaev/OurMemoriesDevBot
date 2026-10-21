@@ -13,7 +13,7 @@ test('production feed carousel selects attachments through drags and opens the s
   const viewport = card.locator('.memoly-mixed-viewport')
   await expect(viewport).toBeVisible()
   await expect(page.locator('.memoly-app-root[data-ui-version="v2"]')).toBeVisible()
-  await expect(card.locator('[data-carousel-position="1"] .memoly-mixed-slide-poster[data-poster-ready="true"] img')).toBeVisible()
+  await expect(card.locator('[data-carousel-position="1"] .memoly-mixed-slide-poster[data-poster-ready="true"] img[alt="Кадр видео"]')).toBeVisible()
   await expect(card.locator('[data-carousel-dot]')).toHaveCount(4)
 
   let lastSelected = 1
@@ -26,7 +26,7 @@ test('production feed carousel selects attachments through drags and opens the s
     await page.mouse.down()
     for (let step = 1; step <= 8; step++) {
       await page.mouse.move(forward ? rect!.x + rect!.width - 20 - step * (rect!.width / 10) : rect!.x + 20 + step * (rect!.width / 10), y, { steps: 1 })
-      if (lastSelected <= 2) await expect(card.locator(`[data-carousel-position="${lastSelected}"] .memoly-mixed-slide-poster[data-poster-ready="true"] img`)).toBeVisible()
+      if (lastSelected <= 2) await expect(card.locator(`[data-carousel-position="${lastSelected}"] .memoly-mixed-slide-poster[data-poster-ready="true"] img[alt="Кадр видео"]`)).toBeVisible()
     }
     await page.mouse.up()
     await expect(card.locator(`[data-carousel-dot="${selected}"]`)).toHaveAttribute('aria-pressed', 'true')

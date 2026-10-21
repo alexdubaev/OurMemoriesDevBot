@@ -8,7 +8,7 @@ import { FeedPage } from '@/features/feed/FeedPage'
 import { feedQueryKeys } from '@/features/feed/queries'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { ApiRequestError } from '@/platform/api'
-import { activatePrivateCacheIdentity, allowPrivateFamilyCache, privateFamilyAccessRevokedEvent } from '@/platform/persistence/private-cache'
+import { activatePrivateCacheIdentity, allowPrivateFamilyCache, privateFamilyAccessRevokedEvent, removePrivateFamilyCache } from '@/platform/persistence/private-cache'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 
@@ -84,7 +84,10 @@ export function Probe() {
     window.__avatarProbe.configure = (next) => updateConfig?.(next)
     const onRevoked = (event: Event) => {
       const detail = (event as CustomEvent<{ userId?: string; familyId?: string }>).detail
-      if (detail?.userId === currentConfig.current.userId && detail.familyId === currentConfig.current.familyId) setRevoked(true)
+      if (detail?.userId === currentConfig.current.userId && detail.familyId === currentConfig.current.familyId) {
+        void removePrivateFamilyCache(queryClient, detail.userId!, detail.familyId!)
+        setRevoked(true)
+      }
     }
     window.addEventListener(privateFamilyAccessRevokedEvent, onRevoked)
     return () => {

@@ -36,6 +36,9 @@ RESUMING_FORWARD_ONLY=false
 RESUMING_MM0=false
 MARKER_TARGET_SHA=
 PREBUILT_IMAGES=false
+RUNNING_BACKEND_IMAGE_TAG=
+RUNNING_WEBAPP_IMAGE_TAG=
+ROLLBACK_VERIFY_ENV=
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -53,6 +56,10 @@ require_root() {
 release_failure() {
     local status=$?
     trap - EXIT
+    if [ -n "$ROLLBACK_VERIFY_ENV" ]; then
+      rm -f -- "$ROLLBACK_VERIFY_ENV"
+      ROLLBACK_VERIFY_ENV=
+    fi
     [ "$status" -eq 0 ] && exit 0
     if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
       printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
@@ -258,8 +265,10 @@ capture_running_images() {
   static=$(service_image static)
   [ "$backend" = "$backend_worker" ] || die 'running backend and worker image tags do not match'
   [ "$backend" = "$backend_scheduler" ] || die 'running backend and scheduler image tags do not match'
-  PREVIOUS_BACKEND_IMAGE_TAG=$(immutable_tag "$backend" memoly-backend)
-  PREVIOUS_WEBAPP_IMAGE_TAG=$(immutable_tag "$static" memoly-webapp)
+  RUNNING_BACKEND_IMAGE_TAG=$(immutable_tag "$backend" memoly-backend)
+  RUNNING_WEBAPP_IMAGE_TAG=$(immutable_tag "$static" memoly-webapp)
+  PREVIOUS_BACKEND_IMAGE_TAG=$RUNNING_BACKEND_IMAGE_TAG
+  PREVIOUS_WEBAPP_IMAGE_TAG=$RUNNING_WEBAPP_IMAGE_TAG
   export PREVIOUS_BACKEND_IMAGE_TAG PREVIOUS_WEBAPP_IMAGE_TAG
 }
 
@@ -385,8 +394,51 @@ verify_rollback_file() {
 
 prepare_rollback() {
   verify_rollback_file
+  local timestamp backup temp verify_env candidate_valid=false
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
+    verify_env=$(mktemp)
+    ROLLBACK_VERIFY_ENV=$verify_env
+    install -m 0600 /dev/null "$verify_env"
+    awk -v backend="$RUNNING_BACKEND_IMAGE_TAG" -v webapp="$RUNNING_WEBAPP_IMAGE_TAG" '
+      BEGIN { backend_seen = 0; webapp_seen = 0 }
+      /^PREVIOUS_BACKEND_IMAGE_TAG=/ { print "PREVIOUS_BACKEND_IMAGE_TAG=" backend; backend_seen = 1; next }
+      /^PREVIOUS_WEBAPP_IMAGE_TAG=/ { print "PREVIOUS_WEBAPP_IMAGE_TAG=" webapp; webapp_seen = 1; next }
+      { print }
+      END {
+        if (!backend_seen) print "PREVIOUS_BACKEND_IMAGE_TAG=" backend
+        if (!webapp_seen) print "PREVIOUS_WEBAPP_IMAGE_TAG=" webapp
+      }
+    ' "$ROLLBACK_ENV" > "$verify_env"
+    chmod 0600 "$verify_env"
+    if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+      bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+      candidate_valid=true
+    else
+      # The captured pair can be a healthy running release without being an
+      # independently attested recovery target. Keep the already designated
+      # recovery only after the same full verifier accepts it against current
+      # source and database state.
+      if ! MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
+        rm -f -- "$verify_env"
+        ROLLBACK_VERIFY_ENV=
+        die 'neither the running images nor the designated rollback pair passed recovery verification'
+      fi
+      set -a
+      # shellcheck disable=SC1090
+      . "$ROLLBACK_ENV"
+      set +a
+      PREVIOUS_BACKEND_IMAGE_TAG=${PREVIOUS_BACKEND_IMAGE_TAG:?designated rollback backend tag is missing}
+      PREVIOUS_WEBAPP_IMAGE_TAG=${PREVIOUS_WEBAPP_IMAGE_TAG:?designated rollback webapp tag is missing}
+      printf 'Captured running images are not an attested recovery pair; preserving the verified designated rollback pair.\n'
+    fi
+    rm -f -- "$verify_env"
+    ROLLBACK_VERIFY_ENV=
+    if [ "$candidate_valid" = true ]; then
+      PREVIOUS_BACKEND_IMAGE_TAG=$RUNNING_BACKEND_IMAGE_TAG
+      PREVIOUS_WEBAPP_IMAGE_TAG=$RUNNING_WEBAPP_IMAGE_TAG
+    fi
+  fi
   install -d -m 0700 "$BACKUPS_DIR"
-  local timestamp backup temp
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   backup="$BACKUPS_DIR/rollback-env.before-${PRODUCT_SHA}-${timestamp}"
   [ ! -e "$backup" ] || die "rollback backup already exists: $(basename "$backup")"
@@ -406,7 +458,7 @@ prepare_rollback() {
   ' "$ROLLBACK_ENV" > "$temp"
   chmod 0600 "$temp"
   mv -- "$temp" "$ROLLBACK_ENV"
-  printf 'Rollback prepared from running images: backend=%s webapp=%s.\n' "$PREVIOUS_BACKEND_IMAGE_TAG" "$PREVIOUS_WEBAPP_IMAGE_TAG"
+  printf 'Rollback prepared: backend=%s webapp=%s.\n' "$PREVIOUS_BACKEND_IMAGE_TAG" "$PREVIOUS_WEBAPP_IMAGE_TAG"
 }
 
 public_smoke() {

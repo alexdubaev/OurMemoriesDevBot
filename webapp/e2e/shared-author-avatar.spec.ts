@@ -45,8 +45,26 @@ test('private author avatars share requests and retire stale URLs across feed sc
   const epochOnlyPaths: [string, string, string] = [...sharedPaths]
   await resetMetrics()
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 2, paths: epochOnlyPaths })
-  await expect.poll(async () => new Set(await avatarRequests()).size).toBe(sameFamilyPaths.size)
-  expect((await avatarRequests()).every((path) => sameFamilyPaths.has(path))).toBe(true)
+  const epochRequests = await avatarRequests()
+  expect(epochRequests.every((path) => sameFamilyPaths.has(path))).toBe(true)
+  expect(new Set(epochRequests).size).toBe(epochRequests.length)
+  expect(epochRequests).not.toContain(sharedPaths[2])
+  const epochImages = page.locator('.memory-card .author-avatar img')
+  await expect.poll(() => epochImages.evaluateAll((nodes) => nodes.length > 0 &&
+    nodes.every((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0),
+  )).toBe(true)
+  const epochImagesByAuthor = await epochImages.evaluateAll((nodes) => {
+    const byAuthor = new Map<string, Set<string>>()
+    for (const image of nodes as HTMLImageElement[]) {
+      const author = image.closest('.memory-card')?.querySelector('.author-name')?.textContent ?? ''
+      const urls = byAuthor.get(author) ?? new Set<string>()
+      urls.add(image.src)
+      byAuthor.set(author, urls)
+    }
+    return [...byAuthor.entries()].map(([author, urls]) => ({ author, urlCount: urls.size }))
+  })
+  expect(epochImagesByAuthor.map(({ author }) => author).sort()).toEqual(['Author A', 'Author B'])
+  expect(epochImagesByAuthor.every(({ urlCount }) => urlCount === 1)).toBe(true)
   const retainedAuthorB = await page.locator('.memory-card').nth(1).locator('.author-avatar img').getAttribute('src')
   const pathOnlyPaths: [string, string, string] = [avatar(familyA, 'ababaccc'), sharedPaths[1], sharedPaths[2]]
   await resetMetrics()
