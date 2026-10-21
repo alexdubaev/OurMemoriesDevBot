@@ -156,6 +156,8 @@ On a real iPhone/MAX, the owner should check:
 Physical iPhone/MAX acceptance has not been performed. Browser emulation and
 synthetic screenshots are not evidence of a physical keyboard/MAX check.
 
-PRODUCTION MIGRATION: NONE  
-PRODUCTION DEPLOY: NONE  
+PRODUCTION MIGRATION: NONE
+
+PRODUCTION DEPLOY: NONE
+
 REAL FAMILY DATA CHANGES: NONE
