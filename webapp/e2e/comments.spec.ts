@@ -36,7 +36,7 @@ async function signInAndSeed(page: Page) {
   await page.getByRole('button', { name: 'Продолжить' }).click()
   const auth = await authPromise
   const token = (await auth.json() as { accessToken: string }).accessToken
-  let seeded: { familyId: string; memoryId: string; token: string } | null = null
+  let seeded: { familyId: string; memoryId: string; childId: string; token: string } | null = null
   let familyPostIntercepted = false
   await page.route('**/api/v1/families', async (route) => {
     if (route.request().method() !== 'POST' || familyPostIntercepted) return route.continue()
@@ -57,14 +57,14 @@ async function signInAndSeed(page: Page) {
       data: { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
     })
     expect(memoryResponse.status()).toBe(201)
-    seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, token: tokenFromRequest }
+    seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, childId, token: tokenFromRequest }
     await route.fulfill({ response: familyResponse })
   })
   await page.getByRole('button', { name: 'Создать свою семью' }).click()
   await expect.poll(() => seeded).not.toBeNull()
   const { familyId, memoryId } = seeded!
   await expect(page.locator(`[data-memory-id="${memoryId}"]`)).toBeVisible({ timeout: 20_000 })
-  return { familyId, memoryId, token: seeded!.token }
+  return { familyId, memoryId, childId: seeded!.childId, token: seeded!.token }
 }
 
 async function uploadPng(page: Page, token: string, familyId: string) {
@@ -84,6 +84,91 @@ async function uploadPng(page: Page, token: string, familyId: string) {
   expect(finalized.status()).toBe(200)
   return ticket.assetId
 }
+
+async function authenticateMax(page: Page, userId: number) {
+  const response = await page.request.post('/api/v1/auth/max', {
+    data: { initData: signedMaxInitData(userId) },
+  })
+  expect(response.status()).toBe(200)
+  return (await response.json() as { accessToken: string }).accessToken
+}
+
+async function acceptRoleInvite(page: Page, familyId: string, ownerToken: string, memberToken: string, role: 'full' | 'viewer') {
+  const invite = await page.request.post(`/api/v1/families/${familyId}/invites`, {
+    headers: { Authorization: `Bearer ${ownerToken}` },
+    data: { role },
+  })
+  expect(invite.status()).toBe(201)
+  const { rawToken } = await invite.json() as { rawToken: string }
+  const accepted = await page.request.post('/api/v1/invites/accept', {
+    headers: { Authorization: `Bearer ${memberToken}` },
+    data: { token: rawToken },
+  })
+  expect(accepted.status()).toBe(200)
+}
+
+test('COM-4 real API roles, family isolation, cursor pages and 50-memory batch through the browser transport', async ({ page }) => {
+  const owner = await signInAndSeed(page)
+  const fullToken = await authenticateMax(page, 987_700_001)
+  const viewerToken = await authenticateMax(page, 987_700_002)
+  const otherPage = await page.context().newPage()
+  const otherFamily = await signInAndSeed(otherPage)
+  await acceptRoleInvite(page, owner.familyId, owner.token, fullToken, 'full')
+  await acceptRoleInvite(page, owner.familyId, owner.token, viewerToken, 'viewer')
+
+  const commentPath = `/api/v1/families/${owner.familyId}/memories/${owner.memoryId}/comments`
+  const identities = [owner.token, fullToken, viewerToken]
+  const writes = await Promise.all(identities.map((token, index) => page.request.post(commentPath, {
+    headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': randomUUID() },
+    data: { body: `COM-4 role ${index}` },
+  })))
+  expect(writes.map((response) => response.status())).toEqual([201, 201, 201])
+  const foreignRead = await page.request.get(`/api/v1/families/${otherFamily.familyId}/memories/${otherFamily.memoryId}/comments`, {
+    headers: { Authorization: `Bearer ${owner.token}` },
+  })
+  expect(foreignRead.status()).toBe(404)
+  await otherPage.close()
+
+  const pageRows = await Promise.all(Array.from({ length: 62 }, (_, index) =>
+    page.request.post(commentPath, {
+      headers: { Authorization: `Bearer ${owner.token}`, 'Idempotency-Key': randomUUID() },
+      data: { body: `COM-4 page ${index}` },
+    })))
+  expect(pageRows.every((response) => response.status() === 201)).toBe(true)
+  const first = await page.request.get(`${commentPath}?limit=50`, {
+    headers: { Authorization: `Bearer ${owner.token}` },
+  })
+  expect(first.status()).toBe(200)
+  const firstBody = await first.json() as { items: Array<{ id: string }>; nextCursor: string | null }
+  expect(firstBody.items).toHaveLength(50)
+  expect(firstBody.nextCursor).toBeTruthy()
+  const second = await page.request.get(`${commentPath}?limit=50&cursor=${encodeURIComponent(firstBody.nextCursor!)}`, {
+    headers: { Authorization: `Bearer ${fullToken}` },
+  })
+  expect(second.status()).toBe(200)
+  const secondBody = await second.json() as { items: Array<{ id: string }>; nextCursor: string | null }
+  expect(secondBody.items.length).toBeGreaterThan(0)
+  expect(new Set([...firstBody.items, ...secondBody.items].map((row) => row.id)).size)
+    .toBe(firstBody.items.length + secondBody.items.length)
+
+  const memoryIds = [owner.memoryId]
+  for (let index = 0; index < 49; index += 1) {
+    const response = await page.request.post(`/api/v1/families/${owner.familyId}/memories`, {
+      headers: { Authorization: `Bearer ${owner.token}`, 'Idempotency-Key': randomUUID() },
+      data: { kind: 'note', childId: owner.childId, body: `COM-4 batch ${index}`, occurredAt: new Date().toISOString() },
+    })
+    expect(response.status()).toBe(201)
+    memoryIds.push((await response.json() as { id: string }).id)
+  }
+  const batch = await page.request.post(`/api/v1/families/${owner.familyId}/memories/comment-summaries`, {
+    headers: { Authorization: `Bearer ${viewerToken}` },
+    data: { memoryIds },
+  })
+  expect(batch.status()).toBe(200)
+  const summary = await batch.json() as { items: Array<{ memoryId: string; count: number }> }
+  expect(summary.items).toHaveLength(50)
+  expect(summary.items.find((item) => item.memoryId === owner.memoryId)?.count).toBeGreaterThanOrEqual(65)
+})
 
 test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }, testInfo) => {
   const { familyId, memoryId, token } = await signInAndSeed(page)
