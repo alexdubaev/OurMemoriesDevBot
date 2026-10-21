@@ -112,7 +112,7 @@ try {
       assert.equal(replay.body.comment.id, state.commentId)
       const deletedReplay = await request(commentsPath, state.token, 'POST', { body: 'COM-4 API-created tombstone' }, state.tombstoneRequestId)
       assert.equal(deletedReplay.response.status, 409)
-      assert.equal(deletedReplay.body.error.code, 'CONFLICT')
+      assert.equal(deletedReplay.body.error.code, 'IDEMPOTENCY_CONFLICT')
       for (const rollbackWrite of state.rollbackMemoryIds ?? []) {
         const oldWrite = await request(`/families/${state.familyId}/memories/${rollbackWrite.id}`, state.token)
         assert.equal(oldWrite.response.status, 200)
