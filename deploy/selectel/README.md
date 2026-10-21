@@ -5,6 +5,8 @@ This runbook is the reproducible source for the existing Selectel host at
 the already-running host-port Caddy gateway unmanaged and giving Docker Compose
 ownership only of internal services.
 
+**Product invariant: memoLy uses accepted UI v4 only, including recovery. Historical pre-v4 artifacts mentioned below are evidence for data/runtime analysis, never permissible frontend promotion targets. No approval flag overrides this rule.**
+
 ## Release entry point
 
 Use this file as the single procedure for the existing host. It is safe for an agent
@@ -48,8 +50,7 @@ access boundary, the build inputs, the migration gate, and the rollback contract
   checkout, or clean files to recover a release.
 
 - The release preflight requires at least 4 GiB free on the filesystem containing
-  `/opt/memoly`. The current host has roughly 2 GiB free, so releases stop at the
-  disk check until the owner completes approved host maintenance.
+  `/opt/memoly`. Measure it before every release; historical free-space values do not prove readiness. If below the floor, stop before mutation and prepare scoped maintenance; never bypass the guard or prune unrelated resources.
 - The current verified public MAX bot username is `id911018762027_bot`. It is a
   build-time frontend value and is not a secret. Pass it as
   `VITE_MAX_BOT_USERNAME`; a reviewed change is required if the public username
@@ -325,7 +326,7 @@ running Compose `postgres` service; database contents and connection secrets
 are never printed.
 
 After a validated backup, the internal action runs the repository's guarded
-`bun run db:deploy` in a one-shot `docker compose run --rm --no-deps backend`
+`bun scripts/deploy-selectel-database.ts` in a one-shot `docker compose run --rm --no-deps backend`
 container using the target immutable backend image. It then verifies
 `prisma migrate status` with that image. It never recreates backend, worker,
 scheduler or static and never reloads Caddy. Do not substitute `prisma db
@@ -337,7 +338,7 @@ compatible runtime commit `0074d04c8e7f88b2327b56cea10ca38647d36190`.
 It validates a backup while the old backend, worker and scheduler are healthy.
 It then writes the root-owned mode-0600
 `/opt/memoly/.selectel-mm0-forward-only` marker, stops all three old writer
-services, and only then invokes `db:deploy`. The MM0 SQL contains multiple DDL
+services, and only then invokes the dedicated Selectel database procedure. The MM0 SQL contains multiple DDL
 statements without an explicit transaction. A failed migration command has an
 unknown database state. Keep the marker and old writers stopped;
 `FORWARD_FIX_REQUIRED` means prepare a compatible forward release. Do not
@@ -539,3 +540,54 @@ candidate Caddyfile in the running unmanaged gateway, checks local immutable
 images, and runs `docker compose config`. It requires the server's Docker daemon
 and must be run on the host before promotion; do not substitute a committed env
 file or print secret values.
+
+## Existing MAX migration, interrupted jobs and accepted UI
+
+For the existing MAX-only host, `migrate` selects `deploy-selectel-database.ts`,
+not the Yandex/DigitalOcean password-bootstrap entrypoint. It requires
+`MAX_ENABLED=true` and refuses any admin seed before connecting. It retains
+migration-owner inventory, Prisma's real migration ledger and atomic runtime
+DML/default PUBLIC ACL hardening. No password administrator is created or
+required. Provider bootstrap requirements remain in [DEPLOYMENT.md](../../docs/DEPLOYMENT.md).
+
+The job's unique `selectel-db-deploy.*.log` remains server-private (directory 0700,
+file 0600); console output contains only fixed stage diagnostics and its basename.
+A post-migration failure does **not** mean SQL was undone. Inspect the exact job,
+ledger/status and active images before retrying. Completed Prisma migrations are
+retained; a retry uses the same guarded entrypoint and a new validated backup.
+Never delete ledger rows, reapply SQL manually, restore a backup automatically or
+use the no-migration flag to avoid an unmet required postcondition. When the
+schema is demonstrably current and all procedure postconditions have passed,
+the normal checked-schema update remains available.
+
+Normal release source must contain the accepted v4 commit
+`afdb408f8bbf22b564c86bb8d33a83261f55cc48`. This is checked after a read-only fetch
+and before checkout, config changes, resumed writer quiescence or promotion.
+Backend reconciliation first investigates preserving the active v4 static and
+proves API/schema compatibility; unknown mixed runtimes fail closed. Do not run
+the old all-service rollback merely to satisfy a convenient baseline.
+
+The additional measured rollback pair is the already accepted v4 release
+`4b4edc0992803b84c919aadb835e8d2e21095c51`:
+
+- backend/worker/scheduler image ID `sha256:400f49886253aeb1d23d3688de5d5cce20fba3b4b1c20a82a9d6453ecb7d2bdc`;
+- frontend image ID `sha256:70682430fd480dfddb3d3df0431665ea71d8018c0a0993993b8ffb6360baadf9`.
+
+Its attestation is restricted to the exact new database-procedure runtime tree,
+current comments migration catalog, unchanged relevant schema/dependencies/config,
+protected artifacts and matching immutable image labels/IDs. It does not permit
+arbitrary future product changes. Real synthetic current → v4 → current and
+current → older runtime → current probes verify data preservation. Historical pre-v4 pairs may be assessed for backend/data evidence only; their frontend cannot be promoted.
+
+`rollback-readiness` is a read-only technical compatibility assessment. It never
+makes a historical artifact an allowed product version. Actual `rollback` and
+`rollback-static` require the target to contain accepted UI v4 before any
+configuration or service mutation. There is no approval file, flag, maintenance
+consent or emergency exception that authorizes pre-v4 UI in memoLy. Preserve v4;
+if no compatible v4 rollback exists, prepare a safe compatible forward recovery.
+Missing compatible recovery remains a pre-release blocker. Database, immutable
+image, configuration and forward-only safeguards remain mandatory.
+
+Incident evidence and limits of historical logs are in the single
+[postmortem](../../docs/RELEASE_POSTMORTEM_2026-10-21.md). This documentation and
+its local tests do not authorize a production release.

@@ -19,6 +19,8 @@ Read `references/scout-contract.md`.
 
 After the scout returns, inspect only the reported relevant files first. Treat scout conclusions as leads, not truth.
 
+For unexpected release preconditions, trace the requirement to its original platform/scenario and the full invoked path before proposing privilege, authentication, or accepted-product changes. Require a synthetic reproduction and assess existing safe alternatives. Follow the canonical release-precondition and product-preservation policy in root AGENTS.md; a rollback artifact is not a product decision. Escalate only the exact protected action still necessary, then resume the assigned task after approval.
+
 ## 2. Plan
 
 Write a concrete implementation plan before edits. Divide work by independently testable outcomes, not by arbitrary files.

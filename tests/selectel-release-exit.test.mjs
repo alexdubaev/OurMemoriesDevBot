@@ -17,6 +17,9 @@ const start = release.indexOf('  release_failure() {')
 const end = release.indexOf('\n  }\n  trap release_failure EXIT', start)
 assert.ok(start >= 0 && end > start, 'release failure handler is present')
 const releaseFailure = release.slice(start, end + 4)
+const plannedSourceMatch = release.match(/validate_planned_source\(\) \{[\s\S]*?\n\}/)
+assert.ok(plannedSourceMatch, 'planned source guard is present')
+const plannedSourceGuard = plannedSourceMatch[0]
 
 function runHandler({ legacy = false, quiesced = false, promoted = false, trigger }) {
   return spawnSync('bash', ['-s'], {
@@ -65,11 +68,39 @@ test('nonzero release exit preserves application rollback handling', () => {
   assert.match(result.stderr, /attempting application rollback/)
 })
 
+test('planned release validates accepted UI v4 ancestry before any resume mutation', { skip: process.platform === 'win32' }, () => {
+  const run = (sha, withUiDowngradeCheck = false) => spawnSync('bash', ['-s'], {
+    input: [
+      'set -euo pipefail',
+      `APP_ROOT=${shellQuote(root)}`,
+      `PRODUCT_SHA=${sha}`,
+      'ACCEPTED_UI_V4_SHA=afdb408f8bbf22b564c86bb8d33a83261f55cc48',
+      'die() { printf "ERROR: %s\\n" "$*" >&2; exit 9; }',
+      'git_memoly() { case "$1" in fetch) echo READ_ONLY_FETCH ;; rev-parse) printf "%s\\n" "$PRODUCT_SHA" ;; *) return 90 ;; esac; }',
+      'git_root() { git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" "$@"; }',
+      plannedSourceGuard,
+      'validate_planned_source',
+      withUiDowngradeCheck ? [redeployDefinitions, `require_accepted_ui_target ${sha}`].join('\n') : '',
+      'echo MUTATION_BOUNDARY',
+    ].filter(Boolean).join('\n'),
+    encoding: 'utf8', timeout: 10_000,
+  })
+  const old = run(rollback180)
+  assert.equal(old.status, 9, old.stdout + old.stderr)
+  assert.doesNotMatch(old.stdout, /MUTATION_BOUNDARY/)
+  assert.match(old.stderr, /accepted UI v4/)
+
+  const acceptedSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
+  const current = run(acceptedSha, true)
+  assert.equal(current.status, 0, current.stdout + current.stderr)
+  assert.match(current.stdout, /MUTATION_BOUNDARY/)
+})
+
 function runStaticRollback({ marker, badLabel, badId, incompatible = false, bunfigChanged = false, rollbackTag, curlFailures = 0 } = {}) {
   const fixture = mkdtempSync(resolve(root, 'tests', '.uim-static-rollback-'))
   const server = resolve(fixture, 'server')
   const bin = resolve(fixture, 'bin')
-  const previous = rollbackTag ?? 'a'.repeat(40)
+  const previous = rollbackTag ?? rollbackV4
   const current = 'b'.repeat(40)
   const eventLog = resolve(fixture, 'events')
   const curlCounter = resolve(fixture, 'curl-count')
@@ -96,6 +127,10 @@ function runStaticRollback({ marker, badLabel, badId, incompatible = false, bunf
     readlink: `#!/usr/bin/env bash\nprintf '%s\\n' "$3"\n`,
     flock: '#!/usr/bin/env bash\nexit 0\n',
     git: `#!/usr/bin/env bash
+if [[ " $* " == *" merge-base --is-ancestor afdb408f8bbf22b564c86bb8d33a83261f55cc48 "* ]]; then
+  [[ "$*" == *" 4b4edc0992803b84c919aadb835e8d2e21095c51"* ]] && exit 0
+  exit 1
+fi
 if [[ " $* " == *" diff --quiet "* ]] && [ "\${STATIC_INCOMPATIBLE:-false}" = true ]; then exit 1; fi
 if [[ " $* " == *" diff --quiet "* && " $* " == *" bunfig.toml "* ]] && [ "\${STATIC_BUNFIG_CHANGED:-false}" = true ]; then exit 1; fi
 exit 0
@@ -208,13 +243,20 @@ test('UI rollback promotes only the static service after all guards pass', () =>
   assert.match(result.output, /UI-only rollback complete/)
 })
 
+test('static rollback rejects pre-v4 UI before static service mutation', () => {
+  const result = runStaticRollback({ rollbackTag: rollback180 })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.output, /UI downgrade is forbidden/)
+  assert.doesNotMatch(result.events, /UP:/)
+})
+
 test('UI rollback rejects forward markers, incompatible trees, bad labels, and image ID mismatches before promotion', () => {
   for (const options of [
     { marker: 'b2.marker' },
     { marker: 'mm0.marker' },
     { incompatible: true },
     { bunfigChanged: true },
-    { badLabel: 'a'.repeat(40) },
+    { badLabel: rollbackV4 },
     { badId: 'backend' },
   ]) {
     const result = runStaticRollback(options)
@@ -236,14 +278,18 @@ test('UI rollback restores the previously running static image after public read
 const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const candidateRuntimeSha = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
 const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
+const rollbackV4 = '4b4edc0992803b84c919aadb835e8d2e21095c51'
 const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
 const candidateWebappId = 'sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66'
+const v4BackendId = 'sha256:400f49886253aeb1d23d3688de5d5cce20fba3b4b1c20a82a9d6453ecb7d2bdc'
+const v4WebappId = 'sha256:70682430fd480dfddb3d3df0431665ea71d8018c0a0993993b8ffb6360baadf9'
 const runtimeFingerprints = {
   legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
   candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
   comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
+  selectel: '9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468',
 }
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
@@ -285,6 +331,10 @@ function rollbackSource(role) {
     const source = { root, sha: currentSha }
     fixtureSourceCache.set(role, source)
     return source
+  }
+
+  if (role === 'selectel') {
+    throw new Error('selectel rollback source requires clean HEAD with the exact 9afbb165… runtime fingerprint')
   }
 
   const fallback = role === 'candidate' ? candidateRuntimeSha : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
@@ -335,6 +385,7 @@ const redeployDefinitions = readFileSync(resolve(root, 'deploy/selectel/redeploy
   .replaceAll('\r\n', '\n').replace(/\nmain "\$@"\s*$/, '\n')
 
 function runApplicationRollback(options = {}) {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const fixture = mkdtempSync(resolve(root, '.scratch/rollback-guard-'))
   const server = resolve(fixture, 'server')
   const backup = resolve(server, 'backups/compose.pre-selectel-fixture')
@@ -351,13 +402,14 @@ function runApplicationRollback(options = {}) {
     'PREVIOUS_WEBAPP_IMAGE_TAG=' + (options.webappTarget ?? rollbackBaseline),
     'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
   ].join('\n'), { mode: 0o600 })
-  if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
-  if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
   const source = options.sourceRootOverride
     ? { root: options.sourceRootOverride, sha: options.sourceShaOverride }
     : rollbackSource(options.source ?? 'legacy')
   const target = options.target ?? rollbackBaseline
   const candidatePair = target === rollback180
+  const v4Pair = target === rollbackV4
+  if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
+  if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
   const targetLabel = options.badLabel ? 'wrong' : target
   const events = resolve(fixture, 'events')
   const env = {
@@ -374,8 +426,8 @@ function runApplicationRollback(options = {}) {
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
     FIXTURE_MIGRATION_HISTORY_MISMATCH: String(options.historyMismatch ?? false),
     FIXTURE_MIGRATION_HISTORY_ERROR: String(options.historyError ?? false),
-    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (candidatePair ? candidateBackendId : legacyBackendId),
-    FIXTURE_WEBAPP_ID: candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
+    FIXTURE_WEBAPP_ID: v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
     FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
@@ -433,26 +485,28 @@ function runApplicationRollback(options = {}) {
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 }
 
-test('candidate to #180 uses its exact runtime attestation and normal auth routing', () => {
-  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', operatorGate: 'true' })
-  assert.equal(result.status, 0, result.output)
-  assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
-  assert.match(result.output, /normal authentication routing/)
+test('legacy UI target fails rollback readiness without changing services', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', action: 'rollback_readiness' })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.events, /STATE/)
+  assert.doesNotMatch(result.events, /UP:|GATE/)
+  assert.match(result.output, /UI downgrade is forbidden/)
   assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
 })
 
-test('measured comments source to #180 attests exact migration history and uses normal auth routing', () => {
-  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments' })
+test('measured comments source to legacy UI remains technical-only and attests exact migration history', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments', action: 'verify_application_rollback' })
   assert.equal(result.status, 0, result.output)
   assert.match(result.events, /HISTORY_ATTESTATION:present/)
-  assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present\nGATE\nUP:.*backend worker scheduler static/)
-  assert.match(result.output, /normal authentication routing/)
+  assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present/)
+  assert.doesNotMatch(result.events, /UP:|GATE/)
+  assert.doesNotMatch(result.output, /readiness verified/)
   assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
 })
 
 test('comments rollback rejects unknown migration history and history query failures before promotion', () => {
   for (const options of [{ historyMismatch: true }, { historyError: true }]) {
-    const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments', ...options })
+    const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments', action: 'verify_application_rollback', ...options })
     assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
     assert.match(result.events, /HISTORY_ATTESTATION:present/)
     assert.doesNotMatch(result.events, /UP:|GATE/)
@@ -614,10 +668,38 @@ test('comments rollback rejects wrong targets, immutable image IDs, OCI labels, 
   }
 })
 
-test('rollback-readiness runs the attestation without changing services or gateway', () => {
+test('rollback-readiness rejects legacy UI without changing services or gateway', () => {
   const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', action: 'rollback_readiness' })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.output, /UI downgrade is forbidden/)
+  assert.doesNotMatch(result.events, /UP:|GATE/)
+  assert.equal(result.caddy, 'before\n')
+})
+
+test('current deploy-procedure source rolls back only to the pinned UI v4 artifact', () => {
+  const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4,
+    source: 'selectel' })
   assert.equal(result.status, 0, result.output)
-  assert.match(result.output, /readiness verified; no services were changed/)
+  assert.match(result.output, /rollback complete|Rollback complete|Application rollback complete/i)
+  assert.doesNotMatch(result.output, /UI downgrade is forbidden/)
+  assert.match(result.events, new RegExp(`GATE\\nUP:${rollbackV4}:.*backend worker scheduler static`))
+  assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+
+  const changedSource = commitSourceChange(createSourceWorktree('selectel'), 'backend/src/worker.ts',
+    '\n// changed product runtime fixture\n', 'mutate new Selectel rollback source')
+  const changed = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4,
+    sourceRootOverride: changedSource.root, sourceShaOverride: changedSource.sha,
+    producer: changedSource.sha })
+  assert.notEqual(changed.status, 0, changed.output)
+  assert.match(changed.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(changed.events, /UP:|GATE/)
+})
+
+test('actual rollback rejects pre-v4 UI before config or service mutation', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    source: 'candidate' })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.output, /UI downgrade is forbidden/)
   assert.doesNotMatch(result.events, /UP:|GATE/)
   assert.equal(result.caddy, 'before\n')
 })
@@ -695,11 +777,11 @@ test('rollback guard reports unknown and dirty source states before promotion', 
 
 for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
   test('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
-    const result = runApplicationRollback(flags)
+    const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4, source: 'selectel', ...flags })
     assert.equal(result.status, 0, result.output)
-    assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
+    assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present\nGATE\nUP:.*backend worker scheduler static/)
     assert.match(result.output, /Application rollback complete/)
-    assert.match(result.caddy, /rollback_auth_maintenance/)
+    assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
   })
 }
 
@@ -709,52 +791,57 @@ test('application rollback fails closed for unknown, incompatible, image, migrat
     { webappTarget: 'a'.repeat(40) }, { stateError: true }, { pending: true },
     { marker: 'b2.marker' }, { marker: 'mm0.marker' }, { badImage: true }, { badLabel: true }, { noBackup: true },
   ]) {
-    const result = runApplicationRollback(options)
+    const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4, source: 'selectel', ...options })
     assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
     assert.doesNotMatch(result.events, /UP:/, JSON.stringify(options) + result.events)
   }
 })
 
 test('real ci-release failure branch completes guarded application restoration and retains failure status', () => {
-  const result = runApplicationRollback({ failure: true })
+  const result = runApplicationRollback({ failure: true, target: rollbackV4, webappTarget: rollbackV4, source: 'selectel' })
   assert.equal(result.status, 42, result.output)
   assert.match(result.output, /attempting application rollback/)
   assert.match(result.output, /Application rollback complete/)
   assert.doesNotMatch(result.output, /automatic application rollback failed/)
   assert.match(result.events, /GATE\nUP:.*backend worker scheduler static/)
-  const failed = runApplicationRollback({ failure: true, stateError: true })
+  assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+  const failed = runApplicationRollback({ failure: true, target: rollbackV4, webappTarget: rollbackV4,
+    source: 'selectel', stateError: true })
   assert.equal(failed.status, 42, failed.output)
   assert.match(failed.output, /automatic application rollback failed/)
   assert.doesNotMatch(failed.events, /UP:/)
 
   const candidate = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180, webappTarget: rollback180 })
   assert.equal(candidate.status, 42, candidate.output)
-  assert.match(candidate.output, /Application rollback complete/)
+  assert.match(candidate.output, /UI downgrade is forbidden/)
+  assert.match(candidate.output, /automatic application rollback failed/)
+  assert.doesNotMatch(candidate.events, /UP:/)
   assert.doesNotMatch(candidate.caddy, /rollback_auth_maintenance/)
-  assert.match(candidate.events, /GATE\nUP:.*backend worker scheduler static/)
 
-  const blocked = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180,
-    webappTarget: rollback180, badAuthResponse: true })
+  const blocked = runApplicationRollback({ failure: true, source: 'selectel', target: rollbackV4,
+    webappTarget: rollbackV4, badAuthResponse: true })
   assert.equal(blocked.status, 42, blocked.output)
   assert.match(blocked.output, /normal authentication routing is not active/)
   assert.doesNotMatch(blocked.events, /UP:/)
 
-  const restorationFailure = runApplicationRollback({ failure: true, source: 'candidate', target: rollback180,
-    webappTarget: rollback180, promotionFail: true })
+  const restorationFailure = runApplicationRollback({ failure: true, source: 'selectel', target: rollbackV4,
+    webappTarget: rollbackV4, promotionFail: true })
   assert.equal(restorationFailure.status, 42, restorationFailure.output)
   assert.match(restorationFailure.output, /automatic application rollback failed/)
   assert.match(restorationFailure.events, /GATE\nUP:/)
 })
 
-test('normal promotion requires compatibility and a fresh validated backup before service changes', () => {
+test('normal promotion validates its prepared rollback UI before any mutation', () => {
   const start = redeployDefinitions.indexOf('\ndeploy() {')
   const end = redeployDefinitions.indexOf('\n}\n', start)
   assert.ok(start > 0 && end > start)
-  for (const failure of ['none', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
+  for (const failure of ['none', 'require_accepted_ui_target', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
     const result = spawnSync('bash', ['-s'], { encoding: 'utf8', input: [
       'set -euo pipefail',
       'MM0_BOUNDARY=false; FORWARD_MARKER=/nonexistent-selectel-marker',
       'die() { echo "DIE:$*"; exit 19; }',
+      'read_static_rollback_tag() { PREVIOUS_WEBAPP_IMAGE_TAG=4b4edc0992803b84c919aadb835e8d2e21095c51; echo STEP:read_static_rollback_tag; }',
+      `require_accepted_ui_target() { [ "${failure}" != require_accepted_ui_target ] && [ "$1" = 4b4edc0992803b84c919aadb835e8d2e21095c51 ] || return 42; echo STEP:require_accepted_ui_target; }`,
       ...['guard_membership_transition', 'preflight', 'backup_server_state', 'verify_application_rollback',
         'validate_database_target', 'backup_database', 'prepare_configuration', 'migration_status',
         'promote_backend', 'wait_backend_internal', 'promote_jobs', 'promote_static',
@@ -765,10 +852,14 @@ test('normal promotion requires compatibility and a fresh validated backup befor
     const output = result.stdout + result.stderr
     if (failure === 'none') {
       assert.equal(result.status, 0, output)
+      assert.match(output, /STEP:read_static_rollback_tag\nSTEP:require_accepted_ui_target\nSTEP:guard_membership_transition/)
       assert.match(output, /STEP:verify_application_rollback\nSTEP:validate_database_target\nSTEP:backup_database\nSTEP:prepare_configuration/)
     } else {
       assert.notEqual(result.status, 0, output)
       assert.doesNotMatch(output, /STEP:promote_backend/)
+      if (failure === 'require_accepted_ui_target') {
+        assert.doesNotMatch(output, /STEP:guard_membership_transition|STEP:backup_server_state|STEP:prepare_configuration/)
+      }
     }
   }
 })

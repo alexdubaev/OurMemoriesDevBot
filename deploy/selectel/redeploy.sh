@@ -606,6 +606,7 @@ backup_database() {
 }
 
 migrate() {
+	local job_log stage
 	preflight
 	validate_database_target
 	if [ "${MM0_BACKUP_PREPARED:-false}" = true ]; then
@@ -614,11 +615,26 @@ migrate() {
 	else
 		backup_database
 	fi
-	if ! compose run --rm --no-deps backend bun run db:deploy >/dev/null 2>&1; then
-		die "database migration failed; application services were not promoted"
+	install -d -m 0700 "$SERVER_ROOT/backups" || die 'cannot create database job log directory'
+	chmod 0700 "$SERVER_ROOT/backups" || die 'cannot secure database job log directory'
+	job_log=$(mktemp "$SERVER_ROOT/backups/selectel-db-deploy.XXXXXXXX.log") || die 'cannot create database job log'
+	chmod 0600 "$job_log" || {
+		rm -f -- "$job_log"
+		die 'cannot secure database job log'
+	}
+	if ! compose run --rm --no-deps backend bun scripts/deploy-selectel-database.ts >"$job_log" 2>&1; then
+		stage='database job failed'
+		if grep -Fxq 'Database ownership preflight failed; inspect the documented ownership inventory before retrying.' "$job_log"; then
+			stage='database ownership preflight failed'
+		elif grep -Fxq 'Database migration failed; schema may already have advanced; inspect migration status before retrying.' "$job_log"; then
+			stage='database migration failed'
+		elif grep -Fxq 'Database migration was applied, but runtime grants or postconditions failed; inspect the database before retrying.' "$job_log"; then
+			stage='post-migration runtime grants or postconditions failed'
+		fi
+		die "$stage; schema may already have advanced; inspect migration status before retrying; private job log: $(basename "$job_log"); application services were not promoted"
 	fi
 	if ! migration_status >/dev/null 2>&1; then
-		die "database migration status failed; application services were not promoted"
+		die "database migration applied or status is unavailable; inspect migration status before retrying; application services were not promoted"
 	fi
 	printf 'Database migration complete. Application services were not promoted.\n'
 }
@@ -718,9 +734,19 @@ rollback_migration_catalog_checksums() {
 	printf '%s' "$records"
 }
 
+require_accepted_ui_target() {
+	local target=$1 accepted_ui_v4=afdb408f8bbf22b564c86bb8d33a83261f55cc48
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$target^{commit}" 2>/dev/null ||
+		die 'UI rollback target is unavailable; use a compatible v4 forward fix'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$accepted_ui_v4" "$target" ||
+		die 'UI rollback target predates accepted v4; UI downgrade is forbidden, use a compatible v4 forward fix'
+}
+
 rollback_auth_gate_for_verified_pair() {
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
+	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
+	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} expected_runtime gate source_runtime
 	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
 	case "$target" in
@@ -731,6 +757,10 @@ rollback_auth_gate_for_verified_pair() {
 		"$candidate_target")
 			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
 			gate=false
+			;;
+		"$accepted_v4_target")
+		expected_runtime=$new_comments_runtime
+		gate=false
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
@@ -743,6 +773,9 @@ rollback_auth_gate_for_verified_pair() {
 	if [ "$target" = "$candidate_target" ] &&
 		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
 		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+	fi
+	if [ "$target" = "$candidate_target" ] && [ "$source_runtime" = "$new_comments_runtime" ]; then
+		expected_runtime=$new_comments_runtime
 	fi
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	printf '%s\n' "$gate"
@@ -770,6 +803,8 @@ verify_application_rollback() {
 	# so squash commits do not need to retain unreachable producer objects.
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
+	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
+	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local target expected_runtime expected_target_runtime profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
@@ -781,6 +816,12 @@ verify_application_rollback() {
 			target=$candidate_target
 			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
 			expected_target_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
+			;;
+		"$accepted_v4_target:$accepted_v4_target")
+			target=$accepted_v4_target
+			expected_runtime=$new_comments_runtime
+			expected_target_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+			profile=comments
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
@@ -803,6 +844,10 @@ verify_application_rollback() {
 		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
 		profile=comments
 		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+	fi
+	if [ "$target" = "$candidate_target" ] && [ "$source_runtime" = "$new_comments_runtime" ]; then
+		profile=comments
+		expected_runtime=$new_comments_runtime
 	fi
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
@@ -836,6 +881,10 @@ verify_application_rollback() {
 		"$candidate_target")
 			expected_backend_id=sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c
 			expected_webapp_id=sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66
+			;;
+		"$accepted_v4_target")
+		expected_backend_id=sha256:400f49886253aeb1d23d3688de5d5cce20fba3b4b1c20a82a9d6453ecb7d2bdc
+			expected_webapp_id=sha256:70682430fd480dfddb3d3df0431665ea71d8018c0a0993993b8ffb6360baadf9
 			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
@@ -901,6 +950,7 @@ rollback() {
 	set -a
 	. "$ROLLBACK_ENV"
 	set +a
+	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	load_runtime_secrets
@@ -1030,6 +1080,7 @@ rollback_static() {
 	image_id=$(docker image inspect --format '{{.Id}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG") ||
 		die 'cannot inspect previous webapp image ID'
 	[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'previous webapp image ID is invalid'
+	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	image_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
 		"memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG") || die 'cannot inspect previous webapp revision label'
 	[ "$image_revision" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] || die 'previous webapp revision label does not match its tag'
@@ -1059,6 +1110,8 @@ rollback_static() {
 }
 
 deploy() {
+	read_static_rollback_tag
+	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	guard_membership_transition
 	preflight
 	backup_server_state
@@ -1081,6 +1134,10 @@ deploy() {
 
 rollback_readiness() {
 	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	set -a
+	. "$ROLLBACK_ENV"
+	set +a
+	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	printf 'Application rollback readiness verified; no services were changed.\n'
 }
 

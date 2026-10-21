@@ -29,7 +29,20 @@ type DatabaseDeployDependencies = {
   migrate(
     databaseUrl: string,
     source: Record<string, string | undefined>,
+    procedure: DatabaseDeployProcedure,
   ): void | Promise<void>
+}
+
+export type DatabaseDeployProcedure = 'cloud' | 'selectel-max-existing'
+
+export class DatabaseDeploymentError extends Error {
+  constructor(
+    readonly phase: 'preflight' | 'migration' | 'postmigration',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DatabaseDeploymentError'
+  }
 }
 
 const defaultDependencies: DatabaseDeployDependencies = {
@@ -39,7 +52,7 @@ const defaultDependencies: DatabaseDeployDependencies = {
   createDatabase: createPrisma,
   grantRuntimeAccess: grantRuntimeDatabaseAccess,
   log: console.log,
-  migrate(databaseUrl, source) {
+  migrate(databaseUrl, source, procedure) {
     const migration = spawnSync('bun', ['run', 'prisma:deploy'], {
       cwd: resolve(import.meta.dirname, '..'),
       env: {
@@ -47,7 +60,7 @@ const defaultDependencies: DatabaseDeployDependencies = {
         ...source,
         DATABASE_URL: databaseUrl,
       },
-      stdio: 'inherit',
+      stdio: procedure === 'cloud' ? 'inherit' : 'ignore',
     })
     if (migration.status !== 0) {
       throw new Error(`Database migration failed with status ${migration.status ?? 1}`)
@@ -58,29 +71,58 @@ const defaultDependencies: DatabaseDeployDependencies = {
 export async function deployDatabase(
   source: Record<string, string | undefined>,
   dependencies: DatabaseDeployDependencies = defaultDependencies,
+  procedure: DatabaseDeployProcedure = 'cloud',
 ) {
-  const config = databaseDeployConfig(source)
+  const config = databaseDeployConfig(source, procedure)
   const prisma = dependencies.createDatabase(config.databaseUrl)
   try {
-    await dependencies.assertMigrationOwnership(prisma, {
-      expectedOwner: config.migrationDatabaseUser,
-    })
-    await dependencies.migrate(config.databaseUrl, source)
-    await dependencies.grantRuntimeAccess(prisma, {
-      databaseName: config.databaseName,
-      username: config.runtimeDatabaseUser,
-    })
-    if (config.seed !== null) {
-      await dependencies.bootstrap(prisma, config.seed)
+    try {
+      await dependencies.assertMigrationOwnership(prisma, {
+        expectedOwner: config.migrationDatabaseUser,
+      })
+    } catch {
+      throw new DatabaseDeploymentError(
+        'preflight',
+        'Database ownership preflight failed; inspect the documented ownership inventory before retrying.',
+      )
     }
-    await dependencies.assertAdmin(prisma)
+    try {
+      await dependencies.migrate(config.databaseUrl, source, procedure)
+    } catch {
+      throw new DatabaseDeploymentError(
+        'migration',
+        'Database migration failed; schema may already have advanced; inspect migration status before retrying.',
+      )
+    }
+    try {
+      await dependencies.grantRuntimeAccess(prisma, {
+        databaseName: config.databaseName,
+        username: config.runtimeDatabaseUser,
+      })
+      if (procedure === 'cloud' && config.seed !== null) {
+        await dependencies.bootstrap(prisma, config.seed)
+      }
+      if (procedure === 'cloud') await dependencies.assertAdmin(prisma)
+    } catch {
+      throw new DatabaseDeploymentError(
+        'postmigration',
+        'Database migration was applied, but runtime grants or postconditions failed; inspect the database before retrying.',
+      )
+    }
   } finally {
     await prisma.$disconnect()
   }
-  dependencies.log('Database deployment completed with a login-capable administrator.')
+  dependencies.log(
+    procedure === 'cloud'
+      ? 'Database deployment completed with a login-capable administrator.'
+      : 'Database deployment completed; existing MAX users and schema ownership were preserved.',
+  )
 }
 
-function databaseDeployConfig(source: Record<string, string | undefined>) {
+function databaseDeployConfig(
+  source: Record<string, string | undefined>,
+  procedure: DatabaseDeployProcedure,
+) {
   const databaseUrl = source.DATABASE_URL?.trim()
   if (!databaseUrl) {
     throw new Error('DATABASE_URL is required for database deployment')
@@ -88,6 +130,14 @@ function databaseDeployConfig(source: Record<string, string | undefined>) {
 
   const hasSeedEmail = Boolean(source.ADMIN_SEED_EMAIL?.trim())
   const hasSeedPassword = Boolean(source.ADMIN_SEED_PASSWORD)
+  if (procedure === 'selectel-max-existing') {
+    if (source.MAX_ENABLED !== 'true') {
+      throw new Error('MAX_ENABLED=true is required for the Selectel MAX database procedure')
+    }
+    if (hasSeedEmail || hasSeedPassword) {
+      throw new Error('ADMIN_SEED variables are forbidden for the Selectel MAX database procedure')
+    }
+  }
   if (hasSeedEmail !== hasSeedPassword) {
     throw new Error(
       'ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be supplied together for initial deployment',

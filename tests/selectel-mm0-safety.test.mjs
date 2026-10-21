@@ -233,6 +233,8 @@ stat() { case "$*" in *%u*) printf '0\\n' ;; *%a*) printf '600\\n' ;; esac; }
 git() { case "$5" in rev-parse) printf '%s\\n' "$MEMOLY_PRODUCT_SHA" ;; cat-file) return 0 ;; merge-base) [ "${'${@: -1}'}" != "$PREVIOUS_BACKEND" ] ;; esac; }
 docker() { [ "$1" = ps ] && return 0; return 99; }
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
+read_static_rollback_tag() { PREVIOUS_WEBAPP_IMAGE_TAG='4b4edc0992803b84c919aadb835e8d2e21095c51'; }
+require_accepted_ui_target() { [ "$1" = '4b4edc0992803b84c919aadb835e8d2e21095c51' ] || die 'fixture rollback UI is not accepted'; }
 verify_mm0_spike_stopped() { :; }
 ${functionBody(redeploy, 'validate_forward_marker')}
 ${functionBody(redeploy, 'verify_no_legacy_writers')}
