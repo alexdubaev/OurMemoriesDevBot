@@ -11,8 +11,9 @@ const backendRoot = resolve(import.meta.dir, '..')
 const root = resolve(backendRoot, '..')
 const oldProduction = '4ce200620bf87d1ba5605aee73f5442fe50ccdb4'
 const rollbackTarget = '3fce2739205da927b95eb3379b1d066b61282965'
+const acceptedV4RollbackTarget = '4b4edc0992803b84c919aadb835e8d2e21095c51'
 
-test('COM-4 old frozen runtimes read and write after additive comments migration while comments and legacy rows survive', async () => {
+test('COM-4 current and measured rollback runtimes read and write after additive migration while comments and legacy rows survive', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl || process.env.DATABASE_URL !== databaseUrl) throw new Error('Explicit matching test database URLs required')
   assertTestDatabaseUrl(databaseUrl)
@@ -41,12 +42,14 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
     checked('bun', ['run', '--cwd', 'backend', 'prisma:generate'], runtimeRoot, childEnv)
   }
   const rollbackRuntimeRoot = resolve(fixture, 'runtime-rollback-target')
+  const acceptedV4RuntimeRoot = resolve(fixture, 'runtime-accepted-v4-rollback-target')
   // Prepare this frozen CLI/client before any fixture rows exist. It establishes
   // the actual historical migration ledger used by the compatibility probe.
   await admin.connect()
   let created = false
   try {
     archiveRuntime(rollbackTarget, rollbackRuntimeRoot)
+    archiveRuntime(acceptedV4RollbackTarget, acceptedV4RuntimeRoot)
     await admin.query(`CREATE DATABASE "${name}"`)
     created = true
     const db = new Client({ connectionString: ownUrl.toString() })
@@ -73,7 +76,56 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
       await db.query("INSERT INTO memories(id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at,updated_at) VALUES($1,$2,$3,$4,'note','legacy memory',now(),now(),now())", [memoryId, familyId, childId, userId])
       await db.query('COMMIT')
       const legacyBefore = (await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]
-      checked('bunx', ['--bun', 'prisma', 'migrate', 'deploy'], resolve(backendRoot), childEnv)
+      // Exercise the actual Selectel entrypoint on an existing MAX database. The deliberately
+      // missing runtime role makes the grant postcondition fail only after Prisma has applied
+      // the additive comments migration; retrying with a safe role must be a ledger no-op.
+      const selectelEnv = {
+        ...childEnv,
+        MAX_ENABLED: 'true',
+        ADMIN_SEED_EMAIL: '',
+        ADMIN_SEED_PASSWORD: '',
+        DATABASE_RUNTIME_USER: `missing_runtime_${process.pid}`,
+      }
+      const failedSelectel = run('bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), selectelEnv)
+      expect(failedSelectel.status).not.toBe(0)
+      expect(`${failedSelectel.stdout}\n${failedSelectel.stderr}`).toContain('Database migration was applied, but runtime grants or postconditions failed')
+      expect(`${failedSelectel.stdout}\n${failedSelectel.stderr}`).not.toContain(ownUrl.toString())
+      const appliedAfterFailure = await db.query<{ migration_name: string; checksum: string; finished_at: Date }>(
+        'SELECT migration_name,checksum,finished_at FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
+      )
+      expect(appliedAfterFailure.rows.map((row) => row.migration_name)).toEqual(migrations)
+      expect(appliedAfterFailure.rows.at(-1)?.migration_name).toBe(migrations.at(-1))
+
+      const runtimeRole = `selectel_runtime_${process.pid}`
+      await admin.query(`CREATE ROLE "${runtimeRole}" NOLOGIN`)
+      try {
+        const retryEnv = { ...selectelEnv, DATABASE_RUNTIME_USER: runtimeRole }
+        checked('bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), retryEnv)
+        const appliedAfterRetry = await db.query<{ migration_name: string; checksum: string; finished_at: Date }>(
+          'SELECT migration_name,checksum,finished_at FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
+        )
+        expect(appliedAfterRetry.rows).toEqual(appliedAfterFailure.rows)
+        const runtimeState = (await db.query<{ rolsuper: boolean; rolcreaterole: boolean; rolcreatedb: boolean; rolbypassrls: boolean; can_create: boolean; can_temp: boolean; has_default_public_acl: boolean }>(
+          `SELECT role.rolsuper,role.rolcreaterole,role.rolcreatedb,role.rolbypassrls,
+                  has_schema_privilege($1,'public','CREATE') AS can_create,
+                  has_database_privilege($1,current_database(),'TEMPORARY') AS can_temp,
+                  EXISTS (SELECT 1 FROM pg_default_acl acl
+                           CROSS JOIN LATERAL aclexplode(acl.defaclacl) grant_entry
+                           WHERE grant_entry.grantee=0) AS has_default_public_acl
+             FROM pg_roles role WHERE role.rolname=$1`,
+          [runtimeRole],
+        )).rows[0]
+        expect(runtimeState).toMatchObject({ rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolbypassrls: false, can_create: false, can_temp: false, has_default_public_acl: false })
+        const passwordUsers = await db.query<{ count: string }>('SELECT count(*)::text AS count FROM users WHERE password_hash IS NOT NULL')
+        expect(passwordUsers.rows).toEqual([{ count: '0' }])
+        const cloudNoAdmin = run('bun', ['scripts/deploy-database.ts'], resolve(backendRoot), retryEnv)
+        expect(cloudNoAdmin.status).not.toBe(0)
+        expect(`${cloudNoAdmin.stdout}\n${cloudNoAdmin.stderr}`).toContain('Database migration was applied, but runtime grants or postconditions failed')
+        expect(`${cloudNoAdmin.stdout}\n${cloudNoAdmin.stderr}`).not.toContain(ownUrl.toString())
+      } finally {
+        await db.query(`DROP OWNED BY "${runtimeRole}"`)
+        await admin.query(`DROP ROLE IF EXISTS "${runtimeRole}"`)
+      }
       const appliedAfterComments = await db.query<{ migration_name: string; checksum: string }>(
         'SELECT migration_name,checksum FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
       )
@@ -91,10 +143,12 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
       checked('bun', [probe, root, 'candidate-before', statePath, seedPath], root, childEnv)
       const beforeRows = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
 
-      for (const [index, revision] of [oldProduction, rollbackTarget].entries()) {
-        const runtimeRoot = revision === rollbackTarget ? rollbackRuntimeRoot : resolve(fixture, `runtime-${index}`)
-        if (revision !== rollbackTarget) archiveRuntime(revision, runtimeRoot)
-        const mode = index === 0 ? 'old-production' : 'old-rollback-target'
+      for (const [revision, runtimeRoot, mode] of [
+        [oldProduction, resolve(fixture, 'runtime-old-production'), 'old-production'],
+        [rollbackTarget, rollbackRuntimeRoot, 'old-rollback-target'],
+        [acceptedV4RollbackTarget, acceptedV4RuntimeRoot, 'accepted-v4-rollback-target'],
+      ] as const) {
+        if (revision === oldProduction) archiveRuntime(revision, runtimeRoot)
         const output = checked('bun', [probe, runtimeRoot, mode, statePath], runtimeRoot, childEnv)
         expect(JSON.parse(output.trim().split('\n').at(-1)!)).toMatchObject({ success: true, phase: mode })
       }

@@ -3,10 +3,56 @@ import { expect, test } from 'bun:test'
 import { createPrisma } from '../src/db'
 import {
   assertMigrationSchemaOwnership,
+  deployDatabase,
   grantRuntimeDatabaseAccess,
   migrationSchemaOwnershipMismatches,
   transferMigrationSchemaOwnership,
 } from './deploy-database'
+
+test('Selectel MAX procedure rejects missing MAX or any admin seed before connecting', async () => {
+  let connections = 0
+  const dependencies = {
+    createDatabase() {
+      connections += 1
+      throw new Error('must not connect')
+    },
+  }
+  for (const source of [
+    { DATABASE_URL: 'postgresql://migration_owner:secret@127.0.0.1:5432/app_test' },
+    { DATABASE_URL: 'postgresql://migration_owner:secret@127.0.0.1:5432/app_test', MAX_ENABLED: 'true', ADMIN_SEED_EMAIL: 'admin@example.test' },
+    { DATABASE_URL: 'postgresql://migration_owner:secret@127.0.0.1:5432/app_test', MAX_ENABLED: 'true', ADMIN_SEED_PASSWORD: 'synthetic' },
+  ]) {
+    await expect(deployDatabase(source, dependencies as never, 'selectel-max-existing')).rejects.toThrow(/MAX_ENABLED|ADMIN_SEED/)
+  }
+  expect(connections).toBe(0)
+})
+
+test('cloud deployment rejects incomplete administrator seed configuration before connecting', async () => {
+  let connections = 0
+  const dependencies = { createDatabase() { connections += 1; throw new Error('must not connect') } }
+  await expect(deployDatabase({
+    DATABASE_URL: 'postgresql://migration_owner:secret@127.0.0.1:5432/app_test',
+    ADMIN_SEED_EMAIL: 'admin@example.test',
+  }, dependencies as never)).rejects.toThrow('ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be supplied together')
+  expect(connections).toBe(0)
+})
+
+test('cloud deployment retains its unconditional administrator postcondition', async () => {
+  let adminAssertions = 0
+  const db = { $disconnect: async () => undefined }
+  const dependencies = {
+    createDatabase: () => db,
+    assertMigrationOwnership: async () => undefined,
+    migrate: async () => undefined,
+    grantRuntimeAccess: async () => undefined,
+    bootstrap: async () => undefined,
+    assertAdmin: async () => { adminAssertions += 1; throw new Error('synthetic no-admin state') },
+    log: () => undefined,
+  }
+  await expect(deployDatabase({ DATABASE_URL: 'postgresql://migration_owner:secret@127.0.0.1:5432/app_test' }, dependencies as never))
+    .rejects.toThrow('Database migration was applied, but runtime grants or postconditions failed')
+  expect(adminAssertions).toBe(1)
+})
 
 test('runtime database grants allow current and future DML without schema DDL', async () => {
   const databaseUrl = process.env.TEST_DATABASE_URL

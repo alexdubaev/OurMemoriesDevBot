@@ -93,7 +93,7 @@ try {
     const memory = await request(memoryPath, state.token)
     assert.equal(memory.response.status, 200)
     assert.equal(memory.body.id, state.memoryId)
-    if (mode.startsWith('old-')) {
+    if (mode.startsWith('old-') || mode.startsWith('accepted-v4-')) {
       const created = await request(`/families/${state.familyId}/memories`, state.token, 'POST', {
         kind: 'note', childId: state.childId, body: `${mode} runtime memory`, occurredAt: new Date().toISOString(),
       }, crypto.randomUUID())
