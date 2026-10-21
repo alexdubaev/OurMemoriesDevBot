@@ -101,6 +101,7 @@ async function acceptRoleInvite(page: Page, familyId: string, ownerToken: string
 }
 
 test('COM-4 real API ACL, family isolation, pagination, batch and conflict retain the owner draft', async ({ page }) => {
+  page.setDefaultTimeout(10_000)
   const owner = await signInAndSeed(page)
   const browser = page.context().browser()!
   const baseURL = new URL(page.url()).origin
@@ -160,8 +161,10 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41, capabilities: { read: true, create: true } }])
 
     const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
+    await page.bringToFront()
     await entry.click()
-    const panel = page.getByRole('dialog', { name: 'Комментарии' })
+    const panel = page.locator('.comments-panel')
+    await expect(panel).toHaveAccessibleName('Комментарии')
     const commentItems = panel.locator('.comments-item')
     await expect(commentItems).toHaveCount(20)
     const anchorText = await commentItems.first().locator('.comments-item-body > p').innerText()
@@ -194,7 +197,8 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await expect(editField).toHaveValue('Owner local draft after competing update')
     await expect(panel.getByText('Concurrent owner update', { exact: true })).toBeVisible()
   } finally {
-    await Promise.all([fullContext.close(), viewerContext.close()])
+    await fullContext.close()
+    await viewerContext.close()
   }
 })
 
