@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
-import { UiV2Button } from '@/components/ui-v2/UiV2Button'
 import { readUiVersion } from '@/features/ui-version'
 import type { ReactionHapticStyle } from '@/platform/reaction-haptics'
 
@@ -17,7 +16,7 @@ const reactionOptions: Array<{ value: MemoryReaction; emoji: string; label: stri
   { value: 'clap', emoji: '👏', label: 'Аплодисменты' },
 ]
 
-export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onOpenFromTrigger, onHaptic, returnFocusRef, onComments, commentCount }: {
+export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onHaptic, returnFocusRef, onComments, commentCount }: {
   counts: Partial<Record<MemoryReaction, number>>
   current: MemoryReaction | null
   interactive: boolean
@@ -25,7 +24,6 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   open: boolean
   point: { x: number; y: number }
   onOpenChange: (open: boolean) => void
-  onOpenFromTrigger: (point: { x: number; y: number }) => void
   onHaptic?: (style: ReactionHapticStyle) => void
   returnFocusRef: React.RefObject<HTMLElement | null>
   onComments?: (trigger: HTMLButtonElement) => void
@@ -33,7 +31,6 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
 }) {
   const firstChoice = useRef<HTMLButtonElement>(null)
   const uiV2 = readUiVersion() === 'v2'
-  const triggerLabel = uiV2 ? 'Добавить реакцию' : 'Откликнуться'
   const used = reactionOptions.filter(({ value }) => (counts[value] ?? 0) > 0)
   useEffect(() => {
     if (open) requestAnimationFrame(() => { if (open) firstChoice.current?.focus({ preventScroll: true }) })
@@ -55,10 +52,6 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
       </div> : <span aria-hidden="true" className="memory-reactions-empty" />}
       <div className="memory-comment-actions">
         {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
-        <UiV2Button aria-label={triggerLabel} className="ui-v2-reaction-button" onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect()
-          onOpenFromTrigger({ x: rect.left + rect.width / 2, y: rect.top })
-        }} type="button" variant="quiet"><WebpIcon decorative monochrome name="heart" size={18} /><Typography as="span" variant="memoryMeta">{triggerLabel}</Typography></UiV2Button>
       </div>
     </footer> : null}
     {!uiV2 && (used.length || onComments) ? <div className="actions">

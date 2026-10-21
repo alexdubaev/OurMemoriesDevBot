@@ -11,6 +11,12 @@ type Metrics = {
 }
 declare global { interface Window { __commentsState: Metrics } }
 
+async function refreshByFocus(page: import('@playwright/test').Page) {
+  const prior = await page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.includes('/comments?')).length)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.includes('/comments?')).length)).toBeGreaterThan(prior)
+}
+
 test('summary batching and closed-panel query boundary', async ({ page }) => {
   await page.goto('/e2e/comments-state.harness.html')
   await expect.poll(() => page.evaluate(() => window.__commentsState.calls.filter((call) => call.path.endsWith('/comment-summaries')).length)).toBe(2)
@@ -86,14 +92,14 @@ test('comment capabilities follow owner, moderator and viewer projections; long 
 
   for (const [mode, edit, remove] of [['moderator', false, true], ['viewer', false, false]] as const) {
     await page.evaluate((next) => window.__commentsState.configure(next), mode)
-    await page.getByRole('button', { name: 'Обновить' }).click()
+    await refreshByFocus(page)
     first = page.locator('.comments-item').first()
     await expect(first.getByRole('button', { name: 'Изменить' })).toHaveCount(edit ? 1 : 0)
     await expect(first.getByRole('button', { name: 'Удалить' })).toHaveCount(remove ? 1 : 0)
   }
 
   await page.evaluate(() => window.__commentsState.configure('owner'))
-  await page.getByRole('button', { name: 'Обновить' }).click()
+  await refreshByFocus(page)
   const editor = page.getByRole('textbox', { name: 'Написать комментарий' })
   const longDraft = `${'👨‍👩‍👧‍👦'.repeat(200)}\n${'строка\n'.repeat(200)}`
   await editor.fill(longDraft)
@@ -114,7 +120,7 @@ for (const context of ['account', 'family', 'epoch', 'logout', 'revoke'] as cons
     await page.getByRole('button', { name: 'Open comments' }).click()
     await expect(page.locator('.comments-item').first()).toBeVisible()
     await page.evaluate(() => { window.__commentsState.holdNext = 'list' })
-    await page.getByRole('button', { name: 'Обновить' }).click()
+    await refreshByFocus(page)
     await expect.poll(() => page.evaluate(() => window.__commentsState.gates.filter((gate) => gate.kind === 'list').length)).toBe(1)
     await page.evaluate((action) => window.__commentsState.configure(action), context)
     await expect(page.getByRole('dialog', { name: 'Комментарии' })).toHaveCount(0)

@@ -2,7 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type APIResponse, type Page } from '@playwright/test'
 import { commentSummariesResponseSchema } from '@web-app-demo/contracts'
 
 const maxBotToken = '987654:max-e2e-synthetic-token'
@@ -27,7 +27,7 @@ function signedMaxInitData(userId: number) {
   return new URLSearchParams([...fields]).toString()
 }
 
-async function signInAndSeed(page: Page) {
+async function signInAndSeed(page: Page, mediaAttachmentCount = 0) {
   const maxUserId = 987_600_000 + Math.floor(Math.random() * 90_000)
   await page.addInitScript((initData) => {
     Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData, version: '1', platform: 'web', ready() {} } })
@@ -53,9 +53,12 @@ async function signInAndSeed(page: Page) {
     })
     expect(childResponse.status()).toBe(200)
     const childId = (await childResponse.json() as ChildResult).child.id
+    const mediaIds = await Promise.all(Array.from({ length: mediaAttachmentCount }, () => uploadPng(page, tokenFromRequest, familyId, 'memory')))
     const memoryResponse = await page.request.post(`/api/v1/families/${familyId}/memories`, {
       headers: { Authorization: `Bearer ${tokenFromRequest}`, 'Idempotency-Key': randomUUID() },
-      data: { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
+      data: mediaAttachmentCount
+        ? { kind: 'photo', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z', mediaIds }
+        : { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
     })
     expect(memoryResponse.status()).toBe(201)
     seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, token: tokenFromRequest }
@@ -68,11 +71,11 @@ async function signInAndSeed(page: Page) {
   return { familyId, memoryId, token: seeded!.token }
 }
 
-async function uploadPng(page: Page, token: string, familyId: string) {
+async function uploadPng(page: Page, token: string, familyId: string, purpose: 'child_avatar' | 'memory' = 'child_avatar') {
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   const reserve = await page.request.post(`/api/v1/families/${familyId}/uploads`, {
     headers: { Authorization: `Bearer ${token}` },
-    data: { purpose: 'child_avatar', kind: 'photo', contentType: 'image/png', byteSize: bytes.byteLength },
+    data: { purpose, kind: 'photo', contentType: 'image/png', byteSize: bytes.byteLength },
   })
   expect(reserve.status()).toBe(201)
   const ticket = await reserve.json() as { assetId: string; upload: { uploadId: string; url: string; headers: Record<string, string> } }
@@ -160,29 +163,82 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     const summary = commentSummariesResponseSchema.parse(await batch.json())
     expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41, capabilities: { read: true, create: true } }])
 
+    const panelListRequests: string[] = []
+    page.on('request', (request) => { if (new URL(request.url()).pathname === commentPath && request.method() === 'GET') panelListRequests.push(request.url()) })
     const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
     await page.bringToFront()
+    await page.context().setOffline(true)
     await entry.click()
     const panel = page.locator('.comments-panel')
     await expect(panel).toHaveAccessibleName('Комментарии')
+    await expect(panel.getByRole('status')).toContainText('Нет подключения')
+    await expect(panel).not.toContainText('Пока нет комментариев')
+    expect(panelListRequests).toHaveLength(0)
+    await page.context().setOffline(false)
     const commentItems = panel.locator('.comments-item')
     await expect(commentItems).toHaveCount(20)
-    const anchorText = await commentItems.first().locator('.comments-item-body > p').innerText()
-    const anchorItem = commentItems.filter({ has: page.getByText(anchorText, { exact: true }) })
-    for (const expectedCount of [40, 41]) {
-      await panel.locator('.comments-list').evaluate((list) => { list.scrollTop = 80 })
-      const older = panel.getByRole('button', { name: 'Показать более ранние' })
-      await older.scrollIntoViewIfNeeded()
-      const beforeY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
-      await older.click()
-      await expect(commentItems).toHaveCount(expectedCount)
-      const afterY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
-      expect(Math.abs(afterY - beforeY)).toBeLessThan(2)
+    await page.clock.install()
+    const initialReads = panelListRequests.length
+    await page.context().setOffline(true)
+    await page.clock.fastForward(90_000)
+    expect(panelListRequests).toHaveLength(initialReads)
+    await page.context().setOffline(false)
+    await page.clock.fastForward(1)
+    await expect.poll(() => panelListRequests.length).toBeGreaterThan(initialReads)
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')) })
+    const hiddenReads = panelListRequests.length
+    await page.clock.fastForward(90_000)
+    expect(panelListRequests).toHaveLength(hiddenReads)
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')) })
+    await page.clock.fastForward(1)
+    await expect.poll(() => panelListRequests.length).toBeGreaterThan(hiddenReads)
+    const commentsList = panel.locator('.comments-list')
+    await commentsList.evaluate((list) => { list.scrollTop = 80 })
+    const anchorId = await commentsList.evaluate((list) => {
+      const top = list.getBoundingClientRect().top
+      return [...list.querySelectorAll<HTMLElement>('[data-comment-id]')].find((row) => row.getBoundingClientRect().bottom > top)?.dataset.commentId ?? null
+    })
+    expect(anchorId).toBeTruthy()
+    const anchorItem = panel.locator(`[data-comment-id="${anchorId}"]`)
+    const beforeY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
+    const burst: APIResponse[] = []
+    for (let index = 0; index < 25; index += 1) {
+      burst.push(await fullPage.request.post(commentPath, {
+        headers: { Authorization: `Bearer ${full.token}`, 'Idempotency-Key': randomUUID() },
+        data: { body: `COM-4 burst ${index}` },
+      }))
     }
-    expect(await commentItems.allInnerTexts()).toHaveLength(41)
+    expect(burst.every((response) => response.status() === 201)).toBe(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(commentItems).toHaveCount(45)
+    await expect(panel.getByRole('button', { name: 'Новые комментарии · 25' })).toBeVisible()
+    const afterY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
+    expect(Math.abs(afterY - beforeY)).toBeLessThan(2)
+    const burstBodies = await commentItems.locator('.comments-item-body > p').allTextContents()
+    for (let index = 0; index < 25; index += 1) expect(burstBodies).toContain(`COM-4 burst ${index}`)
+    await panel.getByRole('button', { name: 'Новые комментарии · 25' }).click()
+    await expect(panel.getByRole('button', { name: /Новые комментарии/ })).toHaveCount(0)
+    const older = panel.getByRole('button', { name: 'Показать более ранние' })
+    while (await older.count()) {
+      await older.scrollIntoViewIfNeeded()
+      const visibleAnchorId = await commentsList.evaluate((list) => {
+        const top = list.getBoundingClientRect().top
+        return [...list.querySelectorAll<HTMLElement>('[data-comment-id]')].find((row) => row.getBoundingClientRect().bottom > top)?.dataset.commentId ?? null
+      })
+      expect(visibleAnchorId).toBeTruthy()
+      const visibleAnchor = panel.locator(`[data-comment-id="${visibleAnchorId}"]`)
+      const beforeOlderY = await visibleAnchor.evaluate((element) => element.getBoundingClientRect().y)
+      const previousCount = await commentItems.count()
+      await older.click()
+      await expect.poll(() => commentItems.count()).toBeGreaterThan(previousCount)
+      const afterOlderY = await visibleAnchor.evaluate((element) => element.getBoundingClientRect().y)
+      expect(Math.abs(afterOlderY - beforeOlderY)).toBeLessThan(2)
+    }
+    await expect(commentItems).toHaveCount(66)
+    expect(await commentItems.allInnerTexts()).toHaveLength(66)
     const commentBodies = await commentItems.locator('.comments-item-body > p').allTextContents()
-    expect(commentBodies).toHaveLength(41)
-    expect(new Set(commentBodies).size).toBe(41)
+    expect(commentBodies).toHaveLength(66)
+    expect(new Set(commentBodies).size).toBe(66)
     const ownerComment = commentItems.filter({ hasText: 'COM-4 role 0' })
     await ownerComment.getByRole('button', { name: 'Изменить' }).click()
     const editField = panel.getByRole('textbox', { name: 'Изменить комментарий' })
@@ -196,9 +252,20 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await expect(panel.getByRole('alert')).toContainText('Черновик сохранён')
     await expect(editField).toHaveValue('Owner local draft after competing update')
     await expect(panel.getByText('Concurrent owner update', { exact: true })).toBeVisible()
+    await panel.getByRole('button', { name: 'Сохранить' }).click()
+    await expect(panel.getByText('Owner local draft after competing update', { exact: true })).toBeVisible()
+    const farOldComment = commentItems.filter({ hasText: 'COM-4 role 1' })
+    await expect(farOldComment).toBeVisible()
+    await farOldComment.getByRole('button', { name: 'Удалить' }).click()
+    await page.getByRole('dialog', { name: 'Удалить комментарий?' }).getByRole('button', { name: 'Удалить' }).click()
+    await expect(commentItems.filter({ hasText: 'COM-4 role 1' })).toHaveCount(0)
+    const readsBeforeClose = panelListRequests.length
+    await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
+    await page.clock.fastForward(90_000)
+    expect(panelListRequests).toHaveLength(readsBeforeClose)
     // Bulk setup shares the verification server's normal IP write budget with later
     // journeys. Honour its real reset boundary instead of raising/disabling limits.
-    const resetAt = Number(externalUpdate.headers()['ratelimit-reset'])
+    const resetAt = Number(burst.at(-1)?.headers()['ratelimit-reset'] ?? externalUpdate.headers()['ratelimit-reset'])
     expect(Number.isSafeInteger(resetAt)).toBe(true)
     const resetWaitMs = Math.max(0, resetAt * 1_000 - Date.now() + 100)
     expect(resetWaitMs).toBeLessThanOrEqual(61_000)
@@ -211,7 +278,8 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
 
 test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }, testInfo) => {
   const { familyId, memoryId, token } = await signInAndSeed(page)
-  await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 320, height: 540 })
+  await page.bringToFront()
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
   const listRequests: string[] = []
   const listResponses: number[] = []
@@ -278,9 +346,15 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await textarea.fill('Синтетический комментарий для проверки')
   await page.getByRole('button', { name: 'Отправить' }).dblclick()
   await expect(page.getByRole('button', { name: 'Повторить отправку' })).toBeVisible()
+  const uncertainComposer = page.locator('.comments-composer')
+  const composerWidth = await uncertainComposer.evaluate((element) => element.getBoundingClientRect().width)
+  const retryBox = await page.getByRole('button', { name: 'Повторить отправку' }).boundingBox()
+  const textareaBox = await textarea.boundingBox()
+  expect(textareaBox?.width).toBeGreaterThan(100)
+  expect(retryBox && textareaBox && retryBox.x + retryBox.width <= composerWidth + (await uncertainComposer.evaluate((element) => element.getBoundingClientRect().x)) + 1).toBe(true)
   await expect(textarea).toHaveValue('Синтетический комментарий для проверки')
   await page.getByRole('button', { name: 'Повторить отправку' }).click()
-  await expect(page.getByText('Синтетический комментарий для проверки', { exact: true })).toBeVisible()
+  await expect(page.locator('.comments-item').getByText('Синтетический комментарий для проверки', { exact: true })).toBeVisible()
   expect(firstKeys).toHaveLength(2)
   expect(firstKeys[0]).toMatch(/^[0-9a-f-]{36}$/i)
   expect(firstKeys[1]).toBe(firstKeys[0])
@@ -325,7 +399,7 @@ test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one co
   await expect(page.getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
 })
 
-test('initial comments 404 stays local and retry works; a later lost target closes only its panel', async ({ page }) => {
+test('initial comments 404 stays local and retry works; a later lost target closes only its panel', async ({ page, context }) => {
   const { familyId, memoryId } = await signInAndSeed(page)
   const commentPath = `/api/v1/families/${familyId}/memories/${memoryId}/comments`
   let readPhase: 'initial-missing' | 'readable' | 'lost' = 'initial-missing'
@@ -348,10 +422,68 @@ test('initial comments 404 stays local and retry works; a later lost target clos
   await panel.getByRole('button', { name: 'Повторить' }).click()
   await expect(panel.getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
   readPhase = 'lost'
-  await panel.getByRole('button', { name: 'Обновить' }).click()
+  const backgroundTab = await context.newPage()
+  await backgroundTab.goto('about:blank')
+  await page.bringToFront()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await backgroundTab.close()
   await expect(panel).toBeHidden()
   await expect(card).toBeVisible()
   await expect(entry).toBeVisible()
+})
+
+test('comments stay compact at short viewport and reactions remain available in memory actions', async ({ page }) => {
+  const { memoryId } = await signInAndSeed(page)
+  await page.setViewportSize({ width: 320, height: 420 })
+  const card = page.locator(`[data-memory-id="${memoryId}"]`)
+  await expect(card.locator('.ui-v2-reaction-button')).toHaveCount(0)
+  await card.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+  await page.getByRole('button', { name: 'Выбрать или изменить реакцию' }).click()
+  await expect(page.getByRole('group', { name: 'Реакции' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await card.locator('.comments-entry').click()
+  const panel = page.locator('.comments-panel')
+  const composer = panel.locator('.comments-composer')
+  await expect(panel).toHaveAccessibleName('Комментарии')
+  await expect(panel).not.toHaveAttribute('aria-describedby')
+  await expect(panel.getByRole('button', { name: 'Закрыть комментарии' })).toBeFocused()
+  await expect(composer.getByRole('textbox', { name: 'Написать комментарий' })).not.toBeFocused()
+  await expect(composer.getByRole('button', { name: 'Отправить' })).toBeVisible()
+  const geometry = await page.evaluate(() => {
+    const dialog = document.querySelector('.comments-panel')!.getBoundingClientRect()
+    const send = document.querySelector('.comments-composer button[type="submit"]')!.getBoundingClientRect()
+    return { dialogHeight: dialog.height, sendBottom: send.bottom }
+  })
+  expect(geometry.dialogHeight).toBeLessThan(420)
+  expect(geometry.sendBottom).toBeLessThanOrEqual(420)
+})
+
+test('discussion opens on the third mixed attachment and returns to the last selected attachment', async ({ page }) => {
+  const { familyId, memoryId } = await signInAndSeed(page, 3)
+  const card = page.locator(`[data-memory-id="${memoryId}"]`)
+  const feedCarousel = card.locator('.memoly-mixed-carousel')
+  await feedCarousel.getByRole('button', { name: 'Показать вложение 3 из 3' }).click()
+  await expect(feedCarousel).toHaveAttribute('data-seen-active-index', '2')
+  let commentReads = 0
+  page.on('request', (request) => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname === `/api/v1/families/${familyId}/memories/${memoryId}/comments`) commentReads += 1
+  })
+  await card.locator('.comments-entry').click()
+  const panel = page.locator('.comments-panel')
+  const context = panel.locator('.comments-mixed-carousel')
+  await expect(context.locator('.memoly-mixed-count')).toHaveText('3 / 3')
+  const draft = panel.getByRole('textbox', { name: 'Написать комментарий' })
+  await expect(panel.getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
+  const readsBeforeSlide = commentReads
+  await draft.fill('Сохраняю черновик при смене вложения')
+  await context.press('ArrowLeft')
+  await expect(context.locator('.memoly-mixed-count')).toHaveText('2 / 3')
+  await expect(draft).toHaveValue('Сохраняю черновик при смене вложения')
+  expect(commentReads).toBe(readsBeforeSlide)
+  await panel.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await page.getByRole('button', { name: 'Закрыть без сохранения' }).click()
+  await expect(panel).toBeHidden()
+  await expect(feedCarousel).toHaveAttribute('data-seen-active-index', '1')
 })
 
 test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 CSS pixels', async ({ page }, testInfo) => {
@@ -384,7 +516,7 @@ test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 
         return { width: rect.width, height: rect.height, right: rect.right }
       })
       expect(footerMeasure.box.height).toBeGreaterThanOrEqual(44)
-      expect(footerMeasure.icon?.width).toBe(22)
+      expect(footerMeasure.icon?.width).toBe(18)
       expect(footerMeasure.documentWidth).toBeLessThanOrEqual(width)
       expect(navMeasure.height).toBeGreaterThanOrEqual(44)
       expect(navMeasure.right).toBeLessThanOrEqual(width + 1)

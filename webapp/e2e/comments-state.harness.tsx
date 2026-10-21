@@ -30,7 +30,8 @@ function fixture(body = 'Existing comment', id = 'cccccccc-cccc-4ccc-8ccc-cccccc
 }
 function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, 1, i)), nextCursor: string | null = null): CommentPage {
   const capabilities = capabilityMode === 'owner' ? { edit: true, delete: true } : capabilityMode === 'moderator' ? { edit: false, delete: true } : { edit: false, delete: false }
-  return { items: items.map((item) => ({ ...item, capabilities })), nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } }
+  const ordered = items.map((item) => ({ ...item, capabilities })).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id))
+  return { items: ordered, nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } }
 }
 
 export function Harness() {
@@ -57,10 +58,13 @@ export function Harness() {
       if (held) { gate.completed = true; return page([fixture('late-old-context-private')], null) }
       if (path.includes('cursor=older')) return { ...page(Array.from({ length: 20 }, (_, i) => { const item = fixture(`Earlier ${i + 1}`, `dddddddd-dddd-4ddd-8ddd-${String(i + 1).padStart(12, '0')}`, 1, i); item.createdAt = new Date(Date.UTC(2026, 8, 30, 12, i)).toISOString(); item.updatedAt = item.createdAt; return item }), null) }
       if (patchMode === 'deleted-conflict') return page([], null)
-      if (patchMode === 'version-conflict') return page([fixture('Server updated comment', 'cccccccc-cccc-4ccc-8ccc-000000000001', 2)], null)
-      if (patchMode === 'delete-version-conflict') return page([fixture('Server updated comment', 'cccccccc-cccc-4ccc-8ccc-000000000001', 2)], null)
+      if (patchMode === 'version-conflict' || patchMode === 'delete-version-conflict') return page(Array.from({ length: 20 }, (_, i) => fixture(i === 0 ? 'Server updated comment' : `Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, i === 0 ? 2 : 1, i)), 'older')
       const newScope = path.includes(B.familyId) || path.includes(B.memoryId)
-      return page(metrics.deleted ? Array.from({ length: 19 }, (_, i) => fixture(`Existing comment ${i + 2}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 2).padStart(12, '0')}`, 1, i + 1)) : metrics.currentBody ? [fixture(metrics.currentBody, 'cccccccc-cccc-4ccc-8ccc-000000000001', 3)] : newScope ? [fixture('Fresh scope comment', 'ffffffff-ffff-4fff-8fff-ffffffffffff')] : undefined, metrics.currentBody || metrics.deleted || newScope ? null : 'older')
+      const currentItems = Array.from({ length: metrics.deleted ? 19 : 20 }, (_, i) => {
+        const ordinal = i + (metrics.deleted ? 1 : 0)
+        return fixture(ordinal === 0 && metrics.currentBody ? metrics.currentBody : `Existing comment ${ordinal + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(ordinal + 1).padStart(12, '0')}`, ordinal === 0 && metrics.currentBody ? 3 : 1, ordinal)
+      })
+      return page(metrics.deleted || metrics.currentBody ? currentItems : newScope ? [fixture('Fresh scope comment', 'ffffffff-ffff-4fff-8fff-ffffffffffff')] : undefined, metrics.deleted || metrics.currentBody ? 'older' : newScope ? null : 'older')
     }
     if (method === 'DELETE') { metrics.deleted = true; return { deletedId: 'cccccccc-cccc-4ccc-8ccc-000000000001', summary: { memoryId: A.memoryId, count: 0, capabilities: { read: true, create: true } } } }
     if (create) {

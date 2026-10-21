@@ -1,7 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
-import { cachePrivateImageResponse, eligiblePrivateImage, privateFamilyCacheGeneration, privateCacheIdentityGeneration, isActivePrivateCacheIdentity, readPrivateImage, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent } from '@/platform/persistence/private-cache'
+import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
+import { cachePrivateImageResponse, eligiblePrivateImage, privateFamilyCacheGeneration, privateCacheIdentityGeneration, isActivePrivateCacheIdentity, readPrivateImage, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
+
+const memberAvatarPool = new AvatarResourcePool<{ url: string; size: number }>((resource) => URL.revokeObjectURL(resource.url))
+subscribePrivateCacheInvalidation((invalidation) => {
+  memberAvatarPool.invalidate((key) => {
+    const [userId, familyId] = JSON.parse(key) as [string, string]
+    if (invalidation.type === 'identity' || invalidation.type === 'all') return true
+    if (invalidation.type === 'user') return userId === invalidation.userId
+    return userId === invalidation.userId && familyId === invalidation.familyId
+  })
+})
 
 export function usePrivateImageUrl(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void) {
   const identityGeneration = privateCacheIdentityGeneration()
@@ -21,6 +32,61 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
   }, [identityGeneration, path, userId])
   useEffect(() => {
     if (!userId || !path || !enabled || !transport) return
+    if (isImmutableMemberAvatarPath(path)) {
+      const eligible = eligiblePrivateImage(path)
+      if (!eligible) return
+      const familyId = eligible.familyId
+      const familyGeneration = privateFamilyCacheGeneration(userId, familyId)
+      const key = JSON.stringify([userId, familyId, identityGeneration, familyGeneration, path])
+      let settled = false
+      const release = memberAvatarPool.acquire(key, async (signal) => {
+        const isCurrent = () => !signal.aborted && isActivePrivateCacheIdentity(userId, identityGeneration) &&
+          privateFamilyCacheGeneration(userId, familyId) === familyGeneration
+        const decode = async (blob: Blob) => {
+          const url = URL.createObjectURL(blob)
+          try {
+            const image = new Image()
+            image.src = url
+            await image.decode()
+            if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+            return { url, size: blob.size }
+          } catch (error) {
+            URL.revokeObjectURL(url)
+            throw error
+          }
+        }
+        const cached = await readPrivateImage(userId, path).catch(() => null)
+        if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+        if (cached) {
+          try { return await decode(cached) }
+          catch { await removePrivateImage(userId, path).catch(() => undefined) }
+        }
+        if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+        const response = await transport.raw(path, { signal, headers: { 'X-Private-Media-Purpose': 'image' } })
+        const blob = await response.clone().blob()
+        if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+        const resource = await decode(blob)
+        void cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
+        return resource
+      }, (result) => {
+        if (result.url) {
+          setLoaded({ userId, path, url: result.url, identityGeneration, familyId, familyGeneration })
+        } else {
+          setLoaded({ userId, path, url: null, identityGeneration, familyId, familyGeneration })
+          const error = result.error
+          if (error instanceof ApiRequestError && error.status === 401) void clearPrivateUserCache(userId, identityGeneration).catch(() => undefined)
+          if (error instanceof ApiRequestError && error.status === 403) {
+            window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId, familyId } }))
+          }
+          if (error instanceof ApiRequestError && [401, 404].includes(error.status)) void removePrivateImage(userId, path).catch(() => undefined)
+        }
+        if (!settled) {
+          settled = true
+          onSettledRef.current?.()
+        }
+      })
+      return release
+    }
     if (hasLoadedReadyUrl(loadedRef.current, userId, path, identityGeneration) && lastRequest.current?.userId === userId && lastRequest.current.path === path && lastRequest.current.transport === transport) return
     lastRequest.current = { userId, path, transport }
     const controller = new AbortController()

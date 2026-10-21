@@ -65,6 +65,7 @@ export type MemoryCardPresentationProps = {
   seenContentRef?: Ref<HTMLDivElement>
   commentCount?: number
   onComments?: (trigger: HTMLButtonElement) => void
+  reactionPickerRequest?: number
 }
 
 export function MemoryCardPresentation({
@@ -90,6 +91,7 @@ export function MemoryCardPresentation({
   seenContentRef,
   commentCount,
   onComments,
+  reactionPickerRequest = 0,
 }: MemoryCardPresentationProps) {
   const hasCaption = body.trim().length > 0
   const interactive = mode === 'feed'
@@ -109,6 +111,16 @@ export function MemoryCardPresentation({
     setPickerState({ open, context: reactionContext })
   }, [reactionContext])
   const [pickerPoint, setPickerPoint] = useState({ x: 0, y: 0 })
+  const handledReactionRequest = useRef(reactionPickerRequest)
+  useEffect(() => {
+    if (!reactionPickerRequest || handledReactionRequest.current === reactionPickerRequest || !interactive) return
+    handledReactionRequest.current = reactionPickerRequest
+    onReactionFeedback?.('light')
+    const rect = articleRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setPickerPoint({ x: rect.left + rect.width / 2, y: rect.top + Math.min(80, rect.height / 4) })
+    setPickerOpen(true)
+  }, [interactive, onReactionFeedback, reactionPickerRequest, setPickerOpen])
 
   const cancelPending = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -254,7 +266,7 @@ export function MemoryCardPresentation({
         : kind === 'video'
           ? hasCaption ? <Typography className="caption" variant="memoryCaption">{body}</Typography> : null
           : hasCaption ? <div className="caption"><MemoryOpenButton body={body} interactive={interactive} kind={kind} onOpen={onOpen} /></div> : null}
-      <MemoryReactions counts={reactionCounts ?? {}} current={currentUserReaction ?? null} interactive={interactive} onSelect={onReaction} onHaptic={onReactionFeedback} onOpenFromTrigger={(point) => { setPickerPoint(point); if (!pickerOpenRef.current) onReactionFeedback?.('light'); setPickerOpen(true) }} open={pickerOpen} point={pickerPoint} onOpenChange={setPickerOpen} returnFocusRef={articleRef} onComments={interactive ? onComments : undefined} commentCount={commentCount} />
+      <MemoryReactions counts={reactionCounts ?? {}} current={currentUserReaction ?? null} interactive={interactive} onSelect={onReaction} onHaptic={onReactionFeedback} open={pickerOpen} point={pickerPoint} onOpenChange={setPickerOpen} returnFocusRef={articleRef} onComments={interactive ? onComments : undefined} commentCount={commentCount} />
     </article>
   )
 }
