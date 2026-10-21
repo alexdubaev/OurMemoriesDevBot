@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
+import { quotePostgresIdentifier } from '../src/test-support/postgres-identifier'
 
 import { createPrisma } from '../src/db'
 import {
@@ -55,7 +57,7 @@ test('cloud deployment retains its unconditional administrator postcondition', a
 })
 
 test('runtime database grants allow current and future DML without schema DDL', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1))
@@ -204,7 +206,7 @@ test('runtime database grants allow current and future DML without schema DDL', 
 })
 
 test('runtime database reconciliation rolls back every revoke when a later grant fails', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1))
@@ -259,7 +261,7 @@ test('runtime database reconciliation rolls back every revoke when a later grant
 })
 
 test('migration ownership preflight requires both public-schema privileges', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const parsed = new URL(databaseUrl)
@@ -273,7 +275,8 @@ test('migration ownership preflight requires both public-schema privileges', asy
     await admin.$executeRawUnsafe(
       `CREATE ROLE "${username}" LOGIN PASSWORD '${password}'`,
     )
-    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE "${decodeURIComponent(parsed.pathname.slice(1))}" TO "${username}"`)
+    const databaseName = decodeURIComponent(parsed.pathname.slice(1))
+    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${quotePostgresIdentifier(databaseName)} TO "${username}"`)
     await admin.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${username}"`)
     await admin.$executeRawUnsafe(`REVOKE CREATE ON SCHEMA public FROM "${username}"`)
 
@@ -299,7 +302,7 @@ test('migration ownership preflight requires both public-schema privileges', asy
 })
 
 test('runtime database reconciliation refuses inherited roles', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1))
@@ -327,7 +330,7 @@ test('runtime database reconciliation refuses inherited roles', async () => {
 })
 
 test('legacy public schema ownership is inventoried and transferred explicitly', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const suffix = `${process.pid}_${Date.now()}`

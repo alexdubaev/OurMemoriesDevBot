@@ -189,23 +189,27 @@ test('unmounting an inactive detail does not retain or stop a different active o
   const card = mediaElement()
   const detail = mediaElement()
   const root = createRoot(detachedContainer(browser.window))
+  let activateCard = () => undefined
 
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, null,
-      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card, onActivate: (activate) => { activateCard = activate } }),
       createElement(PlayerProbe, { id: 'same-media', key: 'detail', media: detail }),
     ))
   })
+  activateCard()
   await act(async () => {
     root.render(createElement(MediaPlaybackCoordinator, null,
-      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card }),
+      createElement(PlayerProbe, { id: 'same-media', key: 'card', media: card, onActivate: (activate) => { activateCard = activate } }),
     ))
   })
 
+  expect(card.pauseCalls).toBe(0)
+  expect(detail.pauseCalls).toBe(0)
   browser.setHidden(true)
   browser.dispatch('visibilitychange')
   expect(detail.pauseCalls).toBe(0)
-  expect(card.pauseCalls).toBe(0)
+  expect(card.pauseCalls).toBe(1)
 
   await act(async () => root.unmount())
   browser.restore()

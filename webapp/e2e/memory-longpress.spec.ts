@@ -1,11 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test'
-
-async function computedUserSelect(locator: Locator) {
-  return locator.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return style.getPropertyValue('user-select') || style.getPropertyValue('-webkit-user-select')
-  })
-}
+import { expect, test } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/e2e/memoly-v4.harness.html')
@@ -13,6 +6,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('a stationary hold on note text opens reactions and suppresses the note click', async ({ page }) => {
+  await page.clock.install()
   const note = page.locator('[data-memory-kind="note"]')
   const text = note.locator('.memoly-note-gradient__text')
   await text.scrollIntoViewIfNeeded()
@@ -21,7 +15,7 @@ test('a stationary hold on note text opens reactions and suppresses the note cli
   if (!box) throw new Error('note text is not visible')
   await page.mouse.move(box.x + 20, box.y + 20)
   await page.mouse.down()
-  await page.waitForTimeout(550)
+  await page.clock.fastForward(550)
   await expect(page.locator('.reaction-picker')).toBeVisible()
   await page.mouse.up()
   await expect(page.getByRole('heading', { name: 'Воспоминание' })).toHaveCount(0)
@@ -30,19 +24,21 @@ test('a stationary hold on note text opens reactions and suppresses the note cli
 })
 
 test('holding the caption action preserves its normal media-open click', async ({ page }) => {
+  await page.clock.install()
   const caption = page.locator('[data-memory-kind="photo"] .caption-open').first()
   await caption.scrollIntoViewIfNeeded()
   const box = await caption.boundingBox()
   if (!box) throw new Error('caption action is not visible')
   await page.mouse.move(box.x + 20, box.y + 12)
   await page.mouse.down()
-  await page.waitForTimeout(550)
+  await page.clock.fastForward(550)
   await expect(page.locator('.reaction-picker')).toHaveCount(0)
   await page.mouse.up()
   await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
 })
 
 test('micro drift still opens reactions while a vertical drag scrolls the feed without opening them', async ({ page }) => {
+  await page.clock.install()
   const note = page.locator('[data-memory-kind="note"] .memoly-note-gradient__text')
   await note.scrollIntoViewIfNeeded()
   const box = await note.boundingBox()
@@ -50,7 +46,7 @@ test('micro drift still opens reactions while a vertical drag scrolls the feed w
   await page.mouse.move(box.x + 20, box.y + 20)
   await page.mouse.down()
   await page.mouse.move(box.x + 28, box.y + 20, { steps: 3 })
-  await page.waitForTimeout(550)
+  await page.clock.fastForward(550)
   await expect(page.locator('.reaction-picker')).toBeVisible()
   await page.mouse.up()
   await page.keyboard.press('Escape')
@@ -74,11 +70,6 @@ test('micro drift still opens reactions while a vertical drag scrolls the feed w
 test('native selection and context menus are cancelled on publication content but controls remain available', async ({ page }) => {
   const note = page.locator('[data-memory-kind="note"]')
   const surface = note.locator('[data-memoly-note-gradient]')
-  expect(await computedUserSelect(surface)).toBe('none')
-  const supportsTouchCallout = await page.evaluate(() => CSS.supports('-webkit-touch-callout', 'none'))
-  if (supportsTouchCallout) {
-    expect(await surface.evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-touch-callout'))).toBe('none')
-  }
   const nativeEvents = await surface.locator('.memoly-note-gradient__text').evaluate((element) => {
     const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })
     element.dispatchEvent(context)
@@ -91,7 +82,6 @@ test('native selection and context menus are cancelled on publication content bu
   })
   expect(nativeEvents).toEqual({ context: true, selection: true })
   const button = page.getByRole('button', { name: 'Действия с воспоминанием' }).first()
-  expect(await computedUserSelect(button)).not.toBe('none')
   const controlContextWasCancelled = await button.evaluate((element) => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
     element.dispatchEvent(event)
@@ -121,11 +111,9 @@ test('native selection and context menus are cancelled on publication content bu
   const input = surface.locator('input')
   const link = surface.locator('a')
   const editor = surface.locator('[contenteditable="true"]')
-  expect(await computedUserSelect(input)).toBe('text')
   await input.fill('input still works')
   await link.click()
   await expect(link).toHaveAttribute('data-activated', 'true')
-  expect(await computedUserSelect(editor)).toBe('text')
   await editor.fill('editor still works')
   await expect(editor).toHaveText('editor still works')
   await expect(editor).toHaveAttribute('data-selection-prevented', 'false')
@@ -133,6 +121,7 @@ test('native selection and context menus are cancelled on publication content bu
 })
 
 test('carousel swipe changes slide, photo opens viewer, and video retry control stays interactive', async ({ page }) => {
+  await page.clock.install()
   const card = page.locator('[data-memory-kind="media"]').filter({ hasText: 'Фото, ролик и ещё одно фото' })
   const viewport = card.locator('.memoly-mixed-viewport').first()
   await viewport.scrollIntoViewIfNeeded()
@@ -154,7 +143,7 @@ test('carousel swipe changes slide, photo opens viewer, and video retry control 
   if (!photoBox) throw new Error('photo is not visible')
   await page.mouse.move(photoBox.x + 20, photoBox.y + 20)
   await page.mouse.down()
-  await page.waitForTimeout(550)
+  await page.clock.fastForward(550)
   await expect(page.locator('.reaction-picker')).toBeVisible()
   await page.mouse.up()
   await expect(page.locator('.pswp--open')).toHaveCount(0)

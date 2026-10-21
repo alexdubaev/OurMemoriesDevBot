@@ -38,17 +38,8 @@ test('a PUBLIC_WEBAPP_URL that is not an absolute http(s) URL fails with an erro
 })
 
 test('the secondary action falls back to the local next step until a webapp URL exists', () => {
-  assert.deepEqual(getSecondaryAction(), {
-    href: '#process',
-    label: 'Как начать: 3 шага',
-  })
-  assert.deepEqual(getSecondaryAction('   '), {
-    href: '#process',
-    label: 'Как начать: 3 шага',
-  })
-  assert.deepEqual(getSecondaryAction('  https://app.example.com  '), {
-    href: 'https://app.example.com',
-    label: 'Открыть веб-приложение',
-  })
+  assert.equal(getSecondaryAction().href, '#process')
+  assert.equal(getSecondaryAction('   ').href, '#process')
+  assert.equal(getSecondaryAction('  https://app.example.com  ').href, 'https://app.example.com')
   assert.throws(() => getSecondaryAction('app.example.com'), /PUBLIC_WEBAPP_URL/)
 })

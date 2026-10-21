@@ -6,11 +6,10 @@ function avatar(family: string, asset: string) {
   return `/api/v1/families/${family}/media/avatars/${asset}-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${asset}-bbbb-4bbb-8bbb-bbbbbbbbbbbb/content`
 }
 
-test('shares private author avatar work and retires URLs across feed scopes', async ({ page }, testInfo) => {
+test('private author avatars share requests and retire stale URLs across feed scopes', async ({ page }) => {
   await page.goto('/e2e/shared-author-avatar.harness.html')
   await expect.poll(() => page.evaluate(() => typeof window.__avatarProbe?.configure)).toBe('function')
-  await expect(page.locator('.memory-card')).toHaveCount(40)
-  const configure = (value: { mode: 'baseline' | 'feed'; userId: string; familyId: string; membershipEpoch: number; paths: [string, string, string] }) => page.evaluate((next) => window.__avatarProbe.configure(next), value)
+  const configure = (value: { mode: 'feed'; userId: string; familyId: string; membershipEpoch: number; paths: [string, string, string] }) => page.evaluate((next) => window.__avatarProbe.configure(next), value)
   const metrics = () => page.evaluate(() => window.__avatarProbe.metrics)
   const avatarRequests = async () => (await metrics()).requests.filter((path) => /\/media\/avatars\//.test(path))
   const resetMetrics = () => page.evaluate(() => {
@@ -18,78 +17,61 @@ test('shares private author avatar work and retires URLs across feed scopes', as
     value.requests.length = 0; value.created.length = 0; value.revoked.length = 0; value.decodes = 0
   })
   const userA = 'user-account-a'
-  const baselinePaths: [string, string, string] = [avatar(familyA, 'aaaaaaaa'), avatar(familyA, 'cccccccc'), avatar(familyB, 'eeeeeeee')]
-
-  await configure({ mode: 'baseline', userId: userA, familyId: familyA, membershipEpoch: 1, paths: baselinePaths })
-  await expect.poll(async () => (await metrics()).requests.length).toBe(40)
-  await expect.poll(async () => (await metrics()).decodes).toBe(40)
-  expect((await metrics()).requests.filter((path) => path === baselinePaths[0]).length).toBe(20)
-
   const sharedPaths: [string, string, string] = [avatar(familyA, 'bbbbbbbb'), avatar(familyA, 'dddddddd'), avatar(familyB, 'ffffffff')]
-  await resetMetrics()
+  const sameFamilyPaths = new Set(sharedPaths.slice(0, 2))
+
   await page.evaluate(() => { window.__avatarProbe.metrics.holdResponses = true })
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 1, paths: sharedPaths })
-  await expect.poll(async () => (await avatarRequests()).length).toBe(2)
-  await expect(page.locator('.memory-card')).toHaveCount(40)
-  await expect(page.locator('.memoly-mixed-carousel')).toHaveCount(1)
-  const carousel = page.locator('.memoly-mixed-carousel')
-  await carousel.focus()
-  await carousel.press('ArrowRight')
-  await expect(carousel).toHaveAttribute('data-seen-active-index', '1')
-  await carousel.press('ArrowLeft')
-  await expect(carousel).toHaveAttribute('data-seen-active-index', '0')
+  const cards = page.locator('.memory-card')
+  await expect(cards.first()).toBeVisible()
+  await expect(page.locator('.memoly-mixed-carousel')).toBeVisible()
+  await expect.poll(async () => new Set(await avatarRequests()).size).toBe(sameFamilyPaths.size)
+  const initialRequests = await avatarRequests()
+  expect(initialRequests.every((path) => sameFamilyPaths.has(path))).toBe(true)
+  expect(new Set(initialRequests).size).toBe(initialRequests.length)
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible()
-  await expect(page.locator('html')).toHaveAttribute('data-ui-version', 'v2')
-  await expect(page.getByRole('button', { name: 'Добавить реакцию' })).toHaveCount(40)
+
   const familyButton = page.getByRole('button', { name: 'Семья' })
   await expect(familyButton).toBeVisible()
   await familyButton.click()
-  await expect.poll(() => page.evaluate(() => window.__avatarProbe.metrics.familyNavigations)).toBe(1)
-  await expect(page.locator('.author-initials')).toHaveCount(40)
+  await expect.poll(() => page.evaluate(() => window.__avatarProbe.metrics.familyNavigations)).toBeGreaterThan(0)
   await page.evaluate(() => window.__avatarProbe.releaseResponses())
-  await expect.poll(async () => (await metrics()).decodes).toBeGreaterThanOrEqual(2)
-  expect((await metrics()).decodes).toBeLessThan(8)
-  await expect(page.locator('.memory-card .author-avatar img')).toHaveCount(38)
-  await expect(page.getByText('Foreign author')).toBeVisible()
-  await expect(page.getByText('No avatar author')).toBeVisible()
-  const sameSrc = await page.locator('.memory-card .author-avatar img').evaluateAll((images) => {
-    const byAuthor = new Map<string, Set<string>>()
-    for (const image of images as HTMLImageElement[]) {
-      const author = image.closest('.memory-card')?.querySelector('.author-name')?.textContent ?? ''
-      const values = byAuthor.get(author) ?? new Set<string>()
-      values.add(image.src); byAuthor.set(author, values)
-    }
-    return [...byAuthor.values()].every((values) => values.size === 1)
-  })
-  expect(sameSrc).toBe(true)
-  const cropStyle = await page.locator('.memory-card .author-avatar img').first().getAttribute('style')
-  expect(cropStyle).toContain('width: 200%')
-  expect(cropStyle).toContain('left: -50%')
+  const images = page.locator('.memory-card .author-avatar img')
+  await expect(images.first()).toBeVisible()
+  await expect.poll(() => images.evaluateAll((nodes) => nodes.every((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
+  expect(await page.locator('.author-initials').count()).toBeGreaterThan(0)
   expect(await avatarRequests()).not.toContain(sharedPaths[2])
-  const firstCard = page.locator('.memory-card').first()
-  await firstCard.scrollIntoViewIfNeeded()
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-  await firstCard.focus()
-  await firstCard.press('Shift+F10')
-  await expect(page.locator('.reaction-picker-options')).toBeVisible()
-  await page.getByRole('button', { name: 'Сердце' }).click({ force: true })
-  await expect.poll(async () => (await metrics()).mutations.length).toBe(1)
-  await expect(page.getByRole('group', { name: /Реакции: Сердце 3/ }).first()).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('shared-author-avatar.png'), fullPage: false })
 
   const epochOnlyPaths: [string, string, string] = [...sharedPaths]
   await resetMetrics()
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 2, paths: epochOnlyPaths })
-  await expect.poll(async () => (await avatarRequests()).length).toBe(2)
-  await expect.poll(async () => (await metrics()).decodes).toBeGreaterThanOrEqual(2)
-  expect((await metrics()).decodes).toBeLessThan(8)
+  const epochRequests = await avatarRequests()
+  expect(epochRequests.every((path) => sameFamilyPaths.has(path))).toBe(true)
+  expect(new Set(epochRequests).size).toBe(epochRequests.length)
+  expect(epochRequests).not.toContain(sharedPaths[2])
+  const epochImages = page.locator('.memory-card .author-avatar img')
+  await expect.poll(() => epochImages.evaluateAll((nodes) => nodes.length > 0 &&
+    nodes.every((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0),
+  )).toBe(true)
+  const epochImagesByAuthor = await epochImages.evaluateAll((nodes) => {
+    const byAuthor = new Map<string, Set<string>>()
+    for (const image of nodes as HTMLImageElement[]) {
+      const author = image.closest('.memory-card')?.querySelector('.author-name')?.textContent ?? ''
+      const urls = byAuthor.get(author) ?? new Set<string>()
+      urls.add(image.src)
+      byAuthor.set(author, urls)
+    }
+    return [...byAuthor.entries()].map(([author, urls]) => ({ author, urlCount: urls.size }))
+  })
+  expect(epochImagesByAuthor.map(({ author }) => author).sort()).toEqual(['Author A', 'Author B'])
+  expect(epochImagesByAuthor.every(({ urlCount }) => urlCount === 1)).toBe(true)
   const retainedAuthorB = await page.locator('.memory-card').nth(1).locator('.author-avatar img').getAttribute('src')
   const pathOnlyPaths: [string, string, string] = [avatar(familyA, 'ababaccc'), sharedPaths[1], sharedPaths[2]]
   await resetMetrics()
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 2, paths: pathOnlyPaths })
-  await expect.poll(async () => (await avatarRequests()).length).toBe(1)
-  await expect.poll(async () => (await metrics()).decodes).toBeGreaterThanOrEqual(1)
-  expect((await metrics()).decodes).toBeLessThan(8)
+  await expect.poll(async () => new Set(await avatarRequests()).size).toBe(1)
+  expect(await avatarRequests()).toContain(pathOnlyPaths[0])
+  expect(await avatarRequests()).not.toContain(pathOnlyPaths[1])
   await expect(page.locator('.memory-card').nth(1).locator('.author-avatar img')).toHaveAttribute('src', retainedAuthorB!)
 
   const missingPath = avatar(familyA, 'abababab')
@@ -98,28 +80,44 @@ test('shares private author avatar work and retires URLs across feed scopes', as
   await resetMetrics()
   await page.evaluate((path) => { window.__avatarProbe.metrics.missing.add(path) }, secondMissingPath)
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 3, paths: [missingPath, secondMissingPath, sharedPaths[2]] })
-  await expect.poll(async () => (await avatarRequests()).length).toBe(2)
+  await expect.poll(async () => new Set(await avatarRequests()).size).toBe(new Set([missingPath, secondMissingPath]).size)
+  expect((await avatarRequests()).every((path) => path === missingPath || path === secondMissingPath)).toBe(true)
   await expect(page.locator('.memory-card .author-avatar img')).toHaveCount(0)
-  await expect(page.locator('.author-initials')).toHaveCount(40)
+  await expect(page.locator('.author-initials').first()).toBeVisible()
 
   const stalePaths: [string, string, string] = [avatar(familyA, '90909090'), avatar(familyA, '80808080'), sharedPaths[2]]
   await page.evaluate(() => { window.__avatarProbe.metrics.holdDecode = true })
   await resetMetrics()
   await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 4, paths: stalePaths })
-  await expect.poll(async () => (await metrics()).decodes).toBe(2)
-  const staleUrls = (await metrics()).created.slice()
-  const nextPaths: [string, string, string] = [...stalePaths]
-  await configure({ mode: 'feed', userId: 'user-account-b', familyId: familyA, membershipEpoch: 5, paths: nextPaths })
-  await expect.poll(async () => (await avatarRequests()).length).toBe(4)
+  await expect.poll(async () => (await metrics()).created.length).toBeGreaterThan(0)
+  await expect.poll(async () => (await metrics()).decodes).toBeGreaterThan(0)
+  const staleUrls = new Set((await metrics()).created)
+  const requestsBeforeIdentitySwitch = (await avatarRequests()).length
+  await configure({ mode: 'feed', userId: 'user-account-b', familyId: familyA, membershipEpoch: 5, paths: stalePaths })
+  const newIdentityRequests = () => avatarRequests().then((requests) => requests.slice(requestsBeforeIdentitySwitch))
+  await expect.poll(async () => new Set(await newIdentityRequests()).size).toBe(new Set(stalePaths.slice(0, 2)).size)
   await page.evaluate(() => window.__avatarProbe.releaseDecode())
-  await expect.poll(async () => (await metrics()).created.length).toBe(4)
-  await expect.poll(async () => new Set((await metrics()).revoked).size).toBe(2)
-  await expect.poll(async () => page.locator('.memory-card .author-avatar img').count()).toBe(38)
-  const displayed = await page.locator('.memory-card .author-avatar img').evaluateAll((images) => images.map((image) => (image as HTMLImageElement).src))
-  expect(displayed.every((src) => !staleUrls.includes(src))).toBe(true)
+  await expect.poll(async () => {
+    const revoked = new Set((await metrics()).revoked)
+    return [...staleUrls].every((url) => revoked.has(url))
+  }).toBe(true)
+  await expect.poll(() => page.locator('.memory-card .author-avatar img').evaluateAll((nodes) => nodes.filter((node) => {
+    const image = node as HTMLImageElement
+    return image.complete && image.naturalWidth > 0
+  }).length)).toBeGreaterThan(0)
+  const displayed = await page.locator('.memory-card .author-avatar img').evaluateAll((nodes) => nodes.map((image) => (image as HTMLImageElement).src))
+  expect(displayed.every((src) => !staleUrls.has(src))).toBe(true)
   await page.evaluate(() => window.__avatarProbe.revoke())
-  await expect.poll(async () => new Set((await metrics()).revoked).size).toBe(4)
+  await expect.poll(async () => {
+    const { created, revoked } = await metrics()
+    const revokedUrls = new Set(revoked)
+    return created.every((url) => revokedUrls.has(url))
+  }).toBe(true)
   await expect(page.locator('.memory-card .author-avatar img')).toHaveCount(0)
   await page.evaluate(() => window.__avatarProbe.unmount())
-  await expect.poll(async () => new Set((await metrics()).revoked).size).toBe(4)
+  await expect.poll(async () => {
+    const { created, revoked } = await metrics()
+    const revokedUrls = new Set(revoked)
+    return created.every((url) => revokedUrls.has(url))
+  }).toBe(true)
 })

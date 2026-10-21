@@ -1,5 +1,6 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHmac, randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
@@ -7,23 +8,12 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import type { BackendRuntime } from '../../runtime'
-// @ts-expect-error The repository's runtime safety guard is JavaScript with no declaration surface.
-import { assertTestDatabaseUrl } from '../../../../scripts/repo-env.mjs'
 import { createPrivateStorage } from '../../storage'
 import { pngFixture } from '../../storage/storage-contract'
 import type { MaxApiPort } from '../max'
 import { createMaxModule } from '../max'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-if (!databaseUrl) {
-  throw new Error('MAX family audit requires the disposable memoly_family_audit database via TEST_DATABASE_URL')
-}
-assertTestDatabaseUrl(databaseUrl)
-const databaseAddress = new URL(databaseUrl)
-if (!['127.0.0.1', 'localhost', '::1'].includes(databaseAddress.hostname)
-  || !/^\/(?:web_app_demo_test|memoly_family_audit(?:_e2e)?_test|memoly_family_audit_verify_20261016_test)$/.test(databaseAddress.pathname)) {
-  throw new Error('MAX family audit refuses non-loopback or non-task-owned databases')
-}
+const databaseUrl = requireIntegrationDatabaseUrl()
 const maxBotToken = '987654:max-family-audit-synthetic'
 
 describe('MAX family invitation and access audit', () => {
@@ -43,6 +33,8 @@ describe('MAX family invitation and access audit', () => {
     AUTH_RATE_LIMIT_MAX: '10000',
   })
   const storageRoot = resolve(`.scratch/max-family-audit-storage-${randomUUID()}`)
+  const ownedUserIds = new Set<string>()
+  const ownedFamilyIds = new Set<string>()
   let app: ReturnType<typeof createApp>
   let privateStorage: ReturnType<typeof createPrivateStorage>
 
@@ -83,7 +75,20 @@ describe('MAX family invitation and access audit', () => {
   })
 
   afterAll(async () => {
+    const familyIds = [...ownedFamilyIds]
+    if (familyIds.length > 0) await prisma.family.deleteMany({ where: { id: { in: familyIds } } })
+    const userIds = [...ownedUserIds]
+    if (userIds.length > 0) {
+      const identities = await prisma.externalIdentity.findMany({ where: { userId: { in: userIds } }, select: { id: true, provider: true, subject: true } })
+      const identityIds = identities.map(({ id }) => id)
+      await prisma.browserLoginChallenge.deleteMany({ where: { approvedExternalIdentityId: { in: identityIds } } })
+      await prisma.authSession.deleteMany({ where: { userId: { in: userIds } } })
+      await prisma.pilotAdmission.deleteMany({ where: { OR: identities.map(({ provider, subject }) => ({ provider, subject })) } })
+      await prisma.externalIdentity.deleteMany({ where: { id: { in: identityIds } } })
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } })
+    }
     await prisma.$disconnect()
+    await rm(storageRoot, { recursive: true, force: true })
   })
 
   test('serves published private photo to an invited viewer and denies it after revocation', async () => {
@@ -591,6 +596,7 @@ describe('MAX family invitation and access audit', () => {
     })
     expect(auth.status).toBe(200)
     const data = await auth.json() as any
+    ownedUserIds.add(data.user.id as string)
     const identity = await prisma.externalIdentity.findFirstOrThrow({ where: { provider: 'max', subject: String(id) } })
     await prisma.pilotAdmission.create({ data: { provider: 'max', subject: String(id) } })
     return { userId: data.user.id as string, token: data.accessToken as string }
@@ -600,6 +606,7 @@ describe('MAX family invitation and access audit', () => {
     const result = await request('/api/v1/families', token, 'POST', { name, timezone: 'Europe/Moscow' }, randomUUID())
     expect(result.response.status).toBe(201)
     const familyId = result.body.family.id as string
+    ownedFamilyIds.add(familyId)
     // A newly-created family is intentionally incomplete; finish its profile through the real API
     // because invite issuance is gated on the owner completing it.
     const family = await prisma.family.findUniqueOrThrow({ where: { id: familyId } })

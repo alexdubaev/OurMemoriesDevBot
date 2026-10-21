@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import {
@@ -11,7 +12,8 @@ import { Client } from 'pg'
 import { readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const suite = process.env.TEST_DATABASE_URL ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
+const suite = describe
 suite('COM-1 comments', () => {
   const f = commentFixtures()
   afterAll(f.cleanup)

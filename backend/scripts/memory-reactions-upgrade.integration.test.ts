@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -12,7 +13,7 @@ const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
 const reactionMigration = '20261001090000_memory_reactions'
 
 test('backfills every existing like to heart without changing identity or timestamp', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
   const migrations = (await readdir(migrationsRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))

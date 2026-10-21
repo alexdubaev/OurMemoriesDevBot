@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
@@ -71,6 +71,16 @@ function testEvidenceError(name, output) {
   return null
 }
 
+function dedupeCommands(commands) {
+  const seen = new Set()
+  return commands.filter((entry) => {
+    const key = JSON.stringify(entry[1])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function bunSummary(output) {
   const ran = [...output.matchAll(/Ran\s+\d+\s+tests?\s+across\s+\d+\s+files?\b[^\n]*/gi)].at(-1)
   if (!ran) return null
@@ -124,7 +134,7 @@ export function selectProfile({ paths, requested }) {
   return { profile: selected, required, paths }
 }
 
-export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') {
+export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', repositoryRoot = process.cwd()) {
   const commands = [['Git whitespace and patch validation', ['git', ['diff', '--check', `${base}...HEAD`]]], ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]]]
   if (profile === 'fast') {
     if (paths.some((path) => /^(webapp\/(?:public\/assets|src\/assets)\/|assets\/)/i.test(path) && RASTER_ASSET.test(path))) {
@@ -138,17 +148,17 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') 
     if (paths.some((path) => path.startsWith('website/') && /\.(css|scss|sass|less)$/i.test(path))) {
       commands.push(['Website production build', ['bun', ['run', 'build:website']]])
     }
-    return commands
+    return dedupeCommands(commands)
   }
 
   if (paths.some((path) => path.startsWith('backend/'))) {
     commands.push(['Backend typecheck and Prisma generation', ['bun', ['run', 'typecheck:backend']]])
-    const testFiles = relatedBackendTests(paths)
+    const testFiles = relatedBackendTests(paths, repositoryRoot)
     const unit = testFiles.filter((path) => !path.includes('.integration.test.') && !path.includes('.live.test.'))
     const integration = testFiles.filter((path) => path.includes('.integration.test.'))
     if (unit.length) commands.push(['Changed backend unit tests', ['bun', ['test', ...unit.map((path) => `./backend/${path}`)]]])
     if (integration.length) commands.push(['Changed backend PostgreSQL integration tests', ['bun', ['run', 'test:backend:integration', '--', ...integration]]])
-    if (!unit.length && !integration.length && paths.some((path) => path.includes('.test.'))) {
+    if (!unit.length && !integration.length && paths.some((path) => path.includes('.test.') && existsSync(resolve(repositoryRoot, path)))) {
       throw new Error(`No backend tests discovered for changed paths: ${paths.join(', ')}`)
     }
   }
@@ -156,7 +166,7 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') 
     commands.push(['Web app typecheck', ['bun', ['run', 'typecheck:webapp']]])
     commands.push(['Web app lint', ['bun', ['run', 'lint']]])
     commands.push(['Web app production build', ['bun', ['run', 'build:webapp']]])
-    const tests = relatedWebappTests(paths)
+    const tests = relatedWebappTests(paths, repositoryRoot)
     if (tests.length) commands.push(['Changed web app unit tests', ['bun', ['test', ...tests]]])
     else console.log('No targeted Web app unit test maps to these paths; typecheck, lint, and production build remain required.')
   }
@@ -192,7 +202,6 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') 
       ['Website typecheck and build', ['bun', ['run', 'typecheck:website']]],
       ['Website production build', ['bun', ['run', 'build:website']]],
       ['Repository and Selectel safety tests', ['bun', ['run', 'test:tools']]],
-      ['Verification runner boundary tests', ['bun', ['test', 'scripts/verify-local.test.mjs']]],
       ['MAX and platform-neutral shared contract tests', ['bun', ['run', 'test:contracts:max']]],
       ['Backend unit tests (MAX/platform-neutral catalog)', ['bun', ['run', '--cwd', 'backend', 'test:unit', '--', '--max-only']]],
       ['Web app unit tests', ['bun', ['run', 'test:webapp']]],
@@ -202,29 +211,30 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main') 
     ]
   }
   if (commands.length === 1) throw new Error(`No mandatory STANDARD checks mapped for changed paths: ${paths.join(', ') || '(none)'}`)
-  return commands
+  return dedupeCommands(commands)
 }
 
-function relatedBackendTests(paths) {
+function relatedBackendTests(paths, repositoryRoot) {
   const files = new Set()
   for (const changed of paths.filter((path) => path.startsWith('backend/'))) {
     if (/\.test\.[cm]?[jt]sx?$/i.test(changed)) {
-      files.add(changed.replace(/^backend\//, ''))
+      const relativePath = changed.replace(/^backend\//, '')
+      if (existsSync(resolve(repositoryRoot, changed))) files.add(relativePath)
       continue
     }
     const normalized = changed.replaceAll('\\', '/')
     const moduleMatch = normalized.match(/^(backend\/src\/modules\/[^/]+)/)
     const testRoot = moduleMatch?.[1] ?? (normalized.startsWith('backend/src/') ? normalized.slice(0, normalized.lastIndexOf('/')) : null)
     if (!testRoot) continue
-    collectBackendTests(resolve(process.cwd(), testRoot), files)
+    collectBackendTests(resolve(repositoryRoot, testRoot), files, repositoryRoot)
   }
   return [...files].sort()
 }
 
-function relatedWebappTests(paths) {
+function relatedWebappTests(paths, repositoryRoot) {
   let candidates = []
-  try { candidates = readdirSync(resolve(process.cwd(), 'webapp/tests')).filter((file) => /\.test\.[jt]sx?$/i.test(file)) } catch { return [] }
-  const changedTests = paths.filter((path) => /^webapp\/tests\/.*\.test\.[jt]sx?$/i.test(path)).map((path) => `./${path}`)
+  try { candidates = readdirSync(resolve(repositoryRoot, 'webapp/tests')).filter((file) => /\.test\.[jt]sx?$/i.test(file)) } catch { return [] }
+  const changedTests = paths.filter((path) => /^webapp\/tests\/.*\.test\.[jt]sx?$/i.test(path) && existsSync(resolve(repositoryRoot, path))).map((path) => `./${path}`)
   if (changedTests.length) return changedTests
   const sourceStems = paths.filter((path) => path.startsWith('webapp/src/')).map((path) => path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-'))
   const matches = candidates.filter((file) => sourceStems.some((stem) => stem && (file.toLowerCase().includes(stem) || stem.includes(file.replace(/\.test\.[jt]sx?$/i, '').toLowerCase()))))
@@ -235,14 +245,14 @@ function isArchitectureBoundary(path) {
   return /(^|\/)(modules|contracts|platform|composition)(\/|\.)/i.test(path)
 }
 
-function collectBackendTests(directory, files) {
+function collectBackendTests(directory, files, repositoryRoot) {
   let entries
   try { entries = readdirSync(directory, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
     const path = resolve(directory, entry.name)
-    if (entry.isDirectory()) collectBackendTests(path, files)
+    if (entry.isDirectory()) collectBackendTests(path, files, repositoryRoot)
     else if (entry.isFile() && /\.test\.[cm]?[jt]sx?$/i.test(entry.name)) {
-      files.add(relative(resolve(process.cwd(), 'backend'), path).replaceAll('\\', '/'))
+      files.add(relative(resolve(repositoryRoot, 'backend'), path).replaceAll('\\', '/'))
     }
   }
 }

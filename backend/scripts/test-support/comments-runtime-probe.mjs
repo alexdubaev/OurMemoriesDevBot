@@ -85,20 +85,51 @@ try {
     const stored = await prisma.memoryComment.findUniqueOrThrow({ where: { id: doomed.body.comment.id } })
     assert.ok(stored.deletedAt)
 
-    writeFileSync(statePath, JSON.stringify({ ...seed, token, requestId, requestBody: 'COM-4 API-created retained comment', commentId: first.body.comment.id, tombstoneId: doomed.body.comment.id, tombstoneRequestId: deletionKey }))
+    const secondOwnerIdentity = await prisma.externalIdentity.create({ data: { userId: seed.secondOwnerId, provider: 'max', subject: `${Date.now()}${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}` } })
+    await prisma.pilotAdmission.create({ data: { provider: 'max', subject: secondOwnerIdentity.subject } })
+    const secondOwnerSession = await prisma.authSession.create({ data: {
+      userId: seed.secondOwnerId, externalIdentityId: secondOwnerIdentity.id,
+      refreshTokenHash: crypto.randomUUID(), refreshTokenFamilyHash: crypto.randomUUID(),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } })
+    const secondOwnerToken = await signAccessToken({ sub: seed.secondOwnerId, sessionId: secondOwnerSession.id }, env)
+    const secondMemory = await request(`/families/${seed.secondFamilyId}/memories`, secondOwnerToken, 'POST', {
+      kind: 'note', childId: seed.secondChildId, body: 'COM-4 unread in second family', occurredAt: new Date().toISOString(),
+    }, crypto.randomUUID())
+    assert.equal(secondMemory.response.status, 201)
+    const families = await request('/me/families', token)
+    assert.equal(families.response.status, 200)
+    assert.ok(families.body.items.some((item) => item.familyId === seed.familyId))
+    assert.ok(families.body.items.some((item) => item.familyId === seed.secondFamilyId && item.unreadCount === 1), JSON.stringify(families.body.items))
+    writeFileSync(statePath, JSON.stringify({ ...seed, secondMemoryId: secondMemory.body.id, token, requestId, requestBody: 'COM-4 API-created retained comment', commentId: first.body.comment.id, tombstoneId: doomed.body.comment.id, tombstoneRequestId: deletionKey }))
     process.stdout.write(JSON.stringify({ success: true, phase: mode, commentId: first.body.comment.id, tombstoneId: doomed.body.comment.id }) + '\n')
   } else {
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
     const memoryPath = `/families/${state.familyId}/memories/${state.memoryId}`
+    const familyList = await request('/me/families', state.token)
+    assert.equal(familyList.response.status, 200)
+    assert.ok(familyList.body.items.some((item) => item.familyId === state.familyId))
+    assert.ok(familyList.body.items.some((item) => item.familyId === state.secondFamilyId && item.unreadCount === 1))
+    const secondMemory = await request(`/families/${state.secondFamilyId}/memories/${state.secondMemoryId}`, state.token)
+    assert.equal(secondMemory.response.status, 200)
+    assert.equal(secondMemory.body.body, 'COM-4 unread in second family')
     const memory = await request(memoryPath, state.token)
     assert.equal(memory.response.status, 200)
     assert.equal(memory.body.id, state.memoryId)
-    if (mode.startsWith('old-') || mode.startsWith('accepted-v4-')) {
+    if (mode === 'permitted-rollback') {
+      const created = await request(`/families/${state.familyId}/memories`, state.token, 'POST', {
+        kind: 'note', childId: state.childId, body: 'permitted rollback runtime write', occurredAt: new Date().toISOString(),
+      }, crypto.randomUUID())
+      assert.equal(created.response.status, 201)
+      state.rollbackMemoryIds = [...(state.rollbackMemoryIds ?? []), { id: created.body.id, mode, body: 'permitted rollback runtime write' }]
+      writeFileSync(statePath, JSON.stringify(state))
+      process.stdout.write(JSON.stringify({ success: true, phase: mode, memoryId: created.body.id }) + '\n')
+    } else if (mode.startsWith('old-') || mode.startsWith('accepted-v4-')) {
       const created = await request(`/families/${state.familyId}/memories`, state.token, 'POST', {
         kind: 'note', childId: state.childId, body: `${mode} runtime memory`, occurredAt: new Date().toISOString(),
       }, crypto.randomUUID())
       assert.equal(created.response.status, 201)
-      state.rollbackMemoryIds = [...(state.rollbackMemoryIds ?? []), { id: created.body.id, mode }]
+      state.rollbackMemoryIds = [...(state.rollbackMemoryIds ?? []), { id: created.body.id, mode, body: `${mode} runtime memory` }]
       writeFileSync(statePath, JSON.stringify(state))
       process.stdout.write(JSON.stringify({ success: true, phase: mode, memoryId: created.body.id }) + '\n')
     } else if (mode === 'candidate-after') {
@@ -116,7 +147,7 @@ try {
       for (const rollbackWrite of state.rollbackMemoryIds ?? []) {
         const oldWrite = await request(`/families/${state.familyId}/memories/${rollbackWrite.id}`, state.token)
         assert.equal(oldWrite.response.status, 200)
-        assert.equal(oldWrite.body.body, `${rollbackWrite.mode} runtime memory`)
+        assert.equal(oldWrite.body.body, rollbackWrite.body)
       }
       const tombstone = await prisma.memoryComment.findUniqueOrThrow({ where: { id: state.tombstoneId } })
       assert.ok(tombstone.deletedAt)

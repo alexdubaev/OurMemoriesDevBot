@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -12,7 +13,7 @@ const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
 const welcomeMigration = '20260927150000_welcome_first_run_claim'
 
 test('Welcome migration backfills existing accounts while post-migration accounts start unclaimed', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
   const databaseName = `welcome_upgrade_${process.pid}_${Date.now()}`
   if (!/^welcome_upgrade_[0-9_]+$/.test(databaseName)) throw new Error('Unsafe database name')

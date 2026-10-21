@@ -1,5 +1,6 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHash, createHmac, randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { afterAll, describe, expect, test } from 'bun:test'
@@ -10,21 +11,27 @@ import { loadEnv } from '../../env'
 import { pngFixture } from '../../storage/storage-contract'
 import { createPrivateStorage } from '../../storage'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = requireIntegrationDatabaseUrl()
 const maxBotToken = '987654:f12-session-replacement-secret'
 const origin = 'https://app.example.com'
 const storageRoot = resolve('.scratch', `f12-session-replacement-storage-${randomUUID()}`)
+const ownedSubjects = new Set<string>()
+const ownedFamilyIds = new Set<string>()
+
+function assertF12TestDatabaseTarget(value: string, configuredDatabaseUrl: string | undefined) {
+  const testDbUrl = new URL(value)
+  const allowedTestHostnames = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+  if (
+    !allowedTestHostnames.has(testDbUrl.hostname) ||
+    !testDbUrl.port ||
+    !testDbUrl.pathname.slice(1).endsWith('_test') ||
+    (testDbUrl.searchParams.has('schema') && testDbUrl.searchParams.get('schema') !== 'public') ||
+    configuredDatabaseUrl !== value
+  ) throw new Error('F12 test requires matching DATABASE_URL and TEST_DATABASE_URL for an explicit loopback *_test database')
+}
 
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for this owned integration test')
-const testDbUrl = new URL(databaseUrl)
-const allowedTestHostnames = new Set(['127.0.0.1', 'localhost', '::1'])
-if (
-  !allowedTestHostnames.has(testDbUrl.hostname) ||
-  !testDbUrl.port ||
-  !testDbUrl.pathname.slice(1).endsWith('_test') ||
-  testDbUrl.searchParams.get('schema') !== 'public' ||
-  process.env.DATABASE_URL !== databaseUrl
-) throw new Error('F12 test requires matching DATABASE_URL and TEST_DATABASE_URL for an explicit loopback *_test database')
+assertF12TestDatabaseTarget(databaseUrl, process.env.DATABASE_URL)
 
 describe('MAX browser session replacement', () => {
   const env = loadEnv({
@@ -48,8 +55,50 @@ describe('MAX browser session replacement', () => {
   const storage = createPrivateStorage(env)
   const app = createApp({ env, prisma, privateStorage: storage })
 
+  test('accepts PostgreSQL default schema and rejects an explicitly different schema', () => {
+    const nonPublicSchema = new URL(databaseUrl!)
+    nonPublicSchema.searchParams.set('schema', 'private')
+    expect(() => assertF12TestDatabaseTarget(nonPublicSchema.toString(), nonPublicSchema.toString())).toThrow(/matching DATABASE_URL/)
+  })
+
   afterAll(async () => {
+    const familyIds = [...ownedFamilyIds]
+    if (familyIds.length > 0) {
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET CONSTRAINTS ALL DEFERRED`
+        await tx.memoryLike.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.memorySeen.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.memoryComment.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.memoryMedia.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.memory.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.child.updateMany({ where: { familyId: { in: familyIds } }, data: { avatarMediaId: null } })
+        await tx.uploadReservation.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.mediaAsset.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.child.deleteMany({ where: { familyId: { in: familyIds } } })
+        await tx.family.deleteMany({ where: { id: { in: familyIds } } })
+      })
+    }
+    const subjects = [...ownedSubjects]
+    if (subjects.length > 0) {
+      const identities = await prisma.externalIdentity.findMany({
+        where: { provider: 'max', subject: { in: subjects } },
+        select: { id: true, userId: true },
+      })
+      const identityIds = identities.map(({ id }) => id)
+      const userIds = [...new Set(identities.map(({ userId }) => userId))]
+      if (identityIds.length > 0) {
+        await prisma.browserLoginChallenge.deleteMany({ where: { approvedExternalIdentityId: { in: identityIds } } })
+      }
+      const sessions = await prisma.authSession.findMany({ where: { userId: { in: userIds } }, select: { id: true } })
+      const sessionIds = sessions.map(({ id }) => id)
+      await prisma.maxAuthReplay.deleteMany({ where: { sessionId: { in: sessionIds } } })
+      await prisma.authSession.deleteMany({ where: { id: { in: sessionIds } } })
+      await prisma.pilotAdmission.deleteMany({ where: { provider: 'max', subject: { in: subjects } } })
+      await prisma.externalIdentity.deleteMany({ where: { id: { in: identityIds } } })
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } })
+    }
     await prisma.$disconnect()
+    await rm(storageRoot, { recursive: true, force: true })
   })
 
   test('MAX re-entry clears a revoked browser cookie and restores through the normal browser client', async () => {
@@ -205,6 +254,7 @@ describe('MAX browser session replacement', () => {
     })
     expect(familyResponse.status).toBe(201)
     const family = await familyResponse.json() as any
+    ownedFamilyIds.add(family.family.id)
 
     const reservedResponse = await app.request(`/api/v1/families/${family.family.id}/uploads`, {
       method: 'POST',
@@ -624,6 +674,7 @@ describe('MAX browser session replacement', () => {
 })
 
 function signedMaxInitData(user: { id: number; first_name: string }, queryId: string, startParam?: string) {
+  ownedSubjects.add(String(user.id))
   const fields = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: queryId, user: JSON.stringify(user) })
   if (startParam) fields.set('start_param', startParam)
   const dataCheck = [...fields.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join('\n')

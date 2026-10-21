@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 const preBlock08Migrations = [
@@ -27,7 +28,7 @@ const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
 
 test('upgrades populated pre-Block 08 family data without inventing child or member values', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const databaseName = `block08_upgrade_${process.pid}_${Date.now()}`

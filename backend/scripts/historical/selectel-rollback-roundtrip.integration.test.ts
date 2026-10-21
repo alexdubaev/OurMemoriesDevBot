@@ -5,9 +5,10 @@ import { mkdirSync, mkdtempSync, existsSync, symlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { Client } from 'pg'
 // @ts-expect-error JS runtime safety guard has no declaration surface.
-import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
+import { assertTestDatabaseUrl } from '../../../scripts/repo-env.mjs'
+import { requireIntegrationDatabaseUrl } from '../../src/test-support/integration-database'
 
-const backendRoot = resolve(import.meta.dir, '..')
+const backendRoot = resolve(import.meta.dir, '../..')
 const root = resolve(backendRoot, '..')
 // Windows directory symlinks require Developer Mode or elevation; junctions do not.
 const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
@@ -24,7 +25,7 @@ test('legacy measured runtime writes survive the e383 roundtrip', () => roundtri
 test('candidate #181 writes survive #181 → #180 → #181 with MAX and browser-link recovery', () => roundtrip(attestedSource, attestedTarget, true), 60_000)
 
 async function roundtrip(sourceRevision: string, targetRevision: string, attestSessions: boolean) {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl || process.env.DATABASE_URL !== databaseUrl) throw new Error('Explicit matching test database URLs required')
   assertTestDatabaseUrl(databaseUrl)
   if (new URL(databaseUrl).hostname !== '127.0.0.1') throw new Error('Loopback test database required')

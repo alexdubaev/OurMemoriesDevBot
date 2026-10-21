@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
@@ -22,10 +23,9 @@ import { createMaxResponseDelivery } from './infrastructure/deliver-response'
 import { choicePayload } from '../../bot-family-target'
 import { MaxChannelProviderError } from './application/channel-protocol'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('MAX forward import integration', () => {
+describe('MAX forward import integration', () => {
   const prisma = createPrisma(databaseUrl!)
   const encryptionKey = Buffer.alloc(32, 21).toString('base64url')
   const crypto = createMaxPayloadCrypto(encryptionKey)

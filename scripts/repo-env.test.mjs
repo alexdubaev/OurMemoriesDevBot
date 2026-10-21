@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 
 import {
   assertLocalPrivateStorageEndpoint,
+  assertLoopbackTestDatabaseUrl,
   assertTestDatabaseUrl,
   postgresTestDataVolume,
   postgresTestService,
@@ -37,6 +38,24 @@ test('assertTestDatabaseUrl accepts test databases and rejects development datab
       'postgresql://superuser:superpassword@localhost:54329/web_app_demo?schema=public',
     ),
   ).toThrow(/Refusing to run tests against non-test database "web_app_demo"/)
+})
+
+test('strict integration guard only accepts matching loopback PostgreSQL test URLs', () => {
+  const safe = 'postgresql://user:secret@127.0.0.1:5432/memoly_suite_test'
+  expect(assertLoopbackTestDatabaseUrl(safe, safe)).toBe(safe)
+  for (const unsafe of [
+    'postgresql://user:secret@db.example.test:5432/memoly_suite_test',
+    'postgresql://user:secret@192.168.1.2:5432/memoly_suite_test',
+    'postgresql://user:secret@127.0.0.1:5432/memoly_suite',
+    'mysql://user:secret@127.0.0.1:5432/memoly_suite_test',
+    'postgresql://user:secret@127.0.0.1:5432/memoly_suite_test?host=db.example.test',
+    'postgresql://user:secret@127.0.0.1:5432/memoly_suite_test?hostaddr=203.0.113.8',
+    'postgresql://user:secret@127.0.0.1:5432/memoly%2Fother',
+  ]) {
+    expect(() => assertLoopbackTestDatabaseUrl(unsafe, unsafe)).toThrow(/loopback PostgreSQL/)
+  }
+  expect(() => assertLoopbackTestDatabaseUrl(safe, 'postgresql://user:secret@127.0.0.1:5432/other_test'))
+    .toThrow(/must match/)
 })
 
 test('assertTestDatabaseUrl accepts non-test databases with an intentional override', () => {

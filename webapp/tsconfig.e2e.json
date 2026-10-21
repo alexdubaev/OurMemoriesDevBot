@@ -23,6 +23,6 @@
     "erasableSyntaxOnly": false,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["e2e/**/*.ts", "e2e/**/*.tsx", "playwright.config.ts"],
+  "include": ["e2e/**/*.ts", "e2e/**/*.tsx", "playwright*.config.ts"],
   "exclude": ["e2e/.artifacts/**", "node_modules"]
 }

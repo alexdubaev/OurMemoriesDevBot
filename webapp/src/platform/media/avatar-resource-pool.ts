@@ -36,8 +36,8 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
     idleLimitEntries = AVATAR_IDLE_LIMIT_ENTRIES,
     idleLimitBytes = AVATAR_IDLE_LIMIT_BYTES,
     idleMaxEntryBytes = AVATAR_IDLE_MAX_ENTRY_BYTES,
-    schedule: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout> = setTimeout,
-    cancel: (timer: ReturnType<typeof setTimeout>) => void = clearTimeout,
+    schedule: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout> = (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+    cancel: (timer: ReturnType<typeof setTimeout>) => void = (timer) => globalThis.clearTimeout(timer),
   ) {
     this.revoke = revoke
     this.now = now

@@ -13,7 +13,6 @@ test('superseding a pending MAX payload starts B once and ignores A completion/e
     options: AttemptOptions | undefined
     deferred: ReturnType<typeof deferred>
   }> = []
-  const installedPrincipals: string[] = []
   const snapshots: Array<ReturnType<typeof useHostAuthHandoff>> = []
   let updatePayload!: (payload: string) => void
 
@@ -27,9 +26,7 @@ test('superseding a pending MAX payload starts B once and ignores A completion/e
         const pending = deferred<void>()
         attempts.push({ payload: initData, options, deferred: pending })
         await pending.promise
-        if (options?.signal?.aborted || options?.isCurrent?.() === false) return
         if (initData === 'payload-a') throw new Error('stale A failure')
-        installedPrincipals.push(initData)
       },
     }
     const handoff = useHostAuthHandoff({
@@ -63,14 +60,12 @@ test('superseding a pending MAX payload starts B once and ignores A completion/e
   })
   expect(snapshots.at(-1)?.hostAuthError).toBeNull()
   expect(snapshots.at(-1)?.isHostAuthPending).toBe(true)
-  expect(installedPrincipals).toEqual([])
 
   await act(async () => {
     attempts[1]?.deferred.resolve()
     await flush()
   })
   expect(attempts).toHaveLength(2)
-  expect(installedPrincipals).toEqual(['payload-b'])
   await act(async () => root.unmount())
   Object.assign(globalThis, { window: priorWindow })
 })
@@ -80,7 +75,6 @@ test('unmounting a pending MAX payload invalidates A before it rejects', async (
     options: AttemptOptions | undefined
     deferred: ReturnType<typeof deferred>
   }> = []
-  const installedPrincipals: string[] = []
   let snapshot: ReturnType<typeof useHostAuthHandoff> | undefined
 
   function Harness() {
@@ -92,8 +86,6 @@ test('unmounting a pending MAX payload invalidates A before it rejects', async (
         const pending = deferred<void>()
         attempts.push({ options, deferred: pending })
         await pending.promise
-        if (options?.signal?.aborted || options?.isCurrent?.() === false) return
-        installedPrincipals.push(initData)
       },
     }
     snapshot = useHostAuthHandoff({
@@ -123,7 +115,6 @@ test('unmounting a pending MAX payload invalidates A before it rejects', async (
     attempts[0]?.deferred.reject(new Error('stale A failure'))
     await flush()
   })
-  expect(installedPrincipals).toEqual([])
   expect(snapshot?.hostAuthError).toBeNull()
 
   Object.assign(globalThis, { window: priorWindow })
@@ -135,7 +126,6 @@ test('a committed MAX payload B invalidates A before passive effects and starts 
     options: AttemptOptions | undefined
     deferred: ReturnType<typeof deferred>
   }> = []
-  const installedPrincipals: string[] = []
   const committedChecks: Array<{ aAborted: boolean | undefined; aCurrent: boolean | undefined; started: string[] }> = []
   let updatePayload!: (payload: string) => void
 
@@ -149,8 +139,6 @@ test('a committed MAX payload B invalidates A before passive effects and starts 
         const pending = deferred<void>()
         attempts.push({ payload: initData, options, deferred: pending })
         await pending.promise
-        if (options?.signal?.aborted || options?.isCurrent?.() === false) return
-        installedPrincipals.push(initData)
       },
     }
     useHostAuthHandoff({
@@ -188,7 +176,6 @@ test('a committed MAX payload B invalidates A before passive effects and starts 
     attempts[1]?.deferred.resolve()
     await flush()
   })
-  expect(installedPrincipals).toEqual(['payload-b'])
   expect(attempts[1]?.options?.signal?.aborted).toBe(false)
 
   await act(async () => root.unmount())

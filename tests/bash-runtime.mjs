@@ -1,7 +1,11 @@
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+
+const gitBash = 'C:/Program Files/Git/bin/bash.exe'
+export const bashExecutable = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash'
 
 const windowsBashFamily = process.platform === 'win32'
-  ? spawnSync('bash', ['-lc', 'uname -s'], { encoding: 'utf8' }).stdout.trim()
+  ? spawnSync(bashExecutable, ['-lc', 'uname -s'], { encoding: 'utf8' }).stdout.trim()
   : ''
 
 export function bashPath(path) {
@@ -17,6 +21,10 @@ export function linuxPath(path) {
   const match = path.match(/^([A-Za-z]):[\\/](.*)$/)
   if (!match) return path.replaceAll('\\', '/')
   return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll('\\', '/')}`
+}
+
+export function gitBashPath(path) {
+  return bashPath(path)
 }
 
 export function runLinuxRoot(script, options = {}) {

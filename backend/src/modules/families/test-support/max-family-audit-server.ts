@@ -4,17 +4,11 @@ import { loadEnv } from '../../../env'
 import { createPrivateStorage } from '../../../storage'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { requireIntegrationDatabaseUrl } from '../../../test-support/integration-database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for MAX family audit E2E')
+const databaseUrl = requireIntegrationDatabaseUrl()
 const runId = process.env.MAX_FAMILY_AUDIT_RUN_ID
 if (!runId || !/^[a-zA-Z0-9-]{1,64}$/.test(runId)) throw new Error('MAX_FAMILY_AUDIT_RUN_ID is required and must be a simple unique identifier')
-const parsedUrl = new URL(databaseUrl)
-if (!['127.0.0.1', 'localhost', '::1'].includes(parsedUrl.hostname)
-  || !/^\/memoly_family_audit_(?:test|e2e_test|resume_20261016_test)$/.test(parsedUrl.pathname)) {
-  throw new Error('MAX family audit E2E refuses non-loopback or non-task-owned databases')
-}
-
 const env = loadEnv({
   DATABASE_URL: databaseUrl,
   NODE_ENV: 'test',

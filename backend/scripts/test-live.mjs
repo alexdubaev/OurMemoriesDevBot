@@ -75,6 +75,14 @@ export function selectLiveSuites(env, suites = liveSuites) {
   return { selected, error: null }
 }
 
+export function selectLiveTestFiles(liveTestFiles, configured) {
+  const selected = liveTestFiles.filter((file) => configured.some((suite) => suite.match(file)))
+  if (selected.length === 0) {
+    throw new Error('Configured live suites matched no discovered test files; refusing to run an unfiltered test suite.')
+  }
+  return selected
+}
+
 // Everything below runs only as a command, so a test can import the selection above.
 if (import.meta.main) {
   const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -103,7 +111,13 @@ if (import.meta.main) {
     process.exit(1)
   }
 
-  const selected = liveTestFiles.filter((file) => configured.some((suite) => suite.match(file)))
+  let selected
+  try {
+    selected = selectLiveTestFiles(liveTestFiles, configured)
+  } catch (selectionError) {
+    console.error(selectionError.message)
+    process.exit(1)
+  }
 
   console.log(`Running live suites: ${configured.map((suite) => suite.name).join(', ')}.`)
 

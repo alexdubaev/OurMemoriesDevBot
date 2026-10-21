@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { installRetargetedTouchClickGuard } from '../src/features/feed/presentation/retargeted-touch-click-guard'
+import { withControlledTimers } from './controlled-timers'
 
 function pointerEvent(type: string, pointerId: number) {
   const event = new Event(type) as Event & { pointerId: number; isPrimary: boolean }
@@ -52,26 +53,27 @@ describe('retargeted touch click guard', () => {
     cleanup()
   })
 
-  test('retains ownership across the next task and expires when no compatibility click arrives', async () => {
+  test('retains ownership for the compatibility click and expires when none arrives', async () => {
+    await withControlledTimers(async (clock) => {
     const document = new EventTarget() as unknown as Document
     const view = new EventTarget() as unknown as Window
     const cleanup = installRetargetedTouchClickGuard(document, view, 12, 40, 50)
     document.dispatchEvent(pointerEvent('pointerup', 12))
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
     const nextTaskClick = clickEvent(1)
     document.dispatchEvent(nextTaskClick)
     expect(nextTaskClick.defaultPrevented).toBe(true)
 
     const expires = installRetargetedTouchClickGuard(document, view, 13, 40, 50)
     document.dispatchEvent(pointerEvent('pointerup', 13))
-    await new Promise((resolve) => setTimeout(resolve, 950))
+    await clock.runAll()
     const afterExpiry = clickEvent(1)
     document.dispatchEvent(afterExpiry)
     expect(afterExpiry.defaultPrevented).toBe(false)
 
     cleanup()
     expires()
+    })
   })
 
   test('releases protection on a fresh pointer, cancellation, blur, or explicit cleanup', () => {

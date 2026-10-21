@@ -12,17 +12,17 @@ describe('family home cursor', () => {
     const cursor = encodeFamilyHomeCursor(position, 'user-a', snapshot, secret, now)
     expect(decodeFamilyHomeCursor(cursor, 'user-a', snapshot, secret, now)).toEqual(position)
     expect(() => decodeFamilyHomeCursor(cursor, 'user-b', snapshot, secret, now))
-      .toThrow('Некорректный курсор')
+      .toThrow(expect.objectContaining({ kind: 'invalid_input' }))
     expect(() => decodeFamilyHomeCursor(cursor, 'user-a', 'changed', secret, now))
-      .toThrow('Список семей изменился')
+      .toThrow(expect.objectContaining({ kind: 'version_conflict' }))
   })
 
   test('rejects tampering and expiration', () => {
     const cursor = encodeFamilyHomeCursor(position, 'user-a', snapshot, secret, now)
     expect(() => decodeFamilyHomeCursor(`${cursor}x`, 'user-a', snapshot, secret, now))
-      .toThrow('Некорректный курсор')
+      .toThrow(expect.objectContaining({ kind: 'invalid_input' }))
     expect(() => decodeFamilyHomeCursor(cursor, 'user-a', snapshot, secret,
       new Date(now.getTime() + 16 * 60_000)))
-      .toThrow('Список семей изменился')
+      .toThrow(expect.objectContaining({ kind: 'version_conflict' }))
   })
 })

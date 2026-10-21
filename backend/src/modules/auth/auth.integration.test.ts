@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
@@ -7,11 +8,10 @@ import { loadEnv } from '../../env'
 import { drainOptionsFromEnv, drainTaskOutbox } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-const maybeDescribe = databaseUrl ? describe : describe.skip
 
-maybeDescribe('auth API integration', () => {
+describe('auth API integration', () => {
   const envInput = {
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '12345678901234567890123456789012',

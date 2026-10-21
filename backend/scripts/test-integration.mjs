@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertLoopbackTestDatabaseUrl,
   assertTestDatabaseUrl,
   composeEnv,
   composeProjectName,
@@ -32,6 +33,14 @@ const repositoryRoot = resolve(backendRoot, '..')
 export const integrationTestTimeoutMs = 60_000
 export const integrationChildProcessTimeoutMs = 180_000
 
+export function runIntegrationChild(spawn, command, args, options, timeoutMs = integrationChildProcessTimeoutMs) {
+  const result = spawn(command, args, { ...options, timeout: timeoutMs })
+  if (result.error?.code === 'ETIMEDOUT') {
+    throw new Error(`Integration test process exceeded ${timeoutMs}ms: ${args.at(-1)}`)
+  }
+  return result
+}
+
 class CommandFailure extends Error {
   constructor(command, args, exitCode) {
     super(`${command} ${args.join(' ')} failed with exit code ${exitCode}`)
@@ -47,11 +56,15 @@ export async function runBackendIntegration({
   writeError = (message) => process.stderr.write(`${message}\n`),
 } = {}) {
   const maxOnly = testArgs.includes('--max-only')
-  const selectedArgs = testArgs.filter((argument) => argument !== '--max-only')
+  const historicalOnly = testArgs.includes('--historical')
+  if (maxOnly && historicalOnly) throw new Error('--max-only and --historical select incompatible integration catalogs')
+  const selectedArgs = testArgs.filter((argument) => argument !== '--max-only' && argument !== '--historical')
   const allIntegrationFiles = integrationTestFiles ?? backendTestFiles(backendRoot).integration
+  const currentIntegrationFiles = allIntegrationFiles.filter((file) => !isHistoricalIntegration(file))
+  const catalogFiles = historicalOnly ? selectHistoricalIntegration(allIntegrationFiles) : currentIntegrationFiles
   const discoveredTestFiles = maxOnly
-    ? selectMaxVerificationIntegration(allIntegrationFiles)
-    : allIntegrationFiles
+    ? selectMaxVerificationIntegration(catalogFiles)
+    : catalogFiles
   const selectedTestRun = discoveredTestFiles.length > 0
     ? selectBackendTestRun(discoveredTestFiles, selectedArgs)
     : undefined
@@ -66,6 +79,7 @@ export async function runBackendIntegration({
 
   const databaseUrl = environment.TEST_DATABASE_URL ?? defaultTestDatabaseUrl()
   assertTestDatabaseUrl(databaseUrl)
+  assertLoopbackTestDatabaseUrl(databaseUrl, environment.DATABASE_URL)
 
   const dockerProjectName = `${composeProjectName}-integration-${randomUUID().slice(0, 8)}`
   const composeArgs = ['compose', '-p', dockerProjectName]
@@ -92,21 +106,23 @@ export async function runBackendIntegration({
         ? 360_000
         : integrationChildProcessTimeoutMs
       : undefined
-    const result = spawn(command, args, {
+    const result = childTimeoutMs === undefined ? spawn(command, args, {
       cwd: options.cwd ?? backendRoot,
       env: options.env ?? environment,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: options.stdio ?? 'pipe',
-      ...(childTimeoutMs === undefined ? {} : { timeout: childTimeoutMs }),
-    })
+    }) : runIntegrationChild(spawn, command, args, {
+      cwd: options.cwd ?? backendRoot,
+      env: options.env ?? environment,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: options.stdio ?? 'pipe',
+    }, childTimeoutMs)
 
     if (result.stdout) process.stdout.write(result.stdout)
     if (result.stderr) process.stderr.write(result.stderr)
 
-    if (result.error?.code === 'ETIMEDOUT') {
-      throw new Error(`Integration test process exceeded ${childTimeoutMs}ms: ${args.at(-1)}`)
-    }
     if (result.status !== 0) {
       throw new CommandFailure(command, args, result.status ?? 1)
     }
@@ -243,65 +259,48 @@ function parseBunSummary(output) {
   }
 }
 
-function isMaxVerificationIntegration(file) {
-  return [
-    'scripts/selectel-rollback-compatibility.integration.test.ts',
-    'scripts/comments-release-compatibility.integration.test.ts',
-    'src/modules/auth/max-auth.integration.test.ts',
-    'src/db.integration.test.ts', 'src/outbox/outbox.integration.test.ts',
-    'src/modules/families/family-access.integration.test.ts',
-    'src/modules/families/family-review-fixes.integration.test.ts',
-    'src/modules/max/backup-media.integration.test.ts', 'src/modules/max/capture.integration.test.ts',
-    'src/modules/max/direct-video-upload.integration.test.ts', 'src/modules/max/forward-import.integration.test.ts',
-    'src/modules/max/media-flow.integration.test.ts', 'src/modules/media/media-access.integration.test.ts',
-    'src/modules/media/infrastructure/reservation-race.integration.test.ts',
-    'src/modules/uploads/uploads.integration.test.ts', 'src/modules/users/users.integration.test.ts',
-    'src/modules/memories/memories.integration.test.ts', 'src/modules/memories/unread.integration.test.ts',
-    'src/modules/memories/comments.integration.test.ts', 'src/modules/memories/comments-idempotency.integration.test.ts',
-    'src/modules/memories/comments-mutations.integration.test.ts', 'src/modules/memories/comments-races.integration.test.ts',
-    'scripts/deploy-database.integration.test.ts', 'scripts/welcome-migration.integration.test.ts',
-    'scripts/block01-upgrade.integration.test.ts', 'scripts/block02-upgrade.integration.test.ts',
-    'scripts/block03-upgrade.integration.test.ts', 'scripts/block08-upgrade.integration.test.ts',
-    'scripts/mm4-upgrade.integration.test.ts', 'scripts/memory-reactions-upgrade.integration.test.ts',
-    'scripts/t0951-b4-upgrade.integration.test.ts', 'scripts/int1-max-upgrade.integration.test.ts',
-  ].includes(file)
-    || /^src\/modules\/auth\/max-[^/]+\.integration\.test\.ts$/.test(file)
-    || /^src\/modules\/max\/.*\.integration\.test\.ts$/.test(file)
-    || /^src\/modules\/families\/[^/]*max[^/]*\.integration\.test\.ts$/i.test(file)
+const requiredMaxVerificationCategories = [
+  ['current candidate and permitted rollback compatibility', (file) => /^scripts\/[^/]*comments[^/]*release[^/]*\.integration\.test\./i.test(file)],
+  ['MAX authentication', (file) => /^src\/modules\/auth\/.*max.*\.integration\.test\./i.test(file)],
+  ['database concurrency', (file) => /^src\/db\.integration\.test\./.test(file)],
+  ['outbox persistence', (file) => /^src\/outbox\/.*\.integration\.test\./.test(file)],
+  ['family ACL', (file) => /^src\/modules\/families\/family-access\.integration\.test\./.test(file)],
+  ['private media access', (file) => /^src\/modules\/media\/media-access\.integration\.test\./.test(file)],
+  ['upload persistence', (file) => /^src\/modules\/uploads\/.*\.integration\.test\./.test(file)],
+  ['user and auth state', (file) => /^src\/modules\/users\/.*\.integration\.test\./.test(file)],
+  ['MAX media delivery', (file) => /^src\/modules\/max\/.*media.*\.integration\.test\./i.test(file)],
+  ['memory/comment behavior', (file) => /^src\/modules\/memories\/(?:memories|comments)[^/]*\.integration\.test\./.test(file)],
+  ['migration upgrade coverage', (file) => /^scripts\/.*(?:upgrade|migration).*\.integration\.test\./i.test(file)],
+]
+
+export function missingMaxVerificationCategories(allIntegrationFiles) {
+  return requiredMaxVerificationCategories
+    .filter(([, matches]) => !allIntegrationFiles.some((file) => matches(file)))
+    .map(([name]) => name)
+}
+
+function isHistoricalIntegration(file) {
+  return /^scripts\/(?:historical|history)\//i.test(file) || /(?:^|\/)historical[^/]*\.integration\.test\./i.test(file)
 }
 
 export function selectMaxVerificationIntegration(allIntegrationFiles) {
-  const missing = requiredMaxVerificationFiles.filter((file) => !allIntegrationFiles.includes(file))
-  if (missing.length) throw new Error(`MAX verification catalog is incomplete; missing required integration files: ${missing.join(', ')}`)
-  return allIntegrationFiles.filter(isMaxVerificationIntegration)
+  const currentFiles = allIntegrationFiles.filter((file) => !isHistoricalIntegration(file))
+  const missing = missingMaxVerificationCategories(currentFiles)
+  if (missing.length) throw new Error(`MAX verification catalog is missing required categories: ${missing.join(', ')}`)
+  const selected = currentFiles.filter((file) =>
+    !/^src\/modules\/telegram\//i.test(file) &&
+    !/^src\/modules\/auth\/telegram-auth\.integration\.test\./i.test(file) &&
+    !/^src\/modules\/(?:families|auth)\/[^/]*telegram[^/]*\.integration\.test\./i.test(file),
+  )
+  if (selected.length === 0) throw new Error('MAX verification catalog selected no integration suites')
+  return selected
 }
 
-const requiredMaxVerificationFiles = [
-  'scripts/selectel-rollback-compatibility.integration.test.ts',
-  'scripts/comments-release-compatibility.integration.test.ts',
-  'src/modules/auth/max-auth.integration.test.ts',
-  'src/db.integration.test.ts',
-  'src/outbox/outbox.integration.test.ts',
-  'src/modules/families/family-access.integration.test.ts',
-  'src/modules/media/media-access.integration.test.ts',
-  'src/modules/uploads/uploads.integration.test.ts',
-  'src/modules/users/users.integration.test.ts',
-  'src/modules/max/media-flow.integration.test.ts',
-  'src/modules/memories/comments.integration.test.ts',
-  'src/modules/memories/comments-idempotency.integration.test.ts',
-  'src/modules/memories/comments-mutations.integration.test.ts',
-  'src/modules/memories/comments-races.integration.test.ts',
-  'scripts/deploy-database.integration.test.ts',
-  'scripts/welcome-migration.integration.test.ts',
-  'scripts/block01-upgrade.integration.test.ts',
-  'scripts/block02-upgrade.integration.test.ts',
-  'scripts/block03-upgrade.integration.test.ts',
-  'scripts/block08-upgrade.integration.test.ts',
-  'scripts/mm4-upgrade.integration.test.ts',
-  'scripts/memory-reactions-upgrade.integration.test.ts',
-  'scripts/t0951-b4-upgrade.integration.test.ts',
-  'scripts/int1-max-upgrade.integration.test.ts',
-]
+export function selectHistoricalIntegration(allIntegrationFiles) {
+  const selected = allIntegrationFiles.filter(isHistoricalIntegration)
+  if (selected.length === 0) throw new Error('No opt-in historical integration suites were discovered')
+  return selected
+}
 
 function withIntegrationDefaults(bunTestArgs) {
   const defaults = [...bunTestArgs]

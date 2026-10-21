@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { execFileSync, spawnSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { bashPath } from './bash-runtime.mjs'
+import { bashExecutable, gitBashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r', '')
@@ -38,7 +38,7 @@ test('release ownership guard accepts a clean tree and stops on a root-owned anc
   const temp = mkdtempSync(resolve(tmpdir(), 'selectel-owner-'))
   try {
     const appRoot = resolve(temp, 'app root')
-    const bashAppRoot = bashPath(appRoot)
+    const bashAppRoot = gitBashPath(appRoot)
     const trackedFile = resolve(appRoot, 'deploy path', 'source file')
     mkdirSync(resolve(appRoot, 'deploy path'), { recursive: true })
     writeFileSync(trackedFile, 'fixture')
@@ -62,13 +62,13 @@ git_memoly() {
 }
 require_release_ownership
 `
-    const clean = spawnSync('bash', ['-s'], {
+    const clean = spawnSync(bashExecutable, ['-s'], {
       input: harness,
       encoding: 'utf8',
     })
     assert.equal(clean.status, 0, `${clean.stdout}${clean.stderr}`)
 
-    const unsafe = spawnSync('bash', ['-s'], {
+    const unsafe = spawnSync(bashExecutable, ['-s'], {
       input: harness.replace("ROOT_OWNED_PATH=''", `ROOT_OWNED_PATH='${bashAppRoot}/deploy path'`),
       encoding: 'utf8',
     })
@@ -85,7 +85,7 @@ test('modified tracked source fails closed and a clean target checkout updates s
   const checkout = release.match(/fetch_and_checkout\(\) \{[\s\S]*?\n\}/)?.[0]
   assert.ok(validate && guard && checkout)
   const fixture = createGitFixture()
-  const bashRoot = bashPath(fixture.appRoot)
+  const bashRoot = gitBashPath(fixture.appRoot)
   try {
     const harness = `
 set -Eeuo pipefail
@@ -112,10 +112,10 @@ test -z "$(git_root status --porcelain)"
 test "$(git_root rev-parse HEAD)" = "$PRODUCT_SHA"
 test ! -e "$APP_ROOT/.runtime/generated.json"
 `
-    const clean = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8' })
+    const clean = spawnSync(bashExecutable, ['-s'], { input: harness, encoding: 'utf8' })
     assert.equal(clean.status, 0, `${clean.stdout}${clean.stderr}`)
 
-    const dirty = spawnSync('bash', ['-s'], {
+    const dirty = spawnSync(bashExecutable, ['-s'], {
       input: harness.replace('validate_repository\nfetch_and_checkout', "printf 'dirty\\n' >> \"$APP_ROOT/deploy path/app.css\"\nvalidate_repository\nfetch_and_checkout"),
       encoding: 'utf8',
     })

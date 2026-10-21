@@ -1,8 +1,10 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { commentFixtures } from './infrastructure/comment-test-fixtures'
 
-const suite = process.env.TEST_DATABASE_URL ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
+const suite = describe
 suite('COM-2 comment mutation permissions and lifecycle', () => {
   const f = commentFixtures()
   afterAll(f.cleanup)

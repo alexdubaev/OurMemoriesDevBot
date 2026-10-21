@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { randomUUID } from 'node:crypto'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
@@ -8,10 +9,9 @@ import { loadEnv } from '../../env'
 import { signAccessToken } from '../auth'
 import { createPrismaFamilyAccess } from './infrastructure/family-access'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('Family access and invitations', () => {
+describe('Family access and invitations', () => {
   const prisma = createPrisma(databaseUrl!)
   const env = loadEnv({
     DATABASE_URL: databaseUrl!,

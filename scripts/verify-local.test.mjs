@@ -51,6 +51,48 @@ describe('risk based verification', () => {
     expect(websiteIcon.some(([name]) => name.includes('Website production build'))).toBe(true)
   })
 
+  test('FAST plans one production build when a surface has both styles and raster assets', () => {
+    const webapp = planFor('fast', ['webapp/src/x.css', 'webapp/public/assets/x.webp'])
+    const website = planFor('fast', ['website/src/x.css', 'website/public/assets/x.webp'])
+    expect(webapp.filter(([, [command, args]]) => command === 'bun' && args.join(' ') === 'run build:webapp')).toHaveLength(1)
+    expect(website.filter(([, [command, args]]) => command === 'bun' && args.join(' ') === 'run build:website')).toHaveLength(1)
+  })
+
+  test('STANDARD targets only current backend and webapp tests after deletion or rename', () => {
+    const fixture = mkdtempSync(resolve(tmpdir(), 'memoly-standard-test-discovery-'))
+    const put = (path) => {
+      const target = resolve(fixture, path)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, 'test("fixture", () => {})\n')
+    }
+    try {
+      put('backend/src/modules/demo/old.test.ts')
+      put('webapp/tests/old.test.tsx')
+      const backendOnly = planFor('standard', ['backend/src/modules/demo/old.test.ts'], undefined, fixture)
+      const webappOnly = planFor('standard', ['webapp/tests/old.test.tsx'], undefined, fixture)
+      rmSync(resolve(fixture, 'backend/src/modules/demo/old.test.ts'))
+      rmSync(resolve(fixture, 'webapp/tests/old.test.tsx'))
+      put('backend/src/modules/demo/renamed.test.ts')
+      put('webapp/tests/renamed.test.tsx')
+      const renamed = planFor('standard', [
+        'backend/src/modules/demo/old.test.ts', 'backend/src/modules/demo/renamed.test.ts',
+        'webapp/tests/old.test.tsx', 'webapp/tests/renamed.test.tsx',
+      ], undefined, fixture)
+      const backendArgs = renamed.find(([name]) => name === 'Changed backend unit tests')?.[1]?.[1] ?? []
+      const webappArgs = renamed.find(([name]) => name === 'Changed web app unit tests')?.[1]?.[1] ?? []
+      expect(backendArgs).toContain('./backend/src/modules/demo/renamed.test.ts')
+      expect(backendArgs).not.toContain('./backend/src/modules/demo/old.test.ts')
+      expect(webappArgs).toContain('./webapp/tests/renamed.test.tsx')
+      expect(webappArgs).not.toContain('./webapp/tests/old.test.tsx')
+      expect(backendOnly.some(([name]) => name === 'Changed backend unit tests')).toBe(true)
+      expect(webappOnly.some(([name]) => name === 'Changed web app unit tests')).toBe(true)
+      const deletedOnly = planFor('standard', ['backend/src/modules/demo/old.test.ts', 'webapp/tests/old.test.tsx'], undefined, fixture)
+      expect(deletedOnly.map(([, [, args]]) => args.join(' ')).join('\n')).not.toContain('old.test.')
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   test('STANDARD limits backend tests to the changed module and includes integrations', () => {
     const plan = planFor('standard', ['backend/src/modules/memories/memories.service.ts'])
     expect(plan.map(([name]) => name).join(' ')).toContain('Changed backend PostgreSQL integration tests')
@@ -67,7 +109,7 @@ describe('risk based verification', () => {
     expect(commands).toContain('--max-only')
     expect(commands).toContain('e2e:webapp:max')
     expect(commands).not.toContain('critical-smoke.spec.ts')
-    expect(commands).toContain('scripts/verify-local.test.mjs')
+    expect(plan.map(([name]) => name)).toContain('Repository and Selectel safety tests')
   })
 
   test('mandatory command failure stops the plan and remains a failure', () => {
@@ -83,11 +125,6 @@ describe('risk based verification', () => {
     expect(calls).toBe(2)
     expect(results).toHaveLength(2)
     expect(results[1]?.status).toBe(7)
-  })
-
-  test('missing integration infra is a failed command result', () => {
-    const results = executePlan([['PostgreSQL integration', ['bun', ['run', 'test:backend:integration']]]], () => ({ status: 1 }))
-    expect(results[0]?.status).toBe(1)
   })
 
   test('a real Bun test.skip result cannot satisfy a required test stage', () => {

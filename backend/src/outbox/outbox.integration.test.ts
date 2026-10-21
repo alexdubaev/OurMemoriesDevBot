@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../test-support/integration-database'
 import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import { createPrisma } from '../db'
@@ -7,24 +8,26 @@ import type { TaskHandlerRegistry } from './handlers'
 import { enqueueTask } from './index'
 import { claimTask, completeTask } from './store'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
 /**
  * The claim is the whole safety argument of this module, and it is made of database semantics a
  * fake client cannot have: two concurrent `UPDATE ... WHERE status = 'pending'` statements
  * serialising on a row lock. Everything here needs a real PostgreSQL.
  */
-maybeDescribe('the task outbox against a real database', () => {
+describe('the task outbox against a real database', () => {
   const prisma = createPrisma(databaseUrl!)
   const runtime = { prisma } as unknown as BackendRuntime
   const now = () => new Date()
+  let transactionFixtureEmail: string | undefined
 
   beforeEach(async () => {
     await prisma.taskOutbox.deleteMany()
   })
 
   afterAll(async () => {
+    await prisma.taskOutbox.deleteMany()
+    if (transactionFixtureEmail) await prisma.user.deleteMany({ where: { email: transactionFixtureEmail } })
     await prisma.$disconnect()
   })
 
@@ -40,12 +43,16 @@ maybeDescribe('the task outbox against a real database', () => {
     }
 
     const ran: string[] = []
+    let arrivals = 0
+    let releaseBoth!: () => void
+    const bothStarted = new Promise<void>((resolve) => { releaseBoth = resolve })
     const handlers: TaskHandlerRegistry = {
       'test:work': {
         run: async ({ payload }) => {
           ran.push((payload as { key: string }).key)
-          // Long enough that the two passes genuinely overlap.
-          await Bun.sleep(2)
+          arrivals += 1
+          if (arrivals === 2) releaseBoth()
+          await bothStarted
         },
       },
     }
@@ -82,6 +89,7 @@ maybeDescribe('the task outbox against a real database', () => {
     await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'shared', payload: { n: 1 } }, handlers)
 
     const email = `tx-${crypto.randomUUID()}@example.com`
+    transactionFixtureEmail = email
     await prisma.$transaction(async (tx) => {
       await tx.user.create({ data: { email, passwordHash: 'hash' } })
       const again = await enqueueTask(tx, { type: 'test:work', dedupeKey: 'shared', payload: { n: 2 } }, handlers)
@@ -137,6 +145,46 @@ maybeDescribe('the task outbox against a real database', () => {
     expect(Date.now() - after.updatedAt.getTime()).toBeLessThan(60_000)
   })
 
+  test('unsupported task types remain pending and are reported', async () => {
+    const handlers = registry(async () => undefined)
+    const { id } = await prisma.taskOutbox.create({ data: { type: 'future:work', dedupeKey: 'unsupported', payload: {} } })
+
+    const metrics = await drainTaskOutbox(runtime, { handlers, now: now() })
+
+    expect(metrics).toMatchObject({ claimed: 0, unhandled: 1 })
+    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({ attempts: 0, status: 'pending' })
+  })
+  test('a fresh processing lease is not reclaimed by another drain', async () => {
+    const handlers = registry(async () => undefined)
+    const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'fresh-lease', payload: {} }, handlers)
+    const token = crypto.randomUUID()
+    await prisma.taskOutbox.update({ where: { id }, data: { attempts: 1, processingToken: token, status: 'processing' } })
+
+    let ran = false
+    const metrics = await drainTaskOutbox(runtime, { handlers: registry(async () => { ran = true }), now: now() })
+    const row = await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })
+
+    expect(metrics).toMatchObject({ claimed: 0, recoveredStale: 0 })
+    expect(ran).toBe(false)
+    expect(row).toMatchObject({ attempts: 1, processingToken: token, status: 'processing' })
+  })
+
+  test('future scheduled work stays pending until its due time', async () => {
+    const dueAt = new Date(Date.now() + 60_000)
+    const handlers = registry(async () => undefined)
+    const { id } = await enqueueTask(prisma, {
+      type: 'test:work', dedupeKey: 'future-due', payload: {}, scheduledFor: dueAt,
+    }, handlers)
+    let ran = false
+
+    const metrics = await drainTaskOutbox(runtime, {
+      handlers: registry(async () => { ran = true }), now: new Date(dueAt.getTime() - 1),
+    })
+
+    expect(metrics.claimed).toBe(0)
+    expect(ran).toBe(false)
+    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'pending' })
+  })
   test('a lease that went stale is handed back without spending an attempt', async () => {
     const handlers = registry(async () => undefined)
     const { id } = await enqueueTask(prisma, { type: 'test:work', dedupeKey: 'stale', payload: {} }, handlers)

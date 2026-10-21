@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -25,13 +26,12 @@ import { normalizeTelegramUpdate } from './transport/update-mapping'
 import { choicePayload, readCandidates } from '../../bot-family-target'
 import { expireTelegramChoice } from './infrastructure/source-target'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 const photoFixture = new Uint8Array(await sharp({
   create: { width: 16, height: 16, channels: 3, background: '#f4a4ae' },
 }).jpeg().toBuffer())
 
-maybeDescribe('Telegram durable capture', () => {
+describe('Telegram durable capture', () => {
   const storageRoot = resolve('.test-telegram-media')
   const key = Buffer.alloc(32, 7).toString('base64url')
   const prisma = createPrisma(databaseUrl!)

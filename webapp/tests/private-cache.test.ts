@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
+import { withControlledTimers } from './controlled-timers'
 
 import {
   activatePrivateCacheIdentity,
@@ -7,10 +8,12 @@ import {
   isActivePrivateCacheIdentity,
   isPersistableQueryKey,
   privateCacheIdentityGeneration,
+  privateFamilyCacheGeneration,
   subscribePrivateCacheInvalidation,
   allowPrivateFamilyCache,
   clearPrivateUserCache,
   restorePrivateQueryCache,
+  cachePrivateImageResponse,
 } from '../src/platform/persistence/private-cache'
 
 const familyId = '11111111-1111-4111-8111-111111111111'
@@ -24,6 +27,7 @@ afterEach(() => {
 })
 
 test('late IndexedDB open closes its connection after the bounded open has failed', async () => {
+  await withControlledTimers(async (clock) => {
   let request!: IDBOpenDBRequest
   let closed = false
   Object.defineProperty(globalThis, 'indexedDB', {
@@ -34,10 +38,16 @@ test('late IndexedDB open closes its connection after the bounded open has faile
     } } as unknown as IDBFactory,
   })
   const generation = activatePrivateCacheIdentity('idb-user')
-  await expect(restorePrivateQueryCache(new QueryClient(), 'idb-user', generation)).rejects.toThrow('timed out')
+  const restore = restorePrivateQueryCache(new QueryClient(), 'idb-user', generation)
+  const outcome = restore.then(() => null, (error: unknown) => error)
+  await clock.runAll()
+  const error = await outcome
+  expect(error).toBeInstanceOf(Error)
+  expect((error as Error).message).toContain('timed out')
   request.result = { close: () => { closed = true } } as IDBDatabase
   request.onsuccess?.(new Event('success') as unknown as Event)
   expect(closed).toBe(true)
+  })
 })
 
 describe('private cache boundaries', () => {
@@ -75,16 +85,24 @@ describe('private cache boundaries', () => {
     expect(isActivePrivateCacheIdentity('user-b', generation)).toBe(false)
   })
 
-  it('notifies avatar owners synchronously when switching private family scope', () => {
+  it('refuses an in-flight private image response after family access switches', async () => {
     activatePrivateCacheIdentity('user-a')
-    const invalidations: string[] = []
-    const unsubscribe = subscribePrivateCacheInvalidation((invalidation) => {
-      if (invalidation.type === 'family') invalidations.push(invalidation.familyId)
-    })
-    allowPrivateFamilyCache('user-a', 'family-a')
-    allowPrivateFamilyCache('user-a', 'family-b')
-    unsubscribe()
-    expect(invalidations).toEqual(['family-a', 'family-a', 'family-b'])
+    const identityGeneration = privateCacheIdentityGeneration()
+    const nextFamilyId = '55555555-5555-4555-8555-555555555555'
+    allowPrivateFamilyCache('user-a', familyId)
+    const familyAGeneration = privateFamilyCacheGeneration('user-a', familyId)
+    let releaseBody!: () => void
+    const body = new ReadableStream<Uint8Array>({ start(controller) { releaseBody = () => { controller.enqueue(new Uint8Array([1])); controller.close() } } })
+    const staleResponse = cachePrivateImageResponse(
+      'user-a',
+      `/api/v1/families/${familyId}/media/${mediaId}/content?variant=display`,
+      new Response(body, { status: 200, headers: { 'content-type': 'image/png' } }),
+      identityGeneration,
+      familyAGeneration,
+    )
+    allowPrivateFamilyCache('user-a', nextFamilyId)
+    releaseBody()
+    expect(await staleResponse).toBe(false)
     activatePrivateCacheIdentity(null)
   })
 

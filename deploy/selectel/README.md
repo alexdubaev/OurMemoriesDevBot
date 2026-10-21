@@ -65,6 +65,14 @@ promotion, and smoke; direct `redeploy.sh` actions cannot interleave with that
 release. If promotion or public smoke fails after services begin changing, the
 entry point attempts the prepared application rollback and preserves the original
 failure status if rollback also fails.
+
+For a normal release, captured running images and the designated recovery pair
+are separate facts. Before replacing `rollback.env`, the entry point checks the
+captured pair with the full `rollback-readiness` verifier. If that pair is not an
+attested recovery target, it preserves the existing designated pair only after
+the same verifier accepts it against the candidate source and current database.
+If neither pair passes, it stops before replacing the file or promoting services.
+Legacy/forward-only boundary decisions continue to use the captured running pair.
 For the first release crossing the B2 membership boundary, the entry point
 compares the running backend SHA with the accepted B2 runtime SHA. A pre-B2
 backend relies on the one-active-membership index that B2 removes. The entry
@@ -455,6 +463,28 @@ allowlist. The exact target SHA, immutable image IDs and OCI revision labels rem
 required. Any other source or target requires new compatibility evidence and a
 reviewed attestation. Schema, dependency, service configuration, migration,
 database, and protected-artifact checks remain fail-closed.
+
+Rollback source verification keeps two distinct measurements. The immutable full
+runtime fingerprint pins each reviewed artifact/source reference and is checked
+against its existing constant before that reference can authorize compatibility.
+The separate compatibility fingerprint compares the candidate with that
+full-attested source using executable product inputs. It omits test files,
+test-only support fixtures and runners, Playwright/E2E/visual test trees, the
+three dev-only visual fixture pages, and the E2E-only TypeScript config. Production source, contracts, migrations, build and
+runtime configuration, manifests, dependencies, protected Selectel files, and
+the UI-v4 ancestry and artifact checks remain covered. A test refactor therefore
+does not rotate an immutable artifact pin, while any production-input drift still
+fails the compatibility comparison.
+
+The native browser avatar-timer fix and exact Storybook 10.6.2 security update
+have one additional exact executable compatibility hash,
+`81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51`, for
+recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. It is anchored to
+the unchanged full-attested `dc320109` source above. The positive fixture reads
+immutable Git blobs for the reviewed timer fix, root manifest and Bun lockfile;
+it does not read changing application files as historical inputs. Existing
+recovery image IDs, source pins, migration/configuration checks and v4 ancestry
+remain mandatory.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises

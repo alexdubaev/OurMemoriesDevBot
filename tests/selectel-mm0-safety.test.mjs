@@ -1,38 +1,35 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { bashPath } from './bash-runtime.mjs'
+import { linuxPath, runLinuxRoot } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const read = (path) => readFileSync(resolve(root, path), 'utf8').replaceAll('\r\n', '\n')
-const release = read('deploy/selectel/ci-release.sh')
-const redeploy = read('deploy/selectel/redeploy.sh')
-const functionBody = (source, name) => {
-  const body = source.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'))?.[0]
-  assert.ok(body, `${name} exists`)
-  return body
-}
-const run = (script) => spawnSync('bash', ['-s'], { input: `set -euo pipefail\n${script}`, encoding: 'utf8', timeout: 30_000 })
-const failureHandler = release.slice(release.indexOf('  release_failure() {'), release.indexOf('\n  trap release_failure EXIT'))
+const run = (script) => runLinuxRoot(`set -euo pipefail\n. '${linuxPath(resolve(root, 'deploy/selectel/ci-release.sh'))}'\n. '${linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'\n${script}`, { timeout: 30_000 })
 
 function failAt(stage, armed, quiesceFails = false) {
   const directory = mkdtempSync(resolve(root, 'tests/.selectel-mm0-inject-'))
   const marker = resolve(directory, 'forward-only')
-  const bashMarker = bashPath(marker)
+  const faultEvent = resolve(directory, 'fault-event')
+  const serverRoot = resolve(directory, 'server')
+  mkdirSync(serverRoot)
+  const bashMarker = linuxPath(marker)
   const injected = {
-    preflight: 'preflight() { return 42; }; preflight',
-    backup: `${functionBody(redeploy, 'backup_migration')}\npreflight() { :; }; validate_database_target() { :; }; backup_database() { return 42; }; backup_migration`,
-    migration: `${functionBody(redeploy, 'migrate')}\npreflight() { :; }; validate_database_target() { :; }; validate_forward_marker() { :; }; verify_no_legacy_writers() { :; }; compose() { return 42; }; MM0_BACKUP_PREPARED=true; FORWARD_MARKER="$MM0_FORWARD_MARKER"; migrate`,
-    startup: `${functionBody(redeploy, 'wait_backend_internal')}\ncompose() { return 42; }; sleep() { :; }; wait_backend_internal 1`,
-    readiness: `${functionBody(redeploy, 'readiness')}\ncompose() { printf 'backend\\nworker\\nscheduler\\nstatic\\n'; }; wait_public() { return 42; }; readiness`,
-    revision: `${functionBody(release, 'verify_promoted_revision')}\nPRODUCT_SHA=${'a'.repeat(40)}; service_image() { printf 'memoly-backend:%s\\n' "$PRODUCT_SHA"; }; docker() { printf '%s\\n' '${'b'.repeat(40)}'; }; verify_promoted_revision`,
+    preflight: 'preflight() { mark_fault preflight; return 42; }; preflight',
+    backup: 'preflight() { :; }; validate_database_target() { :; }; backup_database() { mark_fault backup; return 42; }; backup_migration',
+    migration: 'preflight() { :; }; validate_database_target() { :; }; validate_forward_marker() { :; }; verify_no_legacy_writers() { :; }; compose() { mark_fault migration; return 42; }; MM0_BACKUP_PREPARED=true; FORWARD_MARKER="$MM0_FORWARD_MARKER"; migrate',
+    startup: 'compose() { mark_fault startup; return 42; }; sleep() { :; }; wait_backend_internal 1',
+    readiness: 'compose() { printf "backend\\nworker\\nscheduler\\nstatic\\n"; }; wait_public() { mark_fault readiness; return 42; }; readiness',
+    revision: `PRODUCT_SHA=${'a'.repeat(40)}; service_image() { printf 'memoly-backend:%s\\n' "$PRODUCT_SHA"; }; docker() { mark_fault revision; printf '%s\\n' '${'b'.repeat(40)}'; }; verify_promoted_revision`,
   }[stage]
   assert.ok(injected)
   try {
     const result = run(`
 MM0_FORWARD_MARKER='${bashMarker}'
+FAULT_EVENT='${linuxPath(faultEvent)}'
+mark_fault() { printf '%s\\n' "$1" > "$FAULT_EVENT"; }
+SERVER_ROOT='${linuxPath(serverRoot)}'
 FORWARD_MARKER=/tmp/selectel-b2-test-$$
 if [ ${armed} = true ]; then : > "$MM0_FORWARD_MARKER"; fi
 LEGACY_MEMBERSHIP_RUNTIME=false
@@ -42,11 +39,12 @@ PROMOTION_STARTED=${stage === 'preflight' || stage === 'backup' ? 'false' : 'tru
 APP_ROOT=/mock/app
 bash() { printf 'ACTION:%s\\n' "$*"; if [ "$2" = quiesce-legacy ] && [ ${quiesceFails} = true ]; then return 42; fi; }
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 17; }
-${failureHandler}
 trap release_failure EXIT
 ${injected}
 `)
-    return { result, markerPersists: existsSync(marker) }
+    const faultStage = existsSync(faultEvent) ? readFileSync(faultEvent, 'utf8').trim() : null
+    assert.equal(faultStage, stage, `the injected ${stage} boundary was reached`)
+    return { result, markerPersists: existsSync(marker), faultStage }
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -76,8 +74,9 @@ for (const stage of ['preflight', 'backup']) {
 
 for (const stage of ['migration', 'startup', 'readiness', 'revision']) {
   test(`armed MM0 marker makes ${stage} failure quiesce instead of rollback`, () => {
-    const { result, markerPersists } = failAt(stage, true)
+    const { result, markerPersists, faultStage } = failAt(stage, true)
     assert.notEqual(result.status, 0, `${result.stdout}${result.stderr}`)
+    assert.equal(faultStage, stage, 'the injected failing boundary was reached')
     assert.equal(markerPersists, true, 'forward-only marker survives the failure')
     assert.match(result.stdout, /ACTION:.*quiesce-legacy/)
     assert.doesNotMatch(result.stdout, /ACTION:.*rollback/)
@@ -96,8 +95,6 @@ B2_RUNTIME_SHA=${'b'.repeat(40)}
 MM0_RUNTIME_SHA=${'c'.repeat(40)}
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 17; }
 docker() { printf 'DOCKER_CALLED\\n'; exit 99; }
-${functionBody(redeploy, 'validate_forward_marker')}
-${functionBody(redeploy, 'quiesce_legacy_runtime')}
 quiesce_legacy_runtime
 `)
   assert.equal(result.status, 17, `${result.stdout}${result.stderr}`)
@@ -111,7 +108,6 @@ ATTEMPTS=0
 compose() { ATTEMPTS=$((ATTEMPTS + 1)); [ "$ATTEMPTS" -ne 1 ]; }
 sleep() { :; }
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 17; }
-${functionBody(redeploy, 'wait_backend_internal')}
 wait_backend_internal 3
 printf 'ATTEMPTS:%s\\n' "$ATTEMPTS"
 `)
@@ -120,8 +116,6 @@ printf 'ATTEMPTS:%s\\n' "$ATTEMPTS"
 })
 
 test('successful release cleanup removes MM0 marker without rollback', () => {
-  const cleanup = release.slice(release.indexOf('  PROMOTION_STARTED=false\n  if [ "$LEGACY_MM0_RUNTIME" = true ]'), release.indexOf('\n}\n\nmain "$@"'))
-  assert.ok(cleanup.startsWith('  PROMOTION_STARTED=false'))
   const result = run(`
 MM0_FORWARD_MARKER=/tmp/selectel-mm0-success-$$
 FORWARD_MARKER=/tmp/selectel-b2-success-$$
@@ -129,7 +123,7 @@ MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
 LEGACY_MM0_RUNTIME=true
 LEGACY_MEMBERSHIP_RUNTIME=false
 : > "$MM0_FORWARD_MARKER"
-${cleanup}
+clear_release_markers
 [ ! -e "$MM0_FORWARD_MARKER" ]
 printf 'CLEARED\\n'
 `)
@@ -139,14 +133,12 @@ printf 'CLEARED\\n'
 
 
 test('post-promotion revision mismatch fails before marker cleanup', () => {
-  const check = functionBody(release, 'verify_promoted_revision')
   const target = 'a'.repeat(40)
   const result = run(`
 PRODUCT_SHA=${target}
 service_image() { case "$1" in static) printf 'memoly-webapp:%s\\n' "$PRODUCT_SHA" ;; *) printf 'memoly-backend:%s\\n' "$PRODUCT_SHA" ;; esac; }
 docker() { printf '%s\\n' '${'b'.repeat(40)}'; }
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
-${check}
 verify_promoted_revision
 `)
   assert.equal(result.status, 19, `${result.stdout}${result.stderr}`)
@@ -159,10 +151,6 @@ test('crash with both B2 and MM0 markers recovers through MM0 and removes supers
   const mmTarget = 'a'.repeat(40)
   const b2Target = 'b'.repeat(40)
   const previous = 'c'.repeat(40)
-  const markerStart = release.indexOf('  if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then', release.indexOf('  trap release_failure EXIT'))
-  const markerEnd = release.indexOf('  check_disk_space', markerStart)
-  assert.ok(markerStart > 0 && markerEnd > markerStart)
-  const recovery = release.slice(markerStart, markerEnd)
   const result = run(`
 SERVER_ROOT=$(mktemp -d)
 MM0_FORWARD_MARKER=$SERVER_ROOT/mm0
@@ -181,12 +169,7 @@ die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
 stat() { case "$*" in *%u*) printf '0\\n' ;; *%a*) printf '600\\n' ;; esac; }
 git_root() { [ "$1" = merge-base ] && [ "$4" = '${mmTarget}' ]; }
 bash() { printf 'ACTION:%s\\n' "$*"; }
-${functionBody(release, 'load_mm0_marker')}
-${functionBody(release, 'load_forward_marker')}
-recover() {
-${recovery}
-}
-recover
+recover_forward_markers
 [ -f "$MM0_FORWARD_MARKER" ] && [ ! -e "$FORWARD_MARKER" ]
 [ "$MARKER_TARGET_SHA" = '${mmTarget}' ]
 [ "$RESUMING_MM0" = true ]
@@ -205,7 +188,6 @@ PRODUCT_SHA=${'c'.repeat(40)}
 RESUMING_MM0=true
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
 git_root() { if [ "$1" = cat-file ]; then return 0; fi; return 1; }
-${functionBody(release, 'detect_mm0_boundary')}
 detect_mm0_boundary
 `)
   assert.equal(result.status, 19, `${result.stdout}${result.stderr}`)
@@ -215,8 +197,6 @@ detect_mm0_boundary
 test('guarded MM0 promotion accepts its active marker and reaches readiness', () => {
   const target = 'a'.repeat(40)
   const previous = 'b'.repeat(40)
-  const releaseFlow = release.slice(release.indexOf('  PROMOTION_STARTED=true'), release.indexOf('  verify_promoted_revision'))
-  assert.match(releaseFlow, /FORWARD_MARKER="\$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash .*redeploy\.sh" deploy/)
   const result = run(`
 MEMOLY_PRODUCT_SHA=${target}
 PREVIOUS_BACKEND=${previous}
@@ -237,13 +217,9 @@ die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
 read_static_rollback_tag() { PREVIOUS_WEBAPP_IMAGE_TAG='4b4edc0992803b84c919aadb835e8d2e21095c51'; }
 require_accepted_ui_target() { [ "$1" = '4b4edc0992803b84c919aadb835e8d2e21095c51' ] || die 'fixture rollback UI is not accepted'; }
 verify_mm0_spike_stopped() { :; }
-${functionBody(redeploy, 'validate_forward_marker')}
-${functionBody(redeploy, 'verify_no_legacy_writers')}
-${functionBody(redeploy, 'guard_membership_transition')}
 for step in preflight backup_server_state prepare_configuration migration_status promote_backend wait_backend_internal promote_jobs promote_static verify_static_internal activate_gateway readiness; do
   eval "$step() { printf 'STEP:$step\\n'; }"
 done
-${functionBody(redeploy, 'deploy')}
 deploy
 `)
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
@@ -257,7 +233,6 @@ SELECTEL_DEPLOY_LOCK_FD=
 COMPOSE_PROJECT=memoly
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
 docker() { printf 'DOCKER_CALLED\\n'; exit 99; }
-${functionBody(redeploy, 'quiesce_all_writers')}
 quiesce_all_writers
 `)
   assert.equal(result.status, 19, `${result.stdout}${result.stderr}`)
@@ -284,9 +259,6 @@ docker() {
     *) return 99 ;;
   esac
 }
-${functionBody(redeploy, 'mm0_spike_id')}
-${functionBody(redeploy, 'mm0_spike_relation')}
-${functionBody(redeploy, 'quiesce_mm0_spike')}
 quiesce_mm0_spike${emergency ? ' emergency' : ''}
 printf 'ACTIONS:%s\\n' "$ACTIONS"
 `)
@@ -300,15 +272,44 @@ test('same-database MAX video spike is stopped and restart disabled before MM0',
 })
 
 test('spike database parser reveals only normalized target, never credentials', () => {
-  const script = redeploy.match(/database_script='([^']+)'/)?.[1]
-  assert.ok(script)
-  const result = spawnSync(process.platform === 'win32' ? 'bun.exe' : 'bun', ['-e', script], {
-    encoding: 'utf8', timeout: 30_000,
-    env: { ...process.env, DATABASE_URL: 'postgresql://synthetic_user:synthetic_secret@postgres:5432/prod_db?schema=public' },
-  })
-  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
-  assert.equal(result.stdout, 'postgres|5432|prod_db')
-  assert.doesNotMatch(result.stdout + result.stderr, /synthetic_user|synthetic_secret/)
+  const fixture = mkdtempSync(resolve(root, 'tests/.mm0-spike-payload-'))
+  const payloadPath = resolve(fixture, 'payload.mjs')
+  try {
+    const bunCommand = process.platform === 'win32' ? 'bun.exe' : 'bun'
+    const result = run(`
+COMPOSE_PROJECT=memoly
+MM0_SPIKE_CONTAINER=memoly-spike-max-video-backend-1
+CAPTURE_PAYLOAD='${linuxPath(payloadPath)}'
+docker() {
+  case "$1" in
+    ps) case "$*" in *service=postgres*) printf 'postgres-id\\n' ;; *name=*) printf 'spike-id\\n' ;; *) return 90 ;; esac ;;
+    exec)
+      if [ "$2" = postgres-id ]; then printf 'prod_db'; return 0; fi
+      [ "$2" = spike-id ] && [ "$3" = bun ] && [ "$4" = -e ] || return 91
+      printf '%s' "$5" > "$CAPTURE_PAYLOAD"
+      printf 'postgres|5432|prod_db'
+      ;;
+    *) return 92 ;;
+  esac
+}
+result=$(mm0_spike_relation spike-id) || exit 93
+printf 'RELATION:%s\\n' "$result"
+`)
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+    assert.match(result.stdout, /RELATION:same/)
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic_user|synthetic_secret/)
+    const payload = readFileSync(payloadPath, 'utf8')
+    assert.doesNotMatch(payload, /synthetic_user|synthetic_secret/)
+    const parsed = spawnSync(bunCommand, ['-e', payload], {
+      encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, DATABASE_URL: 'postgresql://synthetic_user:synthetic_secret@postgres:5432/prod_db?schema=public' },
+    })
+    assert.equal(parsed.status, 0, `${parsed.stdout}${parsed.stderr}`)
+    assert.equal(parsed.stdout, 'postgres|5432|prod_db')
+    assert.doesNotMatch(parsed.stdout + parsed.stderr, /synthetic_user|synthetic_secret/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('absent MAX video spike causes no mutation', () => {
@@ -344,21 +345,80 @@ test('armed-marker emergency fallback stops a spike with unknown database target
   assert.match(result.stdout, /ACTIONS: update stop/)
 })
 
-test('ambiguous spike relation aborts backup-migration before marker or writer stop', () => {
-  assert.match(release, /MM0_BOUNDARY=true bash .*redeploy\.sh" backup-migration/)
-  const result = run(`
+function runReleaseBackupBoundary(spikeTarget) {
+  const fixture = mkdtempSync(resolve(root, 'tests/.mm0-release-backup-'))
+  const marker = resolve(fixture, 'mm0.marker')
+  const events = resolve(fixture, 'events')
+  const payload = resolve(fixture, 'payload.mjs')
+  try {
+    const result = run(`
+APP_ROOT='${linuxPath(root)}'
+SERVER_ROOT='${linuxPath(fixture)}'
+MM0_FORWARD_MARKER='${linuxPath(marker)}'
+MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
+LEGACY_MM0_RUNTIME=true
+LEGACY_MEMBERSHIP_RUNTIME=false
+QUIESCE_STARTED=false
+PROMOTION_STARTED=false
+trap release_failure EXIT
+CAPTURE_PAYLOAD='${linuxPath(payload)}'
+EVENT_LOG='${linuxPath(events)}'
+SPIKE_TARGET='${spikeTarget}'
 MM0_BOUNDARY=true
 die() { printf 'DIE:%s\\n' "$*" >&2; exit 19; }
 preflight() { :; }
 validate_database_target() { :; }
-mm0_spike_id() { printf 'spike-id\\n'; }
-mm0_spike_relation() { return 42; }
-backup_database() { printf 'BACKUP_CALLED\\n'; }
-${functionBody(redeploy, 'precheck_mm0_spike_relation')}
-${functionBody(redeploy, 'backup_migration')}
-backup_migration
+backup_database() { printf 'backup\\n' >> "$EVENT_LOG"; }
+docker() {
+  case "$1" in
+    ps) case "$*" in *service=postgres*) printf 'postgres-id\\n' ;; *name=*) printf 'spike-id\\n' ;; *) return 90 ;; esac ;;
+    exec)
+      if [ "$2" = postgres-id ]; then printf 'prod_db'; return 0; fi
+      [ "$2" = spike-id ] && [ "$3" = bun ] && [ "$4" = -e ] || return 91
+      printf '%s' "$5" > "$CAPTURE_PAYLOAD"
+      printf 'spike-probe\\n' >> "$EVENT_LOG"
+      printf '%s' "$SPIKE_TARGET"
+      ;;
+    update|stop) printf 'writer-stop\\n' >> "$EVENT_LOG"; return 0 ;;
+    *) return 92 ;;
+  esac
+}
+bash() {
+  [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ] && [ "$2" = backup-migration ] || return 93
+  [ "$FORWARD_MARKER" = "$MM0_ACTIVE_MARKER" ] && [ "$MM0_BOUNDARY" = true ] || return 94
+  backup_migration
+}
+backup_mm0_database
 `)
-  assert.equal(result.status, 19, `${result.stdout}${result.stderr}`)
-  assert.doesNotMatch(result.stdout, /BACKUP_CALLED/)
-  assert.match(result.stderr, /cannot classify MAX video spike database target before MM0 migration/)
+    return { fixture, marker, events, payload, result }
+  } catch (error) {
+    rmSync(fixture, { recursive: true, force: true })
+    throw error
+  }
+}
+
+test('release backup handoff rejects ambiguous spike targets before backup or writer mutation', () => {
+  const runResult = runReleaseBackupBoundary('other-host|5432|prod_db')
+  try {
+    assert.equal(runResult.result.status, 19, `${runResult.result.stdout}${runResult.result.stderr}`)
+    assert.match(runResult.result.stderr, /MAX video spike database relation is ambiguous/)
+    assert.match(readFileSync(runResult.events, 'utf8'), /spike-probe/)
+    assert.doesNotMatch(readFileSync(runResult.events, 'utf8'), /backup|writer-stop/)
+    assert.equal(existsSync(runResult.marker), false, 'failure happens before MM0 marker creation')
+  } finally {
+    rmSync(runResult.fixture, { recursive: true, force: true })
+  }
+})
+
+test('release backup handoff reaches backup after the real spike check confirms a different database', () => {
+  const runResult = runReleaseBackupBoundary('postgres|5432|other_db')
+  try {
+    assert.equal(runResult.result.status, 0, `${runResult.result.stdout}${runResult.result.stderr}`)
+    const events = readFileSync(runResult.events, 'utf8')
+    assert.match(events, /spike-probe[\s\S]*backup/)
+    assert.doesNotMatch(events, /writer-stop/)
+    assert.equal(existsSync(runResult.marker), false, 'backup is completed before MM0 marker creation')
+  } finally {
+    rmSync(runResult.fixture, { recursive: true, force: true })
+  }
 })

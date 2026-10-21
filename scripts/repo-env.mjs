@@ -131,6 +131,33 @@ export function assertTestDatabaseUrl(
   }
 }
 
+/** Strict boundary for disposable integration databases, independent of legacy override flags. */
+export function assertLoopbackTestDatabaseUrl(testDatabaseUrl, databaseUrl = process.env.DATABASE_URL) {
+  let parsed
+  let databaseName
+  try {
+    parsed = new URL(testDatabaseUrl)
+    databaseName = decodeURIComponent(parsed.pathname.slice(1))
+  } catch {
+    throw new Error('Integration tests require a valid loopback PostgreSQL *_test database URL.')
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  const ipv4 = hostname.split('.')
+  const loopback = hostname === 'localhost' || hostname === '::1' || (
+    ipv4.length === 4 && ipv4[0] === '127' && ipv4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  )
+  const unsafeTargetOverride = [...parsed.searchParams.keys()].some((key) =>
+    ['host', 'hostaddr', 'service'].includes(key.toLowerCase()),
+  )
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !loopback || !databaseName.endsWith('_test') || unsafeTargetOverride) {
+    throw new Error('Integration tests require a loopback PostgreSQL *_test database URL.')
+  }
+  if (databaseUrl && databaseUrl !== testDatabaseUrl) {
+    throw new Error('Integration DATABASE_URL must match the run-owned TEST_DATABASE_URL.')
+  }
+  return testDatabaseUrl
+}
+
 export function composeEnv(extra = {}) {
   return {
     ...process.env,

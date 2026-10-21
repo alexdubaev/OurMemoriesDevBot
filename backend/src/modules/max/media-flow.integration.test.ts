@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { randomUUID } from 'node:crypto'
 
 import { afterAll, afterEach, describe, expect, test } from 'bun:test'
@@ -15,14 +16,13 @@ import { createMaxPayloadCrypto } from './infrastructure/payload-crypto'
 import { PrismaMaxRepository } from './infrastructure/prisma-max-repository'
 import { createMaxWebhook } from './transport/webhook'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 const png = Uint8Array.from(Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p8sAAAAASUVORK5CYII=',
   'base64',
 ))
 
-maybeDescribe('app media to MAX backup and Feed', () => {
+describe('app media to MAX backup and Feed', () => {
   const prisma = createPrisma(databaseUrl!)
   const env = loadEnv({
     DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
