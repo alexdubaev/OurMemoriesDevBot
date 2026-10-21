@@ -74,7 +74,7 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
       await db.query('COMMIT')
       const legacyBefore = (await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]
       checked('bunx', ['--bun', 'prisma', 'migrate', 'deploy'], resolve(backendRoot), childEnv)
-      const appliedAfterComments = await db.query<{ migration_name: string }>(
+      const appliedAfterComments = await db.query<{ migration_name: string; checksum: string }>(
         'SELECT migration_name,checksum FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
       )
       expect(appliedAfterComments.rows.map((row) => row.migration_name)).toEqual(migrations)

@@ -20,22 +20,22 @@ guard also verifies the complete migration names and checksums against SQL files
 from that pinned source and rejects unfinished, unknown or unreadable history.
 
 This closes the missing exact-pair compatibility attestation described in the
-initial snapshot. It does not reconcile the currently observed production API/jobs
-split or make the comments migration/deployment authorized. Production remains at
-48 migrations in the recorded snapshot; no comments migration, service recreation,
-or real-family write has been performed. The accepted source for this guard work is
+initial snapshot. The accepted source for this guard work is
 `a353f01a8354e42f71473b1917f99c9a97181680`; the runtime fingerprint excludes the
 bounded deployment, test and documentation paths, so these changes do not alter the
-measured product runtime.
+measured product runtime. The production recovery was subsequently authorized and
+completed as recorded below. It did not run the comments migration or deploy
+comments code.
 
 ## Delivery decision
 
-**Production rollout is BLOCKED by the existing release/rollback preconditions.**
-The comments migration, deployment and real-family writes have not been performed.
-Local acceptance results and the exact checked source/tree are recorded in the COM-4 PR.
-A passing local gate must not be presented as passing production readiness.
+**The production baseline is normalized; the comments rollout has not been authorized.**
+The original mixed-image barriers were resolved by the approved guarded recovery.
+The comments migration, comments deployment and real-family writes have not been
+performed. The rollout still requires final FULL verification, immutable image
+build and a separate explicit owner approval.
 
-## Read-only production snapshot
+## Historical read-only production snapshot — 2026-10-21 04:02 UTC
 
 SSH metadata and `prisma migrate status` were read on 2026-10-21 at 04:02 UTC;
 backup metadata was checked at 04:14 UTC. No environment secrets or family rows were read.
@@ -70,37 +70,30 @@ rollback pair was `3fce2739205da927b95eb3379b1d066b61282965`; both images existe
 - backend: `sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c`;
 - frontend: `sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66`.
 
-## Proven barriers and safe recovery boundary
+## Current normalized production baseline — 2026-10-21 06:30:32 UTC
 
-1. `ci-release.sh:capture_running_images` requires API, worker and scheduler image
-   tags to match. The actual `4ce2006` / `af606f9` split fails that precondition.
-2. `detect_membership_rollback_boundary` requires the running backend commit to be
-   an ancestor of the accepted candidate. `git merge-base --is-ancestor 4ce2006…
-   11a2836…` returned 1. The production frontend producer SHA is also outside that
-   accepted lineage; no retagging is permitted to conceal this.
-3. `prepare_rollback` records the *running* images. For this host that would be the
-   mixed `4ce2006:a52ba97` pair, replacing the saved `3fce273:3fce273` pair.
-   `redeploy.sh:verify_application_rollback` has no attestation for that mixed pair.
-   The exact COM-4 → #180 profile below resolves compatibility with the saved pair,
-   but cannot attest or normalize the currently running mixed images.
+With the owner's authorization for a fresh backup and the existing guarded rollback
+only, the lead completed recovery with exit code 0. API/backend, worker, scheduler
+and static frontend now all run revision
+`3fce2739205da927b95eb3379b1d066b61282965`; their immutable image IDs are backend
+`sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c` and
+frontend `sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66`.
+The `/`, `/health/live` and `/health/ready` endpoints returned HTTP 200, and Prisma
+reported 48 migrations with status PASS. The host checkout remains the clean,
+unchanged `af606f93ed5e91ff4f7a50c96b6444bfb386adb5`.
 
-Image availability and a synthetic old-runtime schema test did not resolve those
-release-protocol requirements; the later exact-profile integration evidence is
-recorded above. No release command, rollback-readiness one-shot, configuration
-write, service recreation or permission change was run on the host.
-Prebuilding images still meets the same guards; frontend-only delivery omits the
-required API/migration; neither is a safe workaround.
+The fresh custom PostgreSQL dump was validated as PGDMP and by `pg_restore --list`:
+`/opt/memoly/backups/com4-maintenance-20261021T062914Z`, 396,176 bytes. The backup
+directory was root-owned mode 0700 and the dump mode 0600. Free space at completion
+was 6,313,857,024 bytes. No database restore, comments migration, comments code
+deployment or direct family-data write occurred. The older 04:02 mixed-service table
+above is historical and no longer describes the running baseline.
 
-The missing authority is **a separate controlled production-baseline reconciliation
-and its reviewed recovery procedure**, followed by explicit permission for the
-comments rollout. An engineer must design and locally verify that maintenance:
-record each current service image/configuration, select a compatible accepted
-runtime for all API/jobs, attest the exact source/target schema and runtime pair,
-retain a recovery route for interruption, and use the release lock, fresh backup,
-disk and ownership guards. Updating jobs or inventing a new mixed-service rollback
-protocol here would exceed this task's read-only production boundary. Do not solve
-it by disabling an ancestry/ownership/rollback guard, fabricating labels, manually
-writing a forward-only marker, or editing the saved rollback target without proof.
+The mixed-image, ancestry and rollback-target barriers in the historical snapshot
+were resolved by normalizing all four services to the existing measured #180 pair.
+The current baseline is eligible for the separately guarded comments release
+process, subject to final FULL verification, immutable image build, and explicit
+owner approval. This completed recovery does not authorize the comments release.
 
 ## Local acceptance and reproduction
 
@@ -139,9 +132,9 @@ builds, not production containers or a physical MAX session. Their scripts/logs
 are retained with the COM-4 evidence. Application runtime files in accepted main
 were unchanged by the test/documentation-only COM-4 diff.
 
-## Rollout after the blockers and authorization are resolved
+## Comments rollout after final gates and separate authorization
 
-1. Capture fresh production checkout/service SHA, OCI labels/image IDs, migration
+1. Recheck production checkout/service SHA, OCI labels/image IDs, migration
    status, disk bytes, forward markers, backup/configuration ownership and lock state.
    Confirm the separately reconciled baseline and measured rollback pair still match.
 2. Freeze the accepted release SHA and tree; retain its FULL log/exit and review.
@@ -165,8 +158,8 @@ were unchanged by the test/documentation-only COM-4 diff.
 
 ## Rollback without losing comments
 
-The current guards do **not** yet authorize a candidate-to-production-baseline rollback.
-After a separately reviewed exact-pair attestation, use only the existing guarded
+The exact COM-4-to-#180 recovery pair is now measured and guarded. If a comments
+release is later approved and requires rollback, use only the existing guarded
 application rollback with its validated images/configuration backup and readiness
 checks. Restore compatible code/configuration while keeping the expanded schema.
 Never DROP the comments table, execute a down migration, restore an older database
@@ -191,8 +184,12 @@ On a real iPhone/MAX, the owner should check:
 Physical iPhone/MAX acceptance has not been performed. Browser emulation and
 synthetic screenshots are not evidence of a physical keyboard/MAX check.
 
+APPROVED BASELINE ROLLBACK: COMPLETED (exit 0)
+
 PRODUCTION MIGRATION: NONE
 
-PRODUCTION DEPLOY: NONE
+COMMENTS PRODUCTION DEPLOY: NONE
+
+PRODUCTION DATABASE RESTORE: NONE
 
 REAL FAMILY DATA CHANGES: NONE
