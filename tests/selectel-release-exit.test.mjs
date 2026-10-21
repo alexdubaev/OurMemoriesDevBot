@@ -287,7 +287,7 @@ const runtimeFingerprints = {
   candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
   comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
   selectel: '9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468',
-  comux: '9b0390d5eb79585c673829eaed792a486ac949fbb72def38f73c743d0e244196',
+  comux: 'cc85d6c4c9e15582ddc193117d1daf7be95d6a7cb6eef8c68910f713706a826e',
 }
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
