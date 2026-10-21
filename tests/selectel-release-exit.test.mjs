@@ -256,7 +256,7 @@ test('UI rollback rejects forward markers, incompatible trees, bad labels, and i
     { marker: 'mm0.marker' },
     { incompatible: true },
     { bunfigChanged: true },
-    { badLabel: 'a'.repeat(40) },
+    { badLabel: rollbackV4 },
     { badId: 'backend' },
   ]) {
     const result = runStaticRollback(options)
@@ -682,7 +682,8 @@ test('current deploy-procedure source rolls back only to the pinned UI v4 artifa
   assert.equal(result.status, 0, result.output)
   assert.match(result.output, /rollback complete|Rollback complete|Application rollback complete/i)
   assert.doesNotMatch(result.output, /UI downgrade is forbidden/)
-  assert.doesNotMatch(result.events, /UP:|GATE/)
+  assert.match(result.events, new RegExp(`GATE\\nUP:${rollbackV4}:.*backend worker scheduler static`))
+  assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
 
   const changedSource = commitSourceChange(createSourceWorktree('selectel'), 'backend/src/worker.ts',
     '\n// changed product runtime fixture\n', 'mutate new Selectel rollback source')
@@ -778,7 +779,7 @@ for (const flags of [{ unread: true, multiple: false }, { unread: false, multipl
   test('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
     const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4, source: 'selectel', ...flags })
     assert.equal(result.status, 0, result.output)
-    assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
+    assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present\nGATE\nUP:.*backend worker scheduler static/)
     assert.match(result.output, /Application rollback complete/)
     assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
   })
@@ -834,12 +835,14 @@ test('normal promotion validates its prepared rollback UI before any mutation', 
   const start = redeployDefinitions.indexOf('\ndeploy() {')
   const end = redeployDefinitions.indexOf('\n}\n', start)
   assert.ok(start > 0 && end > start)
-  for (const failure of ['none', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
+  for (const failure of ['none', 'require_accepted_ui_target', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
     const result = spawnSync('bash', ['-s'], { encoding: 'utf8', input: [
       'set -euo pipefail',
       'MM0_BOUNDARY=false; FORWARD_MARKER=/nonexistent-selectel-marker',
       'die() { echo "DIE:$*"; exit 19; }',
-      ...['read_static_rollback_tag', 'require_accepted_ui_target', 'guard_membership_transition', 'preflight', 'backup_server_state', 'verify_application_rollback',
+      'read_static_rollback_tag() { PREVIOUS_WEBAPP_IMAGE_TAG=4b4edc0992803b84c919aadb835e8d2e21095c51; echo STEP:read_static_rollback_tag; }',
+      `require_accepted_ui_target() { [ "${failure}" != require_accepted_ui_target ] && [ "$1" = 4b4edc0992803b84c919aadb835e8d2e21095c51 ] || return 42; echo STEP:require_accepted_ui_target; }`,
+      ...['guard_membership_transition', 'preflight', 'backup_server_state', 'verify_application_rollback',
         'validate_database_target', 'backup_database', 'prepare_configuration', 'migration_status',
         'promote_backend', 'wait_backend_internal', 'promote_jobs', 'promote_static',
         'verify_static_internal', 'activate_gateway', 'readiness'].map((name) =>
@@ -854,6 +857,9 @@ test('normal promotion validates its prepared rollback UI before any mutation', 
     } else {
       assert.notEqual(result.status, 0, output)
       assert.doesNotMatch(output, /STEP:promote_backend/)
+      if (failure === 'require_accepted_ui_target') {
+        assert.doesNotMatch(output, /STEP:guard_membership_transition|STEP:backup_server_state|STEP:prepare_configuration/)
+      }
     }
   }
 })
