@@ -87,7 +87,7 @@ async function uploadPng(page: Page, token: string, familyId: string) {
 
 async function acceptRoleInvite(page: Page, familyId: string, ownerToken: string, memberToken: string, role: 'full' | 'viewer') {
   const invite = await page.request.post(`/api/v1/families/${familyId}/invites`, {
-    headers: { Authorization: `Bearer ${ownerToken}` },
+    headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': randomUUID() },
     data: { role },
   })
   expect(invite.status()).toBe(201)
