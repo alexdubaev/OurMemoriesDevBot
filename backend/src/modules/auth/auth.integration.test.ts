@@ -23,14 +23,40 @@ describe('auth API integration', () => {
   const prisma = createPrisma(databaseUrl!)
   const app = createApp({ env, prisma, legacyPasswordAuthForTests: true })
 
-  beforeEach(async () => {
+  async function clearFixtures() {
     await prisma.taskOutbox.deleteMany()
+    await prisma.idempotencyRecord.deleteMany()
+    await prisma.memoryLike.deleteMany()
+    await prisma.maxVideoReference.deleteMany()
+    await prisma.maxOutboundSource.deleteMany()
+    await prisma.maxVideoUploadSession.deleteMany()
+    await prisma.memoryMedia.deleteMany()
+    await prisma.memory.deleteMany()
+    await prisma.child.updateMany({ data: { avatarMediaId: null } })
+    await prisma.mediaVariant.deleteMany()
+    await prisma.uploadReservation.deleteMany()
+    await prisma.userAvatar.deleteMany()
+    await prisma.mediaAsset.deleteMany()
+    await prisma.familyInvite.deleteMany()
+    await prisma.child.deleteMany()
+    await prisma.family.deleteMany()
+    await prisma.passwordResetToken.deleteMany()
+    await prisma.maxAuthReplay.deleteMany()
+    await prisma.telegramAuthReplay.deleteMany()
     await prisma.authSession.deleteMany()
+    await prisma.externalIdentity.deleteMany()
+    await prisma.pilotAdmission.deleteMany()
     await prisma.user.deleteMany()
-  })
+  }
+
+  beforeEach(clearFixtures)
 
   afterAll(async () => {
-    await prisma.$disconnect()
+    try {
+      await clearFixtures()
+    } finally {
+      await prisma.$disconnect()
+    }
   })
 
   test('registers, reads me, refreshes, and logs out', async () => {
