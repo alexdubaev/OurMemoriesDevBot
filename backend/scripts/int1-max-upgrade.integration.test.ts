@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from 'bun:test'
 import { Client } from 'pg'
 import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
@@ -20,7 +21,7 @@ const lifecycleMigration = '20260929220000_max_channel_lifecycle_events'
 const channelOnboardingMigration = '20261001130000_max_channel_onboarding'
 
 test('upgrades populated migration 39 through MAX backup and lifecycle migrations without backfilling legacy memories', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
   assertTaskDatabaseTarget(new URL(databaseUrl))
 

@@ -170,7 +170,7 @@ test('a permanent rejection invalidates the token on the first attempt, not the 
 
 
 
-test('an unknown address costs the same password work as a registered one', async () => {
+test('known and unknown addresses both perform password verification before returning invalid credentials', async () => {
   const verifiedAgainst: string[] = []
   const passwords = {
     hash: async () => 'decoy-password-hash',
@@ -179,7 +179,7 @@ test('an unknown address costs the same password work as a registered one', asyn
       return false
     },
   }
-  const service = new AuthService({
+  const service = (findUserByEmail: AuthRepository['findUserByEmail']) => new AuthService({
     ...unusedPasswordResetDependencies,
     accessTokens: {
       sign: async () => 'access-token',
@@ -199,15 +199,16 @@ test('an unknown address costs the same password work as a registered one', asyn
     },
     repository: {
       ...unusedPasswordResetRepository,
-      findUserByEmail: async () => null,
+      findUserByEmail,
     } as unknown as AuthRepository,
   })
 
-  await expect(
-    service.login({ email: 'nobody@example.com', password: 'password123' }, {}),
-  ).rejects.toThrow('Invalid email or password')
+  const known = service(async () => user)
+  const unknown = service(async () => null)
+  const knownError = await known.login({ email: user.email, password: 'password123' }, {}).catch((error: unknown) => error)
+  const unknownError = await unknown.login({ email: 'nobody@example.com', password: 'password123' }, {}).catch((error: unknown) => error)
 
-  // Without this the response time answers the question the 401 body refuses to answer.
-  expect(verifiedAgainst).toHaveLength(1)
-  expect(verifiedAgainst[0]).not.toBe(user.passwordHash)
+  expect(knownError).toMatchObject({ kind: 'invalid_credentials' })
+  expect(unknownError).toMatchObject({ kind: 'invalid_credentials' })
+  expect(verifiedAgainst).toEqual([user.passwordHash, 'decoy-password-hash'])
 })

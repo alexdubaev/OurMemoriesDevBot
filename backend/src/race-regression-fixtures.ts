@@ -1,16 +1,10 @@
 import { Client } from 'pg'
 
 import { createPrisma, type DbClient } from './db'
+import { requireIntegrationDatabaseUrl } from './test-support/integration-database'
 
 function localTestDatabaseUrl() {
-  const value = process.env.TEST_DATABASE_URL
-  if (!value) throw new Error('Set TEST_DATABASE_URL to an isolated local *_test database')
-  const parsed = new URL(value)
-  if (!parsed.pathname.endsWith('_test') ||
-    !new Set(['localhost', '127.0.0.1', '[::1]', '::1']).has(parsed.hostname)) {
-    throw new Error('Set TEST_DATABASE_URL to an isolated local *_test database')
-  }
-  return value
+  return requireIntegrationDatabaseUrl()
 }
 
 const databaseUrl = localTestDatabaseUrl()
@@ -52,6 +46,28 @@ export async function waitForDatabaseLockWait(pg: Client) {
     await Bun.sleep(10)
   }
   throw new Error('No PostgreSQL lock wait appeared during the controlled race')
+}
+
+export async function advisoryLockWaitCount(pg: Client) {
+  const before = await pg.query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM pg_locks
+      WHERE locktype = 'advisory' AND NOT granted AND pid <> pg_backend_pid()
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+  )
+  return before.rows[0]?.count ?? 0
+}
+
+export async function waitForAdvisoryLockWait(pg: Client, baseline: number, expectedWaiters = 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const result = await pg.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM pg_locks
+        WHERE locktype = 'advisory' AND NOT granted AND pid <> pg_backend_pid()
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+    )
+    if ((result.rows[0]?.count ?? 0) >= baseline + expectedWaiters) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`Expected ${expectedWaiters} additional PostgreSQL advisory lock waiter(s)`)
 }
 
 export async function reservationIsLockableNow(pg: Client, reservationId: string) {

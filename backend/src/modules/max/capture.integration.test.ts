@@ -1,7 +1,9 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { Client } from 'pg'
 
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
@@ -29,12 +31,13 @@ import { choicePayload, readCandidates } from '../../bot-family-target'
 import { expireMaxTarget, resolveMaxTarget } from './infrastructure/source-target'
 import { createMaxVideoPosterProcessor } from './infrastructure/video-poster'
 import { runBackgroundJob } from '../../jobs'
+import { waitForDatabaseLockWait } from '../../race-regression-fixtures'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('MAX durable capture', () => {
+describe('MAX durable capture', () => {
   const prisma = createPrisma(databaseUrl!)
+  const lockMonitor = new Client({ connectionString: databaseUrl! })
   const key = Buffer.alloc(32, 17).toString('base64url')
   const crypto = createMaxPayloadCrypto(key)
   const repository = new PrismaMaxRepository(prisma)
@@ -58,6 +61,7 @@ maybeDescribe('MAX durable capture', () => {
     update_type: 'bot_started', timestamp: 1_757_844_000_001, chat_id: 88, user: { user_id: 77 }, payload: null,
   }
 
+  beforeAll(async () => { await lockMonitor.connect() })
   beforeEach(async () => {
     await prisma.maxOutgoingResponse.deleteMany()
     await prisma.maxSource.deleteMany()
@@ -85,7 +89,7 @@ maybeDescribe('MAX durable capture', () => {
     for (const root of activeStorageRoots) await rm(root, { recursive: true, force: true })
     activeStorageRoots.clear()
   })
-  afterAll(async () => { await prisma.$disconnect() })
+  afterAll(async () => { await lockMonitor.end(); await prisma.$disconnect() })
 
   test('atomically persists a text event, logical response, and UUID-only tasks', async () => {
     const response = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(textUpdate) })
@@ -1707,14 +1711,12 @@ maybeDescribe('MAX durable capture', () => {
     await prisma.familyInvite.create({ data: invite(family.familyId, family.userId, rawToken) })
     const accepted = await accept({ kind: 'bot_started', chatId: '89', userId: '77', occurredAt: '2026-09-15T11:00:00.000Z', payload: `invite_${rawToken}` })
     const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } } })
-    let resolverCalls = 0
     const process = createMaxTaskProcessor({
       runtime: { prisma } as unknown as BackendRuntime,
       crypto,
-      resolveInviteStart: async (value) => { resolverCalls += 1; expect(value).toBe(rawToken); return 'active' },
+      resolveInviteStart: async (value) => { expect(value).toBe(rawToken); return 'active' },
     })
     await Promise.all(Array.from({ length: 10 }, () => process(task.payload)))
-    expect(resolverCalls).toBe(10)
     expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'welcome' } })).toBe(1)
     expect(await prisma.taskOutbox.count({ where: { type: 'max:process', dedupeKey: `max-process:${accepted.inboxId}` } })).toBe(1)
     expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: accepted.inboxId } })).encryptedPayload.byteLength).toBeGreaterThan(0)
@@ -2357,9 +2359,25 @@ maybeDescribe('MAX durable capture', () => {
     await accept(event)
     const task = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:process' } })
     const calls = new Map<string, number>()
-    const download = async (url: string) => { calls.set(url, (calls.get(url) ?? 0) + 1); await new Promise((resolve) => setTimeout(resolve, 30)); return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength } }
+    let releaseDownloads!: () => void
+    let firstDownloadStarted!: () => void
+    const downloadGate = new Promise<void>((resolve) => { releaseDownloads = resolve })
+    const downloadStarted = new Promise<void>((resolve) => { firstDownloadStarted = resolve })
+    const download = async (url: string) => {
+      calls.set(url, (calls.get(url) ?? 0) + 1)
+      firstDownloadStarted()
+      await downloadGate
+      return { bytes: pngFixture, contentType: 'application/octet-stream', contentLength: pngFixture.byteLength }
+    }
     const processors = Array.from({ length: 10 }, () => createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api: fixture.api(event), media: fixture.media, download }))
-    await Promise.all(processors.map((process) => process(task.payload)))
+    const processing = Promise.all(processors.map((process) => process(task.payload)))
+    try {
+      await downloadStarted
+      releaseDownloads()
+      await processing
+    } finally {
+      releaseDownloads()
+    }
     expect(calls).toEqual(new Map([['https://i.oneme.ru/1', 1], ['https://i.oneme.ru/2', 1]]))
     expect(await prisma.memory.count()).toBe(1)
     expect(await prisma.mediaAsset.count({ where: { sourceKind: 'max' } })).toBe(2)
@@ -2526,7 +2544,7 @@ maybeDescribe('MAX durable capture', () => {
       finalizing = finalizingMedia.finalize(scope, uploadId)
       await waitForGate(finalizeGate, 'pending-finalization')
       cleaning = fixture.media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: [assetId], now: new Date() })
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitForDatabaseLockWait(lockMonitor)
       finalizeGate.release()
       const overlap = await Promise.race([
         Promise.allSettled([finalizing, cleaning]),

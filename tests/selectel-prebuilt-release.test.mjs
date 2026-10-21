@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
+import { bashExecutable } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
@@ -24,7 +25,7 @@ function runValidation(values = {}) {
   const assignments = Object.entries(values)
     .map(([key, value]) => `${key}='${value}'`)
     .join('\n')
-  return spawnSync('bash', ['-s'], {
+  return spawnSync(bashExecutable, ['-s'], {
     input: `
 set -euo pipefail
 PRODUCT_SHA=${sha}
@@ -90,7 +91,7 @@ docker() {
   esac
 }
 `
-  return spawnSync('bash', ['-s'], {
+  return spawnSync(bashExecutable, ['-s'], {
     input: `
 set -euo pipefail
 PRODUCT_SHA=${sha}

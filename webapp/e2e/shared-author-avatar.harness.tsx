@@ -4,7 +4,6 @@ if (import.meta.env.VITE_MEMOLY_UI_VERSION === 'v2') document.documentElement.da
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AuthContext } from '@/features/auth'
-import { MemberAvatarImage } from '@/features/avatar'
 import { FeedPage } from '@/features/feed/FeedPage'
 import { feedQueryKeys } from '@/features/feed/queries'
 import type { AuthenticatedTransport } from '@/platform/api'
@@ -13,10 +12,10 @@ import { activatePrivateCacheIdentity, allowPrivateFamilyCache, privateFamilyAcc
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 
-type ProbeConfig = { mode: 'baseline' | 'feed'; userId: string; familyId: string; membershipEpoch: number; paths: [string, string, string] }
+type ProbeConfig = { mode: 'idle' | 'feed'; userId: string; familyId: string; membershipEpoch: number; paths: [string, string, string] }
 type ProbeMetrics = { requests: string[]; mutations: string[]; familyNavigations: number; created: string[]; revoked: string[]; decodes: number; holdResponses: boolean; holdDecode: boolean; responseWaiters: Array<() => void>; decodeWaiters: Array<() => void>; missing: Set<string> }
 declare global { interface Window { __avatarProbe: { configure: (config: ProbeConfig) => void; releaseResponses: () => void; releaseDecode: () => void; revoke: () => void; unmount: () => void; metrics: ProbeMetrics; } } }
-let activeProbeConfig: ProbeConfig = { mode: 'baseline', userId: '', familyId: '', membershipEpoch: 0, paths: ['', '', ''] }
+let activeProbeConfig: ProbeConfig = { mode: 'idle', userId: '', familyId: '', membershipEpoch: 0, paths: ['', '', ''] }
 
 const metrics: ProbeMetrics = window.__avatarProbe?.metrics ?? {
   requests: [], mutations: [], familyNavigations: 0, created: [], revoked: [], decodes: 0, holdResponses: false, holdDecode: false,
@@ -46,7 +45,7 @@ HTMLImageElement.prototype.decode = function () {
 
 let updateConfig: ((config: ProbeConfig) => void) | undefined
 export function Probe() {
-  const [config, setConfig] = useState<ProbeConfig>({ mode: 'baseline', userId: '', familyId: '', membershipEpoch: 0, paths: ['', '', ''] })
+  const [config, setConfig] = useState<ProbeConfig>({ mode: 'idle', userId: '', familyId: '', membershipEpoch: 0, paths: ['', '', ''] })
   const [revoked, setRevoked] = useState(false)
   const currentConfig = useRef(config)
   const transport = useMemo<AuthenticatedTransport>(() => ({
@@ -94,9 +93,8 @@ export function Probe() {
       window.__avatarProbe.configure = () => undefined
     }
   }, [queryClient])
-  const baseline = Array.from({ length: 40 }, (_, index) => <div className="memory-card" key={index}><header><MemberAvatarImage avatarPath={config.paths[index % 2]} avatarCrop={{ x: .25, y: .1, width: .5, height: .5 }} className="author-avatar" name={index % 2 ? 'Author A' : 'Author B'} fallback={<span className="author-initials">{index % 2 ? 'A' : 'B'}</span>} /></header></div>)
   return <AuthContext.Provider value={auth}><QueryClientProvider client={queryClient}>
-    {config.mode === 'baseline' ? baseline : <FeedPage active={!revoked} accountId={config.userId} childId="33333333-3333-4333-8333-333333333333" childName="Synthetic child" childSubtitle="" childAvatarMediaId={null} childAvatarCrop={null} familyId={config.familyId} familyName="Synthetic family" familyTimezone="UTC" filter="all" hostBridge={hostBridge} insets={{ top: 0, right: 0, bottom: 0, left: 0 }} isAppBootstrapped membershipEpoch={config.membershipEpoch} onAccessLost={() => undefined} onAllFamilies={() => undefined} onFamily={() => { metrics.familyNavigations += 1 }} onFilterChange={() => undefined} role="full" transport={transport} />}
+    {config.mode === 'idle' ? null : <FeedPage active={!revoked} accountId={config.userId} childId="33333333-3333-4333-8333-333333333333" childName="Synthetic child" childSubtitle="" childAvatarMediaId={null} childAvatarCrop={null} familyId={config.familyId} familyName="Synthetic family" familyTimezone="UTC" filter="all" hostBridge={hostBridge} insets={{ top: 0, right: 0, bottom: 0, left: 0 }} isAppBootstrapped membershipEpoch={config.membershipEpoch} onAccessLost={() => undefined} onAllFamilies={() => undefined} onFamily={() => { metrics.familyNavigations += 1 }} onFilterChange={() => undefined} role="full" transport={transport} />}
   </QueryClientProvider></AuthContext.Provider>
 }
 

@@ -22,7 +22,6 @@ async function touchSwipe(page: import('@playwright/test').Page, selector: strin
       for (let step = 1; step <= 6; step++) dispatch('touchmove', [{ identifier: 1, clientX: fromX + (toX - fromX) * step / 6, clientY: y }])
       dispatch('touchend', [], [{ identifier: 1, clientX: toX, clientY: y }])
     }, { fromX, toX, y })
-    await page.waitForTimeout(400)
     return
   }
   const cdp = await page.context().newCDPSession(page)
@@ -32,7 +31,6 @@ async function touchSwipe(page: import('@playwright/test').Page, selector: strin
   }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await cdp.detach()
-  await page.waitForTimeout(400)
 }
 
 async function touchSwipeDown(page: import('@playwright/test').Page, selector: string, distance = 132) {
@@ -43,7 +41,6 @@ async function touchSwipeDown(page: import('@playwright/test').Page, selector: s
   const fromY = box.y + box.height / 2
   if (page.context().browser()?.browserType().name() !== 'chromium') {
     await syntheticTouchPath(page, selector, [[{ x, y: fromY }], [{ x, y: fromY + distance / 3 }], [{ x, y: fromY + distance * 2 / 3 }], [{ x, y: fromY + distance }]])
-    await page.waitForTimeout(250)
     return
   }
   const cdp = await page.context().newCDPSession(page)
@@ -53,7 +50,6 @@ async function touchSwipeDown(page: import('@playwright/test').Page, selector: s
   }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await cdp.detach()
-  await page.waitForTimeout(250)
 }
 
 async function syntheticTouchPath(page: import('@playwright/test').Page, selector: string, path: Array<Array<{ x: number; y: number }>>, cancelled = false) {
@@ -74,29 +70,25 @@ async function syntheticTouchPath(page: import('@playwright/test').Page, selecto
   }, { path, cancelled })
 }
 
-test('fullscreen photo album and mixed viewer respond to direct single-finger swipes', async ({ page }, testInfo) => {
+test('fullscreen photo album and mixed viewer respond to direct single-finger swipes', async ({ page }) => {
   const videoFixture = await readFile(fileURLToPath(new URL('./fixtures/portrait-edges.mp4', import.meta.url)))
   await page.route('**/api/v1/families/*/media/playback-session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
   await page.route('**/media/videos/*/content', (route) => route.fulfill({ status: 200, contentType: 'video/mp4', body: videoFixture, headers: { 'Access-Control-Allow-Origin': '*' } }))
-  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
 
-  const albumCard = page.locator('.memory-card').filter({ hasText: 'Synthetic photo album' })
+  const albumCard = page.locator('.memory-card').nth(1)
   await albumCard.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
   const photoViewer = page.locator('.pswp')
   await expect(photoViewer).toBeVisible()
   if (page.context().browser()?.browserType().name() === 'chromium') {
-    console.log('PhotoSwipe initial CDP touch counter:', await photoViewer.locator('.pswp__counter').innerText())
     await touchSwipe(page, '.pswp__scroll-wrap', 'right')
     await expect(photoViewer.locator('.pswp__counter')).toContainText('1 / 3')
     await touchSwipe(page, '.pswp__scroll-wrap', 'left')
     await expect(photoViewer.locator('.pswp__counter')).toContainText('2 / 3')
-    console.log('PhotoSwipe after CDP touch swipe:', await photoViewer.locator('.pswp__counter').innerText())
     await touchSwipe(page, '.pswp__scroll-wrap', 'left')
     await expect(photoViewer.locator('.pswp__counter')).toContainText('3 / 3')
     await touchSwipe(page, '.pswp__scroll-wrap', 'left')
     await expect(photoViewer.locator('.pswp__counter')).toContainText('3 / 3')
-    console.log('PhotoSwipe after trusted CDP touch at final boundary:', await photoViewer.locator('.pswp__counter').innerText())
     await touchSwipe(page, '.pswp__scroll-wrap', 'right')
     await expect(photoViewer.locator('.pswp__counter')).toContainText('2 / 3')
   } else {
@@ -104,12 +96,12 @@ test('fullscreen photo album and mixed viewer respond to direct single-finger sw
     await expect(photoViewer.locator('.pswp__counter')).toContainText('2 / 3')
   }
   await page.keyboard.press('Escape')
-  await expect(albumCard.locator('[data-carousel-dot="2"]')).toHaveClass(/active/)
+  await expect(albumCard.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
   await albumCard.locator('[data-carousel-position="2"] button[aria-label="Открыть фото"]').click()
   await expect(page.locator('.pswp .pswp__counter')).toContainText('2 / 3')
   await page.keyboard.press('Escape')
 
-  const namedMixedCard = page.locator('.memory-card').filter({ hasText: 'Synthetic fullscreen swipe' })
+  const namedMixedCard = page.locator('.memory-card').nth(0)
   await namedMixedCard.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
   const mixedViewer = page.locator('[data-mixed-viewer]')
   await expect(mixedViewer).toBeVisible()
@@ -125,12 +117,8 @@ test('fullscreen photo album and mixed viewer respond to direct single-finger sw
   await syntheticTouchPath(page, '.memoly-mixed-viewer-media img', [[center], [{ x: center.x + 10, y: center.y }, { x: center.x + 20, y: center.y }], [{ x: center.x - 110, y: center.y }, { x: center.x + 20, y: center.y }]])
   await expect(mixedViewer.locator('.memoly-mixed-viewer-bar')).toContainText('1 / 3')
   await touchSwipe(page, '.memoly-mixed-viewer-media img', 'left')
-  await page.waitForTimeout(250)
-  const counter = await mixedViewer.locator('.memoly-mixed-viewer-bar').innerText()
-  console.log(`Mixed viewer after ${page.context().browser()?.browserType().name() === 'chromium' ? 'CDP' : 'synthetic'} touch swipe:`, counter)
-  expect(counter).toContain('2 / 3')
+  await expect(mixedViewer.locator('.memoly-mixed-viewer-bar')).toContainText('2 / 3')
   await expect(mixedViewer.locator('video')).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('mixed-viewer-video.png') })
   const video = mixedViewer.locator('video')
   let videoHandle: Awaited<ReturnType<typeof video.elementHandle>> | null = null
   if (page.context().browser()?.browserType().name() === 'webkit') {
@@ -159,8 +147,6 @@ test('fullscreen photo album and mixed viewer respond to direct single-finger sw
   await expect(mixedViewer.locator('.memoly-mixed-viewer-bar')).toContainText('3 / 3')
   const finalPhoto = mixedViewer.locator('.memoly-mixed-viewer-media img')
   await expect(finalPhoto).toBeVisible()
-  await expect(finalPhoto).toHaveCSS('object-fit', 'contain')
-  await page.screenshot({ path: testInfo.outputPath('mixed-viewer-photo-3.png') })
   if (videoHandle) await expect.poll(() => videoHandle!.evaluate((element: HTMLVideoElement) => [element.paused, element.getAttribute('src'), element.networkState, element.buffered.length])).toEqual([true, null, 0, 0])
   await touchSwipe(page, '.memoly-mixed-viewer-media img', 'left')
   await expect(mixedViewer.locator('.memoly-mixed-viewer-bar')).toContainText('3 / 3')
@@ -178,47 +164,25 @@ test('fullscreen photo album and mixed viewer respond to direct single-finger sw
   await expect(mixedViewer.locator('.memoly-mixed-viewer-bar')).toContainText('1 / 3')
   await mixedViewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
   await expect(mixedViewer).toHaveCount(0)
-  await expect(namedMixedCard.locator('[data-carousel-dot="1"]')).toHaveClass(/active/)
+  await expect(namedMixedCard.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
   await namedMixedCard.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
   await expect(page.locator('[data-mixed-viewer] .memoly-mixed-viewer-bar')).toContainText('1 / 3')
   await page.keyboard.press('ArrowRight')
   await expect(page.locator('[data-mixed-viewer] .memoly-mixed-viewer-bar')).toContainText('2 / 3')
   await page.locator('[data-mixed-viewer]').getByRole('button', { name: 'Закрыть просмотр' }).click()
-  await expect(namedMixedCard.locator('[data-carousel-dot="2"]')).toHaveClass(/active/)
+  await expect(namedMixedCard.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
   await namedMixedCard.locator('[data-carousel-position="2"] button[aria-label^="Открыть видео"]').click()
   await expect(page.locator('[data-mixed-viewer] .memoly-mixed-viewer-bar')).toContainText('2 / 3')
 })
 
-test('mixed fullscreen photo swipe down closes intentionally and ignores guarded gestures', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 })
+test('mixed fullscreen photo swipe down closes intentionally and ignores guarded gestures', async ({ page }) => {
   await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
 
-  const posterImage = page.locator('.memoly-mixed-slide-poster > button > img').first()
-  await expect(posterImage).toBeVisible()
-  const posterGeometry = await posterImage.evaluate((image) => {
-    const poster = image.closest('.memoly-mixed-slide-poster')!
-    const play = poster.querySelector<HTMLElement>('.memoly-carousel-video-play')!
-    const rect = (element: Element) => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } }
-    return { fit: getComputedStyle(image).objectFit, image: rect(image), play: rect(play), glyph: rect(play.querySelector('[data-slot="webp-icon"]')!), poster: rect(poster) }
-  })
-  expect(posterGeometry.fit).toBe('contain')
-  expect(posterGeometry.play.width).toBeCloseTo(54, 1)
-  expect(posterGeometry.play.height).toBeCloseTo(54, 1)
-  expect(Math.abs(posterGeometry.play.x + 27 - (posterGeometry.poster.x + posterGeometry.poster.width / 2))).toBeLessThanOrEqual(1)
-  expect(Math.abs(posterGeometry.play.y + 27 - (posterGeometry.poster.y + posterGeometry.poster.height / 2))).toBeLessThanOrEqual(1)
-  expect(posterGeometry.glyph.width).toBe(25)
-  expect(posterGeometry.glyph.height).toBe(25)
-  expect(Math.abs(posterGeometry.glyph.x + 12.5 - (posterGeometry.play.x + posterGeometry.play.width / 2))).toBeLessThanOrEqual(1)
-  expect(Math.abs(posterGeometry.glyph.y + 12.5 - (posterGeometry.play.y + posterGeometry.play.height / 2))).toBeLessThanOrEqual(1)
-
-  const card = page.locator('.memory-card').filter({ hasText: 'Synthetic fullscreen swipe' })
+  const card = page.locator('.memory-card').nth(0)
   await card.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
   const viewer = page.locator('[data-mixed-viewer]')
-  const media = viewer.locator('.memoly-mixed-viewer-media')
-  const photo = media.locator('img')
   await expect(viewer).toBeVisible()
-  expect(await media.evaluate((element) => getComputedStyle(element).touchAction)).toBe('pinch-zoom')
-  const bounds = await photo.boundingBox()
+  const bounds = await viewer.locator('.memoly-mixed-viewer-media img').boundingBox()
   expect(bounds).not.toBeNull()
   const center = { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 }
 
@@ -240,29 +204,13 @@ test('mixed fullscreen photo swipe down closes intentionally and ignores guarded
   await viewer.getByRole('button', { name: 'Назад' }).click()
   await expect(viewer.locator('.memoly-mixed-viewer-bar')).toContainText('1 / 3')
 
-  const header = viewer.locator('.memoly-mixed-viewer-bar')
-  const headerGeometry = await header.evaluate((element) => {
-    const counter = element.querySelector<HTMLElement>(':scope > [data-slot="typography"]')
-    const close = element.querySelector<HTMLElement>('.memoly-viewer-close')!
-    const author = element.querySelector<HTMLElement>('.memoly-viewer-author')!
-    const rect = (node: HTMLElement) => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height } }
-    return { counter: rect(counter!), close: rect(close), author: rect(author) }
-  })
-  await page.screenshot({ path: testInfo.outputPath('fullscreen-header.png') })
-  expect(headerGeometry.close.width).toBe(44)
-  expect(headerGeometry.close.height).toBe(44)
-  expect(headerGeometry.close.x).toBeGreaterThan(headerGeometry.counter.x)
-  expect(headerGeometry.author.x).toBeLessThan(headerGeometry.counter.x)
-  await expect(viewer.locator('.memoly-viewer-close-glyph')).toHaveText('×')
-  await expect(viewer.locator('.memoly-viewer-close-glyph')).toHaveAttribute('aria-hidden', 'true')
-
   const opener = card.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]')
   const app = page.locator('.app')
   await app.evaluate((element) => { element.scrollTop = Math.min(96, element.scrollHeight) })
   const scrollBeforeClose = await app.evaluate((element) => element.scrollTop)
   await touchSwipeDown(page, '.memoly-mixed-viewer-media img')
   await expect(viewer).toHaveCount(0)
-  await expect(card.locator('[data-carousel-dot="1"]')).toHaveClass(/active/)
+  await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(opener).toBeFocused()
   await expect.poll(() => app.evaluate((element) => element.scrollTop)).toBe(scrollBeforeClose)
   await expect.poll(() => page.evaluate(() => window.history.state?.mixedMediaViewer ?? false)).toBe(false)

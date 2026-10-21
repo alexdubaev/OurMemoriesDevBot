@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,15 +14,14 @@ import { FilesystemPrivateStorage } from '../../storage/filesystem-storage'
 import { pngFixture } from '../../storage/storage-contract'
 import sharp from 'sharp'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
 const jpegFixture = Buffer.concat([
   Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
   Buffer.alloc(pngFixture.byteLength - 4, 0x20),
 ])
 
-maybeDescribe('avatar upload API integration', () => {
+describe('avatar upload API integration', () => {
   const env = loadEnv({
     DATABASE_URL: databaseUrl!,
     JWT_SECRET: '12345678901234567890123456789012',
@@ -407,10 +407,9 @@ maybeDescribe('avatar upload API integration', () => {
     expect(again.status).toBe(200)
   })
 
-  test('never lets a lost race delete a published avatar or its object', async () => {
-    // Both guards live in the real repository, so they are exercised through it rather than
-    // through a fake that could simply mirror them. The scenario is two finalizes of one upload:
-    // the winner publishes it, and the loser must neither re-promote it nor discard it.
+  test('repository cannot re-promote or discard an already published avatar', async () => {
+    // This checks the repository's idempotent terminal-state boundary. It does not simulate two
+    // concurrent finalizers; that race must be covered by the real lock/concurrency scenarios.
     const session = await register('race@example.com')
     const ticket = await requestTicket(session.accessToken, pngFixture, 'image/png')
     await transfer(ticket, pngFixture)

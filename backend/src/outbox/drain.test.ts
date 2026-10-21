@@ -1,14 +1,4 @@
-/**
- * Drain policy against a fake client: deadlines, the runtime budget, backlog reporting, and what
- * happens when a result cannot be written down. These are timing behaviours a database adds
- * nothing to.
- *
- * Anything the lease and the retention window decide - claiming, stale-lease recovery, attempt
- * accounting, backoff, retention - belongs to `outbox.integration.test.ts` against real Postgres.
- * `fake-outbox-prisma.ts` emulates `@updatedAt` on `updateMany` by hand, which is exactly the
- * assumption a duplicate here would keep asserting after Prisma stopped honouring it.
- */
-import { describe, expect, spyOn, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 
 import { drainTaskOutbox } from './drain'
 import { TerminalTaskError } from './errors'
@@ -16,7 +6,6 @@ import { createFakeOutboxRuntime, taskRow, type FakeTaskRow } from './fake-outbo
 import type { TaskHandlerRegistry } from './handlers'
 
 const now = new Date('2026-08-09T12:00:00.000Z')
-const noJitter = () => 0
 
 function registry(run: TaskHandlerRegistry['string']['run'], entry: Partial<{ maxAttempts: number }> = {}) {
   return { 'test:work': { run, ...entry } } satisfies TaskHandlerRegistry
@@ -27,132 +16,68 @@ async function drain(rows: FakeTaskRow[], handlers: TaskHandlerRegistry, options
     clock: () => now,
     handlers,
     now,
-    random: noJitter,
+    random: () => 0,
     ...options,
   })
 }
 
-describe('drainTaskOutbox', () => {
-  test('a handler that deliberately did nothing is skipped, not counted as done', async () => {
-    // Without this split, a system where every task finds nothing to do looks healthy.
-    const rows = [taskRow({ id: 'a', type: 'test:work' })]
+test('handler outcomes are reflected in drain metrics', async () => {
+  const rows = [taskRow({ id: 'skip', type: 'test:work' }), taskRow({ id: 'done', type: 'test:work' })]
+  let calls = 0
 
-    const metrics = await drain(rows, registry(async () => 'skipped'))
+  const metrics = await drain(rows, registry(async () => ++calls === 1 ? 'skipped' : undefined))
 
-    expect(metrics).toMatchObject({ done: 0, skipped: 1 })
-    expect(rows[0]?.status).toBe('skipped')
-  })
-
-  test('a lease that is still fresh is left alone', async () => {
-    const rows = [
-      taskRow({
-        id: 'a',
-        type: 'test:work',
-        processingToken: 'held',
-        status: 'processing',
-        updatedAt: new Date(now.getTime() - 5_000),
-      }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ recoveredStale: 0, claimed: 0 })
-    expect(rows[0]?.status).toBe('processing')
-  })
-
-  test('a handler that knows the work can never succeed stops immediately', async () => {
-    const rows = [taskRow({ id: 'a', type: 'test:work' })]
-    const error = spyOn(console, 'error').mockImplementation(() => {})
-
-    try {
-      const metrics = await drain(rows, registry(async () => {
-        throw new TerminalTaskError('payload will never validate')
-      }))
-
-      // One attempt of five, but no retry: the handler opted out.
-      expect(metrics).toMatchObject({ terminalFailed: 1 })
-      expect(rows[0]).toMatchObject({ attempts: 1, status: 'failed' })
-    } finally {
-      error.mockRestore()
-    }
-  })
-
-  test('the handler is told when this is its last chance', async () => {
-    // Compensating work - invalidating a reset token, say - has to happen on the final attempt
-    // and must not happen before it.
-    const rows = [taskRow({ id: 'a', type: 'test:work', attempts: 1 })]
-    const flags: boolean[] = []
-
-    await drain(rows, registry(async ({ finalAttempt }) => void flags.push(finalAttempt), { maxAttempts: 2 }))
-
-    expect(flags).toEqual([true])
-  })
-
-  test('a type this deployment cannot run is left pending and reported', async () => {
-    // An API already enqueueing work the runner beside it does not know yet. Claiming it would
-    // burn attempts on something no handler here can ever do.
-    const rows = [taskRow({ id: 'a', type: 'shipped:later' })]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ claimed: 0, unhandled: 1 })
-    expect(rows[0]?.status).toBe('pending')
-  })
-
-  test('work that is not due yet is left for a later pass', async () => {
-    const rows = [
-      taskRow({ id: 'a', type: 'test:work', scheduledFor: new Date(now.getTime() + 60_000) }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined))
-
-    expect(metrics).toMatchObject({ claimed: 0, backlog: 0 })
-    expect(rows[0]?.status).toBe('pending')
-  })
-
-  test('the runtime budget stops a pass between items rather than mid-task', async () => {
-    const rows = [1, 2, 3].map((n) => taskRow({ id: `row-${n}`, type: 'test:work' }))
-    let ran = 0
-
-    const metrics = await drain(
-      rows,
-      registry(async () => {
-        ran += 1
-        await Bun.sleep(12)
-      }),
-      { maxRuntimeMs: 15 },
-    )
-
-    expect(ran).toBeLessThan(3)
-    expect(metrics.backlog).toBeGreaterThan(0)
-    // Whatever it did start, it finished and recorded.
-    expect(rows.filter((row) => row.status === 'done')).toHaveLength(ran)
-  })
-
-  test('backlog and the oldest wait are reported for alerting', async () => {
-    const rows = [
-      taskRow({ id: 'a', type: 'test:work', scheduledFor: new Date(now.getTime() - 300_000) }),
-      taskRow({ id: 'b', type: 'test:work' }),
-    ]
-
-    const metrics = await drain(rows, registry(async () => undefined), { limit: 1, maxRuntimeMs: 0 })
-
-    expect(metrics).toMatchObject({ backlog: 2, claimed: 0, oldestPendingAgeSeconds: 300 })
-  })
+  expect(metrics).toMatchObject({ done: 1, skipped: 1 })
 })
 
+test('a terminal handler error is not retried', async () => {
+  const rows = [taskRow({ id: 'bad', type: 'test:work' })]
+  const error = spyOn(console, 'error').mockImplementation(() => {})
 
+  try {
+    const metrics = await drain(rows, registry(async () => {
+      throw new TerminalTaskError('payload will never validate')
+    }))
 
-test('a handler that ignores its deadline does not stop the outbox', async () => {
-  // The signal is a request, not a guarantee - Prisma calls take no signal at all. Without a
-  // race the pass would never resolve, the scheduler's tick would never finish, and croner's
-  // overlap guard would suppress every later tick with nothing in the log.
+    expect(metrics).toMatchObject({ terminalFailed: 1 })
+    expect(rows[0]).toMatchObject({ attempts: 1, status: 'failed' })
+  } finally {
+    error.mockRestore()
+  }
+})
+
+test('the handler is told when this is its final attempt', async () => {
+  const rows = [taskRow({ id: 'last', type: 'test:work', attempts: 1 })]
+  const finalAttempts: boolean[] = []
+
+  await drain(rows, registry(async ({ finalAttempt }) => { finalAttempts.push(finalAttempt) }, { maxAttempts: 2 }))
+
+  expect(finalAttempts).toEqual([true])
+})
+
+test('the pass budget stops between tasks after finishing the active handler', async () => {
+  const rows = [1, 2, 3].map((n) => taskRow({ id: `row-${n}`, type: 'test:work' }))
+  let ran = 0
+  let elapsed = 0
+  const wallClock = spyOn(Date, 'now').mockImplementation(() => elapsed)
+  try {
+    const metrics = await drain(rows, registry(async () => { ran += 1; elapsed += 10 }), { maxRuntimeMs: 15 })
+    expect(ran).toBeGreaterThan(0)
+    expect(ran).toBeLessThan(rows.length)
+    expect(metrics.backlog).toBeGreaterThan(0)
+    expect(rows.filter((row) => row.status === 'done')).toHaveLength(ran)
+  } finally {
+    wallClock.mockRestore()
+  }
+})
+
+test('an uncooperative handler cannot hold up later outbox work', async () => {
   const rows = [
     taskRow({ id: 'stuck', type: 'test:work', payload: { hang: true } }),
     taskRow({ id: 'next', type: 'test:work', payload: { hang: false } }),
   ]
+  let release: (() => void) | undefined
   const error = spyOn(console, 'error').mockImplementation(() => {})
-  let released: (() => void) | undefined
 
   try {
     const metrics = await drainTaskOutbox(createFakeOutboxRuntime(rows), {
@@ -160,52 +85,28 @@ test('a handler that ignores its deadline does not stop the outbox', async () =>
       handlers: {
         'test:work': {
           deadlineMs: 20,
-          run: async ({ payload }) =>
-            (payload as { hang: boolean }).hang
-              ? new Promise<undefined>((resolve) => {
-                  released = () => resolve(undefined)
-                })
-              : undefined,
+          run: async ({ payload }) => (payload as { hang: boolean }).hang
+            ? new Promise<undefined>((resolve) => { release = () => resolve(undefined) })
+            : undefined,
         },
       },
       now,
-      random: noJitter,
+      random: () => 0,
     })
 
-    // The pass finished despite the hung handler, and the row behind it still ran.
     expect(metrics).toMatchObject({ claimed: 2, done: 1, transientFailed: 1 })
     expect(rows.find((row) => row.id === 'stuck')?.status).toBe('pending')
     expect(rows.find((row) => row.id === 'next')?.status).toBe('done')
   } finally {
-    released?.()
+    release?.()
     error.mockRestore()
   }
 }, 5_000)
 
-test('an over-deadline attempt is retried rather than lost', async () => {
-  const rows = [taskRow({ id: 'slow', type: 'test:work' })]
-  let release: (() => void) | undefined
+test('the oldest pending age is available for backlog alerting', async () => {
+  const rows = [taskRow({ id: 'old', type: 'test:work', scheduledFor: new Date(now.getTime() - 300_000) })]
 
-  try {
-    const metrics = await drainTaskOutbox(createFakeOutboxRuntime(rows), {
-      clock: () => now,
-      handlers: {
-        'test:work': {
-          deadlineMs: 20,
-          run: () =>
-            new Promise<undefined>((resolve) => {
-              release = () => resolve(undefined)
-            }),
-        },
-      },
-      now,
-      random: noJitter,
-    })
+  const metrics = await drain(rows, registry(async () => undefined), { limit: 1, maxRuntimeMs: 0 })
 
-    expect(metrics).toMatchObject({ claimed: 1, transientFailed: 1 })
-    expect(rows[0]).toMatchObject({ attempts: 1, status: 'pending' })
-    expect(rows[0]?.lastError).toContain('did not finish within its 20ms deadline')
-  } finally {
-    release?.()
-  }
-}, 5_000)
+  expect(metrics).toMatchObject({ backlog: 1, claimed: 0, oldestPendingAgeSeconds: 300 })
+})

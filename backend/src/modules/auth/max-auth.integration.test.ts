@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHash, createHmac } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
@@ -5,12 +6,11 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 const maxBotToken = '987654:max-integration-secret'
 const telegramBotToken = '123456:telegram-integration-secret'
 
-maybeDescribe('MAX authentication exchange', () => {
+describe('MAX authentication exchange', () => {
   const prisma = createPrisma(databaseUrl!)
   const env = loadEnv({
     DATABASE_URL: databaseUrl!,

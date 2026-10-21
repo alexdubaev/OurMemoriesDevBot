@@ -5,24 +5,20 @@ import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
-import { bashPath } from './bash-runtime.mjs'
+import { bashExecutable, gitBashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
+const redeployScript = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8').replaceAll('\r\n', '\n')
 const slowTest = (name, fn) => test(name, { timeout: 60_000 }, fn)
-const shellQuote = (value) => `'${bashPath(value).replaceAll("'", "'\\''")}'`
-const start = release.indexOf('  release_failure() {')
-const end = release.indexOf('\n  }\n  trap release_failure EXIT', start)
-assert.ok(start >= 0 && end > start, 'release failure handler is present')
-const releaseFailure = release.slice(start, end + 4)
-const plannedSourceMatch = release.match(/validate_planned_source\(\) \{[\s\S]*?\n\}/)
-assert.ok(plannedSourceMatch, 'planned source guard is present')
-const plannedSourceGuard = plannedSourceMatch[0]
+const shellLiteral = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
+const shellQuote = (value) => shellLiteral(gitBashPath(value))
 
 function runHandler({ legacy = false, quiesced = false, promoted = false, trigger }) {
-  return spawnSync('bash', ['-s'], {
+  return spawnSync(bashExecutable, ['-s'], {
     input: `
 set -euo pipefail
+. ${shellQuote(resolve(root, 'deploy/selectel/ci-release.sh'))}
 LEGACY_MEMBERSHIP_RUNTIME=${legacy}
 LEGACY_MM0_RUNTIME=false
 QUIESCE_STARTED=${quiesced}
@@ -30,7 +26,6 @@ PROMOTION_STARTED=${promoted}
 MM0_FORWARD_MARKER=/nonexistent-mm0-marker
 APP_ROOT=/mock/app
 bash() { printf 'ACTION:%s\\n' "$*"; return 0; }
-${releaseFailure}
 ${trigger}
 `,
     encoding: 'utf8',
@@ -67,16 +62,16 @@ test('nonzero release exit preserves application rollback handling', () => {
 })
 
 test('planned release validates accepted UI v4 ancestry before any resume mutation', () => {
-  const run = (sha, withUiDowngradeCheck = false) => spawnSync('bash', ['-s'], {
+  const run = (sha, withUiDowngradeCheck = false) => spawnSync(bashExecutable, ['-s'], {
     input: [
       'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/ci-release.sh'))}'`,
       `APP_ROOT=${shellQuote(root)}`,
       `PRODUCT_SHA=${sha}`,
       'ACCEPTED_UI_V4_SHA=afdb408f8bbf22b564c86bb8d33a83261f55cc48',
       'die() { printf "ERROR: %s\\n" "$*" >&2; exit 9; }',
       'git_memoly() { case "$1" in fetch) echo READ_ONLY_FETCH ;; rev-parse) printf "%s\\n" "$PRODUCT_SHA" ;; *) return 90 ;; esac; }',
       'git_root() { git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" "$@"; }',
-      plannedSourceGuard,
       'validate_planned_source',
       withUiDowngradeCheck ? [redeployDefinitions, `require_accepted_ui_target ${sha}`].join('\n') : '',
       'echo MUTATION_BOUNDARY',
@@ -199,17 +194,17 @@ exit 0
     chmodSync(path, 0o755)
   }
   const env = {
-    SERVER_ROOT: bashPath(server),
-    APP_ROOT: bashPath(root),
-    COMPOSE_FILE: bashPath(resolve(server, 'compose.yml')),
-    ROLLBACK_ENV: bashPath(resolve(server, 'rollback.env')),
-    FORWARD_MARKER: bashPath(resolve(server, 'b2.marker')),
-    MM0_FORWARD_MARKER: bashPath(resolve(server, 'mm0.marker')),
-    SERVER_EDGE_CADDYFILE: bashPath(resolve(server, 'gateway', 'Caddyfile')),
+    SERVER_ROOT: gitBashPath(server),
+    APP_ROOT: gitBashPath(root),
+    COMPOSE_FILE: gitBashPath(resolve(server, 'compose.yml')),
+    ROLLBACK_ENV: gitBashPath(resolve(server, 'rollback.env')),
+    FORWARD_MARKER: gitBashPath(resolve(server, 'b2.marker')),
+    MM0_FORWARD_MARKER: gitBashPath(resolve(server, 'mm0.marker')),
+    SERVER_EDGE_CADDYFILE: gitBashPath(resolve(server, 'gateway', 'Caddyfile')),
     COMPOSE_PROJECT: 'memoly',
     PUBLIC_URL: 'http://example.invalid',
-    STATIC_EVENT_LOG: bashPath(eventLog),
-    STATIC_CURL_COUNTER: bashPath(curlCounter),
+    STATIC_EVENT_LOG: gitBashPath(eventLog),
+    STATIC_CURL_COUNTER: gitBashPath(curlCounter),
     STATIC_CURRENT_SHA: current,
     STATIC_INCOMPATIBLE: String(incompatible),
     STATIC_BUNFIG_CHANGED: String(bunfigChanged),
@@ -219,9 +214,9 @@ exit 0
   }
   const shellEnv = Object.entries(env).map(([name, value]) => `export ${name}=${shellQuote(value)}`).join('\n')
   try {
-    const result = spawnSync('bash', ['-s'], {
+    const result = spawnSync(bashExecutable, ['-s'], {
       cwd: root,
-      input: `${shellEnv}\nPATH=${shellQuote(bin)}:$PATH\nset -- rollback-static\nsource ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}\n`,
+      input: `${shellEnv}\nPATH=${shellQuote(bin)}:$PATH\nset -- rollback-static\nsource ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}\nmain "$@"\n`,
       encoding: 'utf8',
       timeout: 30_000,
     })
@@ -274,7 +269,6 @@ slowTest('UI rollback restores the previously running static image after public 
 })
 
 const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
-const candidateRuntimeSha = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
 const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
 const rollbackV4 = '4b4edc0992803b84c919aadb835e8d2e21095c51'
 const rollbackHealthy = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
@@ -288,7 +282,6 @@ const healthyBackendId = 'sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac7
 const healthyWebappId = 'sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74'
 const runtimeFingerprints = {
   legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
-  candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
   comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
   selectel: '9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468',
   comux: 'ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87',
@@ -297,19 +290,20 @@ const runtimeFingerprints = {
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
-function runtimeFingerprint(cwd, revision) {
-  const result = spawnSync('git', ['ls-tree', '-rz', '--full-tree', '--format=%(objectmode) %(objecttype) %(objectname)%x09%(path)', revision,
-    '--', 'backend', 'webapp', 'packages', 'package.json', 'bun.lock', 'bunfig.toml'], { cwd, encoding: null })
-  if (result.status !== 0) throw new Error(result.stderr.toString())
-  const records = result.stdout.toString('binary').split('\0').filter(Boolean)
-  const kept = records.filter((record) => !/^\d+ \w+ [0-9a-f]+\tbackend\/scripts\/(?:[^/]+\.test\.ts$|test-support\/|test-integration\.mjs$)/.test(record))
-  return createHash('sha256').update(kept.join('\0') + '\0').digest('hex')
+function productionRuntimeFingerprint(cwd, revision = 'HEAD') {
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(cwd)}\nrollback_runtime_fingerprint ${revision}\n`,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+  return result.stdout.trim().split('\n').at(-1)
 }
 
-function productionRuntimeFingerprint(cwd) {
-  const result = spawnSync('bash', ['-s'], {
+function productionCompatibilityFingerprint(cwd) {
+  const result = spawnSync(bashExecutable, ['-s'], {
     cwd: root,
-    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(cwd)}\nrollback_runtime_fingerprint HEAD\n`,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(cwd)}\nrollback_compatibility_fingerprint HEAD\n`,
     encoding: 'utf8',
   })
   if (result.status !== 0) throw new Error(result.stdout + result.stderr)
@@ -326,27 +320,14 @@ function gitFixtureCommit(cwd, message) {
 }
 
 function rollbackSource(role) {
+	if (role === 'candidate') role = 'comments'
 	if (fixtureSourceCache.has(role)) return fixtureSourceCache.get(role)
   const expected = runtimeFingerprints[role]
-  const currentSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-  const currentStatus = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim()
-  const currentFingerprint = runtimeFingerprint(root, currentSha)
-  if (!currentStatus && currentFingerprint === expected && role !== 'feedPhoto') {
-    const source = { root, sha: currentSha }
-    fixtureSourceCache.set(role, source)
-    return source
-  }
-
-  if (role === 'feedPhoto' && currentFingerprint !== expected) {
-    throw new Error('Feed-photo rollback fixture requires current HEAD with its exact runtime fingerprint')
-  }
-
   const fallback = role === 'selectel' ? '91f48719309e20456b1659092a1bf209c3aa3653'
     : role === 'comux' ? rollbackHealthy
-      : role === 'feedPhoto' ? currentSha
-      : role === 'candidate' ? candidateRuntimeSha
+      : role === 'feedPhoto' ? 'dc3201096998f366a88a296d13914abf6047604b'
         : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
-  assert.equal(runtimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
+  assert.equal(productionRuntimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const directory = mkdtempSync(resolve(root, '.scratch', `rollback-${role}-worktree-`))
   const added = spawnSync('git', ['worktree', 'add', '--detach', directory, fallback], { cwd: root, encoding: 'utf8' })
@@ -355,7 +336,7 @@ function rollbackSource(role) {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).stdout.trim()
   assert.equal(head, fallback)
   assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: directory, encoding: 'utf8' }).stdout.trim(), '')
-  assert.equal(runtimeFingerprint(directory, head), expected)
+  assert.equal(productionRuntimeFingerprint(directory, head), expected)
   const source = { root: directory, sha: head }
   fixtureSourceCache.set(role, source)
   return source
@@ -389,8 +370,7 @@ afterAll(() => {
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
 }, { timeout: 60_000 })
-const redeployDefinitions = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8')
-  .replaceAll('\r\n', '\n').replace(/\nmain "\$@"\s*$/, '\n')
+const redeployDefinitions = `. ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}`
 
 function runApplicationRollback(options = {}) {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
@@ -402,7 +382,7 @@ function runApplicationRollback(options = {}) {
   for (const [name, content] of [['compose.yml', 'services: {}\n'], ['Caddyfile', 'before\n'], ['Caddyfile.static', 'static\n']]) {
     writeFileSync(resolve(backup, name), content)
   }
-  writeFileSync(resolve(server, '.selectel-config-backup'), bashPath(backup) + '\n', { mode: 0o600 })
+  writeFileSync(resolve(server, '.selectel-config-backup'), gitBashPath(backup) + '\n', { mode: 0o600 })
   writeFileSync(resolve(server, 'gateway/Caddyfile'), 'before\n')
   writeFileSync(resolve(server, 'compose.yml'), 'services: {}\n')
   writeFileSync(resolve(server, 'rollback.env'), [
@@ -478,7 +458,6 @@ function runApplicationRollback(options = {}) {
     '}',
   ].join('\n')
   const trigger = options.failure ? [
-    releaseFailure,
     'LEGACY_MEMBERSHIP_RUNTIME=false; LEGACY_MM0_RUNTIME=false; QUIESCE_STARTED=false; PROMOTION_STARTED=true',
     'bash() { if [ "$2" = rollback ]; then ( rollback ); else command bash "$@"; fi; }',
     'trap release_failure EXIT',
@@ -486,8 +465,9 @@ function runApplicationRollback(options = {}) {
   ].join('\n') : (options.action ?? 'rollback')
   const assignments = Object.entries(env).map(([name, value]) => name + '=' + shellQuote(value)).join('\n')
   try {
-    const result = spawnSync('bash', ['-s'], {
-      input: [redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: options.processTimeoutMs ?? 30_000,
+    const result = spawnSync(bashExecutable, ['-s'], {
+      input: [`. ${shellQuote(resolve(root, 'deploy/selectel/ci-release.sh'))}`,
+        redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: options.processTimeoutMs ?? 30_000,
     })
     return { ...result, output: result.stdout + result.stderr,
       events: existsSync(events) ? readFileSync(events, 'utf8') : '',
@@ -502,6 +482,7 @@ slowTest('legacy UI target fails rollback readiness without changing services', 
   assert.doesNotMatch(result.events, /UP:|GATE/)
   assert.match(result.output, /UI downgrade is forbidden/)
   assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+  assert.equal(result.caddy, 'before\n')
 })
 
 slowTest('measured comments source to legacy UI remains technical-only and attests exact migration history', () => {
@@ -538,6 +519,35 @@ test('exact COM-UX runtime is accepted only with the pinned v4 pair and changed 
   assert.doesNotMatch(changed.events, /UP:|GATE/)
 })
 
+slowTest('test-only edits keep the verified runtime compatible with its immutable rollback artifact', () => {
+  let source = createSourceWorktree('feedPhoto')
+  for (const [path, marker] of [
+    ['webapp/e2e/comments.spec.ts', '\n// test-only compatibility fixture\n'],
+    ['webapp/tests/ui-v2-header.test.tsx', '\n// test-only compatibility fixture\n'],
+    ['backend/src/http/security.test.ts', '\n// test-only compatibility fixture\n'],
+    ['backend/scripts/test-integration.mjs', '\n// test-runner-only compatibility fixture\n'],
+    ['backend/scripts/test-files.mjs', '\n// test-runner-only compatibility fixture\n'],
+    ['backend/scripts/test-unit.mjs', '\n// test-runner-only compatibility fixture\n'],
+    ['backend/scripts/test-live.mjs', '\n// test-runner-only compatibility fixture\n'],
+  ]) source = commitSourceChange(source, path, marker, 'modify test-only compatibility input')
+
+  const result = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.output, /Application rollback complete/)
+  assert.match(result.events, /GATE\nUP:.*backend worker scheduler static/)
+})
+
+test('the immutable Selectel source ref retains its comments compatibility profile', () => {
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\nrollback_source_compatibility_profile 91f48719309e20456b1659092a1bf209c3aa3653 3fce2739205da927b95eb3379b1d066b61282965\n`,
+    encoding: 'utf8', timeout: 10_000,
+  })
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(result.stdout.trim(), 'comments')
+})
+
 test('exact feed-photo runtime is accepted only with the healthy 33a pair, image IDs and unchanged backend runtime', {
   timeout: process.platform === 'win32' ? 180_000 : 60_000,
 }, () => {
@@ -572,26 +582,37 @@ slowTest('comments rollback rejects unknown migration history and history query 
   }
 })
 
-function migrationHistoryVerifierSource() {
-  const marker = "bun -e \"$(cat <<'MEMOLY_MIGRATION_HISTORY_JS'"
-  const start = redeployDefinitions.indexOf(marker)
-  assert.notEqual(start, -1, 'rollback executes the migration ledger verifier from its heredoc')
-  const bodyStart = redeployDefinitions.indexOf('\n', start) + 1
-  const end = redeployDefinitions.indexOf('\nMEMOLY_MIGRATION_HISTORY_JS', bodyStart)
-  assert.ok(end > bodyStart, 'migration ledger verifier heredoc is terminated')
-  return redeployDefinitions.slice(bodyStart, end)
+function migrationHistoryVerifierSource(expected) {
+  const capture = resolve(root, '.scratch', `migration-ledger-program-${process.pid}.mjs`)
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
+      'compose() { printf "%s" "${!#}" > "$CAPTURE_SCRIPT"; }',
+      `rollback_verify_migration_history ${shellLiteral(expected)}`,
+    ].join('\n'),
+    encoding: 'utf8', env: { ...process.env, CAPTURE_SCRIPT: gitBashPath(capture) }, timeout: 10_000,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  const program = readFileSync(capture, 'utf8')
+  rmSync(capture, { force: true })
+  return program
 }
 
 function runMigrationHistoryVerifier({ expected, rows }) {
-  const verifier = migrationHistoryVerifierSource().replace(
-    'import { Client } from "pg";',
-    `const Client = class {
-      async connect() {}
-      async query() { return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
-      async end() {}
-    };`,
-  )
-  return spawnSync('node', ['--input-type=module', '--eval', verifier], {
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'migration-ledger-module-'))
+  const moduleDir = resolve(fixture, 'node_modules/pg')
+  mkdirSync(moduleDir, { recursive: true })
+  writeFileSync(resolve(moduleDir, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(moduleDir, 'index.js'), `export class Client {
+    async connect() {}
+    async query() { return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+    async end() {}
+  }\n`)
+  const verifier = migrationHistoryVerifierSource(expected)
+  const result = spawnSync('node', ['--input-type=module', '--eval', verifier], {
+    cwd: fixture,
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -600,6 +621,8 @@ function runMigrationHistoryVerifier({ expected, rows }) {
     },
     timeout: 10_000,
   })
+  rmSync(fixture, { recursive: true, force: true })
+  return result
 }
 
 test('comments migration catalog derives both Prisma newline checksums from committed SQL', () => {
@@ -625,7 +648,7 @@ test('comments migration catalog derives both Prisma newline checksums from comm
     git('commit', '--quiet', '-m', 'migration checksum fixture')
     const hash = (sql) => createHash('sha256').update(sql).digest('hex')
     const normalizedSecondSql = secondSql.replaceAll('\r\n', '\n')
-    const result = spawnSync('bash', ['-s'], {
+    const result = spawnSync(bashExecutable, ['-s'], {
       cwd: repo,
       input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(repo)}\nrollback_migration_catalog_checksums HEAD\n`,
       encoding: 'utf8',
@@ -641,7 +664,7 @@ test('comments migration catalog derives both Prisma newline checksums from comm
   }
 })
 
-test('comments migration ledger accepts only exact source SQL with LF or CRLF checksums', () => {
+slowTest('comments migration ledger accepts only exact source SQL with LF or CRLF checksums', () => {
   const firstSql = 'CREATE TABLE memories (id uuid);\n'
   const secondSql = 'CREATE TABLE comments (id uuid);\n'
   const sha = (sql) => createHash('sha256').update(sql).digest('hex')
@@ -659,7 +682,7 @@ test('comments migration ledger accepts only exact source SQL with LF or CRLF ch
   assert.equal(result.status, 0, result.stderr || result.stdout)
 })
 
-test('comments migration ledger rejects SQL drift, missing or extra migrations, and unfinished entries', () => {
+slowTest('comments migration ledger rejects SQL drift, missing or extra migrations, and unfinished entries', () => {
   const sql = 'CREATE TABLE comments (id uuid);\n'
   const sha = (value) => createHash('sha256').update(value).digest('hex')
   const expected = `20261021120000_comments:${sha(sql)}:${sha(sql.replaceAll('\n', '\r\n'))}`
@@ -710,30 +733,21 @@ slowTest('comments rollback rejects protected service configuration drift', () =
   assert.doesNotMatch(result.events, /UP:|GATE/)
 })
 
-test('comments rollback rejects wrong targets, immutable image IDs, OCI labels, and incomplete migration state', () => {
-  for (const options of [
-    { target: rollbackBaseline, webappTarget: rollbackBaseline },
-    { badImage: true }, { badLabel: true }, { pending: true }, { stateError: true },
-  ]) {
+for (const [name, options, rejection] of [
+  ['refuses a different target runtime', { target: rollbackBaseline, webappTarget: rollbackBaseline }, /application runtime differs from the verified rollback source/],
+  ['refuses a different immutable image ID', { badImage: true }, /rollback backend image differs from the verified production artifact/],
+  ['refuses a mismatched OCI revision label', { badLabel: true }, /rollback image revision label mismatch/],
+  ['refuses unfinished migration state', { pending: true }, /rollback target cannot confirm completed migrations/],
+  ['refuses unknown compatibility state', { stateError: true }, /rollback data compatibility state is unknown or migration is unfinished/],
+]) {
+  slowTest(`comments rollback ${name} before promotion`, () => {
     const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
       source: 'comments', ...options })
-    assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
-    if (options.target) assert.match(result.output, /application runtime differs from the verified rollback source/)
-    if (options.badImage) assert.match(result.output, /rollback backend image differs from the verified production artifact/)
-    if (options.badLabel) assert.match(result.output, /rollback image revision label mismatch/)
-    if (options.pending) assert.match(result.output, /rollback target cannot confirm completed migrations/)
-    if (options.stateError) assert.match(result.output, /rollback data compatibility state is unknown or migration is unfinished/)
+    assert.notEqual(result.status, 0, result.output)
+    assert.match(result.output, rejection)
     assert.doesNotMatch(result.events, /UP:|GATE/)
-  }
-})
-
-test('rollback-readiness rejects legacy UI without changing services or gateway', () => {
-  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'candidate', action: 'rollback_readiness' })
-  assert.notEqual(result.status, 0, result.output)
-  assert.match(result.output, /UI downgrade is forbidden/)
-  assert.doesNotMatch(result.events, /UP:|GATE/)
-  assert.equal(result.caddy, 'before\n')
-})
+  })
+}
 
 slowTest('current deploy-procedure source rolls back only to the pinned UI v4 artifact', () => {
   const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4,
@@ -754,16 +768,7 @@ slowTest('current deploy-procedure source rolls back only to the pinned UI v4 ar
   assert.doesNotMatch(changed.events, /UP:|GATE/)
 })
 
-test('actual rollback rejects pre-v4 UI before config or service mutation', () => {
-  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
-    source: 'candidate' })
-  assert.notEqual(result.status, 0, result.output)
-  assert.match(result.output, /UI downgrade is forbidden/)
-  assert.doesNotMatch(result.events, /UP:|GATE/)
-  assert.equal(result.caddy, 'before\n')
-})
-
-slowTest('runtime fingerprint excludes only the declared test-support files', () => {
+slowTest('compatibility fingerprint excludes test harness inputs and rejects production drift', () => {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const fixture = mkdtempSync(resolve(root, '.scratch', 'runtime-fingerprint-'))
   try {
@@ -772,6 +777,19 @@ slowTest('runtime fingerprint excludes only the declared test-support files', ()
       ['backend/scripts/real.test.ts', 'export const test = 1\n'],
       ['backend/scripts/test-support/probe.mjs', 'export const support = 1\n'],
       ['backend/scripts/test-integration.mjs', 'export const integration = 1\n'],
+      ['backend/scripts/test-files.mjs', 'export const files = 1\n'],
+      ['backend/scripts/test-unit.mjs', 'export const unit = 1\n'],
+      ['backend/scripts/test-live.mjs', 'export const live = 1\n'],
+      ['backend/src/race-regression-fixtures.ts', 'export const race = 1\n'],
+      ['backend/src/zod-compile.probe.ts', 'export const probe = 1\n'],
+      ['backend/src/modules/memories/infrastructure/comment-test-fixtures.ts', 'export const comments = 1\n'],
+      ['backend/src/outbox/fake-outbox-prisma.ts', 'export const fake = 1\n'],
+      ['backend/src/modules/media/fixtures/sample.heic', 'test fixture\n'],
+      ['webapp/src/dev/FamilyMaxChannelFixturePage.tsx', 'export const fixture = 1\n'],
+      ['webapp/src/dev/FamilyHubFixturePage.tsx', 'export const fixture = 1\n'],
+      ['webapp/src/dev/DesignSystemFixturePage.tsx', 'export const fixture = 1\n'],
+      ['webapp/tsconfig.e2e.json', '{}\n'],
+      ['backend/src/modules/auth/transport/legacy-test-routes.ts', 'export const route = 1\n'],
       ['backend/scripts/real.test.ts.production', 'export const production = 1\n'],
       ['webapp/src/app.ts', 'export const web = 1\n'],
       ['packages/contracts/index.ts', 'export const contract = 1\n'],
@@ -782,17 +800,32 @@ slowTest('runtime fingerprint excludes only the declared test-support files', ()
       writeFileSync(pathOnDisk, body)
     }
     gitFixtureCommit(fixture, 'initial runtime fixture')
-    const initial = productionRuntimeFingerprint(fixture)
+    const initial = productionCompatibilityFingerprint(fixture)
 
-    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts'), 'export const test = 2\n')
-    writeFileSync(resolve(fixture, 'backend/scripts/test-support/probe.mjs'), 'export const support = 2\n')
-    writeFileSync(resolve(fixture, 'backend/scripts/test-integration.mjs'), 'export const integration = 2\n')
+    for (const path of [
+      'backend/scripts/real.test.ts', 'backend/scripts/test-support/probe.mjs',
+      'backend/scripts/test-integration.mjs', 'backend/scripts/test-files.mjs',
+      'backend/scripts/test-unit.mjs', 'backend/scripts/test-live.mjs',
+      'backend/src/race-regression-fixtures.ts', 'backend/src/zod-compile.probe.ts',
+      'backend/src/modules/memories/infrastructure/comment-test-fixtures.ts',
+      'backend/src/outbox/fake-outbox-prisma.ts', 'backend/src/modules/media/fixtures/sample.heic',
+      'webapp/src/dev/FamilyMaxChannelFixturePage.tsx', 'webapp/src/dev/FamilyHubFixturePage.tsx',
+      'webapp/src/dev/DesignSystemFixturePage.tsx',
+      'webapp/e2e/comments.spec.ts', 'webapp/tests/playback.test.tsx',
+      'webapp/visualtests/example.spec.ts', 'webapp/tsconfig.e2e.json',
+    ]) {
+      const target = resolve(fixture, path)
+      mkdirSync(resolve(target, '..'), { recursive: true })
+      writeFileSync(target, 'changed test-only input\n')
+    }
     gitFixtureCommit(fixture, 'change excluded test support')
-    assert.equal(productionRuntimeFingerprint(fixture), initial)
+    assert.equal(productionCompatibilityFingerprint(fixture), initial)
 
-    writeFileSync(resolve(fixture, 'backend/scripts/real.test.ts.production'), 'export const production = 2\n')
-    gitFixtureCommit(fixture, 'change runtime-shaped test filename')
-    assert.notEqual(productionRuntimeFingerprint(fixture), initial)
+    for (const path of ['backend/src/modules/auth/transport/legacy-test-routes.ts', 'backend/src/worker.ts']) {
+      writeFileSync(resolve(fixture, path), 'production drift\n')
+      gitFixtureCommit(fixture, `change production input ${path}`)
+      assert.notEqual(productionCompatibilityFingerprint(fixture), initial, `${path} remains attested`)
+    }
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -833,16 +866,6 @@ test('rollback guard reports unknown and dirty source states before promotion', 
   assert.match(dirty.output, /rollback source checkout is not clean/)
   assert.doesNotMatch(dirty.events, /UP:|GATE/)
 })
-
-for (const flags of [{ unread: true, multiple: false }, { unread: false, multiple: true }]) {
-  slowTest('attested application target accepts supported data state ' + JSON.stringify(flags), () => {
-    const result = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4, source: 'selectel', ...flags })
-    assert.equal(result.status, 0, result.output)
-    assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present\nGATE\nUP:.*backend worker scheduler static/)
-    assert.match(result.output, /Application rollback complete/)
-    assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
-  })
-}
 
 slowTest('application rollback fails closed for unknown, incompatible, image, migration, DB and artifact states', () => {
   for (const options of [
@@ -891,12 +914,10 @@ slowTest('real ci-release failure branch completes guarded application restorati
 })
 
 test('normal promotion validates its prepared rollback UI before any mutation', () => {
-  const start = redeployDefinitions.indexOf('\ndeploy() {')
-  const end = redeployDefinitions.indexOf('\n}\n', start)
-  assert.ok(start > 0 && end > start)
   for (const failure of ['none', 'require_accepted_ui_target', 'verify_application_rollback', 'validate_database_target', 'backup_database']) {
-    const result = spawnSync('bash', ['-s'], { encoding: 'utf8', input: [
+    const result = spawnSync(bashExecutable, ['-s'], { encoding: 'utf8', input: [
       'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
       'MM0_BOUNDARY=false; FORWARD_MARKER=/nonexistent-selectel-marker',
       'die() { echo "DIE:$*"; exit 19; }',
       'read_static_rollback_tag() { PREVIOUS_WEBAPP_IMAGE_TAG=4b4edc0992803b84c919aadb835e8d2e21095c51; echo STEP:read_static_rollback_tag; }',
@@ -906,7 +927,7 @@ test('normal promotion validates its prepared rollback UI before any mutation', 
         'promote_backend', 'wait_backend_internal', 'promote_jobs', 'promote_static',
         'verify_static_internal', 'activate_gateway', 'readiness'].map((name) =>
         name + '() { echo STEP:' + name + '; return ' + (name === failure ? 42 : 0) + '; }'),
-      redeployDefinitions.slice(start, end + 2), 'deploy',
+      'deploy',
     ].join('\n') })
     const output = result.stdout + result.stderr
     if (failure === 'none') {

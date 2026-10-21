@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, describe, expect, test } from 'bun:test'
 
 import { createHash, randomUUID } from 'node:crypto'
@@ -415,10 +416,9 @@ describe('MAX direct video upload application service', () => {
   })
 })
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDatabaseDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
+describe('MAX direct video upload repository integration', () => {
   const prisma = createPrisma(databaseUrl!)
 
   afterAll(async () => { await prisma.$disconnect() })
@@ -465,10 +465,15 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
     try {
       const repository = new PrismaMaxDirectUploadRepository(prisma)
       let capabilityCalls = 0
+      let releaseCapability!: () => void
+      let capabilityStarted!: () => void
+      const capabilityBarrier = new Promise<void>((resolve) => { capabilityStarted = resolve })
+      const capabilityGate = new Promise<void>((resolve) => { releaseCapability = resolve })
       const delayedApi = (label: string): MaxApiPort => api({
         createVideoUpload: async () => {
           capabilityCalls += 1
-          await new Promise((resolve) => setTimeout(resolve, 20))
+          capabilityStarted()
+          await capabilityGate
           return { url: `https://upload.max.example/${label}`, token: `token-${label}` }
         },
       })
@@ -483,18 +488,24 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
       const input = { childId: child.id, body: 'multi-instance video', occurredAt: '2026-09-20T10:00:00.000Z',
         fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `multi-${randomUUID()}` }
 
-      const results = await Promise.all([firstService.reserve(uploadScope, input), secondService.reserve(uploadScope, input)])
-      const reserved = results.find((result) => result.state === 'reserved')
-      const existing = results.find((result) => result.state === 'existing')
-
-      expect(results.filter((result) => result.state === 'reserved')).toHaveLength(1)
-      expect(results.filter((result) => result.state === 'existing')).toHaveLength(1)
-      expect(capabilityCalls).toBe(1)
-      expect(reserved?.uploadToken).toBeTruthy()
-      expect(existing).not.toHaveProperty('uploadUrl')
-      expect(existing).not.toHaveProperty('uploadToken')
-      const durable = await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { familyId_idempotencyKey: { familyId: family.id, idempotencyKey: input.idempotencyKey } } })
-      expect(durable.providerUploadToken).toBe(reserved?.uploadToken ?? null)
+      const firstReservation = firstService.reserve(uploadScope, input)
+      try {
+        await capabilityBarrier
+        const secondResult = await secondService.reserve(uploadScope, input)
+        if (secondResult.state !== 'existing') throw new Error('The second service instance must observe the committed reservation')
+        expect(secondResult).not.toHaveProperty('uploadUrl')
+        expect(secondResult).not.toHaveProperty('uploadToken')
+        expect(capabilityCalls).toBe(1)
+        releaseCapability()
+        const firstResult = await firstReservation
+        if (firstResult.state !== 'reserved') throw new Error('The first service instance must return the capability it claimed')
+        if (!firstResult.uploadToken) throw new Error('The first service instance must return a non-empty upload token')
+        const durable = await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { familyId_idempotencyKey: { familyId: family.id, idempotencyKey: input.idempotencyKey } } })
+        expect(durable.providerUploadToken).toBe(firstResult.uploadToken)
+      } finally {
+        releaseCapability()
+        await Promise.allSettled([firstReservation])
+      }
     } finally {
       await prisma.maxVideoUploadSession.deleteMany({ where: { familyId: family.id } })
       await prisma.child.delete({ where: { id: child.id } })
@@ -553,10 +564,15 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
       const familyAccess = createPrismaFamilyAccess(prisma)
       const publisher = createSourceMemoryPublisher(prisma, familyAccess)
       let sends = 0
+      let releaseSend!: () => void
+      let sendStarted!: () => void
+      const sendBarrier = new Promise<void>((resolve) => { sendStarted = resolve })
+      const sendGate = new Promise<void>((resolve) => { releaseSend = resolve })
       const providerApi = api({
         sendVideoMessage: async () => {
           sends += 1
-          await new Promise((resolve) => setTimeout(resolve, 50))
+          sendStarted()
+          await sendGate
           return { messageId: 'concurrent-message-1' }
         },
         getMessage: async () => ({ messageId: 'concurrent-message-1', senderId: '1', recipientId: '9001',
@@ -570,12 +586,25 @@ maybeDatabaseDescribe('MAX direct video upload repository integration', () => {
       const reservation = await firstService.reserve(uploadScope, { childId: child.id, body: 'concurrent finalize',
         occurredAt: '2026-09-20T10:00:00.000Z', fileName: 'clip.mp4', fileSize: 128, mimeType: 'video/mp4', idempotencyKey: `concurrent-finalize-${randomUUID()}` })
 
-      const results = await Promise.all([
-        firstService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken),
-        secondService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken),
-      ])
+      const firstFinalization = firstService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken)
+      try {
+        await sendBarrier
+        const secondResult = await secondService.finalize(uploadScope, reservation.sessionId, reservation.uploadToken)
+        expect(secondResult.state).toBe('processing')
+        expect(sends).toBe(1)
+        expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(0)
+        expect(await prisma.maxOutboundSource.count({ where: { familyId: family.id } })).toBe(0)
+        const claimedSession = await prisma.maxVideoUploadSession.findUniqueOrThrow({ where: { id: reservation.sessionId } })
+        expect(claimedSession.providerMessageId).toBeNull()
+        expect(claimedSession.state).toBe('processing')
+        releaseSend()
+      } finally {
+        releaseSend()
+        await Promise.allSettled([firstFinalization])
+      }
+      const firstResult = await firstFinalization
 
-      expect(results.some((result) => result.state === 'finalized')).toBe(true)
+      expect(firstResult.state).toBe('finalized')
       expect(sends).toBe(1)
       expect(await prisma.memory.count({ where: { familyId: family.id } })).toBe(1)
       expect(await prisma.maxOutboundSource.count({ where: { familyId: family.id } })).toBe(1)

@@ -456,6 +456,18 @@ required. Any other source or target requires new compatibility evidence and a
 reviewed attestation. Schema, dependency, service configuration, migration,
 database, and protected-artifact checks remain fail-closed.
 
+Rollback source verification keeps two distinct measurements. The immutable full
+runtime fingerprint pins each reviewed artifact/source reference and is checked
+against its existing constant before that reference can authorize compatibility.
+The separate compatibility fingerprint compares the candidate with that
+full-attested source using executable product inputs. It omits test files,
+test-only support fixtures and runners, Playwright/E2E/visual test trees, the
+three dev-only visual fixture pages, and the E2E-only TypeScript config. Production source, contracts, migrations, build and
+runtime configuration, manifests, dependencies, protected Selectel files, and
+the UI-v4 ancestry and artifact checks remain covered. A test refactor therefore
+does not rotate an immutable artifact pin, while any production-input drift still
+fails the compatibility comparison.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,

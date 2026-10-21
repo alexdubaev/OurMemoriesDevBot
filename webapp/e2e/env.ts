@@ -1,4 +1,5 @@
 import {
+  assertLoopbackTestDatabaseUrl,
   assertTestDatabaseUrl,
   composeProjectName,
   defaultPostgresTestPort,
@@ -38,8 +39,16 @@ export const e2eAdminPassword = 'admin-e2e-password'
  * unlocked by its own variable, so allowing one runner onto a development database never
  * silently allows the other.
  */
-export function assertE2eDatabaseUrl(databaseUrl: string) {
+export function assertE2eDatabaseUrl(databaseUrl: string, configuredDatabaseUrl = process.env.DATABASE_URL) {
+  assertE2eDatabaseConfiguration(databaseUrl, configuredDatabaseUrl)
+}
+
+export function assertE2eDatabaseConfiguration(databaseUrl: string, configuredDatabaseUrl?: string, requireExplicit = false) {
+  if (requireExplicit && !configuredDatabaseUrl) {
+    throw new Error('An explicit TEST_DATABASE_URL or DATABASE_URL is required when Docker is skipped')
+  }
   assertTestDatabaseUrl(databaseUrl, { allowEnvName: 'E2E_ALLOW_NON_TEST_DATABASE' })
+  assertLoopbackTestDatabaseUrl(databaseUrl, configuredDatabaseUrl)
 }
 
 export function composeEnv(extra: NodeJS.ProcessEnv = {}) {

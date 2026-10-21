@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # This script owns only the internal Compose project. The host-port gateway is
 # an existing manually managed Caddy container and must remain outside Compose.
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)
 SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
 B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
@@ -78,8 +78,6 @@ cleanup_candidate() {
 		EDGE_CANDIDATE=
 	fi
 }
-
-trap cleanup_candidate EXIT
 
 backup_server_state() {
 	local container_ids
@@ -713,6 +711,84 @@ rollback_runtime_fingerprint() {
 		sha256sum | awk '{print $1}'
 }
 
+# Runtime compatibility follows executable production inputs. Frozen artifact/source
+# attestations continue to use rollback_runtime_fingerprint above.
+rollback_compatibility_fingerprint() {
+	local revision=$1
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
+		ls-tree -rz --full-tree --format='%(objectmode) %(objecttype) %(objectname)%x09%(path)' "$revision" -- \
+		backend webapp packages package.json bun.lock bunfig.toml |
+		grep -zEv $'\t([^/]+/)*[^/]+\\.(test|spec)\\.[^/]+$|\t([^/]+/)*(tests?|e2e|visualtests|test-support)/|\t(webapp|website)/playwright[^/]*$|\tbackend/scripts/(test-integration|test-files|test-unit|test-live)\\.mjs$|\tbackend/src/(race-regression-fixtures|zod-compile\\.probe)\\.ts$|\tbackend/src/modules/memories/infrastructure/comment-test-fixtures\\.ts$|\tbackend/src/outbox/fake-outbox-prisma\\.ts$|\tbackend/src/modules/media/fixtures/|\twebapp/src/dev/(FamilyMaxChannelFixturePage|FamilyHubFixturePage|DesignSystemFixturePage)\\.tsx$|\twebapp/tsconfig\\.e2e\\.json$' |
+		sha256sum | awk '{print $1}'
+}
+
+rollback_source_compatibility_profile() {
+	local revision=$1 target=$2 candidate_hash reference full_hash profile
+	local -a attestations=()
+	candidate_hash=$(rollback_compatibility_fingerprint "$revision") || return 1
+	case "$target" in
+		e383d79269a3595f4c6cabedf167335aea042cf3)
+			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
+		3fce2739205da927b95eb3379b1d066b61282965)
+			attestations=("39e8af7bb9e9a5949ada3c32dad31d38f9439505:5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107:candidate"
+				"a353f01a8354e42f71473b1917f99c9a97181680:5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02:comments"
+			"91f48719309e20456b1659092a1bf209c3aa3653:9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468:comments") ;;
+		4b4edc0992803b84c919aadb835e8d2e21095c51)
+			attestations=("91f48719309e20456b1659092a1bf209c3aa3653:9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468:comments"
+				"33a0054c3c71372aa5509ee8ebfa4578ad512ea1:ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87:comments") ;;
+		33a0054c3c71372aa5509ee8ebfa4578ad512ea1)
+			attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:comments") ;;
+		*) return 1 ;;
+	esac
+	for attestation in "${attestations[@]}"; do
+		IFS=: read -r reference full_hash profile <<< "$attestation"
+		[ "$(rollback_runtime_fingerprint "$reference")" = "$full_hash" ] || continue
+		if [ "$(rollback_compatibility_fingerprint "$reference")" = "$candidate_hash" ]; then
+			printf '%s\n' "$profile"
+			return 0
+		fi
+	done
+	return 1
+}
+
+rollback_verify_migration_history() {
+	local expected_migration_checksums=$1
+	compose run --rm --no-deps -e "MEMOLY_EXPECTED_MIGRATION_CHECKSUMS=$expected_migration_checksums" backend bun -e "$(cat <<'MEMOLY_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+const expected = new Map();
+for (const line of (process.env.MEMOLY_EXPECTED_MIGRATION_CHECKSUMS ?? "").trim().split("\n")) {
+  const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+  if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+      !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") ||
+      expected.has(name)) process.exit(1);
+  expected.set(name, new Set([lfChecksum, crlfChecksum]));
+}
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  if (expected.size === 0) throw new Error("empty expected migration catalog");
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.some(row => !row.finished_at && !row.rolled_back_at)) throw new Error("unfinished migration");
+  const completed = rows.filter(row => row.finished_at && !row.rolled_back_at);
+  if (completed.length !== expected.size) throw new Error("migration count mismatch");
+  const seen = new Set();
+  for (const row of completed) {
+    if (typeof row.migration_name !== "string" || typeof row.checksum !== "string" || seen.has(row.migration_name)) throw new Error("invalid or duplicate migration ledger row");
+    const sourceChecksums = expected.get(row.migration_name);
+    if (!sourceChecksums || !sourceChecksums.has(row.checksum)) throw new Error("migration ledger differs from source SQL");
+    seen.add(row.migration_name);
+  }
+  if (seen.size !== expected.size) throw new Error("migration names differ from source catalog");
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
 rollback_migration_catalog_checksums() {
 	local revision=$1 path name lf_checksum crlf_checksum records='' count=0
 	local -a migration_paths=()
@@ -750,23 +826,19 @@ rollback_auth_gate_for_verified_pair() {
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
-	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} expected_runtime gate source_runtime
+	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} gate
 	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
 	case "$target" in
 		"$legacy_target")
-			expected_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
 			gate=true
 			;;
 		"$candidate_target")
-			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
 			gate=false
 			;;
 		"$accepted_v4_target")
-		expected_runtime=$new_comments_runtime
 		gate=false
 			;;
 		"$healthy_target")
-		expected_runtime=$feed_photo_runtime
 		gate=false
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
@@ -776,18 +848,8 @@ rollback_auth_gate_for_verified_pair() {
 		die 'rollback source differs from the checked-out release'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
 		die 'rollback source is outside the exact target release lineage'
-	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
-	if [ "$target" = "$candidate_target" ] &&
-		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
-		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
-	fi
-	if [ "$target" = "$candidate_target" ] && [ "$source_runtime" = "$new_comments_runtime" ]; then
-		expected_runtime=$new_comments_runtime
-	fi
-	if [ "$target" = "$accepted_v4_target" ] && [ "$source_runtime" = "$com_ux_runtime" ]; then
-		expected_runtime=$com_ux_runtime
-	fi
-	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
+	rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$target" >/dev/null ||
+		die 'application runtime differs from the verified rollback source'
 	printf '%s\n' "$gate"
 }
 
@@ -818,27 +880,23 @@ verify_application_rollback() {
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
-	local target expected_runtime expected_target_runtime profile=candidate
+	local target expected_target_runtime profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
 			target=$legacy_target
-			expected_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
 			expected_target_runtime=b12190f9bd6e568b544d89d4c4beec8198ad7626b03bdd9164cf76890d440a4e
 			;;
 		"$candidate_target:$candidate_target")
 			target=$candidate_target
-			expected_runtime=5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107
 			expected_target_runtime=3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857
 			;;
 		"$accepted_v4_target:$accepted_v4_target")
 			target=$accepted_v4_target
-			expected_runtime=$new_comments_runtime
 			expected_target_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
 			profile=comments
 			;;
 		"$healthy_target:$healthy_target")
 			target=$healthy_target
-			expected_runtime=$feed_photo_runtime
 			expected_target_runtime=$com_ux_runtime
 			profile=comments
 			;;
@@ -857,26 +915,9 @@ verify_application_rollback() {
 	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
 	[ -z "$source_status" ] ||
 		die 'rollback source checkout is not clean'
-	local source_runtime target_runtime
-	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
-	if [ "$target" = "$candidate_target" ] &&
-		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
-		profile=comments
-		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
-	fi
-	if [ "$target" = "$candidate_target" ] && [ "$source_runtime" = "$new_comments_runtime" ]; then
-		profile=comments
-		expected_runtime=$new_comments_runtime
-	fi
-	if [ "$target" = "$accepted_v4_target" ] && [ "$source_runtime" = "$com_ux_runtime" ]; then
-		profile=comments
-		expected_runtime=$com_ux_runtime
-	fi
-	if [ "$target" = "$healthy_target" ] && [ "$source_runtime" = "$feed_photo_runtime" ]; then
-		profile=comments
-		expected_runtime=$feed_photo_runtime
-	fi
-	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
+	local target_runtime
+	profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$target") ||
+		die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
 	if [ "$profile" = comments ]; then
@@ -937,40 +978,7 @@ verify_application_rollback() {
 		expected_migration_checksums=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") ||
 			die 'cannot fingerprint the verified comments migration catalog'
 		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
-		compose run --rm --no-deps -e "MEMOLY_EXPECTED_MIGRATION_CHECKSUMS=$expected_migration_checksums" backend bun -e "$(cat <<'MEMOLY_MIGRATION_HISTORY_JS'
-import { Client } from "pg";
-const expected = new Map();
-for (const line of (process.env.MEMOLY_EXPECTED_MIGRATION_CHECKSUMS ?? "").trim().split("\n")) {
-  const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
-  if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
-      !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") ||
-      expected.has(name)) process.exit(1);
-  expected.set(name, new Set([lfChecksum, crlfChecksum]));
-}
-const client = new Client({ connectionString: process.env.DATABASE_URL });
-try {
-  if (expected.size === 0) throw new Error("empty expected migration catalog");
-  await client.connect();
-  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
-  if (!Array.isArray(rows) || rows.some(row => !row.finished_at && !row.rolled_back_at)) throw new Error("unfinished migration");
-  const completed = rows.filter(row => row.finished_at && !row.rolled_back_at);
-  if (completed.length !== expected.size) throw new Error("migration count mismatch");
-  const seen = new Set();
-  for (const row of completed) {
-    if (typeof row.migration_name !== "string" || typeof row.checksum !== "string" || seen.has(row.migration_name)) throw new Error("invalid or duplicate migration ledger row");
-    const sourceChecksums = expected.get(row.migration_name);
-    if (!sourceChecksums || !sourceChecksums.has(row.checksum)) throw new Error("migration ledger differs from source SQL");
-    seen.add(row.migration_name);
-  }
-  if (seen.size !== expected.size) throw new Error("migration names differ from source catalog");
-  await client.end();
-  process.exit(0);
-} catch {
-  await client.end().catch(() => {});
-  process.exit(1);
-}
-MEMOLY_MIGRATION_HISTORY_JS
-)" >/dev/null 2>&1 ||
+		rollback_verify_migration_history "$expected_migration_checksums" ||
 			die 'comments rollback requires the exact completed migration history'
 	fi
 	)
@@ -1188,6 +1196,7 @@ main() {
 	require_command git
 	require_command readlink
 	require_command stat
+	trap cleanup_candidate EXIT
 	acquire_deploy_lock
 	case "$action" in
 		preflight) preflight ;;
@@ -1205,4 +1214,6 @@ main() {
 	esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+	main "$@"
+fi

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import {
   assertE2eDatabaseUrl,
+  assertE2eDatabaseConfiguration,
   composeEnv,
   composeProjectName,
   defaultDatabaseUrl,
@@ -29,7 +30,9 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.e
 
 export default async function globalSetup() {
   const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? defaultDatabaseUrl
-  assertE2eDatabaseUrl(databaseUrl)
+  assertE2eDatabaseUrl(databaseUrl, process.env.DATABASE_URL ?? databaseUrl)
+  const skipDocker = process.env.E2E_SKIP_DOCKER === '1'
+  assertE2eDatabaseConfiguration(databaseUrl, process.env.MEMOLY_E2E_DATABASE_URL_EXPLICIT === '1' ? databaseUrl : undefined, skipDocker)
 
   process.env.TEST_DATABASE_URL = databaseUrl
   process.env.DATABASE_URL = databaseUrl
@@ -39,7 +42,6 @@ export default async function globalSetup() {
     TEST_DATABASE_URL: databaseUrl,
   })
 
-  const skipDocker = process.env.E2E_SKIP_DOCKER === '1'
   if (!skipDocker) {
     run('docker', [...composeArgs, 'up', '-d', postgresTestService], env)
   }

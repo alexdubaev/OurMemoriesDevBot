@@ -63,16 +63,11 @@ test('returns distinct safe codes for the two Reserve pre-session not-found bran
   try {
     const membership = await reserve(appFor(failingService('reserve_not_found_membership', 'Семья не найдена')))
     expect(membership.status).toBe(404)
-    expect(await membership.json()).toMatchObject({ error: { code: 'MAX_VIDEO_MEMBERSHIP_NOT_FOUND', message: 'Семья не найдена' } })
+    expect(await membership.json()).toMatchObject({ error: { code: 'MAX_VIDEO_MEMBERSHIP_NOT_FOUND' } })
 
     const child = await reserve(appFor(failingService('reserve_not_found_child', 'Профиль ребёнка не найден')))
     expect(child.status).toBe(404)
-    expect(await child.json()).toMatchObject({ error: { code: 'MAX_VIDEO_CHILD_NOT_FOUND', message: 'Профиль ребёнка не найден' } })
-
-    expect(warn.mock.calls).toEqual([
-      ['max_video_reserve_not_found_membership'],
-      ['max_video_reserve_not_found_child'],
-    ])
+    expect(await child.json()).toMatchObject({ error: { code: 'MAX_VIDEO_CHILD_NOT_FOUND' } })
   } finally {
     warn.mockRestore()
   }

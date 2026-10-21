@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -5,25 +6,33 @@ import { tmpdir } from 'node:os'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { SignJWT } from 'jose'
+import { OpenAPIHono } from '@hono/zod-openapi'
 import sharp from 'sharp'
 
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
+import { createPrismaIdempotencyExecutor } from '../../idempotency'
 import { Prisma } from '../../generated/prisma/client'
 import { loadEnv } from '../../env'
 import { createPrivateStorage } from '../../storage'
 import { runBackgroundJob } from '../../jobs'
+import { disabledEmailDelivery } from '../../email'
 import { pngFixture } from '../../storage/storage-contract'
-import { signAccessToken } from '../auth'
+import { createAuthModule, signAccessToken } from '../auth'
+import { createFamiliesModule } from '../families'
 import { createMaxVideoPlayback } from '../max'
 import { createMediaTasks } from '.'
+import { MediaService } from './application/media-service'
+import { PrismaMediaRepository } from './infrastructure/prisma-media-repository'
+import { processPhoto } from './infrastructure/photo-processor'
+import { probeMediaWithRunner } from './infrastructure/media-probe'
 import { createFfmpegRunner } from './infrastructure/ffmpeg-runner'
 import { videoPosterObjectKey } from './infrastructure/video-poster'
+import { createMediaRoutes } from './transport/routes'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('Private media API', () => {
+describe('Private media API', () => {
   const storageRoot = resolve('.test-media-storage')
   const prisma = createPrisma(databaseUrl!)
   const env = loadEnv({
@@ -108,6 +117,61 @@ maybeDescribe('Private media API', () => {
     }
   })
 
+  test('committed photo remains ready when temporary-directory cleanup fails', async () => {
+    const owner = await admittedUser('Cleanup owner', '43004')
+    const family = await createFamily(owner.token, 'Cleanup family')
+    let cleanupReached = false
+    let cleanupDirectory: string | undefined
+    const auth = createAuthModule({ db: prisma, emailDelivery: disabledEmailDelivery, env })
+    const families = createFamiliesModule({ db: prisma,
+      idempotencyExecutor: createPrismaIdempotencyExecutor(prisma), idempotencySecret: env.JWT_SECRET,
+      familyQuotaBytes: env.MEDIA_FAMILY_QUOTA_BYTES, multiFamilyActivation: env.MULTI_FAMILY_ACTIVATION,
+      requireAuth: auth.requireAuth })
+    const ffmpeg = createFfmpegRunner({ ffmpegPath: env.FFMPEG_PATH, ffprobePath: env.FFPROBE_PATH })
+    const service = new MediaService(families.access, new PrismaMediaRepository(prisma), privateStorage.storage, {
+      familyQuotaBytes: env.MEDIA_FAMILY_QUOTA_BYTES,
+      maxPendingUploads: env.MEDIA_MAX_PENDING_UPLOADS,
+      reservationTtlSeconds: env.MEDIA_RESERVATION_TTL_SECONDS,
+      uploadUrlTtlSeconds: env.MEDIA_UPLOAD_URL_TTL_SECONDS,
+    }, processPhoto, (path, kind) => probeMediaWithRunner(path, kind, ffmpeg), () => new Date(), async (directory) => {
+        cleanupDirectory = directory
+        cleanupReached = true
+        throw new Error('injected cleanup failure after finalization')
+      }, () => undefined,
+    )
+    const cleanupFaultApp = new OpenAPIHono()
+    cleanupFaultApp.route('/storage', privateStorage.httpRoutes!)
+    cleanupFaultApp.route('/api/v1', createMediaRoutes({ authenticateMediaAccess: auth.authenticateMediaAccess,
+      cookieSecure: env.COOKIE_SECURE, requireAuth: auth.requireAuth, service }))
+    let finalized: Awaited<ReturnType<typeof uploadPhoto>>
+    try {
+      finalized = await uploadPhoto(owner.token, family.body.family.id, 'memory', pngFixture, cleanupFaultApp)
+    } finally {
+      if (cleanupDirectory) await rm(cleanupDirectory, { recursive: true, force: true })
+    }
+
+    expect(finalized.finalized.response.status).toBe(200)
+    expect(cleanupReached).toBe(true)
+    expect(finalized.finalized.body.asset).toMatchObject({
+      id: finalized.reserved.body.assetId,
+      originalStatus: 'stored',
+      renditionStatus: 'ready',
+    })
+    const [asset, familyState] = await Promise.all([
+      prisma.mediaAsset.findUniqueOrThrow({ where: { id: finalized.reserved.body.assetId } }),
+      prisma.family.findUniqueOrThrow({ where: { id: family.body.family.id } }),
+    ])
+    expect(asset).toMatchObject({ originalStatus: 'stored', renditionStatus: 'ready', deletedAt: null })
+    expect(familyState.storageReservedBytes).toBe(0n)
+    expect(familyState.storageUsedBytes).toBe(BigInt(pngFixture.byteLength))
+    expect(await privateStorage.storage.headObject(asset.originalKey)).toMatchObject({ contentLength: pngFixture.byteLength })
+    const displayVariant = await prisma.mediaVariant.findFirstOrThrow({ where: { mediaId: asset.id, variant: 'display' } })
+    expect(await privateStorage.storage.headObject(displayVariant.objectKey)).toMatchObject({ contentType: 'image/webp' })
+    const rendition = await privateStorage.storage.readObject({ key: displayVariant.objectKey })
+    if (!rendition) throw new Error('Committed display variant is missing from private storage')
+    expect((await new Response(rendition.body).arrayBuffer()).byteLength).toBeGreaterThan(0)
+  })
+
   test('full uploads a photo and published members receive private HEAD and single-range bytes', async () => {
     const owner = await admittedUser('Владелец', '43001')
     const viewer = await admittedUser('Зритель', '43002')
@@ -155,11 +219,25 @@ maybeDescribe('Private media API', () => {
     expect(head.headers.get('cache-control')).toBe('private, no-store')
     expect(head.headers.get('referrer-policy')).toBe('no-referrer')
 
+    const displayPath = contentPath.replace('variant=original', 'variant=display')
+    const display = await app.request(displayPath, {
+      headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    expect(display.status).toBe(200)
+    const displayEtag = display.headers.get('etag')
+    expect(displayEtag).toBeTruthy()
+    const unchanged = await app.request(displayPath, {
+      headers: { Authorization: `Bearer ${viewer.token}`, 'If-None-Match': displayEtag! },
+    })
+    expect(unchanged.status).toBe(304)
+    expect(await unchanged.arrayBuffer()).toHaveLength(0)
+
     const partial = await app.request(contentPath, {
       headers: { Authorization: `Bearer ${viewer.token}`, Range: 'bytes=8-19' },
     })
     expect(partial.status).toBe(206)
     expect(partial.headers.get('content-range')).toBe(`bytes 8-19/${pngFixture.byteLength}`)
+    expect(partial.headers.get('cache-control')).toBe('private, no-store')
     expect(Buffer.from(await partial.arrayBuffer())).toEqual(pngFixture.subarray(8, 20))
 
     const mediaSession = await app.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
@@ -240,6 +318,10 @@ maybeDescribe('Private media API', () => {
     )
     expect(revoked.response.status).toBe(204)
     expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
+    const revokedValidator = await app.request(displayPath, {
+      headers: { Authorization: `Bearer ${viewer.token}`, 'If-None-Match': displayEtag! },
+    })
+    expect(revokedValidator.status).toBe(404)
 
     const deleted = await app.request(`/api/v1/families/${family.body.family.id}/memories/${memory.body.id}`, {
       method: 'DELETE', headers: { Authorization: `Bearer ${owner.token}`, 'If-Match': String(memory.body.version) },
@@ -742,21 +824,23 @@ maybeDescribe('Private media API', () => {
     expect((await posterApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
   })
 
-  async function uploadPhoto(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array) {
-    const upload = await reserveAndPut(token, familyId, purpose, bytes)
+  async function uploadPhoto(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array,
+    targetApp: any = app) {
+    const upload = await reserveAndPut(token, familyId, purpose, bytes, targetApp)
     const finalized = await jsonRequest(
       `/api/v1/families/${familyId}/uploads/${upload.reserved.body.upload.uploadId}/finalize`,
-      token, 'POST', {},
+      token, 'POST', {}, undefined, targetApp,
     )
     return { ...upload, finalized }
   }
 
-  async function reserveAndPut(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array) {
+  async function reserveAndPut(token: string, familyId: string, purpose: 'memory' | 'child_avatar', bytes: Uint8Array,
+    targetApp: any = app) {
     const reserved = await jsonRequest(`/api/v1/families/${familyId}/uploads`, token, 'POST', {
       purpose, kind: 'photo', contentType: 'image/png', byteSize: bytes.byteLength,
-    })
+    }, undefined, targetApp)
     expect(reserved.response.status).toBe(201)
-    const stored = await app.request(reserved.body.upload.url, {
+    const stored = await targetApp.request(reserved.body.upload.url, {
       method: 'PUT', headers: reserved.body.upload.headers, body: bytes as unknown as BodyInit,
     })
     expect(stored.status).toBe(200)
@@ -839,8 +923,9 @@ maybeDescribe('Private media API', () => {
 
   async function jsonRequest(
     path: string, token: string, method: string, body?: unknown, idempotencyKey?: string,
+    targetApp: any = app,
   ) {
-    const response = await app.request(path, {
+    const response = await targetApp.request(path, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,

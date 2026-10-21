@@ -1,5 +1,6 @@
 import { createServer } from 'node:net'
 import {
+  assertE2eDatabaseConfiguration,
   defaultTestDatabaseUrl,
   preferredBackendPort,
   preferredPostgresTestPort,
@@ -11,6 +12,7 @@ export type PortPlan = {
   backendPort: number
   backendUrl: string
   databaseUrl: string
+  databaseUrlExplicit: boolean
   postgresTestPort: number
   webPort: number
   webUrl: string
@@ -19,6 +21,7 @@ export type PortPlan = {
 export async function resolveE2ePorts(): Promise<PortPlan> {
   const reservedPorts = new Set<number>()
   const explicitDatabaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const databaseUrlExplicit = explicitDatabaseUrl !== undefined
   const explicitPostgresPort = explicitDatabaseUrl
     ? parsePortValue(portFromUrl(explicitDatabaseUrl), explicitDatabaseUrl)
     : undefined
@@ -54,11 +57,13 @@ export async function resolveE2ePorts(): Promise<PortPlan> {
   const backendUrl = process.env.E2E_BACKEND_URL ?? `http://127.0.0.1:${backendPort}`
   const webUrl = process.env.E2E_WEB_URL ?? `http://127.0.0.1:${webPort}`
   const databaseUrl = explicitDatabaseUrl ?? defaultTestDatabaseUrl(String(postgresTestPort))
+  assertE2eDatabaseConfiguration(databaseUrl, process.env.DATABASE_URL ?? (process.env.TEST_DATABASE_URL ? databaseUrl : undefined), process.env.E2E_SKIP_DOCKER === '1')
 
   return {
     backendPort,
     backendUrl,
     databaseUrl,
+    databaseUrlExplicit,
     postgresTestPort,
     webPort,
     webUrl,
@@ -73,6 +78,7 @@ export function applyE2ePortEnv(plan: PortPlan) {
   process.env.E2E_WEB_URL ??= plan.webUrl
   process.env.TEST_DATABASE_URL = plan.databaseUrl
   process.env.DATABASE_URL = plan.databaseUrl
+  process.env.MEMOLY_E2E_DATABASE_URL_EXPLICIT = plan.databaseUrlExplicit ? '1' : '0'
 }
 
 async function resolvePort(input: {

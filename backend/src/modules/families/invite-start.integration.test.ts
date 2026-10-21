@@ -1,13 +1,13 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
 import { createDetailedInviteStartResolver, createInviteStartResolver } from './application/invite-start'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('families invite-start resolver', () => {
+describe('families invite-start resolver', () => {
   const prisma = createPrisma(databaseUrl!)
   const fixedNow = new Date('2026-09-15T10:00:00.000Z')
 

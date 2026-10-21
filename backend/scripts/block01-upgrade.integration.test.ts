@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 import { createPrisma } from '../src/db'
@@ -19,7 +20,7 @@ const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
 
 test('upgrades Block 00 legacy users and sessions to Block 01 without data loss', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const databaseName = `block01_upgrade_${process.pid}_${Date.now()}`

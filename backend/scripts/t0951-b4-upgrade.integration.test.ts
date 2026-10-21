@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -12,7 +13,7 @@ const migrationsRoot = resolve(backendRoot, 'prisma', 'migrations')
 const b4Migration = '20260927140000_t0951_unread_publication_guard'
 
 test('B4 guard upgrades a populated B3 database without changing archive ordinals', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
   const databaseName = `t0951_b4_upgrade_${process.pid}_${Date.now()}`
   if (!/^t0951_b4_upgrade_[0-9_]+$/.test(databaseName)) throw new Error('Unsafe database name')

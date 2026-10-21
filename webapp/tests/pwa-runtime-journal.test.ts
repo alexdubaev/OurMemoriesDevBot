@@ -6,14 +6,24 @@ const workerSource = readFileSync(new URL('../public/pwa-runtime-witness-v1.js',
 const journalBytes = 16_384
 const slotBytes = 8_192
 
-type Store = { bytes: Uint8Array; size: number; locked: boolean; shortWrite: number; openCount: number; asyncFlush: boolean; directoryGate?: Promise<void>; directoryCalls: number; clock?: { mono: number; wall: number }; monitor?: () => void }
+type Store = { bytes: Uint8Array; size: number; locked: boolean; shortWrite: number; openCount: number; writeCalls: number; asyncFlush: boolean; directoryGate?: Promise<void>; directoryCalls: number; clock?: { mono: number; wall: number }; monitor?: () => void; waiters?: Set<() => void> }
 type WitnessRecord = { runId: string; status?: string; storageReason?: string | null; evidence?: { kind?: string } | null; monitorGap?: { elapsedMs?: number } | null; updatedAt?: number }
 type WorkerMessage = { type: string; status?: string; reason?: string | null; runId?: string; seq?: number; record?: WitnessRecord; records?: WitnessRecord[] }
 type WorkerSelf = { onmessage?: (event: { data: unknown }) => void; postMessage: (message: WorkerMessage) => void }
-type WorkerHarness = { messages: WorkerMessage[]; send: (message: unknown) => void; store: Store; waitReady: () => Promise<void>; waitRecord: (runId: string, status?: string) => Promise<WitnessRecord>; advance: (ms: number) => void; tick: () => void; waitMessage: (type: string) => Promise<WorkerMessage> }
+type WorkerHarness = { messages: WorkerMessage[]; send: (message: unknown) => void; store: Store; waitReady: () => Promise<void>; waitRecord: (runId: string, status?: string, predicate?: (record: WitnessRecord) => boolean) => Promise<WitnessRecord>; advance: (ms: number) => void; tick: () => void; waitMessage: (type: string) => Promise<WorkerMessage>; waitStore: (predicate: () => boolean) => Promise<void> }
 
 function harnessFor(store: Store): WorkerHarness {
   const messages: WorkerMessage[] = []
+  const messageWaiters = new Set<() => void>()
+  const storeWaiters = store.waiters ??= new Set()
+  const notify = (waiters: Set<() => void>) => { for (const waiter of [...waiters]) waiter() }
+  const waitFor = (predicate: () => boolean, waiters: Set<() => void>) => {
+    if (predicate()) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const wake = () => { if (predicate()) { waiters.delete(wake); resolve() } }
+      waiters.add(wake)
+    })
+  }
   const access = {
     getSize: () => store.size,
     truncate(size: number) {
@@ -21,6 +31,7 @@ function harnessFor(store: Store): WorkerHarness {
       next.set(store.bytes.subarray(0, Math.min(store.bytes.length, size)))
       store.bytes = next
       store.size = size
+      notify(storeWaiters)
     },
     read(buffer: Uint8Array, options: { at: number }) {
       const count = Math.min(buffer.length, Math.max(0, store.size - options.at))
@@ -31,24 +42,27 @@ function harnessFor(store: Store): WorkerHarness {
       const count = store.shortWrite > 0 ? Math.min(buffer.length, store.shortWrite) : buffer.length
       store.shortWrite = 0
       store.bytes.set(buffer.subarray(0, count), options.at)
+      store.writeCalls += 1
+      notify(storeWaiters)
       return count
     },
     flush() { return store.asyncFlush ? Promise.resolve() : undefined },
-    close() { store.locked = false },
+    close() { store.locked = false; notify(storeWaiters) },
   }
   const file = { async createSyncAccessHandle() {
     if (store.locked) throw new DOMException('locked', 'NoModificationAllowedError')
     store.locked = true
     store.openCount += 1
+    notify(storeWaiters)
     return access
   } }
   const root = { async getFileHandle() { return file } }
-  const self: WorkerSelf = { postMessage(message) { messages.push(message) } }
+  const self: WorkerSelf = { postMessage(message) { messages.push(message); notify(messageWaiters) } }
   const nativeDate = Date
   class WorkerDate extends nativeDate { static now() { return store.clock?.wall ?? nativeDate.now() } }
   const context = createContext({
     self,
-    navigator: { storage: { async getDirectory() { store.directoryCalls += 1; if (store.directoryGate) await store.directoryGate; return root } } },
+    navigator: { storage: { async getDirectory() { store.directoryCalls += 1; notify(storeWaiters); if (store.directoryGate) await store.directoryGate; return root } } },
     TextEncoder,
     TextDecoder,
     setInterval: (callback: () => void) => { store.monitor = callback; return 1 },
@@ -61,13 +75,8 @@ function harnessFor(store: Store): WorkerHarness {
   })
   runInContext(workerSource, context)
   const send = (message: unknown) => self.onmessage?.({ data: message })
-  const waitFor = async (predicate: () => boolean) => {
-    const deadline = Date.now() + 1500
-    while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
-    expect(predicate()).toBe(true)
-  }
-  const waitMessage = async (type: string) => { await waitFor(() => messages.some((message) => message.type === type)); return messages.filter((message) => message.type === type).at(-1)! }
-  const waitChallenge = async (runId: string) => { await waitFor(() => messages.some((message) => message.type === 'challenge' && message.runId === runId)); return messages.filter((message) => message.type === 'challenge' && message.runId === runId).at(-1)! }
+  const waitMessage = async (type: string) => { await waitFor(() => messages.some((message) => message.type === type), messageWaiters); return messages.filter((message) => message.type === type).at(-1)! }
+  const waitChallenge = async (runId: string) => { await waitFor(() => messages.some((message) => message.type === 'challenge' && message.runId === runId), messageWaiters); return messages.filter((message) => message.type === 'challenge' && message.runId === runId).at(-1)! }
   return {
     messages,
     send,
@@ -76,9 +85,10 @@ function harnessFor(store: Store): WorkerHarness {
     tick: () => store.monitor?.(),
     waitMessage,
     waitChallenge,
-    waitReady: () => waitFor(() => messages.some((message) => message.type === 'ready')),
-    waitRecord: async (runId, status) => {
-      await waitFor(() => messages.some((message) => message.type === 'record' && message.record?.runId === runId && (!status || message.record?.status === status)))
+    waitStore: (predicate) => waitFor(predicate, storeWaiters),
+    waitReady: () => waitFor(() => messages.some((message) => message.type === 'ready'), messageWaiters),
+    waitRecord: async (runId, status, predicate = () => true) => {
+      await waitFor(() => messages.some((message) => message.type === 'record' && message.record?.runId === runId && (!status || message.record?.status === status) && predicate(message.record!)), messageWaiters)
       return messages.filter((message) => message.type === 'record' && message.record?.runId === runId).at(-1)!.record
     },
   }
@@ -102,14 +112,18 @@ function validSlots(store: Store) {
 }
 
 test('runtime witness journal keeps the last valid snapshot after a short write', async () => {
-  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, asyncFlush: false, directoryCalls: 0 }
+  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, writeCalls: 0, asyncFlush: false, directoryCalls: 0 }
   const runId = '11111111-1111-4111-8111-111111111111'
   const first = harnessFor(store)
   await first.waitReady()
   first.send({ type: 'sample', sample: sample(runId, 'active', 'visible') })
-  await first.waitChallenge(runId)
-  first.send({ type: 'sample', sample: sample(runId, 'pagehide', 'hidden') })
+  const initialChallenge = await first.waitChallenge(runId)
+  first.send({ type: 'ack', seq: initialChallenge.seq, runId, sample: sample(runId, 'active', 'visible') })
   await first.waitRecord(runId, 'ready')
+  await first.waitStore(() => validSlots(store) === 1)
+  const writesBeforeHide = store.writeCalls
+  first.send({ type: 'sample', sample: sample(runId, 'pagehide', 'hidden') })
+  await first.waitStore(() => store.writeCalls > writesBeforeHide && !store.locked)
   expect(store.size).toBe(journalBytes)
   expect(validSlots(store)).toBe(2)
 
@@ -127,12 +141,12 @@ test('runtime witness journal keeps the last valid snapshot after a short write'
   await recovery.waitReady()
   const recoveredReady = recovery.messages.find((message) => message.type === 'ready')
   expect(recoveredReady.records).toHaveLength(1)
-  expect(recoveredReady.records[0]).toMatchObject({ runId, status: 'ready' })
+  expect(recoveredReady.records.find((record) => record.runId === runId)).toMatchObject({ runId, status: 'ready' })
   expect(validSlots(store)).toBe(2)
 })
 
 test('runtime witness journal bounds storage to 16 KiB and the newest two runs', async () => {
-  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, asyncFlush: false, directoryCalls: 0 }
+  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, writeCalls: 0, asyncFlush: false, directoryCalls: 0 }
   const harness = harnessFor(store)
   await harness.waitReady()
   const runIds = [
@@ -145,8 +159,7 @@ test('runtime witness journal bounds storage to 16 KiB and the newest two runs',
       harness.send({ type: 'sample', sample: sample(runIds[index], 'active', 'visible') })
       await harness.waitChallenge(runIds[index])
       const expectedOpenCount = index + 2
-      const deadline = Date.now() + 1000
-      while (store.openCount < expectedOpenCount && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
+      await harness.waitStore(() => store.openCount >= expectedOpenCount)
       expect(store.openCount).toBe(expectedOpenCount)
     }
     if (index === 0) {
@@ -155,8 +168,7 @@ test('runtime witness journal bounds storage to 16 KiB and the newest two runs',
     }
     harness.send({ type: 'sample', sample: sample(runIds[index], 'pagehide', 'hidden') })
     await harness.waitRecord(runIds[index], 'ready')
-    const closeDeadline = Date.now() + 1000
-    while (store.locked && Date.now() < closeDeadline) await new Promise((resolve) => setTimeout(resolve, 5))
+    await harness.waitStore(() => !store.locked)
     expect(store.locked).toBe(false)
   }
   expect(store.size).toBe(journalBytes)
@@ -173,7 +185,7 @@ test('runtime witness journal bounds storage to 16 KiB and the newest two runs',
 
 
 test('runtime witness rejects Promise-returning access-handle methods as unavailable', async () => {
-  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, asyncFlush: true, directoryCalls: 0 }
+  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, writeCalls: 0, asyncFlush: true, directoryCalls: 0 }
   const worker = harnessFor(store)
   await worker.waitReady()
   const ready = worker.messages.find((message) => message.type === 'ready')
@@ -183,7 +195,7 @@ test('runtime witness rejects Promise-returning access-handle methods as unavail
 
 
 function timedStore(): Store {
-  return { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, asyncFlush: false, directoryCalls: 0, clock: { mono: 0, wall: 100_000 } }
+  return { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, writeCalls: 0, asyncFlush: false, directoryCalls: 0, clock: { mono: 0, wall: 100_000 } }
 }
 
 async function startTimedProbe(harness: WorkerHarness, runId: string) {
@@ -203,8 +215,7 @@ test('runtime witness confirms an overdue probe ACK before a due monitor callbac
   for (let i = 0; i < 9; i += 1) { harness.advance(1000); harness.tick() }
   harness.advance(1000)
   harness.send({ type: 'ack', seq: probe.seq, runId, sample: sample(runId, 'active', 'visible') })
-  const deadline = Date.now() + 1000
-  while (!harness.messages.some((message) => message.type === 'record' && message.record?.runId === runId && message.record.evidence?.kind === 'main-response-gap') && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
+  await harness.waitRecord(runId, undefined, (record) => record.evidence?.kind === 'main-response-gap')
   const record = harness.messages.filter((message) => message.type === 'record' && message.record?.runId === runId).at(-1)!.record
   expect(record.evidence).toMatchObject({ kind: 'main-response-gap', runId })
 })
@@ -216,9 +227,7 @@ test('runtime witness treats a suspended worker as a neutral monitor gap on a la
   const probe = await startTimedProbe(harness, runId)
   harness.advance(15_001)
   harness.send({ type: 'ack', seq: probe.seq, runId, sample: sample(runId, 'active', 'visible') })
-  const deadline = Date.now() + 1000
-  while (!harness.messages.some((message) => message.type === 'record' && message.record?.runId === runId && message.record.monitorGap) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
-  const record = harness.messages.filter((message) => message.type === 'record' && message.record?.runId === runId).at(-1)!.record
+  const record = await harness.waitRecord(runId, undefined, (candidate) => Boolean(candidate.monitorGap))
   expect(record.evidence).toBeNull()
   expect(record.monitorGap?.elapsedMs).toBeGreaterThanOrEqual(15_000)
   expect(harness.messages.some((message) => message.type === 'challenge' && message.seq > probe.seq)).toBe(true)
@@ -227,11 +236,10 @@ test('runtime witness treats a suspended worker as a neutral monitor gap on a la
 test('runtime witness cancels an opening journal on hide and recovers with a fresh visible challenge', async () => {
   let release!: () => void
   const directoryGate = new Promise<void>((resolve) => { release = resolve })
-  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, asyncFlush: false, directoryCalls: 0, directoryGate }
+  const store: Store = { bytes: new Uint8Array(0), size: 0, locked: false, shortWrite: 0, openCount: 0, writeCalls: 0, asyncFlush: false, directoryCalls: 0, directoryGate }
   const harness = harnessFor(store)
   const runId = '66666666-6666-4666-8666-666666666666'
-  const deadline = Date.now() + 1000
-  while (store.directoryCalls === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
+  await harness.waitStore(() => store.directoryCalls > 0)
   expect(store.directoryCalls).toBe(1)
   harness.send({ type: 'sample', sample: sample(runId, 'pagehide', 'hidden') })
   release()
@@ -256,9 +264,7 @@ test('runtime witness records a neutral gap when an overdue monitor tick clears 
   harness.tick()
   harness.advance(3002)
   harness.tick()
-  const deadline = Date.now() + 1000
-  while (!harness.messages.some((message) => message.type === 'record' && message.record?.runId === runId && message.record.monitorGap) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5))
-  const record = harness.messages.filter((message) => message.type === 'record' && message.record?.runId === runId).at(-1)!.record
+  const record = await harness.waitRecord(runId, undefined, (candidate) => Boolean(candidate.monitorGap))
   expect(record.evidence).toBeNull()
   expect(record.monitorGap?.elapsedMs).toBeGreaterThan(10_000)
   expect(harness.messages.some((message) => message.type === 'challenge' && message.runId === runId)).toBe(true)

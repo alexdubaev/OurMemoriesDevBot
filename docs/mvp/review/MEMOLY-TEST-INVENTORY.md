@@ -1,0 +1,150 @@
+# MEMOLY source-review inventory
+
+Base: `dc3201096998f366a88a296d13914abf6047604b`.
+
+All listed base test bodies were inspected across the lead, read-only scouts and domain workers.
+This is source-review accounting, not an assertion that optional/live/historical suites ran.
+Counts are AST/HCL static declarations; parameterized loops may execute more cases.
+Detailed keep/change/remove decisions and command evidence are in the suite and domain audit reports.
+
+| Base path | Static declarations |
+| --- | ---: |
+| `backend/scripts/block01-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/block02-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/block03-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/block08-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/comments-release-compatibility.integration.test.ts` | 1 |
+| `backend/scripts/deploy-database.integration.test.ts` | 8 |
+| `backend/scripts/docker-smoke.test.mjs` | 7 |
+| `backend/scripts/int1-max-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/memory-reactions-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/mm4-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/selectel-rollback-compatibility.integration.test.ts` | 2 |
+| `backend/scripts/t0951-b4-upgrade.integration.test.ts` | 1 |
+| `backend/scripts/test-integration-catalog.test.ts` | 6 |
+| `backend/scripts/welcome-migration.integration.test.ts` | 1 |
+| `backend/src/db.integration.test.ts` | 6 |
+| `backend/src/email/postbox-delivery.live.test.ts` | 2 |
+| `backend/src/email/resend-delivery.live.test.ts` | 2 |
+| `backend/src/http/security.test.ts` | 3 |
+| `backend/src/modules/auth/application/auth-service.test.ts` | 4 |
+| `backend/src/modules/auth/auth.integration.test.ts` | 17 |
+| `backend/src/modules/auth/infrastructure/max-init-data.test.ts` | 6 |
+| `backend/src/modules/auth/infrastructure/telegram-bot-identity.test.ts` | 2 |
+| `backend/src/modules/auth/infrastructure/telegram-init-data.test.ts` | 8 |
+| `backend/src/modules/auth/max-auth.integration.test.ts` | 4 |
+| `backend/src/modules/auth/max-session-replacement.integration.test.ts` | 10 |
+| `backend/src/modules/auth/telegram-auth.integration.test.ts` | 2 |
+| `backend/src/modules/families/application/family-home-cursor.test.ts` | 2 |
+| `backend/src/modules/families/application/family-service.test.ts` | 1 |
+| `backend/src/modules/families/family-access.integration.test.ts` | 30 |
+| `backend/src/modules/families/family-persistence.integration.test.ts` | 2 |
+| `backend/src/modules/families/family-review-fixes.integration.test.ts` | 7 |
+| `backend/src/modules/families/invite-expiry-max.integration.test.ts` | 1 |
+| `backend/src/modules/families/invite-start.integration.test.ts` | 2 |
+| `backend/src/modules/families/max-family-audit.integration.test.ts` | 7 |
+| `backend/src/modules/max/backup-media.integration.test.ts` | 3 |
+| `backend/src/modules/max/capture.integration.test.ts` | 100 |
+| `backend/src/modules/max/direct-video-upload.integration.test.ts` | 21 |
+| `backend/src/modules/max/forward-import.integration.test.ts` | 31 |
+| `backend/src/modules/max/forward-import.test.ts` | 4 |
+| `backend/src/modules/max/infrastructure/channel-avatar.test.ts` | 3 |
+| `backend/src/modules/max/infrastructure/max-channel-provider.test.ts` | 2 |
+| `backend/src/modules/max/infrastructure/media-download.test.ts` | 12 |
+| `backend/src/modules/max/infrastructure/payload-crypto.test.ts` | 3 |
+| `backend/src/modules/max/infrastructure/video-rendition.test.ts` | 5 |
+| `backend/src/modules/max/max-api.test.ts` | 42 |
+| `backend/src/modules/max/media-flow.integration.test.ts` | 1 |
+| `backend/src/modules/max/transport/direct-video-upload-routes.test.ts` | 2 |
+| `backend/src/modules/max/webhook.test.ts` | 4 |
+| `backend/src/modules/media/application/media-service.test.ts` | 3 |
+| `backend/src/modules/media/infrastructure/reservation-race.integration.test.ts` | 1 |
+| `backend/src/modules/media/media-access.integration.test.ts` | 11 |
+| `backend/src/modules/media/media-probe.test.ts` | 1 |
+| `backend/src/modules/memories/comments-idempotency.integration.test.ts` | 4 |
+| `backend/src/modules/memories/comments-mutations.integration.test.ts` | 4 |
+| `backend/src/modules/memories/comments-races.integration.test.ts` | 6 |
+| `backend/src/modules/memories/comments.integration.test.ts` | 7 |
+| `backend/src/modules/memories/memories.integration.test.ts` | 23 |
+| `backend/src/modules/memories/unread.integration.test.ts` | 16 |
+| `backend/src/modules/telegram/capture.integration.test.ts` | 39 |
+| `backend/src/modules/telegram/infrastructure/caption-race.integration.test.ts` | 2 |
+| `backend/src/modules/telegram/telegram-api.test.ts` | 3 |
+| `backend/src/modules/telegram/webhook.test.ts` | 2 |
+| `backend/src/modules/uploads/uploads.integration.test.ts` | 18 |
+| `backend/src/modules/users/users.integration.test.ts` | 18 |
+| `backend/src/outbox/drain.test.ts` | 10 |
+| `backend/src/outbox/outbox.integration.test.ts` | 9 |
+| `backend/src/outbox/retry-policy.test.ts` | 8 |
+| `backend/src/storage/filesystem-signing.test.ts` | 9 |
+| `backend/src/storage/normalize-avatar-image.test.ts` | 7 |
+| `backend/src/storage/object-keys.test.ts` | 7 |
+| `backend/src/storage/s3-storage.live.test.ts` | 1 |
+| `backend/src/zod-compile.test.ts` | 1 |
+| `infra/digitalocean/bootstrap/tests/bootstrap.tftest.hcl` | 1 |
+| `infra/digitalocean/production/tests/production.tftest.hcl` | 2 |
+| `infra/digitalocean/runtime/tests/runtime.tftest.hcl` | 1 |
+| `infra/digitalocean/static/tests/static.tftest.hcl` | 2 |
+| `infra/yandex/bootstrap/tests/bootstrap.tftest.hcl` | 2 |
+| `infra/yandex/migration/tests/migration.tftest.hcl` | 2 |
+| `infra/yandex/production/tests/production.tftest.hcl` | 7 |
+| `infra/yandex/runtime/tests/runtime.tftest.hcl` | 5 |
+| `packages/contracts/src/auth.test.ts` | 10 |
+| `packages/contracts/src/comments.test.ts` | 4 |
+| `packages/contracts/src/families.test.ts` | 14 |
+| `packages/contracts/src/media.test.ts` | 5 |
+| `packages/contracts/src/memories.test.ts` | 18 |
+| `packages/contracts/src/uploads.test.ts` | 6 |
+| `packages/contracts/src/users.test.ts` | 5 |
+| `scripts/repo-env.test.mjs` | 6 |
+| `scripts/verify-local.test.mjs` | 13 |
+| `tests/selectel-caddy-activation.test.mjs` | 3 |
+| `tests/selectel-checkout-hygiene.test.mjs` | 2 |
+| `tests/selectel-deployment-ownership.test.mjs` | 4 |
+| `tests/selectel-mm0-safety.test.mjs` | 19 |
+| `tests/selectel-prebuilt-release.test.mjs` | 2 |
+| `tests/selectel-release-exit.test.mjs` | 29 |
+| `webapp/e2e/comments-state.spec.ts` | 10 |
+| `webapp/e2e/comments.spec.ts` | 6 |
+| `webapp/e2e/critical-smoke.spec.ts` | 3 |
+| `webapp/e2e/fixed-carousel.spec.ts` | 1 |
+| `webapp/e2e/fullscreen-swipe.spec.ts` | 2 |
+| `webapp/e2e/max-browser-link.spec.ts` | 2 |
+| `webapp/e2e/max-closing-confirmation.spec.ts` | 1 |
+| `webapp/e2e/max-family-audit.max-e2e.ts` | 7 |
+| `webapp/e2e/max-video-layout.spec.ts` | 1 |
+| `webapp/e2e/memoly-v4.spec.ts` | 11 |
+| `webapp/e2e/memory-longpress.spec.ts` | 6 |
+| `webapp/e2e/pwa-screen-watch.spec.ts` | 5 |
+| `webapp/e2e/shared-author-avatar.spec.ts` | 1 |
+| `webapp/e2e/video-lifecycle.spec.ts` | 1 |
+| `webapp/e2e/voice-player.spec.ts` | 2 |
+| `webapp/tests/app-host-auth-race.test.tsx` | 3 |
+| `webapp/tests/avatar-resource-pool.test.ts` | 7 |
+| `webapp/tests/comments-scope.test.tsx` | 2 |
+| `webapp/tests/comments-state.test.ts` | 10 |
+| `webapp/tests/family-video-capability.test.ts` | 1 |
+| `webapp/tests/http-client-retry-after.test.ts` | 2 |
+| `webapp/tests/max-auth-epoch.test.ts` | 1 |
+| `webapp/tests/max-auth-stale-cookie-recovery.test.ts` | 8 |
+| `webapp/tests/max-closing-confirmation.test.ts` | 6 |
+| `webapp/tests/media-ratio.test.ts` | 4 |
+| `webapp/tests/playback.test.tsx` | 10 |
+| `webapp/tests/private-cache.test.ts` | 6 |
+| `webapp/tests/private-media-sw.test.ts` | 3 |
+| `webapp/tests/pwa-diagnostics.test.ts` | 17 |
+| `webapp/tests/pwa-runtime-journal.test.ts` | 7 |
+| `webapp/tests/retargeted-touch-click-guard.test.ts` | 3 |
+| `webapp/tests/seen-batch-queue.test.ts` | 4 |
+| `webapp/tests/ui-v2-header.test.tsx` | 3 |
+| `webapp/tests/ui-version.test.ts` | 1 |
+| `webapp/visualtests/agent-k-accessibility.pw.ts` | 2 |
+| `webapp/visualtests/design-system.pw.ts` | 5 |
+| `webapp/visualtests/family-hub.pw.ts` | 3 |
+| `webapp/visualtests/welcome-parity.pw.ts` | 1 |
+| `webapp/visualtests/welcome-responsive.pw.ts` | 1 |
+| `website/tests/landing.test.ts` | 4 |
+
+Total: **135 files / 929 declarations**.
+
+Runtime helpers, runner configuration and optional provider setup were inspected separately.

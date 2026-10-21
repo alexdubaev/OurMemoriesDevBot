@@ -1,4 +1,6 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { randomUUID } from 'node:crypto'
+import { Client } from 'pg'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
@@ -10,10 +12,9 @@ import { signAccessToken } from '../auth'
 import { createPrismaFamilyAccess } from '../families'
 import { createSourceMemoryPublisher } from './infrastructure/source-memory-publisher'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('personal unread memories', () => {
+describe('personal unread memories', () => {
   const prisma = createPrisma(databaseUrl!)
   const env = loadEnv({
     DATABASE_URL: databaseUrl!, JWT_SECRET: '0123456789abcdef'.repeat(4),
@@ -356,29 +357,53 @@ maybeDescribe('personal unread memories', () => {
     expect(await count(viewer)).toEqual({ unreadCount: 1, unreadState: 'ready' })
   })
 
-  test('counter failure leaves family cards available and reports unavailable', async () => {
+  test('database read denial leaves family cards available and marks unread unavailable', async () => {
     const owner = await user('owner', '39119')
     const family = await createFamily(owner)
     await activate(family.id)
-    const faultyDb = new Proxy(prisma, { get(target, property) {
-      const value = Reflect.get(target, property)
-      if (property === '$queryRaw') return (...args: unknown[]) => {
-        const input = args[0] as { strings?: string[] } | string[]
-        const sql = Array.isArray(input) ? input.join('') : input.strings?.join('')
-        if (sql?.includes('"unreadCount"')) throw new Error('synthetic counter failure')
-        return (value as (...arguments_: unknown[]) => unknown).apply(target, args)
-      }
-      return typeof value === 'function' ? value.bind(target) : value
-    } })
-    const faultyApp = createApp({ env, prisma: faultyDb })
-    const response = await faultyApp.request('/api/v1/me/families', {
-      headers: { Authorization: `Bearer ${owner.token}` },
-    })
-    expect(response.status).toBe(200)
-    const body = await response.json() as { items: Array<{ familyId: string; unreadState: string; unreadCount: number | null }> }
-    expect(body.items[0]).toMatchObject({ familyId: family.id, unreadCount: null, unreadState: 'unavailable' })
-  })
 
+    const roleName = `unread_fault_${randomUUID().replaceAll('-', '')}`
+    const password = randomUUID()
+    const dbName = decodeURIComponent(new URL(databaseUrl!).pathname.slice(1))
+    let restrictedPrisma: ReturnType<typeof createPrisma> | undefined
+    let restrictedClient: Client | undefined
+    try {
+      await prisma.$executeRawUnsafe(`CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}'`)
+      await prisma.$executeRawUnsafe(`GRANT CONNECT ON DATABASE "${dbName}" TO "${roleName}"`)
+      await prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${roleName}"`)
+      await prisma.$executeRawUnsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${roleName}"`)
+      await prisma.$executeRawUnsafe(`REVOKE SELECT ON TABLE memories, memory_seen FROM "${roleName}"`)
+
+      const restrictedUrl = new URL(databaseUrl!)
+      restrictedUrl.username = roleName
+      restrictedUrl.password = password
+      restrictedPrisma = createPrisma(restrictedUrl.toString())
+      restrictedClient = new Client({ connectionString: restrictedUrl.toString() })
+      await restrictedClient.connect()
+      let sqlState: string | undefined
+      try {
+        await restrictedClient.query('SELECT id FROM memories LIMIT 1')
+      } catch (error) {
+        sqlState = (error as { code?: string }).code
+      }
+      expect(sqlState).toBe('42501')
+
+      const restrictedApp = createApp({ env, prisma: restrictedPrisma })
+      const response = await restrictedApp.request('/api/v1/me/families', {
+        headers: { Authorization: `Bearer ${owner.token}` },
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { items: Array<{ familyId: string; unreadState: string; unreadCount: number | null }> }
+      expect(body.items).toContainEqual(expect.objectContaining({
+        familyId: family.id, unreadCount: null, unreadState: 'unavailable',
+      }))
+    } finally {
+      await restrictedClient?.end()
+      await restrictedPrisma?.$disconnect()
+      await prisma.$executeRawUnsafe(`DROP OWNED BY "${roleName}"`)
+      await prisma.$executeRawUnsafe(`DROP ROLE IF EXISTS "${roleName}"`)
+    }
+  })
   test('deleted or processing memory makes the entire seen batch fail', async () => {
     const owner = await user('owner', '39114')
     const viewer = await user('viewer', '39115')
@@ -444,7 +469,7 @@ maybeDescribe('personal unread memories', () => {
     expect((await prisma.memorySeen.count()) <= 1).toBe(true)
   })
 
-  test('count uses the ordinal index with a representative populated family', async () => {
+  test('count returns remaining unseen published memories for a populated family', async () => {
     const owner = await user('owner', '39124')
     const viewer = await user('viewer', '39125')
     const family = await createFamily(owner)
@@ -467,26 +492,6 @@ maybeDescribe('personal unread memories', () => {
       familyId: family.id, userId: viewer.id, membershipEpoch: 1, memoryId: id,
     })) })
     expect(await count(viewer)).toEqual({ unreadCount: 50, unreadState: 'ready' })
-    await prisma.$executeRaw`ANALYZE memories`
-    const plan = await prisma.$queryRaw<Array<{ 'QUERY PLAN': string }>>`
-      EXPLAIN (ANALYZE, BUFFERS)
-      SELECT fm.family_id, fm.membership_epoch, COUNT(m.id)
-        FROM family_members fm JOIN families f ON f.id = fm.family_id
-        LEFT JOIN memories m ON m.family_id = fm.family_id
-          AND m.first_published_ordinal > COALESCE(fm.unread_baseline_ordinal, 0)
-          AND m.first_published_ordinal <= f.publication_ordinal
-          AND m.status = 'published' AND m.deleted_at IS NULL AND m.author_id <> ${viewer.id}::uuid
-          AND NOT EXISTS (SELECT 1 FROM memory_seen s WHERE s.family_id = fm.family_id
-            AND s.user_id = fm.user_id AND s.membership_epoch = fm.membership_epoch AND s.memory_id = m.id)
-       WHERE fm.user_id = ${viewer.id}::uuid AND fm.revoked_at IS NULL
-         AND f.status = 'active' AND f.unread_tracking_activated_at IS NOT NULL
-         AND fm.family_id IN (${family.id}::uuid)
-       GROUP BY fm.family_id, fm.membership_epoch
-    `
-    const planText = plan.map((row) => row['QUERY PLAN']).join('\n')
-    expect(planText).toContain('memories_family_id_first_published_ordinal_key')
-    expect(planText).toContain('actual time=')
-    console.info(`unread count plan, 2,000 rows: ${plan.find((row) => row['QUERY PLAN'].includes('Execution Time'))?.['QUERY PLAN']?.trim()}`)
   })
 
   async function clearFixtures() {

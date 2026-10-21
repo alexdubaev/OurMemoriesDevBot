@@ -19,7 +19,7 @@ const maxOnly = args.includes('--max-only')
 const bunArgs = args.filter((argument) => argument !== '--max-only')
 const { unit: allUnitTestFiles } = backendTestFiles(backendRoot)
 const discoveredUnitTestFiles = maxOnly
-  ? allUnitTestFiles.filter((file) => !file.includes('/modules/telegram/') && !/\/telegram-[^/]+\.test\./.test(`/${file}`) && file !== 'scripts/docker-smoke.test.mjs')
+  ? allUnitTestFiles.filter((file) => !file.includes('/modules/telegram/') && !/\/telegram-[^/]+\.test\./.test(`/${file}`))
   : allUnitTestFiles
 
 if (discoveredUnitTestFiles.length === 0) {

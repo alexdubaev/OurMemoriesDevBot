@@ -1,11 +1,11 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
 import { createPrisma } from '../../db'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const maybeDescribe = databaseUrl ? describe : describe.skip
+const databaseUrl = requireIntegrationDatabaseUrl()
 
-maybeDescribe('Block 01 family persistence', () => {
+describe('Block 01 family persistence', () => {
   const prisma = createPrisma(databaseUrl!)
 
   beforeEach(async () => {

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { assertLoopbackTestDatabaseUrl } from '../../scripts/repo-env.mjs'
 
 const webappDirectory = fileURLToPath(new URL('..', import.meta.url))
 const backendDirectory = fileURLToPath(new URL('../../backend', import.meta.url))
@@ -10,11 +11,7 @@ const apiPort = process.env.MAX_FAMILY_AUDIT_API_PORT ?? '56601'
 const webPort = process.env.MAX_FAMILY_AUDIT_WEB_PORT ?? '56602'
 const databaseUrl = process.env.TEST_DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for MAX family audit Playwright tests')
-const parsedDatabaseUrl = new URL(databaseUrl)
-if (!['127.0.0.1', 'localhost', '::1'].includes(parsedDatabaseUrl.hostname)
-  || !/^\/memoly_family_audit_(?:test|e2e_test|resume_20261016_test)$/.test(parsedDatabaseUrl.pathname)) {
-  throw new Error('MAX family audit Playwright tests refuse non-loopback or non-task-owned databases')
-}
+assertLoopbackTestDatabaseUrl(databaseUrl, process.env.DATABASE_URL)
 
 export default defineConfig({
   testDir: '.',

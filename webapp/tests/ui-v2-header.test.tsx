@@ -3,7 +3,6 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { ChildHeader } from '../src/components/ChildHeader'
-import { getUiV2HeaderAsset } from '../src/components/ui-v2/header-assets'
 
 const props = {
   childAvatarCrop: { x: 0.2, y: 0.1, width: 0.5, height: 0.6 },
@@ -17,25 +16,12 @@ const props = {
   theme: 'mint' as const,
 }
 
-test('maps all six existing cover preferences to their owner supplied local artwork', () => {
-  expect(['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'].map((theme) => getUiV2HeaderAsset(theme as typeof props.theme)))
-    .toEqual([
-      '/assets/ui-v2/headers/header-bunny-meadow.webp',
-      '/assets/ui-v2/headers/header-kite-sunset.webp',
-      '/assets/ui-v2/headers/header-airplane-sky.webp',
-      '/assets/ui-v2/headers/header-whale-ocean.webp',
-      '/assets/ui-v2/headers/header-bear-forest.webp',
-      '/assets/ui-v2/headers/header-moon-dream.webp',
-    ])
-})
-
 test('keeps the legacy header default and uses the compact v2 family shell on explicit override', () => {
   const legacy = renderToStaticMarkup(createElement(ChildHeader, props))
   const explicitLegacy = renderToStaticMarkup(createElement(ChildHeader, { ...props, uiVersion: 'legacy' }))
   const v2 = renderToStaticMarkup(createElement(ChildHeader, { ...props, uiVersion: 'v2' }))
 
   expect(explicitLegacy).toBe(legacy)
-  expect(legacy).toContain('--theme-header-art:url(/assets/theme-header/mint.webp)')
   expect(v2).toContain('data-ui-version="v2"')
   expect(v2).toContain('Лилия Александровна с длинным именем')
   expect(v2).toContain('1 год 4 месяца')

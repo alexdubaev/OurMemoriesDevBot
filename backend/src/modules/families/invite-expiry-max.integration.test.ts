@@ -1,3 +1,4 @@
+import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { randomUUID } from 'node:crypto'
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
@@ -9,7 +10,7 @@ import { loadEnv } from '../../env'
 import { assertTestDatabaseUrl } from '../../../../scripts/repo-env.mjs'
 import { signAccessToken } from '../auth'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = requireIntegrationDatabaseUrl()
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for MAX family invite expiry tests')
 assertTestDatabaseUrl(databaseUrl)
 const databaseAddress = new URL(databaseUrl)

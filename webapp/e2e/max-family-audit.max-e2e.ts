@@ -424,7 +424,7 @@ test('MAX user can leave a terminal unavailable invitation and continue to My Fa
   expect(acceptRequests).toBe(0)
 })
 
-test('MAX family owner accepts a same-name viewer invite and switches family data while an older feed response is pending', async ({ browser, page }, testInfo) => {
+test('MAX-FULL: owner switches family data while an older feed response is pending', async ({ browser, page }, testInfo) => {
   const actorId = 7_800_000 + Math.floor(Math.random() * 100_000)
   const hostId = actorId + 200_000
   const actorToken = await signInMax(page, { id: actorId, first_name: 'MAX family owner' })
@@ -445,20 +445,17 @@ test('MAX family owner accepts a same-name viewer invite and switches family dat
   await signInMax(invitePage, { id: actorId, first_name: 'MAX family owner' }, `invite_${rawInvite}`)
   await expect(invitePage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await invitePage.getByRole('button', { name: 'Присоединиться' }).click()
-  await expect(invitePage.getByText('B-only history')).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(invitePage, 'Family B child', 'B-only history')
   await expect(invitePage.getByText('A-only history')).toHaveCount(0)
   await invitePage.screenshot({ path: testInfo.outputPath('max-family-audit-same-name-family-b.png'), fullPage: true })
 
-  await invitePage.getByRole('button', { name: 'Все семьи' }).click()
-  await expect(invitePage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
-  const familyACard = invitePage.getByRole('button', { name: /Same name family.*Владелец/ })
-  const familyBCard = invitePage.getByRole('button', { name: /Same name family.*Просмотр/ })
+  await openFamilyChooser(invitePage)
+  const familyACard = invitePage.getByRole('button', { name: /Family A child.*Владелец/ })
+  const familyBCard = invitePage.getByRole('button', { name: /Family B child.*Просмотр/ })
   await expect(familyACard).toBeVisible()
   await expect(familyBCard).toBeVisible()
-  await familyACard.click()
-  await expect(invitePage.getByText('A-only history')).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(invitePage, 'Family A child', 'A-only history')
   await expect(invitePage.getByText('B-only history')).toHaveCount(0)
-  await invitePage.getByRole('button', { name: 'Все семьи' }).click()
 
   let holdNextFamilyBFeed = true
   let responseHeld!: () => void
@@ -476,12 +473,16 @@ test('MAX family owner accepts a same-name viewer invite and switches family dat
     }
     await route.continue()
   })
-  await familyBCard.click()
-  await held
-  await invitePage.getByRole('button', { name: 'Все семьи' }).click()
-  await familyACard.click()
-  await expect(invitePage.getByText('A-only history')).toBeVisible({ timeout: 15_000 })
-  releaseResponse()
+  const deliveredFamilyBFeed = invitePage.waitForResponse((response) => response.url().includes(`/api/v1/families/${familyB.id}/memories`) && response.request().method() === 'GET' && response.ok())
+  try {
+    await openFamilyChooser(invitePage)
+    await familyBCard.click()
+    await held
+    await selectFamilyFeed(invitePage, 'Family A child', 'A-only history')
+  } finally {
+    releaseResponse()
+  }
+  await deliveredFamilyBFeed
   await expect(invitePage.getByText('A-only history')).toBeVisible()
   await expect(invitePage.getByText('B-only history')).toHaveCount(0)
   await invitePage.screenshot({ path: testInfo.outputPath('max-family-audit-family-a-after-pending-b-feed.png'), fullPage: true })
@@ -514,10 +515,7 @@ test('MAX family owner accepts a same-name viewer invite and switches family dat
     await committed
     await invitePage.getByRole('button', { name: 'Назад' }).click()
     await invitePage.keyboard.press('Escape')
-    await invitePage.getByRole('button', { name: 'Все семьи' }).click()
-    await expect(invitePage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
-    await familyBCard.click()
-    await expect(invitePage.getByText('B-only history')).toBeVisible({ timeout: 15_000 })
+    await selectFamilyFeed(invitePage, 'Family B child', 'B-only history')
     releasePatch()
     await patchSettled
     await expect(invitePage.getByText('B-only history')).toBeVisible()
@@ -531,7 +529,7 @@ test('MAX family owner accepts a same-name viewer invite and switches family dat
   await hostContext.close()
 })
 
-test('MAX viewer loses active family access after owner removal, then rejoins with a new invite and retained history', async ({ browser, page }, testInfo) => {
+test('MAX-FULL: revoked viewer loses family access and rejoins with retained history', async ({ browser, page }, testInfo) => {
   const viewerId = 7_900_000 + Math.floor(Math.random() * 80_000)
   const ownerId = viewerId + 100_000
   const ownerToken = await signInMax(page, { id: ownerId, first_name: 'MAX revocation owner' })
@@ -552,14 +550,14 @@ test('MAX viewer loses active family access after owner removal, then rejoins wi
   const viewerToken = await signInMax(viewerPage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${initialInvite}`)
   await expect(viewerPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await viewerPage.getByRole('button', { name: 'Присоединиться' }).click()
-  await expect(viewerPage.getByText('B retained history')).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(viewerPage, 'B child', 'B retained history')
   await expect(viewerPage.getByText('Synthetic retained photo')).toBeVisible()
   await expect(viewerPage.locator('[data-slot="voice-player"]')).toBeVisible()
   const bNote = viewerPage.locator(`[data-memory-id="${familyB.noteId}"]`)
+  await expect(bNote).toBeVisible()
   const reactionResponse = viewerPage.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyB.id}/memories/${familyB.noteId}/reaction`) && response.request().method() === 'PUT')
-  const reactionTrigger = bNote.getByRole('button', { name: 'Добавить реакцию' })
-  await reactionTrigger.focus()
-  await reactionTrigger.press('Enter')
+  await bNote.focus()
+  await bNote.press('Shift+F10')
   const heartChoice = viewerPage.getByRole('button', { name: 'Сердце' })
   await expect(heartChoice).toBeVisible()
   await heartChoice.press('Enter')
@@ -567,6 +565,7 @@ test('MAX viewer loses active family access after owner removal, then rejoins wi
   expect(reaction.status()).toBe(200)
   expect(await reaction.json()).toMatchObject({ currentUserReaction: 'heart', reactionCounts: { heart: 1 } })
   await expect(bNote.getByLabel('Реакции: Сердце 1, ваша реакция')).toBeVisible()
+  await expect(bNote).toBeVisible()
   const activeHomeResponse = await viewerPage.request.get('/api/v1/me/families', { headers: { Authorization: `Bearer ${viewerToken}` } })
   expect(activeHomeResponse.status()).toBe(200)
   const activeHome = await activeHomeResponse.json() as { items: Array<{ familyId: string; membershipEpoch: number }> }
@@ -617,7 +616,7 @@ test('MAX viewer loses active family access after owner removal, then rejoins wi
   const rejoinToken = await signInMax(rejoinPage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${nextInvite}`)
   await expect(rejoinPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await rejoinPage.getByRole('button', { name: 'Присоединиться' }).click()
-  await expect(rejoinPage.getByText('B retained history')).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(rejoinPage, 'B child', 'B retained history')
   const rejoinedHome = await rejoinPage.request.get('/api/v1/me/families', { headers: { Authorization: `Bearer ${rejoinToken}` } })
   expect(rejoinedHome.status()).toBe(200)
   const rejoined = (await rejoinedHome.json() as { items: Array<{ familyId: string; membershipEpoch: number }> }).items.find((item) => item.familyId === familyB.id)
@@ -641,6 +640,21 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
   const response = await authResponse
   const token = (await response.json() as { accessToken: string }).accessToken
   return token
+}
+
+async function openFamilyChooser(page: import('@playwright/test').Page) {
+  const heading = page.getByRole('heading', { name: 'Мои семьи' })
+  if (await heading.isVisible().catch(() => false)) return
+  await page.getByRole('button', { name: /Сменить семью/ }).click()
+  await expect(heading).toBeVisible()
+}
+
+async function selectFamilyFeed(page: import('@playwright/test').Page, childName: string, memoryBody: string) {
+  await openFamilyChooser(page)
+  const family = page.getByRole('button', { name: new RegExp(childName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
+  await expect(family).toBeVisible()
+  await family.click()
+  await expect(page.getByText(memoryBody, { exact: true })).toBeVisible({ timeout: 15_000 })
 }
 
 async function createAuditFamily(page: import('@playwright/test').Page, token: string, name: string, childName: string, noteBody: string, withMedia = false) {

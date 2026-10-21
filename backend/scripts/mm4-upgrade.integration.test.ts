@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from 'bun:test'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
 import { Client } from 'pg'
 
 const backendRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -21,7 +22,7 @@ const expectedUpgradeMigrations = [
 ]
 
 test('upgrades populated pre-MM memories without changing legacy publication history', async () => {
-  const databaseUrl = process.env.TEST_DATABASE_URL
+  const databaseUrl = requireIntegrationDatabaseUrl()
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required')
 
   const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))

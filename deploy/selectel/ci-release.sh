@@ -50,6 +50,35 @@ require_root() {
   [ "$(id -u)" -eq 0 ] || die 'the Selectel release entry point must run as root'
 }
 
+release_failure() {
+    local status=$?
+    trap - EXIT
+    [ "$status" -eq 0 ] && exit 0
+    if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
+      printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
+      if ! FORWARD_MARKER="$MM0_FORWARD_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
+        printf 'ERROR: marker-based quiescence failed; stopping every application writer.\n' >&2
+        MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
+          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
+      fi
+    elif [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
+      if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+        printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
+      fi
+      printf 'ERROR: pre-B2 runtime cannot be restored after this release boundary; keeping legacy writers stopped for forward recovery.\n' >&2
+      if ! MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
+        MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
+          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
+      fi
+    elif [ "$PROMOTION_STARTED" = true ]; then
+      printf 'ERROR: release promotion failed; attempting application rollback.\n' >&2
+      if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback; then
+        printf 'ERROR: automatic application rollback failed; a compatible forward fix may be required.\n' >&2
+      fi
+    fi
+    exit "$status"
+  }
+
 validate_inputs() {
   [[ "$PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'release SHA must be a 40-character lowercase Git SHA'
   [ "$DEPLOY_CONFIRMATION" = DEPLOY ] || die 'deployment confirmation must be exactly DEPLOY'
@@ -68,6 +97,15 @@ validate_inputs() {
     [[ "$SELECTEL_PREBUILT_WEBAPP_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
       die 'SELECTEL_PREBUILT_WEBAPP_ID must be a lowercase sha256:64hex image ID'
     PREBUILT_IMAGES=true
+  fi
+}
+
+clear_release_markers() {
+  PROMOTION_STARTED=false
+  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$MM0_ACTIVE_MARKER" = "$MM0_FORWARD_MARKER" ]; then rm -- "$MM0_FORWARD_MARKER"; fi
+  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] &&
+     { [ "$LEGACY_MM0_RUNTIME" = false ] || [ "$MM0_ACTIVE_MARKER" = "$FORWARD_MARKER" ]; }; then
+    rm -- "$FORWARD_MARKER"
   fi
 }
 
@@ -442,65 +480,7 @@ EOF
   printf 'Release manifest written: %s\n' "$(basename "$manifest")"
 }
 
-main() {
-  require_root
-  require_command awk
-  require_command cp
-  require_command date
-  require_command df
-  require_command docker
-  require_command git
-  require_command getent
-  require_command id
-  require_command install
-  require_command sudo
-  require_command mv
-  require_command flock
-  require_command curl
-  require_command sed
-  require_command find
-  require_command sha256sum
-  require_command stat
-  require_command sync
-  validate_inputs
-  [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
-  exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
-  flock -n 9 || die 'another Selectel deployment is already running'
-  export SELECTEL_DEPLOY_LOCK_FD=9
-  export SELECTEL_CI_RELEASE=true
-
-  release_failure() {
-    local status=$?
-    trap - EXIT
-    [ "$status" -eq 0 ] && exit 0
-    if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
-      printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
-      if ! FORWARD_MARKER="$MM0_FORWARD_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
-        printf 'ERROR: marker-based quiescence failed; stopping every application writer.\n' >&2
-        MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
-          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
-      fi
-    elif [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] && [ "$QUIESCE_STARTED" = true ]; then
-      if [ "$LEGACY_MM0_RUNTIME" = true ]; then
-        printf 'ERROR: FORWARD_FIX_REQUIRED: MM0 migration may have applied; old writers must remain stopped.\n' >&2
-      fi
-      printf 'ERROR: pre-B2 runtime cannot be restored after this release boundary; keeping legacy writers stopped for forward recovery.\n' >&2
-      if ! MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy; then
-        MM0_BOUNDARY="$LEGACY_MM0_RUNTIME" bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-all ||
-          printf 'ERROR: could not confirm all writers are stopped; immediate operator inspection is required.\n' >&2
-      fi
-    elif [ "$PROMOTION_STARTED" = true ]; then
-      printf 'ERROR: release promotion failed; attempting application rollback.\n' >&2
-      if ! bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback; then
-        printf 'ERROR: automatic application rollback failed; a compatible forward fix may be required.\n' >&2
-      fi
-    fi
-    exit "$status"
-  }
-  trap release_failure EXIT
-
-  validate_repository
-  validate_planned_source
+recover_forward_markers() {
   if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
     load_mm0_marker
     if [ -e "$FORWARD_MARKER" ] || [ -L "$FORWARD_MARKER" ]; then
@@ -528,6 +508,52 @@ main() {
     export MEMOLY_PRODUCT_SHA="$MARKER_TARGET_SHA"
     bash "$APP_ROOT/deploy/selectel/redeploy.sh" quiesce-legacy
   fi
+}
+
+promote_runtime() {
+  PROMOTION_STARTED=true
+  if [ "$LEGACY_MM0_RUNTIME" = true ]; then
+    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
+  else
+    bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
+  fi
+}
+
+backup_mm0_database() {
+  FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" backup-migration
+}
+
+main() {
+  require_root
+  require_command awk
+  require_command cp
+  require_command date
+  require_command df
+  require_command docker
+  require_command git
+  require_command getent
+  require_command id
+  require_command install
+  require_command sudo
+  require_command mv
+  require_command flock
+  require_command curl
+  require_command sed
+  require_command find
+  require_command sha256sum
+  require_command stat
+  require_command sync
+  validate_inputs
+  [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
+  exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
+  flock -n 9 || die 'another Selectel deployment is already running'
+  export SELECTEL_DEPLOY_LOCK_FD=9
+  export SELECTEL_CI_RELEASE=true
+  trap release_failure EXIT
+
+  validate_repository
+  validate_planned_source
+  recover_forward_markers
   check_disk_space
   verify_rollback_file
   if [ "$RESUMING_FORWARD_ONLY" = false ]; then
@@ -553,7 +579,7 @@ main() {
   export MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-app.memoly.ru}
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" preflight
   if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = true ]; then
-    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" backup-migration
+    backup_mm0_database
   fi
   if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = false ]; then
     bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status ||
@@ -585,21 +611,13 @@ main() {
     fi
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
-  PROMOTION_STARTED=true
-  if [ "$LEGACY_MM0_RUNTIME" = true ]; then
-    FORWARD_MARKER="$MM0_ACTIVE_MARKER" MM0_BOUNDARY=true bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
-  else
-    bash "$APP_ROOT/deploy/selectel/redeploy.sh" deploy
-  fi
+  promote_runtime
   verify_promoted_revision
   public_smoke
   write_release_manifest
-  PROMOTION_STARTED=false
-  if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$MM0_ACTIVE_MARKER" = "$MM0_FORWARD_MARKER" ]; then rm -- "$MM0_FORWARD_MARKER"; fi
-  if [ "$LEGACY_MEMBERSHIP_RUNTIME" = true ] &&
-     { [ "$LEGACY_MM0_RUNTIME" = false ] || [ "$MM0_ACTIVE_MARKER" = "$FORWARD_MARKER" ]; }; then
-    rm -- "$FORWARD_MARKER"
-  fi
+  clear_release_markers
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
