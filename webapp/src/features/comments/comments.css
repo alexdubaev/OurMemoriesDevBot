@@ -10,6 +10,7 @@
 .comments-media-context { position: relative; display: grid; width: 100%; height: 100%; min-height: 0; place-items: center; overflow: hidden; background: var(--memory-surface-inset, #f2eeeb); touch-action: pan-y; }
 .comments-media-image { display: block; width: 100%; height: 100%; object-fit: contain; }
 .comments-media-poster { position: relative; display: grid; width: 100%; height: 100%; place-items: center; }
+.comments-media-poster img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .comments-media-play { position: absolute; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 50%; background: rgb(40 45 40 / .68); }
 .comments-media-placeholder { color: var(--memory-text-muted, #756a71); font-size: 13px; }
 .comments-media-note { max-width: 92%; max-height: 82%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -55,8 +56,11 @@
 .comments-entry [data-slot='webp-icon'] { width: 18px; height: 18px; }
 .comments-entry:focus-visible, .comments-close:focus-visible, .comments-composer button:focus-visible, .comments-item-actions button:focus-visible { outline: 2px solid var(--memory-accent-strong, #a83750); outline-offset: 2px; }
 @media (max-height: 560px), (orientation: landscape) { .comments-panel { border-radius: 14px 14px 0 0; } .comments-context:not(.comments-context-compact) { min-height: 44px; max-height: 24dvh; flex-basis: 24dvh; margin-block: 4px; } }
-.comments-panel .comments-mixed-carousel, .comments-panel .comments-mixed-carousel .memoly-mixed-viewport, .comments-panel .comments-mixed-carousel .memoly-mixed-slide { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
-.comments-panel .comments-mixed-carousel .memoly-mixed-slide { flex-basis: 100%; }
+.comments-panel .comments-mixed-carousel, .comments-panel .comments-mixed-carousel .memoly-mixed-viewport, .comments-panel .comments-mixed-carousel .memoly-mixed-track, .comments-panel .comments-mixed-carousel .memoly-mixed-slide, .comments-panel .comments-mixed-carousel .memoly-mixed-slide-media { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; }
+.comments-panel .comments-mixed-carousel .memoly-mixed-track { display: flex; align-items: stretch; }
+.comments-panel .comments-mixed-carousel .memoly-mixed-slide { flex: 0 0 100%; }
+.comments-panel .comments-mixed-carousel .memoly-mixed-slide-media .ml-media-button, .comments-panel .comments-mixed-carousel .memoly-mixed-slide-media .ml-media-slot { height: 100%; }
+.comments-panel .comments-mixed-carousel .memoly-mixed-slide-media img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .comments-panel .comments-mixed-carousel .memoly-mixed-controls { display: none; }
 .comments-panel .comments-mixed-carousel .memoly-mixed-count { position: absolute; z-index: 2; right: 8px; bottom: 8px; min-width: 42px; padding: 4px 8px; border-radius: 999px; color: white; background: rgb(35 37 35 / .68); text-align: center; font-size: 11px; }
 @media (max-height: 560px), (orientation: landscape) { .comments-panel { --comments-context-height: 24dvh; } }
