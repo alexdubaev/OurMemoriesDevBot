@@ -82,4 +82,6 @@ The follow-up branch fix/comments-release-invite-race starts at that accepted ma
 
 ## Owner correction — comments-only bottom sheet (2026-10-21)
 
+The sheet occupies half the screen, bounded by the available keyboard/host viewport. Long comments scroll inside it; the original dimmed feed photo stays visible above it.
+
 The owner rejected the duplicated photo/carousel inside the discussion after production review. The replacement decision is explicit: retain the existing Instagram-style bottom comments sheet and dimmed original feed photo; do not move, resize or scroll the original photo. Remove the sheet media slot, second carousel and their dead context-only branches/styles. Preserve comments scheduling, avatars, draft/Back/focus safeguards, and ordinary feed/fullscreen behavior. This decision supersedes the earlier in-sheet media context in this document. Correction branch fix/comments-keep-feed-photo-focus starts at accepted main 33a0054c3c71372aa5509ee8ebfa4578ad512ea1. Verification is targeted to the changed UI and exact release pairing; unrelated MAX/backend acceptance is not reopened.

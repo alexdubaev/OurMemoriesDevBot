@@ -500,9 +500,11 @@ test('comments stay compact at short viewport and reactions remain available in 
   const geometry = await page.evaluate(() => {
     const dialog = document.querySelector('.comments-panel')!.getBoundingClientRect()
     const send = document.querySelector('.comments-composer button[type="submit"]')!.getBoundingClientRect()
-    return { dialogHeight: dialog.height, sendBottom: send.bottom }
+    return { dialogHeight: dialog.height, dialogTop: dialog.top, sendBottom: send.bottom }
   })
-  expect(geometry.dialogHeight).toBeLessThan(420)
+  expect(geometry.dialogHeight).toBeGreaterThanOrEqual(190)
+  expect(geometry.dialogHeight).toBeLessThanOrEqual(220)
+  expect(geometry.dialogTop).toBeGreaterThanOrEqual(200)
   expect(geometry.sendBottom).toBeLessThanOrEqual(420)
 })
 
