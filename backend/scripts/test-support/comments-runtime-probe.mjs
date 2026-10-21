@@ -46,7 +46,8 @@ const request = async (path, token, method = 'GET', body, idempotencyKey) => {
 try {
   if (mode === 'candidate-before') {
     const seed = JSON.parse(readFileSync(seedPath, 'utf8'))
-    const subject = `comments-compat-${crypto.randomUUID()}`
+    // MAX subjects are numeric in the production schema and fixture conventions.
+    const subject = `${Date.now()}${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`
     const identity = await prisma.externalIdentity.create({ data: { userId: seed.userId, provider: 'max', subject } })
     await prisma.pilotAdmission.create({ data: { provider: 'max', subject } })
     const session = await prisma.authSession.create({ data: {
@@ -106,6 +107,9 @@ try {
       const replay = await request(commentsPath, state.token, 'POST', { body: state.requestBody }, state.requestId)
       assert.equal(replay.response.status, 201)
       assert.equal(replay.body.comment.id, state.commentId)
+      const deletedReplay = await request(commentsPath, state.token, 'POST', { body: 'COM-4 API-created tombstone' }, state.tombstoneRequestId)
+      assert.equal(deletedReplay.response.status, 409)
+      assert.equal(deletedReplay.body.error.code, 'CONFLICT')
       for (const rollbackWrite of state.rollbackMemoryIds ?? []) {
         const oldWrite = await request(`/families/${state.familyId}/memories/${rollbackWrite.id}`, state.token)
         assert.equal(oldWrite.response.status, 200)
