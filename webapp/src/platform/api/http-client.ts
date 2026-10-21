@@ -28,18 +28,20 @@ export class ApiRequestError extends Error {
   readonly code: string
   readonly requestId: string | null
   readonly fieldErrors?: Record<string, string>
+  readonly retryAfterMs?: number
 
   constructor(
     status: number,
     code: string,
     message: string,
-    options: { requestId?: string; fieldErrors?: Record<string, string> } = {},
+    options: { requestId?: string; fieldErrors?: Record<string, string>; retryAfterMs?: number } = {},
   ) {
     super(message)
     this.status = status
     this.code = code
     this.requestId = options.requestId ?? null
     this.fieldErrors = options.fieldErrors
+    this.retryAfterMs = options.retryAfterMs
   }
 }
 
@@ -120,18 +122,28 @@ async function withDeadline<T>(options: HttpRequestOptions, operation: (signal: 
 
 async function toApiError(response: Response, signal?: AbortSignal) {
   const fallbackMessage = `Request failed with status ${response.status}`
+  const retryAfterMs = parseRetryAfter(response.headers.get('Retry-After'))
 
   try {
     const parsed = apiErrorSchema.parse(await response.json())
     return new ApiRequestError(response.status, parsed.error.code, parsed.error.message, {
       requestId: parsed.error.requestId,
       fieldErrors: parsed.error.fieldErrors,
+      retryAfterMs,
     })
   } catch {
     // An abort that lands while the error body is still streaming rejects `json()` with the abort
     // reason. Surface that reason instead of a status-coded error a caller could act on, such as
     // treating a cancelled 401 as an expired session.
     signal?.throwIfAborted()
-    return new ApiRequestError(response.status, 'INTERNAL_ERROR', fallbackMessage)
+    return new ApiRequestError(response.status, 'INTERNAL_ERROR', fallbackMessage, { retryAfterMs })
   }
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000)
+  const date = Date.parse(value)
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined
 }

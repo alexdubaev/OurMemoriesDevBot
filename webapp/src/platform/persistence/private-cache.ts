@@ -7,6 +7,8 @@ export const PRIVATE_CACHE_LIMIT_ENTRIES = 100
 export const PRIVATE_CACHE_MAX_IMAGE_BYTES = 2 * 1024 * 1024
 export const PRIVATE_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000
 export const privateFamilyAccessRevokedEvent = 'memoly:private-family-access-revoked'
+export type PrivateCacheInvalidation = { type: 'identity' } | { type: 'all' } | { type: 'user'; userId: string } | { type: 'family'; userId: string; familyId: string }
+const privateCacheInvalidationListeners = new Set<(invalidation: PrivateCacheInvalidation) => void>()
 const PRIVATE_QUERY_LIMIT_ENTRIES = 100
 const PRIVATE_QUERY_LIMIT_BYTES = 2 * 1024 * 1024
 const IDB_OPERATION_DEADLINE_MS = 3000
@@ -20,7 +22,17 @@ let identityGeneration = 0
 let operationQueue = Promise.resolve()
 const revokedFamilyCache = new Set<string>()
 const familyCacheGeneration = new Map<string, number>()
+const activeFamilyByUser = new Map<string, string>()
 const familyCacheScopeKey = (userId: string, familyId: string) => `${userId}:${familyId}`
+
+export function subscribePrivateCacheInvalidation(listener: (invalidation: PrivateCacheInvalidation) => void) {
+  privateCacheInvalidationListeners.add(listener)
+  return () => privateCacheInvalidationListeners.delete(listener)
+}
+
+function emitPrivateCacheInvalidation(invalidation: PrivateCacheInvalidation) {
+  for (const listener of privateCacheInvalidationListeners) listener(invalidation)
+}
 
 export const persistentUiQueryKey = (userId: string) => ['session', 'persistent-ui', userId] as const
 
@@ -54,7 +66,9 @@ type CacheEntry = {
 }
 
 export function activatePrivateCacheIdentity(userId: string | null) {
+  emitPrivateCacheInvalidation({ type: 'identity' })
   activeIdentity = userId
+  activeFamilyByUser.clear()
   identityGeneration += 1
   return identityGeneration
 }
@@ -68,9 +82,17 @@ export function isActivePrivateCacheIdentity(userId: string, generation: number)
 }
 
 export function allowPrivateFamilyCache(userId: string, familyId: string) {
+  const previousFamilyId = activeFamilyByUser.get(userId)
+  if (previousFamilyId && previousFamilyId !== familyId) {
+    const previousKey = familyCacheScopeKey(userId, previousFamilyId)
+    familyCacheGeneration.set(previousKey, (familyCacheGeneration.get(previousKey) ?? 0) + 1)
+    emitPrivateCacheInvalidation({ type: 'family', userId, familyId: previousFamilyId })
+  }
+  activeFamilyByUser.set(userId, familyId)
   const key = familyCacheScopeKey(userId, familyId)
   revokedFamilyCache.delete(key)
   familyCacheGeneration.set(key, (familyCacheGeneration.get(key) ?? 0) + 1)
+  emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
 }
 
 export function privateFamilyCacheGeneration(userId: string, familyId: string) {
@@ -117,6 +139,9 @@ export function persistPrivateQueryCache(queryClient: QueryClient, userId: strin
 
 export async function clearPrivateUserCache(userId: string, expectedGeneration?: number) {
   const generation = expectedGeneration ?? identityGeneration
+  if (expectedGeneration !== undefined && !isActivePrivateCacheIdentity(userId, expectedGeneration)) return
+  emitPrivateCacheInvalidation({ type: 'user', userId })
+  activeFamilyByUser.delete(userId)
   await enqueue(async () => {
     if (expectedGeneration !== undefined && !isActivePrivateCacheIdentity(userId, expectedGeneration)) return
     const db = await openDatabase()
@@ -136,6 +161,8 @@ export async function clearPrivateUserCache(userId: string, expectedGeneration?:
 }
 
 export async function clearAllPrivateCache() {
+  emitPrivateCacheInvalidation({ type: 'all' })
+  activeFamilyByUser.clear()
   await enqueue(async () => {
     if (typeof indexedDB === 'undefined') return
     const db = await openDatabase()
@@ -151,6 +178,8 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
   const scopeKey = familyCacheScopeKey(userId, familyId)
   revokedFamilyCache.add(scopeKey)
   familyCacheGeneration.set(scopeKey, (familyCacheGeneration.get(scopeKey) ?? 0) + 1)
+  if (activeFamilyByUser.get(userId) === familyId) activeFamilyByUser.delete(userId)
+  emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
   await removePrivateFamilyQueries(queryClient, familyId)
   queryClient.setQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(userId), (current) => {
     if (!current) return current

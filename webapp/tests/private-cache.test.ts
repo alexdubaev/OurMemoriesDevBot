@@ -7,6 +7,9 @@ import {
   isActivePrivateCacheIdentity,
   isPersistableQueryKey,
   privateCacheIdentityGeneration,
+  subscribePrivateCacheInvalidation,
+  allowPrivateFamilyCache,
+  clearPrivateUserCache,
   restorePrivateQueryCache,
 } from '../src/platform/persistence/private-cache'
 
@@ -70,5 +73,31 @@ describe('private cache boundaries', () => {
     activatePrivateCacheIdentity('user-b')
     expect(isActivePrivateCacheIdentity('user-a', generation)).toBe(false)
     expect(isActivePrivateCacheIdentity('user-b', generation)).toBe(false)
+  })
+
+  it('notifies avatar owners synchronously when switching private family scope', () => {
+    activatePrivateCacheIdentity('user-a')
+    const invalidations: string[] = []
+    const unsubscribe = subscribePrivateCacheInvalidation((invalidation) => {
+      if (invalidation.type === 'family') invalidations.push(invalidation.familyId)
+    })
+    allowPrivateFamilyCache('user-a', 'family-a')
+    allowPrivateFamilyCache('user-a', 'family-b')
+    unsubscribe()
+    expect(invalidations).toEqual(['family-a', 'family-a', 'family-b'])
+    activatePrivateCacheIdentity(null)
+  })
+
+  it('does not invalidate a new identity for a stale expected-generation clear', async () => {
+    const oldGeneration = activatePrivateCacheIdentity('user-a')
+    activatePrivateCacheIdentity('user-b')
+    const invalidations: string[] = []
+    const unsubscribe = subscribePrivateCacheInvalidation((invalidation) => {
+      if (invalidation.type === 'user') invalidations.push(invalidation.userId)
+    })
+    await clearPrivateUserCache('user-a', oldGeneration)
+    unsubscribe()
+    expect(invalidations).toEqual([])
+    activatePrivateCacheIdentity(null)
   })
 })

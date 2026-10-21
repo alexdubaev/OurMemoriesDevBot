@@ -15,7 +15,7 @@ const commentsPath = (familyId: string, memoryId: string) => `${familyMemoryPath
 export function loadComments(transport: AuthenticatedTransport, familyId: string, memoryId: string, cursor?: string | null, signal?: AbortSignal) {
   const params = new URLSearchParams({ limit: '20' })
   if (cursor) params.set('cursor', cursor)
-  return transport.request(`${commentsPath(familyId, memoryId)}?${params}`, commentPageSchema, { signal })
+  return transport.request(`${commentsPath(familyId, memoryId)}?${params}`, commentPageSchema, { signal, timeoutMs: 15_000 })
 }
 
 export function createComment(transport: AuthenticatedTransport, familyId: string, memoryId: string, attempt: CommentCreateAttempt, signal?: AbortSignal) {

@@ -9,6 +9,8 @@ import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
 
 const backendRoot = resolve(import.meta.dir, '..')
 const root = resolve(backendRoot, '..')
+// Windows directory symlinks require Developer Mode or elevation; junctions do not.
+const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
 const legacySource = '3fce2739205da927b95eb3379b1d066b61282965'
 const legacyTarget = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const attestedSource = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
@@ -41,9 +43,9 @@ async function roundtrip(sourceRevision: string, targetRevision: string, attestS
     const archive = run('git', ['archive', revision, 'backend', 'packages/contracts'], { encoding: null })
     expect(archive.status).toBe(0)
     expect(run('tar', ['-x', '-C', destination], { input: archive.stdout }).status).toBe(0)
-    symlinkSync(resolve(root, 'node_modules'), resolve(destination, 'node_modules'), 'dir')
-    if (existsSync(resolve(backendRoot, 'node_modules'))) symlinkSync(resolve(backendRoot, 'node_modules'), resolve(destination, 'backend/node_modules'), 'dir')
-    symlinkSync(resolve(backendRoot, 'src/generated'), resolve(destination, 'backend/src/generated'), 'dir')
+    symlinkSync(resolve(root, 'node_modules'), resolve(destination, 'node_modules'), directoryLinkType)
+    if (existsSync(resolve(backendRoot, 'node_modules'))) symlinkSync(resolve(backendRoot, 'node_modules'), resolve(destination, 'backend/node_modules'), directoryLinkType)
+    symlinkSync(resolve(backendRoot, 'src/generated'), resolve(destination, 'backend/src/generated'), directoryLinkType)
   }
   const run = (command: string, args: string[], options: Record<string, unknown> = {}) =>
     spawnSync(command, args, { cwd: root, encoding: 'utf8', timeout: 40_000, maxBuffer: 8 * 1024 * 1024, ...options })
