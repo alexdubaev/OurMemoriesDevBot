@@ -333,11 +333,10 @@ function rollbackSource(role) {
     return source
   }
 
-  if (role === 'selectel') {
-    throw new Error('selectel rollback source requires clean HEAD with the exact 9afbb165… runtime fingerprint')
-  }
-
-  const fallback = role === 'candidate' ? candidateRuntimeSha : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
+  const fallback = role === 'selectel' ? '91f48719309e20456b1659092a1bf209c3aa3653'
+    : role === 'candidate' ? candidateRuntimeSha
+      : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680'
+        : rollback180
   assert.equal(runtimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const directory = mkdtempSync(resolve(root, '.scratch', `rollback-${role}-worktree-`))

@@ -16,3 +16,7 @@ Run on a physical iPhone and Android device inside MAX. Repeat from a chat and f
 4. Check feed scrolling, carousel swipes, comments, text input, and the app's back action to ensure normal interactions still work.
 
 Record any absent warning, unexpected prompt, or interaction regression with the device/app details above. Browser tests can verify bridge setup and React lifecycle behavior but cannot validate native warning UI.
+
+## Rollback test fixture note
+
+The rollback regression's Selectel source fixture is pinned to accepted base `91f48719309e20456b1659092a1bf209c3aa3653`. That commit retains the expected `9afbb165…` production-runtime fingerprint and descends from the UI v4 rollback target. Pinning the fixture keeps the test's source tree stable when unrelated app runtime changes (such as this MAX bridge update) alter the current checkout fingerprint. The production rollback fingerprint and guards are unchanged; the existing test still mutates the fixture and asserts rejection before service changes.
