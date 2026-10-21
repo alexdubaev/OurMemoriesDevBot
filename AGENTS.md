@@ -160,6 +160,7 @@ Owner policy: the agent owns the agreed result, not just the plan. A technical o
 8. **Respect precedence.** Higher-priority instructions, direct owner decisions and applicable project safeguards retain precedence. This policy changes engineering responsibility, not permissions.
 
 The agent solves technical problems and owns the result; the owner decides product direction and substantial risks. The owner is not a message relay between AIs.
+
 ## Решение владельца 2026-10-21: согласование действий без обрыва задачи
 
 Когда выполнение **уже назначенной** задачи требует разрешения на конкретное действие (например, временную остановку сервисов, production maintenance, миграцию, выкладку, доступ или существенный риск), не превращай это в отдельную задачу и не закрывай её общим техническим отчётом `BLOCKED`. До запроса самостоятельно выполни все безопасные разрешённые шаги: диагноз, выбор решения, проверку на тестовом контуре, план восстановления, оценку влияния и продолжительности, подготовку необходимых артефактов. Затем установи `WAITING_FOR_OWNER_APPROVAL` и задай **один короткий вопрос простым русским языком**, который допускает ответ «Да» или «Нет»:
