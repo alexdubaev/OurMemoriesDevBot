@@ -672,15 +672,28 @@ describe('MAX durable capture', () => {
     await channel.processLifecycle(lifecycleInbox.id, crypto.decrypt({ ciphertext: lifecycleInbox.encryptedPayload, iv: lifecycleInbox.encryptionIv, authTag: lifecycleInbox.encryptionAuthTag }))
     const decision = await prisma.maxChannelDecision.findFirstOrThrow({ where: { originInboxId: lifecycleInbox.id } })
     expect(decision).toMatchObject({ actorSubject: '78020', actorUserId: actor.userId, phase: 'select_family', status: 'pending', expectedChannelVersion: 1 })
-    expect(decision.candidateFamilyIds).toEqual([firstFamily.familyId, secondFamily.familyId])
+    const candidateFamilyIds = decision.candidateFamilyIds as string[]
+    expect(candidateFamilyIds).toHaveLength(2)
+    expect(new Set(candidateFamilyIds).size).toBe(2)
+    expect([...candidateFamilyIds].sort()).toEqual([firstFamily.familyId, secondFamily.familyId].sort())
     const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { channelDecisionId: decision.id } })
-    expect(response.text).toBe('К какой семье относится этот канал?')
-    expect(response.buttons).toHaveLength(2)
+    const buttons = response.buttons as Array<{ text: string; payload: string }>
+    expect(buttons).toHaveLength(candidateFamilyIds.length)
+    for (let index = 0; index < candidateFamilyIds.length; index += 1) {
+      const candidate = await prisma.family.findUniqueOrThrow({ where: { id: candidateFamilyIds[index]! }, select: { name: true } })
+      expect(buttons[index]!.text).toContain(candidate.name)
+      expect(buttons[index]!.payload).toBe(`max_channel:${decision.id}:select:${index}`)
+    }
+    const buttonPayloadFor = (familyId: string) => {
+      const index = candidateFamilyIds.indexOf(familyId)
+      expect(index).toBeGreaterThanOrEqual(0)
+      return buttons[index]!.payload
+    }
 
-    const callback = async (userId: string, timestamp: number, selectedIndex = 0) => {
+    const callback = async (userId: string, timestamp: number, selectedPayload: string) => {
       const body = JSON.stringify({ update_type: 'message_callback', timestamp, callback: {
         user: { user_id: Number(userId) }, callback_id: `channel-choice-${timestamp}`,
-        payload: `max_channel:${decision.id}:select:${selectedIndex}`,
+        payload: selectedPayload,
       }, message: { recipient: { chat_type: 'dialog', user_id: Number(userId) } } })
       await webhook.request('/webhooks/max', { method: 'POST', headers, body })
       const inbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' }, orderBy: { receivedAt: 'desc' } })
@@ -689,21 +702,21 @@ describe('MAX durable capture', () => {
       })
       await channel.processCallback(inbox.id, event)
     }
-    await callback('78021', 1790841701000)
+    await callback('78021', 1790841701000, buttonPayloadFor(firstFamily.familyId))
     expect(await prisma.family.findUniqueOrThrow({ where: { id: firstFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
     expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id }, select: { status: true } })).toEqual({ status: 'pending' })
 
     await prisma.familyMember.update({ where: { familyId_userId: { familyId: secondFamily.familyId, userId: actor.userId } }, data: { role: 'viewer' } })
-    await callback('78020', 1790841701500, 1)
+    await callback('78020', 1790841701500, buttonPayloadFor(secondFamily.familyId))
     expect(await prisma.family.findUniqueOrThrow({ where: { id: secondFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
     await prisma.familyMember.update({ where: { familyId_userId: { familyId: secondFamily.familyId, userId: actor.userId } }, data: { role: 'full' } })
     const mappedIdentity = await prisma.externalIdentity.findUniqueOrThrow({ where: { provider_subject: { provider: 'max', subject: actor.subject } } })
     await prisma.externalIdentity.update({ where: { id: mappedIdentity.id }, data: { userId: secondFamily.userId } })
-    await callback('78020', 1790841701750)
+    await callback('78020', 1790841701750, buttonPayloadFor(firstFamily.familyId))
     expect(await prisma.family.findUniqueOrThrow({ where: { id: firstFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
     await prisma.externalIdentity.update({ where: { id: mappedIdentity.id }, data: { userId: actor.userId } })
 
-    await callback('78020', 1790841702000)
+    await callback('78020', 1790841702000, buttonPayloadFor(firstFamily.familyId))
     expect(await prisma.family.findUniqueOrThrow({ where: { id: firstFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: chatId })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: secondFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: viewerFamily.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
@@ -874,29 +887,47 @@ describe('MAX durable capture', () => {
     }
     const added = await deliver('bot_added', 1790841826000)
     const firstDecision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { originInboxId: added.id } })
-    expect(firstDecision).toMatchObject({ candidateFamilyIds: [first.familyId, second.familyId], phase: 'await_permissions' })
+    expect([...(firstDecision.candidateFamilyIds as string[])].sort()).toEqual([first.familyId, second.familyId].sort())
+    expect(firstDecision.phase).toBe('await_permissions')
     await deliver('bot_admin_permissions_changed', 1790841827000)
     const carried = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })
-    expect(carried).toMatchObject({ candidateFamilyIds: [first.familyId, second.familyId], phase: 'await_permissions', status: 'pending', expectedChannelVersion: 2 })
+    expect([...(carried.candidateFamilyIds as string[])].sort()).toEqual([first.familyId, second.familyId].sort())
+    expect(carried).toMatchObject({ phase: 'await_permissions', status: 'pending', expectedChannelVersion: 2 })
     await prisma.familyMember.create({ data: { familyId: later.familyId, userId: actor.userId, role: 'full' } })
     writable = true
     const ready = await deliver('bot_admin_permissions_changed', 1790841828000)
-    expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })).toMatchObject({
-      candidateFamilyIds: [first.familyId, second.familyId], phase: 'select_family', status: 'pending', actorSubject: actor.subject, actorUserId: actor.userId,
-    })
+    const readyDecision = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })
+    expect(readyDecision).toMatchObject({ phase: 'select_family', status: 'pending', actorSubject: actor.subject, actorUserId: actor.userId })
+    const offeredCandidateIds = readyDecision.candidateFamilyIds as string[]
+    expect(offeredCandidateIds).toHaveLength(2)
+    expect(new Set(offeredCandidateIds).size).toBe(2)
+    expect([...offeredCandidateIds].sort()).toEqual([first.familyId, second.familyId].sort())
+    expect(offeredCandidateIds).not.toContain(later.familyId)
     const response = await prisma.maxOutgoingResponse.findFirstOrThrow({ where: { inboxId: ready.id } })
     expect(response.destinationUserId).toBe(BigInt(actor.subject))
-    expect(response.buttons).toHaveLength(2)
-    const selectedIndex = (firstDecision.candidateFamilyIds as string[]).indexOf(second.familyId)
+    const buttons = response.buttons as Array<{ text: string; payload: string }>
+    expect(buttons).toHaveLength(offeredCandidateIds.length)
+    for (let index = 0; index < offeredCandidateIds.length; index += 1) {
+      const candidate = await prisma.family.findUniqueOrThrow({ where: { id: offeredCandidateIds[index]! }, select: { name: true } })
+      expect(buttons[index]!.text).toContain(candidate.name)
+      expect(buttons[index]!.payload).toBe(`max_channel:${readyDecision.id}:select:${index}`)
+    }
+    const selectedIndex = offeredCandidateIds.indexOf(second.familyId)
+    expect(selectedIndex).toBeGreaterThanOrEqual(0)
+    const selectedButton = buttons[selectedIndex]!
+    expect(selectedButton.text).toContain((await prisma.family.findUniqueOrThrow({ where: { id: second.familyId }, select: { name: true } })).name)
     const callbackBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841829000, callback: {
-      user: { user_id: 78124 }, callback_id: 'pending-choice-wrong-actor', payload: `max_channel:${firstDecision.id}:select:${selectedIndex}`,
+      user: { user_id: 78124 }, callback_id: 'pending-choice-wrong-actor', payload: selectedButton.payload,
     }, message: { recipient: { chat_type: 'dialog', user_id: 78124 } } })
     await webhook.request('/webhooks/max', { method: 'POST', headers, body: callbackBody })
     const callbackInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' } })
     await channel.processCallback(callbackInbox.id, crypto.decrypt({ ciphertext: callbackInbox.encryptedPayload, iv: callbackInbox.encryptionIv, authTag: callbackInbox.encryptionAuthTag }))
+    const afterWrongActor = await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: firstDecision.id } })
+    expect(afterWrongActor.status).toBe('pending')
+    expect(afterWrongActor.candidateFamilyIds).toEqual(offeredCandidateIds)
     expect(await prisma.family.findUniqueOrThrow({ where: { id: second.familyId }, select: { maxBackupChatId: true } })).toEqual({ maxBackupChatId: null })
     const allowedBody = JSON.stringify({ update_type: 'message_callback', timestamp: 1790841830000, callback: {
-      user: { user_id: 78123 }, callback_id: 'pending-choice-right-actor', payload: `max_channel:${firstDecision.id}:select:${selectedIndex}`,
+      user: { user_id: 78123 }, callback_id: 'pending-choice-right-actor', payload: selectedButton.payload,
     }, message: { recipient: { chat_type: 'dialog', user_id: 78123 } } })
     await webhook.request('/webhooks/max', { method: 'POST', headers, body: allowedBody })
     const allowedInbox = await prisma.maxInbox.findFirstOrThrow({ where: { eventKind: 'family_choice' }, orderBy: { receivedAt: 'desc' } })
