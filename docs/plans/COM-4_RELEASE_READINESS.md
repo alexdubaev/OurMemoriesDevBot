@@ -111,8 +111,8 @@ API after a comment was saved; the current built frontend against actual old API
 `4ce200620bf87d1ba5605aee73f5442fe50ccdb4` displayed a retryable comments error
 for the real missing endpoint while retaining the feed. These were local source
 builds, not production containers or a physical MAX session. Their scripts/logs
-are retained with the COM-4 evidence. The current production runtime source was
-unchanged by the test/documentation-only COM-4 diff.
+are retained with the COM-4 evidence. Application runtime files in accepted main
+were unchanged by the test/documentation-only COM-4 diff.
 
 ## Rollout after the blockers and authorization are resolved
 
