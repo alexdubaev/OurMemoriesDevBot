@@ -375,3 +375,16 @@ and both webapp/website Storybook builds passed. Existing website module-directi
 do not represent a build failure. The same independent reviewer checks this narrow delta and
 the required exact compatibility content attestation; full immutable recovery pins remain intact.
 The new manifest/lock fixture inputs are frozen blobs, not the changing current revision.
+
+### Verification gate recovery: active-provider persistence fixture
+
+FULL at `d2eb94d1e05745374510a6e440d41f700c1c13c4` passed the first 16 stages, then
+correctly failed closed: the selected family-persistence file contained only two Telegram-named
+tests, so the MAX filter produced an empty run. Both schema-constraint cases now create actual
+MAX identities and retain the PostgreSQL NULL-email and duplicate-identity assertions. Cleanup
+is limited to users/identities created by these tests. The actual MAX runner passed 2 tests / 3
+expectations on the owned PostgreSQL database. Read-only independent review found no P0–P2.
+An AST inventory of all 37 selected integration files found no other entirely filtered file;
+the dynamically named media-flow cases were inspected separately. No catalog exclusion, skip,
+or empty-run relaxation was introduced. This test-only correction must leave the executable
+compatibility fingerprint unchanged.
