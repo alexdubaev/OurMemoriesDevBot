@@ -40,6 +40,39 @@ test('successful release exit does not invoke failure side effects', () => {
   assert.equal(result.stderr, '')
 })
 
+test('documented bash -s release entry reaches SHA validation before creating a deployment lock', () => {
+  const fixture = mkdtempSync(resolve(root, 'tests', '.release-stdin-'))
+  const bin = resolve(fixture, 'bin')
+  const server = resolve(fixture, 'server')
+  mkdirSync(bin, { recursive: true })
+  mkdirSync(server, { recursive: true })
+  const requiredCommands = [
+    'awk', 'cp', 'date', 'df', 'docker', 'git', 'getent', 'id', 'install', 'sudo',
+    'mv', 'flock', 'curl', 'sed', 'find', 'sha256sum', 'stat', 'sync',
+  ]
+  for (const command of requiredCommands) {
+    const executable = resolve(bin, command)
+    writeFileSync(executable, command === 'id'
+      ? '#!/bin/sh\n[ "$1" = -u ] && { printf "0\\n"; exit 0; }\nexit 91\n'
+      : '#!/bin/sh\nexit 0\n')
+    chmodSync(executable, 0o755)
+  }
+
+  try {
+    const result = spawnSync(bashExecutable, ['-s', '--', 'invalid-sha'], {
+      input: `PATH=${shellQuote(gitBashPath(bin))}:$PATH\nSERVER_ROOT=${shellQuote(gitBashPath(server))}\n${release}`,
+      encoding: 'utf8',
+      timeout: 30_000,
+    })
+    assert.equal(result.status, 1, `${result.stdout}${result.stderr}`)
+    assert.match(result.stderr, /ERROR: release SHA must be a 40-character lowercase Git SHA/)
+    assert.equal(existsSync(resolve(server, '.selectel-deploy.lock')), false)
+    assert.equal(readdirSync(server).length, 0, 'rejected input leaves server files untouched')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('nonzero release exit preserves forward-only quiesce handling', () => {
   const result = runHandler({
     legacy: true,
