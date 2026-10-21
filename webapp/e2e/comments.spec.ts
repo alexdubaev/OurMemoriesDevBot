@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from '@playwright/test'
+import { commentSummariesResponseSchema } from '@web-app-demo/contracts'
 
 const maxBotToken = '987654:max-e2e-synthetic-token'
 const themes = ['mint', 'rose', 'sky', 'lavender', 'apricot', 'sand'] as const
@@ -155,8 +156,8 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
       data: { memoryIds: [owner.memoryId] },
     })
     expect(batch.status()).toBe(200)
-    const summary = await batch.json() as { items: Array<{ memoryId: string; count: number }> }
-    expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41 }])
+    const summary = commentSummariesResponseSchema.parse(await batch.json())
+    expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41, capabilities: { read: true, create: true } }])
 
     const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
     await entry.click()
