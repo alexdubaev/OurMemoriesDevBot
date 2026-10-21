@@ -243,6 +243,7 @@ const candidateWebappId = 'sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f
 const runtimeFingerprints = {
   legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
   candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
+  comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
 }
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
@@ -286,7 +287,7 @@ function rollbackSource(role) {
     return source
   }
 
-  const fallback = role === 'candidate' ? candidateRuntimeSha : rollback180
+  const fallback = role === 'candidate' ? candidateRuntimeSha : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
   assert.equal(runtimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const directory = mkdtempSync(resolve(root, '.scratch', `rollback-${role}-worktree-`))
@@ -371,6 +372,8 @@ function runApplicationRollback(options = {}) {
     FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
     FIXTURE_STATE_ERROR: String(options.stateError ?? false),
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
+    FIXTURE_MIGRATION_HISTORY_MISMATCH: String(options.historyMismatch ?? false),
+    FIXTURE_MIGRATION_HISTORY_ERROR: String(options.historyError ?? false),
     FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (candidatePair ? candidateBackendId : legacyBackendId),
     FIXTURE_WEBAPP_ID: candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
@@ -394,6 +397,10 @@ function runApplicationRollback(options = {}) {
     ' fi',
     ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
     ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
+    '   if [[ "$*" == *"migration_name"* && "$*" == *"checksum"* ]]; then',
+    '     if [[ "$*" == *"MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256="* ]]; then echo HISTORY_ATTESTATION:present >> "$FIXTURE_EVENTS"; else echo HISTORY_ATTESTATION:missing >> "$FIXTURE_EVENTS"; return 1; fi',
+    '     [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ] && [ "$FIXTURE_MIGRATION_HISTORY_ERROR" = false ]; return',
+    '   fi',
     '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
     '   [ "$FIXTURE_STATE_ERROR" = false ]; return',
     ' fi',
@@ -432,6 +439,68 @@ test('candidate to #180 uses its exact runtime attestation and normal auth routi
   assert.match(result.events, /STATE.*\nGATE\nUP:.*backend worker scheduler static/)
   assert.match(result.output, /normal authentication routing/)
   assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+})
+
+test('measured comments source to #180 attests exact migration history and uses normal auth routing', () => {
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments' })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.events, /HISTORY_ATTESTATION:present/)
+  assert.match(result.events, /STATE.*\nHISTORY_ATTESTATION:present\nGATE\nUP:.*backend worker scheduler static/)
+  assert.match(result.output, /normal authentication routing/)
+  assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+})
+
+test('comments rollback rejects unknown migration history and history query failures before promotion', () => {
+  for (const options of [{ historyMismatch: true }, { historyError: true }]) {
+    const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180, source: 'comments', ...options })
+    assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
+    assert.match(result.events, /HISTORY_ATTESTATION:present/)
+    assert.doesNotMatch(result.events, /UP:|GATE/)
+  }
+})
+
+for (const [path, contents] of [
+    ['backend/src/worker.ts', '\n// changed comments source fixture\n'],
+    ['backend/prisma/schema.prisma', '\n// changed schema fixture\n'],
+    ['packages/contracts/src/memories.ts', '\n// changed contract fixture\n'],
+    ['bun.lock', '\n# changed dependency lock fixture\n'],
+    ['backend/package.json', '\n// changed dependency manifest fixture\n'],
+]) {
+  test(`comments rollback rejects source drift in ${path}`, () => {
+    const source = commitSourceChange(createSourceWorktree('comments'), path, contents, 'mutate comments rollback source')
+    const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+      sourceRootOverride: source.root, sourceShaOverride: source.sha })
+    assert.notEqual(result.status, 0, `${path}: ${result.output}`)
+    assert.match(result.output, /application runtime differs from the verified rollback source/)
+    assert.doesNotMatch(result.events, /UP:|GATE/)
+  })
+}
+
+test('comments rollback rejects protected service configuration drift', () => {
+  const config = commitSourceChange(createSourceWorktree('comments'), 'deploy/selectel/Caddyfile.edge.template',
+    '\n# changed protected configuration fixture\n', 'mutate comments service configuration')
+  const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+    sourceRootOverride: config.root, sourceShaOverride: config.sha })
+  assert.notEqual(result.status, 0, result.output)
+  assert.match(result.output, /rollback schema, dependencies or service configuration are incompatible/)
+  assert.doesNotMatch(result.events, /UP:|GATE/)
+})
+
+test('comments rollback rejects wrong targets, immutable image IDs, OCI labels, and incomplete migration state', () => {
+  for (const options of [
+    { target: rollbackBaseline, webappTarget: rollbackBaseline },
+    { badImage: true }, { badLabel: true }, { pending: true }, { stateError: true },
+  ]) {
+    const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
+      source: 'comments', ...options })
+    assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
+    if (options.target) assert.match(result.output, /application runtime differs from the verified rollback source/)
+    if (options.badImage) assert.match(result.output, /rollback backend image differs from the verified production artifact/)
+    if (options.badLabel) assert.match(result.output, /rollback image revision label mismatch/)
+    if (options.pending) assert.match(result.output, /rollback target cannot confirm completed migrations/)
+    if (options.stateError) assert.match(result.output, /rollback data compatibility state is unknown or migration is unfinished/)
+    assert.doesNotMatch(result.events, /UP:|GATE/)
+  }
 })
 
 test('rollback-readiness runs the attestation without changing services or gateway', () => {
