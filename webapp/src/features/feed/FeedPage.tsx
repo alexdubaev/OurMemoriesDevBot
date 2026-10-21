@@ -136,8 +136,6 @@ export function FeedPage({
   const mixedIndexes = useRef(new Map<string, number>())
   const [, setMixedIndexRevision] = useState(0)
   const mixedPhotoUrls = useRef(new Map<string, string>())
-  const [mixedPhotoUrlSnapshot, setMixedPhotoUrlSnapshot] = useState(() => new Map<string, string>())
-  const [commentsContextIndex, setCommentsContextIndex] = useState(0)
   const detailReturnFocusRef = useRef<HTMLElement | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
   const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
@@ -164,7 +162,6 @@ export function FeedPage({
   const commentSummaries = useCommentSummaries(transport, familyId, accountId, membershipEpoch ?? 0, items.map((memory) => memory.id), active && isAppBootstrapped)
   const currentCommentsSelection = commentsSelection && commentsSelection.familyId === familyId && commentsSelection.accountId === accountId && commentsSelection.membershipEpoch === (membershipEpoch ?? 0) && items.some((memory) => memory.id === commentsSelection.memoryId) ? commentsSelection : null
   const commentsOpen = Boolean(active && currentCommentsSelection)
-  const currentCommentsMemory = currentCommentsSelection ? items.find((memory) => memory.id === currentCommentsSelection.memoryId) ?? null : null
   const [nearbyPendingVideoIds, setNearbyPendingVideoIds] = useState<string[]>([])
   useEffect(() => {
     if (!active) return
@@ -394,11 +391,10 @@ export function FeedPage({
           reactionPickerRequest={reactionPickerRequest.memoryId === memory.id ? reactionPickerRequest.revision : 0}
           onComments={(trigger) => {
             detailReturnFocusRef.current = trigger
-            setCommentsContextIndex(mixedIndexes.current.get(memory.id) ?? 0)
             setCommentsSelection({ memoryId: memory.id, familyId, accountId, membershipEpoch: membershipEpoch ?? 0 })
           }}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
-            ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onViewerIndexChange={(index) => { mixedIndexes.current.set(memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedPhotoUrlSnapshot((current) => { const next = new Map(current); if (url) next.set(attachmentId, url); else next.delete(attachmentId); return next }); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} />
+            ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onViewerIndexChange={(index) => { mixedIndexes.current.set(memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} />
             : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} photoAlbum={photos} photoIndex={0} registerFullscreen={memory.author.id !== accountId ? registerSeenContent(memory.id, 'fullscreen') : undefined} transport={transport} /> : null}
           memoryId={memory.id}
           reactionScopeKey={`${familyId}:${accountId}:${membershipEpoch ?? 0}`}
@@ -416,7 +412,7 @@ export function FeedPage({
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {active && currentMixedViewer ? <MixedMediaViewer familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
-      {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} mediaContext={currentCommentsMemory ? <CommentsMediaContext borrowedPhotoUrls={mixedPhotoUrlSnapshot} hostBridge={hostBridge} initialIndex={commentsContextIndex} memory={currentCommentsMemory} onIndexChange={(index) => { setCommentsContextIndex(index); mixedIndexes.current.set(currentCommentsMemory.id, index); setMixedIndexRevision((value) => value + 1) }} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null} /> : null}
+      {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
       hostBridge={hostBridge}
@@ -469,14 +465,7 @@ export function FeedPage({
   )
 }
 
-function CommentsMediaContext({ borrowedPhotoUrls, hostBridge, initialIndex, memory, onIndexChange, returnFocusRef, transport }: { borrowedPhotoUrls: Map<string, string>; hostBridge: HostBridge; initialIndex: number; memory: MemoryDto; onIndexChange: (index: number) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
-  const attachment = memory.attachments[0]
-  if (attachment && attachment.kind !== 'voice') return <MixedMediaCarousel contextOnly borrowedPhotoUrls={borrowedPhotoUrls} hostBridge={hostBridge} initialIndex={initialIndex} memory={memory} onIndexChange={onIndexChange} onPhotoUrlChange={() => undefined} onViewerIndexChange={onIndexChange} onOpen={() => undefined} returnFocusRef={returnFocusRef} transport={transport} />
-  if (attachment?.kind === 'voice') return <div aria-label="Голосовое сообщение" className="comments-context comments-context-compact comments-media-context comments-media-voice"><div aria-hidden="true" className="comments-media-waveform">{(attachment.waveform ?? Array.from({ length: 32 }, () => .35)).map((peak, i) => <i key={i} style={{ height: `${Math.max(12, peak * 100)}%` }} />)}</div><Typography as="span" variant="memoryMeta">Голосовое сообщение</Typography></div>
-  return <div aria-label="Текст воспоминания" className="comments-context comments-context-compact comments-media-context">{memory.body.trim() ? <Typography as="p" className="comments-media-note" variant="memoryBody">{memory.body.trim().slice(0, 240)}</Typography> : <Typography as="span" variant="memoryMeta">Воспоминание</Typography>}</div>
-}
-
-function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onViewerIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, returnFocusRef, transport, contextOnly = false, borrowedPhotoUrls }: {
+function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onViewerIndexChange, onPhotoUrlChange, onOpen, registerFullscreen, returnFocusRef, transport }: {
   hostBridge: HostBridge
   initialIndex: number
   memory: MemoryDto
@@ -487,8 +476,6 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   registerFullscreen?: (element: HTMLElement | null) => void
   returnFocusRef: RefObject<HTMLElement | null>
   transport: AuthenticatedTransport
-  contextOnly?: boolean
-  borrowedPhotoUrls?: Map<string, string>
 }) {
   const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
   const reportInitialIndex = useEffectEvent(() => onIndexChange(startIndex))
@@ -518,8 +505,8 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   }, [embla, initialIndex, memory.attachments.length])
   useLayoutEffect(() => {
     const target = root.current?.querySelector<HTMLElement>(`[data-carousel-position="${index + 1}"] button`)
-    if (!contextOnly && target) returnFocusRef.current = target
-  }, [contextOnly, index, returnFocusRef])
+    if (target) returnFocusRef.current = target
+  }, [index, returnFocusRef])
   useEffect(() => {
     const closeViewer = () => photoViewerSession.current?.abort()
     document.addEventListener('memoly:feed-inactive', closeViewer)
@@ -545,7 +532,6 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     return () => { embla.off('select', select); embla.off('settle', settle) }
   }, [embla, select])
   const open = (at: number, trigger: HTMLElement, photoUrl?: string) => {
-    if (contextOnly) return
     returnFocusRef.current = trigger
     root.current?.querySelectorAll('video').forEach((video) => video.pause())
     if (memory.kind === 'photo') {
@@ -561,16 +547,16 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     }
     onOpen(at, trigger, photoUrl)
   }
-  return <div aria-label={contextOnly ? `Контекст воспоминания, ${memory.attachments.length} элементов` : `Медиа воспоминания, ${memory.attachments.length} элементов`} className={`memoly-mixed-carousel${contextOnly ? ' comments-mixed-carousel comments-context' : ''}`} data-carousel-memory={memory.id} data-carousel-multiple={isCarousel} data-comments-media={contextOnly || undefined} data-context-only={contextOnly || undefined} data-seen-active-index={index} onKeyDown={(event) => {
+  return <div aria-label={`Медиа воспоминания, ${memory.attachments.length} элементов`} className="memoly-mixed-carousel" data-carousel-memory={memory.id} data-carousel-multiple={isCarousel} data-seen-active-index={index} onKeyDown={(event) => {
     if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (event.key === 'ArrowLeft' && index > 0) { event.preventDefault(); embla?.scrollPrev() }
     if (event.key === 'ArrowRight' && index < memory.attachments.length - 1) { event.preventDefault(); embla?.scrollNext() }
   }} ref={root} role="group" tabIndex={0}>
-    <div className="memoly-mixed-viewport" data-media-stage={contextOnly ? 'comments' : isCarousel ? 'feed' : undefined} ref={viewportRef} style={{ '--memoly-active-media-aspect': mediaFrameRatio, '--memoly-carousel-aspect': mediaFrameRatio } as CSSProperties}>
+    <div className="memoly-mixed-viewport" data-media-stage={isCarousel ? 'feed' : undefined} ref={viewportRef} style={{ '--memoly-active-media-aspect': mediaFrameRatio, '--memoly-carousel-aspect': mediaFrameRatio } as CSSProperties}>
       <div className="memoly-mixed-track">
         {memory.attachments.map((attachment, position) => <div aria-hidden={position !== index} aria-label={position === index ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-slide" data-carousel-active={position === index} data-carousel-position={position + 1} data-media-kind={attachment.kind} inert={position !== index} key={attachment.id} role={position === index ? 'group' : undefined}>
           {position === index || position === settledIndex || (Math.abs(position - index) === 1 && (attachment.kind === 'photo' || attachment.kind === 'video'))
-            ? <MixedSlideMedia attachment={attachment} borrowedPhotoUrl={borrowedPhotoUrls?.get(attachment.id)} contextOnly={contextOnly} hostBridge={hostBridge} memory={memory} multi={isCarousel || contextOnly} onOpen={(trigger, photoUrl) => open(position, trigger, photoUrl)} onPhotoUrlChange={onPhotoUrlChange} transport={transport} />
+            ? <MixedSlideMedia attachment={attachment} hostBridge={hostBridge} memory={memory} multi={isCarousel} onOpen={(trigger, photoUrl) => open(position, trigger, photoUrl)} onPhotoUrlChange={onPhotoUrlChange} transport={transport} />
             : <span aria-hidden="true" className="memoly-mixed-placeholder" />}
         </div>)}
       </div>
@@ -587,7 +573,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   </div>
 }
 
-function MixedSlideMedia({ attachment, borrowedPhotoUrl, contextOnly = false, hostBridge, memory, multi, onOpen, onPhotoUrlChange, transport }: { attachment: MemoryAttachment; borrowedPhotoUrl?: string; contextOnly?: boolean; hostBridge: HostBridge; memory: MemoryDto; multi: boolean; onOpen: (trigger: HTMLElement, photoUrl?: string) => void; onPhotoUrlChange: (attachmentId: string, url: string | null) => void; transport: AuthenticatedTransport }) {
+function MixedSlideMedia({ attachment, hostBridge, memory, multi, onOpen, onPhotoUrlChange, transport }: { attachment: MemoryAttachment; hostBridge: HostBridge; memory: MemoryDto; multi: boolean; onOpen: (trigger: HTMLElement, photoUrl?: string) => void; onPhotoUrlChange: (attachmentId: string, url: string | null) => void; transport: AuthenticatedTransport }) {
   const root = useRef<HTMLDivElement | null>(null)
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const posterReadinessPath = attachment.source === 'max' && attachment.posterState === 'pending' ? maxVideoPosterReadinessPath(attachment.playbackPath) : null
@@ -595,7 +581,7 @@ function MixedSlideMedia({ attachment, borrowedPhotoUrl, contextOnly = false, ho
   const posterReadiness = useQuery({
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
-    enabled: multi && !contextOnly && Boolean(posterReadinessPath),
+    enabled: multi && Boolean(posterReadinessPath),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -605,8 +591,8 @@ function MixedSlideMedia({ attachment, borrowedPhotoUrl, contextOnly = false, ho
   const videoPoster = multi && attachment.kind === 'video' ? attachment.source === 'private_storage' ? attachment.displayPath ?? attachment.previewPath : attachment.source === 'telegram' ? attachment.thumbnailPath : attachment.posterState === 'ready' ? attachment.posterPath ?? null : attachment.posterState === 'pending' ? posterReadiness.data?.state === 'ready' ? posterReadiness.data.posterPath : null : maxVideoPosterPath(attachment.playbackPath) : null
   const posterUrl = usePrivateObjectUrl(videoPoster, transport)
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
-  if (multi && attachment.kind === 'video') return <div className="memoly-mixed-slide-media memoly-mixed-slide-poster" data-poster-ready={Boolean(posterUrl)}>{contextOnly ? <div aria-label="Кадр видео" className="comments-media-poster" style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }}>{posterUrl ? <img alt="Кадр видео" src={posterUrl} /> : <Typography as="span" className="memoly-carousel-video-loading" variant="memoryMeta">Кадр видео недоступен</Typography>}<span aria-hidden="true" className="memoly-carousel-video-play"><WebpIcon decorative name="play" size={22} state="white" /></span></div> : <button aria-label={`Открыть видео, вложение ${attachment.id}`} onClick={(event) => onOpen(event.currentTarget)} style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }} type="button">{posterUrl ? <img alt="Кадр видео" src={posterUrl} /> : <Typography as="span" className="memoly-carousel-video-loading" variant="memoryMeta">Загружаем кадр видео…</Typography>}<span aria-hidden="true" className="memoly-carousel-video-play"><WebpIcon decorative name="play" size={24} state="white" /></span></button>}</div>
-  return <div className="memoly-mixed-slide-media" ref={root}><Attachment attachment={attachment} borrowedPhotoUrl={borrowedPhotoUrl} hostBridge={hostBridge} memory={memory} onOpenPhoto={contextOnly ? undefined : onOpen} onPhotoUrlChange={contextOnly ? undefined : onPhotoUrlChange} photoInteractive={!contextOnly} transport={transport} /></div>
+  if (multi && attachment.kind === 'video') return <div className="memoly-mixed-slide-media memoly-mixed-slide-poster" data-poster-ready={Boolean(posterUrl)}><button aria-label={`Открыть видео, вложение ${attachment.id}`} onClick={(event) => onOpen(event.currentTarget)} style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }} type="button">{posterUrl ? <img alt="Кадр видео" src={posterUrl} /> : <Typography as="span" className="memoly-carousel-video-loading" variant="memoryMeta">Загружаем кадр видео…</Typography>}<span aria-hidden="true" className="memoly-carousel-video-play"><WebpIcon decorative name="play" size={24} state="white" /></span></button></div>
+  return <div className="memoly-mixed-slide-media" ref={root}><Attachment attachment={attachment} hostBridge={hostBridge} memory={memory} onOpenPhoto={onOpen} onPhotoUrlChange={onPhotoUrlChange} transport={transport} /></div>
 }
 
 function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport }: { familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {

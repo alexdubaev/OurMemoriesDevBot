@@ -13,7 +13,7 @@ import { COMMENT_ACTIVE_REFRESH_MS, COMMENT_IDLE_AFTER_MS, COMMENT_IDLE_REFRESH_
 import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import './comments.css'
 
-export function CommentsPanel({ open, scope, familyTimezone, transport, hostBridge, onClose, returnFocusRef, mediaContext, hostInsets }: {
+export function CommentsPanel({ open, scope, familyTimezone, transport, hostBridge, onClose, returnFocusRef, hostInsets }: {
   open: boolean
   scope: CommentScope
   familyTimezone: string
@@ -21,7 +21,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   hostBridge: { onBack: (callback: () => void) => () => void }
   onClose: () => void
   returnFocusRef: React.RefObject<HTMLElement | null>
-  mediaContext?: React.ReactNode
   hostInsets?: { top: number; right: number; bottom: number; left: number }
 }) {
   const queryClient = useQueryClient()
@@ -303,7 +302,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       const height = viewport?.height ?? window.innerHeight
       const offsetTop = viewport?.offsetTop ?? 0
       panel.style.setProperty('--comments-vv-height', `${height}px`)
-      panel.style.setProperty('--comments-context-height', `${Math.max(64, Math.min(height * (height <= 560 || window.innerWidth > height ? 0.24 : 0.4), 340))}px`)
       panel.style.setProperty('--comments-vv-top', `${offsetTop}px`)
       panel.style.setProperty('--comments-vv-bottom', `${Math.max(0, window.innerHeight - offsetTop - height)}px`)
       cancelAnimationFrame(frame)
@@ -451,7 +449,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   return <DialogPrimitive.Root onOpenChange={(next) => { if (!next) requestClose() }} open={open}>
     <DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-overlay" />
       <DialogPrimitive.Content aria-describedby={undefined} aria-label="Комментарии" className="comments-panel" onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onOpenAutoFocus={(event) => { event.preventDefault(); closeButtonRef.current?.focus({ preventScroll: true }) }} ref={panelRef} style={{ '--comments-host-top': `${hostInsets?.top ?? 0}px`, '--comments-host-right': `${hostInsets?.right ?? 0}px`, '--comments-host-bottom': `${hostInsets?.bottom ?? 0}px`, '--comments-host-left': `${hostInsets?.left ?? 0}px` } as React.CSSProperties}>
-        {mediaContext}
         <header className="comments-header"><DialogPrimitive.Title asChild><Typography as="h2" className="comments-title" variant="memoryBody">Комментарии</Typography></DialogPrimitive.Title><button aria-label="Закрыть комментарии" className="comments-close" onClick={() => requestClose()} ref={closeButtonRef} type="button"><Typography as="span" aria-hidden="true" variant="memoryToolbar">×</Typography></button></header>
         {error ? <Typography as="p" className="comments-error" role="alert" variant="bodyXs">{error}</Typography> : null}
         {list.error && comments.length > 0 ? <Typography as="p" className="comments-sync-status" role="status" variant="bodyXs">Не удалось обновить комментарии. Повторим позже.</Typography> : null}

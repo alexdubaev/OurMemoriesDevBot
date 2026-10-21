@@ -746,8 +746,10 @@ rollback_auth_gate_for_verified_pair() {
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
+	local healthy_target=33a0054c3c71372aa5509ee8ebfa4578ad512ea1
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
+	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
 	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} expected_runtime gate source_runtime
 	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
 	case "$target" in
@@ -761,6 +763,10 @@ rollback_auth_gate_for_verified_pair() {
 			;;
 		"$accepted_v4_target")
 		expected_runtime=$new_comments_runtime
+		gate=false
+			;;
+		"$healthy_target")
+		expected_runtime=$feed_photo_runtime
 		gate=false
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
@@ -808,8 +814,10 @@ verify_application_rollback() {
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
+	local healthy_target=33a0054c3c71372aa5509ee8ebfa4578ad512ea1
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
+	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
 	local target expected_runtime expected_target_runtime profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
@@ -826,6 +834,12 @@ verify_application_rollback() {
 			target=$accepted_v4_target
 			expected_runtime=$new_comments_runtime
 			expected_target_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+			profile=comments
+			;;
+		"$healthy_target:$healthy_target")
+			target=$healthy_target
+			expected_runtime=$feed_photo_runtime
+			expected_target_runtime=$com_ux_runtime
 			profile=comments
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
@@ -857,6 +871,10 @@ verify_application_rollback() {
 	if [ "$target" = "$accepted_v4_target" ] && [ "$source_runtime" = "$com_ux_runtime" ]; then
 		profile=comments
 		expected_runtime=$com_ux_runtime
+	fi
+	if [ "$target" = "$healthy_target" ] && [ "$source_runtime" = "$feed_photo_runtime" ]; then
+		profile=comments
+		expected_runtime=$feed_photo_runtime
 	fi
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
@@ -894,6 +912,10 @@ verify_application_rollback() {
 		"$accepted_v4_target")
 		expected_backend_id=sha256:400f49886253aeb1d23d3688de5d5cce20fba3b4b1c20a82a9d6453ecb7d2bdc
 			expected_webapp_id=sha256:70682430fd480dfddb3d3df0431665ea71d8018c0a0993993b8ffb6360baadf9
+			;;
+		"$healthy_target")
+			expected_backend_id=sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9
+			expected_webapp_id=sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74
 			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||

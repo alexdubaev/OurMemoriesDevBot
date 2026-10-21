@@ -277,18 +277,22 @@ const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const candidateRuntimeSha = '39e8af7bb9e9a5949ada3c32dad31d38f9439505'
 const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
 const rollbackV4 = '4b4edc0992803b84c919aadb835e8d2e21095c51'
+const rollbackHealthy = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
 const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
 const candidateWebappId = 'sha256:9a31bb3f071ae2f11654671fce4a262a37fb4a039e7d7f3c422ed824a7787a66'
 const v4BackendId = 'sha256:400f49886253aeb1d23d3688de5d5cce20fba3b4b1c20a82a9d6453ecb7d2bdc'
 const v4WebappId = 'sha256:70682430fd480dfddb3d3df0431665ea71d8018c0a0993993b8ffb6360baadf9'
+const healthyBackendId = 'sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9'
+const healthyWebappId = 'sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74'
 const runtimeFingerprints = {
   legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
   candidate: '5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107',
   comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
   selectel: '9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468',
   comux: 'ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87',
+  feedPhoto: '9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda',
 }
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
@@ -327,18 +331,19 @@ function rollbackSource(role) {
   const currentSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()
   const currentStatus = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim()
   const currentFingerprint = runtimeFingerprint(root, currentSha)
-  if (!currentStatus && currentFingerprint === expected) {
+  if (!currentStatus && currentFingerprint === expected && role !== 'feedPhoto') {
     const source = { root, sha: currentSha }
     fixtureSourceCache.set(role, source)
     return source
   }
 
-  if (role === 'comux' && currentFingerprint !== expected) {
-    throw new Error('COM-UX rollback fixture requires current HEAD with its exact runtime fingerprint')
+  if (role === 'feedPhoto' && currentFingerprint !== expected) {
+    throw new Error('Feed-photo rollback fixture requires current HEAD with its exact runtime fingerprint')
   }
 
   const fallback = role === 'selectel' ? '91f48719309e20456b1659092a1bf209c3aa3653'
-    : role === 'comux' ? currentSha
+    : role === 'comux' ? rollbackHealthy
+      : role === 'feedPhoto' ? currentSha
       : role === 'candidate' ? candidateRuntimeSha
         : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
   assert.equal(runtimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
@@ -411,6 +416,7 @@ function runApplicationRollback(options = {}) {
   const target = options.target ?? rollbackBaseline
   const candidatePair = target === rollback180
   const v4Pair = target === rollbackV4
+  const healthyPair = target === rollbackHealthy
   if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
   if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
   const targetLabel = options.badLabel ? 'wrong' : target
@@ -429,8 +435,8 @@ function runApplicationRollback(options = {}) {
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
     FIXTURE_MIGRATION_HISTORY_MISMATCH: String(options.historyMismatch ?? false),
     FIXTURE_MIGRATION_HISTORY_ERROR: String(options.historyError ?? false),
-    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
-    FIXTURE_WEBAPP_ID: v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (healthyPair ? healthyBackendId : v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
+    FIXTURE_WEBAPP_ID: healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
     FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
@@ -481,7 +487,7 @@ function runApplicationRollback(options = {}) {
   const assignments = Object.entries(env).map(([name, value]) => name + '=' + shellQuote(value)).join('\n')
   try {
     const result = spawnSync('bash', ['-s'], {
-      input: [redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: 30_000,
+      input: [redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: options.processTimeoutMs ?? 30_000,
     })
     return { ...result, output: result.stdout + result.stderr,
       events: existsSync(events) ? readFileSync(events, 'utf8') : '',
@@ -508,7 +514,9 @@ slowTest('measured comments source to legacy UI remains technical-only and attes
   assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
 })
 
-slowTest('exact COM-UX runtime is accepted only with the pinned v4 pair and changed webapp trees fail closed', () => {
+test('exact COM-UX runtime is accepted only with the pinned v4 pair and changed webapp trees fail closed', {
+  timeout: process.platform === 'win32' ? 120_000 : 60_000,
+}, () => {
   const compatible = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4,
     source: 'comux', action: 'verify_application_rollback' })
   assert.equal(compatible.status, 0, compatible.output)
@@ -520,11 +528,36 @@ slowTest('exact COM-UX runtime is accepted only with the pinned v4 pair and chan
   assert.equal(restored.status, 42, restored.output)
   assert.match(restored.output, /Application rollback complete; additive migrations remain applied with normal authentication routing/)
 
-  const changedSource = commitSourceChange(createSourceWorktree('comux'),
+  const changedSource = commitSourceChange(rollbackSource('comux'),
     'webapp/src/platform/media/use-private-image-url.ts', '\n// altered webapp fingerprint fixture\n',
     'mutate COM-UX webapp runtime')
   const changed = runApplicationRollback({ target: rollbackV4, webappTarget: rollbackV4,
     sourceRootOverride: changedSource.root, sourceShaOverride: changedSource.sha })
+  assert.notEqual(changed.status, 0, changed.output)
+  assert.match(changed.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(changed.events, /UP:|GATE/)
+})
+
+test('exact feed-photo runtime is accepted only with the healthy 33a pair, image IDs and unchanged backend runtime', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    source: 'feedPhoto', action: 'verify_application_rollback', processTimeoutMs: 60_000 })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.events, /STATE.*\nHISTORY_ATTESTATION:present/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const wrongImage = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    source: 'feedPhoto', badImage: true, processTimeoutMs: 60_000 })
+  assert.notEqual(wrongImage.status, 0, wrongImage.output)
+  assert.match(wrongImage.output, /rollback backend image differs from the verified production artifact/)
+  assert.doesNotMatch(wrongImage.events, /UP:|GATE/)
+
+  const changedSource = commitSourceChange(rollbackSource('feedPhoto'),
+    'webapp/src/platform/media/use-private-image-url.ts', '\n// altered feed-photo source fixture\n',
+    'mutate feed-photo webapp runtime')
+  const changed = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    sourceRootOverride: changedSource.root, sourceShaOverride: changedSource.sha, processTimeoutMs: 60_000 })
   assert.notEqual(changed.status, 0, changed.output)
   assert.match(changed.output, /application runtime differs from the verified rollback source/)
   assert.doesNotMatch(changed.events, /UP:|GATE/)

@@ -500,13 +500,15 @@ test('comments stay compact at short viewport and reactions remain available in 
   const geometry = await page.evaluate(() => {
     const dialog = document.querySelector('.comments-panel')!.getBoundingClientRect()
     const send = document.querySelector('.comments-composer button[type="submit"]')!.getBoundingClientRect()
-    return { dialogHeight: dialog.height, sendBottom: send.bottom }
+    return { dialogHeight: dialog.height, dialogTop: dialog.top, sendBottom: send.bottom }
   })
-  expect(geometry.dialogHeight).toBeLessThan(420)
+  expect(geometry.dialogHeight).toBeGreaterThanOrEqual(190)
+  expect(geometry.dialogHeight).toBeLessThanOrEqual(220)
+  expect(geometry.dialogTop).toBeGreaterThanOrEqual(200)
   expect(geometry.sendBottom).toBeLessThanOrEqual(420)
 })
 
-test('discussion opens on the third mixed attachment and returns to the last selected attachment', async ({ page }) => {
+test('comments sheet leaves the third feed attachment in place and preserves the guarded draft', async ({ page }) => {
   const { familyId, memoryId } = await signInAndSeed(page, 3)
   const card = page.locator(`[data-memory-id="${memoryId}"]`)
   const feedCarousel = card.locator('.memoly-mixed-carousel')
@@ -518,20 +520,21 @@ test('discussion opens on the third mixed attachment and returns to the last sel
   })
   await card.locator('.comments-entry').click()
   const panel = page.locator('.comments-panel')
-  const context = panel.locator('.comments-mixed-carousel')
-  await expect(context.locator('.memoly-mixed-count')).toHaveText('3 / 3')
+  await expect(panel.locator('.memoly-mixed-carousel, [data-comments-media], [data-context-only]')).toHaveCount(0)
+  await expect(feedCarousel).toHaveAttribute('data-seen-active-index', '2')
   const draft = panel.getByRole('textbox', { name: 'Написать комментарий' })
   await expect(panel.getByText('Пока нет комментариев. Напишите первым')).toBeVisible()
-  const readsBeforeSlide = commentReads
   await draft.fill('Сохраняю черновик при смене вложения')
-  await context.press('ArrowLeft')
-  await expect(context.locator('.memoly-mixed-count')).toHaveText('2 / 3')
   await expect(draft).toHaveValue('Сохраняю черновик при смене вложения')
-  expect(commentReads).toBe(readsBeforeSlide)
+  expect(commentReads).toBeGreaterThan(0)
+  await panel.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await expect(page.getByRole('dialog', { name: 'Черновик не сохранён' })).toBeVisible()
+  await page.getByRole('button', { name: 'Продолжить писать' }).click()
+  await expect(draft).toHaveValue('Сохраняю черновик при смене вложения')
   await panel.getByRole('button', { name: 'Закрыть комментарии' }).click()
   await page.getByRole('button', { name: 'Закрыть без сохранения' }).click()
   await expect(panel).toBeHidden()
-  await expect(feedCarousel).toHaveAttribute('data-seen-active-index', '1')
+  await expect(feedCarousel).toHaveAttribute('data-seen-active-index', '2')
 })
 
 test('COM-3 footer and open panel fit the frozen six themes at 320, 390 and 430 CSS pixels', async ({ page }, testInfo) => {
