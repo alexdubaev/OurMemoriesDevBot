@@ -492,7 +492,7 @@ test('comments rollback rejects wrong targets, immutable image IDs, OCI labels, 
     const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
       source: 'comments', ...options })
     assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
-    if (options.target) assert.match(result.output, /rollback target pair has no verified runtime compatibility attestation/)
+    if (options.target) assert.match(result.output, /application runtime differs from the verified rollback source/)
     if (options.badImage) assert.match(result.output, /rollback backend image differs from the verified production artifact/)
     if (options.badLabel) assert.match(result.output, /rollback image revision label mismatch/)
     if (options.pending) assert.match(result.output, /rollback target cannot confirm completed migrations/)
