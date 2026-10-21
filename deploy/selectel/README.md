@@ -428,7 +428,7 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   rows, and query errors still fail closed. It does not run a migration or
   restore database contents.
 - The exact COM-UX runtime fingerprint
-  `12fa175209461f76286a9e933d111457af58f7fdd6efd87fb1e0949f662c9ac7` covers
+  `ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87` covers
   the combined COM-UX and MAX-CLOSE runtime source and may use
   only the accepted v4 target `4b4edc0992803b84c919aadb835e8d2e21095c51` and its
   pinned image pair. The fingerprint is content-bound and remains the
