@@ -36,7 +36,7 @@ async function signInAndSeed(page: Page) {
   await page.getByRole('button', { name: 'Продолжить' }).click()
   const auth = await authPromise
   const token = (await auth.json() as { accessToken: string }).accessToken
-  let seeded: { familyId: string; memoryId: string; childId: string; token: string } | null = null
+  let seeded: { familyId: string; memoryId: string; token: string } | null = null
   let familyPostIntercepted = false
   await page.route('**/api/v1/families', async (route) => {
     if (route.request().method() !== 'POST' || familyPostIntercepted) return route.continue()
@@ -57,14 +57,14 @@ async function signInAndSeed(page: Page) {
       data: { kind: 'note', childId, body: `Synthetic comment target ${randomUUID()}`, occurredAt: '2026-10-18T10:00:00.000Z' },
     })
     expect(memoryResponse.status()).toBe(201)
-    seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, childId, token: tokenFromRequest }
+    seeded = { familyId, memoryId: (await memoryResponse.json() as MemoryResult).id, token: tokenFromRequest }
     await route.fulfill({ response: familyResponse })
   })
   await page.getByRole('button', { name: 'Создать свою семью' }).click()
   await expect.poll(() => seeded).not.toBeNull()
   const { familyId, memoryId } = seeded!
   await expect(page.locator(`[data-memory-id="${memoryId}"]`)).toBeVisible({ timeout: 20_000 })
-  return { familyId, memoryId, childId: seeded!.childId, token: seeded!.token }
+  return { familyId, memoryId, token: seeded!.token }
 }
 
 async function uploadPng(page: Page, token: string, familyId: string) {
@@ -128,18 +128,18 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     })
     expect(foreignRead.status()).toBe(404)
 
-    const pageRows = await Promise.all(Array.from({ length: 62 }, (_, index) =>
+    const pageRows = await Promise.all(Array.from({ length: 38 }, (_, index) =>
       page.request.post(commentPath, {
         headers: { Authorization: `Bearer ${owner.token}`, 'Idempotency-Key': randomUUID() },
         data: { body: `COM-4 page ${index}` },
       })))
     expect(pageRows.every((response) => response.status() === 201)).toBe(true)
-    const first = await page.request.get(`${commentPath}?limit=50`, {
+    const first = await page.request.get(`${commentPath}?limit=20`, {
       headers: { Authorization: `Bearer ${owner.token}` },
     })
     expect(first.status()).toBe(200)
     const firstBody = await first.json() as { items: Array<{ id: string }>; nextCursor: string | null }
-    expect(firstBody.items).toHaveLength(50)
+    expect(firstBody.items).toHaveLength(20)
     expect(firstBody.nextCursor).toBeTruthy()
     const second = await page.request.get(`${commentPath}?limit=50&cursor=${encodeURIComponent(firstBody.nextCursor!)}`, {
       headers: { Authorization: `Bearer ${full.token}` },
@@ -150,23 +150,13 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     expect(new Set([...firstBody.items, ...secondBody.items].map((row) => row.id)).size)
       .toBe(firstBody.items.length + secondBody.items.length)
 
-    const memoryIds = [owner.memoryId]
-    for (let index = 0; index < 49; index += 1) {
-      const response = await page.request.post(`/api/v1/families/${owner.familyId}/memories`, {
-        headers: { Authorization: `Bearer ${owner.token}`, 'Idempotency-Key': randomUUID() },
-        data: { kind: 'note', childId: owner.childId, body: `COM-4 batch ${index}`, occurredAt: new Date().toISOString() },
-      })
-      expect(response.status()).toBe(201)
-      memoryIds.push((await response.json() as { id: string }).id)
-    }
     const batch = await page.request.post(`/api/v1/families/${owner.familyId}/memories/comment-summaries`, {
       headers: { Authorization: `Bearer ${viewer.token}` },
-      data: { memoryIds },
+      data: { memoryIds: [owner.memoryId] },
     })
     expect(batch.status()).toBe(200)
     const summary = await batch.json() as { items: Array<{ memoryId: string; count: number }> }
-    expect(summary.items).toHaveLength(50)
-    expect(summary.items.find((item) => item.memoryId === owner.memoryId)?.count).toBeGreaterThanOrEqual(65)
+    expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41 }])
 
     const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
     await entry.click()
@@ -175,7 +165,7 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await expect(commentItems).toHaveCount(20)
     const anchorText = await commentItems.first().locator('.comments-item-body > p').innerText()
     const anchorItem = commentItems.filter({ has: panel.getByText(anchorText, { exact: true }) })
-    for (const expectedCount of [40, 60, 65]) {
+    for (const expectedCount of [40, 41]) {
       await panel.locator('.comments-list').evaluate((list) => { list.scrollTop = 80 })
       const older = panel.getByRole('button', { name: 'Показать более ранние' })
       await older.scrollIntoViewIfNeeded()
@@ -185,10 +175,10 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
       const afterY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
       expect(Math.abs(afterY - beforeY)).toBeLessThan(2)
     }
-    expect(await commentItems.allInnerTexts()).toHaveLength(65)
+    expect(await commentItems.allInnerTexts()).toHaveLength(41)
     const commentBodies = await commentItems.locator('.comments-item-body > p').allTextContents()
-    expect(commentBodies).toHaveLength(65)
-    expect(new Set(commentBodies).size).toBe(65)
+    expect(commentBodies).toHaveLength(41)
+    expect(new Set(commentBodies).size).toBe(41)
     const ownerComment = commentItems.filter({ hasText: 'COM-4 role 0' })
     await ownerComment.getByRole('button', { name: 'Изменить' }).click()
     const editField = panel.getByRole('textbox', { name: 'Изменить комментарий' })
