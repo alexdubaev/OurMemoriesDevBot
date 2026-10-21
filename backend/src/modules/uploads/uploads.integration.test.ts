@@ -1,5 +1,5 @@
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -32,19 +32,43 @@ describe('avatar upload API integration', () => {
   })
 
   const prisma = createPrisma(databaseUrl!)
-  let root: string
+  let root: string | undefined
   let storage: FilesystemPrivateStorage
   let app: ReturnType<typeof createApp>
 
-  beforeEach(async () => {
+  async function clearFixtures() {
+    await prisma.taskOutbox.deleteMany()
+    await prisma.idempotencyRecord.deleteMany()
+    await prisma.memoryLike.deleteMany()
+    await prisma.maxVideoReference.deleteMany()
+    await prisma.maxOutboundSource.deleteMany()
+    await prisma.maxVideoUploadSession.deleteMany()
+    await prisma.memoryMedia.deleteMany()
+    await prisma.memory.deleteMany()
+    await prisma.child.updateMany({ data: { avatarMediaId: null } })
+    await prisma.mediaVariant.deleteMany()
+    await prisma.uploadReservation.deleteMany()
     await prisma.userAvatar.deleteMany()
+    await prisma.mediaAsset.deleteMany()
+    await prisma.familyInvite.deleteMany()
+    await prisma.child.deleteMany()
+    await prisma.family.deleteMany()
+    await prisma.passwordResetToken.deleteMany()
+    await prisma.maxAuthReplay.deleteMany()
+    await prisma.telegramAuthReplay.deleteMany()
     await prisma.authSession.deleteMany()
+    await prisma.externalIdentity.deleteMany()
+    await prisma.pilotAdmission.deleteMany()
     await prisma.user.deleteMany()
+  }
 
-    root = await mkdtemp(join(tmpdir(), 'uploads-integration-'))
+  beforeEach(async () => {
+    await clearFixtures()
+    const storageRoot = await mkdtemp(join(tmpdir(), 'uploads-integration-'))
+    root = storageRoot
     const config = privateStorageConfigFromEnv({
       ...env,
-      PRIVATE_STORAGE_LOCAL_ROOT: root,
+      PRIVATE_STORAGE_LOCAL_ROOT: storageRoot,
     }) as FilesystemStorageConfig
     storage = new FilesystemPrivateStorage(config)
     app = createApp({
@@ -55,9 +79,19 @@ describe('avatar upload API integration', () => {
     })
   })
 
+  afterEach(async () => {
+    if (root) {
+      await rm(root, { recursive: true, force: true })
+      root = undefined
+    }
+  })
+
   afterAll(async () => {
-    await prisma.$disconnect()
-    await rm(root, { recursive: true, force: true })
+    try {
+      await clearFixtures()
+    } finally {
+      await prisma.$disconnect()
+    }
   })
 
   async function register(email: string) {
@@ -318,7 +352,7 @@ describe('avatar upload API integration', () => {
     const tightEnv = { ...env, PRIVATE_STORAGE_UPLOAD_MAX_BYTES: 32 }
     const tightConfig = privateStorageConfigFromEnv({
       ...tightEnv,
-      PRIVATE_STORAGE_LOCAL_ROOT: root,
+      PRIVATE_STORAGE_LOCAL_ROOT: root!,
     }) as FilesystemStorageConfig
     const tightApp = createApp({
       env: tightEnv,
