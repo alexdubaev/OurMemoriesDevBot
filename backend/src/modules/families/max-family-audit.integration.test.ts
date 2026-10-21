@@ -389,6 +389,13 @@ describe('MAX family invitation and access audit', () => {
     const revoked = await createInvite(owner.token, family.id, 'viewer')
     expect((await request(`/api/v1/families/${family.id}/invites/${revoked.body.id}`, owner.token, 'DELETE')).response.status).toBe(204)
     expect((await request('/api/v1/invites/accept', first.token, 'POST', { token: revoked.body.rawToken })).response.status).toBe(410)
+    const revokedInvite = await prisma.familyInvite.findUniqueOrThrow({
+      where: { id: revoked.body.id }, select: { acceptedBy: true, acceptedAt: true, revokedAt: true },
+    })
+    expect(revokedInvite.acceptedBy).toBeNull()
+    expect(revokedInvite.acceptedAt).toBeNull()
+    expect(revokedInvite.revokedAt).toBeInstanceOf(Date)
+    expect(await prisma.familyMember.count({ where: { familyId: family.id, userId: first.userId, revokedAt: null } })).toBe(0)
     expect((await request('/api/v1/invites/preview', first.token, 'POST', { token: 'x'.repeat(43) })).response.status).toBe(404)
 
     const usable = await createInvite(owner.token, family.id, 'viewer')
@@ -401,6 +408,14 @@ describe('MAX family invitation and access audit', () => {
     expect(await prisma.familyMember.count({ where: { familyId: family.id, userId: first.userId, revokedAt: null } })).toBe(1)
     const other = await request('/api/v1/invites/accept', second.token, 'POST', { token: usable.body.rawToken })
     expect(other.response.status).toBe(409)
+    expect((await request(`/api/v1/families/${family.id}/invites/${usable.body.id}`, owner.token, 'DELETE')).response.status).toBe(404)
+    const acceptedInvite = await prisma.familyInvite.findUniqueOrThrow({
+      where: { id: usable.body.id }, select: { acceptedBy: true, acceptedAt: true, revokedAt: true },
+    })
+    expect(acceptedInvite.acceptedBy).toBe(first.userId)
+    expect(acceptedInvite.acceptedAt).toBeInstanceOf(Date)
+    expect(acceptedInvite.revokedAt).toBeNull()
+    expect(await prisma.familyMember.count({ where: { familyId: family.id, userId: first.userId, revokedAt: null } })).toBe(1)
 
     const acceptOrRevoke = await createInvite(owner.token, family.id, 'viewer')
     const racedAcceptor = await maxActor(720004, 'Racing acceptor')
@@ -408,10 +423,24 @@ describe('MAX family invitation and access audit', () => {
       request('/api/v1/invites/accept', racedAcceptor.token, 'POST', { token: acceptOrRevoke.body.rawToken }),
       request(`/api/v1/families/${family.id}/invites/${acceptOrRevoke.body.id}`, owner.token, 'DELETE'),
     ])
-    expect(racedRevoke.response.status).toBe(204)
-    expect([200, 410]).toContain(racedAccept.response.status)
-    expect(await prisma.familyMember.count({ where: { familyId: family.id, userId: racedAcceptor.userId, revokedAt: null } }))
-      .toBe(racedAccept.response.status === 200 ? 1 : 0)
+    expect([[204, 410], [404, 200]]).toContainEqual([racedRevoke.response.status, racedAccept.response.status])
+    const racedInvite = await prisma.familyInvite.findUniqueOrThrow({
+      where: { id: acceptOrRevoke.body.id }, select: { acceptedBy: true, acceptedAt: true, revokedAt: true },
+    })
+    const activeRacedMemberships = await prisma.familyMember.count({
+      where: { familyId: family.id, userId: racedAcceptor.userId, revokedAt: null },
+    })
+    if (racedAccept.response.status === 200) {
+      expect(racedInvite.acceptedBy).toBe(racedAcceptor.userId)
+      expect(racedInvite.acceptedAt).toBeInstanceOf(Date)
+      expect(racedInvite.revokedAt).toBeNull()
+      expect(activeRacedMemberships).toBe(1)
+    } else {
+      expect(racedInvite.acceptedBy).toBeNull()
+      expect(racedInvite.acceptedAt).toBeNull()
+      expect(racedInvite.revokedAt).toBeInstanceOf(Date)
+      expect(activeRacedMemberships).toBe(0)
+    }
   })
 
   test('serializes competing invitees and stale member versions, then invalidates upload and epoch on removal', async () => {
