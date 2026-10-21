@@ -90,9 +90,9 @@
     "e2e:webapp:s3": "bun scripts/storage-local.mjs e2e"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "10.5.10",
-    "@storybook/addon-docs": "10.5.10",
-    "@storybook/react-vite": "10.5.10",
-    "storybook": "10.5.10"
+    "@storybook/addon-a11y": "10.6.2",
+    "@storybook/addon-docs": "10.6.2",
+    "@storybook/react-vite": "10.6.2",
+    "storybook": "10.6.2"
   }
 }

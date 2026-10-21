@@ -288,6 +288,8 @@ const runtimeFingerprints = {
   feedPhoto: '9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda',
 }
 const reviewedAvatarTimerFixBlob = 'e97e72aebc8df97a90990a481de36fd78e77483e'
+const reviewedStorybookManifestBlob = '52a87894fbcc32b5ab0fa0e2c5217d85b3214cd2'
+const reviewedStorybookLockBlob = '67d34b3065b163092b09e4b91c42274405fe7823'
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -379,11 +381,15 @@ function commitSourceFile(source, relativePath, contents, message) {
   return { ...source, sha }
 }
 
-function frozenAvatarTimerFixSource() {
-  const result = spawnSync('git', ['cat-file', 'blob', reviewedAvatarTimerFixBlob], { cwd: root, encoding: 'utf8' })
-  if (result.status !== 0) throw new Error(`frozen avatar timer fixture is unavailable: ${result.stderr}`)
+function frozenGitBlob(hash, description) {
+  const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr}`)
   return result.stdout
 }
+
+const frozenAvatarTimerFixSource = () => frozenGitBlob(reviewedAvatarTimerFixBlob, 'avatar timer')
+const frozenStorybookManifest = () => frozenGitBlob(reviewedStorybookManifestBlob, 'Storybook manifest')
+const frozenStorybookLock = () => frozenGitBlob(reviewedStorybookLockBlob, 'Storybook lockfile')
 
 afterAll(() => {
   for (const directory of fixtureWorktrees.reverse()) {
@@ -574,11 +580,13 @@ slowTest('test-only edits keep the verified runtime compatible with its immutabl
   assert.match(result.events, /GATE\nUP:.*backend worker scheduler static/)
 })
 
-slowTest('runtime timer fix has one exact 33a recovery compatibility attestation', () => {
+slowTest('timer fix and Storybook security update have one exact 33a recovery compatibility attestation', () => {
   let source = createSourceWorktree('feedPhoto')
   source = commitSourceFile(source, 'webapp/src/platform/media/avatar-resource-pool.ts',
     frozenAvatarTimerFixSource(),
     'apply exact avatar timer binding fix')
+  source = commitSourceFile(source, 'package.json', frozenStorybookManifest(), 'upgrade Storybook security pins')
+  source = commitSourceFile(source, 'bun.lock', frozenStorybookLock(), 'refresh Storybook lockfile')
   source = commitSourceFile(source, 'deploy/selectel/redeploy.sh',
     readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8'), 'apply attested rollback compatibility profile')
 
@@ -601,6 +609,8 @@ slowTest('repeat release preserves the verified recovery pair and refuses an inv
   source = commitSourceFile(source, 'webapp/src/platform/media/avatar-resource-pool.ts',
     frozenAvatarTimerFixSource(),
     'apply exact avatar timer binding fix')
+  source = commitSourceFile(source, 'package.json', frozenStorybookManifest(), 'upgrade Storybook security pins')
+  source = commitSourceFile(source, 'bun.lock', frozenStorybookLock(), 'refresh Storybook lockfile')
   source = commitSourceFile(source, 'deploy/selectel/redeploy.sh',
     readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8'), 'apply attested rollback compatibility profile')
 

@@ -357,3 +357,21 @@ must be read from the PR/final handoff; none of the intermediate results is pres
 Read-only production preparation confirmed current checkout/images `dc320109`, a clean host,
 more than 4 GiB free, no concurrent release process, public root/live/ready HTTP 200 and existing
 `33a0054` rollback-readiness PASS. No services were promoted during these preparations.
+
+### Verification gate recovery: newly reported Storybook advisory
+
+The first clean-commit FULL at `99588c8a386f89f173f77466e306972f58b6ca8a` stopped at
+dependency audit, before unit/integration/browser stages. It found critical
+[GHSA-f2ph-cmg5-wxc8](https://github.com/advisories/GHSA-f2ph-cmg5-wxc8), added to the
+reviewed advisory database on October 21. This was a FAIL, not a completed FULL.
+The official [10.6.2 release](https://github.com/storybookjs/storybook/releases/tag/v10.6.2)
+patches the affected Storybook dev-server functionality.
+
+The bounded recovery upgrades the four existing direct development pins from 10.5.10 to
+10.6.2 and regenerates only their lock closure. No audit exception or insecure feature flag
+was added. Inspection found no unrelated production dependency version change; existing
+magic-string versions were re-hoisted for the upgraded Storybook graph. Dependency audit
+and both webapp/website Storybook builds passed. Existing website module-directive warnings
+do not represent a build failure. The same independent reviewer checks this narrow delta and
+the required exact compatibility content attestation; full immutable recovery pins remain intact.
+The new manifest/lock fixture inputs are frozen blobs, not the changing current revision.

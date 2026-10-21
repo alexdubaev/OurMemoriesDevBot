@@ -476,14 +476,15 @@ the UI-v4 ancestry and artifact checks remain covered. A test refactor therefore
 does not rotate an immutable artifact pin, while any production-input drift still
 fails the compatibility comparison.
 
-The native browser avatar-timer binding fix has one additional exact executable
-compatibility hash, `bc01000a1b256cadea573095487added25afe54f29de56814a587246f8827a89`,
-for recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. It is anchored
-to the unchanged full-attested `dc320109` source above. This is a reviewed actual
-runtime fix, not a repin caused by a test edit. Existing recovery image IDs,
-source pins, migration/configuration checks and v4 ancestry remain mandatory.
-Its positive test fixture uses the immutable reviewed timer-source Git blob;
-it does not read the changing application's current file as a historical fixture.
+The native browser avatar-timer fix and exact Storybook 10.6.2 security update
+have one additional exact executable compatibility hash,
+`81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51`, for
+recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. It is anchored to
+the unchanged full-attested `dc320109` source above. The positive fixture reads
+immutable Git blobs for the reviewed timer fix, root manifest and Bun lockfile;
+it does not read changing application files as historical inputs. Existing
+recovery image IDs, source pins, migration/configuration checks and v4 ancestry
+remain mandatory.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises

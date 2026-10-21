@@ -739,10 +739,10 @@ rollback_source_compatibility_profile() {
 				"33a0054c3c71372aa5509ee8ebfa4578ad512ea1:ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87:comments") ;;
 		33a0054c3c71372aa5509ee8ebfa4578ad512ea1)
 			attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:comments")
-			# The timer callback binding fix changes executable source while
-			# preserving this exact recovery profile. This content hash is anchored
+			# The timer callback fix and the exact Storybook security-toolchain
+			# upgrade preserve this recovery profile. This content hash is anchored
 			# to the same full-attested dc320 source and applies only to target 33a.
-			exact_compatibility_attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:bc01000a1b256cadea573095487added25afe54f29de56814a587246f8827a89:comments") ;;
+			exact_compatibility_attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51:comments") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

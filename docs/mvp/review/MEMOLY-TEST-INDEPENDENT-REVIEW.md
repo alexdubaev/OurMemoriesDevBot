@@ -32,3 +32,16 @@ Immutable recovery image/source pins and all data/configuration/v4 guards remain
 No unresolved P0/P1/P2 was reported after that pass. The review did not execute broad FULL,
 production promotion, real email/S3 provider tests, historical suites or Terraform plans.
 Final exact-source verification, publication and production evidence belong to the PR/handoff.
+
+## Narrow closure after the first FULL failure
+
+The exact-commit gate then stopped on newly reported Storybook advisory GHSA-f2ph-cmg5-wxc8.
+A separate bounded dependency worker upgraded only the four existing root Storybook development
+pins and their lock closure to the officially patched 10.6.2; audit and both Storybook builds passed.
+The original fresh reviewer inspected that new failure's correction and the required compatibility
+attestation/immutable fixture update. The two focused release regressions and shell/patch checks
+passed after this closure. The combined exact hash is
+`81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51`, restricted to 33a and
+anchored to the unchanged dc320 full-source pin. The manifest/lock/timer fixture blobs are frozen.
+This is closure of a concrete new gate failure, not a second formal whole-change review or a
+waiver of the gate. No unresolved P0/P1/P2 was reported; final results are recorded with publication.
