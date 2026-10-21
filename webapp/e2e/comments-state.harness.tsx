@@ -19,8 +19,8 @@ type Gate = { kind: 'list' | 'create' | 'summary'; path: string; body?: string; 
 type CapabilityMode = 'owner' | 'moderator' | 'viewer'
 let capabilityMode: CapabilityMode = 'owner'
 let hostBack: (() => void) | null = null
-type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | 'summary' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; denyFamily: boolean; currentBody: string | null; deleted: boolean; configure: (action: string) => void; release: (kind: Gate['kind']) => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; entries: Array<{ key: readonly unknown[]; data: unknown }>; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number; targetSummaryCount: number | undefined } }
-const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', denyFamily: false, currentBody: null, deleted: false, configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], entries: [], open: false, scope: A, summaries: 0, targetSummaryCount: undefined }) }
+type Metrics = { calls: Array<{ path: string; method: string; ids?: number }>; gates: Gate[]; holdNext: 'list' | 'create' | 'summary' | null; patchMode: 'none' | 'forbidden-readable' | 'forbidden-denied' | 'version-conflict' | 'deleted-conflict' | 'delete-version-conflict'; denyFamily: boolean; currentBody: string | null; createdCount: number; deleted: boolean; configure: (action: string) => void; release: (kind: Gate['kind']) => void; snapshot: () => { keys: Array<readonly unknown[]>; data: unknown[]; entries: Array<{ key: readonly unknown[]; data: unknown }>; open: boolean; scope: { accountId: string; familyId: string; membershipEpoch: number; memoryId: string }; summaries: number; targetSummaryCount: number | undefined } }
+const metrics: Metrics = { calls: [], gates: [], holdNext: null, patchMode: 'none', denyFamily: false, currentBody: null, createdCount: 0, deleted: false, configure: () => undefined, release: () => undefined, snapshot: () => ({ keys: [], data: [], entries: [], open: false, scope: A, summaries: 0, targetSummaryCount: undefined }) }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
 ;(window as unknown as { __commentsState: Metrics }).__commentsState = metrics
 
@@ -28,10 +28,10 @@ function fixture(body = 'Existing comment', id = 'cccccccc-cccc-4ccc-8ccc-cccccc
   const time = new Date(Date.UTC(2026, 9, 1, 12, ordinal)).toISOString()
   return { id, familyId: A.familyId, memoryId: A.memoryId, author: { id: A.accountId, name: 'Тест', avatarPath: null, avatarCrop: null }, body, createdAt: time, updatedAt: time, version, capabilities: { edit: true, delete: true } }
 }
-function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, 1, i)), nextCursor: string | null = null): CommentPage {
+function page(items = Array.from({ length: 20 }, (_, i) => fixture(`Existing comment ${i + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(i + 1).padStart(12, '0')}`, 1, i)), nextCursor: string | null = null, summaryCount = items.length): CommentPage {
   const capabilities = capabilityMode === 'owner' ? { edit: true, delete: true } : capabilityMode === 'moderator' ? { edit: false, delete: true } : { edit: false, delete: false }
   const ordered = items.map((item) => ({ ...item, capabilities })).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id))
-  return { items: ordered, nextCursor, summary: { memoryId: A.memoryId, count: items.length, capabilities: { read: true, create: true } } }
+  return { items: ordered, nextCursor, summary: { memoryId: A.memoryId, count: summaryCount, capabilities: { read: true, create: true } } }
 }
 
 export function Harness() {
@@ -64,21 +64,21 @@ export function Harness() {
         const ordinal = i + (metrics.deleted ? 1 : 0)
         return fixture(ordinal === 0 && metrics.currentBody ? metrics.currentBody : `Existing comment ${ordinal + 1}`, `cccccccc-cccc-4ccc-8ccc-${String(ordinal + 1).padStart(12, '0')}`, ordinal === 0 && metrics.currentBody ? 3 : 1, ordinal)
       })
-      return page(metrics.deleted || metrics.currentBody ? currentItems : newScope ? [fixture('Fresh scope comment', 'ffffffff-ffff-4fff-8fff-ffffffffffff')] : undefined, metrics.deleted || metrics.currentBody ? 'older' : newScope ? null : 'older')
+      return page(metrics.deleted || metrics.currentBody ? currentItems : newScope ? [fixture('Fresh scope comment', 'ffffffff-ffff-4fff-8fff-ffffffffffff')] : undefined, metrics.deleted || metrics.currentBody ? 'older' : newScope ? null : 'older', 20 + metrics.createdCount - (metrics.deleted ? 1 : 0))
     }
-    if (method === 'DELETE') { metrics.deleted = true; return { deletedId: 'cccccccc-cccc-4ccc-8ccc-000000000001', summary: { memoryId: A.memoryId, count: 0, capabilities: { read: true, create: true } } } }
+    if (method === 'DELETE') { metrics.deleted = true; return { deletedId: 'cccccccc-cccc-4ccc-8ccc-000000000001', summary: { memoryId: A.memoryId, count: 19 + metrics.createdCount, capabilities: { read: true, create: true } } } }
     if (create) {
       const gate: Gate = { kind: 'create', path, body: options?.body?.body, aborted: false, completed: false, resolve: () => undefined }
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
       if (metrics.holdNext === 'create') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }); gate.completed = true }
-      if (!gate.aborted) metrics.currentBody = gate.body ?? 'Late private body'
-      return { comment: fixture(gate.body ?? 'Late private body', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'), summary: { memoryId: A.memoryId, count: 2, capabilities: { read: true, create: true } } }
+      if (!gate.aborted) { metrics.currentBody = gate.body ?? 'Late private body'; metrics.createdCount += 1 }
+      return { comment: fixture(gate.body ?? 'Late private body', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'), summary: { memoryId: A.memoryId, count: 20 + metrics.createdCount, capabilities: { read: true, create: true } } }
     }
-    if (method === 'PATCH') { metrics.currentBody = options?.body?.body ?? 'Saved edit'; return { comment: fixture(metrics.currentBody, 'cccccccc-cccc-4ccc-8ccc-000000000001', 3), summary: { memoryId: A.memoryId, count: 1, capabilities: { read: true, create: true } } } }
+    if (method === 'PATCH') { metrics.currentBody = options?.body?.body ?? 'Saved edit'; return { comment: fixture(metrics.currentBody, 'cccccccc-cccc-4ccc-8ccc-000000000001', 3), summary: { memoryId: A.memoryId, count: 20 + metrics.createdCount - (metrics.deleted ? 1 : 0), capabilities: { read: true, create: true } } } }
     if (path.endsWith('/comment-summaries')) {
       if (metrics.denyFamily) throw new ApiRequestError(403, 'ROLE_FORBIDDEN', 'Synthetic summary read revoked')
       const gate: Gate = { kind: 'summary', path, aborted: false, completed: false, resolve: () => undefined }
-      const summaries = (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: memoryId === A.memoryId && metrics.currentBody ? 2 : 1, capabilities: { read: true, create: true } }))
+      const summaries = (options?.body?.memoryIds ?? []).map((memoryId) => ({ memoryId, count: memoryId === A.memoryId ? 20 + metrics.createdCount - (metrics.deleted ? 1 : 0) : 1, capabilities: { read: true, create: true } }))
       if (options?.signal) options.signal.addEventListener('abort', () => { gate.aborted = true }, { once: true })
       if (metrics.holdNext === 'summary') { metrics.holdNext = null; metrics.gates.push(gate); await new Promise<void>((resolve) => { gate.resolve = () => resolve() }); gate.completed = true }
       return { items: summaries }

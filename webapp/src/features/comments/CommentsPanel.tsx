@@ -164,15 +164,37 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     const clearTimer = () => { generation += 1; if (timer !== undefined) clearTimeout(timer); timer = undefined }
     const refreshReadingWindow = async () => {
       const key = commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
-      const data = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
       const element = listRef.current
-      const top = element?.getBoundingClientRect().top ?? 0
-      const firstVisible = element ? [...element.querySelectorAll<HTMLElement>('[data-comment-id]')].find((row) => row.getBoundingClientRect().bottom > top) : undefined
-      const commentId = firstVisible?.dataset.commentId
-      const pageIndex = commentId ? data?.pages.findIndex((page) => page.items.some((item) => item.id === commentId)) ?? -1 : -1
-      const olderCursor = pageIndex > 0 ? data?.pageParams[pageIndex] : null
+      const bounds = element?.getBoundingClientRect()
+      const visibleCommentIds = element && bounds
+        ? [...element.querySelectorAll<HTMLElement>('[data-comment-id]')]
+          .filter((row) => {
+            const rowBounds = row.getBoundingClientRect()
+            return rowBounds.bottom > bounds.top && rowBounds.top < bounds.bottom
+          })
+          .map((row) => row.dataset.commentId)
+          .filter((id): id is string => Boolean(id))
+        : []
       await refreshCurrentWindow()
-        if (olderCursor) await refreshOlderWindow(olderCursor)
+      const refreshedCursors = new Set<string>()
+      const refreshedCommentIds = new Set<string>()
+      for (let pass = 0; pass < visibleCommentIds.length; pass += 1) {
+        const data = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+        if (!data) break
+        const cursor = visibleCommentIds.map((id) => {
+          if (refreshedCommentIds.has(id)) return null
+          const pageIndex = data.pages.findIndex((page) => page.items.some((item) => item.id === id))
+          return pageIndex > 0 ? { index: pageIndex, cursor: data.pageParams[pageIndex] } : null
+        }).filter((candidate): candidate is { index: number; cursor: string | null } => candidate !== null)
+          .sort((left, right) => left.index - right.index)
+          .find((candidate) => candidate.cursor !== null && !refreshedCursors.has(candidate.cursor))
+        if (!cursor) break
+        refreshedCursors.add(cursor.cursor!)
+        await refreshOlderWindow(cursor.cursor!)
+        const updated = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+        const refreshedIndex = updated?.pageParams.findIndex((item) => item === cursor.cursor) ?? -1
+        for (const comment of updated?.pages[refreshedIndex]?.items ?? []) refreshedCommentIds.add(comment.id)
+      }
     }
     const schedule = (immediate = false) => {
       if (disposed) return

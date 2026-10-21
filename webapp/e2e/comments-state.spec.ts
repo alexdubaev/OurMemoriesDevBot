@@ -40,7 +40,7 @@ test('summary batching and closed-panel query boundary', async ({ page }) => {
 
 test('late summary batch cannot overwrite a server-confirmed comment count', async ({ page }) => {
   await page.goto('/e2e/comments-state.harness.html')
-  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(1)
+  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(20)
   await page.getByRole('button', { name: 'Open comments' }).click()
   await expect(page.locator('.comments-item').first()).toBeVisible()
   await page.evaluate(() => window.__commentsState.configure('summary-race'))
@@ -48,11 +48,11 @@ test('late summary batch cannot overwrite a server-confirmed comment count', asy
   await page.getByRole('textbox', { name: 'Написать комментарий' }).fill('Race test comment')
   await page.getByRole('button', { name: 'Отправить' }).click()
   await expect.poll(() => page.evaluate(() => window.__commentsState.calls.some((call) => call.method === 'POST' && call.path.endsWith('/comments')))).toBe(true)
-  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(2)
+  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(21)
   expect(await page.evaluate(() => window.__commentsState.gates.find((gate) => gate.kind === 'summary')?.aborted)).toBe(true)
   await page.evaluate(() => window.__commentsState.release('summary'))
   await expect.poll(() => page.evaluate(() => window.__commentsState.gates.find((gate) => gate.kind === 'summary')?.completed)).toBe(true)
-  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(2)
+  await expect.poll(() => page.evaluate(() => window.__commentsState.snapshot().targetSummaryCount)).toBe(21)
 })
 
 test('comment entry handles all memory kinds, known counts, reactions and channel attribution at 320px', async ({ page }) => {

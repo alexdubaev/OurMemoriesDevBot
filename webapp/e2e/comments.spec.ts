@@ -128,6 +128,7 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     })))
     expect(writes.map((response) => response.status())).toEqual([201, 201, 201])
     const ownerCommentId = ((await writes[0]!.json()) as { comment: { id: string } }).comment.id
+    const fullCommentId = ((await writes[1]!.json()) as { comment: { id: string } }).comment.id
     const foreignRead = await page.request.get(`/api/v1/families/${full.familyId}/memories/${full.memoryId}/comments`, {
       headers: { Authorization: `Bearer ${owner.token}` },
     })
@@ -164,7 +165,12 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     expect(summary.items).toEqual([{ memoryId: owner.memoryId, count: 41, capabilities: { read: true, create: true } }])
 
     const panelListRequests: string[] = []
+    const panelListResponses: Array<{ url: string; ids: string[] }> = []
     page.on('request', (request) => { if (new URL(request.url()).pathname === commentPath && request.method() === 'GET') panelListRequests.push(request.url()) })
+    page.on('response', (response) => {
+      if (new URL(response.url()).pathname !== commentPath || response.request().method() !== 'GET' || !response.ok()) return
+      void response.json().then((body: { items?: Array<{ id: string }> }) => panelListResponses.push({ url: response.url(), ids: (body.items ?? []).map((item) => item.id) })).catch(() => undefined)
+    })
     const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
     await page.bringToFront()
     await page.context().setOffline(true)
@@ -212,6 +218,7 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     await expect(commentItems).toHaveCount(45)
     await expect(panel.getByRole('button', { name: 'Новые комментарии · 25' })).toBeVisible()
+    await expect(entry).toHaveAttribute('aria-label', 'Открыть комментарии, 66')
     const afterY = await anchorItem.evaluate((element) => element.getBoundingClientRect().y)
     expect(Math.abs(afterY - beforeY)).toBeLessThan(2)
     const burstBodies = await commentItems.locator('.comments-item-body > p').allTextContents()
@@ -239,6 +246,47 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     const commentBodies = await commentItems.locator('.comments-item-body > p').allTextContents()
     expect(commentBodies).toHaveLength(66)
     expect(new Set(commentBodies).size).toBe(66)
+
+    const olderFullComment = commentItems.filter({ hasText: 'COM-4 role 1' })
+    await olderFullComment.scrollIntoViewIfNeeded()
+    const visibleIdsBeforeRefresh = await commentsList.evaluate((list) => {
+      const bounds = list.getBoundingClientRect()
+      return [...list.querySelectorAll<HTMLElement>('[data-comment-id]')].filter((row) => {
+        const rowBounds = row.getBoundingClientRect()
+        return rowBounds.bottom > bounds.top && rowBounds.top < bounds.bottom
+      }).map((row) => row.dataset.commentId)
+    })
+    expect(visibleIdsBeforeRefresh).toContain(fullCommentId)
+    const draft = panel.getByRole('textbox', { name: 'Написать комментарий' })
+    await draft.fill('COM-4 draft across older refresh')
+    const olderReadsBeforeEdit = panelListRequests.filter((url) => new URL(url).searchParams.has('cursor')).length
+    const olderResponsesBeforeEdit = panelListResponses.length
+    const externalOldEdit = await fullPage.request.patch(`${commentPath}/${fullCommentId}`, {
+      headers: { Authorization: `Bearer ${full.token}` },
+      data: { body: 'COM-4 external older edit', expectedVersion: 1 },
+    })
+    expect(externalOldEdit.status()).toBe(200)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(() => panelListRequests.filter((url) => new URL(url).searchParams.has('cursor')).length).toBeGreaterThan(olderReadsBeforeEdit)
+    await expect.poll(() => panelListResponses.slice(olderResponsesBeforeEdit).some((response) => new URL(response.url).searchParams.has('cursor') && response.ids.includes(fullCommentId))).toBe(true)
+    await expect(commentItems.filter({ hasText: 'COM-4 external older edit' })).toHaveCount(1)
+    await expect(draft).toHaveValue('COM-4 draft across older refresh')
+    await expect(entry).toHaveAttribute('aria-label', 'Открыть комментарии, 66')
+
+    const olderReadsBeforeDelete = panelListRequests.filter((url) => new URL(url).searchParams.has('cursor')).length
+    const olderResponsesBeforeDelete = panelListResponses.length
+    const externalOldDelete = await fullPage.request.delete(`${commentPath}/${fullCommentId}`, {
+      headers: { Authorization: `Bearer ${full.token}`, 'If-Match': '2' },
+    })
+    expect(externalOldDelete.status()).toBe(200)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(() => panelListRequests.filter((url) => new URL(url).searchParams.has('cursor')).length).toBeGreaterThan(olderReadsBeforeDelete)
+    await expect.poll(() => panelListResponses.slice(olderResponsesBeforeDelete).some((response) => new URL(response.url).searchParams.has('cursor') && !response.ids.includes(fullCommentId))).toBe(true)
+    await expect(commentItems.filter({ hasText: 'COM-4 external older edit' })).toHaveCount(0)
+    await expect(draft).toHaveValue('COM-4 draft across older refresh')
+    await expect(entry).toHaveAttribute('aria-label', 'Открыть комментарии, 65')
+    await draft.fill('')
+
     const ownerComment = commentItems.filter({ hasText: 'COM-4 role 0' })
     await ownerComment.getByRole('button', { name: 'Изменить' }).click()
     const editField = panel.getByRole('textbox', { name: 'Изменить комментарий' })
@@ -254,11 +302,11 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await expect(panel.getByText('Concurrent owner update', { exact: true })).toBeVisible()
     await panel.getByRole('button', { name: 'Сохранить' }).click()
     await expect(panel.getByText('Owner local draft after competing update', { exact: true })).toBeVisible()
-    const farOldComment = commentItems.filter({ hasText: 'COM-4 role 1' })
+    const farOldComment = commentItems.filter({ hasText: 'COM-4 role 2' })
     await expect(farOldComment).toBeVisible()
     await farOldComment.getByRole('button', { name: 'Удалить' }).click()
     await page.getByRole('dialog', { name: 'Удалить комментарий?' }).getByRole('button', { name: 'Удалить' }).click()
-    await expect(commentItems.filter({ hasText: 'COM-4 role 1' })).toHaveCount(0)
+    await expect(commentItems.filter({ hasText: 'COM-4 role 2' })).toHaveCount(0)
     const readsBeforeClose = panelListRequests.length
     await page.getByRole('button', { name: 'Закрыть комментарии' }).click()
     await page.clock.fastForward(90_000)

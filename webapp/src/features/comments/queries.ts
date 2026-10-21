@@ -66,6 +66,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: Infinity,
+    gcTime: 0,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -159,9 +160,13 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           if (!valid(expectedRevision) || !canReadNow()) throw new CancelledError()
         }
         const reconciled = reconcileLatestCommentPages(data, pages, params)
+        await cancelCommentSummaryQueries(client, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+        if (!valid(expectedRevision)) throw new CancelledError()
         if (valid(expectedRevision)) {
           beforeWrite?.()
           client.setQueryData(key, reconciled)
+          const authoritativeSummary = pages[0]?.summary
+          if (authoritativeSummary) writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, authoritativeSummary)
           reconciled.pageParams.forEach((rawParam, index) => {
             const param = rawParam ?? ''
             if (index < pages.length) {
@@ -183,6 +188,8 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
         if (cursor !== undefined && requestedWindowIndex < 0) return
         const page = await loadComments(transport, scope.familyId, scope.memoryId, next, controller.signal)
         if (!valid(expectedRevision)) throw new CancelledError()
+        await cancelCommentSummaryQueries(client, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+        if (!valid(expectedRevision)) throw new CancelledError()
         const pageIndex = current.pageParams.findIndex((item) => item === next)
         if (pageIndex < 0) {
           const ids = new Set(current.pages.flatMap((part) => part.items.map((item) => item.id)))
@@ -190,6 +197,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           const boundary = current.pages.at(-1)?.items.at(-1) ?? null
           beforeWrite?.()
           client.setQueryData<InfiniteData<CommentPage, string | null>>(key, { pages: [...current.pages, appended], pageParams: [...current.pageParams, next] })
+          writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, page.summary)
           upperBoundaries.current.set(next, boundary)
           if (page.nextCursor && page.items.at(-1)) upperBoundaries.current.set(page.nextCursor, page.items.at(-1)!)
           failureCount.current = 0; retryAtRef.current = 0; retryAfterAt.current = 0; setRetryAt(0)
@@ -200,6 +208,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           upperBoundaries.current.set(next, upper)
           const reconciled = reconcileCommentWindow(current, page, next, upper)
           beforeWrite?.(); client.setQueryData(key, reconciled)
+          writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, page.summary)
           if (page.nextCursor && page.items.at(-1)) upperBoundaries.current.set(page.nextCursor, page.items.at(-1)!)
           const resultIndex = reconciled.pageParams.findIndex((item) => item === next)
           for (let index = resultIndex + 2; index < reconciled.pageParams.length; index += 1) {
@@ -223,7 +232,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
       if (activeController.current === controller) { activeController.current = null; activeReadKind.current = null; activeReadRevision.current = -1 }
       if (valid(expectedRevision)) { setReadPending(false); setFetchingOlder(false) }
     }
-  }, [beforeWrite, canReadNow, client, enabled, key, lease, scope.familyId, scope.memoryId, transport, valid])
+  }, [beforeWrite, canReadNow, client, enabled, key, lease, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId, transport, valid])
 
   const enqueue = useCallback((kind: 'refresh' | 'older', cursor?: string | null, force = false) => {
     if (kind === 'refresh' && activeReadKind.current === 'refresh' && activeReadRevision.current === revision.current && !queue.current.refresh) return queue.current.running ?? Promise.resolve()
