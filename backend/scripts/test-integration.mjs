@@ -79,26 +79,33 @@ export async function runBackendIntegration({
     ...dockerEnv,
     DATABASE_URL: databaseUrl,
     TEST_DATABASE_URL: databaseUrl,
+    CHECKPOINT_DISABLE: '1',
   }
   const keepsDocker = environment.TEST_KEEP_DOCKER === '1'
 
   const run = (command, args, options = {}) => {
+    const testFile = command === 'bun' && args[0] === 'test'
+      ? args.at(-1)?.replaceAll('\\', '/')
+      : undefined
+    const childTimeoutMs = testFile
+      ? process.platform === 'win32' && testFile === 'scripts/comments-release-compatibility.integration.test.ts'
+        ? 360_000
+        : integrationChildProcessTimeoutMs
+      : undefined
     const result = spawn(command, args, {
       cwd: options.cwd ?? backendRoot,
       env: options.env ?? environment,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: options.stdio ?? 'pipe',
-      ...(command === 'bun' && args[0] === 'test'
-        ? { timeout: integrationChildProcessTimeoutMs }
-        : {}),
+      ...(childTimeoutMs === undefined ? {} : { timeout: childTimeoutMs }),
     })
 
     if (result.stdout) process.stdout.write(result.stdout)
     if (result.stderr) process.stderr.write(result.stderr)
 
     if (result.error?.code === 'ETIMEDOUT') {
-      throw new Error(`Integration test process exceeded ${integrationChildProcessTimeoutMs}ms: ${args.at(-1)}`)
+      throw new Error(`Integration test process exceeded ${childTimeoutMs}ms: ${args.at(-1)}`)
     }
     if (result.status !== 0) {
       throw new CommandFailure(command, args, result.status ?? 1)
@@ -106,7 +113,6 @@ export async function runBackendIntegration({
     if (command === 'bun' && args[0] === 'test') {
       const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
       const summary = parseBunSummary(output)
-      const testFile = args.at(-1)?.replaceAll('\\', '/')
       const expectedFiltered = maxOnly ? expectedMaxHistoricalExclusions(testFile) : 0
       if (!summary || summary.passed === 0 || summary.skipped !== 0 || summary.filtered !== expectedFiltered) {
         throw new Error(`Required integration evidence invalid for ${testFile ?? '(unknown test file)'}: ${JSON.stringify(summary)}`)

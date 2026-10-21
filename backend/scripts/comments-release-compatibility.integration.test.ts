@@ -24,22 +24,51 @@ test('COM-4 current and measured rollback runtimes read and write after additive
   const admin = new Client({ connectionString: databaseUrl })
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const fixture = mkdtempSync(resolve(root, '.scratch', 'comments-compat-'))
-  const childEnv = { ...process.env, NODE_ENV: 'test', DATABASE_URL: ownUrl.toString(), TEST_DATABASE_URL: ownUrl.toString() }
+  const childEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    CHECKPOINT_DISABLE: '1',
+    DATABASE_URL: ownUrl.toString(),
+    TEST_DATABASE_URL: ownUrl.toString(),
+  }
   const run = (command: string, args: string[], cwd = root, env: NodeJS.ProcessEnv = process.env, timeout = 120_000) =>
     spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 })
-  const checked = (command: string, args: string[], cwd = root, env: NodeJS.ProcessEnv = process.env) => {
-    const result = run(command, args, cwd, env)
-    if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status}): ${result.stdout}\n${result.stderr}`)
-    return result.stdout
+  const timed = <T>(label: string, action: () => T): T => {
+    const startedAt = performance.now()
+    process.stdout.write(`COM-4 phase start label=${label}\n`)
+    try {
+      return action()
+    } finally {
+      process.stdout.write(`COM-4 phase done label=${label} elapsedMs=${Math.round(performance.now() - startedAt)}\n`)
+    }
   }
-  const archiveRuntime = (revision: string, runtimeRoot: string) => {
+  const timedAsync = async <T>(label: string, action: () => Promise<T>): Promise<T> => {
+    const startedAt = performance.now()
+    process.stdout.write(`COM-4 phase start label=${label}\n`)
+    try {
+      return await action()
+    } finally {
+      process.stdout.write(`COM-4 phase done label=${label} elapsedMs=${Math.round(performance.now() - startedAt)}\n`)
+    }
+  }
+  const checked = (label: string, command: string, args: string[], cwd = root, env: NodeJS.ProcessEnv = process.env) => timed(label, () => {
+    const result = run(command, args, cwd, env)
+    if (result.status !== 0) {
+      const reason = result.error
+        ? `spawnError=${result.error.code ?? result.error.name}`
+        : `exit=${result.status ?? 'null'} signal=${result.signal ?? 'none'}`
+      throw new Error(`${command} ${args.join(' ')} failed (${reason}): ${result.stdout}\n${result.stderr}`)
+    }
+    return result.stdout
+  })
+  const archiveRuntime = (revision: string, runtimeRoot: string, label: string) => {
     mkdirSync(runtimeRoot)
-    const archive = spawnSync('git', ['archive', revision, 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'], { cwd: root, encoding: null, timeout: 30_000, maxBuffer: 32 * 1024 * 1024 })
-    if (archive.status !== 0) throw new Error(`Cannot archive ${revision}: ${archive.stderr}`)
-    const tarResult = spawnSync('tar', ['-x', '-C', runtimeRoot], { cwd: root, input: archive.stdout, encoding: 'utf8', timeout: 30_000 })
-    if (tarResult.status !== 0) throw new Error(`Cannot extract ${revision}: ${tarResult.stderr}`)
-    checked('bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], runtimeRoot, childEnv)
-    checked('bun', ['run', '--cwd', 'backend', 'prisma:generate'], runtimeRoot, childEnv)
+    const archive = timed(`${label}:archive`, () => spawnSync('git', ['archive', revision, 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'], { cwd: root, encoding: null, timeout: 30_000, maxBuffer: 32 * 1024 * 1024 }))
+    if (archive.status !== 0) throw new Error(`Cannot archive ${label}: ${archive.stderr}`)
+    const tarResult = timed(`${label}:extract`, () => spawnSync('tar', ['-x', '-C', runtimeRoot], { cwd: root, input: archive.stdout, encoding: 'utf8', timeout: 30_000 }))
+    if (tarResult.status !== 0) throw new Error(`Cannot extract ${label}: ${tarResult.stderr}`)
+    checked(`${label}:install`, 'bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], runtimeRoot, childEnv)
+    checked(`${label}:prisma-generate`, 'bun', ['run', '--cwd', 'backend', 'prisma:generate'], runtimeRoot, childEnv)
   }
   const rollbackRuntimeRoot = resolve(fixture, 'runtime-rollback-target')
   const acceptedV4RuntimeRoot = resolve(fixture, 'runtime-accepted-v4-rollback-target')
@@ -48,8 +77,8 @@ test('COM-4 current and measured rollback runtimes read and write after additive
   await admin.connect()
   let created = false
   try {
-    archiveRuntime(rollbackTarget, rollbackRuntimeRoot)
-    archiveRuntime(acceptedV4RollbackTarget, acceptedV4RuntimeRoot)
+    archiveRuntime(rollbackTarget, rollbackRuntimeRoot, 'rollback-target')
+    archiveRuntime(acceptedV4RollbackTarget, acceptedV4RuntimeRoot, 'accepted-v4')
     await admin.query(`CREATE DATABASE "${name}"`)
     created = true
     const db = new Client({ connectionString: ownUrl.toString() })
@@ -60,7 +89,7 @@ test('COM-4 current and measured rollback runtimes read and write after additive
       const migrations = (await readdir(migrationRoot)).filter((entry) => /^\d{14}_/.test(entry)).sort()
       const boundary = migrations.findIndex((entry) => entry.endsWith('_memory_comments'))
       expect(boundary).toBeGreaterThan(0)
-      checked('bunx', ['--bun', 'prisma', 'migrate', 'deploy'], resolve(rollbackRuntimeRoot, 'backend'), childEnv)
+      checked('rollback-migrate-deploy', 'bunx', ['--bun', 'prisma', 'migrate', 'deploy'], resolve(rollbackRuntimeRoot, 'backend'), childEnv)
       const appliedBeforeComments = await db.query<{ migration_name: string }>(
         'SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY migration_name',
       )
@@ -86,7 +115,7 @@ test('COM-4 current and measured rollback runtimes read and write after additive
         ADMIN_SEED_PASSWORD: '',
         DATABASE_RUNTIME_USER: `missing_runtime_${process.pid}`,
       }
-      const failedSelectel = run('bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), selectelEnv)
+      const failedSelectel = timed('selectel-failure-run', () => run('bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), selectelEnv))
       expect(failedSelectel.status).not.toBe(0)
       expect(`${failedSelectel.stdout}\n${failedSelectel.stderr}`).toContain('Database migration was applied, but runtime grants or postconditions failed')
       expect(`${failedSelectel.stdout}\n${failedSelectel.stderr}`).not.toContain(ownUrl.toString())
@@ -100,7 +129,7 @@ test('COM-4 current and measured rollback runtimes read and write after additive
       await admin.query(`CREATE ROLE "${runtimeRole}" NOLOGIN`)
       try {
         const retryEnv = { ...selectelEnv, DATABASE_RUNTIME_USER: runtimeRole }
-        checked('bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), retryEnv)
+        checked('selectel-retry-run', 'bun', ['scripts/deploy-selectel-database.ts'], resolve(backendRoot), retryEnv)
         const appliedAfterRetry = await db.query<{ migration_name: string; checksum: string; finished_at: Date }>(
           'SELECT migration_name,checksum,finished_at FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
         )
@@ -120,7 +149,7 @@ test('COM-4 current and measured rollback runtimes read and write after additive
           "SELECT count(*)::text AS users, count(*) FILTER (WHERE role='admin')::text AS admins, count(*) FILTER (WHERE password_hash IS NOT NULL)::text AS passwords FROM users",
         )
         expect(userState.rows).toEqual([{ users: '1', admins: '0', passwords: '0' }])
-        const cloudNoAdmin = run('bun', ['scripts/deploy-database.ts'], resolve(backendRoot), retryEnv)
+        const cloudNoAdmin = timed('cloud-no-admin-run', () => run('bun', ['scripts/deploy-database.ts'], resolve(backendRoot), retryEnv))
         expect(cloudNoAdmin.status).not.toBe(0)
         expect(`${cloudNoAdmin.stdout}\n${cloudNoAdmin.stderr}`).toContain('Database migration was applied, but runtime grants or postconditions failed')
         expect(`${cloudNoAdmin.stdout}\n${cloudNoAdmin.stderr}`).not.toContain(ownUrl.toString())
@@ -142,7 +171,7 @@ test('COM-4 current and measured rollback runtimes read and write after additive
       const statePath = resolve(fixture, 'runtime-state.json')
       const seedPath = resolve(fixture, 'seed.json')
       writeFileSync(seedPath, JSON.stringify({ userId, familyId, childId, memoryId }))
-      checked('bun', [probe, root, 'candidate-before', statePath, seedPath], root, childEnv)
+      checked('probe-candidate-before', 'bun', [probe, root, 'candidate-before', statePath, seedPath], root, childEnv)
       const beforeRows = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
 
       for (const [revision, runtimeRoot, mode] of [
@@ -150,30 +179,32 @@ test('COM-4 current and measured rollback runtimes read and write after additive
         [rollbackTarget, rollbackRuntimeRoot, 'old-rollback-target'],
         [acceptedV4RollbackTarget, acceptedV4RuntimeRoot, 'accepted-v4-rollback-target'],
       ] as const) {
-        if (revision === oldProduction) archiveRuntime(revision, runtimeRoot)
-        const output = checked('bun', [probe, runtimeRoot, mode, statePath], runtimeRoot, childEnv)
+        if (revision === oldProduction) archiveRuntime(revision, runtimeRoot, 'old-production')
+        const output = checked(`probe-${mode}`, 'bun', [probe, runtimeRoot, mode, statePath], runtimeRoot, childEnv)
         expect(JSON.parse(output.trim().split('\n').at(-1)!)).toMatchObject({ success: true, phase: mode })
       }
 
-      const oldStatus = run('bunx', ['--bun', 'prisma', 'migrate', 'status'], resolve(rollbackRuntimeRoot, 'backend'), childEnv)
+      const oldStatus = timed('old-rollback-cli-status', () => run('bunx', ['--bun', 'prisma', 'migrate', 'status'], resolve(rollbackRuntimeRoot, 'backend'), childEnv))
       const oldStatusOutput = `${oldStatus.stdout}\n${oldStatus.stderr}`
       process.stdout.write(`COM-4 old rollback CLI migrate status exit=${oldStatus.status}\n${oldStatusOutput}\n`)
       expect(oldStatus.status, `Frozen ${rollbackTarget} Prisma CLI must accept the applied migration history. Output:\n${oldStatusOutput}`).toBe(0)
 
-      checked('bun', [probe, root, 'candidate-after', statePath], root, childEnv)
-      const preserved = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
-      expect(preserved).toEqual(beforeRows)
-      expect((await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]).toMatchObject(legacyBefore)
-      const retained = await db.query("SELECT id,body,create_request_id,deleted_at FROM memory_comments WHERE memory_id=$1 ORDER BY body", [memoryId])
-      expect(retained.rows).toHaveLength(2)
-      expect(retained.rows.some((row) => row.body === 'COM-4 API-created retained comment' && row.deleted_at === null)).toBe(true)
-      expect(retained.rows.some((row) => row.body === '' && row.deleted_at !== null)).toBe(true)
+      checked('probe-candidate-after', 'bun', [probe, root, 'candidate-after', statePath], root, childEnv)
+      await timedAsync('final-db-assertions', async () => {
+        const preserved = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
+        expect(preserved).toEqual(beforeRows)
+        expect((await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]).toMatchObject(legacyBefore)
+        const retained = await db.query("SELECT id,body,create_request_id,deleted_at FROM memory_comments WHERE memory_id=$1 ORDER BY body", [memoryId])
+        expect(retained.rows).toHaveLength(2)
+        expect(retained.rows.some((row) => row.body === 'COM-4 API-created retained comment' && row.deleted_at === null)).toBe(true)
+        expect(retained.rows.some((row) => row.body === '' && row.deleted_at !== null)).toBe(true)
+      })
     } finally {
-      await db.end()
+      await timedAsync('db-end', () => db.end())
     }
   } finally {
-    if (created) await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`)
-    await admin.end()
-    rmSync(fixture, { recursive: true, force: true })
+    if (created) await timedAsync('drop-test-database', () => admin.query(`DROP DATABASE "${name}" WITH (FORCE)`))
+    await timedAsync('admin-end', () => admin.end())
+    timed('fixture-rmsync', () => rmSync(fixture, { recursive: true, force: true }))
   }
-}, 180_000)
+}, process.platform === 'win32' ? 300_000 : 180_000)
