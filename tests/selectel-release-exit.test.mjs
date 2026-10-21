@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import test, { after } from 'node:test'
+import test from 'node:test'
+import { afterAll } from 'bun:test'
 import { bashPath } from './bash-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -377,7 +378,7 @@ function commitSourceChange(source, relativePath, contents, message) {
   return { ...source, sha }
 }
 
-after(() => {
+afterAll(() => {
   for (const directory of fixtureWorktrees.reverse()) {
     const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
