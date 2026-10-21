@@ -196,6 +196,13 @@ test('COM-4 real API ACL, family isolation, pagination, batch and conflict retai
     await expect(panel.getByRole('alert')).toContainText('Черновик сохранён')
     await expect(editField).toHaveValue('Owner local draft after competing update')
     await expect(panel.getByText('Concurrent owner update', { exact: true })).toBeVisible()
+    // Bulk setup shares the verification server's normal IP write budget with later
+    // journeys. Honour its real reset boundary instead of raising/disabling limits.
+    const resetAt = Number(externalUpdate.headers()['ratelimit-reset'])
+    expect(Number.isSafeInteger(resetAt)).toBe(true)
+    const resetWaitMs = Math.max(0, resetAt * 1_000 - Date.now() + 100)
+    expect(resetWaitMs).toBeLessThanOrEqual(61_000)
+    await new Promise((resolve) => setTimeout(resolve, resetWaitMs))
   } finally {
     await fullContext.close()
     await viewerContext.close()
