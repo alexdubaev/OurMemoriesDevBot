@@ -8,6 +8,7 @@ describe('MAX PostgreSQL verification catalog', () => {
   test('keeps MAX auth, neutral data and migration checks while excluding messenger-specific suites', () => {
     const files = [
       'scripts/selectel-rollback-compatibility.integration.test.ts',
+      'scripts/comments-release-compatibility.integration.test.ts',
       'src/modules/auth/max-auth.integration.test.ts',
       'src/db.integration.test.ts',
       'src/outbox/outbox.integration.test.ts',
@@ -90,6 +91,7 @@ describe('MAX PostgreSQL verification catalog', () => {
 function requiredFixtures() {
   return [
     'scripts/selectel-rollback-compatibility.integration.test.ts',
+    'scripts/comments-release-compatibility.integration.test.ts',
     'src/modules/auth/max-auth.integration.test.ts', 'src/db.integration.test.ts',
     'src/outbox/outbox.integration.test.ts', 'src/modules/families/family-access.integration.test.ts',
     'src/modules/media/media-access.integration.test.ts', 'src/modules/uploads/uploads.integration.test.ts',
