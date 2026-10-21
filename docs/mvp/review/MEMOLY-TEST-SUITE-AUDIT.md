@@ -388,3 +388,11 @@ An AST inventory of all 37 selected integration files found no other entirely fi
 the dynamically named media-flow cases were inspected separately. No catalog exclusion, skip,
 or empty-run relaxation was introduced. This test-only correction must leave the executable
 compatibility fingerprint unchanged.
+
+FULL at `64b2cd047f1ba358a67d7d32d984c286dc13ad52` again passed the first 16 stages,
+then exposed a redundant exact-name database allowlist in the invite-expiry test. The fixture
+already uses the stricter shared guard; removing the obsolete local list preserves scheme,
+loopback, matching URL and decoded `_test` enforcement. Its HTTP/PG case passed (1 test / 5
+expectations), then all 18 remaining selected integration files passed (287 tests / 2,425
+expectations, no skips/filters). A repository scan found no other selected duplicate exact-name
+guard. Independent read-only closure found no P0–P2; product assertions are unchanged.

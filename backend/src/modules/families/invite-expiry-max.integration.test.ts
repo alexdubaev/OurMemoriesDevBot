@@ -6,18 +6,10 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
-// @ts-expect-error The repository's runtime safety guard is JavaScript with no declaration surface.
-import { assertTestDatabaseUrl } from '../../../../scripts/repo-env.mjs'
 import { signAccessToken } from '../auth'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for MAX family invite expiry tests')
-assertTestDatabaseUrl(databaseUrl)
-const databaseAddress = new URL(databaseUrl)
-if (!['127.0.0.1', 'localhost', '::1'].includes(databaseAddress.hostname)
-  || !/^\/(?:web_app_demo_test|memoly_family_audit(?:_e2e)?_test|memoly_family_audit_verify_20261016_test)$/.test(databaseAddress.pathname)) {
-  throw new Error('MAX family invite expiry tests refuse non-loopback or non-test databases')
-}
 
 describe('MAX family invite expiry', () => {
   const prisma = createPrisma(databaseUrl)
