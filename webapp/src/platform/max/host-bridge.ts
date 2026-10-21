@@ -17,6 +17,7 @@ type MaxWebApp = {
   close?: unknown
   openLink?: unknown
   openMaxLink?: unknown
+  enableClosingConfirmation?: unknown
 }
 
 type BrowserHost = {
@@ -45,6 +46,7 @@ export type MaxRuntimeDiagnostic = {
 }
 
 const zeroInsets: TelegramInsets = { top: 0, right: 0, bottom: 0, left: 0 }
+const configuredClosingConfirmation = new WeakSet<object>()
 
 export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions = {}): HostBridge {
   const browserHost = isRecord(host) ? host as BrowserHost : null
@@ -73,6 +75,7 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
       }
     },
     ready: () => {
+      configureClosingConfirmation(webApp)
       if (typeof webApp?.ready === 'function') webApp.ready()
     },
     close: () => {
@@ -100,6 +103,19 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     openTelegramVideo: () => false,
     openInvite: () => undefined,
     getInsets: () => normalizedInsets(webApp),
+  }
+}
+
+function configureClosingConfirmation(webApp: MaxWebApp | null) {
+  if (!webApp || configuredClosingConfirmation.has(webApp)) return
+  // Mark first so a throwing host method cannot be retried on every ready()/mount.
+  configuredClosingConfirmation.add(webApp)
+  try {
+    if (typeof webApp.enableClosingConfirmation === 'function') {
+      webApp.enableClosingConfirmation.call(webApp)
+    }
+  } catch {
+    // This optional one-way host request must not prevent normal bridge startup.
   }
 }
 
