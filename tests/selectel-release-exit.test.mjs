@@ -459,22 +459,24 @@ test('comments rollback rejects unknown migration history and history query fail
   }
 })
 
-test('comments rollback rejects source, schema, contracts, dependency, and protected configuration drift', () => {
-  for (const [path, contents] of [
+for (const [path, contents] of [
     ['backend/src/worker.ts', '\n// changed comments source fixture\n'],
     ['backend/prisma/schema.prisma', '\n// changed schema fixture\n'],
     ['packages/contracts/src/memories.ts', '\n// changed contract fixture\n'],
     ['bun.lock', '\n# changed dependency lock fixture\n'],
     ['backend/package.json', '\n// changed dependency manifest fixture\n'],
-  ]) {
+]) {
+  test(`comments rollback rejects source drift in ${path}`, () => {
     const source = commitSourceChange(createSourceWorktree('comments'), path, contents, 'mutate comments rollback source')
     const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
       sourceRootOverride: source.root, sourceShaOverride: source.sha })
     assert.notEqual(result.status, 0, `${path}: ${result.output}`)
     assert.match(result.output, /application runtime differs from the verified rollback source/)
     assert.doesNotMatch(result.events, /UP:|GATE/)
-  }
+  })
+}
 
+test('comments rollback rejects protected service configuration drift', () => {
   const config = commitSourceChange(createSourceWorktree('comments'), 'deploy/selectel/Caddyfile.edge.template',
     '\n# changed protected configuration fixture\n', 'mutate comments service configuration')
   const result = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
