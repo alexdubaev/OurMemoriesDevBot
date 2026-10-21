@@ -116,8 +116,10 @@ test('COM-4 current and measured rollback runtimes read and write after additive
           [runtimeRole],
         )).rows[0]
         expect(runtimeState).toMatchObject({ rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolbypassrls: false, can_create: false, can_temp: false, has_default_public_acl: false })
-        const passwordUsers = await db.query<{ count: string }>('SELECT count(*)::text AS count FROM users WHERE password_hash IS NOT NULL')
-        expect(passwordUsers.rows).toEqual([{ count: '0' }])
+        const userState = await db.query<{ users: string; admins: string; passwords: string }>(
+          "SELECT count(*)::text AS users, count(*) FILTER (WHERE role='admin')::text AS admins, count(*) FILTER (WHERE password_hash IS NOT NULL)::text AS passwords FROM users",
+        )
+        expect(userState.rows).toEqual([{ users: '1', admins: '0', passwords: '0' }])
         const cloudNoAdmin = run('bun', ['scripts/deploy-database.ts'], resolve(backendRoot), retryEnv)
         expect(cloudNoAdmin.status).not.toBe(0)
         expect(`${cloudNoAdmin.stdout}\n${cloudNoAdmin.stderr}`).toContain('Database migration was applied, but runtime grants or postconditions failed')

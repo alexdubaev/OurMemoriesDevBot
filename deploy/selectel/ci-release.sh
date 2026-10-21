@@ -28,6 +28,7 @@ QUIESCE_STARTED=false
 B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
 MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
 MM0_MIGRATION=20260928100000_mm0_domain_temporal_foundation
+ACCEPTED_UI_V4_SHA=afdb408f8bbf22b564c86bb8d33a83261f55cc48
 MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
@@ -135,12 +136,16 @@ check_disk_space() {
   printf 'Disk preflight passed: %s KiB available.\n' "$available"
 }
 
-fetch_and_checkout() {
+validate_planned_source() {
   git_memoly fetch --prune origin main || die 'cannot fetch accepted main from origin'
   local accepted_sha
   accepted_sha=$(git_memoly rev-parse refs/remotes/origin/main 2>/dev/null || true)
   [ "$accepted_sha" = "$PRODUCT_SHA" ] || die "requested SHA is not the current accepted origin/main SHA"
+  git_root merge-base --is-ancestor "$ACCEPTED_UI_V4_SHA" "$PRODUCT_SHA" ||
+    die 'planned release must contain the accepted UI v4 source'
+}
 
+fetch_and_checkout() {
   require_release_ownership
   if ! git_memoly switch --detach "$PRODUCT_SHA" >/dev/null 2>&1; then
     # Git diagnostics can include host paths or remote details; surface only a
@@ -495,6 +500,7 @@ main() {
   trap release_failure EXIT
 
   validate_repository
+  validate_planned_source
   if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
     load_mm0_marker
     if [ -e "$FORWARD_MARKER" ] || [ -L "$FORWARD_MARKER" ]; then

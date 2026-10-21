@@ -33,6 +33,25 @@ migration, checks readiness, and writes a protected nonsecret release manifest.
 Never store private key paths, key values, database passwords, MAX tokens,
 webhook secrets, or encryption keys in the repository.
 
+## Scenario-specific database and recovery gates
+
+| Scenario | Entry point / invariant |
+| --- | --- |
+| New Yandex Cloud / DigitalOcean infrastructure | Provider Terraform bootstrap/apply; first cloud release uses its scoped administrator seed. |
+| Later Yandex / DigitalOcean release | Existing `db:deploy` keeps migration-owner, runtime DML and login-capable password administrator postconditions; no Selectel override is inherited. |
+| Existing memoLy MAX-only Selectel, pending SQL | Guarded `ci-release.sh` with migration enabled calls `deploy-selectel-database.ts`: requires MAX enabled, forbids administrator seed, retains ownership, Prisma ledger and atomic grants. It neither creates privileged accounts nor requires a password-authenticated application admin. |
+| Existing Selectel, schema current | Normal guarded release with migration disabled still checks actual migration status before promotion. A previous partial job is not evidence that SQL needs rerunning or undoing. |
+| Interrupted Selectel database job | Determine whether SQL completed and which later stage failed. Retry the same authorized procedure after repair; Prisma's completed ledger is retained. Never restore a backup or erase ledger rows to retry. |
+| Planned backend reconciliation | Preserve accepted UI v4 where a separately verified compatible path exists. A mixed runtime requires its own evidence; do not bypass ancestry/image/compatibility guards. Otherwise prepare a compatible forward fix. |
+| Emergency application rollback | Only accepted UI v4 or its descendants, with exact runtime/data/image/config compatibility. A pre-v4 artifact is not an allowed frontend target. Use compatible forward recovery if no v4 rollback is proven. No automatic DB restore. |
+
+These procedures select product-specific postconditions in code, not via an operator
+"skip admin" flag. The Selectel path is for the existing MAX application, not a
+replacement for cloud bootstrap or an authentication change. If a precondition is
+unexpected, trace its origin and reproduce the relevant complete path before
+proposing new privileged access. See [the incident investigation](RELEASE_POSTMORTEM_2026-10-21.md)
+and the [Selectel operational runbook](../deploy/selectel/README.md).
+
 ## Supported production shape
 
 | Concern               | DigitalOcean                        | Yandex Cloud                                   |
@@ -220,7 +239,7 @@ unset ADMIN_SEED_EMAIL ADMIN_SEED_PASSWORD
 
 The script writes the seed to an ignored mode-`0600` migration-root input only for the migration,
 then removes it. Yandex creates and deletes a migration-only Lockbox secret; DigitalOcean removes
-the PRE_DEPLOY job variables in a second idempotent API deployment. On later releases omit both
+the PRE_DEPLOY job variables in a second idempotent API deployment. On later Yandex/DigitalOcean releases omit both
 values; `db:deploy` verifies that a login-capable administrator still exists. If a Yandex release
 was interrupted after migration but before cleanup, the next release removes exactly the three
 known seed resources before invoking migration, without requiring the old seed value again.
