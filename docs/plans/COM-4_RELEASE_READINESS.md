@@ -104,6 +104,16 @@ old Prisma client. It does not substitute the current generated client or alter 
 accepted migration. Actual current UI/API checks and controlled mock error/privacy
 checks are separate evidence. The latter cannot establish backend correctness.
 
+Two additional mixed-version browser sessions passed against isolated PostgreSQL:
+the built production frontend source `a52ba972018a5f56bfe098b81489cd8889d760d4`
+authenticated, created/loaded a publication and remained usable with the current
+API after a comment was saved; the current built frontend against actual old API
+`4ce200620bf87d1ba5605aee73f5442fe50ccdb4` displayed a retryable comments error
+for the real missing endpoint while retaining the feed. These were local source
+builds, not production containers or a physical MAX session. Their scripts/logs
+are retained with the COM-4 evidence. The current production runtime source was
+unchanged by the test/documentation-only COM-4 diff.
+
 ## Rollout after the blockers and authorization are resolved
 
 1. Capture fresh production checkout/service SHA, OCI labels/image IDs, migration
