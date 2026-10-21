@@ -409,6 +409,19 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   target fingerprint `3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857`,
   and source fingerprint `5555b4b9419d29b4366f5a70fbdd9537a3ccde3230a0497c41fa392de9038107`
   measured from candidate `39e8af7bb9e9a5949ada3c32dad31d38f9439505`.
+- The exact COM-4 comments runtime fingerprint
+  `5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02` may use
+  the same #180 image pair after the real current → #180 → current PostgreSQL
+  integration probe verifies the additive comments API roundtrip. This profile
+  keeps the exact #180 target, image IDs, OCI labels, ancestry, clean checkout,
+  protected configuration backup, and all other rollback checks. Its source
+  fingerprint pins schema, migrations, contracts, manifests and lockfile; only
+  those exact measured source contents may differ from #180. Dockerfiles,
+  backend dependency manifest, Bun config and Selectel Compose/Caddy files must
+  still match. Before any service change, rollback-readiness also compares every
+  completed `_prisma_migrations` name and checksum with the catalog derived from
+  the checked-out source SQL, rejects unfinished rows, and fails closed on query
+  errors. It does not run a migration or restore database contents.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
@@ -426,6 +439,10 @@ memory reads/writes/ordinals, invite acceptance, outbox publication, private med
 revoked sessions and an independent device. No production data is used. The SQL
 compatibility read remains mandatory; read errors and unfinished migrations
 still forbid restoration. B2/MM0 forward-only markers remain unconditional blocks.
+For the COM-4 profile, the frozen #180 Prisma CLI also successfully reports
+`migrate status` against the completed 49-migration test database after the
+additive comments migration. Production's captured baseline remains at 48; this
+test result is compatibility evidence, not a production migration or deployment.
 
 Normal compatible promotion creates and validates a fresh PostgreSQL custom dump
 using the existing backup procedure, in addition to the protected configuration

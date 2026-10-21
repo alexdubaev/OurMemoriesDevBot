@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
@@ -75,9 +75,15 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
       const legacyBefore = (await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]
       checked('bunx', ['--bun', 'prisma', 'migrate', 'deploy'], resolve(backendRoot), childEnv)
       const appliedAfterComments = await db.query<{ migration_name: string }>(
-        'SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY migration_name',
+        'SELECT migration_name,checksum FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name',
       )
       expect(appliedAfterComments.rows.map((row) => row.migration_name)).toEqual(migrations)
+      expect(appliedAfterComments.rows.map(({ migration_name, checksum }) => ({ migration_name, checksum }))).toEqual(
+        migrations.map((migration) => ({
+          migration_name: migration,
+          checksum: createHash('sha256').update(readFileSync(resolve(backendRoot, 'prisma/migrations', migration, 'migration.sql'))).digest('hex'),
+        })),
+      )
       const probe = resolve(root, 'backend/scripts/test-support/comments-runtime-probe.mjs')
       const statePath = resolve(fixture, 'runtime-state.json')
       const seedPath = resolve(fixture, 'seed.json')

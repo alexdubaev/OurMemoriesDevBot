@@ -697,6 +697,25 @@ rollback_runtime_fingerprint() {
 		sha256sum | awk '{print $1}'
 }
 
+rollback_migration_catalog_fingerprint() {
+	local revision=$1 path name checksum records='' count=0
+	local -a migration_paths=()
+	mapfile -t migration_paths < <(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
+		ls-tree -r --name-only "$revision" -- backend/prisma/migrations/ |
+		grep -E '/migration\.sql$' | LC_ALL=C sort)
+	[ "${#migration_paths[@]}" -gt 0 ] || return 1
+	for path in "${migration_paths[@]}"; do
+		name=${path#backend/prisma/migrations/}
+		name=${name%/migration.sql}
+		checksum=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" show "$revision:$path" | sha256sum | awk '{print $1}') || return 1
+		[[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || return 1
+		records+="$name:$checksum"$'\n'
+		count=$((count + 1))
+	done
+	[ "$count" -gt 0 ] || return 1
+	printf '%s' "$records" | sha256sum | awk '{print $1}'
+}
+
 rollback_auth_gate_for_verified_pair() {
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
@@ -719,6 +738,10 @@ rollback_auth_gate_for_verified_pair() {
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
 		die 'rollback source is outside the exact target release lineage'
 	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
+	if [ "$target" = "$candidate_target" ] &&
+		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
+		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+	fi
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	printf '%s\n' "$gate"
 }
@@ -745,7 +768,7 @@ verify_application_rollback() {
 	# so squash commits do not need to retain unreachable producer objects.
 	local legacy_target=e383d79269a3595f4c6cabedf167335aea042cf3
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
-	local target expected_runtime expected_target_runtime
+	local target expected_runtime expected_target_runtime profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
 			target=$legacy_target
@@ -774,14 +797,27 @@ verify_application_rollback() {
 		die 'rollback source checkout is not clean'
 	local source_runtime target_runtime
 	source_runtime=$(rollback_runtime_fingerprint "$MEMOLY_PRODUCT_SHA") || die 'cannot fingerprint rollback source runtime'
+	if [ "$target" = "$candidate_target" ] &&
+		[ "$source_runtime" = 5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02 ]; then
+		profile=comments
+		expected_runtime=5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02
+	fi
 	[ "$source_runtime" = "$expected_runtime" ] || die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
-		backend/prisma backend/Dockerfile backend/package.json packages/contracts bun.lock bunfig.toml \
-		deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
-		deploy/selectel/Caddyfile.edge.template deploy/selectel/Caddyfile.static.template deploy/selectel/in-place-file.sh ||
-		die 'rollback schema, dependencies or service configuration are incompatible'
+	if [ "$profile" = comments ]; then
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
+			backend/Dockerfile backend/package.json bunfig.toml \
+			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
+			deploy/selectel/Caddyfile.edge.template deploy/selectel/Caddyfile.static.template deploy/selectel/in-place-file.sh ||
+			die 'rollback schema, dependencies or service configuration are incompatible'
+	else
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
+			backend/prisma backend/Dockerfile backend/package.json packages/contracts bun.lock bunfig.toml \
+			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
+			deploy/selectel/Caddyfile.edge.template deploy/selectel/Caddyfile.static.template deploy/selectel/in-place-file.sh ||
+			die 'rollback schema, dependencies or service configuration are incompatible'
+	fi
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
 	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
@@ -814,6 +850,14 @@ verify_application_rollback() {
 	# Missing tables, unknown result types, unfinished migrations and read errors fail closed.
 	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
 		die 'rollback data compatibility state is unknown or migration is unfinished'
+	if [ "$profile" = comments ]; then
+		local expected_migration_catalog
+		expected_migration_catalog=$(rollback_migration_catalog_fingerprint "$MEMOLY_PRODUCT_SHA") ||
+			die 'cannot fingerprint the verified comments migration catalog'
+		[[ "$expected_migration_catalog" =~ ^[0-9a-f]{64}$ ]] || die 'verified comments migration catalog fingerprint is invalid'
+		compose run --rm --no-deps -e "MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256=$expected_migration_catalog" backend bun -e 'import { createHash } from "node:crypto"; import { Client } from "pg"; const expected=process.env.MEMOLY_EXPECTED_MIGRATION_CATALOG_SHA256; const client=new Client({connectionString:process.env.DATABASE_URL}); try { if (!/^[0-9a-f]{64}$/.test(expected ?? "")) throw new Error("invalid expected migration catalog"); await client.connect(); const {rows}=await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name"); if (rows.some(row => !row.finished_at && !row.rolled_back_at)) throw new Error("unfinished migration"); const completed=rows.filter(row => row.finished_at && !row.rolled_back_at); if (completed.some(row => typeof row.migration_name !== "string" || typeof row.checksum !== "string")) throw new Error("invalid migration ledger row"); const actual=createHash("sha256").update(completed.map(row => `${row.migration_name}:${row.checksum}`).join("\n")+"\n").digest("hex"); await client.end(); process.exit(actual === expected ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
+			die 'comments rollback requires the exact completed migration history'
+	fi
 	)
 }
 

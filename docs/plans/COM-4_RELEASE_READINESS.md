@@ -4,6 +4,30 @@ Snapshot: 2026-10-21. Product baseline: `11a283605181a09835b734eb3156a815aacbc50
 (COM-1 #187, COM-2 #190, COM-3 #191). This record supplements
 [the Selectel runbook](../../deploy/selectel/README.md); it does not authorize a release.
 
+## Attestation update — 2026-10-21
+
+The guarded recovery path now has one additional exact, locally measured profile:
+the COM-4 runtime fingerprint
+`5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02` may restore
+the configured #180 pair `3fce2739205da927b95eb3379b1d066b61282965` across API,
+worker, scheduler and static. That pair retains its measured image IDs, OCI revision
+labels, target fingerprint and protected configuration requirements. The #180
+Prisma CLI `migrate status` returned exit 0 on the isolated database after all 49
+candidate migrations, and the actual old runtime read and wrote the expanded schema
+in the candidate → old → candidate roundtrip. Runtime source, schema, contracts,
+dependencies, and lockfile remain pinned by the exact measured fingerprint. The
+guard also verifies the complete migration names and checksums against SQL files
+from that pinned source and rejects unfinished, unknown or unreadable history.
+
+This closes the missing exact-pair compatibility attestation described in the
+initial snapshot. It does not reconcile the currently observed production API/jobs
+split or make the comments migration/deployment authorized. Production remains at
+48 migrations in the recorded snapshot; no comments migration, service recreation,
+or real-family write has been performed. The accepted source for this guard work is
+`a353f01a8354e42f71473b1917f99c9a97181680`; the runtime fingerprint excludes the
+bounded deployment, test and documentation paths, so these changes do not alter the
+measured product runtime.
+
 ## Delivery decision
 
 **Production rollout is BLOCKED by the existing release/rollback preconditions.**
@@ -56,13 +80,14 @@ rollback pair was `3fce2739205da927b95eb3379b1d066b61282965`; both images existe
    accepted lineage; no retagging is permitted to conceal this.
 3. `prepare_rollback` records the *running* images. For this host that would be the
    mixed `4ce2006:a52ba97` pair, replacing the saved `3fce273:3fce273` pair.
-   `redeploy.sh:verify_application_rollback` has no attestation for that mixed pair,
-   and its existing exact source fingerprints/schema/dependency equality do not
-   attest the comments candidate against the saved older pair either.
+   `redeploy.sh:verify_application_rollback` has no attestation for that mixed pair.
+   The exact COM-4 → #180 profile below resolves compatibility with the saved pair,
+   but cannot attest or normalize the currently running mixed images.
 
-Image availability and a synthetic old-runtime schema test do not resolve those
-release-protocol requirements. No release command, rollback-readiness one-shot,
-configuration write, service recreation or permission change was run on the host.
+Image availability and a synthetic old-runtime schema test did not resolve those
+release-protocol requirements; the later exact-profile integration evidence is
+recorded above. No release command, rollback-readiness one-shot, configuration
+write, service recreation or permission change was run on the host.
 Prebuilding images still meets the same guards; frontend-only delivery omits the
 required API/migration; neither is a safe workaround.
 
