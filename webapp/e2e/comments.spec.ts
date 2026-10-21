@@ -85,14 +85,6 @@ async function uploadPng(page: Page, token: string, familyId: string) {
   return ticket.assetId
 }
 
-async function authenticateMax(page: Page, userId: number) {
-  const response = await page.request.post('/api/v1/auth/max', {
-    data: { initData: signedMaxInitData(userId) },
-  })
-  expect(response.status()).toBe(200)
-  return (await response.json() as { accessToken: string }).accessToken
-}
-
 async function acceptRoleInvite(page: Page, familyId: string, ownerToken: string, memberToken: string, role: 'full' | 'viewer') {
   const invite = await page.request.post(`/api/v1/families/${familyId}/invites`, {
     headers: { Authorization: `Bearer ${ownerToken}` },
@@ -107,27 +99,33 @@ async function acceptRoleInvite(page: Page, familyId: string, ownerToken: string
   expect(accepted.status()).toBe(200)
 }
 
-test('COM-4 real API roles, family isolation, cursor pages and 50-memory batch through the browser transport', async ({ page }) => {
+test('COM-4 real API ACL, family isolation, pagination, batch and conflict retain the owner draft', async ({ page }) => {
   const owner = await signInAndSeed(page)
-  const fullToken = await authenticateMax(page, 987_700_001)
-  const viewerToken = await authenticateMax(page, 987_700_002)
-  const otherPage = await page.context().newPage()
-  const otherFamily = await signInAndSeed(otherPage)
-  await acceptRoleInvite(page, owner.familyId, owner.token, fullToken, 'full')
-  await acceptRoleInvite(page, owner.familyId, owner.token, viewerToken, 'viewer')
+  const browser = page.context().browser()!
+  const baseURL = new URL(page.url()).origin
+  const fullContext = await browser.newContext({ baseURL })
+  const viewerContext = await browser.newContext({ baseURL })
+  const fullPage = await fullContext.newPage()
+  const viewerPage = await viewerContext.newPage()
+  const full = await signInAndSeed(fullPage)
+  const viewer = await signInAndSeed(viewerPage)
+  await acceptRoleInvite(page, owner.familyId, owner.token, full.token, 'full')
+  await acceptRoleInvite(page, owner.familyId, owner.token, viewer.token, 'viewer')
 
   const commentPath = `/api/v1/families/${owner.familyId}/memories/${owner.memoryId}/comments`
-  const identities = [owner.token, fullToken, viewerToken]
-  const writes = await Promise.all(identities.map((token, index) => page.request.post(commentPath, {
+  const actors: Array<{ page: Page; token: string }> = [
+    { page, token: owner.token }, { page: fullPage, token: full.token }, { page: viewerPage, token: viewer.token },
+  ]
+  const writes = await Promise.all(actors.map(({ page: actorPage, token }, index) => actorPage.request.post(commentPath, {
     headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': randomUUID() },
     data: { body: `COM-4 role ${index}` },
   })))
   expect(writes.map((response) => response.status())).toEqual([201, 201, 201])
-  const foreignRead = await page.request.get(`/api/v1/families/${otherFamily.familyId}/memories/${otherFamily.memoryId}/comments`, {
+  const ownerCommentId = ((await writes[0]!.json()) as { comment: { id: string } }).comment.id
+  const foreignRead = await page.request.get(`/api/v1/families/${full.familyId}/memories/${full.memoryId}/comments`, {
     headers: { Authorization: `Bearer ${owner.token}` },
   })
   expect(foreignRead.status()).toBe(404)
-  await otherPage.close()
 
   const pageRows = await Promise.all(Array.from({ length: 62 }, (_, index) =>
     page.request.post(commentPath, {
@@ -143,7 +141,7 @@ test('COM-4 real API roles, family isolation, cursor pages and 50-memory batch t
   expect(firstBody.items).toHaveLength(50)
   expect(firstBody.nextCursor).toBeTruthy()
   const second = await page.request.get(`${commentPath}?limit=50&cursor=${encodeURIComponent(firstBody.nextCursor!)}`, {
-    headers: { Authorization: `Bearer ${fullToken}` },
+    headers: { Authorization: `Bearer ${full.token}` },
   })
   expect(second.status()).toBe(200)
   const secondBody = await second.json() as { items: Array<{ id: string }>; nextCursor: string | null }
@@ -161,13 +159,43 @@ test('COM-4 real API roles, family isolation, cursor pages and 50-memory batch t
     memoryIds.push((await response.json() as { id: string }).id)
   }
   const batch = await page.request.post(`/api/v1/families/${owner.familyId}/memories/comment-summaries`, {
-    headers: { Authorization: `Bearer ${viewerToken}` },
+    headers: { Authorization: `Bearer ${viewer.token}` },
     data: { memoryIds },
   })
   expect(batch.status()).toBe(200)
   const summary = await batch.json() as { items: Array<{ memoryId: string; count: number }> }
   expect(summary.items).toHaveLength(50)
   expect(summary.items.find((item) => item.memoryId === owner.memoryId)?.count).toBeGreaterThanOrEqual(65)
+
+  const entry = page.locator(`[data-memory-id="${owner.memoryId}"] .comments-entry`)
+  await entry.click()
+  const panel = page.getByRole('dialog', { name: 'Комментарии' })
+  const commentItems = panel.locator('.comments-item')
+  await expect(commentItems).toHaveCount(20)
+  const firstItem = commentItems.first()
+  const beforeY = await firstItem.evaluate((element) => element.getBoundingClientRect().y)
+  for (const expectedCount of [40, 60, 65]) {
+    await panel.getByRole('button', { name: 'Показать более ранние' }).click()
+    await expect(commentItems).toHaveCount(expectedCount)
+  }
+  expect(await commentItems.allInnerTexts()).toHaveLength(65)
+  expect(await commentItems.evaluateAll((items) => new Set(items.map((item) => item.querySelector('p')?.textContent)).size)).toBe(65)
+  const afterY = await firstItem.evaluate((element) => element.getBoundingClientRect().y)
+  expect(Math.abs(afterY - beforeY)).toBeLessThan(2)
+  const ownerComment = commentItems.filter({ hasText: 'COM-4 role 0' })
+  await ownerComment.getByRole('button', { name: 'Изменить' }).click()
+  const editField = panel.getByRole('textbox', { name: 'Изменить комментарий' })
+  await editField.fill('Owner local draft after competing update')
+  const externalUpdate = await fullPage.request.patch(`${commentPath}/${ownerCommentId}`, {
+    headers: { Authorization: `Bearer ${owner.token}` },
+    data: { body: 'Concurrent owner update', expectedVersion: 1 },
+  })
+  expect(externalUpdate.status()).toBe(200)
+  await panel.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(panel.getByRole('alert')).toContainText('Черновик сохранён')
+  await expect(editField).toHaveValue('Owner local draft after competing update')
+  await expect(panel.getByText('Concurrent owner update', { exact: true })).toBeVisible()
+  await Promise.all([fullContext.close(), viewerContext.close()])
 })
 
 test('COM-3 real MAX browser creates, retries, edits, cancels and deletes one comment', async ({ page }, testInfo) => {

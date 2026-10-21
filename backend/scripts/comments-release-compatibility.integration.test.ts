@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
-import { createPrisma } from '../src/db'
 // @ts-expect-error JS runtime safety guard has no declaration surface.
 import { assertTestDatabaseUrl } from '../../scripts/repo-env.mjs'
 
@@ -59,11 +58,13 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
       const legacyBefore = (await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]
       await db.query(await readFile(resolve(migrationRoot, migrations[boundary]!, 'migration.sql'), 'utf8'))
 
-      const activeId = randomUUID(), tombstoneId = randomUUID(), requestId = randomUUID()
-      await db.query("INSERT INTO memory_comments(id,family_id,memory_id,author_id,body,create_request_id,initial_payload_hash) VALUES($1,$2,$3,$4,'COM-4 preserved comment',$5,'synthetic-hash')", [activeId, familyId, memoryId, userId, requestId])
-      await db.query("INSERT INTO memory_comments(id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash) VALUES($1,$2,$3,$4,'',2,now(),$5,'synthetic-tombstone-hash')", [tombstoneId, familyId, memoryId, userId, randomUUID()])
-      const commentRows = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
       const childEnv = { ...process.env, NODE_ENV: 'test', DATABASE_URL: ownUrl.toString(), TEST_DATABASE_URL: ownUrl.toString() }
+      const probe = resolve(root, 'backend/scripts/test-support/comments-runtime-probe.mjs')
+      const statePath = resolve(fixture, 'runtime-state.json')
+      const seedPath = resolve(fixture, 'seed.json')
+      writeFileSync(seedPath, JSON.stringify({ userId, familyId, childId, memoryId }))
+      checked('bun', [probe, root, 'candidate-before', statePath, seedPath], root, childEnv)
+      const beforeRows = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
 
       for (const [index, revision] of [oldProduction, rollbackTarget].entries()) {
         const runtimeRoot = resolve(fixture, `runtime-${index}`)
@@ -74,22 +75,19 @@ test('COM-4 old frozen runtimes read and write after additive comments migration
         if (tarResult.status !== 0) throw new Error(`Cannot extract ${revision}: ${tarResult.stderr}`)
         checked('bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], runtimeRoot, childEnv)
         checked('bun', ['run', '--cwd', 'backend', 'prisma:generate'], runtimeRoot, childEnv)
-        const output = checked('bun', [resolve(root, 'backend/scripts/test-support/comments-runtime-probe.mjs'), runtimeRoot, memoryId, familyId], runtimeRoot, childEnv)
-        expect(JSON.parse(output.trim().split('\n').at(-1)!)).toMatchObject({ success: true, memoryId, familyId })
+        const mode = index === 0 ? 'old-production' : 'old-rollback-target'
+        const output = checked('bun', [probe, runtimeRoot, mode, statePath], runtimeRoot, childEnv)
+        expect(JSON.parse(output.trim().split('\n').at(-1)!)).toMatchObject({ success: true, phase: mode })
       }
 
+      checked('bun', [probe, root, 'candidate-after', statePath], root, childEnv)
       const preserved = (await db.query('SELECT id,family_id,memory_id,author_id,body,version,deleted_at,create_request_id,initial_payload_hash FROM memory_comments ORDER BY id')).rows
-      expect(preserved).toEqual(commentRows)
-      expect((await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]).toMatchObject({ ...legacyBefore, body: 'old runtime wrote on expanded schema' })
-      const candidate = createPrisma(ownUrl.toString())
-      try {
-        const comments = await candidate.memoryComment.findMany({ where: { memoryId }, orderBy: { id: 'asc' } })
-        expect(comments).toHaveLength(2)
-        expect(comments.find((row) => row.id === activeId)).toMatchObject({ body: 'COM-4 preserved comment', createRequestId: requestId, version: 1, deletedAt: null })
-        expect(comments.find((row) => row.id === tombstoneId)).toMatchObject({ body: '', version: 2, deletedAt: expect.any(Date) })
-      } finally {
-        await candidate.$disconnect()
-      }
+      expect(preserved).toEqual(beforeRows)
+      expect((await db.query('SELECT id,family_id,child_id,author_id,kind,body,occurred_at,first_published_at FROM memories WHERE id=$1', [memoryId])).rows[0]).toMatchObject(legacyBefore)
+      const retained = await db.query("SELECT id,body,create_request_id,deleted_at FROM memory_comments WHERE memory_id=$1 ORDER BY body", [memoryId])
+      expect(retained.rows).toHaveLength(2)
+      expect(retained.rows.some((row) => row.body === 'COM-4 API-created retained comment' && row.deleted_at === null)).toBe(true)
+      expect(retained.rows.some((row) => row.body === '' && row.deleted_at !== null)).toBe(true)
     } finally {
       await db.end()
     }
