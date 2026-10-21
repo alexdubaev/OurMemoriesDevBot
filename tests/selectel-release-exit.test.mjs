@@ -489,6 +489,45 @@ function runMigrationHistoryVerifier({ expected, rows }) {
   })
 }
 
+test('comments migration catalog derives both Prisma newline checksums from committed SQL', () => {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const fixture = mkdtempSync(resolve(root, '.scratch/migration-checksum-fixture-'))
+  const repo = resolve(fixture, 'source')
+  mkdirSync(resolve(repo, 'backend/prisma/migrations/20261020100000_first'), { recursive: true })
+  mkdirSync(resolve(repo, 'backend/prisma/migrations/20261021120000_second'), { recursive: true })
+  const firstSql = 'CREATE TABLE first (id uuid);\n'
+  const secondSql = 'CREATE TABLE second (id uuid);\r\n'
+  writeFileSync(resolve(repo, 'backend/prisma/migrations/20261020100000_first/migration.sql'), firstSql)
+  writeFileSync(resolve(repo, 'backend/prisma/migrations/20261021120000_second/migration.sql'), secondSql)
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    return result.stdout.trim()
+  }
+  try {
+    git('init', '--quiet')
+    git('config', 'user.email', 'migration-checksums@example.invalid')
+    git('config', 'user.name', 'Migration checksum fixture')
+    git('add', 'backend/prisma/migrations')
+    git('commit', '--quiet', '-m', 'migration checksum fixture')
+    const hash = (sql) => createHash('sha256').update(sql).digest('hex')
+    const normalizedSecondSql = secondSql.replaceAll('\r\n', '\n')
+    const result = spawnSync('bash', ['-s'], {
+      cwd: repo,
+      input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(repo)}\nrollback_migration_catalog_checksums HEAD\n`,
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.stdout.trim(), [
+      `20261020100000_first:${hash(firstSql)}:${hash(firstSql.replaceAll('\n', '\r\n'))}`,
+      `20261021120000_second:${hash(normalizedSecondSql)}:${hash(secondSql)}`,
+    ].join('\n'))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('comments migration ledger accepts only exact source SQL with LF or CRLF checksums', () => {
   const firstSql = 'CREATE TABLE memories (id uuid);\n'
   const secondSql = 'CREATE TABLE comments (id uuid);\n'
@@ -516,6 +555,7 @@ test('comments migration ledger rejects SQL drift, missing or extra migrations, 
     [{ ...row, checksum: sha(sql.replace('uuid', 'text')) }],
     [],
     [row, { ...row, migration_name: '20261022120000_extra' }],
+    [{ ...row, migration_name: '20261021120000_different' }],
     [{ ...row, finished_at: null }],
   ]) {
     const result = runMigrationHistoryVerifier({ expected, rows })

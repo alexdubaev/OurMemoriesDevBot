@@ -700,6 +700,7 @@ rollback_runtime_fingerprint() {
 rollback_migration_catalog_checksums() {
 	local revision=$1 path name lf_checksum crlf_checksum records='' count=0
 	local -a migration_paths=()
+	require_command perl
 	mapfile -t migration_paths < <(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" \
 		ls-tree -r --name-only "$revision" -- backend/prisma/migrations/ |
 		grep -E '/migration\.sql$' | LC_ALL=C sort)
