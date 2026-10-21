@@ -747,7 +747,7 @@ rollback_auth_gate_for_verified_pair() {
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
-	local com_ux_runtime=12fa175209461f76286a9e933d111457af58f7fdd6efd87fb1e0949f662c9ac7
+	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} expected_runtime gate source_runtime
 	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
 	case "$target" in
@@ -809,7 +809,7 @@ verify_application_rollback() {
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
-	local com_ux_runtime=12fa175209461f76286a9e933d111457af58f7fdd6efd87fb1e0949f662c9ac7
+	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local target expected_runtime expected_target_runtime profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
