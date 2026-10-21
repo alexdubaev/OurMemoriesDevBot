@@ -807,7 +807,7 @@ verify_application_rollback() {
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
 	if [ "$profile" = comments ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
-			backend/Dockerfile backend/package.json bunfig.toml \
+			backend/Dockerfile bunfig.toml \
 			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
 			deploy/selectel/Caddyfile.edge.template deploy/selectel/Caddyfile.static.template deploy/selectel/in-place-file.sh ||
 			die 'rollback schema, dependencies or service configuration are incompatible'

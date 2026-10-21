@@ -416,9 +416,11 @@ The guarded rollback supports two exact measured backend + webapp pairs:
   keeps the exact #180 target, image IDs, OCI labels, ancestry, clean checkout,
   protected configuration backup, and all other rollback checks. Its source
   fingerprint pins schema, migrations, contracts, manifests and lockfile; only
-  those exact measured source contents may differ from #180. Dockerfiles,
-  backend dependency manifest, Bun config and Selectel Compose/Caddy files must
-  still match. Before any service change, rollback-readiness also compares every
+  those exact measured source contents may differ from #180. The measured
+  `backend/package.json` delta is the pinned Hono patch update from `4.13.7` to
+  `4.13.11`; it is accepted only for this exact source fingerprint and integration
+  evidence. Backend and webapp Dockerfiles, Bun config and Selectel Compose/Caddy
+  files must still match. Before any service change, rollback-readiness also compares every
   completed `_prisma_migrations` name and checksum with the catalog derived from
   the checked-out source SQL, rejects unfinished rows, and fails closed on query
   errors. It does not run a migration or restore database contents.
