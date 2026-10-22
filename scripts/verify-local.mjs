@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 
-const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/|webapp\/src\/(?:App|main)\.tsx$|webapp\/src\/platform\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
-const CRITICAL_UI = /(^|\/)(auth|session|invite|family|media|storage|cache|offline|service-worker)(\/|\.|-)/i
+const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
 const STANDARD = /(^|\/)(backend\/|webapp\/|website\/)/i
 const DOCS = /(^|\/)(docs\/|references\/|templates\/)|(^|\/)(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$/i
 const FAST_SAFE = /\.(css|scss|sass|less|md|mdx|txt)$/i
 const FRONTEND_ASSET = /^(webapp\/(?:public\/assets|src\/assets)\/|website\/public\/|assets\/)/i
 const RASTER_ASSET = /\.(webp|png|jpe?g|avif|ico)$/i
-const FRONTEND_POLICY_PATH = 'deploy/selectel/frontend-safe-paths.txt'
+const FRONTEND_SCOPE_CLI = 'deploy/selectel/frontend-scope.sh'
+const BASH_EXECUTABLE = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
 const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 
 function isFastSafe(path) {
@@ -65,30 +65,14 @@ function parseNameStatus(values) {
 }
 
 export function validateFrontendScope(paths, { repositoryRoot = process.cwd(), requireRuntime = true } = {}) {
-  const policyPath = resolve(repositoryRoot, FRONTEND_POLICY_PATH)
-  const rules = readFileSync(policyPath, 'utf8').split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => {
-    const [kind, source, extra] = line.split('\t')
-    if (!['A', 'D'].includes(kind) || !source || extra !== undefined) throw new Error('Frontend path policy is malformed.')
-    try { return { kind, expression: new RegExp(source) } } catch { throw new Error('Frontend path policy contains an invalid expression.') }
-  })
   if (!paths.length) throw new Error('Frontend verification requires a non-empty change set.')
+  const result = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...paths], { encoding: 'utf8', cwd: repositoryRoot })
+  if (result.status !== 0) throw new Error(result.stderr?.trim() || 'Frontend path classification failed closed.')
   let runtime = false
   for (const path of paths) {
-    if (path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
-      throw new Error(`Frontend verification refuses ambiguous path: ${path}`)
-    }
-    const first = rules.find((rule) => rule.expression.test(path))
-    if (!first || first.kind !== 'A') throw new Error(`Frontend verification refuses path outside its allowlist: ${path}`)
+    const classification = result.stdout.split(/\r?\n/).find((line) => line.startsWith(`${path}\t`))?.split('\t')[1]
+    if (!['A', 'R'].includes(classification)) throw new Error(`Frontend verification refuses sensitive or unknown path: ${path}`)
     if (/^webapp\/(?:src|public)\//.test(path)) runtime = true
-    const candidate = resolve(repositoryRoot, path)
-    try {
-      const info = lstatSync(candidate)
-      if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o111) !== 0) {
-        throw new Error(`Frontend verification refuses non-regular or executable input: ${path}`)
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error
-    }
   }
   if (requireRuntime && !runtime) throw new Error('Frontend verification requires at least one changed production frontend input.')
   return { paths, runtime }
@@ -218,7 +202,15 @@ function bunSummary(output) {
 
 export function classifyChanges(paths) {
   if (!paths.length) return 'full'
-  if (paths.some((path) => !isFastSafe(path) && (CRITICAL.test(path) || (path.startsWith('webapp/') && CRITICAL_UI.test(path))))) return 'full'
+  const frontendPaths = paths.filter((path) => path.startsWith('webapp/'))
+  const scoped = frontendPaths.length
+    ? spawnSync(BASH_EXECUTABLE, [resolve(process.cwd(), FRONTEND_SCOPE_CLI), 'classify', ...frontendPaths], { encoding: 'utf8', cwd: process.cwd() })
+    : { status: 0, stdout: '' }
+  if (scoped.status === 0) {
+    const classes = scoped.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split('\t').at(-1))
+    if (classes.includes('D')) return 'full'
+  } else if (frontendPaths.length) return 'full'
+  if (paths.some((path) => CRITICAL.test(path) && !DOCS.test(path))) return 'full'
   if (paths.every((path) => DOCS.test(path) || isFastSafe(path))) return 'fast'
   if (paths.every((path) => DOCS.test(path) || isFastSafe(path) || STANDARD.test(path))) return 'standard'
   return 'full'
@@ -376,7 +368,7 @@ function collectBackendTests(directory, files, repositoryRoot) {
 }
 
 function parseArgs(args) {
-  const out = { profile: undefined, base: undefined, journey: [], journeyGrep: [], dryRun: false }
+  const out = { profile: undefined, base: undefined, frontendBase: undefined, frontendReview: undefined, journey: [], journeyGrep: [], dryRun: false }
   const seen = new Set()
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--dry-run') {
@@ -395,6 +387,13 @@ function parseArgs(args) {
       if (!value || value.startsWith('--') || value.length > 160 || /[\r\n]/.test(value)) throw new Error('--journey-grep requires a short single-line test title.')
       if (out.journeyGrep.length >= 2) throw new Error('At most two --journey-grep titles may be provided.')
       out.journeyGrep.push(value)
+    }
+    else if (args[i] === '--frontend-base' || args[i] === '--frontend-review') {
+      const flag = args[i].slice(2)
+      const value = args[++i]
+      if (!value || value.startsWith('--')) throw new Error(`${args[i - 1]} requires a value.`)
+      if (flag === 'frontend-base') out.frontendBase = value
+      else out.frontendReview = value
     }
     else if (args[i] === '--profile' || args[i] === '--base') {
       const flag = args[i].slice(2)
@@ -437,11 +436,24 @@ async function main() {
   const options = parseArgs(process.argv.slice(2))
   if (options.profile === 'frontend') {
     if (!options.base) throw new Error('Frontend verification requires --base with the full deployed backend SHA.')
+    if (!options.frontendBase) throw new Error('Frontend verification requires --frontend-base with the full deployed frontend SHA.')
     if (options.journey.length === 0) throw new Error('Frontend verification requires at least one --journey browser spec.')
     const { base } = validateFrontendLineage(options.base)
-    const paths = changedNames(base)
-    validateFrontendScope(paths)
+    const { base: frontendBase } = validateFrontendLineage(options.frontendBase)
+    const backendPaths = changedNames(base)
+    const frontendPaths = changedNames(frontendBase)
+    const paths = [...new Set([...backendPaths, ...frontendPaths])].sort()
+    validateFrontendScope(frontendPaths)
     validateFrontendModes(base)
+    if (git(['status', '--porcelain']).length) throw new Error('Frontend review receipts require a clean committed candidate tree.')
+    const candidateSha = git(['rev-parse', 'HEAD'])
+    for (const reviewBase of [...new Set([base, frontendBase])]) {
+      const verifyArgs = [resolve(FRONTEND_SCOPE_CLI), 'verify', reviewBase, candidateSha, 'local']
+      if (options.frontendReview) verifyArgs.push(resolve(options.frontendReview))
+      const checked = spawnSync(BASH_EXECUTABLE, verifyArgs, { encoding: 'utf8', cwd: process.cwd() })
+      if (checked.status !== 0) throw new Error(checked.stderr?.trim() || `Frontend review failed for deployed base ${reviewBase}.`)
+      process.stdout.write(checked.stdout)
+    }
     for (const journey of options.journey) {
       if (!/^webapp\/e2e\/[^/]+\.spec\.ts$/.test(journey) || !existsSync(resolve(journey))) {
         throw new Error(`Browser journey must be an existing webapp/e2e/*.spec.ts file: ${journey}`)

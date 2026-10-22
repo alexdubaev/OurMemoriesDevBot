@@ -192,34 +192,20 @@ frontend_assert_runtime_unchanged() {
 }
 
 frontend_validate_scope() {
-  local base=$1 rules="$APP_ROOT/deploy/selectel/frontend-safe-paths.txt" path matched runtime=false summary
-  [ -f "$rules" ] && [ ! -L "$rules" ] || frontend_die 'shared frontend path policy is missing or invalid'
+  local scope="$APP_ROOT/deploy/selectel/frontend-scope.sh" range_base runtime_changes
+  local -a scope_bases=("$FRONTEND_BACKEND_SHA")
+  [ "$FRONTEND_OLD_SHA" = "$FRONTEND_BACKEND_SHA" ] || scope_bases+=("$FRONTEND_OLD_SHA")
+  [ -f "$scope" ] && [ ! -L "$scope" ] || frontend_die 'shared frontend scope interpreter is missing or invalid'
   git_root merge-base --is-ancestor "$FRONTEND_BACKEND_SHA" "$PRODUCT_SHA" || frontend_die 'candidate must descend from the retained backend SHA'
   git_root merge-base --is-ancestor "$FRONTEND_OLD_SHA" "$PRODUCT_SHA" || frontend_die 'candidate must descend from the currently active frontend SHA'
   git_root merge-base --is-ancestor "$ACCEPTED_UI_V4_SHA" "$FRONTEND_BACKEND_SHA" || frontend_die 'retained backend does not contain accepted UI v4'
   git_root merge-base --is-ancestor "$ACCEPTED_UI_V4_SHA" "$FRONTEND_OLD_SHA" || frontend_die 'active frontend predates accepted UI v4'
   git_root merge-base --is-ancestor "$ACCEPTED_UI_V4_SHA" "$PRODUCT_SHA" || frontend_die 'candidate predates accepted UI v4'
-  for base in "$FRONTEND_BACKEND_SHA" "$FRONTEND_OLD_SHA"; do
-    summary=$(git_root diff --summary --no-renames "$base" "$PRODUCT_SHA" --) || frontend_die 'cannot inspect source modes for frontend scope'
-    [[ "$summary" != *'mode change'* && "$summary" != *'create mode 120000'* && "$summary" != *'create mode 160000'* ]] || frontend_die 'frontend scope refuses symlink, submodule, or executable mode changes'
-    while IFS= read -r -d '' path; do
-      [ -n "$path" ] || frontend_die 'Git returned an empty path in frontend scope'
-      [[ "$path" != *$'\n'* && "$path" != *$'\r'* ]] || frontend_die 'frontend scope refuses newline-containing paths'
-      matched=false
-      while IFS=$'\t' read -r kind expression; do
-        [[ -z "$kind" || "$kind" == \#* ]] && continue
-        [[ "$kind" == A || "$kind" == D ]] || frontend_die 'shared frontend path policy is malformed'
-        if [[ "$path" =~ $expression ]]; then
-          [ "$kind" = A ] || frontend_die "frontend scope refuses sensitive path: $path"
-          matched=true
-          break
-        fi
-      done < "$rules"
-      [ "$matched" = true ] || frontend_die "frontend scope refuses unknown path: $path"
-      case "$path" in webapp/src/*|webapp/public/*) runtime=true ;; esac
-    done < <(git_root diff --name-only --no-renames -z "$base" "$PRODUCT_SHA" --)
+  runtime_changes=$(git_root diff --name-only "$FRONTEND_OLD_SHA" "$PRODUCT_SHA" -- webapp/src/ webapp/public/) || frontend_die 'cannot inspect frontend runtime changes'
+  [ -n "$runtime_changes" ] || frontend_die 'frontend release requires a production frontend input change against the active frontend'
+  for range_base in "${scope_bases[@]}"; do
+    (cd -- "$APP_ROOT" && bash "$scope" verify "$range_base" "$PRODUCT_SHA" server) || frontend_die "frontend review scope failed for deployed base $range_base"
   done
-  [ "$runtime" = true ] || frontend_die 'frontend release requires a production frontend input change'
 }
 
 frontend_verify_migration_catalog() {
@@ -468,8 +454,7 @@ frontend_run_release() {
     printf 'Frontend release is already active and its recovery state is verified: backend=%s frontend=%s.\n' "$active_backend_sha" "$PRODUCT_SHA"
     return 0
   fi
-  frontend_validate_scope "$FRONTEND_BACKEND_SHA"
-  frontend_validate_scope "$FRONTEND_OLD_SHA"
+  frontend_validate_scope
   local FRONTEND_BACKEND_SHA_CAPTURED=$FRONTEND_BACKEND_SHA
   local FRONTEND_BACKEND_IDS_CAPTURED=$FRONTEND_BACKEND_IDS
   local FRONTEND_BACKEND_IMAGE_IDS_CAPTURED=$FRONTEND_BACKEND_IMAGE_IDS

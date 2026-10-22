@@ -23,9 +23,10 @@ Access is provisioned by the owner outside Git using a secure store or SSH agent
 GitHub Actions CI/CD is not used. Before publication and production release, select
 the highest applicable risk profile and record the exact source SHA, deployed
 comparison bases, commands and results. Under the owner's 2026-10-22 policy,
-eligible presentation-only changes use the short **FRONTEND** lane by default:
+eligible reviewed client-UI changes use the short **FRONTEND** lane by default:
 frontend typecheck/lint/build, narrow tests, a real targeted browser journey and
-visual acceptance. The host publishes only static/webapp, retaining the running
+visual acceptance. Review-required source ranges need exact receipts for both
+deployed backend and frontend bases. The host publishes only static/webapp, retaining the running
 backend, worker, scheduler, gateway and database. A strict scope check compares
 against both deployed backend and frontend revisions; unknown or sensitive inputs
 require the normal lane. No backend change alone is not proof of eligibility.
