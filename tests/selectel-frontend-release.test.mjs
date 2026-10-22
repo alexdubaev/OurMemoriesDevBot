@@ -542,7 +542,9 @@ cat "$SERVER_ROOT/events"
 test('full ci-release archives frontend state only after all full-release success gates', () => {
   const success = runLinuxRoot(fullEntryScript())
   assert.equal(success.status, 0, `${success.stdout}${success.stderr}`)
-  assert.match(success.stdout, /ENTRY=success\nLIVE=absent\nARCHIVES=1/)
+  for (const line of ['ENTRY=success', 'LIVE=absent', 'ARCHIVES=1']) {
+    assert.ok(success.stdout.split(/\r?\n/).includes(line), `${success.stdout}${success.stderr}`)
+  }
   assert.ok(success.stdout.indexOf('REVISION') < success.stdout.indexOf('SMOKE'))
   assert.ok(success.stdout.indexOf('SMOKE') < success.stdout.indexOf('MANIFEST'))
   assert.ok(success.stdout.indexOf('MANIFEST') < success.stdout.indexOf('CLEAR'))
@@ -551,12 +553,16 @@ test('full ci-release archives frontend state only after all full-release succes
 
   const failed = runLinuxRoot(fullEntryScript({ failSmoke: true }))
   assert.equal(failed.status, 0, `${failed.stdout}${failed.stderr}`)
-  assert.match(failed.stdout, /ENTRY=failed\nLIVE=present\nARCHIVES=0/)
+  for (const line of ['ENTRY=failed', 'LIVE=present', 'ARCHIVES=0']) {
+    assert.ok(failed.stdout.split(/\r?\n/).includes(line), `${failed.stdout}${failed.stderr}`)
+  }
   assert.doesNotMatch(failed.stdout, /MANIFEST|Frontend recovery artifact archived/)
 
   const unsafe = runLinuxRoot(fullEntryScript({ unsafeMode: true }))
   assert.equal(unsafe.status, 0, `${unsafe.stdout}${unsafe.stderr}`)
-  assert.match(unsafe.stdout, /ENTRY=failed\nLIVE=present\nARCHIVES=0/)
+  for (const line of ['ENTRY=failed', 'LIVE=present', 'ARCHIVES=0']) {
+    assert.ok(unsafe.stdout.split(/\r?\n/).includes(line), `${unsafe.stdout}${unsafe.stderr}`)
+  }
   assert.doesNotMatch(unsafe.stdout, /FORWARD|PROMOTE|REVISION|SMOKE|MANIFEST/)
 
   for (const pathCase of ['custom', 'rollback-override', 'collision']) {
