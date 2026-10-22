@@ -18,6 +18,14 @@ test('production feed carousel selects attachments through drags and opens the s
 
   let lastSelected = 1
   let delayedPosterReleased = false
+  const expectSelectedAttachment = async (position: number) => {
+    const selected = card.locator(`[data-carousel-position="${position}"]`)
+    await expect(card.locator(`[data-carousel-dot="${position}"]`)).toHaveAttribute('aria-pressed', 'true')
+    await expect.poll(async () => {
+      const [viewportBounds, slideBounds] = await Promise.all([viewport.boundingBox(), selected.boundingBox()])
+      return Boolean(viewportBounds && slideBounds && Math.abs(viewportBounds.x - slideBounds.x) < 1)
+    }).toBe(true)
+  }
   for (const selected of [2, 3, 4, 3, 2, 1]) {
     const rect = await viewport.boundingBox()
     const y = rect!.y + rect!.height / 2
@@ -28,7 +36,7 @@ test('production feed carousel selects attachments through drags and opens the s
       await page.mouse.move(forward ? rect!.x + rect!.width - 20 - step * (rect!.width / 10) : rect!.x + 20 + step * (rect!.width / 10), y, { steps: 1 })
     }
     await page.mouse.up()
-    await expect(card.locator(`[data-carousel-dot="${selected}"]`)).toHaveAttribute('aria-pressed', 'true')
+    await expectSelectedAttachment(selected)
     await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
     if (selected === 3 && !delayedPosterReleased) {
       await expect.poll(() => page.evaluate(() => window.__fixedCarouselProbe?.delayedPosterWaiters.length ?? 0)).toBeGreaterThan(0)
@@ -60,9 +68,9 @@ test('production feed carousel selects attachments through drags and opens the s
   }
   await swipeNext()
   await swipePrevious()
-  await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
+  await expectSelectedAttachment(1)
   await swipeNext()
-  await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
+  await expectSelectedAttachment(2)
   const inlineVideoSlide = card.locator('[data-carousel-position="2"]')
   await expect.poll(async () => {
     const [viewportBounds, slideBounds] = await Promise.all([viewport.boundingBox(), inlineVideoSlide.boundingBox()])
@@ -72,6 +80,15 @@ test('production feed carousel selects attachments through drags and opens the s
 
   const inlinePlay = card.locator('[data-carousel-position="2"] .memoly-private-video-v2-play')
   const inlineVideo = card.locator('[data-carousel-position="2"] video')
+  const playBounds = await inlinePlay.boundingBox()
+  expect(playBounds).not.toBeNull()
+  await page.mouse.move(playBounds!.x + playBounds!.width / 2 + 24, playBounds!.y + playBounds!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(playBounds!.x + playBounds!.width / 2, playBounds!.y + playBounds!.height / 2, { steps: 5 })
+  await page.mouse.up()
+  await expectSelectedAttachment(2)
+  await expect(inlinePlay).toBeVisible()
+  await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => [video.paused, video.getAttribute('src')])).toEqual([true, null])
   await inlinePlay.click()
   const viewer = page.locator('[data-mixed-viewer]')
   await expect(viewer).toHaveCount(0)
@@ -90,6 +107,7 @@ test('production feed carousel selects attachments through drags and opens the s
   await page.mouse.up()
   await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(viewer).toHaveCount(0)
+  await timeline.fill('0.5')
   await timeline.focus()
   const seekBeforeArrow = Number(await timeline.inputValue())
   await page.keyboard.press('ArrowRight')
@@ -106,13 +124,13 @@ test('production feed carousel selects attachments through drags and opens the s
   await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1)
   const playingVideo = await inlineVideo.elementHandle()
   await swipePrevious()
-  await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
+  await expectSelectedAttachment(1)
   await expect.poll(() => playingVideo!.evaluate((video: HTMLVideoElement) => video.paused)).toBe(true)
   await expect.poll(() => playingVideo!.evaluate((video: HTMLVideoElement) => [video.getAttribute('src'), video.networkState, video.buffered.length])).toEqual([null, 0, 0])
 
   await swipeNext()
   await swipeNext()
-  await expect(card.locator('[data-carousel-dot="3"]')).toHaveAttribute('aria-pressed', 'true')
+  await expectSelectedAttachment(3)
   await card.locator('[data-carousel-position="3"] button[aria-label="Открыть фото"]').click()
   await expect(viewer).toBeVisible()
   await expect(viewer.getByText('3 / 4')).toBeVisible()
@@ -196,6 +214,14 @@ test('MAX video in a mixed carousel plays inline, releases its source off-screen
   const card = page.locator('.memory-card').first()
   const viewport = card.locator('.memoly-mixed-viewport')
   const video = card.locator('[data-carousel-position="1"] video')
+  const playBounds = await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Смотреть видео' }).boundingBox()
+  expect(playBounds).not.toBeNull()
+  await page.mouse.move(playBounds!.x + playBounds!.width / 2, playBounds!.y + playBounds!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(playBounds!.x + playBounds!.width / 2 + 90, playBounds!.y + playBounds!.height / 2, { steps: 5 })
+  await page.mouse.up()
+  await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => [element.paused, element.getAttribute('src'), element.currentTime])).toEqual([true, null, 0])
   await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Смотреть видео' }).click()
   await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
   await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.videoWidth / element.videoHeight)).toBeCloseTo(360 / 640, 2)
@@ -224,4 +250,6 @@ test('MAX video in a mixed carousel plays inline, releases its source off-screen
   await expect(card.locator('[data-carousel-position="1"] [aria-label="Смотреть видео"]')).toBeVisible()
   await expect(card.locator('[data-carousel-position="1"] img[alt="Кадр видео"]')).toBeVisible()
   await expect.poll(() => card.locator('[data-carousel-position="1"] video').evaluate((element: HTMLVideoElement) => element.getAttribute('src'))).toBeNull()
+  await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Смотреть видео' }).click()
+  await expect.poll(() => card.locator('[data-carousel-position="1"] video').evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0.1)
 })
