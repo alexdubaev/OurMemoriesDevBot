@@ -509,12 +509,13 @@ validate_prebuilt_images() { :; }
 detect_membership_rollback_boundary() { :; }
 detect_mm0_boundary() { :; }
 git_memoly() { :; }
+require_release_ownership() { :; }
 prepare_rollback() { :; }
 promote_runtime() { PROMOTION_STARTED=true; printf 'PROMOTE\\n' >> "$SERVER_ROOT/events"; }
 verify_promoted_revision() { printf 'REVISION\\n' >> "$SERVER_ROOT/events"; }
 public_smoke() {
   printf 'SMOKE\\n' >> "$SERVER_ROOT/events"
-  ${failSmoke ? 'return 9' : 'return 0'}
+  ${failSmoke ? "die 'synthetic smoke failure'" : 'return 0'}
 }
 write_release_manifest() { printf 'MANIFEST\\n' >> "$SERVER_ROOT/events"; }
 clear_release_markers() { printf 'CLEAR\\n' >> "$SERVER_ROOT/events"; PROMOTION_STARTED=false; }
