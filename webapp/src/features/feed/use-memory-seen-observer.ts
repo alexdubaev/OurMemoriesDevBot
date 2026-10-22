@@ -33,10 +33,8 @@ function visibleViewport(layer: SeenLayer, element: HTMLElement): SeenViewport {
 }
 
 function blockedByOverlay(layer: SeenLayer, element: HTMLElement) {
-  const photoViewer = document.querySelector('.pswp--open')
-  if (layer === 'fullscreen') return !(photoViewer?.contains(element) || document.fullscreenElement?.contains(element) || element.closest('[data-mixed-viewer]'))
+  if (layer === 'fullscreen') return !(document.fullscreenElement?.contains(element) || element.closest('[data-mixed-viewer]'))
   if (document.fullscreenElement) return !element.contains(document.fullscreenElement)
-  if (photoViewer) return true
   const overlays = document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')
   for (const overlay of overlays) {
     if (layer === 'detail' && overlay.contains(element)) continue

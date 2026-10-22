@@ -14,7 +14,6 @@ type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 
 export function FamilyScreen({
   active = true,
-  childProfileOpen,
   familyResponse,
   invites,
   members,
@@ -24,9 +23,6 @@ export function FamilyScreen({
   onAdd,
   onAllFamilies,
   onEditChild,
-  onChangeChildPhoto,
-  onOpenChild,
-  onCloseChild,
   settingsRequest,
   onSettingsRequestHandled,
   onFeed,
@@ -37,7 +33,6 @@ export function FamilyScreen({
   onOpenInstall = () => undefined,
 }: {
   active?: boolean
-  childProfileOpen: boolean
   familyResponse: FamilyResponse
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
@@ -47,9 +42,6 @@ export function FamilyScreen({
   onAdd: () => void
   onAllFamilies?: () => void
   onEditChild: () => void
-  onChangeChildPhoto: () => void
-  onOpenChild: () => void
-  onCloseChild: () => void
   settingsRequest?: number
   onSettingsRequestHandled?: () => void
   onFeed: () => void
@@ -146,7 +138,6 @@ export function FamilyScreen({
         canOpenInstall={canOpenInstall}
         installLabel={installLabel}
         onOpenInstall={onOpenInstall}
-          childProfileOpen={childProfileOpen}
           childAvatarUrl={avatarUrl}
           copyState={copyState}
           familyResponse={familyResponse}
@@ -206,9 +197,6 @@ export function FamilyScreen({
             }
           }}
           onEditChild={onEditChild}
-          onChangeChildPhoto={onChangeChildPhoto}
-          onOpenChild={onOpenChild}
-          onCloseChild={onCloseChild}
           settingsRequest={settingsRequest}
           onSettingsRequestHandled={onSettingsRequestHandled}
           onLeaveFamily={async () => {
@@ -238,7 +226,7 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={onCloseChild} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }

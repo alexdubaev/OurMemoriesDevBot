@@ -574,23 +574,6 @@
     8px 9px 18px var(--app-shadow),
     -6px -6px 14px var(--app-glow);
 }
-.child-edit-v2-camera{
-  position:absolute;
-  right:0;
-  bottom:3px;
-  width:38px;
-  height:38px;
-  border-radius:50%;
-  display:grid;
-  place-items:center;
-  color:#fff;
-  background:linear-gradient(145deg,var(--app-action-hi),var(--app-action-deep));
-  box-shadow:4px 5px 11px rgba(91,121,104,.20);
-}
-.child-edit-v2-camera svg{
-  width:19px;
-  height:19px;
-}
 .child-edit-v2-photo-link{
   margin-top:9px;
   color:#698478;
@@ -780,7 +763,6 @@
   box-shadow: 8px 9px 18px var(--app-shadow), -6px -6px 14px var(--app-glow);
 }
 .child-edit-v2-screen .child-edit-v2-avatar-image img { width: 100%; height: 100%; border: 0; box-shadow: none; }
-.child-edit-v2-screen .child-edit-v2-camera img { width: 19px; height: 19px; }
 .child-edit-v2-screen .child-edit-v2-card.surface-raised { background: linear-gradient(145deg,var(--app-surface-hi),var(--app-surface)); box-shadow: 9px 10px 22px var(--app-shadow), -7px -7px 16px var(--app-glow), inset 1px 1px 0 rgba(255,255,255,.82); }
 .child-edit-v2-screen .child-edit-v2-field.surface-inset { background: linear-gradient(145deg,var(--app-inset-lo),var(--app-inset-hi)); box-shadow: inset 5px 5px 12px var(--app-shadow-soft), inset -5px -5px 12px rgba(255,255,255,.78); }
 .child-edit-v2-screen .child-edit-v2-field img { width: 19px; height: 19px; flex: 0 0 auto; }
@@ -791,6 +773,70 @@
 .child-edit-v2-screen .child-edit-v2-save { width: 100%; min-height: 56px; border: 0; border-radius: 24px; color: #fff; background: linear-gradient(145deg,var(--app-action-hi),var(--app-action)); box-shadow: 7px 8px 16px rgba(91,121,104,.20), -5px -5px 12px rgba(255,255,255,.78); }
 .child-edit-v2-screen .child-edit-v2-save:focus-visible,
 .child-edit-v2-screen .child-edit-v2-titlebar .child-back-btn:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }
+
+/* memoLy's v2 child editor uses one quiet outline for the photo and flat form controls. */
+.child-edit-v2-screen .child-edit-v2-avatar-image {
+  border: 1px solid var(--ui-v2-color-line, #e8dfda);
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-photo-link { margin-top: 12px; }
+.child-edit-v2-screen .child-edit-v2-crop-link {
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--ui-v2-color-accent, #a83750);
+  background: transparent;
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-card.surface-raised,
+.child-edit-v2-screen .child-edit-v2-sex-field > .child-edit-v2-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-field.surface-inset {
+  min-height: 52px;
+  border: 1px solid var(--ui-v2-color-line, #e8dfda);
+  border-radius: 12px;
+  background: var(--ui-v2-color-surface, #fff);
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-field:focus-within {
+  border-color: #4f8066;
+  outline: 2px solid #4f8066;
+  outline-offset: -2px;
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-field input {
+  min-height: 48px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-field input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-sex label {
+  border: 1px solid var(--ui-v2-color-line, #e8dfda);
+  border-radius: 12px;
+  background: var(--ui-v2-color-surface, #fff);
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-sex label:has(input:checked) {
+  box-shadow: none;
+}
+.child-edit-v2-screen .child-edit-v2-crop-link {
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+}
+.child-edit-v2-screen .child-edit-v2-sex label:focus-within {
+  outline-color: #4f8066;
+  outline-offset: -2px;
+}
 @media (max-width: 355px) { .child-edit-v2-screen .child-edit-v2-titlebar { width: min(calc(100% - 20px), 432px); } }
 @media (max-width: 355px) {
   .family-screen.child-edit-v2-screen { padding-left: calc(10px + var(--host-inset-left, 0px)); padding-right: calc(10px + var(--host-inset-right, 0px)); }

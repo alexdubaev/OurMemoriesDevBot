@@ -25,11 +25,11 @@ export function VideoPlaybackControls({
   const fullscreenAvailable = supportsVideoStageFullscreen()
   return <div className="memoly-video-playback-controls" data-slot="video-playback-controls">
   <div className="memoly-video-control-row">
-      <button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-video-control" disabled={!available} onClick={onToggle} title={playing ? 'Пауза' : 'Воспроизвести'} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={20} state="white" /></button>
+      <button aria-label={playing ? 'Поставить видео на паузу' : 'Воспроизвести видео'} className="memoly-video-control" disabled={!available} onClickCapture={(event) => { event.stopPropagation(); onToggle() }} title={playing ? 'Пауза' : 'Воспроизвести'} type="button"><WebpIcon decorative name={playing ? 'pause' : 'play'} size={20} state="white" /></button>
       <Typography className="flex-1 text-right text-white" variant="memoryMeta">{seconds(current)} / {seconds(duration)}</Typography>
-      <button aria-label="На весь экран" className="memoly-video-control" disabled={!available || !fullscreenAvailable} onClick={() => void requestVideoStageFullscreen(stageRef.current, videoRef.current)} title="На весь экран" type="button"><WebpIcon decorative monochrome name="fullscreen" size={18} /></button>
+      <button aria-label="На весь экран" className="memoly-video-control" disabled={!available || !fullscreenAvailable} onClickCapture={(event) => { event.stopPropagation(); void requestVideoStageFullscreen(stageRef.current, videoRef.current) }} title="На весь экран" type="button"><WebpIcon decorative monochrome name="fullscreen" size={18} /></button>
     </div>
-    <input aria-label="Позиция видео" disabled={!available} max={Number.isFinite(duration) ? duration : 0} min="0" onChange={(event) => onSeek(Number(event.currentTarget.value))} step="0.1" type="range" value={current} />
+    <input aria-label="Позиция видео" disabled={!available} max={Number.isFinite(duration) ? duration : 0} min="0" onClickCapture={(event) => event.stopPropagation()} onChange={(event) => onSeek(Number(event.currentTarget.value))} step="0.1" type="range" value={current} />
   </div>
 }
 

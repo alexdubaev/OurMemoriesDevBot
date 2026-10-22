@@ -245,7 +245,7 @@ export function FamilyOnboarding({
     <>
     <main hidden={Boolean(cropPreviewUrl)} className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
       {photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
-        <button aria-label="Назад к профилю ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
+        <button aria-label="Назад к семье" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
         <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
@@ -279,9 +279,8 @@ export function FamilyOnboarding({
                 />
               ) : <Typography variant="memoryChild">Фото</Typography>}
             </span>
-            <span aria-hidden="true" className="child-edit-v2-camera"><WebpIcon decorative name="photo" size={19} /></span>
             </span>
-            <span className="grid gap-2"><Typography className="child-edit-v2-photo-link" tone="primary" variant="memoryButton">Заменить фотографию</Typography>{displayAvatarUrl ? <Button onClick={(event) => { event.preventDefault(); event.stopPropagation(); openDisplayedAvatarCrop() }} type="button" variant="ghost">Изменить кадрирование</Button> : null}</span>
+            <Typography className="child-edit-v2-photo-link" tone="primary" variant="memoryButton">Заменить фотографию</Typography>
             <input
               aria-label="Заменить фотографию ребёнка"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
@@ -293,6 +292,7 @@ export function FamilyOnboarding({
               type="file"
             />
           </label>
+          {displayAvatarUrl ? <Button className="child-edit-v2-crop-link" onClick={openDisplayedAvatarCrop} type="button" variant="ghost">Изменить кадрирование</Button> : null}
           <Typography as="p" className="ds-meta" variant="memoryMeta">Изменения увидят только участники вашей семьи.</Typography>
         </div> : <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
           <span className="relative grid size-36 place-items-center overflow-hidden rounded-full bg-accent">

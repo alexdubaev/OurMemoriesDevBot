@@ -28,12 +28,15 @@ const attachments = [
   { id: '44444444-4444-4444-8444-444444444444', source: 'private_storage', kind: 'photo', width: 720, height: 1280, durationMs: null, renditionStatus: 'ready', previewPath: mediaPath('44444444-4444-4444-8444-444444444444', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444444', 'photos'), playbackPath: null, originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444444', 'original'), waveform: null },
 ]
 const memory = { id: memoryId, familyId, childId: '55555555-5555-4555-8555-555555555555', author: { id: userId, name: 'Synthetic author', avatarPath: null, avatarCrop: null }, kind: 'media', body: 'Synthetic carousel caption', occurredAt: '2026-10-14T10:00:00.000Z', firstPublishedAt: '2026-10-14T10:00:00.000Z', sourcePublishedAt: null, createdAt: '2026-10-14T10:00:00.000Z', version: 1, status: 'published', attachments, reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
-const singlePhotoMemory = { ...memory, id: '22222222-2222-4222-8222-222222222223', body: 'Single photo natural ratio', attachments: [attachments[3]] }
+const singlePhotoMemory = { ...memory, id: '22222222-2222-4222-8222-222222222223', kind: 'photo', body: '', attachments: [attachments[3]] }
 const photoAlbumAttachments = [attachments[2], attachments[3],
   { ...attachments[2], id: '44444444-4444-4444-8444-444444444445', width: 360, height: 640, previewPath: mediaPath('44444444-4444-4444-8444-444444444445', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444445', 'photos'), originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444445', 'original') },
   { ...attachments[3], id: '44444444-4444-4444-8444-444444444446', previewPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), displayPath: mediaPath('44444444-4444-4444-8444-444444444446', 'photos'), originalDownloadPath: mediaPath('44444444-4444-4444-8444-444444444446', 'original') },
 ]
 const photoAlbumMemory = { ...memory, id: '22222222-2222-4222-8222-222222222224', kind: 'photo', body: 'Synthetic photo album', attachments: photoAlbumAttachments }
+const landscapePhotoId = '44444444-4444-4444-8444-444444444447'
+const landscapePhotoPath = mediaPath(landscapePhotoId, 'photos')
+const landscapePhotoMemory = { ...memory, id: '22222222-2222-4222-8222-222222222229', kind: 'photo', body: '', attachments: [{ ...attachments[2], id: landscapePhotoId, width: 1280, height: 720, previewPath: landscapePhotoPath, displayPath: landscapePhotoPath, originalDownloadPath: mediaPath(landscapePhotoId, 'original') }] }
 const swipeMode = new URLSearchParams(window.location.search).has('fullscreen-swipe')
 const swipePhotoAlbum = { ...photoAlbumMemory, attachments: photoAlbumAttachments.slice(0, 3) }
 const swipeMixedMemory = { ...memory, id: '22222222-2222-4222-8222-222222222228', body: 'Synthetic fullscreen swipe', attachments: [attachments[2], attachments[0], attachments[3]] }
@@ -47,8 +50,10 @@ const maxVideoId = '99999999-9999-4999-8999-999999999999'
 const maxAttachmentId = '99999999-9999-4999-8999-999999999998'
 const maxPlaybackPath = `/api/v1/families/${familyId}/media/max-videos/${maxVideoId}/content`
 const maxVideoMemory = { ...memory, id: maxAttachmentId, kind: 'video', body: 'Lifecycle MAX video', attachments: [{ id: maxVideoId, source: 'max', kind: 'video', width: 720, height: 1280, durationMs: 5000, playbackPath: maxPlaybackPath, posterState: 'ready', posterPath: maxPlaybackPath.replace('/content', '/poster') }] }
+const maxMixedMemory = { ...memory, id: '22222222-2222-4222-8222-222222222230', kind: 'media', body: 'Synthetic MAX mixed media', attachments: [maxVideoMemory.attachments[0], attachments[3]] }
 const lifecycleMode = new URLSearchParams(window.location.search).has('lifecycle')
 const voiceMode = new URLSearchParams(window.location.search).has('voice')
+const maxMixedMode = new URLSearchParams(window.location.search).has('max-mixed')
 const voiceId = '88888888-8888-4888-8888-888888888888'
 const voicePath = mediaPath(voiceId, 'voices') + '/content'
 const voiceMemory = { ...memory, id: '22222222-2222-4222-8222-222222222225', kind: 'voice', body: 'Synthetic voice recording', attachments: [{ id: voiceId, source: 'private_storage', kind: 'voice', width: null, height: null, durationMs: 5000, renditionStatus: 'ready', previewPath: null, displayPath: null, playbackPath: voicePath, originalDownloadPath: mediaPath(voiceId, 'original'), waveform: Array.from({ length: 48 }, (_, index) => .2 + (index % 6) * .12) }] }
@@ -56,13 +61,14 @@ const maxVoiceId = '88888888-8888-4888-8888-888888888887'
 const maxVoicePath = mediaPath(maxVoiceId, 'voices') + '/content'
 const missingWaveformVoice = { ...voiceMemory, id: '22222222-2222-4222-8222-222222222227', body: 'Synthetic MAX voice', attachments: [{ ...voiceMemory.attachments[0], id: maxVoiceId, playbackPath: maxVoicePath, waveform: null }] }
 const transport = {
-  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
+  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: maxMixedMode ? [maxMixedMemory] : swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, ...(lifecycleMode || voiceMode ? [] : [landscapePhotoMemory]), ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('44444444-4444-4444-8444-444444444442') && window.__fixedCarouselProbe?.delayed) await new Promise<void>((resolve) => delayedPosterWaiters.push(resolve))
     const video = path.includes('44444444-4444-4444-8444-444444444441')
-    const width = video ? 360 : path.includes('44444444-4444-4444-8444-444444444442') ? 640 : path.includes('44444444-4444-4444-8444-444444444443') ? 512 : 360
-    const height = video ? 640 : path.includes('44444444-4444-4444-8444-444444444442') ? 360 : path.includes('44444444-4444-4444-8444-444444444443') ? 512 : 640
+    const landscape = path.includes(landscapePhotoId)
+    const width = landscape ? 1280 : video ? 360 : path.includes('44444444-4444-4444-8444-444444444442') ? 640 : path.includes('44444444-4444-4444-8444-444444444443') ? 512 : 360
+    const height = landscape ? 720 : video ? 640 : path.includes('44444444-4444-4444-8444-444444444442') ? 360 : path.includes('44444444-4444-4444-8444-444444444443') ? 512 : 640
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
     const context = canvas.getContext('2d')!
     context.fillStyle = '#e0b74d'; context.fillRect(0, 0, width, height)
