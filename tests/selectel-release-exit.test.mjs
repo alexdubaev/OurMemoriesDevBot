@@ -316,6 +316,7 @@ const healthyWebappId = 'sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f
 const runtimeFingerprints = {
   legacy: '3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857',
   comments: '5a8c7cfe1839c8ed44434f80ddf7a83e1e9f6c43154a249f3b214ca3d25b5e02',
+  diagnostic: '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088',
   selectel: '9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468',
   comux: 'ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87',
   feedPhoto: '9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda',
@@ -362,7 +363,8 @@ function rollbackSource(role) {
   const fallback = role === 'selectel' ? '91f48719309e20456b1659092a1bf209c3aa3653'
     : role === 'comux' ? rollbackHealthy
       : role === 'feedPhoto' ? 'dc3201096998f366a88a296d13914abf6047604b'
-        : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
+        : role === 'diagnostic' ? 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+          : role === 'comments' ? 'a353f01a8354e42f71473b1917f99c9a97181680' : rollback180
   assert.equal(productionRuntimeFingerprint(root, fallback), expected, `${role} fallback source has the wrong runtime fingerprint`)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const directory = mkdtempSync(resolve(root, '.scratch', `rollback-${role}-worktree-`))
@@ -525,7 +527,7 @@ function runApplicationRollback(options = {}) {
       'bash() {',
       ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
       '   shift',
-      '   ( . "$APP_ROOT/deploy/selectel/redeploy.sh"; require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )',
+      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR' : '$APP_ROOT'}/deploy/selectel/redeploy.sh"; require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
       ' else command bash "$@"; fi',
       '}',
     ] : []),
@@ -669,6 +671,46 @@ slowTest('repeat release preserves the verified recovery pair and refuses an inv
   assert.doesNotMatch(rejected.output, /Rollback prepared:/)
   assert.match(rejected.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${unknown}$`, 'm'))
   assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact dc26 comments diagnostic source preserves the designated 33a recovery and rejects drift', () => {
+  const source = rollbackSource('diagnostic')
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const changedSource = commitSourceChange(source,
+    'webapp/src/platform/diagnostics/bootstrap.js',
+    '\n// diagnostic production source drift fixture\n', 'mutate comments diagnostic runtime')
+  const changed = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: changedSource.root, sourceShaOverride: changedSource.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(changed.status, 0, changed.output)
+  assert.match(changed.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(changed.events, /UP:|GATE/)
+  assert.match(changed.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(changed.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(changed.rollbackBackups, [])
 })
 
 test('the immutable Selectel source ref retains its comments compatibility profile', () => {
