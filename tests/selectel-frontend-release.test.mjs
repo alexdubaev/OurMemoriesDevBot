@@ -473,7 +473,7 @@ printf 'UNSAFE-PRESERVED\\n'
   assert.match(result.stderr, /changed during full release|mode 0600/)
 })
 
-function fullEntryScript({ failSmoke = false, unsafeMode = false } = {}) {
+function fullEntryScript({ failSmoke = false, unsafeMode = false, pathCase = 'canonical' } = {}) {
   return `
 set -euo pipefail
 tmp=$(mktemp -d)
@@ -486,6 +486,13 @@ chmod 0700 "$RELEASES_DIR"
 mkdir -p "$APP_ROOT/deploy/selectel"
 printf 'PHASE=pending\\nopaque=full-entry-test\\n' > "$SERVER_ROOT/frontend-recovery.env"
 chmod ${unsafeMode ? '0640' : '0600'} "$SERVER_ROOT/frontend-recovery.env"
+${pathCase === 'custom'
+    ? 'FRONTEND_STATE="$SERVER_ROOT/custom-recovery.env" ROLLBACK_ENV="$SERVER_ROOT/rollback.env"'
+    : pathCase === 'rollback-override'
+      ? 'FRONTEND_STATE="$SERVER_ROOT/rollback.env" ROLLBACK_ENV="$SERVER_ROOT/rollback.env"'
+      : pathCase === 'collision'
+        ? 'ROLLBACK_ENV="$SERVER_ROOT/./frontend-recovery.env"'
+        : ''}
 touch "$SERVER_ROOT/events"
 set -- ${hex('d', 40)} DEPLOY false ExampleBot full
 . ${linuxEntrypoint}
@@ -526,6 +533,7 @@ else
   printf 'ENTRY=failed\\n'
 fi
 if [[ -e "$SERVER_ROOT/frontend-recovery.env" ]]; then printf 'LIVE=present\\n'; else printf 'LIVE=absent\\n'; fi
+if [[ -e "$SERVER_ROOT/.selectel-deploy.lock" ]]; then printf 'LOCK=opened\\n'; else printf 'LOCK=untouched\\n'; fi
 printf 'ARCHIVES=%s\\n' "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name 'frontend-recovery-*.env' | wc -l)"
 cat "$SERVER_ROOT/events"
 `
@@ -538,7 +546,8 @@ test('full ci-release archives frontend state only after all full-release succes
   assert.ok(success.stdout.indexOf('REVISION') < success.stdout.indexOf('SMOKE'))
   assert.ok(success.stdout.indexOf('SMOKE') < success.stdout.indexOf('MANIFEST'))
   assert.ok(success.stdout.indexOf('MANIFEST') < success.stdout.indexOf('CLEAR'))
-  assert.ok(success.stdout.indexOf('CLEAR') < success.stdout.indexOf('ARCHIVE'))
+  const successEvents = success.stdout.split(/\r?\n/)
+  assert.ok(successEvents.indexOf('CLEAR') < successEvents.indexOf('ARCHIVE'))
 
   const failed = runLinuxRoot(fullEntryScript({ failSmoke: true }))
   assert.equal(failed.status, 0, `${failed.stdout}${failed.stderr}`)
@@ -549,6 +558,13 @@ test('full ci-release archives frontend state only after all full-release succes
   assert.equal(unsafe.status, 0, `${unsafe.stdout}${unsafe.stderr}`)
   assert.match(unsafe.stdout, /ENTRY=failed\nLIVE=present\nARCHIVES=0/)
   assert.doesNotMatch(unsafe.stdout, /FORWARD|PROMOTE|REVISION|SMOKE|MANIFEST/)
+
+  for (const pathCase of ['custom', 'rollback-override', 'collision']) {
+    const pathRefusal = runLinuxRoot(fullEntryScript({ pathCase }))
+    assert.equal(pathRefusal.status, 0, `${pathRefusal.stdout}${pathRefusal.stderr}`)
+    assert.match(pathRefusal.stdout, /ENTRY=failed\nLIVE=present\nLOCK=untouched\nARCHIVES=0/)
+    assert.doesNotMatch(pathRefusal.stdout, /FORWARD|PROMOTE|REVISION|SMOKE|MANIFEST/)
+  }
 })
 
 test('frontend recovery restores only the exact recorded static image when static is absent', () => {

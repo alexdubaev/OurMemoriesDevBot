@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-FRONTEND_STATE=${FRONTEND_STATE:-$SERVER_ROOT/frontend-recovery.env}
+FRONTEND_STATE=$SERVER_ROOT/frontend-recovery.env
 FRONTEND_PROMOTION_STARTED=false
 FRONTEND_OLD_SHA=
 FRONTEND_OLD_ID=

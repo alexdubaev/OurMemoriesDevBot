@@ -9,6 +9,7 @@ SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
 export SERVER_ROOT APP_ROOT
 ROLLBACK_ENV=${ROLLBACK_ENV:-$SERVER_ROOT/rollback.env}
+FRONTEND_STATE=${FRONTEND_STATE:-$SERVER_ROOT/frontend-recovery.env}
 RELEASES_DIR=${RELEASES_DIR:-$SERVER_ROOT/releases}
 BACKUPS_DIR=${BACKUPS_DIR:-$SERVER_ROOT/backups}
 COMPOSE_FILE=${COMPOSE_FILE:-$SERVER_ROOT/compose.yml}
@@ -114,6 +115,16 @@ validate_inputs() {
       die 'SELECTEL_PREBUILT_WEBAPP_ID must be a lowercase sha256:64hex image ID'
     PREBUILT_IMAGES=true
   fi
+}
+
+validate_frontend_recovery_path() {
+  local canonical frontend_resolved rollback_resolved
+  canonical=$SERVER_ROOT/frontend-recovery.env
+  [ "$FRONTEND_STATE" = "$canonical" ] || die 'FRONTEND_STATE override is unsupported; use the canonical server-root recovery path'
+  frontend_resolved=$(readlink -m -- "$canonical") || die 'cannot resolve canonical frontend recovery path'
+  rollback_resolved=$(readlink -m -- "$ROLLBACK_ENV") || die 'cannot resolve application rollback path'
+  [ "$frontend_resolved" != "$rollback_resolved" ] ||
+    die 'frontend recovery path must not collide with the application rollback file'
 }
 
 clear_release_markers() {
@@ -670,8 +681,10 @@ main() {
   require_command find
   require_command sha256sum
   require_command stat
+  require_command readlink
   require_command sync
   validate_inputs
+  validate_frontend_recovery_path
   [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
   exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
   flock -n 9 || die 'another Selectel deployment is already running'
