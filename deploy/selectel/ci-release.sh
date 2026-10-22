@@ -9,6 +9,7 @@ SERVER_ROOT=${SERVER_ROOT:-/opt/memoly}
 APP_ROOT=${APP_ROOT:-$SERVER_ROOT/app}
 export SERVER_ROOT APP_ROOT
 ROLLBACK_ENV=${ROLLBACK_ENV:-$SERVER_ROOT/rollback.env}
+FRONTEND_STATE=${FRONTEND_STATE:-$SERVER_ROOT/frontend-recovery.env}
 RELEASES_DIR=${RELEASES_DIR:-$SERVER_ROOT/releases}
 BACKUPS_DIR=${BACKUPS_DIR:-$SERVER_ROOT/backups}
 COMPOSE_FILE=${COMPOSE_FILE:-$SERVER_ROOT/compose.yml}
@@ -21,6 +22,7 @@ PRODUCT_SHA=${1:-}
 DEPLOY_CONFIRMATION=${2:-}
 RUN_MIGRATION=${3:-false}
 MAX_BOT_USERNAME=${4:-}
+RELEASE_MODE=${5:-full}
 PROMOTION_STARTED=false
 LEGACY_MEMBERSHIP_RUNTIME=false
 LEGACY_MM0_RUNTIME=false
@@ -39,6 +41,9 @@ PREBUILT_IMAGES=false
 RUNNING_BACKEND_IMAGE_TAG=
 RUNNING_WEBAPP_IMAGE_TAG=
 ROLLBACK_VERIFY_ENV=
+FRONTEND_RECOVERY_FILE=$SERVER_ROOT/frontend-recovery.env
+FRONTEND_RECOVERY_PRESENT=false
+FRONTEND_RECOVERY_SHA256=
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -89,6 +94,7 @@ release_failure() {
 validate_inputs() {
   [[ "$PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'release SHA must be a 40-character lowercase Git SHA'
   [ "$DEPLOY_CONFIRMATION" = DEPLOY ] || die 'deployment confirmation must be exactly DEPLOY'
+  case "$RELEASE_MODE" in full|frontend|frontend-rollback) ;; *) die 'release mode must be full, frontend, or frontend-rollback' ;; esac
   case "$RUN_MIGRATION" in
     true|false) ;;
     *) die 'migration flag must be true or false' ;;
@@ -97,7 +103,11 @@ validate_inputs() {
   local backend_set=false webapp_set=false
   [ "${SELECTEL_PREBUILT_BACKEND_ID+x}" = x ] && backend_set=true
   [ "${SELECTEL_PREBUILT_WEBAPP_ID+x}" = x ] && webapp_set=true
-  [ "$backend_set" = "$webapp_set" ] || die 'prebuilt image IDs must be supplied together'
+  if [ "$RELEASE_MODE" = full ]; then
+    [ "$backend_set" = "$webapp_set" ] || die 'prebuilt image IDs must be supplied together'
+  else
+    [ "$backend_set" = false ] || die 'frontend release modes refuse prebuilt backend image IDs'
+  fi
   if [ "$backend_set" = true ]; then
     [[ "$SELECTEL_PREBUILT_BACKEND_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
       die 'SELECTEL_PREBUILT_BACKEND_ID must be a lowercase sha256:64hex image ID'
@@ -105,6 +115,16 @@ validate_inputs() {
       die 'SELECTEL_PREBUILT_WEBAPP_ID must be a lowercase sha256:64hex image ID'
     PREBUILT_IMAGES=true
   fi
+}
+
+validate_frontend_recovery_path() {
+  local canonical frontend_resolved rollback_resolved
+  canonical=$SERVER_ROOT/frontend-recovery.env
+  [ "$FRONTEND_STATE" = "$canonical" ] || die 'FRONTEND_STATE override is unsupported; use the canonical server-root recovery path'
+  frontend_resolved=$(readlink -m -- "$canonical") || die 'cannot resolve canonical frontend recovery path'
+  rollback_resolved=$(readlink -m -- "$ROLLBACK_ENV") || die 'cannot resolve application rollback path'
+  [ "$frontend_resolved" != "$rollback_resolved" ] ||
+    die 'frontend recovery path must not collide with the application rollback file'
 }
 
 clear_release_markers() {
@@ -532,6 +552,73 @@ EOF
   printf 'Release manifest written: %s\n' "$(basename "$manifest")"
 }
 
+# A successful full release replaces the complete runtime, so any older
+# frontend-only recovery record no longer describes the live service. Keep its
+# exact bytes as a forensic archive only after the new full runtime is proven
+# healthy. Do not parse the record here: backend forward-only recovery owns
+# migration safety, and must remain possible even if this unrelated artifact
+# contains an interrupted or malformed frontend state.
+capture_frontend_recovery_artifact() {
+  FRONTEND_RECOVERY_FILE=$SERVER_ROOT/frontend-recovery.env
+  FRONTEND_RECOVERY_PRESENT=false
+  FRONTEND_RECOVERY_SHA256=
+  if [ -e "$FRONTEND_RECOVERY_FILE" ] || [ -L "$FRONTEND_RECOVERY_FILE" ]; then
+    [ -f "$FRONTEND_RECOVERY_FILE" ] && [ ! -L "$FRONTEND_RECOVERY_FILE" ] ||
+      die 'frontend recovery artifact is not a regular non-symlink file'
+    [ "$(stat -c '%u' -- "$FRONTEND_RECOVERY_FILE")" = 0 ] ||
+      die 'frontend recovery artifact is not owned by root'
+    [ "$(stat -c '%a' -- "$FRONTEND_RECOVERY_FILE")" = 600 ] ||
+      die 'frontend recovery artifact must have mode 0600'
+    FRONTEND_RECOVERY_SHA256=$(sha256sum -- "$FRONTEND_RECOVERY_FILE" | awk '{print $1}') ||
+      die 'cannot checksum frontend recovery artifact'
+    [[ "$FRONTEND_RECOVERY_SHA256" =~ ^[0-9a-f]{64}$ ]] || die 'frontend recovery artifact checksum is invalid'
+    FRONTEND_RECOVERY_PRESENT=true
+  fi
+}
+
+verify_frontend_recovery_artifact_unchanged() {
+  local expected_present=$FRONTEND_RECOVERY_PRESENT expected_sha256=$FRONTEND_RECOVERY_SHA256
+  capture_frontend_recovery_artifact
+  [ "$FRONTEND_RECOVERY_PRESENT" = "$expected_present" ] &&
+    [ "$FRONTEND_RECOVERY_SHA256" = "$expected_sha256" ] ||
+    die 'frontend recovery artifact changed during full release; refusing to archive it'
+}
+
+archive_frontend_recovery_artifact() {
+  [ "$FRONTEND_RECOVERY_PRESENT" = true ] || return 0
+  verify_frontend_recovery_artifact_unchanged
+  [ -d "$RELEASES_DIR" ] && [ ! -L "$RELEASES_DIR" ] ||
+    die 'release archive directory is missing or unsafe'
+  [ "$(stat -c '%u' -- "$RELEASES_DIR")" = 0 ] || die 'release archive directory is not owned by root'
+
+  local archive timestamp actual_sha256
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  archive=$RELEASES_DIR/frontend-recovery-${PRODUCT_SHA}-${timestamp}-$$.env
+  [ ! -e "$archive" ] && [ ! -L "$archive" ] || die 'frontend recovery archive target already exists'
+  sync -f "$FRONTEND_RECOVERY_FILE" || die 'cannot sync frontend recovery artifact before archival'
+  sync -f "$RELEASES_DIR" || die 'cannot sync release archive directory before archival'
+  mv -- "$FRONTEND_RECOVERY_FILE" "$archive" || die 'cannot archive frontend recovery artifact'
+
+  if ! [ -f "$archive" ] || [ -L "$archive" ] ||
+     [ "$(stat -c '%u' -- "$archive" 2>/dev/null || true)" != 0 ] ||
+     [ "$(stat -c '%a' -- "$archive" 2>/dev/null || true)" != 600 ]; then
+    mv -- "$archive" "$FRONTEND_RECOVERY_FILE" 2>/dev/null ||
+      die 'archived frontend recovery artifact is unsafe and could not be restored to its live path'
+    die 'archived frontend recovery artifact has unsafe ownership or permissions; original state was restored'
+  fi
+  if ! actual_sha256=$(sha256sum -- "$archive" | awk '{print $1}') ||
+     [ "$actual_sha256" != "$FRONTEND_RECOVERY_SHA256" ]; then
+    mv -- "$archive" "$FRONTEND_RECOVERY_FILE" 2>/dev/null ||
+      die 'frontend recovery archive checksum changed and original state could not be restored'
+    die 'frontend recovery archive checksum changed; original state was restored'
+  fi
+  FRONTEND_RECOVERY_PRESENT=false
+  FRONTEND_RECOVERY_SHA256=
+  sync -f "$RELEASES_DIR" || printf 'WARNING: could not sync archive directory after atomic frontend recovery archival.\n' >&2
+  sync -f "$SERVER_ROOT" || printf 'WARNING: could not sync server root after atomic frontend recovery archival.\n' >&2
+  printf 'Frontend recovery artifact archived: %s\n' "$(basename "$archive")" || true
+}
+
 recover_forward_markers() {
   if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
     load_mm0_marker
@@ -594,17 +681,36 @@ main() {
   require_command find
   require_command sha256sum
   require_command stat
+  require_command readlink
   require_command sync
   validate_inputs
+  validate_frontend_recovery_path
   [ -d "$SERVER_ROOT" ] || die "server root is missing: $SERVER_ROOT"
   exec 9>"$SERVER_ROOT/.selectel-deploy.lock" || die 'cannot open Selectel deployment lock'
   flock -n 9 || die 'another Selectel deployment is already running'
   export SELECTEL_DEPLOY_LOCK_FD=9
   export SELECTEL_CI_RELEASE=true
-  trap release_failure EXIT
-
+  if [ "$RELEASE_MODE" = full ]; then trap release_failure EXIT; fi
   validate_repository
   validate_planned_source
+  if [ "$RELEASE_MODE" = frontend ] || [ "$RELEASE_MODE" = frontend-rollback ]; then
+    if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ] ||
+       [ -e "$FORWARD_MARKER" ] || [ -L "$FORWARD_MARKER" ]; then
+      die 'frontend release modes are blocked while a backend forward-only marker exists'
+    fi
+    check_disk_space
+    fetch_and_checkout
+    [ -f "$APP_ROOT/deploy/selectel/frontend-release.sh" ] &&
+      [ ! -L "$APP_ROOT/deploy/selectel/frontend-release.sh" ] || die 'frontend release guard script is missing or invalid'
+    # The frontend handler installs its own trap and can only restore static.
+    # Never install the full release failure trap for this mode.
+    # shellcheck disable=SC1090
+    . "$APP_ROOT/deploy/selectel/frontend-release.sh"
+    frontend_release_main
+    exit 0
+  fi
+  trap release_failure EXIT
+  capture_frontend_recovery_artifact
   recover_forward_markers
   check_disk_space
   verify_rollback_file
@@ -612,6 +718,7 @@ main() {
     capture_running_images
   fi
   fetch_and_checkout
+  verify_frontend_recovery_artifact_unchanged
   validate_prebuilt_images
   detect_membership_rollback_boundary
   detect_mm0_boundary
@@ -663,11 +770,13 @@ main() {
     fi
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
+  verify_frontend_recovery_artifact_unchanged
   promote_runtime
   verify_promoted_revision
   public_smoke
   write_release_manifest
   clear_release_markers
+  archive_frontend_recovery_artifact
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then

@@ -31,6 +31,7 @@ set -euo pipefail
 PRODUCT_SHA=${sha}
 DEPLOY_CONFIRMATION=DEPLOY
 RUN_MIGRATION=false
+RELEASE_MODE=full
 MAX_BOT_USERNAME=id911018762027_bot
 PREBUILT_IMAGES=false
 die() { printf 'ERROR: %s\\n' "$*" >&2; exit 7; }
@@ -66,6 +67,13 @@ test('prebuilt image IDs are optional only as an exact pair', { timeout: 30_000 
     assert.equal(result.status, 7, `${result.stdout}${result.stderr}`)
     assert.match(result.stderr, /prebuilt image IDs|SELECTEL_PREBUILT_/)
   }
+
+  const frontendBackend = runValidation({
+    RELEASE_MODE: 'frontend',
+    SELECTEL_PREBUILT_BACKEND_ID: backendId,
+  })
+  assert.equal(frontendBackend.status, 7, `${frontendBackend.stdout}${frontendBackend.stderr}`)
+  assert.match(frontendBackend.stderr, /frontend release modes refuse prebuilt backend image IDs/)
 })
 
 function runImageValidation({ backend = backendId, webapp = webappId, backendRevision = sha, webappRevision = sha } = {}) {

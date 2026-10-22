@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
 import { bashExecutable, gitBashPath } from './bash-runtime.mjs'
+import './selectel-frontend-release.test.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
