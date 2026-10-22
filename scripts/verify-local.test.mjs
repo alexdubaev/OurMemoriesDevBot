@@ -4,9 +4,29 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classifyChanges, executePlan, planFor, selectProfile } from './verify-local.mjs'
+import { classifyChanges, executePlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 describe('risk based verification', () => {
+  test('frontend scope accepts only vetted presentation paths and needs a production input', () => {
+    expect(validateFrontendScope(['webapp/src/components/ui-v2/ChildHeaderV2.tsx'], { requireRuntime: true }).runtime).toBe(true)
+    expect(() => validateFrontendScope(['webapp/src/App.tsx'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['webapp/src/features/auth/SignIn.css'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['docs/release.md'])).toThrow('production frontend input')
+    expect(() => validateFrontendScope(['deploy/selectel/ci-release.sh'])).toThrow('outside its allowlist')
+  })
+
+  test('frontend journey test stages require an executed passing Playwright case', () => {
+    const [pass] = executePlan([['Browser journey webapp/e2e/memoly-v4.spec.ts', ['fake', []]]], () => ({
+      status: 0, stdout: 'Running 1 test using 1 worker\n  1 passed (2.1s)\n',
+    }))
+    expect(pass?.status).toBe(0)
+    const [skip] = executePlan([['Browser journey webapp/e2e/memoly-v4.spec.ts', ['fake', []]]], () => ({
+      status: 0, stdout: 'Running 1 test using 1 worker\n  1 skipped\n  0 passed (2.1s)\n',
+    }))
+    expect(skip?.status).toBe(1)
+    expect(skip?.error).toContain('skipped or unrun required journeys')
+  })
+
   test('cosmetic and documentation diffs select FAST', () => {
     expect(classifyChanges(['webapp/src/styles.css'])).toBe('fast')
     expect(classifyChanges(['docs/release.md'])).toBe('fast')

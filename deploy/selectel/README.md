@@ -13,6 +13,92 @@ Use this file as the single procedure for the existing host. It is safe for an a
 with no previous chat context because it names the host and server checkout, the
 access boundary, the build inputs, the migration gate, and the rollback contract.
 
+### Short frontend releases (owner policy 2026-10-22)
+
+Use this lane by default for proven presentation-only text, button, navigation and
+styling changes. It publishes **only the static/webapp image**. It does not run a
+backend build/promotion, restart workers/scheduler, activate gateway configuration,
+apply migrations, create a database dump or rewrite `rollback.env`.
+
+Eligibility is checked against **both actual running backend and webapp commits**,
+not only the last merged PR. The shared policy in `frontend-safe-paths.txt` is
+fail-closed: unknown paths, backend/schema/contracts, authentication/session/ACL,
+private media/lifecycle, API/platform/offline/cache, dependencies, build and deploy
+inputs require the normal full release. A changed allowed component is still
+subject to semantic review: introducing API calls, permission decisions or business
+logic does not become presentation-only because of its pathname. Do not add
+temporary policy exceptions to shorten one release. This lane's own implementation
+and policy changes require FULL and independent review.
+
+1. Read actual deployed tags and verify image IDs and OCI revisions. Keep these
+   full SHAs in the task evidence. Do not infer them from the server checkout,
+   which can include unreleased documentation or tools.
+
+   ```sh
+   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+     'docker inspect --format "{{.Config.Image}} {{.Image}}" memoly-backend-1 memoly-static-1'
+   ```
+
+2. In the clean task checkout, verify the entire deployed-backend-to-candidate
+   diff. Choose a relevant existing short journey and inspect the changed screen.
+   For a header/family navigation change, the existing UI v4 journey is:
+
+   ```sh
+   bun run verify:local --profile frontend --base '<full deployed backend SHA>' \
+     --journey webapp/e2e/memoly-v4.spec.ts \
+     --journey-grep 'feed and family navigation expose working controls'
+   ```
+
+   Up to two relevant journey specs may be supplied. The verifier uses an existing
+   dedicated Playwright config when available, otherwise the existing MAX config.
+   It requires executed passing cases and refuses skipped/unrun/empty results.
+   FRONTEND runs frontend typecheck, lint, production build and mapped narrow
+   tests; it does not run backend FULL. Document targeted visual/browser acceptance
+   and its limits. Use cached local tooling rather than rebuilding the test host.
+
+3. Squash merge through the normal reviewed PR process. Verify the final main tree,
+   then run FRONTEND on that exact final SHA with the deployed backend base. Do not
+   run FULL merely because squash changed the commit SHA. New or broader source
+   changes require the appropriate new checks.
+
+4. From the accepted clean main checkout, invoke the **versioned** host entry point
+   with migration `false` and the explicit fifth argument `frontend`:
+
+   ```sh
+   SHA=$(git rev-parse HEAD)
+   git show "$SHA:deploy/selectel/ci-release.sh" |
+     ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+       bash -s -- "$SHA" DEPLOY false id911018762027_bot frontend
+   ```
+
+   The host repeats source/current-main/scope/ownership, host-lock/disk/forward-marker,
+   accepted UI v4 and immutable artifact checks. It validates the unchanged migration
+   history read-only, captures exact prior webapp recovery identity before promotion,
+   and verifies retained backend/worker/scheduler and gateway/config identities.
+   Only static is recreated with `--no-deps`. Internal/public readiness and candidate
+   artifact checks precede the final protected manifest. Failures after promotion
+   restore only the exact prior frontend and keep a failed command status.
+
+5. Confirm the frontend manifest records distinct deployed backend/frontend SHAs,
+   exact image IDs, public smoke and frontend recovery readiness. The previously
+   designated full application recovery pair remains unchanged. This independent
+   frontend recovery proof is not a new exact-source application rollback attestation.
+   Do not report the backend at the frontend SHA or claim a newly attested full
+   application rollback source.
+
+For recovery after a failed or interrupted frontend promotion, use the same
+accepted entry point with `frontend-rollback` as the fifth argument. It restores
+only the exact prior image recorded in the protected frontend state after checking
+retained backend/config compatibility; it does not accept arbitrary target images
+or restore the database. Missing/corrupt state, unknown sources, changed backend or
+forward-only markers fail closed. Resolve such a failure through the normal guarded
+forward-fix process. The normal `rollback-static` action below retains its older
+contract and is not the recovery command for this new lane.
+
+Documentation-only PRs have no runtime deployment. The initial installation of this
+release tooling uses the normal reviewed FULL release; future eligible UI commits
+then use the short lane. No product UI change is required merely to install tooling.
+
 ### Access and build inputs
 
 - Production is `app.memoly.ru`; run host commands from `/opt/memoly/app`.
@@ -167,7 +253,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before PR merge, run the risk-appropriate FAST, STANDARD, or FULL profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Before production deployment, run FULL on the exact final release SHA, including the combined state of all included PRs. This FULL check does not replace the guarded backup, migration, readiness, health, and rollback steps below. Production deployment remains a separate manual operation and requires an explicit owner request. With owner-provisioned SSH access, confirm the accepted clean SHA,
+Before PR merge, run the applicable risk profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible presentation-only production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the exact final release SHA, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh

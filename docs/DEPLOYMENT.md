@@ -20,16 +20,29 @@ the guarded database migration, promotion, smoke checks, and rollback, lives in 
 from chat history or run an invented migration command.
 
 Access is provisioned by the owner outside Git using a secure store or SSH agent.
-GitHub Actions CI/CD is not used. Before PR merge, run FAST, STANDARD, or FULL
-according to the highest-risk diff and record the reason, commands, outcome, and
-exact source SHA. The main/master pre-push hook runs risk-based verification against the pushed
-remote SHA; PR merge does not run local hooks. Before production deployment, run
-FULL on the exact final release SHA, including the combined state of all included
-PRs. FULL supplements the existing backup, migration, readiness, health, and
-rollback safeguards. Production deployment remains a separate manual operation,
-only when explicitly requested by the owner. The guarded host entry point builds
-immutable SHA images, prepares rollback, applies only the selected guarded
-migration, checks readiness, and writes a protected nonsecret release manifest.
+GitHub Actions CI/CD is not used. Before publication and production release, select
+the highest applicable risk profile and record the exact source SHA, deployed
+comparison bases, commands and results. Under the owner's 2026-10-22 policy,
+eligible presentation-only changes use the short **FRONTEND** lane by default:
+frontend typecheck/lint/build, narrow tests, a real targeted browser journey and
+visual acceptance. The host publishes only static/webapp, retaining the running
+backend, worker, scheduler, gateway and database. A strict scope check compares
+against both deployed backend and frontend revisions; unknown or sensitive inputs
+require the normal lane. No backend change alone is not proof of eligibility.
+
+Backend, authentication/session/ACL, API/contracts, private-media lifecycle,
+data/schema, dependencies/build/deploy tooling and uncertain changes still require
+**FULL on the exact final release SHA** and the complete normal release guards.
+The short lane retains source/ownership/lock/disk/UI v4/immutable artifact guards,
+read-only migration-history verification, service-retention checks, public smoke,
+a protected manifest and exact frontend recovery state. It does not run migrations,
+dump the database or rewrite the designated application recovery pair. It is not
+an exception to normal application rollback attestations. Commands and limits are
+defined in the [Selectel runbook](../deploy/selectel/README.md).
+
+Production deployment remains a separate manual operation under the owner's
+standing authorization unless the task restricts it. PR merge does not invoke
+local hooks; attach the applicable source-bound evidence to the PR.
 Never store private key paths, key values, database passwords, MAX tokens,
 webhook secrets, or encryption keys in the repository.
 

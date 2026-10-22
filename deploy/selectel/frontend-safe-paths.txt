@@ -1,0 +1,15 @@
+# Shared POSIX extended regular expressions. First matching rule wins; exact
+# reviewed presentation exceptions appear before broad sensitive-path denies.
+A	^webapp/src/features/family/(FamilyHubPage\.tsx|family-hub\.css)$
+A	^webapp/tests/.+\.test\.[cm]?[jt]sx?$
+A	^webapp/e2e/[^/]+\.(spec|max-e2e)\.ts$
+D	(^|/)(auth|session|invite|family|media|storage|cache|offline|service-worker|platform|api|contracts|feeds?|memory|memories|upload|permission|access)(/|\.|-|$)
+D	(^|/)(package\.json|bun\.lockb?|Dockerfile[^/]*|.*\.ya?ml|vite[^/]*\.config\.[cm]?[jt]s|playwright[^/]*\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|eslint[^/]*\.config\.[cm]?[jt]s)$
+D	^(deploy/|scripts/|backend/|packages/|website/|infra/|\.github/|\.githooks/)
+D	^webapp/src/(App|main)\.tsx$
+A	^(docs|templates)/.+$
+A	^(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$
+A	^webapp/src/.+\.(css|scss|sass|less)$
+A	^webapp/(src|public)/assets/.+\.(webp|png|jpe?g|avif|ico)$
+A	^webapp/src/components/ui-v2/ChildHeaderV2\.(tsx|css)$
+A	^webapp/src/features/memoly-ui/FamilyPresentation\.tsx$

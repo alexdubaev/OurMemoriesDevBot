@@ -21,6 +21,7 @@ PRODUCT_SHA=${1:-}
 DEPLOY_CONFIRMATION=${2:-}
 RUN_MIGRATION=${3:-false}
 MAX_BOT_USERNAME=${4:-}
+RELEASE_MODE=${5:-full}
 PROMOTION_STARTED=false
 LEGACY_MEMBERSHIP_RUNTIME=false
 LEGACY_MM0_RUNTIME=false
@@ -89,6 +90,7 @@ release_failure() {
 validate_inputs() {
   [[ "$PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'release SHA must be a 40-character lowercase Git SHA'
   [ "$DEPLOY_CONFIRMATION" = DEPLOY ] || die 'deployment confirmation must be exactly DEPLOY'
+  case "$RELEASE_MODE" in full|frontend|frontend-rollback) ;; *) die 'release mode must be full, frontend, or frontend-rollback' ;; esac
   case "$RUN_MIGRATION" in
     true|false) ;;
     *) die 'migration flag must be true or false' ;;
@@ -97,7 +99,11 @@ validate_inputs() {
   local backend_set=false webapp_set=false
   [ "${SELECTEL_PREBUILT_BACKEND_ID+x}" = x ] && backend_set=true
   [ "${SELECTEL_PREBUILT_WEBAPP_ID+x}" = x ] && webapp_set=true
-  [ "$backend_set" = "$webapp_set" ] || die 'prebuilt image IDs must be supplied together'
+  if [ "$RELEASE_MODE" = full ]; then
+    [ "$backend_set" = "$webapp_set" ] || die 'prebuilt image IDs must be supplied together'
+  else
+    [ "$backend_set" = false ] || die 'frontend release modes refuse prebuilt backend image IDs'
+  fi
   if [ "$backend_set" = true ]; then
     [[ "$SELECTEL_PREBUILT_BACKEND_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
       die 'SELECTEL_PREBUILT_BACKEND_ID must be a lowercase sha256:64hex image ID'
@@ -601,10 +607,26 @@ main() {
   flock -n 9 || die 'another Selectel deployment is already running'
   export SELECTEL_DEPLOY_LOCK_FD=9
   export SELECTEL_CI_RELEASE=true
-  trap release_failure EXIT
-
+  if [ "$RELEASE_MODE" = full ]; then trap release_failure EXIT; fi
   validate_repository
   validate_planned_source
+  if [ "$RELEASE_MODE" = frontend ] || [ "$RELEASE_MODE" = frontend-rollback ]; then
+    if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ] ||
+       [ -e "$FORWARD_MARKER" ] || [ -L "$FORWARD_MARKER" ]; then
+      die 'frontend release modes are blocked while a backend forward-only marker exists'
+    fi
+    check_disk_space
+    fetch_and_checkout
+    [ -f "$APP_ROOT/deploy/selectel/frontend-release.sh" ] &&
+      [ ! -L "$APP_ROOT/deploy/selectel/frontend-release.sh" ] || die 'frontend release guard script is missing or invalid'
+    # The frontend handler installs its own trap and can only restore static.
+    # Never install the full release failure trap for this mode.
+    # shellcheck disable=SC1090
+    . "$APP_ROOT/deploy/selectel/frontend-release.sh"
+    frontend_release_main
+    exit 0
+  fi
+  trap release_failure EXIT
   recover_forward_markers
   check_disk_space
   verify_rollback_file
