@@ -329,7 +329,9 @@ bash() { if [[ "$1" == */build-images.sh ]]; then printf 'BUILD:%s\\n' "$*" >> "
 ( main )
 PRODUCT_SHA=$t2
 ( main )
-PROMOTION_FAIL_SHA=$t3 PRODUCT_SHA=$t3
+PROMOTION_FAIL_SHA=$t3
+export PROMOTION_FAIL_SHA
+PRODUCT_SHA=$t3
 if ( main ); then printf 'third promotion unexpectedly passed\\n' >&2; exit 60; fi
 rm -f "$SERVER_ROOT/current-static"
 PRODUCT_SHA=$t3 RELEASE_MODE=frontend-rollback
