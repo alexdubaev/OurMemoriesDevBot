@@ -61,7 +61,7 @@ const maxVoiceId = '88888888-8888-4888-8888-888888888887'
 const maxVoicePath = mediaPath(maxVoiceId, 'voices') + '/content'
 const missingWaveformVoice = { ...voiceMemory, id: '22222222-2222-4222-8222-222222222227', body: 'Synthetic MAX voice', attachments: [{ ...voiceMemory.attachments[0], id: maxVoiceId, playbackPath: maxVoicePath, waveform: null }] }
 const transport = {
-  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: maxMixedMode ? [maxMixedMemory] : swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, landscapePhotoMemory, ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
+  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: maxMixedMode ? [maxMixedMemory] : swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, ...(lifecycleMode || voiceMode ? [] : [landscapePhotoMemory]), ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('44444444-4444-4444-8444-444444444442') && window.__fixedCarouselProbe?.delayed) await new Promise<void>((resolve) => delayedPosterWaiters.push(resolve))

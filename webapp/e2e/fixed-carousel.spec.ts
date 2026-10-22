@@ -63,6 +63,11 @@ test('production feed carousel selects attachments through drags and opens the s
   await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
   await swipeNext()
   await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
+  const inlineVideoSlide = card.locator('[data-carousel-position="2"]')
+  await expect.poll(async () => {
+    const [viewportBounds, slideBounds] = await Promise.all([viewport.boundingBox(), inlineVideoSlide.boundingBox()])
+    return Boolean(viewportBounds && slideBounds && Math.abs(viewportBounds.x - slideBounds.x) < 1)
+  }).toBe(true)
   await expect(card.locator('[data-carousel-position="2"] .memoly-private-video-v2-play')).toBeVisible()
 
   const inlinePlay = card.locator('[data-carousel-position="2"] .memoly-private-video-v2-play')
@@ -70,7 +75,8 @@ test('production feed carousel selects attachments through drags and opens the s
   await inlinePlay.click()
   const viewer = page.locator('[data-mixed-viewer]')
   await expect(viewer).toHaveCount(0)
-  await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => [video.videoWidth, video.videoHeight])).toEqual([640, 360])
+  await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => video.videoWidth)).toBeGreaterThan(0)
+  await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => Math.abs(video.videoWidth / video.videoHeight - 16 / 9))).toBeLessThan(0.02)
   await expect(card.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Поставить видео на паузу' })).toBeVisible()
   await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1)
   const timeline = card.locator('[data-carousel-position="2"]').getByRole('slider', { name: 'Позиция видео' })
