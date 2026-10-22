@@ -17,7 +17,8 @@ function runBash(script) {
   return spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8', timeout: 30_000 })
 }
 
-function scopeScript(path) {
+function scopeScript(paths) {
+  const output = paths.map((path) => `printf '%s\\0' ${JSON.stringify(path)};`).join(' ')
   return `
 set -euo pipefail
 APP_ROOT=${appRoot}
@@ -29,7 +30,7 @@ ACCEPTED_UI_V4_SHA=${hex('a', 40)}
 git_root() {
   if [[ "$1" == merge-base ]]; then return 0; fi
   if [[ "$1" == diff && "$2" == --summary* ]]; then return 0; fi
-  if [[ "$1" == diff && "$2" == --name-only* ]]; then printf '%s\\0' ${JSON.stringify(path)}; return 0; fi
+  if [[ "$1" == diff && "$2" == --name-only* ]]; then ${output} return 0; fi
   return 90
 }
 . ${library}
@@ -37,15 +38,29 @@ frontend_validate_scope ${hex('b', 40)}
 `
 }
 
-test('frontend source guard admits vetted presentation and rejects runtime or unknown paths', async () => {
-  const allowed = runBash(scopeScript('webapp/src/features/family/FamilyHubPage.tsx'))
-  assert.equal(allowed.status, 0, `${allowed.stdout}${allowed.stderr}`)
-  const denied = runBash(scopeScript('webapp/src/features/auth/LoginPage.tsx'))
-  assert.notEqual(denied.status, 0)
-  assert.match(denied.stderr, /refuses sensitive path/)
-  const unknown = runBash(scopeScript('webapp/src/features/home/Widget.tsx'))
-  assert.notEqual(unknown.status, 0)
-  assert.match(unknown.stderr, /refuses unknown path/)
+test('frontend source scope allows the feed stylesheet and family presentation while rejecting sensitive, unknown, and mixed changes', () => {
+  for (const path of [
+    'webapp/src/features/feed/presentation/memoly-feed.css',
+    'webapp/src/features/family/family-hub.css',
+  ]) {
+    const allowed = runBash(scopeScript([path]))
+    assert.equal(allowed.status, 0, `${allowed.stdout}${allowed.stderr}`)
+  }
+  for (const [path, reason] of [
+    ['webapp/src/features/feed/FeedPage.tsx', /refuses sensitive path/],
+    ['webapp/src/platform/media/use-private-image-url.ts', /refuses sensitive path/],
+    ['webapp/src/features/home/Widget.tsx', /refuses unknown path/],
+  ]) {
+    const denied = runBash(scopeScript([path]))
+    assert.notEqual(denied.status, 0)
+    assert.match(denied.stderr, reason)
+  }
+  const mixed = runBash(scopeScript([
+    'webapp/src/features/feed/presentation/memoly-feed.css',
+    'webapp/src/features/feed/FeedPage.tsx',
+  ]))
+  assert.notEqual(mixed.status, 0)
+  assert.match(mixed.stderr, /refuses sensitive path/)
 })
 
 test('frontend entrypoint rejects forward markers before image capture or recovery', () => {

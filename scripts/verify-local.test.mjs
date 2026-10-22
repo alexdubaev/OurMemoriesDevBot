@@ -7,10 +7,19 @@ import { fileURLToPath } from 'node:url'
 import { classifyChanges, executePlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 describe('risk based verification', () => {
-  test('frontend scope accepts only vetted presentation paths and needs a production input', () => {
+  test('frontend scope allows the feed stylesheet and family presentation while rejecting sensitive, unknown, and mixed changes', () => {
     expect(validateFrontendScope(['webapp/src/components/ui-v2/ChildHeaderV2.tsx'], { requireRuntime: true }).runtime).toBe(true)
+    expect(validateFrontendScope(['webapp/src/features/feed/presentation/memoly-feed.css']).runtime).toBe(true)
+    expect(validateFrontendScope(['webapp/src/features/family/family-hub.css']).runtime).toBe(true)
     expect(() => validateFrontendScope(['webapp/src/App.tsx'])).toThrow('outside its allowlist')
     expect(() => validateFrontendScope(['webapp/src/features/auth/SignIn.css'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['webapp/src/features/feed/FeedPage.tsx'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['webapp/src/platform/media/use-private-image-url.ts'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['webapp/src/features/home/Widget.tsx'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope([
+      'webapp/src/features/feed/presentation/memoly-feed.css',
+      'webapp/src/features/feed/FeedPage.tsx',
+    ])).toThrow('outside its allowlist')
     expect(() => validateFrontendScope(['docs/release.md'])).toThrow('production frontend input')
     expect(() => validateFrontendScope(['deploy/selectel/ci-release.sh'])).toThrow('outside its allowlist')
   })
