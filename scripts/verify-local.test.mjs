@@ -1,27 +1,196 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bashExecutable, gitBashPath } from '../tests/bash-runtime.mjs'
 import { classifyChanges, executePlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const frontendScopeCli = resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh')
+const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+
+function createFrontendRangeFixture() {
+  const root = mkdtempSync(resolve(tmpdir(), 'memoly-frontend-range-'))
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(result.stderr)
+    return result.stdout.trim()
+  }
+  const put = (path, contents) => {
+    const target = resolve(root, path)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, contents)
+  }
+  git('init', '-b', 'main')
+  git('config', 'user.name', 'Frontend Scope Fixture')
+  git('config', 'user.email', 'frontend-scope@example.invalid')
+  for (const path of [
+    'deploy/selectel/frontend-safe-paths.txt', 'deploy/selectel/frontend-scope.sh',
+    'deploy/selectel/frontend-release.sh', 'scripts/verify-local.mjs',
+  ]) {
+    const destination = resolve(root, path)
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(resolve(repositoryRoot, path), destination)
+  }
+  put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>before</main>\n')
+  put('webapp/src/features/feed/presentation/memoly-feed.css', 'main { color: black; }\n')
+  put('webapp/src/features/feed/video-lifecycle.ts', 'export const lifecycle = "before"\n')
+  git('add', '.')
+  git('commit', '-m', 'fixture base')
+  const base = git('rev-parse', 'HEAD')
+  put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>reviewed UI</main>\n')
+  put('webapp/src/features/feed/presentation/memoly-feed.css', 'main { color: navy; }\n')
+  git('add', '.')
+  git('commit', '-m', 'reviewed UI fixture')
+  return { root, base, git, put }
+}
+
+function runFrontendScope(fixture, ...args) {
+  return spawnSync(bashExecutable, [gitBashPath(resolve(fixture.root, 'deploy/selectel/frontend-scope.sh')), ...args], {
+    cwd: fixture.root, encoding: 'utf8',
+  })
+}
 
 describe('risk based verification', () => {
   test('frontend scope allows the feed stylesheet and family presentation while rejecting sensitive, unknown, and mixed changes', () => {
     expect(validateFrontendScope(['webapp/src/components/ui-v2/ChildHeaderV2.tsx'], { requireRuntime: true }).runtime).toBe(true)
     expect(validateFrontendScope(['webapp/src/features/feed/presentation/memoly-feed.css']).runtime).toBe(true)
     expect(validateFrontendScope(['webapp/src/features/family/family-hub.css']).runtime).toBe(true)
-    expect(() => validateFrontendScope(['webapp/src/App.tsx'])).toThrow('outside its allowlist')
-    expect(() => validateFrontendScope(['webapp/src/features/auth/SignIn.css'])).toThrow('outside its allowlist')
-    expect(() => validateFrontendScope(['webapp/src/features/feed/FeedPage.tsx'])).toThrow('outside its allowlist')
-    expect(() => validateFrontendScope(['webapp/src/platform/media/use-private-image-url.ts'])).toThrow('outside its allowlist')
-    expect(() => validateFrontendScope(['webapp/src/features/home/Widget.tsx'])).toThrow('outside its allowlist')
-    expect(() => validateFrontendScope([
+    expect(validateFrontendScope(['webapp/src/App.tsx']).runtime).toBe(true)
+    expect(() => validateFrontendScope(['webapp/src/features/auth/SignIn.css'])).toThrow('sensitive or unknown')
+    expect(validateFrontendScope(['webapp/src/features/feed/FeedPage.tsx']).runtime).toBe(true)
+    expect(() => validateFrontendScope(['webapp/src/features/feed/video-lifecycle.ts'])).toThrow('sensitive or unknown')
+    expect(() => validateFrontendScope(['webapp/src/platform/media/use-private-image-url.ts'])).toThrow('sensitive or unknown')
+    expect(() => validateFrontendScope(['webapp/src/features/home/Widget.svg'])).toThrow('unknown path requires FULL')
+    expect(validateFrontendScope(['webapp/src/main.tsx']).runtime).toBe(true)
+    expect(validateFrontendScope(['webapp/src/platform/reaction-haptics.ts']).runtime).toBe(true)
+    expect(validateFrontendScope(['webapp/src/features/family/model.ts']).runtime).toBe(true)
+    expect(validateFrontendScope([
       'webapp/src/features/feed/presentation/memoly-feed.css',
       'webapp/src/features/feed/FeedPage.tsx',
-    ])).toThrow('outside its allowlist')
+    ]).runtime).toBe(true)
     expect(() => validateFrontendScope(['docs/release.md'])).toThrow('production frontend input')
-    expect(() => validateFrontendScope(['deploy/selectel/ci-release.sh'])).toThrow('outside its allowlist')
+    expect(() => validateFrontendScope(['deploy/selectel/ci-release.sh'])).toThrow('sensitive or unknown')
+  })
+
+  test('shared range verifier accepts CSS automatically, requires exact R receipts, rejects stale and D ranges', { timeout: 30_000 }, () => {
+    const fixture = createFrontendRangeFixture()
+    let reviewDirectory
+    try {
+      fixture.put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>before</main>\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'CSS only')
+      let candidate = fixture.git('rev-parse', 'HEAD')
+      const cssOnly = runFrontendScope(fixture, 'verify', fixture.base, candidate, 'local')
+      expect(cssOnly.status).toBe(0, cssOnly.stderr)
+
+      fixture.put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>reviewed UI</main>\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'review-required TSX')
+      candidate = fixture.git('rev-parse', 'HEAD')
+      const missing = runFrontendScope(fixture, 'verify', fixture.base, candidate, 'local')
+      expect(missing.status).not.toBe(0)
+      expect(missing.stderr).toContain('REVIEW_REQUIRED')
+
+      const inspection = runFrontendScope(fixture, 'inspect', fixture.base, candidate)
+      expect(inspection.status).toBe(0, inspection.stderr)
+      const values = Object.fromEntries(inspection.stdout.trim().split(/\r?\n/).map((line) => line.split('=')))
+      const fingerprint = values.FINGERPRINT
+      reviewDirectory = mkdtempSync(resolve(tmpdir(), 'memoly-frontend-receipts-'))
+      const report = 'Independent technical review\nChanged hunks checked\nImports, contracts, auth, access, media, storage, lifecycle, API and business rules checked\nBackend compatibility checked\nDecision: FRONTEND for the exact client UI range.\n'
+      const reportSha = sha256(report)
+      writeFileSync(resolve(reviewDirectory, `${fingerprint}.report`), report)
+      writeFileSync(resolve(reviewDirectory, `${fingerprint}.receipt`), [
+        'MEMOLY_FRONTEND_REVIEW=1', `BASE_SHA=${values.BASE_SHA}`, `CANDIDATE_TREE=${values.CANDIDATE_TREE}`,
+        `DIFF_SHA256=${values.DIFF_SHA256}`, `POLICY_SHA256=${values.POLICY_SHA256}`,
+        'REVIEWER_ID=independent-reviewer', 'DECISION=FRONTEND', `REPORT_SHA256=${reportSha}`, `FINGERPRINT=${fingerprint}`, '',
+      ].join('\n'))
+      const accepted = runFrontendScope(fixture, 'verify', fixture.base, candidate, 'local', gitBashPath(reviewDirectory))
+      expect(accepted.status).toBe(0, accepted.stderr)
+      expect(accepted.stdout).toContain(`reviewer=independent-reviewer`)
+
+      const reportFile = resolve(reviewDirectory, `${fingerprint}.report`)
+      writeFileSync(reportFile, `${report}tampered\n`)
+      const tampered = runFrontendScope(fixture, 'verify', fixture.base, candidate, 'local', gitBashPath(reviewDirectory))
+      expect(tampered.status).not.toBe(0)
+      expect(tampered.stderr).toContain('report digest does not match receipt')
+      writeFileSync(reportFile, report)
+
+      const fakeServerRoot = spawnSync(bashExecutable, [gitBashPath(resolve(fixture.root, 'deploy/selectel/frontend-scope.sh')), 'verify', fixture.base, candidate, 'server'], {
+        cwd: fixture.root, encoding: 'utf8', env: { ...process.env, FRONTEND_REVIEW_ROOT: reviewDirectory },
+      })
+      expect(fakeServerRoot.status).not.toBe(0)
+      expect(fakeServerRoot.stderr).toContain('protected frontend review store is unavailable')
+      expect(fakeServerRoot.stdout).not.toContain('REVIEW_OK')
+
+      fixture.put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>changed after review</main>\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'stale the receipt')
+      const staleCandidate = fixture.git('rev-parse', 'HEAD')
+      const stale = runFrontendScope(fixture, 'verify', fixture.base, staleCandidate, 'local', gitBashPath(reviewDirectory))
+      expect(stale.status).not.toBe(0)
+      expect(stale.stderr).toContain('REVIEW_REQUIRED')
+
+      fixture.put('webapp/src/features/feed/video-lifecycle.ts', 'export const lifecycle = "changed"\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'sensitive video lifecycle change')
+      const sensitiveCandidate = fixture.git('rev-parse', 'HEAD')
+      const sensitive = runFrontendScope(fixture, 'verify', fixture.base, sensitiveCandidate, 'local', gitBashPath(reviewDirectory))
+      expect(sensitive.status).not.toBe(0)
+      expect(sensitive.stderr).toContain('requires FULL')
+    } finally {
+      if (reviewDirectory) rmSync(reviewDirectory, { recursive: true, force: true })
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  test('range risk checks allow a UI revert while runtime eligibility uses the active frontend base', () => {
+    const fixture = createFrontendRangeFixture()
+    let reviewDirectory
+    try {
+      fixture.git('checkout', '-b', 'backend-and-frontend', fixture.base)
+      fixture.put('docs/release.md', 'backend-only release note\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'backend range has no frontend change')
+      const backendBase = fixture.git('rev-parse', 'HEAD')
+
+      fixture.put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>active frontend</main>\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'active frontend presentation')
+      const frontendBase = fixture.git('rev-parse', 'HEAD')
+
+      fixture.put('webapp/src/features/feed/FeedPage.tsx', 'export const FeedPage = () => <main>before</main>\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'revert to backend frontend presentation')
+      const candidate = fixture.git('rev-parse', 'HEAD')
+
+      const backendRange = runFrontendScope(fixture, 'verify', backendBase, candidate, 'local')
+      expect(backendRange.status).toBe(0, backendRange.stderr)
+      const missingActiveReview = runFrontendScope(fixture, 'verify', frontendBase, candidate, 'local')
+      expect(missingActiveReview.status).not.toBe(0)
+      expect(missingActiveReview.stderr).toContain('REVIEW_REQUIRED')
+
+      const inspection = runFrontendScope(fixture, 'inspect', frontendBase, candidate)
+      expect(inspection.status).toBe(0, inspection.stderr)
+      const values = Object.fromEntries(inspection.stdout.trim().split(/\r?\n/).map((line) => line.split('=')))
+      reviewDirectory = mkdtempSync(resolve(tmpdir(), 'memoly-frontend-revert-review-'))
+      const report = 'Independent review: exact frontend revert hunks checked; no auth, access, media, storage, lifecycle, API, business-rule, or backend compatibility risk.\n'
+      const reportSha = sha256(report)
+      writeFileSync(resolve(reviewDirectory, `${values.FINGERPRINT}.report`), report)
+      writeFileSync(resolve(reviewDirectory, `${values.FINGERPRINT}.receipt`), [
+        'MEMOLY_FRONTEND_REVIEW=1', `BASE_SHA=${values.BASE_SHA}`, `CANDIDATE_TREE=${values.CANDIDATE_TREE}`,
+        `DIFF_SHA256=${values.DIFF_SHA256}`, `POLICY_SHA256=${values.POLICY_SHA256}`,
+        'REVIEWER_ID=independent-reviewer', 'DECISION=FRONTEND', `REPORT_SHA256=${reportSha}`, `FINGERPRINT=${values.FINGERPRINT}`, '',
+      ].join('\n'))
+      const reviewedRevert = runFrontendScope(fixture, 'verify', frontendBase, candidate, 'local', gitBashPath(reviewDirectory))
+      expect(reviewedRevert.status).toBe(0, reviewedRevert.stderr)
+    } finally {
+      if (reviewDirectory) rmSync(reviewDirectory, { recursive: true, force: true })
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
   })
 
   test('frontend journey test stages require an executed passing Playwright case', () => {
@@ -39,6 +208,7 @@ describe('risk based verification', () => {
   test('cosmetic and documentation diffs select FAST', () => {
     expect(classifyChanges(['webapp/src/styles.css'])).toBe('fast')
     expect(classifyChanges(['docs/release.md'])).toBe('fast')
+    expect(classifyChanges(['deploy/selectel/README.md'])).toBe('fast')
     expect(classifyChanges(['webapp/src/assets/family-icon.webp'])).toBe('fast')
     expect(classifyChanges(['website/public/assets/brand-mark.png'])).toBe('fast')
     expect(classifyChanges(['unknown/icon.webp'])).toBe('full')
@@ -46,8 +216,13 @@ describe('risk based verification', () => {
 
   test('ordinary UI selects STANDARD while auth and unknown paths select FULL', () => {
     expect(classifyChanges(['webapp/src/components/FamilyCard.tsx'])).toBe('standard')
+    expect(classifyChanges(['webapp/src/features/feed/FeedPage.tsx'])).toBe('standard')
+    expect(classifyChanges(['webapp/src/features/family/FamilyHubPage.tsx'])).toBe('standard')
+    expect(classifyChanges(['webapp/src/App.tsx'])).toBe('standard')
     expect(classifyChanges(['backend/src/modules/auth/session.ts'])).toBe('full')
     expect(classifyChanges(['unclassified/build-input.bin'])).toBe('full')
+    expect(classifyChanges(['deploy/selectel/frontend-safe-paths.txt'])).toBe('full')
+    expect(classifyChanges(['deploy/selectel/frontend-scope.sh'])).toBe('full')
   })
 
   test('unknown paths mixed with known paths and auth-like CSS keep the conservative boundaries', () => {
@@ -204,6 +379,9 @@ describe('risk based verification', () => {
       runGit('config', 'user.name', 'Verifier Fixture')
       runGit('config', 'user.email', 'verify-fixture@example.invalid')
       mkdirSync(resolve(root, 'webapp/src'), { recursive: true })
+      mkdirSync(resolve(root, 'deploy/selectel'), { recursive: true })
+      copyFileSync(resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh'), resolve(root, 'deploy/selectel/frontend-scope.sh'))
+      copyFileSync(resolve(repositoryRoot, 'deploy/selectel/frontend-safe-paths.txt'), resolve(root, 'deploy/selectel/frontend-safe-paths.txt'))
       writeFileSync(resolve(root, 'webapp/src/styles.css'), 'body { color: black; }\n')
       writeFileSync(resolve(root, 'docs.md'), 'base\n')
       runGit('add', '.')

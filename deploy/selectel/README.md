@@ -15,20 +15,41 @@ access boundary, the build inputs, the migration gate, and the rollback contract
 
 ### Short frontend releases (owner policy 2026-10-22)
 
-Use this lane by default for proven presentation-only text, button, navigation and
-styling changes. It publishes **only the static/webapp image**. It does not run a
+Use this lane by default for proven client rendering, CSS, button, animation,
+gesture, carousel, modal and navigation changes. Client source paths marked R in
+`frontend-safe-paths.txt` require an independent semantic review bound to the
+exact range; A paths are mechanically eligible. It publishes **only the
+static/webapp image**. It does not run a
 backend build/promotion, restart workers/scheduler, activate gateway configuration,
 apply migrations, create a database dump or rewrite `rollback.env`.
 
 Eligibility is checked against **both actual running backend and webapp commits**,
-not only the last merged PR. The shared policy in `frontend-safe-paths.txt` is
-fail-closed: unknown paths, backend/schema/contracts, authentication/session/ACL,
-private media/lifecycle, API/platform/offline/cache, dependencies, build and deploy
-inputs require the normal full release. A changed allowed component is still
-subject to semantic review: introducing API calls, permission decisions or business
-logic does not become presentation-only because of its pathname. Do not add
-temporary policy exceptions to shorten one release. This lane's own implementation
-and policy changes require FULL and independent review.
+not only the last merged PR. One shared fail-closed interpreter classifies paths
+and reviews exact base-to-candidate ranges. Unknown paths, backend/schema/contracts,
+authentication/session/ACL, private media/lifecycle, API/platform/offline/cache,
+dependencies, build and deploy inputs require the normal full release. Every R
+range must have an independent report and receipt binding its base SHA, candidate
+tree, NUL-delimited no-rename Git diff hash (paths, modes and full old/new blob
+IDs) and policy hash. The candidate tree and blob IDs bind the complete contents.
+The report reviews changed
+hunks, imports/interfaces/contracts, auth/access/media/storage/lifecycle, API and
+business rules, and backend compatibility; uncertainty means FULL. Same-file
+sensitive hunks make that range ineligible. Do not add temporary policy exceptions
+to shorten one release. This lane's own implementation and policy changes require
+FULL and independent review.
+
+On the host, receipts are accepted only from `/opt/memoly/frontend-reviews`, a
+root-owned mode-0700 directory containing root-owned mode-0600 receipt and report
+files. An authorized release operator independently checks reviewer provenance
+and the full report, then installs both files under the exact fingerprint printed
+by `frontend-scope.sh inspect`. This uses the existing root release-operator trust
+boundary; the checker validates hashes and scope, not the reasoning behind a
+report. Never install a receipt supplied by the candidate checkout or create one
+from a candidate-declared approval. A receipt cannot override a D path.
+For an assigned task, its authorized lead may install the receipt after the
+independent review is complete under the existing release permission; this needs
+no additional owner approval or second review. The lead is registering that
+independent report, not substituting a self-review.
 
 1. Read actual deployed tags and verify image IDs and OCI revisions. Keep these
    full SHAs in the task evidence. Do not infer them from the server checkout,
@@ -45,6 +66,7 @@ and policy changes require FULL and independent review.
 
    ```sh
    bun run verify:local --profile frontend --base '<full deployed backend SHA>' \
+     --frontend-base '<full deployed webapp SHA>' [--frontend-review '<receipt directory>'] \
      --journey webapp/e2e/memoly-v4.spec.ts \
      --journey-grep 'feed and family navigation expose working controls'
    ```
@@ -55,6 +77,30 @@ and policy changes require FULL and independent review.
    FRONTEND runs frontend typecheck, lint, production build and mapped narrow
    tests; it does not run backend FULL. Document targeted visual/browser acceptance
    and its limits. Use cached local tooling rather than rebuilding the test host.
+
+   For each R range, the independent reviewer supplies a report that addresses
+   the actual changed hunks, old/new imports and interfaces/contracts, auth/access,
+   media/storage/lifecycle, API/business rules, and compatibility with the deployed
+   backend. The reviewer recommends FRONTEND only when that range is client UI.
+   Generate the expected bindings from the immutable candidate and each deployed
+   base; the command only prints hashes and never creates approval:
+
+   ```sh
+   bash deploy/selectel/frontend-scope.sh inspect '<deployed backend SHA>' '<candidate SHA>'
+   bash deploy/selectel/frontend-scope.sh inspect '<deployed frontend SHA>' '<candidate SHA>'
+   ```
+
+   An authorized root release operator checks the reviewer provenance, report,
+   decision and displayed bindings, then installs the report and a receipt with
+   `MEMOLY_FRONTEND_REVIEW=1`, `BASE_SHA`, `CANDIDATE_TREE`, `DIFF_SHA256`,
+   `POLICY_SHA256`, `REVIEWER_ID`, `DECISION=FRONTEND`, `REPORT_SHA256`, and
+   `FINGERPRINT` under the matching `<fingerprint>.report` and
+   `<fingerprint>.receipt` names. Install both with owner root, group root and
+   mode 0600 in `/opt/memoly/frontend-reviews` (directory owner root, mode 0700).
+   If both deployed SHAs are identical, one receipt covers the deduplicated range.
+   Do not install a report or receipt from the candidate checkout. Hash validation
+   confirms exact bytes and range; the existing authorized operator is the trust
+   boundary for the independent provenance and semantic decision.
 
 3. Squash merge through the normal reviewed PR process. Verify the final main tree,
    then run FRONTEND on that exact final SHA with the deployed backend base. Do not
@@ -263,7 +309,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before PR merge, run the applicable risk profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible presentation-only production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the exact final release SHA, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
+Before PR merge, run the applicable risk profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the exact final release SHA, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh

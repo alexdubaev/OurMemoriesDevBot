@@ -13,54 +13,36 @@ const appRoot = gitBashPath(root)
 const linuxEntrypoint = linuxPath(resolve(root, 'deploy/selectel/ci-release.sh'))
 const hex = (char, size) => char.repeat(size)
 
-function runBash(script) {
-  return spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8', timeout: 30_000 })
+function runBash(script, timeout = 30_000) {
+  return spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8', timeout })
 }
 
 function scopeScript(paths) {
-  const output = paths.map((path) => `printf '%s\\0' ${JSON.stringify(path)};`).join(' ')
-  return `
-set -euo pipefail
-APP_ROOT=${appRoot}
-SERVER_ROOT=/mock
-PRODUCT_SHA=${hex('d', 40)}
-FRONTEND_BACKEND_SHA=${hex('b', 40)}
-FRONTEND_OLD_SHA=${hex('c', 40)}
-ACCEPTED_UI_V4_SHA=${hex('a', 40)}
-git_root() {
-  if [[ "$1" == merge-base ]]; then return 0; fi
-  if [[ "$1" == diff && "$2" == --summary* ]]; then return 0; fi
-  if [[ "$1" == diff && "$2" == --name-only* ]]; then ${output} return 0; fi
-  return 90
-}
-. ${library}
-frontend_validate_scope ${hex('b', 40)}
-`
+  const cli = gitBashPath(resolve(root, 'deploy/selectel/frontend-scope.sh'))
+  return `bash ${cli} classify ${paths.map((path) => JSON.stringify(path)).join(' ')}`
 }
 
-test('frontend source scope allows the feed stylesheet and family presentation while rejecting sensitive, unknown, and mixed changes', () => {
-  for (const path of [
-    'webapp/src/features/feed/presentation/memoly-feed.css',
-    'webapp/src/features/family/family-hub.css',
+test('Selectel scope uses the shared A/R/D interpreter for client presentation and sensitive boundaries', () => {
+  for (const [path, kind] of [
+    ['webapp/src/features/feed/presentation/memoly-feed.css', 'A'],
+    ['webapp/src/features/family/family-hub.css', 'A'],
+    ['webapp/src/features/feed/FeedPage.tsx', 'R'],
+    ['webapp/src/features/family/FamilyHubPage.tsx', 'R'],
+    ['webapp/src/App.tsx', 'R'],
+    ['webapp/src/main.tsx', 'R'],
+    ['webapp/src/platform/reaction-haptics.ts', 'R'],
+    ['webapp/src/features/family/model.ts', 'R'],
+    ['webapp/src/platform/media/use-private-image-url.ts', 'D'],
+    ['webapp/src/features/feed/video-lifecycle.ts', 'D'],
+    ['webapp/src/features/feed/api.ts', 'D'],
   ]) {
-    const allowed = runBash(scopeScript([path]))
-    assert.equal(allowed.status, 0, `${allowed.stdout}${allowed.stderr}`)
+    const result = runBash(scopeScript([path]))
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+    assert.match(result.stdout, new RegExp(`${path}\\t${kind}`))
   }
-  for (const [path, reason] of [
-    ['webapp/src/features/feed/FeedPage.tsx', /refuses sensitive path/],
-    ['webapp/src/platform/media/use-private-image-url.ts', /refuses sensitive path/],
-    ['webapp/src/features/home/Widget.tsx', /refuses unknown path/],
-  ]) {
-    const denied = runBash(scopeScript([path]))
-    assert.notEqual(denied.status, 0)
-    assert.match(denied.stderr, reason)
-  }
-  const mixed = runBash(scopeScript([
-    'webapp/src/features/feed/presentation/memoly-feed.css',
-    'webapp/src/features/feed/FeedPage.tsx',
-  ]))
-  assert.notEqual(mixed.status, 0)
-  assert.match(mixed.stderr, /refuses sensitive path/)
+  const unknown = runBash(scopeScript(['webapp/src/features/home/Widget.svg']))
+  assert.notEqual(unknown.status, 0)
+  assert.match(unknown.stderr, /unknown path requires FULL/)
 })
 
 test('frontend entrypoint rejects forward markers before image capture or recovery', () => {
@@ -207,7 +189,7 @@ cat "$server/frontend-recovery.env"
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /FULL-CAPTURE/)
 })
 
-test('frontend entrypoint supports two static releases, failed-promotion restore, and guarded operator rollback', { timeout: 60_000 }, () => {
+test('frontend entrypoint supports two static releases, failed-promotion restore, and guarded operator rollback', { timeout: 90_000 }, () => {
   const result = runBash(`
 set -Eeuo pipefail
 root='${appRoot}'
@@ -217,6 +199,11 @@ git -c core.autocrlf=false clone --quiet --shared "$root" "$tmp/app"
 app="$tmp/app"
 git -C "$app" config user.name 'Frontend release fixture'
 git -C "$app" config user.email 'frontend-fixture@example.invalid'
+mkdir -p "$app/deploy/selectel"
+cp "$root/deploy/selectel/frontend-scope.sh" "$root/deploy/selectel/frontend-safe-paths.txt" "$root/deploy/selectel/frontend-release.sh" "$app/deploy/selectel/"
+cp "$root/scripts/verify-local.mjs" "$app/scripts/verify-local.mjs"
+git -C "$app" add deploy/selectel/frontend-scope.sh deploy/selectel/frontend-safe-paths.txt deploy/selectel/frontend-release.sh scripts/verify-local.mjs
+git -C "$app" diff --cached --quiet || git -C "$app" commit -qm 'test: seed frontend scope guard fixture baseline'
 printf '\\n/* synthetic presentation release one */\\n' >> "$app/webapp/src/components/ui-v2/ChildHeaderV2.css"
 git -C "$app" add webapp/src/components/ui-v2/ChildHeaderV2.css
 git -C "$app" commit -qm 'test: frontend fixture one'
@@ -363,7 +350,7 @@ printf 'STATE-BEGIN\\n'
 cat "$SERVER_ROOT/frontend-recovery.env"
 printf 'STATIC-BEGIN\\n'
 cat "$SERVER_ROOT/current-static"
-`)
+`, 60_000)
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
   assert.match(result.stdout, /MANIFESTS=2/)
   assert.match(result.stdout, /PHASE=restored/)
