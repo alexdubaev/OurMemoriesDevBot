@@ -674,7 +674,7 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
 async function openFamilyChooser(page: import('@playwright/test').Page) {
   const heading = page.getByRole('heading', { name: 'Мои семьи' })
   if (await heading.isVisible().catch(() => false)) return
-  await page.getByRole('button', { name: 'Мои семьи' }).click()
+  await page.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ }).click()
   await expect(heading).toBeVisible()
 }
 
