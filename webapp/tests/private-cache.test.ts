@@ -9,6 +9,7 @@ import {
   isPersistableQueryKey,
   privateCacheIdentityGeneration,
   privateFamilyCacheGeneration,
+  removePrivateFamilyCache,
   subscribePrivateCacheInvalidation,
   allowPrivateFamilyCache,
   clearPrivateUserCache,
@@ -103,6 +104,46 @@ describe('private cache boundaries', () => {
     allowPrivateFamilyCache('user-a', nextFamilyId)
     releaseBody()
     expect(await staleResponse).toBe(false)
+    activatePrivateCacheIdentity(null)
+  })
+
+  it('keeps a confirmed same-family grant warm but invalidates epoch changes, revocation and switches', async () => {
+    const userId = 'same-family-confirmation-user'
+    const otherFamilyId = '55555555-5555-4555-8555-555555555555'
+    activatePrivateCacheIdentity(userId)
+    const invalidations: string[] = []
+    const unsubscribe = subscribePrivateCacheInvalidation((invalidation) => {
+      if (invalidation.type === 'family' && invalidation.userId === userId) invalidations.push(invalidation.familyId)
+    })
+
+    allowPrivateFamilyCache(userId, familyId, 7)
+    const firstGeneration = privateFamilyCacheGeneration(userId, familyId)
+    invalidations.length = 0
+    allowPrivateFamilyCache(userId, familyId, 7)
+    expect(privateFamilyCacheGeneration(userId, familyId)).toBe(firstGeneration)
+    expect(invalidations).toEqual([])
+
+    allowPrivateFamilyCache(userId, familyId, 8)
+    const epochGeneration = privateFamilyCacheGeneration(userId, familyId)
+    expect(epochGeneration).toBe(firstGeneration + 1)
+    expect(invalidations).toEqual([familyId])
+
+    const queryClient = new QueryClient()
+    Object.defineProperty(globalThis, 'indexedDB', {
+      configurable: true,
+      value: { open: () => { throw new Error('test-only IndexedDB unavailable') } } as unknown as IDBFactory,
+    })
+    await removePrivateFamilyCache(queryClient, userId, familyId).catch(() => undefined)
+    const revokedGeneration = privateFamilyCacheGeneration(userId, familyId)
+    allowPrivateFamilyCache(userId, familyId, 8)
+    expect(privateFamilyCacheGeneration(userId, familyId)).toBe(revokedGeneration + 1)
+    expect(invalidations.slice(-2)).toEqual([familyId, familyId])
+
+    const activeGeneration = privateFamilyCacheGeneration(userId, familyId)
+    allowPrivateFamilyCache(userId, otherFamilyId, 1)
+    expect(privateFamilyCacheGeneration(userId, familyId)).toBe(activeGeneration + 1)
+    expect(invalidations.at(-2)).toBe(familyId)
+    unsubscribe()
     activatePrivateCacheIdentity(null)
   })
 

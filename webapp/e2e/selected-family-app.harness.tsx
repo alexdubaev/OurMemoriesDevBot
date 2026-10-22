@@ -39,14 +39,30 @@ const home = {
   ],
   nextCursor: null,
 }
+function currentHome() {
+  return { ...home, items: home.items.filter((item) => !params.has('onlyOneFamily') || item.familyId === familyId).map((item) => item.familyId === familyId
+    ? { ...item, childAvatarMediaId: child.avatarMediaId, childAvatarCrop: child.avatarCrop }
+    : item) }
+}
 
 activatePrivateCacheIdentity(userId)
-allowPrivateFamilyCache(userId, familyId)
-allowPrivateFamilyCache(userId, secondFamilyId)
+if (!params.has('hubFirst')) allowPrivateFamilyCache(userId, familyId, 1)
 allowPrivateFamilyCache(secondUserId, secondFamilyId)
 syncPrivateMediaAccessToken('synthetic-selected-family-token', userId)
 
-const timeline: Array<{ stage: string; at: number; url?: string }> = []
+const timeline: Array<{ stage: string; at: number; url?: string; cacheHit?: boolean; duration?: number }> = []
+const rawPaths: string[] = []
+const nativeIdbGet = IDBObjectStore.prototype.get
+IDBObjectStore.prototype.get = function (query: IDBValidKey | IDBKeyRange) {
+  const request = nativeIdbGet.call(this, query)
+  if (typeof query === 'string' && query.includes(':image:')) {
+    const startedAt = performance.now()
+    timeline.push({ stage: 'idb:image:start', at: startedAt })
+    request.addEventListener('success', () => timeline.push({ stage: 'idb:image:ready', at: performance.now(), cacheHit: request.result !== undefined, duration: performance.now() - startedAt }), { once: true })
+    request.addEventListener('error', () => timeline.push({ stage: 'idb:image:error', at: performance.now(), duration: performance.now() - startedAt }), { once: true })
+  }
+  return request
+}
 const nativeCreateObjectURL = URL.createObjectURL.bind(URL)
 const nativeRevokeObjectURL = URL.revokeObjectURL.bind(URL)
 const liveBlobUrls = new Set<string>()
@@ -60,12 +76,14 @@ HTMLImageElement.prototype.decode = function () {
 }
 Object.assign(window, {
   __selectedFamilyAvatarTimeline: timeline,
+  __selectedFamilyRawPaths: rawPaths,
   __selectedFamilyAvatarRequests: [] as number[],
   __selectedFamilyLiveBlobCount: () => liveBlobUrls.size,
   __selectedFamilyIsBlobLive: (url: string) => liveBlobUrls.has(url),
   __selectedFamilyUpdateAvatar: (mediaId: string | null, crop: typeof child.avatarCrop) => {
     child.avatarMediaId = mediaId
     child.avatarCrop = crop
+    timeline.push({ stage: 'profile:save', at: performance.now(), url: mediaId ?? undefined })
     window.dispatchEvent(new CustomEvent('member-avatar-updated', { detail: { accountId: userId } }))
   },
   __selectedFamilyRevokeAccess: () => window.dispatchEvent(new CustomEvent('memoly:private-family-access-revoked', { detail: { userId, familyId } })),
@@ -74,18 +92,26 @@ Object.assign(window, {
 
 const transport = {
   request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-    if (path.startsWith('/api/v1/me/families')) return schema.parse(home)
-    if (path === `/api/v1/families/${familyId}`) return schema.parse(familyResponse)
-    if (path === `/api/v1/families/${secondFamilyId}`) return schema.parse(secondFamilyResponse)
+    if (path.startsWith('/api/v1/me/families')) {
+      const startedAt = performance.now()
+      timeline.push({ stage: 'rights:data:home:start', at: startedAt })
+      const homeDelay = Number(params.get('homeDelay') ?? 0)
+      if (homeDelay > 0) await new Promise((resolve) => window.setTimeout(resolve, homeDelay))
+      timeline.push({ stage: 'rights:data:home', at: performance.now(), duration: performance.now() - startedAt })
+      return schema.parse(currentHome())
+    }
+    if (path === `/api/v1/families/${familyId}`) { const startedAt = performance.now(); timeline.push({ stage: 'rights:data:family:start', at: startedAt }); timeline.push({ stage: 'rights:data:family', at: performance.now(), duration: performance.now() - startedAt }); return schema.parse(familyResponse) }
+    if (path === `/api/v1/families/${secondFamilyId}`) { const startedAt = performance.now(); timeline.push({ stage: 'rights:data:family:start', at: startedAt }); timeline.push({ stage: 'rights:data:family', at: performance.now(), duration: performance.now() - startedAt }); return schema.parse(secondFamilyResponse) }
     if (path === `/api/v1/families/${familyId}/members` || path === `/api/v1/families/${secondFamilyId}/members`) return schema.parse({ items: members })
     if (path === `/api/v1/families/${familyId}/invites` || path === `/api/v1/families/${secondFamilyId}/invites`) return schema.parse({ items: [] })
     if (path === `/api/v1/families/${familyId}/usage` || path === `/api/v1/families/${secondFamilyId}/usage`) return schema.parse({ usedBytes: 0, quotaBytes: null })
     if (path === `/api/v1/families/${familyId}/max-channel` || path === `/api/v1/families/${secondFamilyId}/max-channel`) return schema.parse({ state: 'unconfigured', title: null, canManage: true })
-    if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: [], nextCursor: null })
+    if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
     if (path === '/api/v1/me/welcome/claim') return schema.parse({ showWelcome: false })
     throw new Error(`Unexpected synthetic API request: ${path}`)
   },
   raw: async (path: string) => {
+    rawPaths.push(path)
     if ((child.avatarMediaId && path.startsWith(`/api/v1/families/${familyId}/media/${child.avatarMediaId}/content?variant=display`)) || path.startsWith(`/api/v1/families/${secondFamilyId}/media/${secondChild.avatarMediaId}/content?variant=display`)) {
       const requests = (window as typeof window & { __selectedFamilyAvatarRequests: number[] }).__selectedFamilyAvatarRequests
       requests.push(performance.now())
@@ -99,8 +125,33 @@ const transport = {
   },
 } as unknown as AuthenticatedTransport
 
+function syntheticChannelMemory() {
+  return {
+    id: '77777777-7777-4777-8777-777777777777',
+    familyId,
+    childId,
+    author: { id: secondUserId, name: 'Synthetic channel publisher', avatarPath: null, avatarCrop: null },
+    kind: 'note',
+    body: 'Synthetic channel memory',
+    occurredAt: '2026-10-17T10:00:00.000Z',
+    firstPublishedAt: '2026-10-17T10:00:00.000Z',
+    sourcePublishedAt: null,
+    createdAt: '2026-10-17T10:00:00.000Z',
+    version: 1,
+    status: 'published',
+    attachments: [],
+    reactionCounts: {},
+    currentUserReaction: null,
+    likes: { count: 0, likedByMe: false },
+    capabilities: { edit: false, delete: false, like: true },
+    publicationAttribution: { kind: 'channel', name: 'Домашний канал', avatarPath: `/api/v1/families/${familyId}/media/max-channels/1234567890123456789/avatar` },
+  }
+}
+
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-queryClient.setQueryData(persistentUiQueryKey(userId), { home, family: familyResponse, members, screen: 'feed', selectedFamilyId: familyId, membershipEpoch: 1, filter: 'all' })
+queryClient.setQueryData(persistentUiQueryKey(userId), params.has('hubFirst')
+  ? { home, family: null, members, screen: 'hub', selectedFamilyId: null, membershipEpoch: null, filter: 'all' }
+  : { home, family: familyResponse, members, screen: 'feed', selectedFamilyId: familyId, membershipEpoch: 1, filter: 'all' })
 queryClient.setQueryData(persistentUiQueryKey(secondUserId), { home, family: secondFamilyResponse, members, screen: 'feed', selectedFamilyId: secondFamilyId, membershipEpoch: 1, filter: 'all' })
 
 export function SelectedFamilyAppHarness() {

@@ -4,7 +4,8 @@ export const AVATAR_IDLE_LIMIT_BYTES = 10 * 1024 * 1024
 export const AVATAR_IDLE_MAX_ENTRY_BYTES = 5 * 1024 * 1024
 
 export type AvatarResource = { url: string; size: number }
-export type AvatarResourceResult = { url: string | null; error?: unknown }
+export type AvatarResourceResult = { url: string | null; status: 'loading' | 'ready' | 'error'; error?: unknown }
+const EMPTY_RESULT: AvatarResourceResult = Object.freeze({ url: null, status: 'loading' })
 
 type Entry<Resource extends AvatarResource> = {
   key: string
@@ -16,10 +17,13 @@ type Entry<Resource extends AvatarResource> = {
   timer: ReturnType<typeof setTimeout> | null
   lastUsedAt: number
   disposed: boolean
+  snapshot: AvatarResourceResult
+  onError?: (error: unknown) => void
 }
 
 export class AvatarResourcePool<Resource extends AvatarResource> {
   private readonly entries = new Map<string, Entry<Resource>>()
+  private readonly subscribers = new Map<string, Set<() => void>>()
   private readonly revoke: (resource: Resource) => void
   private readonly now: () => number
   private readonly idleTtlMs: number
@@ -49,9 +53,13 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
     this.cancel = cancel
   }
 
-  acquire(key: string, load: (signal: AbortSignal) => Promise<Resource>, listener: (result: AvatarResourceResult) => void) {
+  acquire(key: string, load: (signal: AbortSignal) => Promise<Resource>, listener: (result: AvatarResourceResult) => void, onError?: (error: unknown) => void) {
     this.expireIdle()
     let entry = this.entries.get(key)
+    if (entry?.leases === 0 && entry.snapshot.status === 'error') {
+      this.dispose(entry)
+      entry = undefined
+    }
     if (!entry || entry.disposed) {
       entry = {
         key,
@@ -63,6 +71,8 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
         timer: null,
         lastUsedAt: this.now(),
         disposed: false,
+        snapshot: EMPTY_RESULT,
+        onError,
       }
       this.entries.set(key, entry)
       void this.load(entry, load)
@@ -72,7 +82,7 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
     entry.lastUsedAt = this.now()
     entry.leases += 1
     entry.listeners.add(listener)
-    if (entry.resource) listener({ url: entry.resource.url })
+    if (entry.snapshot.status !== 'loading') listener(entry.snapshot)
     let released = false
     return () => {
       if (released) return
@@ -87,10 +97,24 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
     }
   }
 
+  subscribe(key: string, listener: () => void) {
+    let listeners = this.subscribers.get(key)
+    if (!listeners) this.subscribers.set(key, listeners = new Set())
+    listeners.add(listener)
+    return () => {
+      listeners!.delete(listener)
+      if (!listeners!.size) this.subscribers.delete(key)
+    }
+  }
+
+  getSnapshot(key: string) {
+    return this.entries.get(key)?.snapshot ?? EMPTY_RESULT
+  }
+
   invalidate(matches: (key: string) => boolean) {
     for (const entry of [...this.entries.values()]) {
       if (!matches(entry.key)) continue
-      for (const listener of entry.listeners) listener({ url: null })
+      for (const listener of entry.listeners) listener({ url: null, status: 'loading' })
       this.dispose(entry)
     }
   }
@@ -115,12 +139,13 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
         return
       }
       entry.resource = resource
-      for (const listener of entry.listeners) listener({ url: resource.url })
+      this.publish(entry, { url: resource.url, status: 'ready' })
       if (entry.leases === 0) this.markIdle(entry)
     } catch (error) {
       if (entry.disposed || entry.controller.signal.aborted) return
-      for (const listener of entry.listeners) listener({ url: null, error })
-      this.dispose(entry)
+      entry.onError?.(error)
+      this.publish(entry, { url: null, status: 'error', error })
+      if (entry.leases === 0) this.markIdle(entry)
     }
   }
 
@@ -132,8 +157,8 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
   }
 
   private enforceIdleBudget() {
-    const idle = [...this.entries.values()].filter((entry) => entry.leases === 0 && entry.resource !== null)
-    let bytes = idle.reduce((total, entry) => total + entry.resource!.size, 0)
+    const idle = [...this.entries.values()].filter((entry) => entry.leases === 0 && entry.snapshot.status !== 'loading')
+    let bytes = idle.reduce((total, entry) => total + (entry.resource?.size ?? 0), 0)
     idle.sort((left, right) => left.lastUsedAt - right.lastUsedAt)
     while (idle.length > this.idleLimitEntries || bytes > this.idleLimitBytes) {
       const oldest = idle.shift()
@@ -154,7 +179,15 @@ export class AvatarResourcePool<Resource extends AvatarResource> {
     if (this.entries.get(entry.key) === entry) this.entries.delete(entry.key)
     if (entry.resource) this.revoke(entry.resource)
     entry.resource = null
+    entry.snapshot = EMPTY_RESULT
     entry.listeners.clear()
+    for (const listener of this.subscribers.get(entry.key) ?? []) listener()
+  }
+
+  private publish(entry: Entry<Resource>, snapshot: AvatarResourceResult) {
+    entry.snapshot = snapshot
+    for (const listener of entry.listeners) listener(snapshot)
+    for (const listener of this.subscribers.get(entry.key) ?? []) listener()
   }
 
   private clearIdleTimer(entry: Entry<Resource>) {

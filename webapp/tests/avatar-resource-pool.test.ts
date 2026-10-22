@@ -149,4 +149,64 @@ describe('member avatar resource lifecycle', () => {
     releaseCroppedUse()
     releaseNewVersion()
   })
+
+  it('exposes stable ready and error snapshots and clears them before invalidation notifications', async () => {
+    const { pool, revoked } = createPool({ entries: 1 })
+    const observed: Array<ReturnType<typeof pool.getSnapshot>> = []
+    const unsubscribe = pool.subscribe('error-snapshot', () => observed.push(pool.getSnapshot('error-snapshot')))
+    const loading = pool.getSnapshot('error-snapshot')
+    expect(pool.getSnapshot('error-snapshot')).toBe(loading)
+    const releaseError = pool.acquire('error-snapshot', async () => { throw new Error('synthetic image failure') }, () => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    const error = pool.getSnapshot('error-snapshot')
+    expect(error.status).toBe('error')
+    expect(pool.getSnapshot('error-snapshot')).toBe(error)
+    releaseError()
+
+    const releaseReady = pool.acquire('ready-snapshot', async () => ({ url: 'blob:ready-snapshot', size: 2 }), () => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(pool.getSnapshot('ready-snapshot').status).toBe('ready')
+    releaseReady()
+    expect(pool.getSnapshot('error-snapshot').status).toBe('loading')
+    expect(observed.at(-1)).toBe(pool.getSnapshot('error-snapshot'))
+    expect(revoked).toEqual([])
+
+    const releaseInvalidated = pool.acquire('invalidated', async () => ({ url: 'blob:invalidated', size: 1 }), () => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    const invalidatedSnapshots: Array<ReturnType<typeof pool.getSnapshot>> = []
+    const unsubscribeInvalidated = pool.subscribe('invalidated', () => invalidatedSnapshots.push(pool.getSnapshot('invalidated')))
+    releaseInvalidated()
+    pool.invalidate((key) => key === 'invalidated')
+    expect(pool.getSnapshot('invalidated').status).toBe('loading')
+    expect(invalidatedSnapshots.at(-1)).toBe(pool.getSnapshot('invalidated'))
+    expect(revoked).toContain('blob:invalidated')
+    unsubscribeInvalidated()
+    unsubscribe()
+  })
+
+  it('retries an idle error entry on the next lease', async () => {
+    const { pool } = createPool()
+    let attempts = 0
+    const releaseFailed = pool.acquire('retryable-error', async () => {
+      attempts += 1
+      throw new Error('temporary failure')
+    }, () => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(pool.getSnapshot('retryable-error').status).toBe('error')
+    releaseFailed()
+
+    const releaseRetried = pool.acquire('retryable-error', async () => {
+      attempts += 1
+      return { url: 'blob:retry-success', size: 1 }
+    }, () => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(attempts).toBe(2)
+    expect(pool.getSnapshot('retryable-error')).toEqual({ url: 'blob:retry-success', status: 'ready' })
+    releaseRetried()
+  })
 })

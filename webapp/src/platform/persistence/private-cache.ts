@@ -23,6 +23,7 @@ let operationQueue = Promise.resolve()
 const revokedFamilyCache = new Set<string>()
 const familyCacheGeneration = new Map<string, number>()
 const activeFamilyByUser = new Map<string, string>()
+const activeFamilyEpochByUser = new Map<string, number | null>()
 const familyCacheScopeKey = (userId: string, familyId: string) => `${userId}:${familyId}`
 
 export function subscribePrivateCacheInvalidation(listener: (invalidation: PrivateCacheInvalidation) => void) {
@@ -69,6 +70,7 @@ export function activatePrivateCacheIdentity(userId: string | null) {
   emitPrivateCacheInvalidation({ type: 'identity' })
   activeIdentity = userId
   activeFamilyByUser.clear()
+  activeFamilyEpochByUser.clear()
   identityGeneration += 1
   return identityGeneration
 }
@@ -81,18 +83,27 @@ export function isActivePrivateCacheIdentity(userId: string, generation: number)
   return activeIdentity === userId && identityGeneration === generation
 }
 
-export function allowPrivateFamilyCache(userId: string, familyId: string) {
+export function allowPrivateFamilyCache(userId: string, familyId: string, membershipEpoch: number | null = null) {
   const previousFamilyId = activeFamilyByUser.get(userId)
+  const key = familyCacheScopeKey(userId, familyId)
+  const wasRevoked = revokedFamilyCache.has(key)
+  if (previousFamilyId === familyId && activeFamilyEpochByUser.get(userId) === membershipEpoch && !wasRevoked) return
   if (previousFamilyId && previousFamilyId !== familyId) {
     const previousKey = familyCacheScopeKey(userId, previousFamilyId)
     familyCacheGeneration.set(previousKey, (familyCacheGeneration.get(previousKey) ?? 0) + 1)
     emitPrivateCacheInvalidation({ type: 'family', userId, familyId: previousFamilyId })
   }
+  if (previousFamilyId === familyId) {
+    familyCacheGeneration.set(key, (familyCacheGeneration.get(key) ?? 0) + 1)
+    emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
+  }
   activeFamilyByUser.set(userId, familyId)
-  const key = familyCacheScopeKey(userId, familyId)
+  activeFamilyEpochByUser.set(userId, membershipEpoch)
   revokedFamilyCache.delete(key)
-  familyCacheGeneration.set(key, (familyCacheGeneration.get(key) ?? 0) + 1)
-  emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
+  if (previousFamilyId !== familyId && (previousFamilyId !== undefined || wasRevoked)) {
+    familyCacheGeneration.set(key, (familyCacheGeneration.get(key) ?? 0) + 1)
+    emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
+  }
 }
 
 export function privateFamilyCacheGeneration(userId: string, familyId: string) {
@@ -142,6 +153,7 @@ export async function clearPrivateUserCache(userId: string, expectedGeneration?:
   if (expectedGeneration !== undefined && !isActivePrivateCacheIdentity(userId, expectedGeneration)) return
   emitPrivateCacheInvalidation({ type: 'user', userId })
   activeFamilyByUser.delete(userId)
+  activeFamilyEpochByUser.delete(userId)
   await enqueue(async () => {
     if (expectedGeneration !== undefined && !isActivePrivateCacheIdentity(userId, expectedGeneration)) return
     const db = await openDatabase()
@@ -163,6 +175,7 @@ export async function clearPrivateUserCache(userId: string, expectedGeneration?:
 export async function clearAllPrivateCache() {
   emitPrivateCacheInvalidation({ type: 'all' })
   activeFamilyByUser.clear()
+  activeFamilyEpochByUser.clear()
   await enqueue(async () => {
     if (typeof indexedDB === 'undefined') return
     const db = await openDatabase()
@@ -178,7 +191,10 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
   const scopeKey = familyCacheScopeKey(userId, familyId)
   revokedFamilyCache.add(scopeKey)
   familyCacheGeneration.set(scopeKey, (familyCacheGeneration.get(scopeKey) ?? 0) + 1)
-  if (activeFamilyByUser.get(userId) === familyId) activeFamilyByUser.delete(userId)
+  if (activeFamilyByUser.get(userId) === familyId) {
+    activeFamilyByUser.delete(userId)
+    activeFamilyEpochByUser.delete(userId)
+  }
   emitPrivateCacheInvalidation({ type: 'family', userId, familyId })
   await removePrivateFamilyQueries(queryClient, familyId)
   queryClient.setQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(userId), (current) => {

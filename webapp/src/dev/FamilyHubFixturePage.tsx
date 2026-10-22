@@ -48,7 +48,7 @@ function FixtureContent() {
   if (selected) return <div data-fixture-state="feed"><FeedPresentation activeFilter="all" childName="Ребёнок" childSubtitle="Профиль ребёнка" familyName={selected.name} insets={{ top: 0, right: 0, bottom: 0, left: 0 }} onAllFamilies={() => setSelected(null)} onFamily={() => undefined} onFeed={() => undefined} onFilterChange={() => undefined} role={selected.role}><Typography as="p" variant="memoryBody">Воспоминания выбранной семьи</Typography></FeedPresentation></div>
   const data = fixtureHome()
   return <div data-fixture-state={caseName} data-fixture-theme={theme}>
-    <FamilyHubPage busy={false} error={caseName === 'error' ? 'Проверьте соединение и повторите попытку.' : null} home={caseName === 'loading' || caseName === 'error' ? null : data} loading={caseName === 'loading'} loadingMore={false} notice={caseName === 'revoked' ? 'Доступ к этой семье закрыт.' : null} onCreate={() => undefined} onLoadMore={() => undefined} onRetry={() => undefined} onSelect={(id) => setSelected(data.items.find((value) => value.familyId === id) ?? null)} transport={transport} />
+    <FamilyHubPage avatarAccessConfirmed={false} busy={false} error={caseName === 'error' ? 'Проверьте соединение и повторите попытку.' : null} home={caseName === 'loading' || caseName === 'error' ? null : data} loading={caseName === 'loading'} loadingMore={false} notice={caseName === 'revoked' ? 'Доступ к этой семье закрыт.' : null} onCreate={() => undefined} onLoadMore={() => undefined} onRetry={() => undefined} onSelect={(id) => setSelected(data.items.find((value) => value.familyId === id) ?? null)} transport={transport} />
   </div>
 }
 

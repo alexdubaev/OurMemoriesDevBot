@@ -40,6 +40,7 @@ import { memberAvatarUpdatedEvent } from '@/features/avatar'
 import { readPwaInstallIntent, setPwaInstallDismissed } from '@/platform/pwa-install'
 import { readUiVersion } from '@/features/ui-version'
 import { allowPrivateFamilyCache, persistentUiQueryKey, privateFamilyAccessRevokedEvent, removePrivateFamilyCache, type PersistentFamilyPresentation } from '@/platform/persistence/private-cache'
+import { invalidatePrivateChildAvatar } from '@/platform/media/use-private-image-url'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -188,6 +189,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const hasCachedHome = Boolean(savedPresentation?.home)
   const installIntent = useMemo(() => hostBridge.kind === 'browser' ? readPwaInstallIntent(window.location) : null, [hostBridge.kind])
   const [home, setHome] = useState<FamilyHomeResponse | null>(() => savedPresentation?.home as FamilyHomeResponse | null ?? null)
+  const [homeAccessConfirmed, setHomeAccessConfirmed] = useState(false)
   const homeRef = useRef<FamilyHomeResponse | null>(home)
   const [homeLoading, setHomeLoading] = useState(!hasCachedHome)
   const [homeError, setHomeError] = useState<string | null>(null)
@@ -295,6 +297,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       if (version !== homeRefreshVersion.current) return null
       homeRef.current = result
       setHome(result)
+      setHomeAccessConfirmed(true)
       const selectedFamilyId = selectedFamilyIdRef.current
       const selectedSummary = selectedFamilyId
         ? result.items.find((item) => item.familyId === selectedFamilyId)
@@ -392,7 +395,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         setScreen('hub')
         return
       }
-      allowPrivateFamilyCache(currentUserId, familyId)
+      allowPrivateFamilyCache(currentUserId, familyId, summary.membershipEpoch)
       setVisitedSurfaces(new Set(response.child ? ['feed'] : ['family']))
       surfaceScroll.current = { feed: 0, family: 0 }
       setFamilyResponse(response)
@@ -499,7 +502,19 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     try {
       const response = await loadFamily(transport, familyId)
       if (!isCurrentSelection()) return
+      const previousAvatarMediaId = familyResponseRef.current?.family.id === familyId ? familyResponseRef.current.child?.avatarMediaId ?? null : null
+      const nextAvatarMediaId = response.child?.avatarMediaId ?? null
+      if (previousAvatarMediaId && previousAvatarMediaId !== nextAvatarMediaId) invalidatePrivateChildAvatar(currentUserId, familyId, previousAvatarMediaId)
+      familyResponseRef.current = response
       setFamilyResponse(response)
+      const currentHome = homeRef.current
+      if (currentHome?.items.some((item) => item.familyId === familyId)) {
+        const updatedHome = { ...currentHome, items: currentHome.items.map((item) => item.familyId === familyId
+          ? { ...item, displaySubtitle: response.child?.name ?? null, childAvatarMediaId: response.child?.avatarMediaId ?? null, childAvatarCrop: response.child?.avatarCrop ?? null }
+          : item) }
+        homeRef.current = updatedHome
+        setHome(updatedHome)
+      }
       if (selectedMembershipEpoch !== null) setConfirmedAvatarScope({ familyId, membershipEpoch: selectedMembershipEpoch })
       if (response.child) {
         const [nextMembers, nextInvites] = await Promise.all([
@@ -721,9 +736,10 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       setInvitePreview(null)
     }
   }} />
-  if (screen === 'hub' || !familyResponse) return <div style={insetsStyle}><FamilyHubPage busy={busy} error={homeError} home={home} loading={homeLoading} loadingMore={loadingMore} notice={notice} onCreate={() => void createOwnFamily()} onLoadMore={() => void loadMore()} onRetry={() => void refreshHome(true)} onSelect={(id) => void selectFamily(id)} transport={transport} /></div>
+  if (screen === 'hub' || !familyResponse) return <div style={insetsStyle}><FamilyHubPage avatarAccessConfirmed={homeAccessConfirmed} busy={busy} error={homeError} home={home} loading={homeLoading} loadingMore={loadingMore} notice={notice} onCreate={() => void createOwnFamily()} onLoadMore={() => void loadMore()} onRetry={() => void refreshHome(true)} onSelect={(id) => void selectFamily(id)} transport={transport} /></div>
   if (!familyResponse.child || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} cancelLabel={familyResponse.child ? 'Отмена' : 'Все семьи'} onCancel={familyResponse.child ? () => setEditingChild(false) : () => returnHome()} onCompleted={async () => {
     await refreshSelected()
+    await refreshHome()
     if (!familyResponse.child) setScreen('feed')
     else setEditingChild(false)
   }} transport={transport} /></div>
