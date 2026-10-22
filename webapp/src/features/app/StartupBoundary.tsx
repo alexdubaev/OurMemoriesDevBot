@@ -1,4 +1,4 @@
-import { Component, useLayoutEffect, type PropsWithChildren } from 'react'
+import { Component, useLayoutEffect, type ErrorInfo, type PropsWithChildren } from 'react'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
 import { DiagnosticsReportAction } from '@/platform/diagnostics/DiagnosticsReportAction'
@@ -36,7 +36,13 @@ class StartupErrorBoundary extends Component<PropsWithChildren, { failed: boolea
     </main>
   }
 
-  componentDidCatch() {
-    window.__MEMOLY_DIAGNOSTICS__?.record('react-boundary', 'mounted')
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    try {
+      const diagnostics = window.__MEMOLY_DIAGNOSTICS__
+      if (diagnostics?.recordReactError) diagnostics.recordReactError(error, info.componentStack ?? undefined)
+      else diagnostics?.record('react-boundary', 'mounted')
+    } catch {
+      try { window.__MEMOLY_DIAGNOSTICS__?.record('react-boundary', 'mounted') } catch { /* diagnostics must not affect the React fallback */ }
+    }
   }
 }

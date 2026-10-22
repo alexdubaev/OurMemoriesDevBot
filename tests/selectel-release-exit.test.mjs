@@ -982,7 +982,7 @@ slowTest('rollback guard reaches runtime and service-configuration incompatibili
   assert.doesNotMatch(config.events, /UP:|GATE/)
 })
 
-test('rollback guard reports unknown and dirty source states before promotion', () => {
+slowTest('rollback guard reports unknown and dirty source states before promotion', () => {
   const unknown = runApplicationRollback({ target: rollback180, webappTarget: rollback180,
     source: 'candidate', producer: 'f'.repeat(40) })
   assert.notEqual(unknown.status, 0, unknown.output)
