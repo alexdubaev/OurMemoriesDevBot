@@ -448,6 +448,14 @@ test('MAX-FULL: owner switches family data while an older feed response is pendi
   await selectFamilyFeed(invitePage, 'Family B child', 'B-only history')
   await expect(invitePage.getByText('A-only history')).toHaveCount(0)
   await invitePage.screenshot({ path: testInfo.outputPath('max-family-audit-same-name-family-b.png'), fullPage: true })
+  await expect(invitePage.locator('[data-navigation-surface="feed"]')).toBeVisible()
+  await invitePage.locator('[data-child-header-mode="feed"] .ui-v2-child-identity').click()
+  await expect(invitePage.locator('[data-navigation-surface="feed"]')).toBeVisible()
+  await expect(invitePage.getByRole('button', { name: 'Мои семьи' })).toBeVisible()
+  await invitePage.getByRole('button', { name: 'Мои семьи' }).click()
+  await expect(invitePage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
+  await expect(invitePage.getByText('Цифра рядом — новые воспоминания для вас')).toHaveCount(0)
+  await expect(invitePage.getByText('Близкие рядом, даже на расстоянии')).toHaveCount(0)
 
   await openFamilyChooser(invitePage)
   const familyACard = invitePage.getByRole('button', { name: /Family A child.*Владелец/ })
@@ -666,7 +674,7 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
 async function openFamilyChooser(page: import('@playwright/test').Page) {
   const heading = page.getByRole('heading', { name: 'Мои семьи' })
   if (await heading.isVisible().catch(() => false)) return
-  await page.getByRole('button', { name: /Сменить семью/ }).click()
+  await page.getByRole('button', { name: 'Мои семьи' }).click()
   await expect(heading).toBeVisible()
 }
 
