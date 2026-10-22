@@ -341,6 +341,12 @@ const reviewedMediaUiBlobs = [
   ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', 'a5784a62b4df8d4554fc99633ba3c060f62b8a52'],
   ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
 ]
+const reviewedFamilyNavigationBlobs = [
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', 'd648a7ad8ca15553f78e3adca5a5ac08c2d641ff'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', 'ad70bd6401f76123dc052c638e919aef1e4b3e90'],
+  ['webapp/src/features/family/family-hub.css', '50f6ccb272456209bd44fd48d7ba6f383980c7f0'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -776,6 +782,50 @@ slowTest('exact media UI source preserves the designated 33a recovery and reject
 
   const drifted = commitSourceChange(source, 'webapp/src/features/feed/FeedPage.tsx',
     '\n// unmeasured executable source drift\n', 'mutate media UI executable source')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact family navigation source preserves the designated 33a recovery and rejects drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/family/FamilyHubPage.tsx',
+    '\n// unmeasured family navigation source drift\n', 'mutate family navigation executable source')
   const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
     runningBackend: runningPair, runningWebapp: runningPair,
     sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
