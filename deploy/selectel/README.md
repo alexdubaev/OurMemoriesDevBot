@@ -641,6 +641,20 @@ service mutation. This source binding does not establish database compatibility:
 the documented synthetic PostgreSQL current → frozen 33a → current probe must
 also pass for the final source SHA before release.
 
+The final single-source child-avatar runtime frozen for candidate
+`e28bdfc605a1b3fd4d39b75f3f3fe3af7a56d274` has executable compatibility
+fingerprint
+`7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its exact production Git blobs, including the final `ChildAvatar.tsx` blob, are
+pinned in `tests/selectel-release-exit.test.mjs`; the executable profile remains
+anchored to full-attested source `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`.
+The focused regression checks read-only readiness, designated-pair preservation,
+and rejection of executable drift before service mutation. This source binding
+does not establish database compatibility. Run the synthetic PostgreSQL current
+→ frozen 33a → current compatibility probe against this exact candidate SHA
+before release; its result is not recorded by this source attestation.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,
