@@ -143,15 +143,46 @@ test('production App reuses one child avatar across feed, family and same-family
   expect(await avatarDecodeCount(page)).toBe(initialDecodes)
   expect(await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarLoadingMutations?: number }).__selectedFamilyAvatarLoadingMutations ?? 0)).toBe(0)
   expect(await rawRequestPaths(page)).not.toContain(channelPath)
-  await expect(page.locator('.publication-channel-avatar img')).toHaveAttribute('src', readyUrl ?? '')
-  const channelAvatarContained = await page.locator('.publication-channel-avatar').evaluate((container) => {
+  await page.evaluate(() => {
+    const win = window as typeof window & { __selectedFamilyUpdateAvatar?: (mediaId: string, crop: { x: number; y: number; width: number; height: number }) => void }
+    win.__selectedFamilyUpdateAvatar?.('aaa00000-0000-4000-8000-000000000012', { x: 0.18, y: 0.12, width: 0.48, height: 0.48 })
+  })
+  const channelSlot = page.locator('.publication-channel-avatar')
+  const channelAvatarImage = channelSlot.locator('[data-slot="child-avatar-image"]')
+  await expect(channelAvatarImage).toHaveAttribute('src', readyUrl ?? '')
+  await expect(channelAvatarImage).toHaveCSS('position', 'absolute')
+  const channelAvatarGeometry = () => channelSlot.evaluate((container) => {
     const avatar = container.querySelector<HTMLElement>('[data-slot="child-avatar"]')
-    if (!avatar) return false
+    const image = container.querySelector<HTMLImageElement>('[data-slot="child-avatar-image"]')
+    if (!avatar || !image) return null
     const slot = container.getBoundingClientRect()
     const bounds = avatar.getBoundingClientRect()
-    return bounds.left >= slot.left && bounds.top >= slot.top && bounds.right <= slot.right && bounds.bottom <= slot.bottom
+    const imageBounds = image.getBoundingClientRect()
+    return {
+      slot: { width: slot.width, height: slot.height, clientWidth: container.clientWidth, clientHeight: container.clientHeight, left: slot.left, top: slot.top, borderLeft: Number.parseFloat(getComputedStyle(container).borderLeftWidth), borderTop: Number.parseFloat(getComputedStyle(container).borderTopWidth) },
+      avatar: { width: bounds.width, height: bounds.height },
+      image: { width: imageBounds.width, height: imageBounds.height },
+      contained: bounds.left >= slot.left + Number.parseFloat(getComputedStyle(container).borderLeftWidth) - 1
+        && bounds.top >= slot.top + Number.parseFloat(getComputedStyle(container).borderTopWidth) - 1
+        && bounds.right <= slot.right - Number.parseFloat(getComputedStyle(container).borderRightWidth) + 1
+        && bounds.bottom <= slot.bottom - Number.parseFloat(getComputedStyle(container).borderBottomWidth) + 1,
+      imageLoaded: image.complete && image.naturalWidth > 0,
+    }
   })
-  expect(channelAvatarContained).toBe(true)
+  const normalChannelGeometry = await channelAvatarGeometry()
+  expect(normalChannelGeometry).not.toBeNull()
+  expect(Math.abs(normalChannelGeometry!.avatar.width - normalChannelGeometry!.slot.clientWidth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(normalChannelGeometry!.avatar.height - normalChannelGeometry!.slot.clientHeight)).toBeLessThanOrEqual(1)
+  expect(normalChannelGeometry!.contained).toBe(true)
+  expect(normalChannelGeometry!.imageLoaded).toBe(true)
+  await page.setViewportSize({ width: 320, height: 800 })
+  const narrowChannelGeometry = await channelAvatarGeometry()
+  expect(narrowChannelGeometry).not.toBeNull()
+  expect(Math.abs(narrowChannelGeometry!.avatar.width - narrowChannelGeometry!.slot.clientWidth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(narrowChannelGeometry!.avatar.height - narrowChannelGeometry!.slot.clientHeight)).toBeLessThanOrEqual(1)
+  expect(narrowChannelGeometry!.contained).toBe(true)
+  expect(narrowChannelGeometry!.imageLoaded).toBe(true)
+  expect(await channelAvatarImage.getAttribute('src')).toBe(readyUrl)
   const avatarStages = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
   const stageAt = (stage: string) => avatarStages.find((item) => item.stage === stage)?.at
   console.log(`avatar stage durations (ms): rights=${avatarStages.find((item) => item.stage === 'rights:data:home')?.duration?.toFixed(1) ?? 'n/a'}, idb=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.duration?.toFixed(1) ?? 'n/a'} (hit=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.cacheHit ?? 'n/a'}), network=${stageAt('fetch:start') !== undefined && stageAt('fetch:ready') !== undefined ? Math.round(stageAt('fetch:ready')! - stageAt('fetch:start')!) : 'avoided'}, decode=${stageAt('decode:start') !== undefined && stageAt('decode:ready') !== undefined ? Math.round(stageAt('decode:ready')! - stageAt('decode:start')!) : 'n/a'}`)
