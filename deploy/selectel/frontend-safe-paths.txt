@@ -3,6 +3,7 @@
 A	^webapp/src/features/family/(FamilyHubPage\.tsx|family-hub\.css)$
 A	^webapp/tests/.+\.test\.[cm]?[jt]sx?$
 A	^webapp/e2e/[^/]+\.(spec|max-e2e)\.ts$
+A	^webapp/src/features/feed/presentation/memoly-feed\.css$
 D	(^|/)(auth|session|invite|family|media|storage|cache|offline|service-worker|platform|api|contracts|feeds?|memory|memories|upload|permission|access)(/|\.|-|$)
 D	(^|/)(package\.json|bun\.lockb?|Dockerfile[^/]*|.*\.ya?ml|vite[^/]*\.config\.[cm]?[jt]s|playwright[^/]*\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|eslint[^/]*\.config\.[cm]?[jt]s)$
 D	^(deploy/|scripts/|backend/|packages/|website/|infra/|\.github/|\.githooks/)
