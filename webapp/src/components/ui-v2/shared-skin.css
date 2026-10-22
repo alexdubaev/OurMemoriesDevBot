@@ -94,14 +94,13 @@ html[data-ui-version='v2'] .avatar-editor .avatar-editor-controls > [data-slot='
   background: var(--ui-v2-color-surface);
   box-shadow: var(--ui-v2-shadow-surface);
 }
-.memoly-app-root[data-ui-version='v2'] :where(.family-management-fields input, .family-management-fields select, .member-account-form input, .member-profile-field, .member-profile-field input, .child-edit-v2-field, .child-edit-v2-field input, .invite-alias-field input) {
+.memoly-app-root[data-ui-version='v2'] :where(.family-management-fields input, .family-management-fields select, .member-account-form input, .member-profile-field, .member-profile-field input, .child-edit-v2-field, .invite-alias-field input) {
   border-color: var(--ui-v2-color-line);
   border-radius: var(--ui-v2-radius-field);
   color: var(--ui-v2-color-text);
   background: var(--ui-v2-color-field);
   box-shadow: none;
 }
-.memoly-app-root[data-ui-version='v2'] .ui-v2-family-profile-link { font-size: .6875rem; font-weight: 500; line-height: 1rem; }
 .memoly-app-root[data-ui-version='v2'] .family-management-fields label { font-size: 12px; line-height: 17px; }
 .memoly-app-root[data-ui-version='v2'] .family-management-fields p,
 .memoly-app-root[data-ui-version='v2'] .family-management-error,
