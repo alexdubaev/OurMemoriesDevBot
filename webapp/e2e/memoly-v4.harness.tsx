@@ -9,6 +9,7 @@ import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { FeedPage } from '@/features/feed/FeedPage'
 import { FamilyScreen } from '@/features/family/FamilyScreen'
 import { FamilyOnboarding } from '@/features/family/FamilyOnboarding'
+import { useChildAvatar } from '@/features/family/useChildAvatar'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache } from '@/platform/persistence/private-cache'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
@@ -76,6 +77,10 @@ const transport = {
     const requests = (window as typeof window & { __memolyV4RawRequests?: string[] }).__memolyV4RawRequests ?? []
     requests.push(url)
     Object.assign(window, { __memolyV4RawRequests: requests })
+    if (url === avatarPath(childAvatarId)) {
+      const delayMs = Number(params.get('avatarDelay') ?? 0)
+      if (delayMs > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs))
+    }
     if (url === channelAvatarPath) {
       const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F2sAAAAASUVORK5CYII='), (char) => char.charCodeAt(0))
       return new Response(new Blob([bytes], { type: 'image/png' }), { status: 200, headers: { 'Content-Type': 'image/png' } })
@@ -96,12 +101,16 @@ const insetsStyle = { '--host-inset-top': `${insets.top}px`, '--host-inset-right
 const familyResponse = { family: { id: familyId, name: 'Семья Алисы', timezone: 'Europe/Moscow', ownerUserId: role === 'owner' ? userId : '44444444-4444-4444-8444-444444444444' }, child: { id: childId, name: long ? 'Алиса с очень длинным синтетическим именем для проверки переноса строк' : 'Алиса', birthDate: '2024-01-17', sex: 'girl', avatarMediaId: childAvatarId, avatarCrop: null, version: 1, isComplete: true } } as FamilyResponse
 const members = Array.from({ length: count }, (_, i) => ({ userId: i === 0 ? userId : `33333333-3333-4333-8333-${String(i + 2).padStart(12, '0')}`, avatarPath: i === 0 ? avatarPath('aaa00000-0000-4000-8000-000000000013') : null, displayName: i === 0 ? 'Папа' : i === 1 ? long ? 'Андрей с очень длинным тестовым именем участника' : 'Андрей' : `Участник ${i + 1}`, familyDisplayName: i === 1 ? 'Дедушка' : null, role: i === 0 && role === 'viewer' ? 'viewer' : 'full', isOwner: i === 0 && role === 'owner', joinedAt: '2026-10-17T00:00:00.000Z', version: 1 })) as FamilyMemberDto[]
 const isFamily = new URLSearchParams(location.search).has('family')
-function HarnessApp() {
+function HarnessRuntime() {
+  const childAvatar = useChildAvatar(transport, familyId, childAvatarId, { childId, membershipEpoch: 1 })
+  return <HarnessApp childAvatar={childAvatar} />
+}
+function HarnessApp({ childAvatar }: { childAvatar: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' } }) {
   const [childEditor, setChildEditor] = useState<'profile' | 'photo' | null>(null)
   const [showFamily, setShowFamily] = useState(isFamily)
   const [settingsRequest, setSettingsRequest] = useState(0)
   const openSettingsFromFeed = () => { setShowFamily(true); setSettingsRequest((value) => value + 1) }
-  return <AuthContext.Provider value={{ user: { id: userId, theme }, transport, updateTheme: async () => undefined } as never}><ThemeProvider><QueryClientProvider client={queryClient}>{showFamily ? childEditor ? <FamilyOnboarding familyId={familyId} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={childEditor === 'photo'} transport={transport} onCancel={() => setChildEditor(null)} onCompleted={async () => undefined} /> : <div style={insetsStyle}><FamilyScreen familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userId} onAdd={() => undefined} onAllFamilies={() => undefined} onEditChild={() => setChildEditor('profile')} onFeed={() => setShowFamily(false)} onRefresh={async () => undefined} createInviteLink={() => 'https://example.invalid/invite'} settingsRequest={settingsRequest} onSettingsRequestHandled={() => setSettingsRequest(0)} /></div> : <FeedPage active accountId={userId} childId={childId} childName={long ? 'Алиса с очень длинным синтетическим именем для проверки переноса строк' : 'Алиса'} childSubtitle="2 года 9 месяцев" childAvatarMediaId={childAvatarId} childAvatarCrop={null} familyId={familyId} familyName="Семья Алисы" familyTimezone="Europe/Moscow" filter="all" hostBridge={hostBridge} insets={insets} isAppBootstrapped membershipEpoch={1} unreadCount={params.has('unread') ? 3 : null} unreadState={params.has('unread') ? 'ready' : 'not_enabled'} onAccessLost={() => undefined} onAllFamilies={() => setShowFamily(true)} onFamily={() => { setShowFamily(true); setSettingsRequest(0) }} onFilterChange={() => undefined} onOpenSettings={openSettingsFromFeed} role={role === 'viewer' ? 'viewer' : 'full'} transport={transport} />}</QueryClientProvider></ThemeProvider></AuthContext.Provider>
+  return <>{showFamily ? childEditor ? <FamilyOnboarding familyId={familyId} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} photoOnly={childEditor === 'photo'} transport={transport} onCancel={() => setChildEditor(null)} onCompleted={async () => undefined} /> : <div style={insetsStyle}><FamilyScreen childAvatar={childAvatar} familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userId} onAdd={() => undefined} onAllFamilies={() => undefined} onEditChild={() => setChildEditor('profile')} onFeed={() => setShowFamily(false)} onRefresh={async () => undefined} createInviteLink={() => 'https://example.invalid/invite'} settingsRequest={settingsRequest} onSettingsRequestHandled={() => setSettingsRequest(0)} /></div> : <FeedPage active accountId={userId} childId={childId} childName={long ? 'Алиса с очень длинным синтетическим именем для проверки переноса строк' : 'Алиса'} childSubtitle="2 года 9 месяцев" childAvatarUrl={childAvatar.url} childAvatarStatus={childAvatar.status} childAvatarCrop={null} familyId={familyId} familyName="Семья Алисы" familyTimezone="Europe/Moscow" filter="all" hostBridge={hostBridge} insets={insets} isAppBootstrapped membershipEpoch={1} unreadCount={params.has('unread') ? 3 : null} unreadState={params.has('unread') ? 'ready' : 'not_enabled'} onAccessLost={() => undefined} onAllFamilies={() => setShowFamily(true)} onFamily={() => { setShowFamily(true); setSettingsRequest(0) }} onFilterChange={() => undefined} onOpenSettings={openSettingsFromFeed} role={role === 'viewer' ? 'viewer' : 'full'} transport={transport} />}</>
 }
-const app = <HarnessApp />
+const app = <AuthContext.Provider value={{ user: { id: userId, theme }, transport, updateTheme: async () => undefined } as never}><ThemeProvider><QueryClientProvider client={queryClient}><HarnessRuntime /></QueryClientProvider></ThemeProvider></AuthContext.Provider>
 createRoot(document.getElementById('root')!).render(app)

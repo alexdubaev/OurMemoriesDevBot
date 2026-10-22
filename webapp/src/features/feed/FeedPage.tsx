@@ -28,7 +28,6 @@ import { PlaybackContext } from './playback-context'
 import { usePlaybackRegistration } from './use-playback-registration'
 import { isVoiceWaveformPeakPlayed, voiceWaveformProgress } from './voice-waveform'
 import { shouldRenderInitialFeedError } from '@/features/app'
-import { useChildAvatar } from '@/features/family'
 import { PwaInstallPrompt } from '@/features/pwa-install'
 import { MemoryEditor, NoteComposer, PhotoComposer } from '@/features/composer'
 import { AddSheetPresentation } from '@/features/memoly-ui'
@@ -53,6 +52,8 @@ type Props = {
   childSubtitle: string
   childAvatarCrop?: { x: number; y: number; width: number; height: number } | null
   childAvatarMediaId?: string | null
+  childAvatarUrl?: string | null
+  childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   familyId: string
   familyName: string
   familyTimezone: string
@@ -107,14 +108,15 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 }
 
 export function FeedPage({
-  active = true, accountId = '', childAvatarCrop = null, childAvatarMediaId = null, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
+  active = true, accountId = '', childAvatarCrop = null, childAvatarUrl, childAvatarStatus, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, onOpenChild, onOpenSettings, role, transport,
   openAddInitially = false,
 }: Props) {
   // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
   void filter
   const queryClient = useQueryClient()
-  const childAvatarUrl = useChildAvatar(transport, familyId, childAvatarMediaId)
+  const displayedChildAvatarUrl = childAvatarUrl ?? null
+  const displayedChildAvatarStatus = childAvatarStatus ?? (displayedChildAvatarUrl ? 'ready' : 'absent')
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [unreadCycle, setUnreadCycle] = useState(0)
   const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active)
@@ -354,7 +356,7 @@ export function FeedPage({
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
-    <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
+    <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onAllFamilies={onAllFamilies} onFamily={onFamily} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
@@ -378,7 +380,7 @@ export function FeedPage({
           authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath}
           authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
           childName={memory.childId === childId ? childName : undefined}
-          childAvatarUrl={memory.childId === childId ? childAvatarUrl : null}
+          childAvatarUrl={memory.childId === childId ? displayedChildAvatarUrl : null}
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
           body={memory.body}
           kind={memory.kind}

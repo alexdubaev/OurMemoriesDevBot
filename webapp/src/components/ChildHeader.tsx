@@ -16,6 +16,7 @@ export type ChildHeaderProps = {
   childName: string
   childSubtitle: string
   childAvatarUrl?: string | null
+  childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   childAvatarCrop?: ChildAvatarCrop | null
   theme: MemolyTheme
   uiVersion?: UiVersion
@@ -29,6 +30,7 @@ export type ChildHeaderProps = {
 export function ChildHeader({
   childAvatarCrop = null,
   childAvatarUrl = null,
+  childAvatarStatus,
   childName,
   childSubtitle,
   mode,
@@ -39,7 +41,7 @@ export function ChildHeader({
   uiVersion = readUiVersion(),
 }: ChildHeaderProps) {
   if (uiVersion === 'v2') {
-    return <ChildHeaderV2 childAvatarCrop={childAvatarCrop} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} mode={mode} onAllFamilies={onAllFamilies} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} theme={theme} />
+    return <ChildHeaderV2 childAvatarCrop={childAvatarCrop} childAvatarStatus={childAvatarStatus} childAvatarUrl={childAvatarUrl} childName={childName} childSubtitle={childSubtitle} mode={mode} onAllFamilies={onAllFamilies} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} theme={theme} />
   }
 
   const artStyle = {

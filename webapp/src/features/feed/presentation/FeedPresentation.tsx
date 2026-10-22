@@ -30,6 +30,7 @@ export type FeedPresentationProps = {
   childSubtitle: string
   familyName?: string
   childAvatarUrl?: string | null
+  childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   children: ReactNode
   insets: TelegramInsets
   onAdd?: () => void
@@ -61,7 +62,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
     <div data-memoly-feed="true" style={style}>
       <main className="app" data-slot="feed-scroll">
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
-        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />
+        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />
         <div className="feed-rest">
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
           <div className="feed-unread-mode">

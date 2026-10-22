@@ -628,6 +628,19 @@ the established `comments` recovery checks and remains scoped to the 33a target,
 the full-attested `dc26ad9` runtime, and the frozen media plus family-navigation
 source blobs.
 
+The shared-header and child-avatar production source frozen for candidate
+`b95786a7abad26fba2305ad4afae13f2bd0b0fe3` has executable compatibility
+fingerprint
+`b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its 13 changed production Git blobs are pinned in
+`tests/selectel-release-exit.test.mjs`; the exact profile remains anchored to
+the full-attested `dc26ad9` diagnostic runtime. The focused guard regression
+checks readiness, designated-pair preservation, and drift rejection before
+service mutation. This source binding does not establish database compatibility:
+the documented synthetic PostgreSQL current → frozen 33a → current probe must
+also pass for the final source SHA before release.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,
