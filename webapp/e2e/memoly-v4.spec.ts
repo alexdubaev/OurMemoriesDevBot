@@ -144,6 +144,14 @@ test('production App reuses one child avatar across feed, family and same-family
   expect(await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarLoadingMutations?: number }).__selectedFamilyAvatarLoadingMutations ?? 0)).toBe(0)
   expect(await rawRequestPaths(page)).not.toContain(channelPath)
   await expect(page.locator('.publication-channel-avatar img')).toHaveAttribute('src', readyUrl ?? '')
+  const channelAvatarContained = await page.locator('.publication-channel-avatar').evaluate((container) => {
+    const avatar = container.querySelector<HTMLElement>('[data-slot="child-avatar"]')
+    if (!avatar) return false
+    const slot = container.getBoundingClientRect()
+    const bounds = avatar.getBoundingClientRect()
+    return bounds.left >= slot.left && bounds.top >= slot.top && bounds.right <= slot.right && bounds.bottom <= slot.bottom
+  })
+  expect(channelAvatarContained).toBe(true)
   const avatarStages = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
   const stageAt = (stage: string) => avatarStages.find((item) => item.stage === stage)?.at
   console.log(`avatar stage durations (ms): rights=${avatarStages.find((item) => item.stage === 'rights:data:home')?.duration?.toFixed(1) ?? 'n/a'}, idb=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.duration?.toFixed(1) ?? 'n/a'} (hit=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.cacheHit ?? 'n/a'}), network=${stageAt('fetch:start') !== undefined && stageAt('fetch:ready') !== undefined ? Math.round(stageAt('fetch:ready')! - stageAt('fetch:start')!) : 'avoided'}, decode=${stageAt('decode:start') !== undefined && stageAt('decode:ready') !== undefined ? Math.round(stageAt('decode:ready')! - stageAt('decode:start')!) : 'n/a'}`)

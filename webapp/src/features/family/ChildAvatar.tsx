@@ -38,7 +38,7 @@ export function ChildAvatar({
   }
 
   return (
-    <Avatar className={`${sizeClass} relative overflow-hidden`} data-slot="child-avatar" size="xl">
+    <Avatar className={`${sizeClass} relative overflow-hidden`} data-slot="child-avatar" size={size === 'feed-author' ? 'default' : 'xl'}>
       <img
         alt={`Аватар ${name}`}
         className="size-full rounded-full object-cover"
