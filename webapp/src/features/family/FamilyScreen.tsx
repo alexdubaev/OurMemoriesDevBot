@@ -7,7 +7,6 @@ import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
 import { createInviteResult } from './invite-result'
-import { useChildAvatar } from './useChildAvatar'
 import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamilyMaxChannelStatus'
 
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
@@ -15,6 +14,7 @@ type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 export function FamilyScreen({
   active = true,
   familyResponse,
+  childAvatar,
   invites,
   members,
   transport,
@@ -34,6 +34,7 @@ export function FamilyScreen({
 }: {
   active?: boolean
   familyResponse: FamilyResponse
+  childAvatar?: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' }
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
   transport: AuthenticatedTransport
@@ -63,10 +64,10 @@ export function FamilyScreen({
   const current = members.find((member) => member.userId === currentUserId)
   const isOwner = current?.isOwner === true
   const child = familyResponse.child
+  const displayedChildAvatar = childAvatar ?? { url: null, status: child?.avatarMediaId ? 'loading' as const : 'absent' as const }
   const canInvite = (isOwner || current?.role === 'full') && child?.isComplete === true
   const maxChannel = useFamilyMaxChannelStatus(transport, familyResponse.family.id, currentUserId, current?.role ?? null)
   const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
-  const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
   const activeInvites = useMemo(() => invites.filter((invite) => Date.parse(invite.expiresAt) > now), [invites, now])
 
   useEffect(() => {
@@ -138,7 +139,8 @@ export function FamilyScreen({
         canOpenInstall={canOpenInstall}
         installLabel={installLabel}
         onOpenInstall={onOpenInstall}
-          childAvatarUrl={avatarUrl}
+          childAvatarUrl={displayedChildAvatar.url}
+          childAvatarStatus={displayedChildAvatar.status}
           copyState={copyState}
           familyResponse={familyResponse}
           currentUserId={currentUserId}

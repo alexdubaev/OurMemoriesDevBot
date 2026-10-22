@@ -463,13 +463,6 @@ html[data-ui-version='v2'] .reaction-choice.is-selected { background: var(--ui-v
 html[data-ui-version='v2'] .reaction-choice-check { color: var(--ui-v2-color-accent); }
 html[data-ui-version='v2'] .memoly-mixed-viewer button:focus-visible { outline-color: var(--ui-v2-color-accent-detail); }
 
-/* Approved v4 feed composition: only the media frame follows publication metadata. */
-.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .ui-v2-child-header-frame {
-  width: min(100vw, 480px);
-  max-width: 480px;
-  padding: max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)) 0 0;
-  margin-inline: calc(50% - min(50vw, 240px));
-}
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .feed-rest { padding-inline: max(1rem, var(--host-inset-left, 0px)) max(1rem, var(--host-inset-right, 0px)); }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .feed-content { padding-top: .8125rem; }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .feed-rest:has(> .feed-unread-action, > .feed-unread-mode) > .feed-content { padding-top: 0; }

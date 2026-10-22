@@ -22,7 +22,7 @@ export function FamilySummaryCard({ family, onSelect, transport, disabled = fals
   transport: AuthenticatedTransport
   disabled?: boolean
 }) {
-  const avatarUrl = useChildAvatar(transport, family.familyId, family.childAvatarMediaId)
+  const avatar = useChildAvatar(transport, family.familyId, family.childAvatarMediaId)
   const unread = family.unreadState === 'ready' ? family.unreadCount : null
   const countLabel = unread === null
     ? family.unreadState === 'unavailable' ? 'Счётчик временно недоступен' : 'Счётчик пока не включён'
@@ -34,7 +34,7 @@ export function FamilySummaryCard({ family, onSelect, transport, disabled = fals
     onClick={() => onSelect(family.familyId)}
     type="button"
   >
-    <span aria-hidden="true" className="family-hub-avatar"><ChildAvatar avatarCrop={family.childAvatarCrop ?? null} avatarUrl={avatarUrl} name={family.name.split(/\s+/).at(-1) ?? family.name} size="family-card" /></span>
+    <span aria-hidden="true" className="family-hub-avatar"><ChildAvatar avatarCrop={family.childAvatarCrop ?? null} avatarUrl={avatar.url} status={avatar.status} name={family.name.split(/\s+/).at(-1) ?? family.name} size="family-card" /></span>
       <span className="family-hub-card-copy">
         <strong className="family-hub-card-name">{family.name}</strong>
         {family.displaySubtitle ? <span className="family-hub-card-subtitle">{family.displaySubtitle}</span> : null}
