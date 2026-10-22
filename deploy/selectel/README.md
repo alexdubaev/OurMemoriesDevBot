@@ -486,6 +486,20 @@ it does not read changing application files as historical inputs. Existing
 recovery image IDs, source pins, migration/configuration checks and v4 ancestry
 remain mandatory.
 
+The exact comments diagnostic production snapshot `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`
+has full runtime fingerprint
+`2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088` and
+compatibility fingerprint
+`18d7cd0be088612c52c39ac101c97a81292d4da759bb92e679036b9604be65d5` for
+recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. The regression
+fixture checks read-only readiness, preservation of the designated pair when
+the running `f6` pair is not an attested recovery target, and rejection of a
+production-source mutation before service changes. Unknown targets still fail
+closed. Existing source ancestry, target/image IDs and labels, migration history,
+schema, dependency, protected-artifact and service-configuration checks remain
+required; this pin does not authorize arbitrary descendants or future source
+changes.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,
