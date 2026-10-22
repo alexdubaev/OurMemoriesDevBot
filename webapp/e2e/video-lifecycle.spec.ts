@@ -61,7 +61,7 @@ test('production feed releases private video sources after scroll and stays boun
   expect(sessions).toBe(0)
   const idleSubscriptions = await page.evaluate(() => {
     const probe = (window as typeof window & { __videoLifecycleProbe: { subscriptions: Map<string, number>; activeLifecycleObservers: Set<object> } }).__videoLifecycleProbe
-    return { listeners: Object.fromEntries([...probe.subscriptions].filter(([key]) => /:(visibilitychange|pagehide|memoly:feed-inactive)$/.test(key))), observers: probe.activeLifecycleObservers.size }
+    return { listeners: Object.fromEntries([...probe.subscriptions].filter(([key, count]) => count > 0 && /:(visibilitychange|pagehide|memoly:feed-inactive)$/.test(key))), observers: probe.activeLifecycleObservers.size }
   })
   await play.click()
   const video = card.locator('video')
@@ -105,7 +105,7 @@ test('production feed releases private video sources after scroll and stays boun
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => ({ networkState: node.networkState, buffered: node.buffered.length }))).toEqual({ networkState: 0, buffered: 0 })
   const releasedSubscriptions = await page.evaluate(() => {
     const probe = (window as typeof window & { __videoLifecycleProbe: { subscriptions: Map<string, number>; activeLifecycleObservers: Set<object> } }).__videoLifecycleProbe
-    return { listeners: Object.fromEntries([...probe.subscriptions].filter(([key]) => /:(visibilitychange|pagehide|memoly:feed-inactive)$/.test(key))), observers: probe.activeLifecycleObservers.size }
+    return { listeners: Object.fromEntries([...probe.subscriptions].filter(([key, count]) => count > 0 && /:(visibilitychange|pagehide|memoly:feed-inactive)$/.test(key))), observers: probe.activeLifecycleObservers.size }
   })
   expect(releasedSubscriptions).toEqual(idleSubscriptions)
   await page.evaluate(() => { (window as typeof window & { __videoLifecycleProbe: { playEvents: number } }).__videoLifecycleProbe.playEvents = 0 })
