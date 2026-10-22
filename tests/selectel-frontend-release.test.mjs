@@ -340,6 +340,8 @@ printf 'EVENTS-BEGIN\\n'
 cat "$SERVER_ROOT/docker-events"
 printf 'BUILDS-BEGIN\\n'
 cat "$SERVER_ROOT/build-events"
+printf 'BASE=%s\\n' "$base"
+printf 'SECOND=%s\\n' "$t2"
 printf 'MANIFESTS=%s\\n' "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name 'frontend-*.env' | wc -l)"
 printf 'STATE-BEGIN\\n'
 cat "$SERVER_ROOT/frontend-recovery.env"
@@ -349,7 +351,12 @@ cat "$SERVER_ROOT/current-static"
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
   assert.match(result.stdout, /MANIFESTS=2/)
   assert.match(result.stdout, /PHASE=restored/)
-  assert.match(result.stdout, /memoly-webapp:7a24e720cd2cf9ecfefa5344539e3d416999ec58/)
+  const backend = result.stdout.match(/BASE=([0-9a-f]{40})/)?.[1]
+  assert.ok(backend, 'fixture prints its retained backend SHA')
+  const second = result.stdout.match(/SECOND=([0-9a-f]{40})/)?.[1]
+  assert.ok(second, 'fixture prints the second successful frontend SHA')
+  assert.ok(result.stdout.includes(`memoly-webapp:${second}`), 'operator rollback restores the exact prior successful frontend tag')
+  assert.ok(result.stdout.includes(`BACKEND_SHA=${backend}`), 'frontend recovery retains the backend SHA unchanged')
   assert.match(result.stdout, /BUILD:.*--frontend-only/)
   assert.doesNotMatch(result.stdout, /FULL-CAPTURE|up -d.*(backend|worker|scheduler)/)
   assert.match(result.stderr, /frontend promotion failed; restoring the recorded previous static image/)
