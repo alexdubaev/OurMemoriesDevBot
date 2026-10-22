@@ -522,6 +522,16 @@ sessions, outbox, migrations and grants. This is technical recovery evidence;
 the exact UI image IDs, OCI labels, accepted-UI ancestry, migration and
 configuration checks remain required, and no database rollback is authorized.
 
+For source SHA `6a15a9ee19e59437de9c3863084c02a0437a8f69`, the measured runtime
+fingerprint is `fc6192f557002dfd54b1e22fa74bdd69f3ac52a21ef5c9b794c650fe0e2fc4b3`
+and the executable compatibility fingerprint is
+`a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6`. The actual
+`current → frozen 33a → current` PostgreSQL proof passed 8/8 tests and 50/50
+expectations with exit code 0 in 31.35 s. The exact compatibility profile reuses
+the established `comments` recovery checks and remains scoped to the 33a target,
+the full-attested `dc26ad9` runtime, and the frozen media plus family-navigation
+source blobs.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,

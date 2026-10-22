@@ -84,8 +84,6 @@ export function FamilyHubPage({ home, loading, error, notice, busy, loadingMore,
       {invited.length > 0 ? <section className="family-hub-section"><h2>Семьи близких</h2><div className="family-hub-cards">{invited.map((family) => <FamilySummaryCard disabled={busy} family={family} key={family.familyId} onSelect={onSelect} transport={transport} />)}</div></section> : null}
       {home?.nextCursor ? <button className="family-hub-more" disabled={loadingMore} onClick={onLoadMore} type="button">{loadingMore ? 'Загружаем…' : 'Показать ещё семьи'}</button> : null}
       {home && home.items.length > 0 && home.canCreateOwnFamily ? <button className="family-hub-create" disabled={busy} onClick={onCreate} type="button"><span aria-hidden="true">＋</span>{busy ? 'Создаём семью…' : 'Создать свою семью'}</button> : null}
-      {home && home.items.length > 0 ? <p className="family-hub-count-hint">Цифра рядом — новые воспоминания для вас</p> : null}
-      <footer className="family-hub-footer"><p>Близкие рядом, даже на расстоянии</p></footer>
     </main>
   </div>
 }
