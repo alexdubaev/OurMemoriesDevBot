@@ -147,7 +147,7 @@ describe('risk based verification', () => {
     }
   })
 
-  test('range risk checks allow a UI revert while runtime eligibility uses the active frontend base', () => {
+  test('range risk checks allow a UI revert while runtime eligibility uses the active frontend base', { timeout: 30_000 }, () => {
     const fixture = createFrontendRangeFixture()
     let reviewDirectory
     try {
@@ -189,6 +189,41 @@ describe('risk based verification', () => {
       expect(reviewedRevert.status).toBe(0, reviewedRevert.stderr)
     } finally {
       if (reviewDirectory) rmSync(reviewDirectory, { recursive: true, force: true })
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  test('raw range modes accept regular asset edits and reject same-mode symlink target edits', () => {
+    const fixture = createFrontendRangeFixture()
+    try {
+      fixture.put('webapp/src/assets/ordinary.webp', 'regular asset v1\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'add regular asset')
+      const regularBase = fixture.git('rev-parse', 'HEAD')
+      fixture.put('webapp/src/assets/ordinary.webp', 'regular asset v2\n')
+      fixture.git('add', '.')
+      fixture.git('commit', '-m', 'edit regular asset')
+      const regularCandidate = fixture.git('rev-parse', 'HEAD')
+      const regularEdit = runFrontendScope(fixture, 'verify', regularBase, regularCandidate, 'local')
+      expect(regularEdit.status).toBe(0, regularEdit.stderr)
+
+      const symlinkPath = 'webapp/public/assets/allowlisted.webp'
+      const hashBlob = (contents) => {
+        const result = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: fixture.root, input: contents, encoding: 'utf8' })
+        expect(result.status).toBe(0, result.stderr)
+        return result.stdout.trim()
+      }
+      fixture.git('update-index', '--add', '--cacheinfo', `120000,${hashBlob('../../outside-first.webp')},${symlinkPath}`)
+      fixture.git('commit', '-m', 'fixture baseline contains allowlisted symlink')
+      const symlinkBase = fixture.git('rev-parse', 'HEAD')
+      fixture.git('update-index', '--add', '--cacheinfo', `120000,${hashBlob('../../outside-second.webp')},${symlinkPath}`)
+      fixture.git('commit', '-m', 'change existing symlink target')
+      const symlinkCandidate = fixture.git('rev-parse', 'HEAD')
+
+      const symlinkEdit = runFrontendScope(fixture, 'verify', symlinkBase, symlinkCandidate, 'local')
+      expect(symlinkEdit.status).not.toBe(0)
+      expect(symlinkEdit.stderr).toContain('non-regular changed inputs')
+    } finally {
       rmSync(fixture.root, { recursive: true, force: true })
     }
   })

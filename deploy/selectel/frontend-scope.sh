@@ -34,6 +34,21 @@ frontend_scope_hash() {
   sha256sum | awk '{print $1}'
 }
 
+frontend_scope_validate_raw_modes() {
+  local raw=$1 record path oldmode newmode
+  while IFS= read -r -d '' record; do
+    [[ "$record" =~ ^:([0-7]{6})\ ([0-7]{6})\ [0-9a-f]{40}\ [0-9a-f]{40}\ [A-Z][0-9]*$ ]] || {
+      frontend_scope_error 'malformed raw range record'; return 1;
+    }
+    oldmode=${BASH_REMATCH[1]}; newmode=${BASH_REMATCH[2]}
+    [[ ( "$oldmode" == 000000 || "$oldmode" == 100644 ) && ( "$newmode" == 000000 || "$newmode" == 100644 ) ]] || {
+      frontend_scope_error 'frontend scope refuses non-regular changed inputs'; return 1;
+    }
+    IFS= read -r -d '' path || { frontend_scope_error 'raw range record has no path'; return 1; }
+    [[ -n "$path" ]] || { frontend_scope_error 'raw range record has an empty path'; return 1; }
+  done < "$raw"
+}
+
 frontend_scope_range_values() {
   local base=$1 candidate=$2 raw tree policy_sha script_blob candidate_script_blob candidate_policy_blob policy_blob
   [[ "$base" =~ ^[0-9a-f]{40}$ && "$candidate" =~ ^[0-9a-f]{40}$ ]] || { frontend_scope_error 'range requires full commit SHAs'; return 1; }
@@ -58,6 +73,7 @@ frontend_scope_range_values() {
   if ! frontend_git diff --raw --no-ext-diff --no-textconv -z --no-renames --abbrev=40 "$base" "$candidate" -- > "$raw"; then
     rm -f -- "$raw"; frontend_scope_error 'cannot read complete raw range diff'; return 1
   fi
+  if ! frontend_scope_validate_raw_modes "$raw"; then rm -f -- "$raw"; return 1; fi
   local diff_sha
   diff_sha=$(frontend_scope_hash < "$raw") || { rm -f -- "$raw"; return 1; }
   rm -f -- "$raw"
