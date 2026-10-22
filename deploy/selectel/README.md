@@ -500,17 +500,18 @@ schema, dependency, protected-artifact and service-configuration checks remain
 required; this pin does not authorize arbitrary descendants or future source
 changes.
 
-The exact family media UI source measured on release candidate `013b6672` has
-runtime fingerprint
-`b2e18384511eaae52eee297b07a0e9e59e7f98ee0b4d1cbf06b19cea1f7ce35b` and
+The exact family media UI source measured on release candidate
+`c1b50d4113192115bdd19906faa91e0c05fcf8ac` has runtime fingerprint
+`39c68e0616088b22d463e29e691a90b2def319b1a56f496d23bc699df6044ed7` and
 executable compatibility fingerprint
-`f888baecfd1c1dd45323775688c0167bc9868f0d2ed0a88901c10649ff1347fd` for
+`98ec68669e8a64cac59ca55bd34e3585cc5fbf24d3c48d6976196118ae1a762a` for
 recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. Its exact Git
 blobs are pinned in `tests/selectel-release-exit.test.mjs`; the profile is
 anchored to the full-attested `dc26ad9` diagnostic source. The fixture verifies
 read-only readiness and designated-pair preservation, then refuses executable
-source drift before any service mutation. Database compatibility evidence is
-the PostgreSQL current → frozen 33a → current roundtrip, run with:
+source drift before any service mutation. Database compatibility was verified
+by an actual PostgreSQL current → frozen 33a → current roundtrip (8 tests, 50
+assertions), run with:
 
 ```bash
 bun run --cwd backend test:integration -- scripts/comments-release-compatibility.integration.test.ts

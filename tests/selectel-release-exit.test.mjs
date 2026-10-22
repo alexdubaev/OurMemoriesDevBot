@@ -334,7 +334,8 @@ const reviewedMediaUiBlobs = [
   ['webapp/src/features/family/ChildProfile.css', '93e89a50d3a66673f023cfa541fa1dbaaa1342f0'],
   ['webapp/src/features/family/FamilyOnboarding.tsx', '2ae2d0b6288ee446f884e134f2a22aefafac9bf1'],
   ['webapp/src/features/family/FamilyScreen.tsx', '6b86aafa30182075b5703b538be8a43f9d9aa76a'],
-  ['webapp/src/features/feed/FeedPage.tsx', '4c924a3c1c4769ae7696f4011b8c41f103297a95'],
+  ['webapp/src/features/feed/FeedPage.tsx', 'ce6d53fef6f739703392cc2cb8061f2be8859fca'],
+  ['webapp/src/features/feed/video-presentation.tsx', 'c3d3fd1f12bb7493d002448d61deae81d391b768'],
   ['webapp/src/features/feed/presentation/memoly-feed.css', '13ebe687faae12eec77a068d078bffffb52238f2'],
   ['webapp/src/features/feed/use-memory-seen-observer.ts', 'abc81f827cba1224c4d4c76987be8a6d9c2394f1'],
   ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', 'a5784a62b4df8d4554fc99633ba3c060f62b8a52'],
@@ -751,7 +752,7 @@ slowTest('exact media UI source preserves the designated 33a recovery and reject
   let source = createSourceWorktree('diagnostic')
   source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
   assert.equal(productionCompatibilityFingerprint(source.root),
-    'f888baecfd1c1dd45323775688c0167bc9868f0d2ed0a88901c10649ff1347fd')
+    '98ec68669e8a64cac59ca55bd34e3585cc5fbf24d3c48d6976196118ae1a762a')
 
   const runningPair = 'f6'.repeat(20)
   const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
