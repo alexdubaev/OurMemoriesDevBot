@@ -515,7 +515,14 @@
       sampleCounts('resource-sample', false)
     }, writeInterval)
   }
-  window.__MEMOLY_DIAGNOSTICS__ = { record, updateState, report: () => { sampleCounts('resource-sample', false); return serializeSnapshot() } }
+  window.__MEMOLY_DIAGNOSTICS__ = {
+    record,
+    recordReactError: (error, componentStack) => {
+      try { record('react-boundary', 'mounted', undefined, sanitizeError({ error }, componentStack)) } catch { /* diagnostics must not affect the React fallback */ }
+    },
+    updateState,
+    report: () => { sampleCounts('resource-sample', false); return serializeSnapshot() },
+  }
   startWitness()
   record('app-entry')
   window.addEventListener('error', (event) => record('error', undefined, undefined, sanitizeError(event)), true)
@@ -524,19 +531,22 @@
   window.addEventListener('pageshow', (event) => { current.pageshowPersisted = event?.persisted === true; record('visible') })
   window.addEventListener('pagehide', (event) => { current.pagehidePersisted = event?.persisted === true; record('pagehide') })
   window.addEventListener('pagehide', persistNow)
-  function sanitizeError(event) {
+  function sanitizeError(event, componentStack) {
     try {
     const error = event?.error ?? event
     const errorClass = error && typeof error.name === 'string' ? error.name : 'Error'
-    const stack = error && typeof error.stack === 'string' ? error.stack : ''
     const frames = []
-    const expression = /(https?:\/\/[^\s/]+)?\/assets\/((?:index|vendor|react-vendor|tanstack-vendor|rolldown-runtime|chunk)-[A-Za-z0-9_-]{6,64}\.js):(\d+):(\d+)/g
-    let match
-    while ((match = expression.exec(stack)) && frames.length < 4) {
-      if (match[1]) {
-        try { if (new URL(match[1]).origin !== window.location.origin) continue } catch { continue }
+    const expression = /((?:https?:)?\/\/[^\s/]+)?\/assets\/((?:index|vendor|react-vendor|tanstack-vendor|rolldown-runtime|chunk)-[A-Za-z0-9_-]{6,64}\.js):(\d+):(\d+)/g
+    const stacks = [error && typeof error.stack === 'string' ? error.stack : '', typeof componentStack === 'string' ? componentStack : '']
+    for (const stack of stacks) {
+      expression.lastIndex = 0
+      let match
+      while ((match = expression.exec(stack)) && frames.length < 4) {
+        if (match[1]) {
+          try { if (new URL(match[1], window.location.href).origin !== window.location.origin) continue } catch { continue }
+        }
+        frames.push({ asset: match[2], line: Number(match[3]), column: Number(match[4]) })
       }
-      frames.push({ asset: match[2], line: Number(match[3]), column: Number(match[4]) })
     }
     if (frames.length < 4 && typeof event?.filename === 'string') {
       try {

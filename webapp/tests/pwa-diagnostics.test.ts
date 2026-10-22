@@ -74,7 +74,7 @@ function startDiagnostics(storage: { getItem: (key: string) => string | null; se
   })()
   new Function('window', 'document', 'Date', 'HTMLImageElement', 'HTMLMediaElement', 'MutationObserver', 'navigator', source)(window, document, { now: () => clock }, FakeImage, FakeMedia, FakeMutationObserver, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15', standalone: true })
   return {
-    diagnostics: (window as typeof window & { __MEMOLY_DIAGNOSTICS__?: { record: (...args: unknown[]) => void; updateState: (area: 'auth' | 'cache', value: Record<string, boolean>) => void; report: () => string } }).__MEMOLY_DIAGNOSTICS__,
+    diagnostics: (window as typeof window & { __MEMOLY_DIAGNOSTICS__?: { record: (...args: unknown[]) => void; recordReactError?: (error: unknown, componentStack?: string) => void; updateState: (area: 'auth' | 'cache', value: Record<string, boolean>) => void; report: () => string } }).__MEMOLY_DIAGNOSTICS__,
     advance: (milliseconds: number) => {
       clock += milliseconds
       const pending = [...timers.values()]
@@ -202,6 +202,52 @@ test('storage failures never prevent diagnostics startup or report generation', 
   expect(writes).toBe(1)
   harness.advance(2000)
   expect(writes).toBe(2)
+})
+
+test('React boundary records only allowlisted class and same-origin bundle coordinates', () => {
+  const { diagnostics } = startDiagnostics({ getItem: () => null, setItem: () => undefined })
+  const thrown = new TypeError('PRIVATE_COMMENT private-token https://cdn.test/private.jpg?sig=secret')
+  thrown.stack = 'TypeError: PRIVATE_COMMENT\n    at render (https://app.test/assets/index-AbCdEf123456.js:41:9)\n    at render (https://evil.test/assets/vendor-AbCdEf123456.js:8:2)\n    at render (//evil.test/assets/vendor-AbCdEf123456.js:9:2)'
+
+  diagnostics!.recordReactError!(thrown, '\n    at CommentsPanel (https://app.test/assets/react-vendor-AbCdEf123456.js:82:17)')
+  const report = diagnostics!.report()
+
+  expect(JSON.parse(report).current.error).toEqual({
+    errorClass: 'TypeError',
+    frames: [
+      { asset: 'index-AbCdEf123456.js', line: 41, column: 9 },
+      { asset: 'react-vendor-AbCdEf123456.js', line: 82, column: 17 },
+    ],
+  })
+  expect(report).not.toContain('PRIVATE_COMMENT')
+  expect(report).not.toContain('private-token')
+  expect(report).not.toContain('evil.test')
+  expect(report).not.toContain('private.jpg')
+  expect(report).not.toContain('secret')
+})
+
+test('React boundary ignores throwing getters and component stacks with query-bearing assets', () => {
+  const { diagnostics } = startDiagnostics({ getItem: () => null, setItem: () => undefined })
+  let messageReads = 0
+  const safeError = Object.defineProperties({}, {
+    name: { value: 'RangeError' },
+    stack: { value: 'RangeError: hidden\n    at render (https://app.test/assets/chunk-Qwerty987654.js:5:6)' },
+    message: { get: () => { messageReads += 1; throw new Error('private message getter was read') } },
+  })
+  const malformed = Object.defineProperties({}, {
+    name: { get: () => { throw new Error('private name getter') } },
+    stack: { get: () => { throw new Error('private stack getter') } },
+  })
+
+  diagnostics!.recordReactError!(safeError)
+  expect(messageReads).toBe(0)
+  expect(JSON.parse(diagnostics!.report()).current.error).toEqual({ errorClass: 'RangeError', frames: [{ asset: 'chunk-Qwerty987654.js', line: 5, column: 6 }] })
+  expect(() => diagnostics!.recordReactError!(malformed, 'at CommentsPanel (https://app.test/assets/index-AbCdEf123456.js?token=private:3:4)')).not.toThrow()
+  const report = diagnostics!.report()
+
+  expect(JSON.parse(report).current.error).toEqual({ errorClass: 'Error', frames: [] })
+  expect(report).not.toContain('private')
+  expect(report).not.toContain('getter')
 })
 
 test('oversized stored values are ignored before they can become report content', () => {
