@@ -348,6 +348,21 @@ const reviewedFamilyNavigationBlobs = [
   ['webapp/src/features/family/FamilyHubPage.tsx', 'ad70bd6401f76123dc052c638e919aef1e4b3e90'],
   ['webapp/src/features/family/family-hub.css', '50f6ccb272456209bd44fd48d7ba6f383980c7f0'],
 ]
+const reviewedSharedHeaderChildAvatarBlobs = [
+  ['webapp/src/App.tsx', '5cbce19d0bb8120fff799019475edff3263b009c'],
+  ['webapp/src/components/ChildHeader.tsx', '1f7078cbc38204f7ba296711a5f1d3661cbe83d5'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', '1161cc95a5c003d89d8ed432aac8a7c85c7735be'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', '4e88167ccdfe0c85e1807c52f265df2d6e17bf5f'],
+  ['webapp/src/features/family/ChildAvatar.tsx', '88275705aac27eed5b052af2a80bd26693a72f90'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', '0f5d771a42141fee67846a1983a747f63b6aa875'],
+  ['webapp/src/features/family/FamilyScreen.tsx', 'f54acce9477ba0426b8f7e266e88cfcbc99ba70c'],
+  ['webapp/src/features/family/useChildAvatar.ts', '23b230a2d1c148b2ac1a90fa2a69404225f606a1'],
+  ['webapp/src/features/feed/FeedPage.tsx', '83554b1a019d7d94f3c933eadeb6b5b489e35a8a'],
+  ['webapp/src/features/feed/presentation/FeedPresentation.tsx', '87794042c2afceebe7c4fa90027e26d55a7bef70'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', '982ba5c6ca0d4bd7ee6935ad0dd09117a752c4ea'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '86528665625ae140ed84652a3db73b3baad60b11'],
+  ['webapp/src/platform/media/use-private-image-url.ts', 'da84fe42067ff0f463b132fae5a509d88083a120'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -827,6 +842,52 @@ slowTest('exact family navigation source preserves the designated 33a recovery a
 
   const drifted = commitSourceChange(source, 'webapp/src/features/family/FamilyHubPage.tsx',
     '\n// unmeasured family navigation source drift\n', 'mutate family navigation executable source')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact shared header and child avatar source preserves the designated 33a recovery and rejects drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
+    'apply exact shared header and child avatar source blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/family/ChildAvatar.tsx',
+    '\n// unmeasured child avatar source drift\n', 'mutate shared header and child avatar runtime')
   const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
     runningBackend: runningPair, runningWebapp: runningPair,
     sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
