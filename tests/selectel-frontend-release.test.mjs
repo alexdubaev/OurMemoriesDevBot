@@ -442,4 +442,3 @@ frontend_restore_static
   assert.match(result.stdout, /STATE:restored/)
   assert.doesNotMatch(result.stdout, /up -d.*(backend|worker|scheduler)/)
 })
-
