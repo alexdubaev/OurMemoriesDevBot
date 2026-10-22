@@ -655,6 +655,20 @@ does not establish database compatibility. Run the synthetic PostgreSQL current
 → frozen 33a → current compatibility probe against this exact candidate SHA
 before release; its result is not recorded by this source attestation.
 
+The cropped-channel avatar sizing source frozen for candidate
+`bd333e62d1fea2e27687e916207908202b458781` has executable compatibility
+fingerprint
+`51c87510ba6c21e8afc99e5c2dcc6c3cafefa4c058c772268add1d000ed2fb62` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its exact production Git blobs, including the scoped channel-avatar grid sizing
+in `memoly-feed.css`, are pinned in `tests/selectel-release-exit.test.mjs`; the
+profile remains anchored to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`
+runtime. The focused regression checks read-only readiness, designated-pair
+preservation, and rejection of executable drift before service mutation. This
+source binding does not establish database compatibility; run the synthetic
+PostgreSQL current → frozen 33a → current compatibility probe against the exact
+release SHA before release.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,
