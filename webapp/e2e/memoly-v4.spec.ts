@@ -92,6 +92,123 @@ test('production App keeps the selected child avatar through tabs and editor ret
   expect.soft(countsAfterEditor).toBe(countsBeforeEditor + 1) // The editor owns one source read for its crop preview.
 })
 
+test('production App reuses one child avatar across feed, family and same-family hub round trips', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/e2e/selected-family-app.harness.html?avatarDelay=180&channelMemory&onlyOneFamily')
+  await startProductionFeed(page)
+
+  const feedAvatar = page.locator('[data-navigation-surface="feed"] .ui-v2-child-header [data-slot="child-avatar-image"]')
+  await expect(feedAvatar).toBeVisible()
+  const readyUrl = await feedAvatar.getAttribute('src')
+  const initialRequests = await avatarRequestCount(page)
+  const initialDecodes = await avatarDecodeCount(page)
+  const channelPath = '/api/v1/families/11111111-1111-4111-8111-111111111111/media/max-channels/1234567890123456789/avatar'
+  await expect(page.getByText('Домашний канал')).toBeVisible()
+
+  await page.evaluate(() => {
+    const win = window as typeof window & { __selectedFamilyAvatarLoadingMutations?: number; __selectedFamilyAvatarLoadingObserver?: MutationObserver }
+    win.__selectedFamilyAvatarLoadingMutations = 0
+    win.__selectedFamilyAvatarLoadingObserver = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue
+        if (node.matches('[data-slot="child-avatar-loading"]') || node.querySelector('[data-slot="child-avatar-loading"]')) {
+          win.__selectedFamilyAvatarLoadingMutations = (win.__selectedFamilyAvatarLoadingMutations ?? 0) + 1
+        }
+      }
+    })
+    win.__selectedFamilyAvatarLoadingObserver.observe(document.body, { childList: true, subtree: true })
+  })
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    await page.getByRole('button', { name: 'Семья', exact: true }).click()
+    const familyAvatar = page.locator('[data-navigation-surface="family"] .ui-v2-child-header [data-slot="child-avatar-image"]')
+    await expect(familyAvatar).toBeVisible()
+    await expect(familyAvatar).toHaveAttribute('src', readyUrl ?? '')
+    await page.getByRole('button', { name: 'Лента', exact: true }).click()
+    await expect(feedAvatar).toBeVisible()
+    await expect(feedAvatar).toHaveAttribute('src', readyUrl ?? '')
+
+    await page.getByRole('button', { name: 'Мои семьи' }).click()
+    await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+    const familyCard = page.locator('.family-hub-card').filter({ hasText: 'Семья Алисы' })
+    await expect(familyCard.locator('[data-slot="child-avatar-image"]')).toBeVisible()
+    await expect(familyCard.locator('[data-slot="child-avatar-image"]')).toHaveAttribute('src', readyUrl ?? '')
+    await familyCard.click()
+    await expect(feedAvatar).toBeVisible()
+    await expect(feedAvatar).toHaveAttribute('src', readyUrl ?? '')
+  }
+
+  expect(await avatarRequestCount(page)).toBe(initialRequests)
+  expect(await avatarDecodeCount(page)).toBe(initialDecodes)
+  expect(await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarLoadingMutations?: number }).__selectedFamilyAvatarLoadingMutations ?? 0)).toBe(0)
+  expect(await rawRequestPaths(page)).not.toContain(channelPath)
+  await expect(page.locator('.publication-channel-avatar img')).toHaveAttribute('src', readyUrl ?? '')
+  const channelAvatarContained = await page.locator('.publication-channel-avatar').evaluate((container) => {
+    const avatar = container.querySelector<HTMLElement>('[data-slot="child-avatar"]')
+    if (!avatar) return false
+    const slot = container.getBoundingClientRect()
+    const bounds = avatar.getBoundingClientRect()
+    return bounds.left >= slot.left && bounds.top >= slot.top && bounds.right <= slot.right && bounds.bottom <= slot.bottom
+  })
+  expect(channelAvatarContained).toBe(true)
+  const avatarStages = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
+  const stageAt = (stage: string) => avatarStages.find((item) => item.stage === stage)?.at
+  console.log(`avatar stage durations (ms): rights=${avatarStages.find((item) => item.stage === 'rights:data:home')?.duration?.toFixed(1) ?? 'n/a'}, idb=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.duration?.toFixed(1) ?? 'n/a'} (hit=${avatarStages.find((item) => item.stage === 'idb:image:ready')?.cacheHit ?? 'n/a'}), network=${stageAt('fetch:start') !== undefined && stageAt('fetch:ready') !== undefined ? Math.round(stageAt('fetch:ready')! - stageAt('fetch:start')!) : 'avoided'}, decode=${stageAt('decode:start') !== undefined && stageAt('decode:ready') !== undefined ? Math.round(stageAt('decode:ready')! - stageAt('decode:start')!) : 'n/a'}`)
+  await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarLoadingObserver?: MutationObserver }).__selectedFamilyAvatarLoadingObserver?.disconnect())
+
+  const replacementId = 'aaa00000-0000-4000-8000-000000000013'
+  const replacementCrop = { x: 0.2, y: 0.1, width: 0.6, height: 0.7 }
+  await page.evaluate(({ replacementId, replacementCrop }) => {
+    const win = window as typeof window & { __selectedFamilyUpdateAvatar?: (mediaId: string | null, crop: typeof replacementCrop) => void }
+    win.__selectedFamilyUpdateAvatar?.(replacementId, replacementCrop)
+  }, { replacementId, replacementCrop })
+  await expect(feedAvatar).toBeVisible()
+  const replacementUrl = await feedAvatar.getAttribute('src')
+  expect(replacementUrl).not.toBe(readyUrl)
+  const feedCropLeft = Number.parseFloat(await feedAvatar.evaluate((image) => image.style.left))
+  expect(feedCropLeft).toBeCloseTo(-33.333, 2)
+  await page.getByRole('button', { name: 'Мои семьи' }).click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  const updatedCardAvatar = page.locator('.family-hub-card').filter({ hasText: 'Семья Алисы' }).locator('[data-slot="child-avatar-image"]')
+  await expect(updatedCardAvatar).toBeVisible()
+  await expect(updatedCardAvatar).toHaveAttribute('src', replacementUrl ?? '')
+  const hubCropLeft = Number.parseFloat(await updatedCardAvatar.evaluate((image) => image.style.left))
+  expect(hubCropLeft).toBeCloseTo(feedCropLeft, 4)
+  await page.locator('.family-hub-card').filter({ hasText: 'Семья Алисы' }).click()
+  await expect(feedAvatar).toHaveAttribute('src', replacementUrl ?? '')
+  const channelAvatar = page.locator('.publication-channel-avatar img')
+  await expect(channelAvatar).toHaveAttribute('src', replacementUrl ?? '')
+  const channelCropLeft = Number.parseFloat(await channelAvatar.evaluate((image) => image.style.left))
+  expect(channelCropLeft).toBeCloseTo(feedCropLeft, 4)
+  expect(await rawRequestPaths(page)).not.toContain(channelPath)
+})
+
+test('production App confirms a cold hub family before loading and keeps its avatar on first selection', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/e2e/selected-family-app.harness.html?hubFirst&onlyOneFamily&homeDelay=450&avatarDelay=180')
+  const welcome = page.getByRole('button', { name: 'Продолжить' })
+  const card = page.locator('.family-hub-card').filter({ hasText: 'Семья Алисы' })
+  await expect(welcome).toBeVisible()
+  await welcome.click()
+  await expect(card).toBeVisible()
+  await expect(card.locator('[data-slot="child-avatar-loading"]')).toBeVisible()
+  expect(await avatarRequestCount(page)).toBe(0)
+  await expect(card.locator('[data-slot="child-avatar-image"]')).toBeVisible()
+  const readyUrl = await card.locator('[data-slot="child-avatar-image"]').getAttribute('src')
+  const requestsBeforeSelection = await avatarRequestCount(page)
+  await card.click()
+  const feedAvatar = page.locator('[data-navigation-surface="feed"] .ui-v2-child-header [data-slot="child-avatar-image"]')
+  await expect(feedAvatar).toBeVisible()
+  await expect(feedAvatar).toHaveAttribute('src', readyUrl ?? '')
+  expect(requestsBeforeSelection).toBe(1)
+  expect(await avatarRequestCount(page)).toBe(requestsBeforeSelection)
+  const timeline = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
+  expect(timeline.findIndex((item) => item.stage === 'rights:data:home')).toBeLessThan(timeline.findIndex((item) => item.stage === 'fetch:start'))
+  expect(await isChildBlobLive(page, readyUrl ?? '')).toBe(true)
+})
+
 test('production App remains usable with a delayed cold child avatar', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -103,11 +220,12 @@ test('production App remains usable with a delayed cold child avatar', async ({ 
   const loadingGeometry = await headerGeometry(page, '[data-navigation-surface="feed"] .ui-v2-child-header')
   await expect(header.locator('[data-slot="child-avatar-image"]')).toBeVisible({ timeout: 5000 })
   expect(await headerGeometry(page, '[data-navigation-surface="feed"] .ui-v2-child-header')).toEqual(loadingGeometry)
-  const timeline = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number }> }).__selectedFamilyAvatarTimeline ?? [])
+  const timeline = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
   const fetchStart = timeline.find((item) => item.stage === 'fetch:start')?.at
   const fetchReady = timeline.find((item) => item.stage === 'fetch:ready')?.at
   const decodeReady = timeline.find((item) => item.stage === 'decode:ready')?.at
-  console.log(`cold avatar stages (ms): fetch=${fetchStart !== undefined && fetchReady !== undefined ? Math.round(fetchReady - fetchStart) : 'n/a'}, decode after response=${fetchReady !== undefined && decodeReady !== undefined ? Math.round(decodeReady - fetchReady) : 'n/a'}`)
+  const idbReady = timeline.find((item) => item.stage === 'idb:image:ready')
+  console.log(`cold avatar stage durations (ms): rights=${timeline.find((item) => item.stage === 'rights:data:home')?.duration?.toFixed(1) ?? 'n/a'}, idb=${idbReady?.duration?.toFixed(1) ?? 'n/a'} (hit=${idbReady?.cacheHit ?? 'n/a'}), network=${fetchStart !== undefined && fetchReady !== undefined ? Math.round(fetchReady - fetchStart) : 'n/a'}, decode=${timeline.find((item) => item.stage === 'decode:start')?.at !== undefined && decodeReady !== undefined ? Math.round(decodeReady - timeline.find((item) => item.stage === 'decode:start')!.at) : 'n/a'}`)
 })
 
 test('production App uses the saved private child photo while a refresh is delayed', async ({ page }) => {
@@ -119,13 +237,17 @@ test('production App uses the saved private child photo while a refresh is delay
   await expect(header.locator('[data-slot="child-avatar-image"]')).toBeVisible()
   const url = await header.locator('[data-slot="child-avatar-image"]').getAttribute('src')
   const requests = await avatarRequestCount(page)
-  const timeline = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number }> }).__selectedFamilyAvatarTimeline ?? [])
-  expect(requests).toBe(1)
+  const timeline = await page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarTimeline?: Array<{ stage: string; at: number; cacheHit?: boolean; duration?: number }> }).__selectedFamilyAvatarTimeline ?? [])
+  expect(requests).toBe(0)
   expect(timeline.some((item) => item.stage === 'decode:ready')).toBe(true)
   expect(timeline.some((item) => item.stage === 'fetch:ready')).toBe(false)
   const fetchStart = timeline.find((item) => item.stage === 'fetch:start')?.at
+  const idbReady = timeline.find((item) => item.stage === 'idb:image:ready')
   const decodeReady = timeline.find((item) => item.stage === 'decode:ready')?.at
-  console.log(`cached avatar decode before delayed network response: ${fetchStart !== undefined && decodeReady !== undefined ? Math.round(decodeReady - fetchStart) : 'n/a'} ms; network delay configured=1400 ms`)
+  expect(idbReady?.cacheHit).toBe(true)
+  expect(decodeReady).toBeDefined()
+  if (fetchStart !== undefined) expect(decodeReady!).toBeLessThan(fetchStart)
+  console.log(`cached avatar stage durations (ms): rights=${timeline.find((item) => item.stage === 'rights:data:home')?.duration?.toFixed(1) ?? 'n/a'}, idb=${idbReady?.duration?.toFixed(1) ?? 'n/a'} (hit=${idbReady?.cacheHit ?? 'n/a'}), decode=${timeline.find((item) => item.stage === 'decode:start')?.at !== undefined && decodeReady !== undefined ? Math.round(decodeReady - timeline.find((item) => item.stage === 'decode:start')!.at) : 'n/a'}, network=${fetchStart === undefined ? 'avoided for immutable child resource' : 'unexpected'} (delay configured=1400 ms)`)
   await expect(header.locator('[data-slot="child-avatar-image"]')).toHaveAttribute('src', url ?? '')
 })
 
@@ -218,6 +340,10 @@ test('production App replaces, recrops, removes and revokes only the current chi
 
 async function avatarRequestCount(page: import('@playwright/test').Page) {
   return page.evaluate(() => (window as typeof window & { __selectedFamilyAvatarRequests?: number[] }).__selectedFamilyAvatarRequests?.length ?? 0)
+}
+
+async function rawRequestPaths(page: import('@playwright/test').Page) {
+  return page.evaluate(() => (window as typeof window & { __selectedFamilyRawPaths?: string[] }).__selectedFamilyRawPaths ?? [])
 }
 
 async function startProductionFeed(page: import('@playwright/test').Page) {

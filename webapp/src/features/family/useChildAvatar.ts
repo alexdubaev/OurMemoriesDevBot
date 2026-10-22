@@ -9,6 +9,6 @@ export function useChildAvatar(transport: AuthenticatedTransport, familyId: stri
   const path = mediaId
     ? `/api/v1/families/${encodeURIComponent(familyId)}/media/${encodeURIComponent(mediaId)}/content?variant=display`
     : null
-  const scopeKey = JSON.stringify([familyId, options.childId ?? null, options.membershipEpoch ?? null, mediaId])
-  return usePrivateImageResource(auth?.user?.id ?? '', path, transport, options.enabled ?? true, undefined, scopeKey)
+  const scopeKey = JSON.stringify([familyId, options.membershipEpoch ?? null])
+  return usePrivateImageResource(auth?.user?.id ?? '', path, transport, options.enabled ?? true, undefined, scopeKey, 'child-avatar')
 }

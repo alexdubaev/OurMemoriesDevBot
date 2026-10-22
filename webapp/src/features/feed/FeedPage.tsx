@@ -12,6 +12,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AuthContext } from '@/features/auth'
+import { ChildAvatar } from '@/features/family'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { toggleAudioPlayback } from './audio-playback'
@@ -354,7 +355,7 @@ export function FeedPage({
 
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
-    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
+    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
@@ -377,11 +378,12 @@ export function FeedPage({
           authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
           authorName={memory.publicationAttribution?.name ?? memory.author.name}
           authorKind={memory.publicationAttribution?.kind ?? 'user'}
-          authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath}
+          authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath}
           authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
           childName={memory.childId === childId ? childName : undefined}
           childAvatarUrl={memory.childId === childId ? displayedChildAvatarUrl : null}
           childAvatarCrop={memory.childId === childId ? childAvatarCrop : null}
+          childAvatarStatus={memory.childId === childId ? displayedChildAvatarStatus : 'absent'}
           body={memory.body}
           kind={memory.kind}
           reactionCounts={memory.reactionCounts}
@@ -410,7 +412,7 @@ export function FeedPage({
         ? <div className="feed-unread-restart" role="status"><Typography as="p" variant="memoryMeta">Список изменился. Обновите непросмотренные, чтобы продолжить.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'instant' }); setUnreadCycle((value) => value + 1) }} type="button">Обновить список</Button></div>
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} onOpenPhoto={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory: currentDetail, index, photoUrl }) }} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
-      {active && currentMixedViewer ? <MixedMediaViewer familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {active && currentMixedViewer ? <MixedMediaViewer childAvatarCrop={currentMixedViewer.memory.childId === childId ? childAvatarCrop : null} childAvatarStatus={currentMixedViewer.memory.childId === childId ? displayedChildAvatarStatus : 'absent'} childAvatarUrl={currentMixedViewer.memory.childId === childId ? displayedChildAvatarUrl : null} childName={childName} familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
@@ -455,7 +457,7 @@ export function FeedPage({
           .catch(() => { setDeleteError('Не удалось удалить воспоминание. Попробуйте ещё раз.') })
       }}
       open={active && deleteTarget !== null}
-      preview={deleteTarget ? <MemoryDeletePreview familyTimezone={familyTimezone} memory={deleteTarget} transport={transport} /> : null}
+      preview={deleteTarget ? <MemoryDeletePreview childAvatarCrop={deleteTarget.childId === childId ? childAvatarCrop : null} childAvatarStatus={deleteTarget.childId === childId ? displayedChildAvatarStatus : 'absent'} childAvatarUrl={deleteTarget.childId === childId ? displayedChildAvatarUrl : null} childName={childName} familyTimezone={familyTimezone} memory={deleteTarget} transport={transport} /> : null}
       submitting={deletion.isPending}
     />
     </MediaPlaybackCoordinator>
@@ -583,7 +585,7 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
   return <div className="memoly-mixed-slide-media" ref={root}><Attachment attachment={attachment} hostBridge={hostBridge} memory={memory} onOpenPhoto={onOpen} onPhotoUrlChange={onPhotoUrlChange} transport={transport} /></div>
 }
 
-function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport }: { familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
+function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport }: { childAvatarCrop: Props['childAvatarCrop']; childAvatarStatus: Props['childAvatarStatus']; childAvatarUrl: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
   const playbackCoordinator = useContext(PlaybackContext)
   useLayoutEffect(() => { playbackCoordinator?.pauseAll() }, [playbackCoordinator])
   const [index, setIndex] = useState(initialIndex)
@@ -591,11 +593,9 @@ function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, ini
   const attribution = memory.publicationAttribution
   const authorName = attribution?.name ?? memory.author.name
   const isChannelAuthor = attribution?.kind === 'channel'
-  const authorAvatarPath = attribution?.kind === 'channel' ? attribution.avatarPath : memory.author.avatarPath
+  const authorAvatarPath = attribution?.kind === 'channel' ? null : memory.author.avatarPath
   const authorAvatarCrop = isChannelAuthor ? null : memory.author.avatarCrop
-  const authorAvatarFallback = isChannelAuthor
-    ? <span aria-hidden="true" className="author-avatar publication-channel-avatar"><WebpIcon decorative name="channel" size={22} /></span>
-    : <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{initials(authorName)}</Typography></span>
+  const authorAvatarFallback = <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{initials(authorName)}</Typography></span>
   const root = useRef<HTMLDivElement | null>(null)
   const [photoZoom, setPhotoZoom] = useState(1)
   const [photoPan, setPhotoPan] = useState({ x: 0, y: 0 })
@@ -721,7 +721,9 @@ function MixedMediaViewer({ familyTimezone, hostBridge, index: initialIndex, ini
         <DialogPrimitive.Title className="sr-only">Медиа воспоминания</DialogPrimitive.Title>
         <div className="memoly-mixed-viewer-bar">
           <div className="memoly-viewer-author">
-            <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className={`author-avatar${isChannelAuthor ? ' publication-channel-avatar' : ''}`} name={authorName} fallback={authorAvatarFallback} />
+            {isChannelAuthor
+              ? <span className="author-avatar publication-channel-avatar"><ChildAvatar avatarCrop={childAvatarCrop ?? null} avatarUrl={childAvatarUrl ?? null} name={childName} size="feed-author" status={childAvatarStatus} /></span>
+              : <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={authorAvatarFallback} />}
             <div className="memoly-viewer-author-copy">
               <Typography as="span" variant="memoryMeta">{authorName}</Typography>
               <Typography as="span" variant="memoryMeta">{timeLabel(memory.occurredAt, familyTimezone)}</Typography>
@@ -839,7 +841,7 @@ function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onChooseRea
   </div>
 }
 
-function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTimezone: string; memory: MemoryDto; transport: AuthenticatedTransport }) {
+function MemoryDeletePreview({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, memory, transport }: { childAvatarCrop: Props['childAvatarCrop']; childAvatarStatus: Props['childAvatarStatus']; childAvatarUrl: Props['childAvatarUrl']; childName: string; familyTimezone: string; memory: MemoryDto; transport: AuthenticatedTransport }) {
   const primary = memory.attachments[0]
   return <div className="memoly-delete-preview-card" data-memoly-feed>
     <MemoryCardPresentation
@@ -847,8 +849,12 @@ function MemoryDeletePreview({ familyTimezone, memory, transport }: { familyTime
       authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
       authorName={memory.publicationAttribution?.name ?? memory.author.name}
       authorKind={memory.publicationAttribution?.kind ?? 'user'}
-      authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? memory.publicationAttribution.avatarPath : memory.author.avatarPath}
+      authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath}
       authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
+      childName={childName}
+      childAvatarUrl={childAvatarUrl}
+      childAvatarCrop={childAvatarCrop}
+      childAvatarStatus={childAvatarStatus}
       body={memory.body}
       kind={memory.kind}
       reactionCounts={memory.reactionCounts}
