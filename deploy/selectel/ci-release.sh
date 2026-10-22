@@ -40,6 +40,9 @@ PREBUILT_IMAGES=false
 RUNNING_BACKEND_IMAGE_TAG=
 RUNNING_WEBAPP_IMAGE_TAG=
 ROLLBACK_VERIFY_ENV=
+FRONTEND_RECOVERY_FILE=$SERVER_ROOT/frontend-recovery.env
+FRONTEND_RECOVERY_PRESENT=false
+FRONTEND_RECOVERY_SHA256=
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -538,6 +541,73 @@ EOF
   printf 'Release manifest written: %s\n' "$(basename "$manifest")"
 }
 
+# A successful full release replaces the complete runtime, so any older
+# frontend-only recovery record no longer describes the live service. Keep its
+# exact bytes as a forensic archive only after the new full runtime is proven
+# healthy. Do not parse the record here: backend forward-only recovery owns
+# migration safety, and must remain possible even if this unrelated artifact
+# contains an interrupted or malformed frontend state.
+capture_frontend_recovery_artifact() {
+  FRONTEND_RECOVERY_FILE=$SERVER_ROOT/frontend-recovery.env
+  FRONTEND_RECOVERY_PRESENT=false
+  FRONTEND_RECOVERY_SHA256=
+  if [ -e "$FRONTEND_RECOVERY_FILE" ] || [ -L "$FRONTEND_RECOVERY_FILE" ]; then
+    [ -f "$FRONTEND_RECOVERY_FILE" ] && [ ! -L "$FRONTEND_RECOVERY_FILE" ] ||
+      die 'frontend recovery artifact is not a regular non-symlink file'
+    [ "$(stat -c '%u' -- "$FRONTEND_RECOVERY_FILE")" = 0 ] ||
+      die 'frontend recovery artifact is not owned by root'
+    [ "$(stat -c '%a' -- "$FRONTEND_RECOVERY_FILE")" = 600 ] ||
+      die 'frontend recovery artifact must have mode 0600'
+    FRONTEND_RECOVERY_SHA256=$(sha256sum -- "$FRONTEND_RECOVERY_FILE" | awk '{print $1}') ||
+      die 'cannot checksum frontend recovery artifact'
+    [[ "$FRONTEND_RECOVERY_SHA256" =~ ^[0-9a-f]{64}$ ]] || die 'frontend recovery artifact checksum is invalid'
+    FRONTEND_RECOVERY_PRESENT=true
+  fi
+}
+
+verify_frontend_recovery_artifact_unchanged() {
+  local expected_present=$FRONTEND_RECOVERY_PRESENT expected_sha256=$FRONTEND_RECOVERY_SHA256
+  capture_frontend_recovery_artifact
+  [ "$FRONTEND_RECOVERY_PRESENT" = "$expected_present" ] &&
+    [ "$FRONTEND_RECOVERY_SHA256" = "$expected_sha256" ] ||
+    die 'frontend recovery artifact changed during full release; refusing to archive it'
+}
+
+archive_frontend_recovery_artifact() {
+  [ "$FRONTEND_RECOVERY_PRESENT" = true ] || return 0
+  verify_frontend_recovery_artifact_unchanged
+  [ -d "$RELEASES_DIR" ] && [ ! -L "$RELEASES_DIR" ] ||
+    die 'release archive directory is missing or unsafe'
+  [ "$(stat -c '%u' -- "$RELEASES_DIR")" = 0 ] || die 'release archive directory is not owned by root'
+
+  local archive timestamp actual_sha256
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  archive=$RELEASES_DIR/frontend-recovery-${PRODUCT_SHA}-${timestamp}-$$.env
+  [ ! -e "$archive" ] && [ ! -L "$archive" ] || die 'frontend recovery archive target already exists'
+  sync -f "$FRONTEND_RECOVERY_FILE" || die 'cannot sync frontend recovery artifact before archival'
+  sync -f "$RELEASES_DIR" || die 'cannot sync release archive directory before archival'
+  mv -- "$FRONTEND_RECOVERY_FILE" "$archive" || die 'cannot archive frontend recovery artifact'
+
+  if ! [ -f "$archive" ] || [ -L "$archive" ] ||
+     [ "$(stat -c '%u' -- "$archive" 2>/dev/null || true)" != 0 ] ||
+     [ "$(stat -c '%a' -- "$archive" 2>/dev/null || true)" != 600 ]; then
+    mv -- "$archive" "$FRONTEND_RECOVERY_FILE" 2>/dev/null ||
+      die 'archived frontend recovery artifact is unsafe and could not be restored to its live path'
+    die 'archived frontend recovery artifact has unsafe ownership or permissions; original state was restored'
+  fi
+  if ! actual_sha256=$(sha256sum -- "$archive" | awk '{print $1}') ||
+     [ "$actual_sha256" != "$FRONTEND_RECOVERY_SHA256" ]; then
+    mv -- "$archive" "$FRONTEND_RECOVERY_FILE" 2>/dev/null ||
+      die 'frontend recovery archive checksum changed and original state could not be restored'
+    die 'frontend recovery archive checksum changed; original state was restored'
+  fi
+  FRONTEND_RECOVERY_PRESENT=false
+  FRONTEND_RECOVERY_SHA256=
+  sync -f "$RELEASES_DIR" || printf 'WARNING: could not sync archive directory after atomic frontend recovery archival.\n' >&2
+  sync -f "$SERVER_ROOT" || printf 'WARNING: could not sync server root after atomic frontend recovery archival.\n' >&2
+  printf 'Frontend recovery artifact archived: %s\n' "$(basename "$archive")" || true
+}
+
 recover_forward_markers() {
   if [ -e "$MM0_FORWARD_MARKER" ] || [ -L "$MM0_FORWARD_MARKER" ]; then
     load_mm0_marker
@@ -627,6 +697,7 @@ main() {
     exit 0
   fi
   trap release_failure EXIT
+  capture_frontend_recovery_artifact
   recover_forward_markers
   check_disk_space
   verify_rollback_file
@@ -634,6 +705,7 @@ main() {
     capture_running_images
   fi
   fetch_and_checkout
+  verify_frontend_recovery_artifact_unchanged
   validate_prebuilt_images
   detect_membership_rollback_boundary
   detect_mm0_boundary
@@ -685,11 +757,13 @@ main() {
     fi
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
+  verify_frontend_recovery_artifact_unchanged
   promote_runtime
   verify_promoted_revision
   public_smoke
   write_release_manifest
   clear_release_markers
+  archive_frontend_recovery_artifact
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then

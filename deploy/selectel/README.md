@@ -95,6 +95,16 @@ forward-only markers fail closed. Resolve such a failure through the normal guar
 forward-fix process. The normal `rollback-static` action below retains its older
 contract and is not the recovery command for this new lane.
 
+After a successful normal FULL promotion, revision verification, public smoke and
+manifest creation, the entry point archives the previous frontend recovery file
+under `RELEASES_DIR`. It checks root ownership, mode 0600, regular-file identity and
+unchanged checksum, preserving its exact bytes as forensic evidence. FULL does not
+parse that payload or use it as recovery authorization; its independently verified
+new runtime supersedes even an interrupted frontend record. Failed FULL attempts
+leave the live file unchanged. Unsafe filesystem metadata or a changed file fail
+closed. This prevents a completed FULL from leaving stale frontend permissions that
+would block the next eligible short release.
+
 Documentation-only PRs have no runtime deployment. The initial installation of this
 release tooling uses the normal reviewed FULL release; future eligible UI commits
 then use the short lane. No product UI change is required merely to install tooling.

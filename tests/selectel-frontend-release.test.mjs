@@ -10,6 +10,7 @@ const library = gitBashPath(resolve(root, 'deploy/selectel/frontend-release.sh')
 const linuxLibrary = linuxPath(resolve(root, 'deploy/selectel/frontend-release.sh'))
 const entrypoint = gitBashPath(resolve(root, 'deploy/selectel/ci-release.sh'))
 const appRoot = gitBashPath(root)
+const linuxEntrypoint = linuxPath(resolve(root, 'deploy/selectel/ci-release.sh'))
 const hex = (char, size) => char.repeat(size)
 
 function runBash(script) {
@@ -407,6 +408,146 @@ frontend_load_state
   assert.notEqual(result.status, 0)
   assert.doesNotMatch(result.stdout, /DOCKER-MUTATION/)
   assert.match(result.stderr, /invalid line count/)
+})
+
+test('a successful full release archives opaque frontend recovery bytes exactly', () => {
+  const result = runLinuxRoot(`
+set -euo pipefail
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+SERVER_ROOT="$tmp"
+RELEASES_DIR="$tmp/releases"
+mkdir -m 0700 "$RELEASES_DIR"
+PRODUCT_SHA=${hex('d', 40)}
+. ${linuxEntrypoint}
+for phase in pending malformed; do
+  FRONTEND_RECOVERY_FILE="$SERVER_ROOT/frontend-recovery.env"
+  if [[ "$phase" == pending ]]; then
+    printf 'FRONTEND_RECOVERY_VERSION=1\\nPHASE=pending\\nopaque=keep-me\\n' > "$FRONTEND_RECOVERY_FILE"
+  else
+    printf 'not a parseable frontend state\\n' > "$FRONTEND_RECOVERY_FILE"
+    PRODUCT_SHA=${hex('e', 40)}
+  fi
+  chmod 0600 "$FRONTEND_RECOVERY_FILE"
+  cp "$FRONTEND_RECOVERY_FILE" "$tmp/expected-$phase"
+  capture_frontend_recovery_artifact
+  archive_frontend_recovery_artifact
+  test ! -e "$FRONTEND_RECOVERY_FILE"
+  archive=$(find "$RELEASES_DIR" -maxdepth 1 -type f -name "frontend-recovery-$PRODUCT_SHA-*.env" -print -quit)
+  test -n "$archive"
+  cmp "$tmp/expected-$phase" "$archive"
+  test "$(stat -c '%u:%a' "$archive")" = 0:600
+done
+printf 'ARCHIVES=%s\\n' "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name 'frontend-recovery-*.env' | wc -l)"
+`)
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.match(result.stdout, /ARCHIVES=2/)
+})
+
+test('full release archival refuses changed or unsafe frontend recovery artifacts without removing them', () => {
+  const result = runLinuxRoot(`
+set -euo pipefail
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+SERVER_ROOT="$tmp"
+RELEASES_DIR="$tmp/releases"
+mkdir -m 0700 "$RELEASES_DIR"
+PRODUCT_SHA=${hex('d', 40)}
+. ${linuxEntrypoint}
+FRONTEND_RECOVERY_FILE="$SERVER_ROOT/frontend-recovery.env"
+printf 'PHASE=pending\\n' > "$FRONTEND_RECOVERY_FILE"
+chmod 0600 "$FRONTEND_RECOVERY_FILE"
+capture_frontend_recovery_artifact
+printf 'changed\\n' > "$FRONTEND_RECOVERY_FILE"
+if ( verify_frontend_recovery_artifact_unchanged ); then exit 70; fi
+test -f "$FRONTEND_RECOVERY_FILE"
+printf 'CHANGED-PRESERVED\\n'
+chmod 0640 "$FRONTEND_RECOVERY_FILE"
+if ( capture_frontend_recovery_artifact ); then exit 71; fi
+test -f "$FRONTEND_RECOVERY_FILE"
+printf 'UNSAFE-PRESERVED\\n'
+`)
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.match(result.stdout, /CHANGED-PRESERVED/)
+  assert.match(result.stdout, /UNSAFE-PRESERVED/)
+  assert.match(result.stderr, /changed during full release|mode 0600/)
+})
+
+function fullEntryScript({ failSmoke = false, unsafeMode = false } = {}) {
+  return `
+set -euo pipefail
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+SERVER_ROOT="$tmp"
+APP_ROOT="$tmp/app"
+RELEASES_DIR="$tmp/releases"
+mkdir -p "$APP_ROOT" "$RELEASES_DIR"
+chmod 0700 "$RELEASES_DIR"
+mkdir -p "$APP_ROOT/deploy/selectel"
+printf 'PHASE=pending\\nopaque=full-entry-test\\n' > "$SERVER_ROOT/frontend-recovery.env"
+chmod ${unsafeMode ? '0640' : '0600'} "$SERVER_ROOT/frontend-recovery.env"
+touch "$SERVER_ROOT/events"
+set -- ${hex('d', 40)} DEPLOY false ExampleBot full
+. ${linuxEntrypoint}
+eval "$(declare -f archive_frontend_recovery_artifact | sed '1s/^archive_frontend_recovery_artifact/archive_frontend_recovery_artifact_impl/')"
+archive_frontend_recovery_artifact() {
+  archive_frontend_recovery_artifact_impl
+  printf 'ARCHIVE\\n' >> "$SERVER_ROOT/events"
+}
+require_root() { :; }
+require_command() { :; }
+validate_inputs() { :; }
+validate_repository() { :; }
+validate_planned_source() { :; }
+flock() { :; }
+recover_forward_markers() { printf 'FORWARD\\n' >> "$SERVER_ROOT/events"; }
+check_disk_space() { :; }
+verify_rollback_file() { :; }
+capture_running_images() { :; }
+fetch_and_checkout() { :; }
+validate_prebuilt_images() { :; }
+detect_membership_rollback_boundary() { :; }
+detect_mm0_boundary() { :; }
+git_memoly() { :; }
+prepare_rollback() { :; }
+promote_runtime() { PROMOTION_STARTED=true; printf 'PROMOTE\\n' >> "$SERVER_ROOT/events"; }
+verify_promoted_revision() { printf 'REVISION\\n' >> "$SERVER_ROOT/events"; }
+public_smoke() {
+  printf 'SMOKE\\n' >> "$SERVER_ROOT/events"
+  ${failSmoke ? 'return 9' : 'return 0'}
+}
+write_release_manifest() { printf 'MANIFEST\\n' >> "$SERVER_ROOT/events"; }
+clear_release_markers() { printf 'CLEAR\\n' >> "$SERVER_ROOT/events"; PROMOTION_STARTED=false; }
+bash() { printf 'COMMAND:%s\\n' "$*" >> "$SERVER_ROOT/events"; }
+if ( main ); then
+  printf 'ENTRY=success\\n'
+else
+  printf 'ENTRY=failed\\n'
+fi
+if [[ -e "$SERVER_ROOT/frontend-recovery.env" ]]; then printf 'LIVE=present\\n'; else printf 'LIVE=absent\\n'; fi
+printf 'ARCHIVES=%s\\n' "$(find "$RELEASES_DIR" -maxdepth 1 -type f -name 'frontend-recovery-*.env' | wc -l)"
+cat "$SERVER_ROOT/events"
+`
+}
+
+test('full ci-release archives frontend state only after all full-release success gates', () => {
+  const success = runLinuxRoot(fullEntryScript())
+  assert.equal(success.status, 0, `${success.stdout}${success.stderr}`)
+  assert.match(success.stdout, /ENTRY=success\nLIVE=absent\nARCHIVES=1/)
+  assert.ok(success.stdout.indexOf('REVISION') < success.stdout.indexOf('SMOKE'))
+  assert.ok(success.stdout.indexOf('SMOKE') < success.stdout.indexOf('MANIFEST'))
+  assert.ok(success.stdout.indexOf('MANIFEST') < success.stdout.indexOf('CLEAR'))
+  assert.ok(success.stdout.indexOf('CLEAR') < success.stdout.indexOf('ARCHIVE'))
+
+  const failed = runLinuxRoot(fullEntryScript({ failSmoke: true }))
+  assert.equal(failed.status, 0, `${failed.stdout}${failed.stderr}`)
+  assert.match(failed.stdout, /ENTRY=failed\nLIVE=present\nARCHIVES=0/)
+  assert.doesNotMatch(failed.stdout, /MANIFEST|Frontend recovery artifact archived/)
+
+  const unsafe = runLinuxRoot(fullEntryScript({ unsafeMode: true }))
+  assert.equal(unsafe.status, 0, `${unsafe.stdout}${unsafe.stderr}`)
+  assert.match(unsafe.stdout, /ENTRY=failed\nLIVE=present\nARCHIVES=0/)
+  assert.doesNotMatch(unsafe.stdout, /FORWARD|PROMOTE|REVISION|SMOKE|MANIFEST/)
 })
 
 test('frontend recovery restores only the exact recorded static image when static is absent', () => {
