@@ -370,6 +370,8 @@ const reviewedSingleAvatarSourceBlobs = [
   ['webapp/src/features/family/useChildAvatar.ts', 'f2c3a017ed01ee2117493c2412edea0a219d0a6b'],
   ['webapp/src/features/feed/FeedPage.tsx', '086f8ad4784b975830a4f581598edb3f15c987bc'],
   ['webapp/src/features/feed/presentation/MemoryCardPresentation.tsx', '146bef666016a7faf311bed861db798cf77af046'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', '7d8d5b43278b26c23fabb07a2704d01d614d13b5'],
+  ['bun.lock', '64112c805296ec42b124d3c11f1cdc3e73228a60'],
   ['webapp/src/platform/media/avatar-resource-pool.ts', '2e04a01ba8ead3c4e5e2c3985e654226f4b5243f'],
   ['webapp/src/platform/media/use-private-image-url.ts', '73a376f7d919dbad664eec30ddfa903fe8b0313b'],
   ['webapp/src/platform/persistence/private-cache.ts', '302b1f5a95b8ad092b255a936959e5d6e324180c'],
@@ -914,16 +916,16 @@ slowTest('exact shared header and child avatar source preserves the designated 3
   assert.deepEqual(rejected.rollbackBackups, [])
 })
 
-slowTest('exact single-source child avatar runtime preserves designated 33a recovery and rejects drift before mutation', () => {
+slowTest('exact cropped-channel avatar source preserves designated 33a recovery and rejects drift before mutation', () => {
   let source = createSourceWorktree('diagnostic')
   source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
   source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
   source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
     'apply exact shared header and child avatar source blobs')
   source = commitFrozenSourceFiles(source, reviewedSingleAvatarSourceBlobs,
-    'apply exact single-source child avatar production blobs')
+    'apply exact cropped-channel avatar production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root),
-    '7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e')
+    '0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0')
 
   const runningPair = 'f6'.repeat(20)
   const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
