@@ -500,6 +500,27 @@ schema, dependency, protected-artifact and service-configuration checks remain
 required; this pin does not authorize arbitrary descendants or future source
 changes.
 
+The exact family media UI source measured on release candidate `013b6672` has
+runtime fingerprint
+`b2e18384511eaae52eee297b07a0e9e59e7f98ee0b4d1cbf06b19cea1f7ce35b` and
+executable compatibility fingerprint
+`f888baecfd1c1dd45323775688c0167bc9868f0d2ed0a88901c10649ff1347fd` for
+recovery to `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` only. Its exact Git
+blobs are pinned in `tests/selectel-release-exit.test.mjs`; the profile is
+anchored to the full-attested `dc26ad9` diagnostic source. The fixture verifies
+read-only readiness and designated-pair preservation, then refuses executable
+source drift before any service mutation. Database compatibility evidence is
+the PostgreSQL current → frozen 33a → current roundtrip, run with:
+
+```bash
+bun run --cwd backend test:integration -- scripts/comments-release-compatibility.integration.test.ts
+```
+
+That probe checks preserved data, family ACLs, comments and unread state,
+sessions, outbox, migrations and grants. This is technical recovery evidence;
+the exact UI image IDs, OCI labels, accepted-UI ancestry, migration and
+configuration checks remain required, and no database rollback is authorized.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,

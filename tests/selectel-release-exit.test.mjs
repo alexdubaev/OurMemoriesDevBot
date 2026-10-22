@@ -324,6 +324,22 @@ const runtimeFingerprints = {
 const reviewedAvatarTimerFixBlob = 'e97e72aebc8df97a90990a481de36fd78e77483e'
 const reviewedStorybookManifestBlob = '52a87894fbcc32b5ab0fa0e2c5217d85b3214cd2'
 const reviewedStorybookLockBlob = '67d34b3065b163092b09e4b91c42274405fe7823'
+const reviewedMediaUiBlobs = [
+  ['bun.lock', '36bcc71d60db020a4e65fe9cb8b7559b17625916'],
+  ['webapp/package.json', '9f907f4cba1a99b7a6e7dcc82f1d6f84da4bdfec'],
+  ['webapp/src/App.tsx', 'de773296cb4a7e021ebc640f4f9075bce11ca9b5'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', '44816e178118bb2436a4e5fe951ae44bd6a2ccbd'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', '1b387846246848e9b769297b28cbab33862d92ff'],
+  ['webapp/src/components/ui-v2/shared-skin.css', '55fd96fefcfca1add8ed3f87c2d17bf1dbc8649d'],
+  ['webapp/src/features/family/ChildProfile.css', '93e89a50d3a66673f023cfa541fa1dbaaa1342f0'],
+  ['webapp/src/features/family/FamilyOnboarding.tsx', '2ae2d0b6288ee446f884e134f2a22aefafac9bf1'],
+  ['webapp/src/features/family/FamilyScreen.tsx', '6b86aafa30182075b5703b538be8a43f9d9aa76a'],
+  ['webapp/src/features/feed/FeedPage.tsx', '4c924a3c1c4769ae7696f4011b8c41f103297a95'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', '13ebe687faae12eec77a068d078bffffb52238f2'],
+  ['webapp/src/features/feed/use-memory-seen-observer.ts', 'abc81f827cba1224c4d4c76987be8a6d9c2394f1'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', 'a5784a62b4df8d4554fc99633ba3c060f62b8a52'],
+  ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -410,6 +426,24 @@ function commitSourceFile(source, relativePath, contents, message) {
   if (add.status !== 0) throw new Error(add.stdout + add.stderr)
   const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
     'commit', '--quiet', '-m', message, '--', relativePath], { cwd: source.root, env, encoding: 'utf8' })
+  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
+  return { ...source, sha }
+}
+
+function commitFrozenSourceFiles(source, files, message) {
+  const paths = []
+  for (const [relativePath, blob] of files) {
+    writeFileSync(resolve(source.root, relativePath), frozenGitBlob(blob, relativePath))
+    paths.push(relativePath)
+  }
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  const add = spawnSync('git', ['add', '--', ...paths], { cwd: source.root, env, encoding: 'utf8' })
+  if (add.status !== 0) throw new Error(add.stdout + add.stderr)
+  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '--quiet', '-m', message], { cwd: source.root, env, encoding: 'utf8' })
   if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
   const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
   assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
@@ -711,6 +745,49 @@ slowTest('exact dc26 comments diagnostic source preserves the designated 33a rec
     'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
   ].join('\n'))
   assert.deepEqual(changed.rollbackBackups, [])
+})
+
+slowTest('exact media UI source preserves the designated 33a recovery and rejects executable drift', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'f888baecfd1c1dd45323775688c0167bc9868f0d2ed0a88901c10649ff1347fd')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/feed/FeedPage.tsx',
+    '\n// unmeasured executable source drift\n', 'mutate media UI executable source')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
 })
 
 test('the immutable Selectel source ref retains its comments compatibility profile', () => {
