@@ -656,14 +656,19 @@ does not establish database compatibility. Run the synthetic PostgreSQL current
 before release; its result is not recorded by this source attestation.
 
 The cropped-channel avatar sizing source frozen for candidate
-`bd333e62d1fea2e27687e916207908202b458781` has executable compatibility
+`3559ff6e65fbb93804b882cd4a53b6d7717b140d` has executable compatibility
 fingerprint
-`51c87510ba6c21e8afc99e5c2dcc6c3cafefa4c058c772268add1d000ed2fb62` for the
+`0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0` for the
 same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
 Its exact production Git blobs, including the scoped channel-avatar grid sizing
-in `memoly-feed.css`, are pinned in `tests/selectel-release-exit.test.mjs`; the
-profile remains anchored to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`
-runtime. The focused regression checks read-only readiness, designated-pair
+in `memoly-feed.css` and pinned `bun.lock`, are pinned in
+`tests/selectel-release-exit.test.mjs`; the profile remains anchored to the
+full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime. Astro is
+pinned to `7.3.3` to address
+[GHSA-98hj-9722-w3j8](https://github.com/withastro/astro/security/advisories/GHSA-98hj-9722-w3j8)
+and
+[GHSA-mpr7-6m5w-76rw](https://github.com/withastro/astro/security/advisories/GHSA-mpr7-6m5w-76rw).
+The focused regression checks read-only readiness, designated-pair
 preservation, and rejection of executable drift before service mutation. This
 source binding does not establish database compatibility; run the synthetic
 PostgreSQL current → frozen 33a → current compatibility probe against the exact

@@ -371,6 +371,7 @@ const reviewedSingleAvatarSourceBlobs = [
   ['webapp/src/features/feed/FeedPage.tsx', '086f8ad4784b975830a4f581598edb3f15c987bc'],
   ['webapp/src/features/feed/presentation/MemoryCardPresentation.tsx', '146bef666016a7faf311bed861db798cf77af046'],
   ['webapp/src/features/feed/presentation/memoly-feed.css', '7d8d5b43278b26c23fabb07a2704d01d614d13b5'],
+  ['bun.lock', '64112c805296ec42b124d3c11f1cdc3e73228a60'],
   ['webapp/src/platform/media/avatar-resource-pool.ts', '2e04a01ba8ead3c4e5e2c3985e654226f4b5243f'],
   ['webapp/src/platform/media/use-private-image-url.ts', '73a376f7d919dbad664eec30ddfa903fe8b0313b'],
   ['webapp/src/platform/persistence/private-cache.ts', '302b1f5a95b8ad092b255a936959e5d6e324180c'],
@@ -924,7 +925,7 @@ slowTest('exact cropped-channel avatar source preserves designated 33a recovery 
   source = commitFrozenSourceFiles(source, reviewedSingleAvatarSourceBlobs,
     'apply exact cropped-channel avatar production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root),
-    '51c87510ba6c21e8afc99e5c2dcc6c3cafefa4c058c772268add1d000ed2fb62')
+    '0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0')
 
   const runningPair = 'f6'.repeat(20)
   const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
