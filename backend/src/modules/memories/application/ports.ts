@@ -51,3 +51,5 @@ export type MemoryRepository = {
   setReaction(scope: FamilyScope, memoryId: string, reaction: MemoryReaction | null): Promise<ReactionResponse>
   markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void>
 }
+
+export type { AlbumMemorySourceCatalog, AlbumMemorySourceProjection, AlbumMemorySourceRef } from './album-source-ports'

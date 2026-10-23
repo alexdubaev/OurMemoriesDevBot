@@ -116,6 +116,73 @@ describe('MAX closing confirmation', () => {
   })
 })
 
+describe('MAX native BackButton', () => {
+  test('uses one native listener and dispatches only to the newest active handler', () => {
+    const calls: string[] = []
+    const listeners = new Set<() => void>()
+    const backButton = {
+      show(this: unknown) { expect(this).toBe(backButton); calls.push('show') },
+      hide(this: unknown) { expect(this).toBe(backButton); calls.push('hide') },
+      onClick(this: unknown, callback: () => void) { expect(this).toBe(backButton); calls.push('on'); listeners.add(callback) },
+      offClick(this: unknown, callback: () => void) { expect(this).toBe(backButton); calls.push('off'); listeners.delete(callback) },
+    }
+    const bridge = createMaxHostBridge(maxHost({ BackButton: backButton }))
+    const unsubscribeParent = bridge.onBack(() => calls.push('parent'))
+    const unsubscribeChild = bridge.onBack(() => calls.push('child'))
+
+    expect(calls).toEqual(['on', 'show'])
+    expect(listeners.size).toBe(1)
+    for (const listener of listeners) listener()
+    expect(calls.slice(2)).toEqual(['child'])
+
+    unsubscribeParent()
+    unsubscribeParent()
+    for (const listener of listeners) listener()
+    expect(calls.slice(2)).toEqual(['child', 'child'])
+    expect(listeners.size).toBe(1)
+
+    unsubscribeChild()
+    unsubscribeChild()
+    expect(calls.slice(-2)).toEqual(['off', 'hide'])
+    expect(listeners.size).toBe(0)
+  })
+
+  test('removes a nested handler safely when cleanups arrive out of order', () => {
+    const calls: string[] = []
+    let nativeClick: (() => void) | undefined
+    const backButton = {
+      show() {},
+      hide() {},
+      onClick(callback: () => void) { nativeClick = callback },
+      offClick(callback: () => void) { if (nativeClick === callback) nativeClick = undefined },
+    }
+    const bridge = createMaxHostBridge(maxHost({ BackButton: backButton }))
+    const unsubscribeFirst = bridge.onBack(() => calls.push('first'))
+    const unsubscribeSecond = bridge.onBack(() => calls.push('second'))
+
+    unsubscribeSecond()
+    nativeClick?.()
+    unsubscribeFirst()
+    nativeClick?.()
+    expect(calls).toEqual(['first'])
+  })
+
+  test('treats an absent or incomplete BackButton as a safe no-op', () => {
+    expect(() => createMaxHostBridge(maxHost()).onBack(() => { throw new Error('unexpected callback') })()).not.toThrow()
+
+    const calls: string[] = []
+    const bridge = createMaxHostBridge(maxHost({ BackButton: {
+      show() { calls.push('show') },
+      onClick() { calls.push('on') },
+      offClick() { calls.push('off') },
+      // Missing hide means the capability is incomplete and should not partially install.
+    } }))
+    const unsubscribe = bridge.onBack(() => calls.push('handler'))
+    unsubscribe()
+    expect(calls).toEqual([])
+  })
+})
+
 function detachedContainer() {
   const ownerDocument = {
     nodeType: 9,

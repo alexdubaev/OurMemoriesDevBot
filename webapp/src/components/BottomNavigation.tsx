@@ -5,11 +5,12 @@ import { Typography } from '@/components/typography'
 import { cn } from '@/lib/utils'
 
 export type BottomNavigationProps = {
-  active: 'feed' | 'family'
+  active: 'feed' | 'albums' | 'family'
   addButtonRef?: Ref<HTMLButtonElement>
   appearance?: 'default' | 'memoly'
   onAdd?: () => void
   onFamily: () => void
+  onAlbums?: () => void
   onFeed: () => void
   role: 'full' | 'viewer'
 }
@@ -20,6 +21,7 @@ export function BottomNavigation({
   appearance = 'default',
   onAdd,
   onFamily,
+  onAlbums,
   onFeed,
   role,
 }: BottomNavigationProps) {
@@ -36,7 +38,7 @@ export function BottomNavigation({
       data-testid="bottom-navigation"
     >
       <div className={cn(
-        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-3 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
+        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-4 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
         appearance === 'memoly' && 'memoly-bottom-nav-grid',
       )}>
         <NavButton
@@ -46,6 +48,7 @@ export function BottomNavigation({
           label="Лента"
           onClick={onFeed}
         />
+        <NavButton active={active === 'albums'} appearance={appearance} icon="archive-box" label="Альбомы" onClick={onAlbums ?? (() => undefined)} />
         {role === 'full' ? (
           <button
             aria-label="Добавить"
@@ -105,7 +108,7 @@ function NavButton({
 }: {
   active: boolean
   appearance: 'default' | 'memoly'
-  icon: 'family' | 'home'
+  icon: 'family' | 'home' | 'archive-box'
   label: string
   onClick: () => void
 }) {
