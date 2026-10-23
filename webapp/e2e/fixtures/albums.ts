@@ -33,8 +33,14 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   const log: { path: string; method: string; key?: string; body?: unknown }[] = []
   const replay = new Map<string, unknown>()
   let failAttach = params.has('attachFail')
-  Object.assign(window, { __albumsEvidence: { log, albums, entries, published: 0, rawPaths: [] as string[] }, __albumsDelay: false })
-  const evidence = (window as unknown as { __albumsEvidence: { published: number; rawPaths: string[] } }).__albumsEvidence
+  let revokeNextAlbumRead = false
+  let delayNextEntriesPage = false
+  Object.assign(window, {
+    __albumsEvidence: { log, albums, entries, published: 0, rawPaths: [] as string[], lateReadStarted: false, lateReadCompleted: false },
+    __albumsDelay: false,
+    __albumsRevokeOnNextRead: () => { revokeNextAlbumRead = true; delayNextEntriesPage = true; evidence.lateReadStarted = false; evidence.lateReadCompleted = false },
+  })
+  const evidence = (window as unknown as { __albumsEvidence: { published: number; rawPaths: string[]; lateReadStarted: boolean; lateReadCompleted: boolean } }).__albumsEvidence
   const bump = (album: AlbumDto, item: AlbumEntryDto) => { album.version += 1; item.version += 1; item.aggregateVersion = album.version; album.entryCount = album.kind === 'year' ? (entries.get(album.id) ?? []).filter((item) => item.caption || item.sources.some((source) => source.available)).length : entries.get(album.id)!.length }
   async function request(path: string, options: HttpRequestOptions = {}): Promise<{ handled: boolean; value?: unknown }> {
     const method = options.method ?? 'GET'
@@ -74,6 +80,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     const album = albums.find((album) => album.id === segments[1])
     if (!album) throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic album missing')
     if (segments.length === 2) {
+      if (method === 'GET' && revokeNextAlbumRead) { revokeNextAlbumRead = false; throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic family membership revoked') }
       if (method === 'GET' && params.has('delayedAlbum') && album.kind === 'year') await new Promise((resolve) => setTimeout(resolve, 900))
       if (method === 'DELETE') { albums.splice(albums.indexOf(album), 1); return done(null) }
       if (method === 'PATCH') { Object.assign(album, body); album.version += 1 }
@@ -83,6 +90,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     if (segments[2] === 'workshop-groups') return done({ groups: [{ year: 2026, month: 10, count: list.length }] })
     if (segments[2] === 'entries:reorder') { const index = list.findIndex((item) => item.id === body!.entryId); const [item] = list.splice(index, 1); const before = body!.beforeEntryId ? list.findIndex((item) => item.id === body!.beforeEntryId) : list.length; list.splice(before, 0, item); bump(album, item); return done({ album }) }
     if (segments.length === 3 && method === 'GET') {
+      if (delayNextEntriesPage) { delayNextEntriesPage = false; evidence.lateReadStarted = true; await new Promise((resolve) => setTimeout(resolve, 900)); evidence.lateReadCompleted = true }
       const filtered = list.filter((entry) => !parsed.searchParams.get('category') || entry.category === parsed.searchParams.get('category'))
       const start = Number(parsed.searchParams.get('cursor') ?? 0)
       return done({ items: filtered.slice(start, start + 48).map((item) => ({ ...item, aggregateVersion: album.version })), nextCursor: start + 48 < filtered.length ? String(start + 48) : null })

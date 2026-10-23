@@ -87,7 +87,21 @@ export function AlbumsPage(props: AlbumsPageProps) {
   useEffect(() => { const online = () => setOffline(!navigator.onLine); window.addEventListener('online', online); window.addEventListener('offline', online); return () => { window.removeEventListener('online', online); window.removeEventListener('offline', online) } }, [])
   const fail = useCallback((reason: unknown) => {
     if (scopeController.isAborted()) return
-    if (reason instanceof ApiRequestError && (reason.status === 401 || reason.status === 403)) { props.onAccessLost(); return }
+    if (reason instanceof ApiRequestError && [401, 403, 404].includes(reason.status)) {
+      requestGeneration.current += 1
+      albumRead.current += 1
+      activeAlbumId.current = null
+      pending.current = false
+      paging.current = false
+      scopeController.abort()
+      setAlbums([]); setCatalogCursor(null); setAlbum(null); setEntries([]); setEntryCursor(null); setEntry(null)
+      setGroups([]); setUpload(null); setSuggestedTitle(''); setHiddenSuggestions([]); setCategory(undefined); setYear(undefined)
+      setWorkshopFocusId(null); setWorkshopFocusTop(null); setRoute('catalog')
+      setLoading(false); setLoadingMore(false); setBusy(false); setError(null); setConflict(false); setSavedRefreshFailed(false)
+      scrolls.current = { catalog: 0 }; focus.current = {}
+      props.onAccessLost()
+      return
+    }
     setConflict(reason instanceof ApiRequestError && reason.status === 409)
     setError(reason instanceof ApiRequestError && reason.status === 409 ? 'Альбом уже изменили. Обновите данные перед новым действием.' : 'Не удалось загрузить альбомы. Проверьте соединение и повторите.')
   }, [scopeController, props])
@@ -175,7 +189,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       await action(); if (scopeController.isAborted()) return false
       after?.()
       try { if (album && !after) await refreshAlbum(album.id, route === 'entry'); else reloadCatalog() }
-      catch { setSavedRefreshFailed(true) }
+      catch (reason) { if (reason instanceof ApiRequestError && [401, 403, 404].includes(reason.status)) { fail(reason); return false } setSavedRefreshFailed(true) }
       return true
     } catch (reason) { fail(reason); return false }
     finally { pending.current = false; if (!scopeController.isAborted()) setBusy(false) }

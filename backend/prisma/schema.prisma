@@ -26,6 +26,7 @@ model User {
   createdInvites      FamilyInvite[]       @relation("InviteCreator")
   acceptedInvites     FamilyInvite[]       @relation("InviteAcceptor")
   idempotencyRecords  IdempotencyRecord[]
+  albumSourceOperations AlbumSourceOperation[]
   authoredMemories    Memory[]             @relation("MemoryAuthor")
   uploadedMedia       MediaAsset[]         @relation("MediaUploader")
   mediaReservations   UploadReservation[]
@@ -414,6 +415,7 @@ model Family {
   albums               Album[]
   albumEntries         AlbumEntry[]
   albumEntrySources    AlbumEntrySource[]
+  albumSourceOperations AlbumSourceOperation[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -565,6 +567,7 @@ model Album {
   child           Child?               @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "albums_child_id_family_id_fkey")
   entries         AlbumEntry[]
   sources         AlbumEntrySource[]    @relation("AlbumSources")
+  sourceOperations AlbumSourceOperation[]
   coverSource     AlbumEntrySource?    @relation("AlbumCoverSource", fields: [coverSourceId], references: [id], onDelete: SetNull, map: "albums_cover_source_id_fkey")
 
   @@unique([id, familyId], map: "albums_id_family_id_key")
@@ -597,6 +600,7 @@ model AlbumEntry {
   family      Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entries_family_id_fkey")
   album       Album                @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entries_album_id_family_id_fkey")
   sources     AlbumEntrySource[]
+  sourceOperations AlbumSourceOperation[]
 
   @@unique([id, familyId], map: "album_entries_id_family_id_key")
   @@unique([id, albumId, familyId], map: "album_entries_id_album_id_family_id_key")
@@ -628,6 +632,26 @@ model AlbumEntrySource {
   @@index([familyId, albumId, entryId, position], map: "album_entry_sources_entry_order_idx")
   @@index([familyId, memoryId], map: "album_entry_sources_memory_idx")
   @@map("album_entry_sources")
+}
+
+model AlbumSourceOperation {
+  id          String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId    String     @map("family_id") @db.Uuid
+  albumId     String     @map("album_id") @db.Uuid
+  entryId     String     @map("entry_id") @db.Uuid
+  actorUserId String     @map("actor_user_id") @db.Uuid
+  operation   String
+  requestId   String     @map("request_id") @db.Uuid
+  payloadHash String     @map("payload_hash")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  family      Family     @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_source_operations_family_id_fkey")
+  album       Album      @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_source_operations_album_id_family_id_fkey")
+  entry       AlbumEntry @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_source_operations_entry_id_album_id_family_id_fkey")
+  actor       User       @relation(fields: [actorUserId], references: [id], onDelete: Cascade, map: "album_source_operations_actor_user_id_fkey")
+
+  @@unique([familyId, actorUserId, albumId, entryId, operation, requestId], map: "album_source_operations_scope_key")
+  @@index([familyId, albumId, entryId], map: "album_source_operations_entry_idx")
+  @@map("album_source_operations")
 }
 
 model MemoryComment {

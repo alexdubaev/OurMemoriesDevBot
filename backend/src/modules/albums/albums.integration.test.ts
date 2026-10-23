@@ -115,6 +115,52 @@ describe('album PostgreSQL invariants', () => {
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
   })
 
+  test('source updates remain replayable after shared idempotency expiry without stale-version conflicts or resurrection', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const album = await createAlbum()
+    const entry = await createEntry(album.id, { title: 'Запись' })
+    const memory = await createNote()
+    const secondMemory = await createNote()
+    const key = randomUUID()
+    const body = { expectedVersion: 1, sources: [{ memoryId: memory.id, sourceKind: 'memory', sourceId: memory.id }] }
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`
+
+    const concurrent = await Promise.all([
+      http(path, 'PUT', token, body, key),
+      http(path, 'PUT', token, body, key),
+    ])
+    expect(concurrent.map(({ status }) => status)).toEqual([200, 200])
+    const firstResult = await concurrent[0]!.json()
+    const sourceId = firstResult.entry.sources[0].id
+    const stableVersion = (await db.album.findUniqueOrThrow({ where: { id: album.id } })).version
+    const stableEntryVersion = (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version
+    await db.memory.update({ where: { id: memory.id }, data: { status: 'deleted', deletedAt: new Date() } })
+    await db.idempotencyRecord.deleteMany({ where: { actorUserId: userId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key } })
+
+    const replay = await http(path, 'PUT', token, body, key)
+    expect(replay.status).toBe(200)
+    expect((await replay.json()).entry.sources).toMatchObject([{ id: sourceId, available: false, attachment: null, body: null }])
+    expect((await db.album.findUniqueOrThrow({ where: { id: album.id } })).version).toBe(stableVersion)
+    expect((await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version).toBe(stableEntryVersion)
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
+
+    await db.idempotencyRecord.deleteMany({ where: { actorUserId: userId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key } })
+    const altered = await http(path, 'PUT', token, {
+      expectedVersion: 1, sources: [{ memoryId: secondMemory.id, sourceKind: 'memory', sourceId: secondMemory.id }],
+    }, key)
+    expect(altered.status).toBe(409)
+    expect((await db.album.findUniqueOrThrow({ where: { id: album.id } })).version).toBe(stableVersion)
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
+
+    const deletedEntry = await http(`/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}`, 'DELETE', token, undefined, undefined, { 'if-match': String(stableVersion) })
+    expect(deletedEntry.status).toBe(204)
+    await db.idempotencyRecord.deleteMany({ where: { actorUserId: userId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key } })
+    const replayAfterDelete = await http(path, 'PUT', token, body, key)
+    expect(replayAfterDelete.status).toBe(404)
+    expect((await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).deletedAt).not.toBeNull()
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(0)
+  })
+
   test('requires an event title even when the event already has a source', async () => {
     const album = await createAlbum('events')
     const memory = await createNote()

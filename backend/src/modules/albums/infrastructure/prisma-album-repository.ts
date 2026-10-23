@@ -291,6 +291,16 @@ export class PrismaAlbumRepository implements AlbumRepository {
       async execute(tx) {
       await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
+      const receipt = await tx.albumSourceOperation.findUnique({ where: {
+        familyId_actorUserId_albumId_entryId_operation_requestId: {
+          familyId: scope.familyId, actorUserId: scope.principal.userId, albumId, entryId,
+          operation: 'set_sources', requestId: key,
+        },
+      } })
+      if (receipt) {
+        if (receipt.payloadHash !== payloadHash) throw idempotencyConflict()
+        return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
+      }
       assertVersion(album.version, input.expectedVersion)
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
       const refs = input.sources as AlbumMemorySourceRef[]
@@ -319,6 +329,10 @@ export class PrismaAlbumRepository implements AlbumRepository {
       if (album.kind === 'workshop' && resolved.length === 0) throw new AlbumFailure('invalid_input', 'Для работы добавьте хотя бы одно фото')
       await tx.albumEntry.update({ where: { id: entryId }, data: { version: { increment: 1 } } })
       await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
+      await tx.albumSourceOperation.create({ data: {
+        familyId: scope.familyId, albumId, entryId, actorUserId: scope.principal.userId,
+        operation: 'set_sources', requestId: key, payloadHash,
+      } })
       return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
     },
     })

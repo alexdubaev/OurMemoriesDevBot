@@ -196,6 +196,32 @@ test('stale album detail and old account responses cannot replace the current ro
   await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)
 })
 
+test('album 404 revokes and clears private detail before a late read can settle', async ({ page }) => {
+  await openSynthetic(page, 'albums=24')
+  await page.getByRole('button', { name: /У бабушки/ }).click()
+  await expect(page.getByRole('heading', { name: 'У бабушки', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'В саду', exact: true }).click()
+  await expect(page.locator('.albums-entry-detail')).toContainText('Тёплый день у бабушки')
+  await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  await page.evaluate(() => (window as unknown as { __albumsTriggerBack: () => void }).__albumsTriggerBack())
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+
+  await page.evaluate(() => (window as unknown as { __albumsRevokeOnNextRead: () => void }).__albumsRevokeOnNextRead())
+  await page.getByRole('button', { name: 'Переместить историю 2 вверх', exact: true }).click()
+  await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Мои семьи', exact: true })).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('Доступ к этой семье закрыт.')
+  await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)
+  await expect(page.getByText('У бабушки', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Тёплый день у бабушки', { exact: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __albumsEvidence: { lateReadStarted: boolean } }).__albumsEvidence.lateReadStarted)).toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __albumsEvidence: { lateReadCompleted: boolean } }).__albumsEvidence.lateReadCompleted), { timeout: 3000 }).toBe(true)
+  await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)
+  await expect(page.getByText('Тёплый день у бабушки', { exact: true })).toHaveCount(0)
+})
+
 test('bottom navigation grows and wraps labels at 200% text without reducing touch targets', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
