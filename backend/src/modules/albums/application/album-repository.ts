@@ -16,7 +16,7 @@ export type EntryListCursor = { orderKey?: number; dateValue?: string | null; id
 export type PickerListCursor = { occurredAt: string; id: string }
 
 export interface AlbumRepository {
-  listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; limit: number; before?: AlbumListCursor }): Promise<{ items: AlbumDto[]; hasNext: boolean; last: AlbumListCursor | null }>
+  listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; childId?: string; limit: number; before?: AlbumListCursor }): Promise<{ items: AlbumDto[]; hasNext: boolean; last: AlbumListCursor | null }>
   getAlbum(scope: FamilyScope, albumId: string): Promise<AlbumDto>
   createAlbum(scope: FamilyScope, input: CreateAlbumRequest, key: string, payloadHash: string): Promise<{ album: AlbumDto; replayed: boolean }>
   updateAlbum(scope: FamilyScope, albumId: string, input: UpdateAlbumRequest): Promise<AlbumDto>

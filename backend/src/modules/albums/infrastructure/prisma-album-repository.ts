@@ -42,12 +42,16 @@ export class PrismaAlbumRepository implements AlbumRepository {
     private readonly sourceCatalog: AlbumMemorySourceCatalog,
   ) {}
 
-  async listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; limit: number; before?: AlbumCursor }) {
+  async listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; childId?: string; limit: number; before?: AlbumCursor }) {
     return this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, false)
+      if (input.childId && !await tx.child.findFirst({ where: { id: input.childId, familyId: scope.familyId, deletedAt: null }, select: { id: true } })) {
+        throw new AlbumFailure('not_found', 'Профиль ребёнка не найден')
+      }
       const where: Prisma.AlbumWhereInput = {
         familyId: scope.familyId,
         deletedAt: null,
+        ...(input.childId ? { childId: input.childId } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.filter === 'template' ? { kind: { in: ['year', 'events', 'workshop'] } } : {}),
         ...(input.filter === 'custom' ? { kind: 'free' } : {}),
@@ -90,9 +94,9 @@ export class PrismaAlbumRepository implements AlbumRepository {
           return { resourceId: existing.id, response: { albumId: existing.id, reused: true }, responseSnapshot: { albumId: existing.id } }
         }
         if (input.kind === 'free' ? input.childId !== null : !input.childId) throw new AlbumFailure('invalid_input', 'Для этого типа альбома нужен текущий профиль ребёнка')
-        if (input.childId && !await tx.child.findFirst({ where: { id: input.childId, familyId: scope.familyId }, select: { id: true } })) throw albumMissing()
+        // The row lock serializes with child deletion, which refuses while a live album exists.
+        if (input.childId && !await lockLiveChild(tx, scope.familyId, input.childId)) throw albumMissing()
         if (input.kind === 'year') {
-          await tx.$queryRaw`SELECT id FROM children WHERE id=${input.childId!}::uuid AND family_id=${scope.familyId}::uuid FOR UPDATE`
           const existingYear = await tx.album.findFirst({ where: { familyId: scope.familyId, childId: input.childId, kind: 'year', deletedAt: null }, select: { id: true } })
           if (existingYear) throw new AlbumFailure('conflict', 'Для этого ребёнка уже создан первый год')
         }
@@ -509,6 +513,10 @@ async function lockEntry(tx: PrismaTransactionClient, familyId: string, albumId:
   const row = await tx.albumEntry.findUnique({ where: { id: entryId } })
   if (!row) throw albumMissing()
   return row
+}
+async function lockLiveChild(tx: PrismaTransactionClient, familyId: string, childId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM children WHERE id=${childId}::uuid AND family_id=${familyId}::uuid AND deleted_at IS NULL FOR UPDATE`
+  return rows.length > 0
 }
 function assertVersion(actual: number, expected: number) { if (actual !== expected) throw albumVersionConflict() }
 function idempotencyConflict() { return new AlbumFailure('idempotency_conflict', 'Этот Idempotency-Key уже использован с другими данными') }

@@ -23,9 +23,11 @@ export class AlbumService {
   constructor(private readonly repository: AlbumRepository, private readonly secret: string) {}
 
   list(scope: FamilyScope, query: ListAlbumsQuery) {
-    const before = query.cursor ? this.readCursor(query.cursor, { familyId: scope.familyId, kind: 'albums', filters: { kind: query.kind ?? null, filter: query.filter } }) : undefined
+    // `childId` joins the signed filters only when set, so cursors issued before it stay valid.
+    const filters = { kind: query.kind ?? null, filter: query.filter, ...(query.childId ? { childId: query.childId } : {}) }
+    const before = query.cursor ? this.readCursor(query.cursor, { familyId: scope.familyId, kind: 'albums', filters }) : undefined
     return this.repository.listAlbums(scope, { ...query, before: before?.last as { createdAt: string; id: string } | undefined })
-      .then((page) => ({ items: page.items, nextCursor: page.hasNext && page.last ? this.writeCursor({ version: 1, familyId: scope.familyId, kind: 'albums', filters: { kind: query.kind ?? null, filter: query.filter }, last: page.last }) : null }))
+      .then((page) => ({ items: page.items, nextCursor: page.hasNext && page.last ? this.writeCursor({ version: 1, familyId: scope.familyId, kind: 'albums', filters, last: page.last }) : null }))
   }
 
   async create(scope: FamilyScope, input: CreateAlbumRequest, key: string) {
