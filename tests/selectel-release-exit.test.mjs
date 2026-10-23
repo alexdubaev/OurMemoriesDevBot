@@ -376,6 +376,13 @@ const reviewedSingleAvatarSourceBlobs = [
   ['webapp/src/platform/media/use-private-image-url.ts', '73a376f7d919dbad664eec30ddfa903fe8b0313b'],
   ['webapp/src/platform/persistence/private-cache.ts', '302b1f5a95b8ad092b255a936959e5d6e324180c'],
 ]
+const reviewedWelcomeCta6Blobs = [
+  ['bun.lock', '1e6ca895f4498c94b59ae1b4e9e97d5a99a59409'],
+  ['webapp/package.json', '1202c550eaa3a6cbd90fbd9f5a9c4b30080cec8a'],
+  ['webapp/public/assets/fonts/Comfortaa-OFL.txt', '1ecc8c6edc4c6624e40b073ea17d177a5641b9e3'],
+  ['webapp/src/features/welcome/WelcomeSplash.tsx', '60388d4b83e4b4fd46e9c82f7213a43ae2fa0a0d'],
+  ['webapp/src/features/welcome/welcome-splash.css', '18174a67d1aad32d10c509a93e576ccbfadf3936'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -953,6 +960,57 @@ slowTest('exact cropped-channel avatar source preserves designated 33a recovery 
     runningBackend: runningPair, runningWebapp: runningPair,
     sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
     action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact Welcome CTA 6 source preserves designated 33a recovery and rejects welcome drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
+    'apply exact shared header and child avatar source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSingleAvatarSourceBlobs,
+    'apply exact cropped-channel avatar production blobs')
+  mkdirSync(resolve(source.root, 'webapp/public/assets/fonts'), { recursive: true })
+  source = commitFrozenSourceFiles(source, reviewedWelcomeCta6Blobs,
+    'apply exact Welcome CTA 6 production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness', processTimeoutMs: 60_000 })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/welcome/WelcomeSplash.tsx',
+    '\n// unreviewed welcome runtime drift\n', 'mutate welcome production source')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
   assert.notEqual(rejected.status, 0, rejected.output)
   assert.match(rejected.output, /application runtime differs from the verified rollback source/)
   assert.doesNotMatch(rejected.events, /UP:|GATE/)

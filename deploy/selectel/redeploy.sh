@@ -744,13 +744,16 @@ rollback_source_compatibility_profile() {
 			# to the same full-attested dc320 source and applies only to target 33a.
 			# The diagnostic source pin is separately bound to an exact runtime and
 			# executable compatibility fingerprint.
+			# The exact Welcome CTA 6 production inputs have their own measured
+			# executable fingerprint; this binding remains limited to recovery to 33a.
 			exact_compatibility_attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:18d7cd0be088612c52c39ac101c97a81292d4da759bb92e679036b9604be65d5:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:98ec68669e8a64cac59ca55bd34e3585cc5fbf24d3c48d6976196118ae1a762a:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e:comments"
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0:comments") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc:comments") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

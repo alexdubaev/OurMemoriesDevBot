@@ -219,6 +219,40 @@ test('production App reuses one child avatar across feed, family and same-family
   expect(await rawRequestPaths(page)).not.toContain(channelPath)
 })
 
+test('welcome CTA is ready immediately, pauses with document visibility, and completes the real App transition', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await page.goto('/e2e/selected-family-app.harness.html?avatarDelay=250')
+
+  const welcome = page.getByRole('button', { name: 'Продолжить', exact: true })
+  await expect(welcome).toBeVisible({ timeout: 1_500 })
+  await expect(welcome).toBeEnabled()
+  await welcome.focus()
+  await expect(welcome).toBeFocused()
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => page.locator('.memolyWelcome .photo').evaluate((image) => getComputedStyle(image).opacity)).toBe('1')
+  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationName)).toBe('none')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationPlayState)).toBe('paused')
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationPlayState)).toBe('running')
+
+  await welcome.evaluate((button: HTMLButtonElement) => {
+    button.click()
+    button.click()
+  })
+  await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
+  await expect(page.locator('.memolyWelcome')).toHaveCount(0)
+})
+
 test('production App confirms a cold hub family before loading and keeps its avatar on first selection', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
