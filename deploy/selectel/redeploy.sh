@@ -756,7 +756,8 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc:comments"
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65:comments") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1:albums") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -790,6 +791,7 @@ for (const line of (process.env.MEMOLY_EXPECTED_MIGRATION_CHECKSUMS ?? "").trim(
       expected.has(name)) process.exit(1);
   expected.set(name, new Set([lfChecksum, crlfChecksum]));
 }
+
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 try {
   if (expected.size === 0) throw new Error("empty expected migration catalog");
@@ -813,6 +815,77 @@ try {
   process.exit(1);
 }
 MEMOLY_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
+rollback_verify_albums_migration_history() {
+	local phase=$1 baseline_catalog candidate_catalog suffix expected_suffix
+	local baseline_count candidate_count baseline_names candidate_names
+	case "$phase" in pre-sql|complete) ;; *) return 1 ;; esac
+	baseline_catalog=$(rollback_migration_catalog_checksums dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92) || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
+	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
+	[ "$baseline_count" = 49 ] && [ "$candidate_count" = 52 ] || return 1
+	baseline_names=$(printf '%s\n' "$baseline_catalog" | cut -d: -f1)
+	candidate_names=$(printf '%s\n' "$candidate_catalog" | cut -d: -f1)
+	[ "$(printf '%s\n' "$candidate_names" | head -n 49)" = "$baseline_names" ] || return 1
+	suffix=$(printf '%s\n' "$candidate_names" | tail -n 3)
+	expected_suffix=$(printf '%s\n' \
+		20261023110000_memoly_albums \
+		20261023120000_album_entry_tombstones_year_uniqueness \
+		20261023130000_album_source_operation_receipts)
+	[ "$suffix" = "$expected_suffix" ] || return 1
+	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
+	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
+	MEMOLY_ALBUMS_LEDGER_PHASE="$phase" compose run --rm --no-deps \
+		-e "MEMOLY_EXPECTED_BASELINE_MIGRATIONS=$baseline_catalog" \
+		-e "MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS=$candidate_catalog" \
+		-e "MEMOLY_ALBUMS_LEDGER_PHASE=$phase" backend bun -e "$(cat <<'MEMOLY_ALBUM_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+function parse(value) {
+  const result = [];
+  const seen = new Set();
+  for (const line of (value ?? "").trim().split("\n")) {
+    const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+    if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+        !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") || seen.has(name))
+      throw new Error("invalid expected migration catalog");
+    seen.add(name);
+    result.push({ name, checksums: new Set([lfChecksum, crlfChecksum]) });
+  }
+  return result;
+}
+const baseline = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
+const candidate = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
+const phase = process.env.MEMOLY_ALBUMS_LEDGER_PHASE;
+if (baseline.length !== 49 || candidate.length !== 52 ||
+    candidate.slice(0, 49).some((row, index) => row.name !== baseline[index].name ||
+      ![...row.checksums].some(checksum => baseline[index].checksums.has(checksum))) ||
+    !["pre-sql", "complete"].includes(phase)) process.exit(1);
+const minimum = phase === "pre-sql" ? 49 : 52;
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.length < minimum || rows.length > 52 || rows.some(row => !row.finished_at || row.rolled_back_at))
+    throw new Error("invalid album migration ledger state");
+  const seen = new Set();
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const expected = candidate[index];
+    if (!expected || typeof row.migration_name !== "string" || typeof row.checksum !== "string" ||
+        row.migration_name !== expected.name || !expected.checksums.has(row.checksum) || seen.has(row.migration_name))
+      throw new Error("migration ledger is not an exact catalog prefix");
+    seen.add(row.migration_name);
+  }
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_ALBUM_MIGRATION_HISTORY_JS
 )" >/dev/null 2>&1
 }
 
@@ -881,6 +954,8 @@ rollback_auth_gate_for_verified_pair() {
 }
 
 verify_application_rollback() {
+	local migration_phase=${1:-complete}
+	case "$migration_phase" in complete|pre-sql) ;; *) die 'unknown application rollback verification phase' ;; esac
 	(
 	[ ! -e "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
 	[ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] ||
@@ -947,7 +1022,7 @@ verify_application_rollback() {
 		die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = comments ]; then
+	if [ "$profile" = comments ] || [ "$profile" = albums ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
@@ -995,7 +1070,13 @@ verify_application_rollback() {
 			die 'rollback image revision label mismatch'
 	done
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	migration_status >/dev/null 2>&1 || die 'rollback target cannot confirm completed migrations'
+	if [ "$profile" = albums ] && [ "$migration_phase" = pre-sql ]; then
+		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
+		# migrate status intentionally reports a pending reviewed additive suffix.
+		:
+	else
+		migration_status >/dev/null 2>&1 || die 'rollback target cannot confirm completed migrations'
+	fi
 	# Both capabilities are proven by the current -> old -> current PostgreSQL probe.
 	# Missing tables, unknown result types, unfinished migrations and read errors fail closed.
 	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
@@ -1007,12 +1088,15 @@ verify_application_rollback() {
 		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
 		rollback_verify_migration_history "$expected_migration_checksums" ||
 			die 'comments rollback requires the exact completed migration history'
+	elif [ "$profile" = albums ]; then
+		rollback_verify_albums_migration_history "$migration_phase" ||
+			die 'albums rollback requires the exact reviewed migration history for this phase'
 	fi
 	)
 }
 
 rollback() {
-	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	verify_application_rollback complete || die 'application rollback compatibility could not be verified'
 	set -a
 	. "$ROLLBACK_ENV"
 	set +a
@@ -1199,7 +1283,22 @@ deploy() {
 }
 
 rollback_readiness() {
-	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	local migration_phase=complete lock_path fd_target
+	case "${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}" in
+		complete) ;;
+		pre-sql)
+			[ "${SELECTEL_CI_RELEASE:-false}" = true ] || die 'pre-SQL album readiness is restricted to the guarded CI release'
+			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || die 'pre-SQL album readiness requires the inherited deploy lock'
+			lock_path=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || die 'deployment lock path is unavailable'
+			fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
+			[ "$fd_target" = "$lock_path" ] || die 'pre-SQL album readiness lock does not reference the expected lock file'
+			{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || die 'pre-SQL album readiness lock is not open'
+			flock -n "$SELECTEL_DEPLOY_LOCK_FD" || die 'pre-SQL album readiness lock is not held'
+			migration_phase=pre-sql
+			;;
+		*) die 'unknown album ledger readiness phase' ;;
+	esac
+	verify_application_rollback "$migration_phase" || die 'application rollback compatibility could not be verified'
 	set -a
 	. "$ROLLBACK_ENV"
 	set +a
