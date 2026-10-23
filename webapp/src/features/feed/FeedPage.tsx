@@ -588,7 +588,11 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
 function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport }: { childAvatarCrop: Props['childAvatarCrop']; childAvatarStatus: Props['childAvatarStatus']; childAvatarUrl: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport }) {
   const playbackCoordinator = useContext(PlaybackContext)
   useLayoutEffect(() => { playbackCoordinator?.pauseAll() }, [playbackCoordinator])
-  const [index, setIndex] = useState(initialIndex)
+  const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
+  const [index, setIndex] = useState(startIndex)
+  const [settledIndex, setSettledIndex] = useState(startIndex)
+  const indexRef = useRef(startIndex)
+  const onIndexChangeRef = useRef(onIndexChange)
   const media = memory.attachments[index]
   const attribution = memory.publicationAttribution
   const authorName = attribution?.name ?? memory.author.name
@@ -599,23 +603,64 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
   const root = useRef<HTMLDivElement | null>(null)
   const [photoZoom, setPhotoZoom] = useState(1)
   const [photoPan, setPhotoPan] = useState({ x: 0, y: 0 })
+  const photoZoomRef = useRef(1)
+  const [reduceMotion, setReduceMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const reduceMotionRef = useRef(reduceMotion)
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null)
   const swipeStart = useRef<{ id: number; x: number; y: number; axis: 'undecided' | 'horizontal' | 'vertical' | 'cancelled'; direction: -1 | 1 | null } | null>(null)
   const onCloseRef = useRef(onClose)
+  const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: reduceMotion ? 0 : 25, startIndex, watchDrag: (_api, event) => {
+    if (photoZoomRef.current > 1 || pinchStart.current) return false
+    if ('touches' in event && event.touches.length !== 1) return false
+    const target = event.target
+    return !(target instanceof Element && target.closest('button, input, select, textarea, a, [role="slider"], video[controls]'))
+  } })
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
+  useEffect(() => { onIndexChangeRef.current = onIndexChange }, [onIndexChange])
+  useEffect(() => { reduceMotionRef.current = reduceMotion }, [reduceMotion])
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReduceMotion(preference.matches)
+    preference.addEventListener('change', update)
+    return () => preference.removeEventListener('change', update)
+  }, [])
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
+  useEffect(() => {
+    if (!embla) return
+    const select = () => {
+      const next = embla.selectedScrollSnap()
+      if (pinchStart.current || swipeStart.current?.axis === 'vertical' || swipeStart.current?.axis === 'cancelled') { embla.scrollTo(indexRef.current, true); return }
+      if (next === indexRef.current) return
+      swipeStart.current = null
+      photoZoomRef.current = 1
+      setPhotoZoom(1)
+      setPhotoPan({ x: 0, y: 0 })
+      root.current?.querySelectorAll('video').forEach((video) => video.pause())
+      indexRef.current = next
+      setIndex(next)
+      onIndexChangeRef.current(next)
+    }
+    const settle = () => setSettledIndex(indexRef.current)
+    const pointerUp = () => { if (reduceMotionRef.current) embla.scrollTo(embla.selectedScrollSnap(), true) }
+    embla.on('select', select)
+    embla.on('settle', settle)
+    embla.on('pointerUp', pointerUp)
+    return () => { embla.off('select', select); embla.off('settle', settle); embla.off('pointerUp', pointerUp) }
+  }, [embla])
+  const viewerViewportRef = useCallback((element: HTMLDivElement | null) => { viewportRef(element); registerSeenContent?.(element) }, [registerSeenContent, viewportRef])
   const navigate = (next: number) => {
-    if (next < 0 || next >= memory.attachments.length) return
+    if (next < 0 || next >= memory.attachments.length || !embla) return
     swipeStart.current = null
+    pinchStart.current = null
+    photoZoomRef.current = 1
     setPhotoZoom(1)
     setPhotoPan({ x: 0, y: 0 })
-    root.current?.querySelectorAll('video').forEach((video) => video.pause())
-    setIndex(next)
-    onIndexChange(next)
+    embla.scrollTo(next, reduceMotion)
   }
   const onMediaTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
     const target = event.target
     if (media.kind === 'photo' && event.touches.length === 2) {
+      embla?.scrollTo(index, true)
       const [a, b] = Array.from(event.touches)
       pinchStart.current = { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: photoZoom }
       swipeStart.current = null
@@ -638,21 +683,22 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
       const [a, b] = Array.from(event.touches)
       const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
       const zoom = Math.min(4, Math.max(1, pinchStart.current.zoom * distance / pinchStart.current.distance))
-      const photo = event.currentTarget.querySelector('img')
+      const photo = event.currentTarget.querySelector('[data-carousel-active="true"] img')
       const photoBounds = photo?.getBoundingClientRect()
       const baseWidth = photoBounds ? photoBounds.width / photoZoom : 0
       const baseHeight = photoBounds ? photoBounds.height / photoZoom : 0
       const maxX = Math.max(0, (baseWidth * zoom - event.currentTarget.clientWidth) / 2)
       const maxY = Math.max(0, (baseHeight * zoom - event.currentTarget.clientHeight) / 2)
+      photoZoomRef.current = zoom
       setPhotoZoom(zoom)
       setPhotoPan((pan) => ({ x: Math.max(-maxX, Math.min(maxX, pan.x)), y: Math.max(-maxY, Math.min(maxY, pan.y)) }))
       return
     }
     const start = swipeStart.current
     if (!start) return
-    if (media.kind === 'photo' && photoZoom > 1 && event.touches.length === 1) {
+    if (media.kind === 'photo' && photoZoomRef.current > 1 && event.touches.length === 1) {
       const touch = event.touches[0]
-      const photo = event.currentTarget.querySelector('img')
+      const photo = event.currentTarget.querySelector('[data-carousel-active="true"] img')
       const photoBounds = photo?.getBoundingClientRect()
       const baseWidth = photoBounds ? photoBounds.width / photoZoom : 0
       const baseHeight = photoBounds ? photoBounds.height / photoZoom : 0
@@ -675,23 +721,27 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
     if (start.axis === 'undecided') {
       if (Math.max(Math.abs(dx), Math.abs(dy)) <= 12) return
       if (Math.abs(dx) >= Math.abs(dy) * 1.25) { start.axis = 'horizontal'; start.direction = dx < 0 ? -1 : 1 }
-      else if (Math.abs(dy) >= Math.abs(dx) * 1.25) { start.axis = 'vertical'; start.direction = dy < 0 ? -1 : 1 }
-      else start.axis = 'cancelled'
+      else if (Math.abs(dy) >= Math.abs(dx) * 1.25) { start.axis = 'vertical'; start.direction = dy < 0 ? -1 : 1; embla?.scrollTo(indexRef.current, true) }
+      else { start.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }
       return
     }
     const primary = start.axis === 'horizontal' ? dx : dy
     const cross = start.axis === 'horizontal' ? dy : dx
-    if (start.axis === 'cancelled' || (start.direction !== null && primary * start.direction < -8) || Math.abs(cross) > Math.abs(primary) * 1.25) start.axis = 'cancelled'
+    if (start.axis === 'cancelled' || (start.direction !== null && primary * start.direction < -8) || Math.abs(cross) > Math.abs(primary) * 1.25) {
+      start.axis = 'cancelled'
+      embla?.scrollTo(indexRef.current, true)
+    }
   }
   const onMediaTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
     if (event.touches.length < 2) pinchStart.current = null
     const start = swipeStart.current
     swipeStart.current = null
+    if (start?.axis === 'horizontal' && reduceMotion) embla?.scrollTo(indexRef.current, true)
     if (!start || start.axis === 'cancelled' || (window.visualViewport?.scale ?? 1) > 1 || event.touches.length !== 0 || event.changedTouches.length !== 1 || event.changedTouches[0].identifier !== start.id) return
     const touch = event.changedTouches[0]
     const dx = touch.clientX - start.x
     const dy = touch.clientY - start.y
-    if (start.axis === 'horizontal' && start.direction !== null && Math.abs(dx) >= 48 && Math.abs(dx) >= Math.abs(dy) * 1.3 && Math.sign(dx) === start.direction) navigate(index - start.direction)
+    if (start.axis === 'horizontal') { swipeStart.current = null; return }
     if (media.kind === 'photo' && start.axis === 'vertical' && start.direction === 1 && dy >= 96 && dy >= Math.abs(dx) * 1.3) onCloseRef.current()
   }
   useEffect(() => {
@@ -734,7 +784,21 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
             <Typography as="span" aria-hidden="true" className="memoly-viewer-close-glyph" variant="memoryMeta">×</Typography>
           </button>
         </div>
-        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchEnd={onMediaTouchEnd} onTouchMove={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" key={media.id} ref={registerSeenContent}><div data-carousel-active="true" style={media.kind === 'photo' ? { transform: `translate(${photoPan.x}px, ${photoPan.y}px) scale(${photoZoom})`, transformOrigin: 'center', touchAction: 'none' } : undefined}><Attachment attachment={media} autoplay={index === initialIndex && media.kind === 'video'} borrowedPhotoUrl={index === initialIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div></div>
+        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchCancelCapture={() => { if (swipeStart.current) swipeStart.current.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }} onTouchEnd={onMediaTouchEnd} onTouchMoveCapture={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" ref={viewerViewportRef}>
+          <div className="memoly-mixed-viewer-track">
+            {memory.attachments.map((attachment, position) => {
+              const active = position === index
+              const near = Math.abs(position - index) <= 1 || position === settledIndex
+              return <div aria-hidden={!active} aria-label={active ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-viewer-slide" data-carousel-active={active} data-carousel-position={position + 1} inert={!active} key={attachment.id} role={active ? 'group' : undefined}>
+                {attachment.kind === 'photo' && near || active
+                  ? <div style={attachment.kind === 'photo' ? { transform: `translate(${active ? photoPan.x : 0}px, ${active ? photoPan.y : 0}px) scale(${active ? photoZoom : 1})`, transformOrigin: 'center', touchAction: active && photoZoom > 1 ? 'none' : undefined } : undefined}><Attachment attachment={attachment} autoplay={position === startIndex && attachment.kind === 'video'} borrowedPhotoUrl={position === startIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={memory} photoInteractive={false} transport={transport} /></div>
+                  : attachment.kind === 'video' && near
+                    ? <ViewerThumbnail attachment={attachment} index={position + 1} total={memory.attachments.length} active={false} onSelect={() => navigate(position)} transport={transport} />
+                    : <span aria-hidden="true" className="memoly-mixed-placeholder" />}
+              </div>
+            })}
+          </div>
+        </div>
         {memory.body.trim() ? <Typography className="memoly-viewer-caption" variant="memoryMeta">{memory.body}</Typography> : null}
         {memory.attachments.length > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={thumbnailIndex + 1} total={memory.attachments.length} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div> : null}
         {memory.attachments.length > 1 ? <div className="memoly-mixed-viewer-nav"><button disabled={index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={index === memory.attachments.length - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div> : null}
