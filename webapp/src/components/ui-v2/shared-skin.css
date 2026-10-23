@@ -44,7 +44,7 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] { color: var(--ui-v2-color-text); background: var(--ui-v2-color-canvas); }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] :where(.ui-v2-header-back, .ui-v2-settings) { color: var(--ui-v2-color-accent); background: var(--ui-v2-header-action); font-family: var(--ui-v2-font-family); }
 
-/* Existing controller-owned navigation, with its three positions and refs. */
+/* Controller-owned navigation retains compact geometry and one safe-area inset. */
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] {
   --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   left: 0 !important; right: 0 !important; bottom: 0 !important;
@@ -57,9 +57,10 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
 }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] > div { box-sizing: border-box; width: 100%; height: auto; min-height: calc(var(--layout-bottom-nav) - 1px); padding: 0 calc(12px + var(--host-inset-right)) 0 calc(12px + var(--host-inset-left)); border-top: 0; background: var(--ui-v2-color-surface); }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] { position: relative; min-height: calc(var(--layout-bottom-nav) - 1px); color: var(--ui-v2-color-muted) !important; border-radius: 0; font-weight: 400; }
-.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home']::before,.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family']::before { position: absolute; top: 0; width: 22px; height: 2px; border-radius: 2px; background: var(--ui-v2-color-accent); content: ''; display: none; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home']::before,.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='archive-box']::before,.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family']::before { position: absolute; top: 0; width: 22px; height: 2px; border-radius: 2px; background: var(--ui-v2-color-accent); content: ''; display: none; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > [data-slot='webp-icon'] { width: 20px !important; height: 20px !important; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > span { color: inherit; font-family: inherit; font-size: .625rem; font-weight: inherit; }
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > [data-variant='memoryNav'] { display: block; width: 100%; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] > :is([data-slot='webp-icon'], [data-slot='typography'], .memoly-nav-add-circle) { position: relative; top: min(5px, calc(2px + var(--ui-v2-effective-bottom-inset))); pointer-events: none; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true'] { color: var(--ui-v2-color-accent) !important; background: transparent; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-v2-active='true']::before { display: block !important; }

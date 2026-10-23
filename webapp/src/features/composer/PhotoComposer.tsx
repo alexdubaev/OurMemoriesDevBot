@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type MemoryDto } from '@web-app-demo/contracts'
 import { ZodError } from 'zod'
 
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,9 @@ export type PhotoComposerProps = {
   transport: AuthenticatedTransport
   onCancel: () => void
   onSuccess: () => void | Promise<void>
+  onPublished?: (memory: MemoryDto) => void
+  onCancellationBlockedChange?: (blocked: boolean) => void
+  onCancelRequestChange?: (cancel: () => void) => void
   onTiming?: (sample: UploadTimingSample) => void
 }
 
@@ -59,7 +62,7 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess, onTiming }: PhotoComposerProps) {
+export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess, onTiming, onPublished, onCancellationBlockedChange, onCancelRequestChange }: PhotoComposerProps) {
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
   const [occurredDate, setOccurredDate] = useState(() => familyCalendarDate(familyTimezone))
@@ -85,6 +88,8 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const abortController = useRef<AbortController | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const [createUncertain, setCreateUncertain] = useState(false)
+  const cancellationBlocked = status === 'saving' || createUncertain
+  useEffect(() => { onCancellationBlockedChange?.(cancellationBlocked) }, [cancellationBlocked, onCancellationBlockedChange])
   const [restartRequiredIndex, setRestartRequiredIndex] = useState<number | null>(null)
 
   function recordTiming(stage: UploadTimingSample['stage'], startedAt: number, fileIndex?: number) {
@@ -291,6 +296,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     }
 
     const saveStage: { current: SaveStage } = { current: 'reserve' }
+    let publishedMemory: MemoryDto | null = null
     try {
       const validationStartedAt = performance.now()
       const mediaItems: ComposerMedia[] = verifiedMedia.current ?? []
@@ -377,7 +383,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       setErrorStage(saveStage.current)
       setCreateUncertain(true)
       const createStartedAt = performance.now()
-      try { await createMediaMemory(transport, familyId, {
+      try { publishedMemory = await createMediaMemory(transport, familyId, {
         kind,
         childId,
         body: caption.trim(),
@@ -423,6 +429,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       if (abortController.current === controller) abortController.current = null
       saving.current = false
     }
+    if (publishedMemory) try { onPublished?.(publishedMemory) } catch { /* attachments are a separate durable operation */ }
   }
 
   function cancel() {
@@ -435,6 +442,8 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
     saving.current = false
     onCancel()
   }
+
+  useEffect(() => { onCancelRequestChange?.(cancel) })
 
   function addAnother() {
     setFiles([])
