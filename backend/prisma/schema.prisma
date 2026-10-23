@@ -411,6 +411,9 @@ model Family {
   maxMemoryBackups     MaxMemoryBackup[]
   maxBackupAttachments MaxMemoryBackupAttachment[]
   maxChannelBindings MaxChannelBinding[]
+  albums               Album[]
+  albumEntries         AlbumEntry[]
+  albumEntrySources    AlbumEntrySource[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -457,6 +460,7 @@ model Child {
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
   memories      Memory[]
   maxVideoUploadSessions MaxVideoUploadSession[]
+  albums        Album[]
   avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
 
   @@unique([id, familyId], map: "children_id_family_id_key")
@@ -531,12 +535,99 @@ model Memory {
   telegramVideoReference TelegramVideoReference?
   maxVideoReferences    MaxVideoReference[]
   maxBackup             MaxMemoryBackup?
+  albumSources          AlbumEntrySource[]
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@unique([familyId, firstPublishedOrdinal], map: "memories_family_id_first_published_ordinal_key")
   @@index([familyId, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_feed_idx")
   @@index([familyId, kind, status, occurredAt(sort: Desc), id(sort: Desc)], map: "memories_kind_feed_idx")
   @@map("memories")
+}
+
+model Album {
+  id              String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId        String               @map("family_id") @db.Uuid
+  childId         String?              @map("child_id") @db.Uuid
+  kind            AlbumKind
+  templateVersion Int                  @default(1) @map("template_version")
+  title           String
+  description     String?
+  version         Int                  @default(1)
+  coverSourceId   String?              @unique(map: "albums_cover_source_id_key") @map("cover_source_id") @db.Uuid
+  createActorId   String               @map("create_actor_id") @db.Uuid
+  createOperation String               @map("create_operation")
+  createRequestId String               @map("create_request_id") @db.Uuid
+  initialPayloadHash String            @map("initial_payload_hash")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  family          Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "albums_family_id_fkey")
+  child           Child?               @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "albums_child_id_family_id_fkey")
+  entries         AlbumEntry[]
+  sources         AlbumEntrySource[]    @relation("AlbumSources")
+  coverSource     AlbumEntrySource?    @relation("AlbumCoverSource", fields: [coverSourceId], references: [id], onDelete: SetNull, map: "albums_cover_source_id_fkey")
+
+  @@unique([id, familyId], map: "albums_id_family_id_key")
+  @@unique([familyId, createActorId, createOperation, createRequestId], map: "albums_create_marker_key")
+  @@index([familyId, kind, deletedAt, createdAt(sort: Desc), id(sort: Desc)], map: "albums_family_catalog_idx")
+  @@map("albums")
+}
+
+model AlbumEntry {
+  id          String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId    String               @map("family_id") @db.Uuid
+  albumId     String               @map("album_id") @db.Uuid
+  kind        AlbumEntryKind
+  monthNumber Int?                 @map("month_number")
+  title       String?
+  caption     String?
+  childQuote  String?              @map("child_quote")
+  category    String?
+  dateValue   String?              @map("date_value")
+  datePrecision AlbumDatePrecision @default(unknown) @map("date_precision")
+  orderKey    Int                  @map("order_key")
+  version     Int                  @default(1)
+  createActorId   String?           @map("create_actor_id") @db.Uuid
+  createOperation String?           @map("create_operation")
+  createRequestId String?           @map("create_request_id") @db.Uuid
+  initialPayloadHash String?        @map("initial_payload_hash")
+  deletedAt          DateTime?      @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  family      Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entries_family_id_fkey")
+  album       Album                @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entries_album_id_family_id_fkey")
+  sources     AlbumEntrySource[]
+
+  @@unique([id, familyId], map: "album_entries_id_family_id_key")
+  @@unique([id, albumId, familyId], map: "album_entries_id_album_id_family_id_key")
+  @@unique([albumId, monthNumber], map: "album_entries_album_month_key")
+  @@unique([familyId, createActorId, createOperation, createRequestId], map: "album_entries_create_marker_key")
+  @@index([familyId, albumId, orderKey, id], map: "album_entries_album_order_idx")
+  @@map("album_entries")
+}
+
+model AlbumEntrySource {
+  id         String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId   String                 @map("family_id") @db.Uuid
+  albumId    String                 @map("album_id") @db.Uuid
+  entryId    String                 @map("entry_id") @db.Uuid
+  memoryId   String                 @map("memory_id") @db.Uuid
+  sourceKind AlbumEntrySourceKind   @map("source_kind")
+  kind       AlbumSourceMediaKind
+  sourceId   String                 @map("source_id") @db.Uuid
+  position   Int                    @default(0)
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  family     Family                 @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entry_sources_family_id_fkey")
+  album      Album                  @relation("AlbumSources", fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_album_id_family_id_fkey")
+  entry      AlbumEntry             @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_entry_sources_entry_id_album_id_family_id_fkey")
+  memory     Memory                 @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
+  coverFor   Album?                 @relation("AlbumCoverSource")
+
+  @@unique([id, albumId, familyId], map: "album_entry_sources_id_album_id_family_id_key")
+  @@unique([entryId, memoryId, sourceKind, sourceId], map: "album_entry_sources_entry_source_key")
+  @@index([familyId, albumId, entryId, position], map: "album_entry_sources_entry_order_idx")
+  @@index([familyId, memoryId], map: "album_entry_sources_memory_idx")
+  @@map("album_entry_sources")
 }
 
 model MemoryComment {
@@ -894,6 +985,50 @@ enum MemoryKind {
   media
 
   @@map("memory_kind")
+}
+
+enum AlbumKind {
+  year
+  events
+  workshop
+  free
+
+  @@map("album_kind")
+}
+
+enum AlbumEntryKind {
+  month
+  event
+  work
+
+  @@map("album_entry_kind")
+}
+
+enum AlbumDatePrecision {
+  day
+  month
+  year
+  unknown
+
+  @@map("album_date_precision")
+}
+
+enum AlbumEntrySourceKind {
+  memory
+  private_storage
+  max_video
+  telegram_video
+
+  @@map("album_entry_source_kind")
+}
+
+enum AlbumSourceMediaKind {
+  photo
+  video
+  voice
+  note
+
+  @@map("album_source_media_kind")
 }
 
 enum MemoryReaction {

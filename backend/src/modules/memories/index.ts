@@ -8,7 +8,9 @@ import { TelegramVideoDeliveryService } from '../telegram'
 import { MemoryService } from './application/memory-service'
 import type { MediaMemoryCatalog } from './application/ports'
 import { unavailableMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
+import { createAlbumMemorySourceCatalog } from './infrastructure/album-memory-source-catalog'
 export { createMediaMemoryCatalog } from './infrastructure/media-memory-catalog'
+export { createAlbumMemorySourceCatalog }
 import { PrismaMemoryRepository } from './infrastructure/prisma-memory-repository'
 export { createSourceMemoryPublisher } from './infrastructure/source-memory-publisher'
 export type { SourceMemoryInput } from './infrastructure/source-memory-publisher'
@@ -48,5 +50,6 @@ export function createMemoriesModule({
 }
 
 export type { MediaMemoryCatalog, MemoryRepository } from './application/ports'
+export type { AlbumMemoryPickerItem, AlbumMemorySourceCatalog, AlbumMemorySourceProjection, AlbumMemorySourceRef } from './application/album-source-ports'
 export { MemoryService } from './application/memory-service'
 export { MemoryFailure } from './domain/errors'
