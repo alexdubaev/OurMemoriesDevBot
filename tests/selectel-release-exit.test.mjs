@@ -383,6 +383,14 @@ const reviewedWelcomeCta6Blobs = [
   ['webapp/src/features/welcome/WelcomeSplash.tsx', '60388d4b83e4b4fd46e9c82f7213a43ae2fa0a0d'],
   ['webapp/src/features/welcome/welcome-splash.css', '18174a67d1aad32d10c509a93e576ccbfadf3936'],
 ]
+const reviewedWelcomeOnceZoomBlobs = [
+  ['webapp/src/features/feed/FeedPage.tsx', '9daee855b3dd3d157a892e6f281dcd85f1ee533b'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', 'fee8d9ded865635455fe684c112f513134a6ca13'],
+  ['webapp/src/App.tsx', '648381db4d7aa5488a019254cf42d3cb436dbe1b'],
+  ['webapp/src/index.css', '8d088751c71a08c43252f31fb1990db124657147'],
+  ['webapp/src/main.tsx', '5468ed089f85d2f243e2a893264f104d199687b3'],
+  ['webapp/src/platform/app-zoom.ts', '4561b0c501136d38473905497643247ab688bb03'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -971,7 +979,7 @@ slowTest('exact cropped-channel avatar source preserves designated 33a recovery 
   assert.deepEqual(rejected.rollbackBackups, [])
 })
 
-slowTest('exact Welcome CTA 6 source preserves designated 33a recovery and rejects welcome drift before mutation', () => {
+slowTest('exact Welcome CTA and once-zoom source preserves 33a recovery and rejects production drift before mutation', () => {
   let source = createSourceWorktree('diagnostic')
   source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
   source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
@@ -982,8 +990,10 @@ slowTest('exact Welcome CTA 6 source preserves designated 33a recovery and rejec
   mkdirSync(resolve(source.root, 'webapp/public/assets/fonts'), { recursive: true })
   source = commitFrozenSourceFiles(source, reviewedWelcomeCta6Blobs,
     'apply exact Welcome CTA 6 production blobs')
+  source = commitFrozenSourceFiles(source, reviewedWelcomeOnceZoomBlobs,
+    'apply exact Welcome once-zoom production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root),
-    'b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc')
+    '2f0a4f20de43a8d4179545278c30e5430ada194948080efea4e875b097ab525f')
 
   const runningPair = 'f6'.repeat(20)
   const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
@@ -1005,21 +1015,30 @@ slowTest('exact Welcome CTA 6 source preserves designated 33a recovery and rejec
   assert.equal(preserved.rollbackBackups.length, 1)
   assert.doesNotMatch(preserved.events, /UP:|GATE/)
 
-  const drifted = commitSourceChange(source, 'webapp/src/features/welcome/WelcomeSplash.tsx',
-    '\n// unreviewed welcome runtime drift\n', 'mutate welcome production source')
-  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
-    runningBackend: runningPair, runningWebapp: runningPair,
-    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
-    action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
-  assert.notEqual(rejected.status, 0, rejected.output)
-  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
-  assert.doesNotMatch(rejected.events, /UP:|GATE/)
-  assert.equal(rejected.rollbackEnv, [
-    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
-    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
-    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
-  ].join('\n'))
-  assert.deepEqual(rejected.rollbackBackups, [])
+  for (const [path, marker] of [
+    ['webapp/src/App.tsx', '\n// unreviewed app production drift\n'],
+    ['webapp/src/platform/app-zoom.ts', '\n// unreviewed zoom production drift\n'],
+  ]) {
+    const driftRoot = mkdtempSync(resolve(root, '.scratch', 'rollback-welcome-once-zoom-drift-'))
+    const driftCheckout = spawnSync('git', ['worktree', 'add', '--detach', driftRoot, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftCheckout.status !== 0) throw new Error(driftCheckout.stdout + driftCheckout.stderr)
+    fixtureWorktrees.push(driftRoot)
+    const drifted = commitSourceChange({ root: driftRoot, sha: source.sha }, path, marker,
+      `mutate ${path} production source`)
+    const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+      runningBackend: runningPair, runningWebapp: runningPair,
+      sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+      action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
+    assert.notEqual(rejected.status, 0, rejected.output)
+    assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+    assert.doesNotMatch(rejected.events, /UP:|GATE/)
+    assert.equal(rejected.rollbackEnv, [
+      `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+      `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+      'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+    ].join('\n'))
+    assert.deepEqual(rejected.rollbackBackups, [])
+  }
 })
 
 test('the immutable Selectel source ref retains its comments compatibility profile', () => {
