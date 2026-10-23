@@ -419,7 +419,7 @@ const reviewedPrivatePhotoProductionBlobs = [
   ['backend/src/jobs.ts', 'b4774dbb15c993fee4b9985dea185808ceb584f0'],
   ['backend/src/modules/albums/index.ts', '8c8ae9e62b96eabdd7771e4b97d0363e3f068439'],
   ['backend/src/modules/albums/infrastructure/composed-album-source-catalog.ts', '3ca86aa8b21e63813df360fd26d7dbf273b9d47b'],
-  ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', 'bc655faac498a02f79882aff2f8674b34ebd44ba'],
+  ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', '382c809fa85efbd0d7c2b6db02c5e3bef7b39773'],
   ['backend/src/modules/media/application/ports.ts', '01e0881e7ffbafde73dbc14d4472dd54bdb7b4ed'],
   ['backend/src/modules/media/index.ts', '1e04ca12ded1ddca5cd0639a9700ea9cdff244a2'],
   ['backend/src/modules/media/infrastructure/prisma-album-photo-source-catalog.ts', 'c1a4a71a12505e1a6ba0192cb38187f30674cc18'],
@@ -541,7 +541,7 @@ function rollbackSource(role) {
 	if (role === 'privatePhotos') {
 	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
 	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-	  const expectedCompatibility = '6b6ea0473f2986a7bb0e9cf7432b15260ffeb87fc7d33d2e5a62638dd070dc95'
+	  const expectedCompatibility = '3dad9a61fbcb5358c1a4c8cc6a7f614b954d84869bdaaca085075a45e5a3225f'
 	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
 	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
 	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-worktree-'))
