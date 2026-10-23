@@ -4,9 +4,11 @@ import {
   albumPageSchema,
   likeResponseSchema,
   reactionResponseSchema,
+  memoryChildTagsResponseSchema,
   memoryDtoSchema,
   memoryPageSchema,
   telegramVideoOpenResponseSchema,
+  type MemoryChildTag,
   type MemoryPage,
   type MemoryReaction,
 } from '@web-app-demo/contracts'
@@ -45,6 +47,15 @@ export function loadMemory(transport: AuthenticatedTransport, familyId: string, 
     `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}`,
     memoryDtoSchema,
     { signal, headers: feedHeaders },
+  )
+}
+
+/** Replaces all child tags of a publication; a stale `expectedChildTagsVersion` is a 409 VERSION_CONFLICT. */
+export function replaceMemoryChildTags(transport: AuthenticatedTransport, familyId: string, memoryId: string, tags: MemoryChildTag[], expectedChildTagsVersion: number, signal?: AbortSignal) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/memories/${encodeURIComponent(memoryId)}/child-tags`,
+    memoryChildTagsResponseSchema,
+    { method: 'PUT', body: { tags, expectedChildTagsVersion }, signal, headers: feedHeaders },
   )
 }
 

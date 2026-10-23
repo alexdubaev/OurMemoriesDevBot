@@ -26,6 +26,8 @@ import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './
 import { ChildFilterChips, EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
 import { childFilterChips, composerInitialChildIds, normalizeChildFilter, UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
 import { ChildAlbumsStrip } from './ChildAlbumsStrip'
+import { canEditChildTags } from './child-tag-editor'
+import { MemoryChildTagsEditor } from './MemoryChildTagsEditor'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
 import { feedQueryKeys, isFeedListKey, useFeedQuery, useMemoryDelete, useMemoryReaction } from './queries'
 import { refreshFromTop, shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
@@ -162,7 +164,8 @@ export function FeedPage({
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
   const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
-  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget || commentsSelection), (id) => onSeenCandidate?.(id))
+  const [tagsMemory, setTagsMemory] = useState<MemoryDto | null>(null)
+  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || tagsMemory || deleteTarget || commentsSelection), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
   const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle, childFilter: activeChildFilter }), [familyId, unreadOnly, unreadCycle, activeChildFilter])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
@@ -314,6 +317,7 @@ export function FeedPage({
     setAddSheetOpen(false)
     setComposer(null)
     setEditingMemory(null)
+    setTagsMemory(null)
     setDetail(null)
     setMixedViewer(null)
     setActionsMemory(null)
@@ -452,6 +456,7 @@ export function FeedPage({
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} onOpenPhoto={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory: currentDetail, index, photoUrl }) }} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {active && currentMixedViewer ? <MixedMediaViewer childAvatarCrop={currentMixedViewer.memory.childId === childId ? childAvatarCrop : null} childAvatarStatus={currentMixedViewer.memory.childId === childId ? displayedChildAvatarStatus : 'absent'} childAvatarUrl={currentMixedViewer.memory.childId === childId ? displayedChildAvatarUrl : null} childName={childName} familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {active && tagsMemory && canEditChildTags(role, childList, tagsMemory) ? <MemoryChildTagsEditor accountId={accountId} childOptions={childList} key={tagsMemory.id} memory={tagsMemory} onClose={() => setTagsMemory(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
     <AddSheetPresentation
@@ -481,6 +486,7 @@ export function FeedPage({
           } : undefined}
           onDetails={() => { detailReturnFocusRef.current = actionTriggerRef.current; setActionsMemory(null); if (actionsMemory.kind === 'media' || (actionsMemory.kind === 'photo' && actionsMemory.attachments.length > 1)) { const index = mixedIndexes.current.get(actionsMemory.id) ?? 0; setMixedViewer({ memory: actionsMemory, index, photoUrl: mixedPhotoUrls.current.get(actionsMemory.attachments[index]?.id) }) } else setDetail(actionsMemory) }}
           onEdit={actionsMemory.capabilities.edit ? () => { setActionsMemory(null); setEditingMemory(actionsMemory) } : undefined}
+          onEditChildTags={canEditChildTags(role, childList, actionsMemory) ? () => { detailReturnFocusRef.current = actionTriggerRef.current; setActionsMemory(null); setTagsMemory(actionsMemory) } : undefined}
         />
       ) : null}
     </MemolyBottomSheet>
@@ -930,7 +936,7 @@ function MemoryActions({ memory, onOpen }: { memory: MemoryDto; onOpen: (memory:
   return <button aria-label="Действия с воспоминанием" className="flex size-11 items-center justify-center rounded-full text-muted-foreground" onClick={(event) => onOpen(memory, event.currentTarget)} type="button"><WebpIcon decorative name="more" size={24} /></button>
 }
 
-function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onChooseReaction }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void; onChooseReaction: () => void }) {
+function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onEditChildTags, onChooseReaction }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void; onEditChildTags?: () => void; onChooseReaction: () => void }) {
   return <div className="memoly-memory-actions" data-memory-actions-for={memory.id}>
     <DrawerTitle className="sr-only">Действия с воспоминанием</DrawerTitle>
     <DrawerDescription className="sr-only">Выберите действие для этого воспоминания.</DrawerDescription>
@@ -949,6 +955,11 @@ function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onChooseRea
         <span className="memoly-memory-action-icon state-action-icon"><WebpIcon decorative monochrome name="pencil" size={18} /></span>
         <span className="memoly-memory-action-copy state-action-copy"><Typography as="span" className="memoly-memory-action-title" variant="memoryBody">Редактировать</Typography><Typography as="span" className="memoly-memory-action-subtitle" variant="memoryMeta">Изменить подпись или дату</Typography></span>
         <span className="memoly-memory-action-chevron state-chevron"><WebpIcon decorative name="chevron" size={16} /></span>
+      </button> : null}
+      {onEditChildTags ? <button className="memoly-memory-action" data-memory-action="child-tags" onClick={onEditChildTags} type="button">
+        <span className="memoly-memory-action-icon"><WebpIcon decorative monochrome name="family" size={18} /></span>
+        <span className="memoly-memory-action-copy"><Typography as="span" className="memoly-memory-action-title" variant="memoryBody">Отметить детей</Typography><Typography as="span" className="memoly-memory-action-subtitle" variant="memoryMeta">Кто на фото и видео</Typography></span>
+        <span className="memoly-memory-action-chevron"><WebpIcon decorative name="chevron" size={16} /></span>
       </button> : null}
       {onDelete ? <button className="memoly-memory-action is-danger" onClick={onDelete} type="button">
         <span className="memoly-memory-action-icon"><WebpIcon decorative monochrome name="trash-can" size={18} /></span>

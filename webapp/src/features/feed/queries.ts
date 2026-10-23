@@ -1,4 +1,4 @@
-import type { MemoryDto, MemoryPage, MemoryReaction } from '@web-app-demo/contracts'
+import type { MemoryChildTagsResponse, MemoryDto, MemoryPage, MemoryReaction } from '@web-app-demo/contracts'
 import { QueryClient, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
@@ -157,6 +157,20 @@ export function removeMemoryFromCachedFeeds(queryClient: QueryClient, familyId: 
     })
   }
   return matches
+}
+
+/** Puts a memory's saved child tags (and their version) into every cached list that holds it. */
+export function applyChildTagsToCachedFeeds(queryClient: QueryClient, familyId: string, memoryId: string, saved: MemoryChildTagsResponse) {
+  for (const [key, current] of queryClient.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] })) {
+    if (!current || !Array.isArray(current.pages)) continue
+    queryClient.setQueryData<FeedCache>(key, {
+      ...current,
+      pages: current.pages.map((page) => ({
+        ...page,
+        items: page.items.map((memory) => memory.id === memoryId ? { ...memory, childTags: saved.childTags, childTagsVersion: saved.childTagsVersion } : memory),
+      })),
+    })
+  }
 }
 
 function restoreMemoryFeedSnapshots(queryClient: QueryClient, snapshots: FeedSnapshot | undefined) {
