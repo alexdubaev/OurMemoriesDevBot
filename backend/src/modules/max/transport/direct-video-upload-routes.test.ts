@@ -72,3 +72,48 @@ test('returns distinct safe codes for the two Reserve pre-session not-found bran
     warn.mockRestore()
   }
 })
+
+test('reserve accepts a request without the legacy child and finalize forwards children and the opt-in header', async () => {
+  const calls: unknown[] = []
+  const app = appFor({
+    reserve: async (_scope, body) => { calls.push(body); return { state: 'reserved', sessionId: familyId, expiresAt: '2026-09-20T10:00:00.000Z' } },
+    finalize: async (_scope, sessionId, uploadToken, options) => { calls.push({ sessionId, uploadToken, options }); return { state: 'processing', sessionId } },
+  } as DirectVideoUploadService)
+  const { childId: _legacy, ...withoutChild } = input
+  const reserved = await app.request(`/families/${familyId}/max-video-uploads/reserve`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withoutChild),
+  })
+  expect(reserved.status).toBe(201)
+  expect(calls[0]).not.toHaveProperty('childId')
+
+  const finalized = await app.request(`/families/${familyId}/max-video-uploads/${familyId}/finalize`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'X-Memoly-Children': '1' },
+    body: JSON.stringify({ uploadToken: 'token', childIds: [childId] }),
+  })
+  expect(finalized.status).toBe(200)
+  expect(calls[1]).toEqual({ sessionId: familyId, uploadToken: 'token', options: { childIds: [childId], includeChildTags: true } })
+
+  const duplicate = await app.request(`/families/${familyId}/max-video-uploads/${familyId}/finalize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uploadToken: 'token', childIds: [childId, childId] }),
+  })
+  expect(duplicate.status).toBe(422)
+  expect(calls).toHaveLength(2)
+})
+
+test('a child rejected at finalize is reported as a missing child profile', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const app = appFor({
+      reserve: async () => { throw new Error('not used') },
+      finalize: async () => { throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'finalize_not_found_child') },
+    } as DirectVideoUploadService)
+    const response = await app.request(`/families/${familyId}/max-video-uploads/${familyId}/finalize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uploadToken: 'token', childIds: [childId] }),
+    })
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ error: { code: 'MAX_VIDEO_CHILD_NOT_FOUND' } })
+  } finally {
+    warn.mockRestore()
+  }
+})

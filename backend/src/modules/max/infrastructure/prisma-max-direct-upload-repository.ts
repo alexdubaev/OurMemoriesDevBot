@@ -203,6 +203,13 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
     const child = await this.db.child.findFirst({ where: { id: childId, familyId, deletedAt: null }, select: { id: true } })
     return child !== null
   }
+
+  async findAnchorChildId(familyId: string) {
+    const child = await this.db.child.findFirst({
+      where: { familyId, deletedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true },
+    })
+    return child?.id ?? null
+  }
 }
 
 function normalizeSession(value: Record<string, unknown>): MaxVideoUploadSession {

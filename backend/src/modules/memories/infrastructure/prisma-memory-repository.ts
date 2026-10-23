@@ -4,7 +4,9 @@ import type {
   MemoryReaction,
   ReactionResponse,
   MemoryDto,
+  MemoryChildTagsResponse,
   MemoryStatus,
+  ReplaceMemoryChildTagsRequest,
   SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
@@ -23,7 +25,13 @@ import { MemoryFailure } from '../domain/errors'
 import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 import type { MemoryRepository } from '../application/ports'
 import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
-import { assertLiveFamilyChildren, insertPublicationChildTags, resolveCreationChildTags } from './child-tags'
+import {
+  assertLiveFamilyChildren,
+  type ChildTag,
+  insertPublicationChildTags,
+  normalizeChildTags,
+  resolveCreationChildTags,
+} from './child-tags'
 
 type MemberRole = 'full' | 'viewer'
 
@@ -90,6 +98,66 @@ export class PrismaMemoryRepository implements MemoryRepository {
           kind: 'user', name: familyName || profileName || 'Участник семьи',
         } }
       })
+    })
+  }
+
+  async attachChildTags(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]> {
+    if (memories.length === 0) return memories
+    return this.db.$transaction(async (tx) => {
+      await lockMember(tx, scope, 'member')
+      const rows = await tx.memory.findMany({
+        where: { familyId: scope.familyId, id: { in: memories.map(({ id }) => id) } },
+        select: { id: true, childTagsVersion: true, childTags: { select: { childId: true, attachmentId: true } } },
+      })
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      return memories.map((memory) => {
+        const row = byId.get(memory.id)
+        return row ? { ...memory, childTags: sortChildTags(row.childTags), childTagsVersion: row.childTagsVersion } : memory
+      })
+    })
+  }
+
+  replaceChildTags(scope: FamilyScope, memoryId: string, input: ReplaceMemoryChildTagsRequest): Promise<MemoryChildTagsResponse> {
+    return this.db.$transaction(async (tx) => {
+      await lockMember(tx, scope, 'full')
+      // NO KEY UPDATE serializes tag editors without blocking likes, comments or seen rows that reference the memory.
+      const rows = await tx.$queryRaw<Array<{ childTagsVersion: number }>>`
+        SELECT child_tags_version AS "childTagsVersion" FROM memories
+         WHERE id = ${memoryId}::uuid AND family_id = ${scope.familyId}::uuid
+           AND deleted_at IS NULL AND status <> 'deleted'
+         FOR NO KEY UPDATE
+      `
+      const current = rows[0]
+      if (!current) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
+      if (current.childTagsVersion !== input.expectedChildTagsVersion) {
+        throw new MemoryFailure('version_conflict', 'Отметки уже изменили, обновите')
+      }
+      const normalized = normalizeChildTags(input.tags, await memoryAttachments(tx, scope.familyId, memoryId))
+      await assertLiveFamilyChildren(tx, scope.familyId, input.tags.map(({ childId }) => childId))
+
+      const existing = await tx.memoryChildTag.findMany({
+        where: { familyId: scope.familyId, memoryId },
+        select: { id: true, childId: true, attachmentId: true },
+      })
+      const wanted = new Set(normalized.map(childTagKey))
+      const present = new Set(existing.map(childTagKey))
+      const removed = existing.filter((tag) => !wanted.has(childTagKey(tag)))
+      const added = normalized.filter((tag) => !present.has(childTagKey(tag)))
+      let childTagsVersion = current.childTagsVersion
+      if (removed.length > 0 || added.length > 0) {
+        if (removed.length > 0) await tx.memoryChildTag.deleteMany({ where: { id: { in: removed.map(({ id }) => id) } } })
+        if (added.length > 0) await tx.memoryChildTag.createMany({ data: added.map(({ childId, attachmentId }) => ({
+          familyId: scope.familyId, memoryId, childId, attachmentId, createdBy: scope.principal.userId,
+        })) })
+        // Raw update: `version`, `updated_at` and the unread order stay untouched by a tag edit.
+        const bumped = await tx.$queryRaw<Array<{ childTagsVersion: number }>>`
+          UPDATE memories SET child_tags_version = child_tags_version + 1
+           WHERE id = ${memoryId}::uuid AND family_id = ${scope.familyId}::uuid
+           RETURNING child_tags_version AS "childTagsVersion"
+        `
+        childTagsVersion = bumped[0]!.childTagsVersion
+      }
+      return { childTags: sortChildTags(normalized), childTagsVersion }
     })
   }
 
@@ -514,7 +582,7 @@ async function findPage(
       familyId: scope.familyId,
       deletedAt: null,
       createdSequence: { lt: BigInt(snapshotWatermark) },
-      ...(filters.childId ? { childId: filters.childId } : {}),
+      ...childFilter(filters),
       ...(filters.kind ? { kind: filters.kind } : {}),
       status: { in: visibleStatuses(role) },
       ...(before ? { AND: [beforePosition(before)] } : {}),
@@ -566,7 +634,7 @@ async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, r
       authorId: { not: scope.principal.userId },
       firstPublishedOrdinal: { gt: BigInt(baselineOrdinal), lte: BigInt(snapshotPublicationOrdinal) },
       seenByMembers: { none: { userId: scope.principal.userId, membershipEpoch } },
-      ...(filters.childId ? { childId: filters.childId } : {}),
+      ...childFilter(filters),
       ...(filters.kind ? { kind: filters.kind } : {}),
       ...(before ? { AND: [beforePosition(before)] } : {}),
     },
@@ -577,6 +645,37 @@ async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, r
   const hasNext = memories.length > limit
   const page = hasNext ? memories.slice(0, limit) : memories
   return { items: page.map((memory) => dto(memory, scope.principal.userId, role)), hasNext }
+}
+
+/** Child filters look at tags of any level: a child tagged on one photo selects the whole memory. */
+function childFilter(filters: MemoryCursorFilters) {
+  if (filters.childId) return { childTags: { some: { childId: filters.childId } } }
+  if (filters.untagged) return { childTags: { none: {} } }
+  return {}
+}
+
+/** Every attachment of the memory across all three sources, with the kind tags care about. */
+async function memoryAttachments(tx: PrismaTransactionClient, familyId: string, memoryId: string) {
+  const [media, maxVideos, telegramVideos] = await Promise.all([
+    tx.memoryMedia.findMany({ where: { memoryId, familyId }, select: { mediaId: true, asset: { select: { mediaKind: true } } } }),
+    tx.maxVideoReference.findMany({ where: { memoryId, familyId }, select: { id: true } }),
+    tx.telegramVideoReference.findMany({ where: { memoryId, familyId }, select: { id: true } }),
+  ])
+  return [
+    ...media.map(({ mediaId, asset }) => ({ id: mediaId, kind: asset.mediaKind })),
+    ...[...maxVideos, ...telegramVideos].map(({ id }) => ({ id, kind: 'video' as const })),
+  ]
+}
+
+function childTagKey(tag: ChildTag) {
+  return `${tag.attachmentId ?? ''}:${tag.childId}`
+}
+
+/** Stable order: whole-publication tags first, then by attachment and child. */
+function sortChildTags(tags: readonly ChildTag[]): ChildTag[] {
+  return [...tags]
+    .map(({ childId, attachmentId }) => ({ childId, attachmentId }))
+    .sort((left, right) => childTagKey(left).localeCompare(childTagKey(right)))
 }
 
 async function getMemory(

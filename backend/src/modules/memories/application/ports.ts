@@ -4,6 +4,8 @@ import type {
   ReactionResponse,
   MemoryReaction,
   MemoryDto,
+  MemoryChildTagsResponse,
+  ReplaceMemoryChildTagsRequest,
   SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
@@ -44,6 +46,10 @@ export type MemoryRepository = {
   listUnreadAfter(scope: FamilyScope, filters: MemoryCursorFilters,
     cursor: UnreadMemoryCursorClaims, limit: number): Promise<{ items: MemoryDto[]; hasNext: boolean }>
   addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[], includeChannelAvatar?: boolean): Promise<MemoryDto[]>
+  /** Adds `childTags` and `childTagsVersion` for clients that opted in with the children header. */
+  attachChildTags(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]>
+  /** Full replacement of a memory's child tags; never touches the memory's own version. */
+  replaceChildTags(scope: FamilyScope, memoryId: string, input: ReplaceMemoryChildTagsRequest): Promise<MemoryChildTagsResponse>
   get(scope: FamilyScope, memoryId: string): Promise<MemoryDto>
   update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto>
   delete(scope: FamilyScope, memoryId: string, expectedVersion: number, now: Date): Promise<void>

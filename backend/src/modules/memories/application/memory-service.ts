@@ -5,7 +5,9 @@ import type {
   LikeResponse,
   ListMemoriesQuery,
   MemoryDto,
+  MemoryChildTagsResponse,
   MemoryPage,
+  ReplaceMemoryChildTagsRequest,
   SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
@@ -39,22 +41,29 @@ export class MemoryService {
     scope: FamilyScope,
     input: CreateMemoryRequest,
     idempotencyKey: string,
+    includeChildTags = false,
   ): Promise<{ memory: MemoryDto; replayed: boolean }> {
     await this.access.requireFull(scope)
     const now = this.now()
     assertOccurredAt(input.occurredAt, now)
-    return this.repository.create(scope, input, {
+    const result = await this.repository.create(scope, input, {
       key: idempotencyKey,
       payloadHash: hashPayload(input),
       now,
     })
+    return { ...result, memory: await this.withChildTags(scope, result.memory, includeChildTags) }
   }
 
-  async list(scope: FamilyScope, query: ListMemoriesQuery, includePublicationAttribution = false, includeChannelAvatar = false): Promise<MemoryPage> {
+  async list(scope: FamilyScope, query: ListMemoriesQuery, includePublicationAttribution = false, includeChannelAvatar = false,
+    includeChildTags = false): Promise<MemoryPage> {
     await this.access.requireMember(scope)
+    if (query.untagged === true && query.childId) {
+      throw new MemoryFailure('invalid_input', 'Нельзя одновременно выбрать ребёнка и «Без отметки»')
+    }
     const filters: MemoryCursorFilters = {
       childId: query.childId ?? null,
       kind: query.kind ?? null,
+      untagged: query.untagged === true,
     }
     const now = this.now()
     if (query.unreadOnly === true) {
@@ -73,9 +82,7 @@ export class MemoryService {
         unreadContext = firstPage
       }
       const last = page.items.at(-1)
-      const items = includePublicationAttribution
-        ? await this.repository.addPublicationAttribution(scope, page.items, includeChannelAvatar)
-        : page.items
+      const items = await this.decorate(scope, page.items, includePublicationAttribution, includeChannelAvatar, includeChildTags)
       return { items, nextCursor: page.hasNext && last
         ? encodeUnreadMemoryCursor({
           familyId: scope.familyId, userId: scope.principal.userId, filters,
@@ -109,9 +116,7 @@ export class MemoryService {
       snapshotWatermark = firstPage.snapshotWatermark
     }
     const last = page.items.at(-1)
-    const items = includePublicationAttribution
-      ? await this.repository.addPublicationAttribution(scope, page.items, includeChannelAvatar)
-      : page.items
+    const items = await this.decorate(scope, page.items, includePublicationAttribution, includeChannelAvatar, includeChildTags)
     return {
       items,
       nextCursor: page.hasNext && last
@@ -126,17 +131,23 @@ export class MemoryService {
     }
   }
 
-  async get(scope: FamilyScope, memoryId: string, includePublicationAttribution = false, includeChannelAvatar = false): Promise<MemoryDto> {
+  async get(scope: FamilyScope, memoryId: string, includePublicationAttribution = false, includeChannelAvatar = false,
+    includeChildTags = false): Promise<MemoryDto> {
     await this.access.requireMember(scope)
     const memory = await this.repository.get(scope, memoryId)
-    if (!includePublicationAttribution) return memory
-    return (await this.repository.addPublicationAttribution(scope, [memory], includeChannelAvatar))[0]!
+    return (await this.decorate(scope, [memory], includePublicationAttribution, includeChannelAvatar, includeChildTags))[0]!
   }
 
-  async update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest): Promise<MemoryDto> {
+  async update(scope: FamilyScope, memoryId: string, input: UpdateMemoryRequest, includeChildTags = false): Promise<MemoryDto> {
     await this.access.requireFull(scope)
     assertOccurredAt(input.occurredAt, this.now())
-    return this.repository.update(scope, memoryId, input)
+    return this.withChildTags(scope, await this.repository.update(scope, memoryId, input), includeChildTags)
+  }
+
+  /** Any full member may retag any memory of the family; this grants nothing on the memory itself. */
+  async replaceChildTags(scope: FamilyScope, memoryId: string, input: ReplaceMemoryChildTagsRequest): Promise<MemoryChildTagsResponse> {
+    await this.access.requireFull(scope)
+    return this.repository.replaceChildTags(scope, memoryId, input)
   }
 
   async delete(scope: FamilyScope, memoryId: string, expectedVersion: number): Promise<void> {
@@ -158,6 +169,18 @@ export class MemoryService {
   async markSeen(scope: FamilyScope, input: SeenMemoriesRequest): Promise<void> {
     await this.access.requireMember(scope)
     await this.repository.markSeen(scope, input)
+  }
+
+  private async decorate(scope: FamilyScope, memories: MemoryDto[], includePublicationAttribution: boolean,
+    includeChannelAvatar: boolean, includeChildTags: boolean) {
+    const attributed = includePublicationAttribution
+      ? await this.repository.addPublicationAttribution(scope, memories, includeChannelAvatar)
+      : memories
+    return includeChildTags ? this.repository.attachChildTags(scope, attributed) : attributed
+  }
+
+  private async withChildTags(scope: FamilyScope, memory: MemoryDto, includeChildTags: boolean) {
+    return includeChildTags ? (await this.repository.attachChildTags(scope, [memory]))[0]! : memory
   }
 }
 

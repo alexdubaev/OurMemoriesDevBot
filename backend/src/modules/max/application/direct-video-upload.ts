@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 
-import { MAX_DIRECT_VIDEO_MAX_BYTES, type MemoryDto } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, MAX_FAMILY_CHILDREN, type MemoryDto } from '@web-app-demo/contracts'
 
 import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
@@ -16,7 +16,8 @@ const reservationTtlMs = 15 * 60 * 1_000
 const attachmentReadyAttempts = 3
 
 export type DirectVideoUploadReserveInput = {
-  childId: string
+  /** Legacy upload target; optional. The memory's child tags are chosen at finalize. */
+  childId?: string
   body: string
   mode?: 'standalone' | 'attachment'
   occurredAt: string
@@ -32,6 +33,13 @@ export type DirectVideoUploadReserveResult = {
   expiresAt: string
   uploadUrl?: string
   uploadToken?: string
+}
+
+export type DirectVideoUploadFinalizeOptions = {
+  /** Whole-publication child tags for a standalone video; absent applies the server default rule. */
+  childIds?: string[]
+  /** The caller understands `childTags` in the returned memory DTO. */
+  includeChildTags?: boolean
 }
 
 export type DirectVideoUploadFinalizeResult = {
@@ -53,6 +61,7 @@ type SourceMemoryPublisher = {
 
 type MemoryReader = {
   get(scope: FamilyScope, memoryId: string): Promise<MemoryDto>
+  attachChildTags?(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]>
 }
 
 export class MaxDirectUploadFailure extends Error {
@@ -151,7 +160,8 @@ export function createMaxDirectVideoUploadService(options: {
         throw error
       }
       validateReservation(input, now())
-      await assertChild(options.repository, scope, input.childId)
+      const childId = input.childId ?? await anchorChild(options.repository, scope)
+      await assertChild(options.repository, scope, childId)
       const occurredAt = new Date(input.occurredAt)
       const idempotencyFingerprint = fingerprint(input)
       let reserved
@@ -159,7 +169,7 @@ export function createMaxDirectVideoUploadService(options: {
         reserved = await options.repository.reserve({
           familyId: scope.familyId,
           authorId: scope.principal.userId,
-          childId: input.childId,
+          childId,
           plannedMemoryId: randomUUID(),
           body: input.body.trim(),
           mode: input.mode ?? 'standalone',
@@ -203,23 +213,27 @@ export function createMaxDirectVideoUploadService(options: {
       }
     },
 
-    async finalize(scope: FamilyScope, sessionId: string, uploadToken?: string): Promise<DirectVideoUploadFinalizeResult> {
+    async finalize(scope: FamilyScope, sessionId: string, uploadToken?: string,
+      finalizeOptions: DirectVideoUploadFinalizeOptions = {}): Promise<DirectVideoUploadFinalizeResult> {
       await options.access.requireFull(scope)
+      const reader = finalizeOptions.includeChildTags ? options.memoryReader : withoutChildTags(options.memoryReader)
       const initial = await options.repository.find(scope.familyId, sessionId)
       if (!initial) throw new MaxDirectUploadFailure('not_found', 'Сессия загрузки не найдена')
       if (initial.familyId !== scope.familyId || initial.authorId !== scope.principal.userId) {
         throw new MaxDirectUploadFailure('forbidden', 'Сессия загрузки недоступна')
       }
-      if (initial.state === 'finalized') return finalizedResult(scope, initial, options.memoryReader)
+      if (initial.state === 'finalized') return finalizedResult(scope, initial, reader)
       const currentTime = now()
       if (initial.expiresAt <= currentTime) {
         if (initial.state !== 'expired') await options.repository.update(initial, { state: 'expired', lastErrorCode: 'upload_expired' })
         return { state: 'expired', sessionId: initial.id, retryable: false, code: 'upload_expired' }
       }
+      // Checked before the claim so a wrong child neither sends to MAX nor holds the processing lease.
+      if (initial.mode !== 'attachment') await assertTaggedChildren(options.repository, scope, finalizeOptions.childIds)
       const claimed = await options.repository.claim(scope.familyId, sessionId, currentTime)
       if (!claimed) throw new MaxDirectUploadFailure('not_found', 'Сессия загрузки не найдена')
       if (!claimed.claimed) {
-        if (claimed.session.state === 'finalized') return finalizedResult(scope, claimed.session, options.memoryReader)
+        if (claimed.session.state === 'finalized') return finalizedResult(scope, claimed.session, reader)
         return { state: 'processing', sessionId: claimed.session.id, retryable: true, code: 'finalize_in_progress' }
       }
       const session = claimed.session
@@ -305,7 +319,7 @@ export function createMaxDirectVideoUploadService(options: {
         })
         if (session.mode !== 'attachment') await options.publisher.publish(scope, {
           id: session.plannedMemoryId,
-          childId: session.childId,
+          childIds: finalizeOptions.childIds,
           kind: 'video',
           body: session.body,
           occurredAt: session.occurredAt,
@@ -327,7 +341,7 @@ export function createMaxDirectVideoUploadService(options: {
           await options.enqueueVideoPoster?.(tx, reference.id)
         })
         const finalized = await options.repository.update(session, { state: 'finalized', lastErrorCode: null })
-        return finalizedResult(scope, finalized, options.memoryReader)
+        return finalizedResult(scope, finalized, reader)
       } catch (error) {
         if (error instanceof MaxDirectUploadFailure) {
           if (error.kind === 'retryable') await options.repository.update(session, { state: 'uploaded', lastErrorCode: error.code ?? 'retryable' })
@@ -350,7 +364,8 @@ export function createMaxDirectVideoUploadService(options: {
 
 async function finalizedResult(scope: FamilyScope, session: MaxVideoUploadSession, reader?: MemoryReader): Promise<DirectVideoUploadFinalizeResult> {
   if (session.mode === 'attachment') return { state: 'finalized', sessionId: session.id }
-  const memory = reader ? await reader.get(scope, session.plannedMemoryId) : undefined
+  const read = reader ? await reader.get(scope, session.plannedMemoryId) : undefined
+  const memory = read && reader?.attachChildTags ? (await reader.attachChildTags(scope, [read]))[0] : read
   return { state: 'finalized', sessionId: session.id, memoryId: session.plannedMemoryId, ...(memory ? { memory } : {}) }
 }
 
@@ -380,6 +395,28 @@ async function assertChild(repository: MaxDirectUploadRepository, scope: FamilyS
     const valid = await repository.assertChild(scope.familyId, childId)
     if (!valid) throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'reserve_not_found_child')
   }
+}
+
+async function anchorChild(repository: MaxDirectUploadRepository, scope: FamilyScope) {
+  const childId = await repository.findAnchorChildId?.(scope.familyId)
+  if (!childId) throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'reserve_not_found_child')
+  return childId
+}
+
+async function assertTaggedChildren(repository: MaxDirectUploadRepository, scope: FamilyScope, childIds: string[] | undefined) {
+  if (!childIds) return
+  if (new Set(childIds).size !== childIds.length || childIds.length > MAX_FAMILY_CHILDREN) {
+    throw new MaxDirectUploadFailure('invalid_input', 'Дети не должны повторяться')
+  }
+  for (const childId of childIds) {
+    if (repository.assertChild && !(await repository.assertChild(scope.familyId, childId))) {
+      throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'finalize_not_found_child')
+    }
+  }
+}
+
+function withoutChildTags(reader: MemoryReader | undefined): MemoryReader | undefined {
+  return reader ? { get: (scope, memoryId) => reader.get(scope, memoryId) } : undefined
 }
 
 function isNotFoundFailure(error: unknown) {
