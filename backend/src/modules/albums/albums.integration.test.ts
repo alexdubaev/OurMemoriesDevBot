@@ -229,9 +229,16 @@ describe('album PostgreSQL invariants', () => {
     const outsiderId = (await db.user.create({ data: { displayName: 'Посторонний' } })).id
     extraUserIds.push(outsiderId)
     const outsiderSession = await db.authSession.create({ data: { userId: outsiderId, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 60_000) } })
-    expect((await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}`, 'GET', await auth(outsiderId, outsiderSession.id))).status).toBe(404)
+    const outsiderAlbum = await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}`, 'GET', await auth(outsiderId, outsiderSession.id))
+    expect(outsiderAlbum.status).toBe(404)
+    expect((await outsiderAlbum.json()).error.code).toBe('ALBUM_SCOPE_UNAVAILABLE')
+    const missingAlbum = await http(`/api/v1/families/${familyId}/albums/${randomUUID()}`, 'GET', ownerToken)
+    expect(missingAlbum.status).toBe(404)
+    expect((await missingAlbum.json()).error.code).toBe('NOT_FOUND')
     await db.familyMember.update({ where: { familyId_userId: { familyId, userId: viewerId } }, data: { revokedAt: new Date(), membershipEpoch: { increment: 1 } } })
-    expect((await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}`, 'GET', viewerToken)).status).toBe(404)
+    const revokedAlbum = await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}`, 'GET', viewerToken)
+    expect(revokedAlbum.status).toBe(404)
+    expect((await revokedAlbum.json()).error.code).toBe('ALBUM_SCOPE_UNAVAILABLE')
 
     const freeKey = randomUUID()
     const freeResponse = await http(`/api/v1/families/${familyId}/albums`, 'POST', ownerToken, { kind: 'free', title: 'Заметки', childId: null }, freeKey)

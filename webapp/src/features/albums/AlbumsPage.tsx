@@ -7,7 +7,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { useMemolyTheme } from '@/features/theme'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
-import { albumsApi, createAlbumRequestScope, type AlbumFilter } from './api'
+import { albumsApi, createAlbumRequestScope, createAlbumScopeFailureSink, isAlbumScopeFailure, type AlbumFilter } from './api'
 import { AlbumForm } from './AlbumForms'
 import { AlbumEntryDetail } from './AlbumEntryDetail'
 import { EntryEditor } from './EntryEditor'
@@ -29,7 +29,8 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const scopeKey = `${accountId}:${familyId}:${membershipEpoch}`
   const { theme } = useMemolyTheme()
   const scopeController = useMemo(() => createAlbumRequestScope(), [])
-  const api = useMemo(() => albumsApi(transport, familyId, scopeController.signal), [transport, familyId, scopeController])
+  const scopeFailureSink = useMemo(() => createAlbumScopeFailureSink(), [])
+  const api = useMemo(() => albumsApi(transport, familyId, scopeController.signal, scopeFailureSink.notify), [transport, familyId, scopeController, scopeFailureSink])
   useEffect(() => {
     // StrictMode replays effect cleanup/setup in development. Renew the scoped
     // controller after cleanup so the replayed reads are not born aborted.
@@ -87,7 +88,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   useEffect(() => { const online = () => setOffline(!navigator.onLine); window.addEventListener('online', online); window.addEventListener('offline', online); return () => { window.removeEventListener('online', online); window.removeEventListener('offline', online) } }, [])
   const fail = useCallback((reason: unknown) => {
     if (scopeController.isAborted()) return
-    if (reason instanceof ApiRequestError && [401, 403, 404].includes(reason.status)) {
+    if (isAlbumScopeFailure(reason)) {
       requestGeneration.current += 1
       albumRead.current += 1
       activeAlbumId.current = null
@@ -105,6 +106,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     setConflict(reason instanceof ApiRequestError && reason.status === 409)
     setError(reason instanceof ApiRequestError && reason.status === 409 ? 'Альбом уже изменили. Обновите данные перед новым действием.' : 'Не удалось загрузить альбомы. Проверьте соединение и повторите.')
   }, [scopeController, props])
+  useLayoutEffect(() => { scopeFailureSink.setHandler(fail) }, [scopeFailureSink, fail])
   useEffect(() => {
     if (album) return
     const generation = ++requestGeneration.current
@@ -189,7 +191,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       await action(); if (scopeController.isAborted()) return false
       after?.()
       try { if (album && !after) await refreshAlbum(album.id, route === 'entry'); else reloadCatalog() }
-      catch (reason) { if (reason instanceof ApiRequestError && [401, 403, 404].includes(reason.status)) { fail(reason); return false } setSavedRefreshFailed(true) }
+      catch (reason) { if (isAlbumScopeFailure(reason)) { fail(reason); return false } setSavedRefreshFailed(true) }
       return true
     } catch (reason) { fail(reason); return false }
     finally { pending.current = false; if (!scopeController.isAborted()) setBusy(false) }
@@ -197,7 +199,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   function saved(version: number) {
     if (!album || scopeController.isAborted()) return
     setAlbum({ ...album, version }); setUpload(null); navigate('album')
-    void refreshAlbum(album.id).catch(() => setSavedRefreshFailed(true))
+    void refreshAlbum(album.id).catch((reason) => { if (isAlbumScopeFailure(reason)) fail(reason); else setSavedRefreshFailed(true) })
   }
   function reloadCatalog() { setLoading(true); setError(null); setConflict(false); setRevision((value) => value + 1) }
   function retryRead() {

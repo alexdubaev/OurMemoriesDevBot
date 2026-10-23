@@ -196,7 +196,7 @@ test('stale album detail and old account responses cannot replace the current ro
   await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)
 })
 
-test('album 404 revokes and clears private detail before a late read can settle', async ({ page }) => {
+test('album scope 404 revokes and clears private detail before a late read can settle', async ({ page }) => {
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
   await expect(page.getByRole('heading', { name: 'У бабушки', exact: true })).toBeVisible()
@@ -220,6 +220,37 @@ test('album 404 revokes and clears private detail before a late read can settle'
   await expect.poll(() => page.evaluate(() => (window as unknown as { __albumsEvidence: { lateReadCompleted: boolean } }).__albumsEvidence.lateReadCompleted), { timeout: 3000 }).toBe(true)
   await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)
   await expect(page.getByText('Тёплый день у бабушки', { exact: true })).toHaveCount(0)
+})
+
+test('saved entry refresh scope loss returns home, while an ordinary source 404 stays recoverable', async ({ page }) => {
+  await openSynthetic(page, 'albums=24')
+  await page.getByRole('button', { name: /У бабушки/ }).click()
+  await page.getByRole('button', { name: 'В саду', exact: true }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Обновлённая запись перед потерей семейного доступа')
+  await page.evaluate(() => (window as unknown as { __albumsRevokeOnNextRead: () => void }).__albumsRevokeOnNextRead())
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-slot="family-hub"]')).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('Доступ к этой семье закрыт.')
+  await expect(page.getByText('Обновлённая запись перед потерей семейного доступа', { exact: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __albumsEvidence: { lateReadCompleted: boolean } }).__albumsEvidence.lateReadCompleted), { timeout: 3000 }).toBe(true)
+
+  await openSynthetic(page, 'albums=24')
+  await page.getByRole('button', { name: /У бабушки/ }).click()
+  await page.getByRole('button', { name: 'В саду', exact: true }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Черновик должен сохраниться после ошибки каталога')
+  await page.evaluate(() => (window as unknown as { __albumsFailNextPickerRead: () => void }).__albumsFailNextPickerRead())
+  await page.getByRole('button', { name: 'Выбрать из воспоминаний', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить материалы. Выбор сохранён.')
+  await expect(page.locator('.albums-picker')).toBeVisible()
+  await expect(page.locator('[data-slot="family-hub"]')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Фото 1', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+  await expect(page.locator('.albums-editor')).toBeVisible()
+  await expect(page.getByLabel('История')).toHaveValue('Черновик должен сохраниться после ошибки каталога')
+  await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
 })
 
 test('bottom navigation grows and wraps labels at 200% text without reducing touch targets', async ({ page }) => {

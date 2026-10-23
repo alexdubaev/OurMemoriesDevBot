@@ -35,10 +35,12 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   let failAttach = params.has('attachFail')
   let revokeNextAlbumRead = false
   let delayNextEntriesPage = false
+  let failNextPickerRead = false
   Object.assign(window, {
     __albumsEvidence: { log, albums, entries, published: 0, rawPaths: [] as string[], lateReadStarted: false, lateReadCompleted: false },
     __albumsDelay: false,
     __albumsRevokeOnNextRead: () => { revokeNextAlbumRead = true; delayNextEntriesPage = true; evidence.lateReadStarted = false; evidence.lateReadCompleted = false },
+    __albumsFailNextPickerRead: () => { failNextPickerRead = true },
   })
   const evidence = (window as unknown as { __albumsEvidence: { published: number; rawPaths: string[]; lateReadStarted: boolean; lateReadCompleted: boolean } }).__albumsEvidence
   const bump = (album: AlbumDto, item: AlbumEntryDto) => { album.version += 1; item.version += 1; item.aggregateVersion = album.version; album.entryCount = album.kind === 'year' ? (entries.get(album.id) ?? []).filter((item) => item.caption || item.sources.some((source) => source.available)).length : entries.get(album.id)!.length }
@@ -62,6 +64,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     }
     if (route.startsWith('/memories/')) return done(memories.get(route.split('/')[2]))
     if (route === '/media-picker') {
+      if (method === 'GET' && failNextPickerRead) { failNextPickerRead = false; throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic source no longer exists') }
       const kind = parsed.searchParams.get('kind')
       const catalog = [...photos.slice(0, 25), note, voice].filter((memory) => !kind || memory.kind === kind)
       const start = Number(parsed.searchParams.get('cursor') ?? 0)
@@ -80,7 +83,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     const album = albums.find((album) => album.id === segments[1])
     if (!album) throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic album missing')
     if (segments.length === 2) {
-      if (method === 'GET' && revokeNextAlbumRead) { revokeNextAlbumRead = false; throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic family membership revoked') }
+      if (method === 'GET' && revokeNextAlbumRead) { revokeNextAlbumRead = false; throw new ApiRequestError(404, 'ALBUM_SCOPE_UNAVAILABLE', 'Synthetic family membership revoked') }
       if (method === 'GET' && params.has('delayedAlbum') && album.kind === 'year') await new Promise((resolve) => setTimeout(resolve, 900))
       if (method === 'DELETE') { albums.splice(albums.indexOf(album), 1); return done(null) }
       if (method === 'PATCH') { Object.assign(album, body); album.version += 1 }
@@ -107,7 +110,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     if (method === 'DELETE') { list.splice(list.indexOf(item), 1); bump(album, item); return done(null) }
     if (segments[4] === 'sources') { item.sources = (body!.sources as { memoryId: string; sourceKind: string; sourceId: string }[]).map((ref) => ({ ...memorySources(memories.get(ref.memoryId)!).find((source) => sourceKey(source) === sourceKey(ref as never))!, id: id() })); item.sourceCount = item.sources.length }
     else if (segments[4] === 'clear') { item.sources = []; item.caption = null; item.sourceCount = 0 }
-    else Object.assign(item, body)
+    else { const input = { ...body }; delete input.expectedVersion; Object.assign(item, input) }
     bump(album, item); return done({ entry: item })
   }
   async function raw(path: string) {

@@ -24,7 +24,7 @@ import type { FamilyScope } from '../../families'
 import type { DbClient } from '../../../db'
 import type { IdempotencyExecutor, JsonObject, PrismaTransactionClient } from '../../../idempotency'
 import { Prisma as PrismaSql } from '../../../generated/prisma/client'
-import { albumMissing, albumVersionConflict, AlbumFailure } from '../domain/errors'
+import { albumMissing, albumScopeUnavailable, albumVersionConflict, AlbumFailure } from '../domain/errors'
 import type { AlbumRepository } from '../application/album-repository'
 
 type Role = 'full' | 'viewer'
@@ -485,13 +485,13 @@ function sourceRef(source: { memoryId: string; sourceKind: AlbumEntrySourceKind;
 
 async function lockScope(tx: PrismaTransactionClient, scope: FamilyScope, write: boolean): Promise<{ role: Role; owner: boolean; membershipEpoch: number }> {
   const user = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM users WHERE id=${scope.principal.userId}::uuid FOR SHARE`
-  if (!user.length) throw albumMissing()
+  if (!user.length) throw albumScopeUnavailable()
   const session = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM auth_sessions WHERE id=${scope.principal.sessionId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL AND expires_at > now() FOR SHARE`
-  if (!session.length) throw albumMissing()
+  if (!session.length) throw albumScopeUnavailable()
   const family = await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
-  if (!family.length) throw albumMissing()
+  if (!family.length) throw albumScopeUnavailable()
   const members = await tx.$queryRaw<Array<{ role: Role; membership_epoch: number }>>`SELECT role::text AS role, membership_epoch FROM family_members WHERE family_id=${scope.familyId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL FOR SHARE`
-  if (!members.length) throw albumMissing()
+  if (!members.length) throw albumScopeUnavailable()
   if (write && members[0]!.role !== 'full') throw new AlbumFailure('forbidden', 'Для изменения альбома нужен полный доступ')
   return { role: members[0]!.role, owner: family[0]!.owner_user_id === scope.principal.userId, membershipEpoch: members[0]!.membership_epoch }
 }

@@ -124,8 +124,8 @@ async function run(c: Context<AuthHttpEnv>, operation: () => Promise<Response>) 
       return c.json({ error: { code, message: error.message, requestId: requestIdFrom(c) } }, status)
     }
     if (error instanceof AlbumFailure) {
-      const status = error.kind === 'not_found' ? 404 : error.kind === 'forbidden' ? 403 : error.kind === 'invalid_input' ? 422 : 409
-      const code = error.kind === 'not_found' ? 'NOT_FOUND' : error.kind === 'forbidden' ? 'ROLE_FORBIDDEN' : error.kind === 'invalid_input' ? 'INVALID_INPUT' : error.kind === 'version_conflict' ? 'VERSION_CONFLICT' : error.kind === 'idempotency_conflict' ? 'IDEMPOTENCY_CONFLICT' : 'CONFLICT'
+      const status = error.kind === 'not_found' || error.kind === 'scope_unavailable' ? 404 : error.kind === 'forbidden' ? 403 : error.kind === 'invalid_input' ? 422 : 409
+      const code = error.kind === 'scope_unavailable' ? 'ALBUM_SCOPE_UNAVAILABLE' : error.kind === 'not_found' ? 'NOT_FOUND' : error.kind === 'forbidden' ? 'ROLE_FORBIDDEN' : error.kind === 'invalid_input' ? 'INVALID_INPUT' : error.kind === 'version_conflict' ? 'VERSION_CONFLICT' : error.kind === 'idempotency_conflict' ? 'IDEMPOTENCY_CONFLICT' : 'CONFLICT'
       return c.json({ error: { code, message: error.message, requestId: requestIdFrom(c) } }, status)
     }
     throw error
