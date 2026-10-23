@@ -617,6 +617,26 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   a date or descendant allowlist, and still requires the real synthetic current
   → 33a → current recovery probe.
 
+- The exact private-album-photo runtime fingerprint
+  `3dad9a61fbcb5358c1a4c8cc6a7f614b954d84869bdaaca085075a45e5a3225f` may use
+  only the same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and
+  its existing pinned image pair. This executable compatibility fingerprint
+  is measured from frozen source `51d14a9b25eed565e60f51004328ab5b9202a7da`
+  and anchored to the unchanged full-attested `dc26ad9` reference; it is
+  independent of producer commit reachability.
+  The recovery catalog remains anchored to the exact 49-migration `dc26ad9`
+  baseline and recognizes only either the original three reviewed album
+  migrations (52 total) or those same three plus
+  `20261023150000_album_private_photos` (53 total). In the guarded
+  `ci-release` path with `RUN_MIGRATION=true`, pre-SQL readiness accepts only a
+  completed exact ordered prefix from 49 through the selected candidate's full
+  catalog. Ordinary readiness, rollback, and post-SQL readiness require all 52
+  or all 53 migrations for that exact catalog. Unknown suffixes and all
+  incomplete, duplicate, checksum-mismatched, unfinished, rolled-back, or
+  unrelated ledger rows fail closed. The existing deployment lock, backup,
+  ancestry, image, configuration, recovery, and data safeguards remain
+  required; this pin does not authorize database rollback.
+
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
 excluding only the existing backend test/support paths. It survives squash

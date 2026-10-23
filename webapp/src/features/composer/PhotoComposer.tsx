@@ -23,10 +23,12 @@ import { AddDateField } from './AddDateField'
 import '@/styles/composer-skin.css'
 
 export type PhotoComposerProps = {
-  childId: string
+  childId?: string
   familyId: string
   familyTimezone: string
   transport: AuthenticatedTransport
+  destination?: 'feed' | 'album'
+  onAlbumPhotosUploaded?: (mediaIds: string[]) => Promise<void>
   onCancel: () => void
   onSuccess: () => void | Promise<void>
   onPublished?: (memory: MemoryDto) => void
@@ -41,7 +43,7 @@ export type UploadTimingSample = {
   fileIndex?: number
 }
 
-type SaveStage = 'reserve' | 'upload' | 'finalize' | 'create'
+type SaveStage = 'reserve' | 'upload' | 'finalize' | 'create' | 'album_attach'
 
 class UnsupportedComposerFileError extends Error {}
 class AmbiguousMaxUploadTerminalError extends Error {}
@@ -62,7 +64,8 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function PhotoComposer({ childId, familyId, familyTimezone, transport, onCancel, onSuccess, onTiming, onPublished, onCancellationBlockedChange, onCancelRequestChange }: PhotoComposerProps) {
+export function PhotoComposer({ childId, familyId, familyTimezone, transport, destination = 'feed', onAlbumPhotosUploaded, onCancel, onSuccess, onTiming, onPublished, onCancellationBlockedChange, onCancelRequestChange }: PhotoComposerProps) {
+  const albumDestination = destination === 'album'
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
   const [occurredDate, setOccurredDate] = useState(() => familyCalendarDate(familyTimezone))
@@ -88,6 +91,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   const abortController = useRef<AbortController | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const [createUncertain, setCreateUncertain] = useState(false)
+  const [albumAttachAttempted, setAlbumAttachAttempted] = useState(false)
   const cancellationBlocked = status === 'saving' || createUncertain
   useEffect(() => { onCancellationBlockedChange?.(cancellationBlocked) }, [cancellationBlocked, onCancellationBlockedChange])
   const [restartRequiredIndex, setRestartRequiredIndex] = useState<number | null>(null)
@@ -100,9 +104,15 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   useEffect(() => () => abortController.current?.abort(), [])
 
   function chooseFiles(next: File[]) {
-    if (saving.current || createUncertain || restartRequiredIndex !== null) return
+    if (saving.current || createUncertain || albumAttachAttempted || restartRequiredIndex !== null) return
     if (next.length === 0) return
     const selection = [...files, ...next]
+    if (albumDestination && selection.some((file) => resolveComposerFile(file)?.kind === 'video')) {
+      setError('В альбом можно загрузить только фотографии.')
+      setErrorStage(null)
+      setStatus('error')
+      return
+    }
     const validation = validateComposerFiles(selection)
     if (!validation.ok) {
       setError(validation.code === 'too_many' ? 'Выберите от 1 до 10 фото и видео.'
@@ -136,7 +146,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   }
 
   function removeFile(index: number) {
-    if (saving.current || createUncertain || restartRequiredIndex !== null && index !== restartRequiredIndex) return
+    if (saving.current || createUncertain || albumAttachAttempted || restartRequiredIndex !== null && index !== restartRequiredIndex) return
     const next = files.filter((_, current) => current !== index)
     setFiles(next)
     setPreflightKinds(null)
@@ -176,6 +186,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       requireRestart(capability)
     }
     if (!capability) {
+      if (!childId) throw new Error('Для публикации видео нужен профиль ребёнка.')
       onStage('reserve')
       const reservation = await reserveMaxVideo(transport, familyId, {
         childId, body: '', occurredAt: submission.current!.occurredAt, file,
@@ -311,6 +322,10 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
         }
         verifiedMedia.current = mediaItems
       } } finally { recordTiming('validation', validationStartedAt) }
+      if (albumDestination && mediaItems.some((media) => media.kind !== 'photo')) {
+        throw new UnsupportedComposerFileError('В альбом можно загрузить только фотографии.')
+      }
+      if (!albumDestination && !childId) throw new UnsupportedComposerFileError('Для публикации нужен профиль ребёнка.')
       controller.signal.throwIfAborted()
       setPreflightKinds(mediaItems.map((media) => media.kind))
       setCompletedCount(completedAssets.current.slice(0, files.length).filter(Boolean).length)
@@ -379,20 +394,29 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       const kinds = mediaItems.map((media) => media.kind)
       const kind = kinds.every((item) => item === 'photo') ? 'photo' as const : 'media' as const
 
-      saveStage.current = 'create'
-      setErrorStage(saveStage.current)
-      setCreateUncertain(true)
-      const createStartedAt = performance.now()
-      try { publishedMemory = await createMediaMemory(transport, familyId, {
-        kind,
-        childId,
-        body: caption.trim(),
-        occurredAt,
-        ...(kind === 'photo' ? { mediaIds: mediaIds as string[] } : { attachments: mediaIds.map((id, index) => mediaItems[index]!.kind === 'video'
-          ? { source: 'max' as const, sessionId: id! }
-          : { source: 'private_storage' as const, mediaId: id! }) }),
-        idempotencyKey: key,
-      }, controller.signal) } finally { recordTiming('memory_create', createStartedAt) }
+      if (albumDestination) {
+        if (!onAlbumPhotosUploaded) throw new Error('Не удалось добавить фото в альбом.')
+        saveStage.current = 'album_attach'
+        setErrorStage(saveStage.current)
+        setAlbumAttachAttempted(true)
+        await onAlbumPhotosUploaded(mediaIds as string[])
+      } else {
+        if (!childId) throw new Error('Для публикации нужен профиль ребёнка.')
+        saveStage.current = 'create'
+        setErrorStage(saveStage.current)
+        setCreateUncertain(true)
+        const createStartedAt = performance.now()
+        try { publishedMemory = await createMediaMemory(transport, familyId, {
+          kind,
+          childId,
+          body: caption.trim(),
+          occurredAt,
+          ...(kind === 'photo' ? { mediaIds: mediaIds as string[] } : { attachments: mediaIds.map((id, index) => mediaItems[index]!.kind === 'video'
+            ? { source: 'max' as const, sessionId: id! }
+            : { source: 'private_storage' as const, mediaId: id! }) }),
+          idempotencyKey: key,
+        }, controller.signal) } finally { recordTiming('memory_create', createStartedAt) }
+      }
       setStatus('success')
     } catch (reason) {
       if (controller.signal.aborted) return
@@ -412,7 +436,9 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
       setErrorStage(saveStage.current)
       setStatus('error')
       if (saveStage.current === 'finalize') setFinalizeApplicationCode(safeFinalizeApplicationCode(reason))
-      setError(saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.status === 403
+      setError(saveStage.current === 'album_attach'
+        ? 'Фото загружены, но добавление в альбом пока не подтверждено. Повторите только прикрепление.'
+        : saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.status === 403
         ? 'Нет доступа к загрузке в эту семью.'
         : saveStage.current === 'reserve' && reason instanceof ApiRequestError && reason.code === 'FILE_TOO_LARGE'
           ? 'Недостаточно свободного места или слишком много незавершённых загрузок. Попробуйте позже.'
@@ -477,15 +503,15 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, on
   }
 
   const containsVideo = preflightKinds?.some((kind) => kind === 'video') ?? files.some((file) => resolveComposerFile(file)?.kind === 'video')
-  return <main className="memoly-add-page" data-add-screen="photo">
-    {status === 'success' ? <section aria-label={containsVideo ? 'Воспоминание опубликовано' : 'Фото опубликованы'} className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Воспоминание опубликовано!' : 'Фото опубликованы!'}</Typography><Typography as="p" variant="memoryBody">Теперь они в ленте воспоминаний</Typography><div className="memoly-add-success-actions"><Button onClick={() => void showFeed()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></div></section> : status === 'error' && errorStage ? <section aria-label={containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'} className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'}</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{createUncertain && errorStage === 'create' ? <Typography as="p" variant="memoryMeta">Ответ о публикации не получен. Повторите сохранение этой же заявки, чтобы проверить результат.</Typography> : null}{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions">{restartRequiredIndex === null ? <Button onClick={() => void save()} type="button">Попробовать снова</Button> : null}{createUncertain ? null : <Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">{containsVideo ? 'Вернуться к вложениям' : 'Вернуться к фото'}</Button>}</div></section> : <>
-      <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving' || createUncertain} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">Добавить фото и видео</Typography><span /></header>
+  return <main className="memoly-add-page" data-add-screen="photo" data-photo-destination={destination}>
+    {status === 'success' ? <section aria-label={albumDestination ? 'Фото добавлены в альбом' : containsVideo ? 'Воспоминание опубликовано' : 'Фото опубликованы'} className="memoly-add-success" role="status"><Typography aria-hidden as="span" className="memoly-add-success-mark" variant="memoryScreen">✓</Typography><Typography as="h1" variant="memoryScreen">{albumDestination ? 'Фото добавлены в альбом!' : containsVideo ? 'Воспоминание опубликовано!' : 'Фото опубликованы!'}</Typography><Typography as="p" variant="memoryBody">{albumDestination ? 'Оригиналы сохранены в семейном хранилище.' : 'Теперь они в ленте воспоминаний'}</Typography><div className="memoly-add-success-actions">{albumDestination ? <Button onClick={() => void onSuccess()} type="button">Вернуться к альбому</Button> : <><Button onClick={() => void showFeed()} type="button">Смотреть в ленте</Button><Button onClick={addAnother} type="button" variant="outline">Добавить ещё</Button></>}</div></section> : status === 'error' && errorStage ? <section aria-label={containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'} className="memoly-add-success memoly-add-failure" role="alert"><WebpIcon decorative name="warning" size={64} /><Typography as="h1" variant="memoryScreen">{containsVideo ? 'Не удалось загрузить медиа' : 'Не удалось загрузить фото'}</Typography><Typography as="p" variant="memoryBody">{error}</Typography>{createUncertain && errorStage === 'create' ? <Typography as="p" variant="memoryMeta">Ответ о публикации не получен. Повторите сохранение этой же заявки, чтобы проверить результат.</Typography> : null}{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}<div className="memoly-add-success-actions">{restartRequiredIndex === null ? <Button onClick={() => void save()} type="button">{errorStage === 'album_attach' ? 'Повторить только прикрепление' : 'Попробовать снова'}</Button> : null}{createUncertain || errorStage === 'album_attach' ? null : <Button onClick={() => { setErrorStage(null); setStatus('idle'); setError(null) }} type="button" variant="outline">{containsVideo ? 'Вернуться к вложениям' : 'Вернуться к фото'}</Button>}</div></section> : <>
+      <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving' || createUncertain} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" id="photo-composer-title" variant="memoryScreen">{albumDestination ? 'Добавить фото в альбом' : 'Добавить фото и видео'}</Typography><span /></header>
       <section aria-labelledby="photo-composer-title" className="memoly-add-body">
-        <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/x-matroska,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.mkv,.webm" className="memoly-add-native-file" disabled={status === 'saving' || createUncertain || restartRequiredIndex !== null || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
-        {files.length ? <div aria-label={containsVideo ? 'Предпросмотр вложений' : 'Предпросмотр фотографий'} className="memoly-add-photo-grid">{files.map((file, index) => <MediaPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} kind={preflightKinds?.[index]} onRemove={removeFile} removeDisabled={restartRequiredIndex !== null && index !== restartRequiredIndex} state={itemStates[index] ?? 'selected'} showState={itemStates.some((state) => state !== 'selected')} />)}{files.length < 10 ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />до 10 файлов</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">Выберите фото и видео</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 вложений</Typography></label>}
-        <div className="memoly-add-caption"><textarea aria-label={containsVideo ? 'Подпись к воспоминанию' : 'Подпись к фотографиям'} disabled={status === 'saving' || createUncertain} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { invalidateMetadata('caption') }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
-        <AddDateField disabled={status === 'saving' || createUncertain} id="photo-composer-date" label={containsVideo ? 'Дата воспоминания' : 'Дата фотографий'} onChange={(value) => { if (value !== occurredDate) { invalidateMetadata('date') }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} />
-        <Button className="memoly-add-publish" disabled={status === 'saving' || restartRequiredIndex !== null || !files.length || [...caption].length > 8000} onClick={() => void save()} type="button">Опубликовать{files.length ? ` (${files.length})` : ''}</Button>
+        <input accept={albumDestination ? 'image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif' : 'image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/x-matroska,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.mkv,.webm'} className="memoly-add-native-file" disabled={status === 'saving' || createUncertain || albumAttachAttempted || restartRequiredIndex !== null || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
+        {files.length ? <div aria-label={containsVideo ? 'Предпросмотр вложений' : 'Предпросмотр фотографий'} className="memoly-add-photo-grid">{files.map((file, index) => <MediaPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} kind={preflightKinds?.[index]} onRemove={removeFile} removeDisabled={albumAttachAttempted || restartRequiredIndex !== null && index !== restartRequiredIndex} state={itemStates[index] ?? 'selected'} showState={itemStates.some((state) => state !== 'selected')} />)}{files.length < 10 && !albumAttachAttempted ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />{albumDestination ? 'до 10 фото' : 'до 10 файлов'}</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">{albumDestination ? 'Выберите фотографии' : 'Выберите фото и видео'}</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 {albumDestination ? 'фото' : 'вложений'}</Typography></label>}
+        {albumDestination ? null : <><div className="memoly-add-caption"><textarea aria-label={containsVideo ? 'Подпись к воспоминанию' : 'Подпись к фотографиям'} disabled={status === 'saving' || createUncertain} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { invalidateMetadata('caption') }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
+        <AddDateField disabled={status === 'saving' || createUncertain} id="photo-composer-date" label={containsVideo ? 'Дата воспоминания' : 'Дата фотографий'} onChange={(value) => { if (value !== occurredDate) { invalidateMetadata('date') }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} /></>}
+        <Button className="memoly-add-publish" disabled={status === 'saving' || restartRequiredIndex !== null || !files.length || !albumDestination && [...caption].length > 8000} onClick={() => void save()} type="button">{albumDestination ? 'Добавить в альбом' : 'Опубликовать'}{files.length ? ` (${files.length})` : ''}</Button>
         {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><ProgressBar label="Сохранение вложений" value={allBytesAccepted ? 100 : errorStage === 'upload' ? byteProgress : null} /><Typography as="p" variant="memoryBody">{errorStage === 'create' ? 'Публикуем воспоминание…' : allBytesAccepted ? 'Обрабатываем вложения…' : errorStage === 'reserve' ? 'Подготавливаем вложения…' : errorStage === 'upload' ? byteProgress === null ? 'Загружаем вложения…' : `Загружено ${byteProgress}% байт…` : 'Обрабатываем вложения…'}</Typography><Typography as="p" variant="memoryMeta">Готово вложений: {completedCount} из {files.length}</Typography><Button disabled={createUncertain} onClick={cancel} type="button" variant="outline">Отменить</Button></div> : null}
         {error ? <div className="memoly-add-error" data-save-stage={errorStage ?? undefined} role="alert"><WebpIcon decorative name="warning" size={28} /><Typography as="p" variant="memoryBody">{error}</Typography>{finalizeApplicationCode ? <Typography as="small" data-save-error-code={finalizeApplicationCode} variant="memoryMeta">Код: {finalizeApplicationCode}</Typography> : null}{files.length ? <Button onClick={() => void save()} type="button">Повторить</Button> : null}</div> : null}
       </section>

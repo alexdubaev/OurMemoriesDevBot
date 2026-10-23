@@ -415,6 +415,7 @@ model Family {
   albums               Album[]
   albumEntries         AlbumEntry[]
   albumEntrySources    AlbumEntrySource[]
+  albumPhotos          AlbumPhoto[]
   albumSourceOperations AlbumSourceOperation[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
@@ -615,7 +616,8 @@ model AlbumEntrySource {
   familyId   String                 @map("family_id") @db.Uuid
   albumId    String                 @map("album_id") @db.Uuid
   entryId    String                 @map("entry_id") @db.Uuid
-  memoryId   String                 @map("memory_id") @db.Uuid
+  memoryId   String?                @map("memory_id") @db.Uuid
+  albumPhotoMediaId String?          @map("album_photo_media_id") @db.Uuid
   sourceKind AlbumEntrySourceKind   @map("source_kind")
   kind       AlbumSourceMediaKind
   sourceId   String                 @map("source_id") @db.Uuid
@@ -624,7 +626,8 @@ model AlbumEntrySource {
   family     Family                 @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entry_sources_family_id_fkey")
   album      Album                  @relation("AlbumSources", fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_album_id_family_id_fkey")
   entry      AlbumEntry             @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_entry_sources_entry_id_album_id_family_id_fkey")
-  memory     Memory                 @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
+  memory     Memory?                @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
+  albumPhoto AlbumPhoto?             @relation(fields: [albumPhotoMediaId, familyId], references: [mediaId, familyId], onDelete: Cascade, map: "album_entry_sources_album_photo_family_fkey")
   coverFor   Album?                 @relation("AlbumCoverSource")
 
   @@unique([id, albumId, familyId], map: "album_entry_sources_id_album_id_family_id_key")
@@ -632,6 +635,20 @@ model AlbumEntrySource {
   @@index([familyId, albumId, entryId, position], map: "album_entry_sources_entry_order_idx")
   @@index([familyId, memoryId], map: "album_entry_sources_memory_idx")
   @@map("album_entry_sources")
+}
+
+model AlbumPhoto {
+  mediaId   String   @map("media_id") @db.Uuid
+  familyId  String   @map("family_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_photos_family_id_fkey")
+  media     MediaAsset @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_photos_media_id_family_id_fkey")
+  sources   AlbumEntrySource[]
+
+  @@id([mediaId])
+  @@unique([mediaId, familyId], map: "album_photos_media_id_family_id_key")
+  @@index([familyId, createdAt, mediaId], map: "album_photos_family_created_idx")
+  @@map("album_photos")
 }
 
 model AlbumSourceOperation {
@@ -828,6 +845,7 @@ model MediaAsset {
   variants           MediaVariant[]
   reservation        UploadReservation?
   memories           MemoryMedia[]
+  albumPhoto         AlbumPhoto?
   backupAttachments  MaxMemoryBackupAttachment[]
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   maxVideoThumbnailFor MaxVideoReference? @relation("MaxVideoThumbnail")

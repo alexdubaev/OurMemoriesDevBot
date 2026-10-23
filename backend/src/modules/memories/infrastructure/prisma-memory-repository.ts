@@ -134,7 +134,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
           await lockMediaAssets(tx, scope.familyId, mediaIds)
           const assetKinds = await tx.mediaAsset.findMany({ where: {
             id: { in: mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
-            memories: { none: {} },
+            memories: { none: {} }, albumPhoto: { is: null },
           }, select: { id: true, mediaKind: true } })
           assetKindById = new Map(assetKinds.map(({ id, mediaKind }) => [id, mediaKind]))
           const expected = input.kind === 'media' ? ['photo', 'video'] : [input.kind]

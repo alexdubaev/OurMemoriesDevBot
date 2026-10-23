@@ -16,9 +16,8 @@ import type {
   UpdateAlbumEntryRequest,
   UpdateAlbumRequest,
   AlbumMemoryPickerItem,
-  AlbumMemorySourceCatalog,
-  AlbumMemorySourceRef,
 } from '../application/album-types'
+import type { AlbumSourceCatalog, AlbumSourceRef } from './composed-album-source-catalog'
 import { albumDateSchema } from '@web-app-demo/contracts'
 import type { FamilyScope } from '../../families'
 import type { DbClient } from '../../../db'
@@ -39,7 +38,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
   constructor(
     private readonly db: DbClient,
     private readonly idempotency: IdempotencyExecutor<PrismaTransactionClient>,
-    private readonly sourceCatalog: AlbumMemorySourceCatalog,
+    private readonly sourceCatalog: AlbumSourceCatalog,
   ) {}
 
   async listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; limit: number; before?: AlbumCursor }) {
@@ -194,7 +193,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
         }
         assertVersion(album.version, input.expectedVersion)
         if (album.kind === 'year') throw new AlbumFailure('invalid_input', 'Месяцы первого года создаются вместе с альбомом')
-        const refs = input.sources as AlbumMemorySourceRef[]
+        const refs = input.sources as AlbumSourceRef[]
         const resolved = await sourceCatalog.resolve(tx, scope, refs, 'update')
         validateEntryCreate(album.kind, input, resolved)
         const lastOrder = await tx.albumEntry.aggregate({ where: { familyId: scope.familyId, albumId, deletedAt: null }, _max: { orderKey: true } })
@@ -206,6 +205,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
         }, select: { id: true } })
         if (resolved.length) await tx.albumEntrySource.createMany({ data: resolved.map((source, position) => ({
           familyId: scope.familyId, albumId, entryId: entry.id, memoryId: source.memoryId,
+          albumPhotoMediaId: source.memoryId === null ? source.sourceId : null,
           sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId, kind: source.kind as AlbumSourceMediaKind, position,
         })) })
         await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
@@ -303,12 +303,12 @@ export class PrismaAlbumRepository implements AlbumRepository {
       }
       assertVersion(album.version, input.expectedVersion)
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
-      const refs = input.sources as AlbumMemorySourceRef[]
+      const refs = input.sources as AlbumSourceRef[]
       const resolved = await sourceCatalog.resolve(tx, scope, refs, 'update')
       if (album.kind === 'workshop' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В мастерской можно размещать только фото работ')
       if (album.kind === 'year' && resolved.some((source) => source.kind !== 'photo' && source.kind !== 'video')) throw new AlbumFailure('invalid_input', 'В первом годе доступны только фото и видео')
       const existing = await tx.albumEntrySource.findMany({ where: { familyId: scope.familyId, albumId, entryId }, orderBy: { position: 'asc' } })
-      const keyOf = (ref: AlbumMemorySourceRef) => `${ref.memoryId}:${ref.sourceKind}:${ref.sourceId}`
+      const keyOf = (ref: AlbumSourceRef) => `${ref.memoryId ?? 'private'}:${ref.sourceKind}:${ref.sourceId}`
       const byKey = new Map(existing.map((row) => [keyOf(sourceRef(row)), row]))
       const retained = new Set<string>()
       for (const [position, source] of resolved.entries()) {
@@ -319,6 +319,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
         } else {
           const created = await tx.albumEntrySource.create({ data: {
             familyId: scope.familyId, albumId, entryId, memoryId: source.memoryId,
+            albumPhotoMediaId: source.memoryId === null ? source.sourceId : null,
             sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId, kind: source.kind as AlbumSourceMediaKind, position,
           } })
           retained.add(created.id)
@@ -385,7 +386,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
   }
 }
 
-async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumMemorySourceCatalog, scope: FamilyScope, role: Role, albums: AlbumRow[]): Promise<AlbumDto[]> {
+async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, role: Role, albums: AlbumRow[]): Promise<AlbumDto[]> {
   if (!albums.length) return []
   const ids = albums.map(({ id }) => id)
   const selectedIds = albums.flatMap(({ coverSourceId }) => coverSourceId ? [coverSourceId] : [])
@@ -393,15 +394,18 @@ async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumMemorySo
     SELECT DISTINCT ON (s.album_id) s.id
       FROM album_entry_sources s
       JOIN album_entries e ON e.id=s.entry_id AND e.album_id=s.album_id AND e.family_id=s.family_id
-      JOIN memories m ON m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL
      WHERE e.deleted_at IS NULL AND s.family_id=${scope.familyId}::uuid AND s.album_id IN (${PrismaSql.join(ids.map((id) => PrismaSql.sql`${id}::uuid`))})
        AND s.kind IN ('photo','video')
-       AND ((s.source_kind='private_storage' AND EXISTS (
+       AND ((s.memory_id IS NULL AND s.album_photo_media_id=s.source_id AND EXISTS (
+             SELECT 1 FROM album_photos ap JOIN media_assets a ON a.id=ap.media_id AND a.family_id=ap.family_id
+              WHERE ap.media_id=s.album_photo_media_id AND ap.family_id=s.family_id AND a.media_kind='photo'
+                AND a.original_status='stored' AND a.rendition_status='ready' AND a.deleted_at IS NULL AND a.storage_deleted_at IS NULL))
+         OR (s.memory_id IS NOT NULL AND EXISTS (SELECT 1 FROM memories m WHERE m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL) AND s.source_kind='private_storage' AND EXISTS (
              SELECT 1 FROM memory_media mm JOIN media_assets a ON a.id=mm.media_id AND a.family_id=mm.family_id
               WHERE mm.memory_id=s.memory_id AND mm.family_id=s.family_id AND a.id=s.source_id
                 AND a.purpose='memory' AND a.original_status='stored' AND a.deleted_at IS NULL))
-         OR (s.source_kind='max_video' AND EXISTS (SELECT 1 FROM max_video_references r WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id))
-         OR (s.source_kind='telegram_video' AND EXISTS (SELECT 1 FROM telegram_video_references r WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id)))
+         OR (s.memory_id IS NOT NULL AND s.source_kind='max_video' AND EXISTS (SELECT 1 FROM memories m JOIN max_video_references r ON r.memory_id=m.id AND r.family_id=m.family_id WHERE m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL AND r.id=s.source_id))
+         OR (s.memory_id IS NOT NULL AND s.source_kind='telegram_video' AND EXISTS (SELECT 1 FROM memories m JOIN telegram_video_references r ON r.memory_id=m.id AND r.family_id=m.family_id WHERE m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL AND r.id=s.source_id)))
      ORDER BY s.album_id,e.order_key,s.position,s.id
   `)
   const wantedSourceIds = [...new Set([...selectedIds, ...fallbackRows.map(({ id }) => id)])]
@@ -421,16 +425,20 @@ async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumMemorySo
            OR EXISTS (
              SELECT 1
                FROM album_entry_sources s
-               JOIN memories m ON m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL
               WHERE s.entry_id=e.id AND s.family_id=a.family_id
                 AND (
-                  (s.source_kind='memory' AND s.source_id=s.memory_id AND m.kind IN ('note','voice'))
-                  OR (s.source_kind='private_storage' AND EXISTS (
+                  (s.memory_id IS NULL AND s.album_photo_media_id=s.source_id AND s.source_kind='private_storage' AND s.kind='photo' AND EXISTS (
+                    SELECT 1 FROM album_photos ap JOIN media_assets ma ON ma.id=ap.media_id AND ma.family_id=ap.family_id
+                     WHERE ap.media_id=s.album_photo_media_id AND ap.family_id=s.family_id AND ma.media_kind='photo' AND ma.original_status='stored' AND ma.rendition_status='ready' AND ma.deleted_at IS NULL AND ma.storage_deleted_at IS NULL
+                  ))
+                  OR (s.memory_id IS NOT NULL AND s.source_kind='memory' AND s.source_id=s.memory_id AND EXISTS (SELECT 1 FROM memories m WHERE m.id=s.memory_id AND m.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL AND m.kind IN ('note','voice')))
+                  OR (s.memory_id IS NOT NULL AND s.source_kind='private_storage' AND EXISTS (
                     SELECT 1 FROM memory_media mm JOIN media_assets ma ON ma.id=mm.media_id AND ma.family_id=mm.family_id
+                     JOIN memories m ON m.id=mm.memory_id AND m.family_id=mm.family_id AND m.status='published' AND m.deleted_at IS NULL
                      WHERE mm.memory_id=s.memory_id AND mm.family_id=s.family_id AND ma.id=s.source_id AND ma.purpose='memory' AND ma.original_status='stored' AND ma.deleted_at IS NULL
                   ))
-                  OR (s.source_kind='max_video' AND EXISTS (SELECT 1 FROM max_video_references r WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id))
-                  OR (s.source_kind='telegram_video' AND EXISTS (SELECT 1 FROM telegram_video_references r WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id))
+                  OR (s.memory_id IS NOT NULL AND s.source_kind='max_video' AND EXISTS (SELECT 1 FROM max_video_references r JOIN memories m ON m.id=r.memory_id AND m.family_id=r.family_id WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL))
+                  OR (s.memory_id IS NOT NULL AND s.source_kind='telegram_video' AND EXISTS (SELECT 1 FROM telegram_video_references r JOIN memories m ON m.id=r.memory_id AND m.family_id=r.family_id WHERE r.id=s.source_id AND r.memory_id=s.memory_id AND r.family_id=s.family_id AND m.status='published' AND m.deleted_at IS NULL))
                 )
            )
       ) ELSE count(e.id) END AS "entryCount"
@@ -452,7 +460,7 @@ async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumMemorySo
   })
 }
 
-async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumMemorySourceCatalog, scope: FamilyScope, role: Role, album: AlbumRow, entries: EntryRow[]): Promise<AlbumEntryDto[]> {
+async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, role: Role, album: AlbumRow, entries: EntryRow[]): Promise<AlbumEntryDto[]> {
   const rows = entries.flatMap((entry) => entry.sources)
   const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
   const byId = new Map(projected.map((source) => [source.id, source]))
@@ -474,12 +482,12 @@ async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumMemoryS
   }))
 }
 
-function sourceDto(source: Awaited<ReturnType<AlbumMemorySourceCatalog['project']>>[number]) {
+function sourceDto(source: Awaited<ReturnType<AlbumSourceCatalog['project']>>[number]) {
   return { id: source.id, memoryId: source.memoryId, sourceKind: source.sourceKind, sourceId: source.sourceId, kind: source.kind,
     available: source.available, attachment: source.available ? source.attachment : null, body: source.available ? source.body : null, occurredAt: source.occurredAt }
 }
 
-function sourceRef(source: { memoryId: string; sourceKind: AlbumEntrySourceKind; sourceId: string }) {
+function sourceRef(source: { memoryId: string | null; sourceKind: AlbumEntrySourceKind; sourceId: string }) {
   return { memoryId: source.memoryId, sourceKind: source.sourceKind, sourceId: source.sourceId }
 }
 
@@ -488,7 +496,9 @@ async function lockScope(tx: PrismaTransactionClient, scope: FamilyScope, write:
   if (!user.length) throw albumScopeUnavailable()
   const session = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM auth_sessions WHERE id=${scope.principal.sessionId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL AND expires_at > now() FOR SHARE`
   if (!session.length) throw albumScopeUnavailable()
-  const family = await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
+  const family = write
+    ? await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR UPDATE`
+    : await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
   if (!family.length) throw albumScopeUnavailable()
   const members = await tx.$queryRaw<Array<{ role: Role; membership_epoch: number }>>`SELECT role::text AS role, membership_epoch FROM family_members WHERE family_id=${scope.familyId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL FOR SHARE`
   if (!members.length) throw albumScopeUnavailable()
@@ -516,7 +526,7 @@ function snapshotId(snapshot: unknown, property: string) {
   if (!snapshot || typeof snapshot !== 'object' || !(property in snapshot) || typeof (snapshot as Record<string, unknown>)[property] !== 'string') throw new AlbumFailure('conflict', 'Результат исходного запроса недоступен')
   return (snapshot as Record<string, string>)[property]!
 }
-function validateEntryCreate(kind: AlbumKind, input: CreateAlbumEntryRequest, sources: Awaited<ReturnType<AlbumMemorySourceCatalog['resolve']>>) {
+function validateEntryCreate(kind: AlbumKind, input: CreateAlbumEntryRequest, sources: Awaited<ReturnType<AlbumSourceCatalog['resolve']>>) {
   if (kind === 'events' && input.kind !== 'event') throw new AlbumFailure('invalid_input', 'В альбоме открытий можно создать только событие')
   if ((kind === 'free' || kind === 'workshop') && input.kind !== 'work') throw new AlbumFailure('invalid_input', 'Для этого альбома создаётся работа')
   if (kind === 'events' && !(input.title?.trim() && (input.caption?.trim() || sources.length > 0))) throw new AlbumFailure('invalid_input', 'Событию нужны название и описание либо хотя бы один источник')
@@ -524,7 +534,7 @@ function validateEntryCreate(kind: AlbumKind, input: CreateAlbumEntryRequest, so
   if (kind === 'year') throw new AlbumFailure('invalid_input', 'В первом годе нельзя создавать дополнительные главы')
 }
 
-async function countAvailableSources(tx: PrismaTransactionClient, catalog: AlbumMemorySourceCatalog, scope: FamilyScope, entryId: string) {
+async function countAvailableSources(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, entryId: string) {
   const rows = await tx.albumEntrySource.findMany({ where: { entryId, familyId: scope.familyId }, orderBy: { position: 'asc' } })
   const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
   return projected.filter(({ available }) => available).length

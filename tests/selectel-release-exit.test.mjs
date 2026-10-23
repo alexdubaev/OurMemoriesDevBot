@@ -413,6 +413,30 @@ const reviewedMediaUiBlobs = [
   ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', 'a5784a62b4df8d4554fc99633ba3c060f62b8a52'],
   ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
 ]
+const reviewedPrivatePhotoProductionBlobs = [
+  ['backend/prisma/migrations/20261023150000_album_private_photos/migration.sql', '1a3232d1ee4d53c23205580a5faa13ded2a524d2'],
+  ['backend/prisma/schema.prisma', '5e66d187c9b98165928acdd22548785777ee11c0'],
+  ['backend/src/jobs.ts', 'b4774dbb15c993fee4b9985dea185808ceb584f0'],
+  ['backend/src/modules/albums/index.ts', '8c8ae9e62b96eabdd7771e4b97d0363e3f068439'],
+  ['backend/src/modules/albums/infrastructure/composed-album-source-catalog.ts', '3ca86aa8b21e63813df360fd26d7dbf273b9d47b'],
+  ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', '382c809fa85efbd0d7c2b6db02c5e3bef7b39773'],
+  ['backend/src/modules/media/application/ports.ts', '01e0881e7ffbafde73dbc14d4472dd54bdb7b4ed'],
+  ['backend/src/modules/media/index.ts', '1e04ca12ded1ddca5cd0639a9700ea9cdff244a2'],
+  ['backend/src/modules/media/infrastructure/prisma-album-photo-source-catalog.ts', 'c1a4a71a12505e1a6ba0192cb38187f30674cc18'],
+  ['backend/src/modules/media/infrastructure/prisma-media-repository.ts', '3f36b7836601c228b0f01b0d87f4d11e667da8f7'],
+  ['backend/src/modules/memories/index.ts', '974276ac646c9038a1805b6a8f24c6422983bbfd'],
+  ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', '150072bdbb48a87f473e39a5dff55fcc03663586'],
+  ['backend/src/modules/memories/infrastructure/source-memory-publisher.ts', '9404465526d36838a52197a8f600cff7372119db'],
+  ['packages/contracts/src/albums.ts', '163dbe2fe344331fd21bc7481e003b56fbb3efbc'],
+  ['webapp/src/features/albums/AlbumEntryDetail.tsx', '0320fd50d15b4d68326e81beeeb23a806f064638'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', '240d12a4482033002ab1fb6e7e3b8dc3d5cf5211'],
+  ['webapp/src/features/albums/ComposerHost.tsx', '70f434256c7235dab2921dc7835b0d7e2887e407'],
+  ['webapp/src/features/albums/EntryEditor.tsx', '0668701c8f58e4a82c45def2ce8f4392f64c67cc'],
+  ['webapp/src/features/albums/model.ts', 'db14f185e628d83fc4ebbe05fa4b08b3dca446e4'],
+  ['webapp/src/features/composer/PhotoComposer.tsx', '1bba733803603e99bba84e80e6d89c0d60ee8470'],
+  ['webapp/src/features/feed/FeedPage.tsx', '5afb5b3b9280ca572f925eee76bc0f176d36dfcf'],
+  ['webapp/src/features/memoly-ui/AddSheetPresentation.tsx', '7187fbcdd05fa4f9e9ac46db7104d215fd301d06'],
+]
 const reviewedFamilyNavigationBlobs = [
   ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
   ['webapp/src/components/ui-v2/ChildHeaderV2.css', 'd648a7ad8ca15553f78e3adca5a5ac08c2d641ff'],
@@ -509,6 +533,24 @@ function rollbackSource(role) {
 	  fixtureWorktrees.push(directory)
 	  const source = commitFrozenSourceFiles({ root: directory, sha: anchor }, reviewedAlbumsProductionBlobs,
 	    'freeze reviewed album runtime production blobs')
+	  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+	  assert.equal(productionRuntimeFingerprint(source.root, anchor), anchorRuntime)
+	  fixtureSourceCache.set(role, source)
+	  return source
+	}
+	if (role === 'privatePhotos') {
+	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
+	  const expectedCompatibility = '3dad9a61fbcb5358c1a4c8cc6a7f614b954d84869bdaaca085075a45e5a3225f'
+	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
+	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-worktree-'))
+	  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, anchor], { cwd: root, encoding: 'utf8' })
+	  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+	  fixtureWorktrees.push(directory)
+	  const source = commitFrozenSourceFiles({ root: directory, sha: anchor },
+	    [...reviewedAlbumsProductionBlobs, ...reviewedPrivatePhotoProductionBlobs],
+	    'freeze reviewed private-photo runtime production blobs')
 	  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 	  assert.equal(productionRuntimeFingerprint(source.root, anchor), anchorRuntime)
 	  fixtureSourceCache.set(role, source)
@@ -1254,6 +1296,67 @@ test('albums migration ledger accepts only exact reviewed prefixes and complete 
   assert.notEqual(verify('unknown', rowsFor(52)).status, 0, 'unknown phase')
 })
 
+test('private-photo recovery pins only its frozen source and accepts the exact 53-migration catalog', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const source = rollbackSource('privatePhotos')
+  const profile = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(profile.status, 0, profile.stdout + profile.stderr)
+  assert.equal(profile.stdout.trim().split('\n').at(-1), 'albums')
+
+  const { program, baseline, candidate } = albumsMigrationHistoryProgram('privatePhotos')
+  const rowsFor = (count) => candidate.trim().split('\n').slice(0, count).map((line) => {
+    const [migration_name, checksum] = line.split(':')
+    return { migration_name, checksum, finished_at: '2026-10-23T00:00:00.000Z', rolled_back_at: null }
+  })
+  const verify = (phase, rows) => runAlbumsMigrationHistoryVerifier({ program, baseline, candidate, phase, rows })
+  for (const count of [49, 50, 51, 52, 53]) assert.equal(verify('pre-sql', rowsFor(count)).status, 0, `pre-SQL prefix ${count}`)
+  assert.equal(verify('complete', rowsFor(53)).status, 0, 'post-SQL complete private-photo catalog')
+  assert.notEqual(verify('complete', rowsFor(52)).status, 0, 'post-SQL catalog missing private-photo migration')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(53)[0], checksum: 'f'.repeat(64) }, ...rowsFor(53).slice(1)]).status, 0,
+    'changed baseline checksum')
+  assert.notEqual(verify('pre-sql', [...rowsFor(52), { ...rowsFor(53)[52], finished_at: null }]).status, 0,
+    'unfinished private-photo migration')
+  assert.notEqual(verify('pre-sql', [...rowsFor(52), { ...rowsFor(53)[52], rolled_back_at: '2026-10-23T00:00:00.000Z' }]).status, 0,
+    'rolled-back private-photo migration')
+  assert.notEqual(verify('pre-sql', [...rowsFor(53), rowsFor(53)[52]]).status, 0, 'duplicate private-photo migration')
+  assert.notEqual(verify('unknown', rowsFor(53)).status, 0, 'unknown phase')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitFrozenSourceFiles({ root: driftDirectory, sha: source.sha },
+    [['backend/src/modules/media/infrastructure/prisma-media-repository.ts', '53b1e92e154dde778454061b5e40d60a6b081538']],
+    'restore the anchored media repository blob to simulate production drift')
+  const rejected = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(mutated.root)}\nMEMOLY_PRODUCT_SHA=${mutated.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.notEqual(rejected.status, 0, 'production source mutation must invalidate the exact fingerprint')
+
+  const wrongName = spawnSync('git', ['mv', '--',
+    'backend/prisma/migrations/20261023150000_album_private_photos',
+    'backend/prisma/migrations/20261023150000_unknown_private_photos'],
+  { cwd: source.root, encoding: 'utf8' })
+  assert.equal(wrongName.status, 0, wrongName.stdout + wrongName.stderr)
+  const wrongNameCommit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '--quiet', '-m', 'simulate an unreviewed migration suffix'], { cwd: source.root, encoding: 'utf8' })
+  assert.equal(wrongNameCommit.status, 0, wrongNameCommit.stdout + wrongNameCommit.stderr)
+  const unknownSuffixSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  const badCatalog = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${unknownSuffixSha}\nrollback_verify_albums_migration_history pre-sql\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.notEqual(badCatalog.status, 0, 'unknown migration suffix must be rejected before invoking compose')
+})
+
 function migrationHistoryVerifierSource(expected) {
   const capture = resolve(root, '.scratch', `migration-ledger-program-${process.pid}.mjs`)
   const result = spawnSync(bashExecutable, ['-s'], {
@@ -1297,9 +1400,9 @@ function runMigrationHistoryVerifier({ expected, rows }) {
   return result
 }
 
-function albumsMigrationHistoryProgram() {
+function albumsMigrationHistoryProgram(sourceRole = 'albums') {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
-  const source = rollbackSource('albums')
+  const source = rollbackSource(sourceRole)
   const captureProgram = resolve(root, '.scratch', `albums-ledger-program-${process.pid}.mjs`)
   const captureCatalog = resolve(root, '.scratch', `albums-ledger-catalog-${process.pid}.txt`)
   const result = spawnSync(bashExecutable, ['-s'], {

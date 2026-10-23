@@ -9,6 +9,9 @@ import { requireIntegrationDatabaseUrl } from '../../test-support/integration-da
 import { createApp } from '../../app'
 import { loadEnv } from '../../env'
 import { signAccessToken } from '../auth'
+import { runBackgroundJob } from '../../jobs'
+import { createPrismaAlbumPhotoSourceCatalog } from '../media'
+import { createComposedAlbumSourceCatalog } from './infrastructure/composed-album-source-catalog'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
 const env = loadEnv({ DATABASE_URL: databaseUrl, JWT_SECRET: '0123456789abcdef'.repeat(4), CORS_ORIGINS: 'http://localhost:5173', AUTH_RATE_LIMIT_MAX: '10000' })
@@ -28,7 +31,8 @@ describe('album PostgreSQL invariants', () => {
 
   beforeEach(async () => {
     db = createPrisma(databaseUrl!)
-    repository = new PrismaAlbumRepository(db, createPrismaIdempotencyExecutor(db), createAlbumMemorySourceCatalog())
+    repository = new PrismaAlbumRepository(db, createPrismaIdempotencyExecutor(db),
+      createComposedAlbumSourceCatalog(createAlbumMemorySourceCatalog(), createPrismaAlbumPhotoSourceCatalog()))
     userId = (await db.user.create({ data: { displayName: 'Синтетический участник' } })).id
     otherFamilyId = undefined
     otherOwnerId = undefined
@@ -113,6 +117,279 @@ describe('album PostgreSQL invariants', () => {
     const memory = await createNote()
     await repository.setSources(scope, album.id, entry.id, { expectedVersion: 1, sources: [{ memoryId: memory.id, sourceKind: 'memory', sourceId: memory.id }] }, randomUUID(), 'd'.repeat(64))
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
+  })
+
+  test('stores a finalized album photo directly without creating a feed Memory', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const album = await createAlbum()
+    const entry = await createEntry(album.id, { title: 'Фото в альбоме' })
+    const media = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'a'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const beforeMemories = await db.memory.count({ where: { familyId } })
+    const beforeBackups = await db.maxMemoryBackup.count({ where: { familyId } })
+    const beforeOutbox = await db.taskOutbox.count()
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`
+    const body = { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: media.id }] }
+    const thiefId = (await db.user.create({ data: { displayName: 'Другой редактор' } })).id
+    extraUserIds.push(thiefId)
+    await db.familyMember.create({ data: { familyId, userId: thiefId, role: 'full' } })
+    const thiefSession = await db.authSession.create({ data: { userId: thiefId, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 60_000) } })
+    expect((await http(path, 'PUT', await auth(thiefId, thiefSession.id), body, randomUUID())).status).toBe(404)
+    const key = randomUUID()
+    const response = await http(path, 'PUT', token, body, key)
+    expect(response.status).toBe(200)
+    const result = await response.json()
+    expect(result.entry.sources).toMatchObject([{ memoryId: null, sourceId: media.id, kind: 'photo', available: true }])
+    expect(await db.memory.count({ where: { familyId } })).toBe(beforeMemories)
+    expect(await db.maxMemoryBackup.count({ where: { familyId } })).toBe(beforeBackups)
+    expect(await db.taskOutbox.count()).toBe(beforeOutbox)
+    const sourceId = result.entry.sources[0].id
+    await db.idempotencyRecord.deleteMany({ where: { actorUserId: userId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key } })
+    const replay = await http(path, 'PUT', token, body, key)
+    expect(replay.status).toBe(200)
+    expect((await replay.json()).entry.sources).toMatchObject([{ id: sourceId, memoryId: null, sourceId: media.id, available: true }])
+    const viewerId = (await db.user.create({ data: { displayName: 'Зритель альбома' } })).id
+    extraUserIds.push(viewerId)
+    await db.familyMember.create({ data: { familyId, userId: viewerId, role: 'viewer' } })
+    const viewerSession = await db.authSession.create({ data: { userId: viewerId, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 60_000) } })
+    const viewerEntry = await http(`/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}`, 'GET', await auth(viewerId, viewerSession.id))
+    expect((await viewerEntry.json()).entry.sources).toMatchObject([{ memoryId: null, sourceId: media.id, available: true }])
+  })
+
+  test('serializes concurrent photo attaches before taking media locks', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const firstAlbum = await createAlbum()
+    const secondAlbum = await createAlbum()
+    const firstEntry = await createEntry(firstAlbum.id)
+    const secondEntry = await createEntry(secondAlbum.id)
+    const makeReadyPhoto = (sha: string) => db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: sha.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const firstMedia = await makeReadyPhoto('1')
+    const secondMedia = await makeReadyPhoto('2')
+    const firstPath = `/api/v1/families/${familyId}/albums/${firstAlbum.id}/entries/${firstEntry.id}/sources`
+    const secondPath = `/api/v1/families/${familyId}/albums/${secondAlbum.id}/entries/${secondEntry.id}/sources`
+    let releaseBlocker!: () => void
+    const unblock = new Promise<void>((resolve) => { releaseBlocker = resolve })
+    let blocker: Promise<void> | undefined
+    const requests: Promise<Response>[] = []
+    try {
+      const waitForBlockedQuery = async (pattern: string) => {
+        const deadline = Date.now() + 5_000
+        while (Date.now() < deadline) {
+          const rows = await db.$queryRaw<Array<{ waiting: bigint }>>`
+            SELECT count(*) AS waiting
+              FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock' AND query ILIKE ${pattern}
+          `
+          if (Number(rows[0]?.waiting ?? 0) > 0) return
+          await new Promise((resolve) => setTimeout(resolve, 25))
+        }
+        throw new Error(`Timed out waiting for PostgreSQL lock query ${pattern}`)
+      }
+      // The blocker is acquired first; the first real request then pauses on its media row.
+      // A second real request must queue on the family lock before it can lock another media row.
+      let blockerLockedResolve!: () => void
+      const blockerLocked = new Promise<void>((resolve) => { blockerLockedResolve = resolve })
+      blocker = db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM media_assets WHERE id=${firstMedia.id}::uuid FOR UPDATE`
+        blockerLockedResolve()
+        await unblock
+      })
+      await blockerLocked
+      requests.push(http(firstPath, 'PUT', token,
+        { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: firstMedia.id }] }, randomUUID()))
+      await waitForBlockedQuery('%media_assets%')
+      requests.push(http(secondPath, 'PUT', token,
+        { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: secondMedia.id }] }, randomUUID()))
+      await waitForBlockedQuery('%families%')
+      releaseBlocker()
+      await blocker
+      const [firstResponse, secondResponse] = await Promise.all(requests)
+      expect([firstResponse.status, secondResponse.status]).toEqual([200, 200])
+      expect(await db.albumPhoto.count({ where: { mediaId: { in: [firstMedia.id, secondMedia.id] }, familyId } })).toBe(2)
+      expect(await db.albumEntrySource.count({ where: { albumId: { in: [firstAlbum.id, secondAlbum.id] } } })).toBe(2)
+      expect(await db.memory.count({ where: { familyId } })).toBe(0)
+    } finally {
+      releaseBlocker()
+      await Promise.allSettled(requests)
+      if (blocker) await Promise.allSettled([blocker])
+    }
+  }, { timeout: 15_000 })
+
+  test('uses a direct private photo as an available year cover and counted source', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const created = await http(`/api/v1/families/${familyId}/albums`, 'POST', token,
+      { kind: 'year', title: 'Первый год', childId }, randomUUID())
+    expect(created.status).toBe(201)
+    const album = (await created.json()).album
+    const entriesResponse = await http(`/api/v1/families/${familyId}/albums/${album.id}/entries`, 'GET', token)
+    const entry = (await entriesResponse.json()).items[0]
+    const media = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'f'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const attach = await http(`/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`, 'PUT', token,
+      { expectedVersion: album.version, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: media.id }] }, randomUUID())
+    expect(attach.status).toBe(200)
+    const listed = await http(`/api/v1/families/${familyId}/albums`, 'GET', token)
+    const projected = (await listed.json()).items.find((item: { id: string }) => item.id === album.id)
+    expect(projected.entryCount).toBe(1)
+    expect(projected.cover).toMatchObject({ memoryId: null, sourceId: media.id, kind: 'photo', available: true })
+  })
+
+  test('rejects unready, foreign-family, and mismatched private source references', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const album = await createAlbum()
+    const entry = await createEntry(album.id)
+    const unready = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', byteSize: 3,
+    } })
+    const key = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`
+    const unreadyResponse = await http(key, 'PUT', token,
+      { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: unready.id }] }, randomUUID())
+    expect(unreadyResponse.status).toBe(404)
+    const note = await createNote()
+    const mismatchedResponse = await http(key, 'PUT', token,
+      { expectedVersion: 1, sources: [{ memoryId: note.id, sourceKind: 'private_storage', sourceId: unready.id }] }, randomUUID())
+    expect(mismatchedResponse.status).toBe(404)
+    const foreignFamilyId = randomUUID()
+    otherFamilyId = foreignFamilyId
+    otherOwnerId = (await db.user.create({ data: { displayName: 'Чужой владелец' } })).id
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SET CONSTRAINTS ALL DEFERRED`
+      await tx.family.create({ data: { id: foreignFamilyId, ownerUserId: otherOwnerId!, name: 'Другая семья', timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: foreignFamilyId, userId: otherOwnerId!, role: 'full' } })
+    })
+    const foreign = await db.mediaAsset.create({ data: {
+      familyId: foreignFamilyId, uploaderId: otherOwnerId!, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: '9'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const foreignResponse = await http(key, 'PUT', token,
+      { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: foreign.id }] }, randomUUID())
+    expect(foreignResponse.status).toBe(404)
+    expect(await db.albumPhoto.count({ where: { mediaId: { in: [unready.id, foreign.id] } } })).toBe(0)
+  })
+
+  test('retains registered private photos through clear and legacy cleanup while blocking publication', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const album = await createAlbum()
+    const entry = await createEntry(album.id, { title: 'Фото в альбоме' })
+    const media = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'b'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+      createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    } })
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`
+    const body = { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: media.id }] }
+    const attachKey = randomUUID()
+    const attach = await http(path, 'PUT', token, body, attachKey)
+    expect(attach.status).toBe(200)
+    expect(await db.albumPhoto.count({ where: { mediaId: media.id, familyId } })).toBe(1)
+    const note = await createNote()
+    await expect(Promise.resolve().then(() => db.memoryMedia.create({ data: { familyId, memoryId: note.id, mediaId: media.id, position: 0 } }))).rejects.toThrow()
+    const storageBefore = (await db.family.findUniqueOrThrow({ where: { id: familyId } })).storageUsedBytes
+    await runBackgroundJob('media:pending:cleanup', { prisma: db } as never, new Date())
+    const afterCleanup = await db.mediaAsset.findUniqueOrThrow({ where: { id: media.id } })
+    expect(afterCleanup.deletedAt).toBeNull()
+    expect((await db.family.findUniqueOrThrow({ where: { id: familyId } })).storageUsedBytes).toBe(storageBefore)
+    const detached = await http(path, 'PUT', token, { expectedVersion: 2, sources: [] }, randomUUID())
+    expect(detached.status).toBe(200)
+    expect((await detached.json()).entry.sources).toEqual([])
+    expect(await db.albumPhoto.count({ where: { mediaId: media.id, familyId } })).toBe(1)
+    expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: media.id } })).deletedAt).toBeNull()
+    await db.idempotencyRecord.deleteMany({ where: { actorUserId: userId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key: attachKey } })
+    const replayAfterClear = await http(path, 'PUT', token, body, attachKey)
+    expect(replayAfterClear.status).toBe(200)
+    expect((await replayAfterClear.json()).entry.sources).toEqual([])
+  })
+
+  test('serializes a private-photo claim against real publication and GC transactions', async () => {
+    const media = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'd'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const memory = await createNote()
+    const catalog = createPrismaAlbumPhotoSourceCatalog()
+    let claimedResolve!: () => void
+    let releaseResolve!: () => void
+    const claimed = new Promise<void>((resolve) => { claimedResolve = resolve })
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve })
+    const claimTx = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id=${familyId}::uuid FOR UPDATE`
+      await catalog.claim(tx, scope, [media.id])
+      claimedResolve()
+      await release
+    })
+    await claimed
+    let publicationStartResolve!: () => void
+    let gcStartResolve!: () => void
+    const publicationStarted = new Promise<void>((resolve) => { publicationStartResolve = resolve })
+    const gcStarted = new Promise<void>((resolve) => { gcStartResolve = resolve })
+    let publicationSettled = false
+    let gcSettled = false
+    const publicationTx = db.$transaction(async (tx) => {
+      publicationStartResolve()
+      await tx.memoryMedia.create({ data: { familyId, memoryId: memory.id, mediaId: media.id, position: 0 } })
+    }).finally(() => { publicationSettled = true })
+    const gcTx = db.$transaction(async (tx) => {
+      gcStartResolve()
+      return tx.$executeRaw`UPDATE media_assets SET deleted_at=now() WHERE id=${media.id}::uuid AND deleted_at IS NULL`
+    }).finally(() => { gcSettled = true })
+    await Promise.all([publicationStarted, gcStarted])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(publicationSettled).toBe(false)
+    expect(gcSettled).toBe(false)
+    releaseResolve()
+    await claimTx
+    await expect(publicationTx).rejects.toThrow()
+    expect(await gcTx).toBe(0)
+    expect(await db.memoryMedia.count({ where: { mediaId: media.id } })).toBe(0)
+    expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: media.id } })).deletedAt).toBeNull()
+    expect(await db.albumPhoto.count({ where: { mediaId: media.id, familyId } })).toBe(1)
+
+    const gcWinnerMedia = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'e'.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    let gcLockedResolve!: () => void
+    let gcReleaseResolve!: () => void
+    let claimStartResolve!: () => void
+    const gcLocked = new Promise<void>((resolve) => { gcLockedResolve = resolve })
+    const gcRelease = new Promise<void>((resolve) => { gcReleaseResolve = resolve })
+    const claimStarted = new Promise<void>((resolve) => { claimStartResolve = resolve })
+    let reverseClaimSettled = false
+    const gcFirst = db.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE media_assets SET deleted_at=now() WHERE id=${gcWinnerMedia.id}::uuid AND deleted_at IS NULL`
+      gcLockedResolve()
+      await gcRelease
+    })
+    await gcLocked
+    const claimAfterGc = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id=${familyId}::uuid FOR UPDATE`
+      claimStartResolve()
+      await catalog.claim(tx, scope, [gcWinnerMedia.id])
+    }).finally(() => { reverseClaimSettled = true })
+    await claimStarted
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(reverseClaimSettled).toBe(false)
+    gcReleaseResolve()
+    await gcFirst
+    await expect(claimAfterGc).rejects.toThrow()
+    expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: gcWinnerMedia.id } })).deletedAt).not.toBeNull()
+    expect(await db.albumPhoto.count({ where: { mediaId: gcWinnerMedia.id, familyId } })).toBe(0)
   })
 
   test('source updates remain replayable after shared idempotency expiry without stale-version conflicts or resurrection', async () => {

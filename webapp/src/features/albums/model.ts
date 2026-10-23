@@ -33,6 +33,9 @@ export function memorySources(memory: MemoryDto): AlbumSource[] {
   if (memory.kind === 'note' || memory.kind === 'voice') return [{ id: memory.id, memoryId: memory.id, sourceKind: 'memory', sourceId: memory.id, kind: memory.kind, attachment: memory.attachments.find((item) => item.kind === 'voice') ?? null, body: memory.body, available: true, occurredAt: memory.occurredAt }]
   return memory.attachments.map((attachment) => ({ id: attachment.id, memoryId: memory.id, sourceId: attachment.id, sourceKind: attachment.source === 'max' ? 'max_video' : attachment.source === 'telegram' ? 'telegram_video' : 'private_storage', kind: attachment.kind, attachment, body: null, occurredAt: memory.occurredAt })) .map((source) => ({ ...source, available: true })) as AlbumSource[]
 }
+export function albumPhotoSources(mediaIds: string[]): AlbumSource[] {
+  return mediaIds.map((mediaId) => ({ id: mediaId, memoryId: null, sourceKind: 'private_storage', sourceId: mediaId, kind: 'photo', attachment: null, body: null, available: true, occurredAt: null }))
+}
 export function previewPath(source?: AlbumSource | null) {
   if (!source?.available || !source.attachment) return null
   const attachment = source.attachment

@@ -18,6 +18,7 @@ export type AddSheetPresentationProps = {
   onPhoto: () => void
   onVideo: () => void
   open: boolean
+  photoOnly?: boolean
   returnFocusRef?: RefObject<HTMLElement | null>
   role: 'full' | 'viewer'
 }
@@ -29,6 +30,7 @@ export function AddSheetPresentation({
   onPhoto,
   onVideo,
   open,
+  photoOnly = false,
   returnFocusRef,
   role,
 }: AddSheetPresentationProps) {
@@ -76,6 +78,7 @@ export function AddSheetPresentation({
         onNote={() => { close(); onNote() }}
         onPhoto={() => { close(); onPhoto() }}
         onVoiceOrVideo={() => setLevel('voice-video')}
+        photoOnly={photoOnly}
       /> : <VoiceOrVideoPanel
         onBack={() => setLevel('add')}
         onClose={close}
@@ -91,18 +94,20 @@ export function AddSheetPanel({
   onNote,
   onPhoto,
   onVoiceOrVideo,
+  photoOnly = false,
 }: {
   onClose: () => void
   onNote: () => void
   onPhoto: () => void
   onVoiceOrVideo: () => void
+  photoOnly?: boolean
 }) {
   return (
     <div className="memoly-sheet-content memoly-add-sheet-panel" data-slot="memoly-add-sheet-panel" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
       <DrawerTitle className="sheet-title">Добавить воспоминание</DrawerTitle>
       <DrawerDescription className="sheet-subtitle">Сохраняйте моменты, которые важны</DrawerDescription>
       <div className="add-options">
-        <AddAction icon="photo" label="Добавить фото и видео" name="photo" onClick={onPhoto} copy={<>Файлы<br />с устройства</>} />
+        <AddAction icon="photo" label={photoOnly ? 'Добавить фото' : 'Добавить фото и видео'} name="photo" onClick={onPhoto} photoOnly={photoOnly} copy={<>Файлы<br />с устройства</>} />
         <AddAction icon="note" label="Добавить заметку" name="note" onClick={onNote} copy={<>Мысли<br />и события</>} />
         <AddAction icon="voice" label="Добавить голос или видео" name="voice-or-video" onClick={onVoiceOrVideo} copy={<>Файл<br />с устройства</>} />
       </div>
@@ -110,11 +115,11 @@ export function AddSheetPanel({
   )
 }
 
-function AddAction({ icon, label, name, onClick, copy }: { icon: 'note' | 'photo' | 'voice' | 'video'; label: string; name: 'note' | 'photo' | 'video' | 'voice-or-video'; onClick: () => void; copy: ReactNode }) {
+function AddAction({ icon, label, name, onClick, copy, photoOnly = false }: { icon: 'note' | 'photo' | 'voice' | 'video'; label: string; name: 'note' | 'photo' | 'video' | 'voice-or-video'; onClick: () => void; copy: ReactNode; photoOnly?: boolean }) {
   const kind = name === 'photo' ? 'kind-photo' : name === 'note' ? 'kind-note' : 'kind-media'
   return <button aria-label={label} className={`add-option ${kind}`} data-add-action={name} onClick={onClick} type="button">
     <span className="add-option-icon"><WebpIcon decorative name={icon} size={38} state="active" /></span>
-    <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? 'Фото и видео' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
+    <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? photoOnly ? 'Фото' : 'Фото и видео' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
     <Typography as="span" className="add-option-copy" tone="muted" variant="memoryMeta">{copy}</Typography>
   </button>
 }

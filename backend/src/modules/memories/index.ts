@@ -50,6 +50,6 @@ export function createMemoriesModule({
 }
 
 export type { MediaMemoryCatalog, MemoryRepository } from './application/ports'
-export type { AlbumMemoryPickerItem, AlbumMemorySourceCatalog, AlbumMemorySourceProjection, AlbumMemorySourceRef } from './application/album-source-ports'
+export type { AlbumMemoryPickerItem, AlbumMemorySourceCatalog, AlbumMemorySourceProjection, AlbumMemorySourceRef, AlbumSourceFilter, AlbumSourceCursor } from './application/album-source-ports'
 export { MemoryService } from './application/memory-service'
 export { MemoryFailure } from './domain/errors'
