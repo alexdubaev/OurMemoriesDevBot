@@ -267,7 +267,6 @@ test('production App skips the welcome after the account claim has been used', a
 })
 
 test('production entry blocks page pinch zoom while preserving ordinary input and PhotoSwipe gestures', async ({ page }) => {
-  await page.goto('/')
   const cdp = await page.context().newCDPSession(page)
   let pinchScale: number
   try {
@@ -278,6 +277,22 @@ test('production entry blocks page pinch zoom while preserving ordinary input an
       mobile: true,
     })
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await page.goto('/')
+    const blockingZoomListeners = async () => {
+      const remoteDocument = await cdp.send('Runtime.evaluate', { expression: 'document' })
+      if (!remoteDocument.result.objectId) throw new Error('Could not inspect document event listeners')
+      const { listeners } = await cdp.send('DOMDebugger.getEventListeners', { objectId: remoteDocument.result.objectId })
+      return listeners
+        .filter((listener) => ['gesturestart', 'gesturechange', 'touchmove'].includes(listener.type) && listener.passive !== true)
+        .map((listener) => listener.type)
+        .sort()
+    }
+    expect(await blockingZoomListeners()).toEqual([])
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 195, y: 300, id: 1 }] })
+    expect(await blockingZoomListeners()).toEqual(['gesturestart'])
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(await blockingZoomListeners()).toEqual([])
     await cdp.send('Input.synthesizePinchGesture', {
       x: 195,
       y: 300,
@@ -305,14 +320,20 @@ test('production entry blocks page pinch zoom while preserving ordinary input an
 
     const outcome = {
       rootTouchAction: getComputedStyle(document.documentElement).touchAction,
+      firstFinger: dispatch(document, 'touchstart', { touches: [{}] }),
       gestureStart: dispatch(document, 'gesturestart'),
-      gestureChange: dispatch(document, 'gesturechange'),
+      secondFinger: dispatch(document, 'touchstart', { touches: [{}, {}] }),
       multiTouch: dispatch(document, 'touchmove', { touches: [{}, {}] }),
+      gestureChange: dispatch(document, 'gesturechange'),
+      lastFinger: dispatch(document, 'touchend', { touches: [{}] }),
       singleTouch: dispatch(document, 'touchmove', { touches: [{}] }),
+      finalFinger: dispatch(document, 'touchend', { touches: [] }),
       ctrlWheel: dispatch(document, 'wheel', { ctrlKey: true }),
       metaWheel: dispatch(document, 'wheel', { metaKey: true }),
       ordinaryWheel: dispatch(document, 'wheel', { ctrlKey: false, metaKey: false }),
+      photoSwipeTouchStart: dispatch(image, 'touchstart', { touches: [{}] }),
       photoSwipeGesture: dispatch(image, 'gesturestart'),
+      photoSwipeTouchEnd: dispatch(image, 'touchend', { touches: [] }),
     }
     pswp.remove()
     return outcome
@@ -321,14 +342,20 @@ test('production entry blocks page pinch zoom while preserving ordinary input an
   expect(pinchScale).toBe(1)
   expect(outcomes).toEqual({
     rootTouchAction: 'pan-x pan-y',
+    firstFinger: false,
     gestureStart: true,
-    gestureChange: true,
+    secondFinger: false,
     multiTouch: true,
+    gestureChange: true,
+    lastFinger: false,
     singleTouch: false,
+    finalFinger: false,
     ctrlWheel: true,
     metaWheel: true,
     ordinaryWheel: false,
+    photoSwipeTouchStart: false,
     photoSwipeGesture: false,
+    photoSwipeTouchEnd: false,
   })
 })
 
