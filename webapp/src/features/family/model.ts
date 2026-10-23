@@ -1,4 +1,6 @@
-import type { FamilyHomeResponse, FamilyMemberDto } from '@web-app-demo/contracts'
+import { MAX_FAMILY_CHILDREN, type ChildDto, type FamilyHomeResponse, type FamilyMemberDto, type FamilyResponse } from '@web-app-demo/contracts'
+
+import { ApiRequestError } from '@/platform/api'
 
 type CalendarDate = { year: number; month: number; day: number }
 
@@ -8,6 +10,27 @@ export function canStartMaxVideoUpload(summary: FamilyHomeResponse['items'][numb
 }
 
 export const onboardingSaveErrorMessage = 'Не удалось сохранить данные. Попробуйте ещё раз.'
+
+/** Children in server order. A server or cache without `children` still has its single `child`. */
+export function familyChildren(response: Pick<FamilyResponse, 'child' | 'children'>): ChildDto[] {
+  return response.children ?? (response.child ? [response.child] : [])
+}
+
+export function hasManyChildren(children: readonly ChildDto[]) {
+  return children.length >= 2
+}
+
+/** Only the owner adds children, and a family holds at most twelve. */
+export function canAddChild(isOwner: boolean, children: readonly ChildDto[]) {
+  return isOwner && children.length > 0 && children.length < MAX_FAMILY_CHILDREN
+}
+
+/** A server refusal carries its own Russian reason; transport and server faults get a generic text. */
+export function childActionErrorMessage(error: unknown) {
+  return error instanceof ApiRequestError && error.status >= 400 && error.status < 500 && error.code !== 'VERSION_CONFLICT'
+    ? error.message
+    : onboardingSaveErrorMessage
+}
 
 export function familyCalendarDate(timezone: string, now = new Date()) {
   const today = dateParts(now, timezone)

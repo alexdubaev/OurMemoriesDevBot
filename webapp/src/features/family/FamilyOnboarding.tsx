@@ -8,14 +8,15 @@ import { AvatarEditor, avatarCropStyle, createAvatarPreview, fullAvatarCrop, res
 import type { AvatarCrop } from '@/features/avatar'
 import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { completeChildProfile, updateFamily, uploadChildAvatar } from './api'
+import { completeChildProfile, createChild, deleteChild, updateChild, updateFamily, uploadChildAvatar } from './api'
 import {
+  childActionErrorMessage,
   familyCalendarDate,
   formatChildAge,
   isBirthDateOnOrBeforeFamilyToday,
   onboardingSaveErrorMessage,
 } from './model'
-import type { FamilyResponse } from '@web-app-demo/contracts'
+import type { ChildDto } from '@web-app-demo/contracts'
 
 type Crop = AvatarCrop
 
@@ -23,20 +24,34 @@ export function FamilyOnboarding({
   familyId,
   familyTimezone,
   initialChild,
+  addChild = false,
+  canDelete = false,
+  legacyProfileEndpoint = false,
   photoOnly = false,
   transport,
   onCancel,
   cancelLabel = 'Отмена',
   onCompleted,
+  onDeleted,
+  onRefresh,
 }: {
   familyId: string
   familyTimezone: string
-  initialChild?: NonNullable<FamilyResponse['child']>
+  initialChild?: ChildDto
+  /** The owner adds one more child to a family that already has one. */
+  addChild?: boolean
+  /** Offers «Удалить профиль» in the editor; the server still decides whether it is allowed. */
+  canDelete?: boolean
+  /** Saves through `PUT /child`, the call the oldest child's profile has always used; other children use `PATCH /children/:id`. */
+  legacyProfileEndpoint?: boolean
   photoOnly?: boolean
   transport: AuthenticatedTransport
   onCancel?: () => void
   cancelLabel?: string
   onCompleted: () => Promise<void>
+  onDeleted?: () => Promise<void>
+  /** Reloads the family after another editor changed this profile first. */
+  onRefresh?: () => Promise<void>
 }) {
   const [name, setName] = useState(initialChild?.name ?? '')
   const [birthDate, setBirthDate] = useState(initialChild?.birthDate ?? '')
@@ -60,6 +75,11 @@ export function FamilyOnboarding({
   const [requestError, setRequestError] = useState<Error | null>(null)
   const submitError = useRef<Error | null>(null)
   const [childVersionConflict, setChildVersionConflict] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const submitLock = useRef(false)
+  const createAttempt = useRef<{ key: string; payload: string } | null>(null)
   const filePicker = useRef<HTMLInputElement>(null)
   const previewController = useRef<AbortController | null>(null)
   const ownedCropUrls = useRef(new Set<string>())
@@ -102,6 +122,8 @@ export function FamilyOnboarding({
   const displayAvatarUrl = previewUrl ?? currentAvatarUrl
   const photoVersionConflict = photoOnly && childVersionConflict
   const isChildEdit = Boolean(initialChild && !photoOnly)
+  const editVersionConflict = !photoOnly && childVersionConflict
+  const refusalMessage = (error: Error | null) => initialChild || addChild ? childActionErrorMessage(error) : onboardingSaveErrorMessage
 
   async function chooseFile(next: File | null) {
     setRequestError(null)
@@ -185,6 +207,7 @@ export function FamilyOnboarding({
   }
 
   async function submit(override?: { file: File | null; crop: Crop }): Promise<boolean> {
+    if (submitLock.current) return false
     const submittedFile = override ? override.file : file
     const submittedCrop = override?.crop ?? confirmedCrop
     const errors: Record<string, string> = {}
@@ -204,6 +227,7 @@ export function FamilyOnboarding({
     if (Object.keys(errors).length > 0
       || (!photoOnly && ((!submittedFile && !initialChild?.avatarMediaId) || !sex || age === null))) return false
 
+    submitLock.current = true
     setSubmitting(true)
     try {
       const contentType = submittedFile ? resolveAvatarContentType(submittedFile) : null
@@ -219,6 +243,19 @@ export function FamilyOnboarding({
         await updateFamily(transport, familyId, { child: {
           avatarMediaId, avatarCrop: submittedCrop, expectedVersion: initialChild.version,
         } })
+      } else if (addChild) {
+        const input = { name: name.trim(), birthDate, sex: sex!, avatarMediaId, avatarCrop: submittedCrop }
+        // One key per distinct payload: a retry or double tap returns the same child instead of a second one.
+        const payload = JSON.stringify(input)
+        if (createAttempt.current?.payload !== payload) createAttempt.current = { key: crypto.randomUUID(), payload }
+        await createChild(transport, familyId, input, createAttempt.current.key)
+      } else if (initialChild && !legacyProfileEndpoint) {
+        const avatarChanged = Boolean(file) || cropDirty
+        await updateChild(transport, familyId, initialChild.id, {
+          name: name.trim(), birthDate, sex: sex!,
+          ...(avatarChanged ? { avatarMediaId, avatarCrop: submittedCrop } : {}),
+          expectedVersion: initialChild.version,
+        })
       } else {
         await completeChildProfile(transport, familyId, {
           name: name.trim(), birthDate, sex: sex!, avatarMediaId, avatarCrop: submittedCrop,
@@ -230,15 +267,37 @@ export function FamilyOnboarding({
       return true
     } catch (error) {
       submitError.current = error instanceof Error ? error : new Error('Не удалось сохранить профиль ребёнка.')
-      if (photoOnly && error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT') {
+      if (error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT' && (photoOnly || initialChild)) {
         finalizedAvatar.current = null
         setChildVersionConflict(true)
       }
       setRequestError(error instanceof Error ? error : new Error('Не удалось сохранить профиль ребёнка.'))
       return false
     } finally {
+      submitLock.current = false
       setSubmitting(false)
     }
+  }
+
+  async function removeChild() {
+    if (!initialChild || deleting) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteChild(transport, familyId, initialChild.id, initialChild.version)
+      await (onDeleted ?? onCompleted)()
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.code === 'VERSION_CONFLICT') setChildVersionConflict(true)
+      setDeleteError(childActionErrorMessage(error))
+      setConfirmingDelete(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  async function refreshAfterConflict() {
+    try { await onRefresh?.() } catch { /* the family screen reports a failed reload itself */ }
+    onCancel?.()
   }
 
   return (
@@ -261,9 +320,9 @@ export function FamilyOnboarding({
           <Typography as="p" variant="memoryBody">Новое фото профиля сохранено.</Typography>
           <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={requestCancel} type="button">Перейти в профиль</Button>
         </div> : <>
-        {!isChildEdit ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
+        {!isChildEdit ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : addChild ? 'Добавить ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
         {!isChildEdit ? <Typography className="mt-2" tone="muted" variant="memoryBody">
-          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : 'Это поможет сделать семейную ленту вашей.'}
+          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : addChild ? 'Имя, дата рождения, пол и фотография — как у первого ребёнка.' : 'Это поможет сделать семейную ленту вашей.'}
         </Typography> : null}
 
         {isChildEdit ? <div className="child-edit-v2-intro">
@@ -389,17 +448,30 @@ export function FamilyOnboarding({
           </fieldset>
         </div> : null}
 
-        {requestError || photoVersionConflict ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" role="alert">
+        {requestError || photoVersionConflict || editVersionConflict ? <section className="mt-5 rounded-[var(--radius-field)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]" data-slot="child-save-error" role="alert">
           <Typography variant="memoryBody">
             {photoVersionConflict
               ? 'Профиль ребёнка уже изменился. Отмените смену фото, вернитесь в профиль и откройте её снова.'
-              : onboardingSaveErrorMessage}
+              : editVersionConflict
+                ? 'Профиль ребёнка уже изменили. Обновите данные, чтобы увидеть свежую версию.'
+                : refusalMessage(requestError)}
           </Typography>
-          {!photoVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
+          {editVersionConflict ? <Button className="mt-3" onClick={() => void refreshAfterConflict()} type="button" variant="ghost"><Typography variant="memoryButton">Обновить</Typography></Button> : null}
+          {!photoVersionConflict && !editVersionConflict ? <Button className="mt-3" onClick={() => void submit()} type="button" variant="ghost"><Typography variant="memoryButton">Повторить</Typography></Button> : null}
         </section> : null}
-        <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || (photoOnly && (!(file || cropDirty) || photoVersionConflict))} onClick={() => void submit()} type="button">
-          <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
+        <Button className={isChildEdit ? 'child-edit-v2-save ui-btn ui-btn-primary ds-btn ds-btn--primary' : 'mt-7 min-h-[var(--layout-primary-height)] w-full rounded-[var(--radius-field)]'} disabled={submitting || deleting || editVersionConflict || (photoOnly && (!(file || cropDirty) || photoVersionConflict))} onClick={() => void submit()} type="button">
+          <Typography variant="memoryButton">{submitting ? 'Сохраняем…' : photoOnly ? 'Сохранить фото' : addChild ? 'Сохранить' : initialChild ? 'Сохранить профиль' : 'Создать семейную ленту'}</Typography>
         </Button>
+        {isChildEdit && canDelete ? <section className="child-edit-v2-delete" data-slot="child-delete">
+          {deleteError ? <Typography as="p" className="child-edit-v2-delete-error" role="alert" tone="destructive" variant="memoryMeta">{deleteError}</Typography> : null}
+          {confirmingDelete ? <div aria-label="Удалить профиль ребёнка" className="child-edit-v2-delete-confirm" role="group">
+            <Typography as="p" variant="memoryBody">Удалить профиль «{initialChild?.name}»? Удалить можно только профиль без отметок в публикациях и без альбомов.</Typography>
+            <div className="child-edit-v2-delete-actions">
+              <Button disabled={deleting} onClick={() => void removeChild()} type="button" variant="destructive"><Typography variant="memoryButton">{deleting ? 'Удаляем…' : 'Удалить'}</Typography></Button>
+              <Button disabled={deleting} onClick={() => setConfirmingDelete(false)} type="button" variant="ghost"><Typography variant="memoryButton">Отмена</Typography></Button>
+            </div>
+          </div> : <Button className="child-edit-v2-delete-link" disabled={submitting} onClick={() => { setDeleteError(null); setConfirmingDelete(true) }} type="button" variant="ghost"><Typography tone="destructive" variant="memoryButton">Удалить профиль</Typography></Button>}
+        </section> : null}
         {onCancel && !isChildEdit ? <Button className="mt-3 min-h-11 w-full" disabled={submitting} onClick={requestCancel} type="button" variant="outline"><Typography variant="memoryButton">{cancelLabel}</Typography></Button> : null}
         </>}
       </section>

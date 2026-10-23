@@ -101,3 +101,11 @@
 .memoly-app-root[data-ui-version='v2'] .family-overview-body .family-inline-action { min-height: 44px; color: var(--ui-v2-color-accent); }
 .memoly-app-root[data-ui-version='v2'] .family-overview-privacy-note { margin: 16px 0; color: var(--ui-v2-color-muted); font-size: 11px; line-height: 1.65; }
 @media (max-width: 349px) { .memoly-app-root[data-ui-version='v2'] .family-overview-body { padding-inline: 14px; } }
+
+/* Children of the family: a list for two or more, plus the owner's «Добавить ребёнка». */
+.family-child-avatar { display: grid; width: 36px; height: 36px; place-items: center; overflow: hidden; border-radius: 50%; }
+.family-child-avatar > * { width: 100%; height: 100%; }
+.family-child-row { cursor: default; }
+button.family-child-row { cursor: pointer; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-children .family-list { margin-bottom: 0; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-children > .family-add-child-btn:first-child { margin-top: 0; }

@@ -6,7 +6,9 @@ import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
+import { FamilyChildAvatar } from './FamilyChildAvatar'
 import { createInviteResult } from './invite-result'
+import { canAddChild, familyChildren } from './model'
 import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamilyMaxChannelStatus'
 
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
@@ -23,6 +25,9 @@ export function FamilyScreen({
   onAdd,
   onAllFamilies,
   onEditChild,
+  onAddChild,
+  childAvatarsEnabled = false,
+  membershipEpoch = null,
   settingsRequest,
   onSettingsRequestHandled,
   onFeed,
@@ -43,7 +48,12 @@ export function FamilyScreen({
   currentUserId: string
   onAdd: () => void
   onAllFamilies?: () => void
-  onEditChild: () => void
+  onEditChild: (childId: string) => void
+  /** Opens the add-child form; offered to the owner only. */
+  onAddChild?: () => void
+  /** Per-child avatars load only once the selected family scope is confirmed. */
+  childAvatarsEnabled?: boolean
+  membershipEpoch?: number | null
   settingsRequest?: number
   onSettingsRequestHandled?: () => void
   onFeed: () => void
@@ -67,6 +77,7 @@ export function FamilyScreen({
   const isOwner = current?.isOwner === true
   const child = familyResponse.child
   const displayedChildAvatar = childAvatar ?? { url: null, status: child?.avatarMediaId ? 'loading' as const : 'absent' as const }
+  const children = familyChildren(familyResponse)
   const canInvite = (isOwner || current?.role === 'full') && child?.isComplete === true
   const maxChannel = useFamilyMaxChannelStatus(transport, familyResponse.family.id, currentUserId, current?.role ?? null)
   const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
@@ -201,6 +212,8 @@ export function FamilyScreen({
             }
           }}
           onEditChild={onEditChild}
+          onAddChild={onAddChild && canAddChild(isOwner, children) ? onAddChild : undefined}
+          renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyResponse.family.id} membershipEpoch={membershipEpoch} transport={transport} />}
           settingsRequest={settingsRequest}
           onSettingsRequestHandled={onSettingsRequestHandled}
           onLeaveFamily={async () => {

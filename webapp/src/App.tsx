@@ -17,6 +17,7 @@ import {
   canStartMaxVideoUpload,
   createFamilyErrorMessage,
   feedChildSubtitle,
+  familyChildren,
   FamilyOnboarding,
   FamilyHubPage,
   FamilyScreen,
@@ -203,7 +204,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   useEffect(() => { familyResponseRef.current = familyResponse }, [familyResponse])
   const [members, setMembers] = useState<FamilyMemberDto[]>(() => savedPresentation?.members as FamilyMemberDto[] ?? [])
   const [invites, setInvites] = useState<FamilyInviteDto[]>([])
-  const [editingChild, setEditingChild] = useState(false)
+  const [childEditor, setChildEditor] = useState<{ kind: 'add' } | { kind: 'edit'; childId: string } | null>(null)
   const [familySettingsRequest, setFamilySettingsRequest] = useState(0)
   const [screen, setScreen] = useState<'hub' | 'family' | 'feed' | 'albums'>(() => savedPresentation?.screen ?? 'hub')
   const [visitedSurfaces, setVisitedSurfaces] = useState<Set<'family' | 'feed' | 'albums'>>(() => new Set(savedPresentation?.screen === 'feed' ? ['feed'] : savedPresentation?.screen === 'family' ? ['family'] : []))
@@ -468,7 +469,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     setMembers([])
     setInvites([])
     setScreen('hub')
-    setEditingChild(false)
+    setChildEditor(null)
     setOpenAddFromFamily(false)
     setFilter('all')
     setBusy(false)
@@ -505,9 +506,11 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     try {
       const response = await loadFamily(transport, familyId)
       if (!isCurrentSelection()) return
-      const previousAvatarMediaId = familyResponseRef.current?.family.id === familyId ? familyResponseRef.current.child?.avatarMediaId ?? null : null
-      const nextAvatarMediaId = response.child?.avatarMediaId ?? null
-      if (previousAvatarMediaId && previousAvatarMediaId !== nextAvatarMediaId) invalidatePrivateChildAvatar(currentUserId, familyId, previousAvatarMediaId)
+      const previousChildren = familyResponseRef.current?.family.id === familyId ? familyChildren(familyResponseRef.current) : []
+      const nextAvatarMediaIds = new Set(familyChildren(response).map((item) => item.avatarMediaId))
+      for (const previous of previousChildren) {
+        if (previous.avatarMediaId && !nextAvatarMediaIds.has(previous.avatarMediaId)) invalidatePrivateChildAvatar(currentUserId, familyId, previous.avatarMediaId)
+      }
       familyResponseRef.current = response
       setFamilyResponse(response)
       const currentHome = homeRef.current
@@ -536,7 +539,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         : 'Не удалось обновить семью. Повторите попытку.')
       if (options?.failureMode === 'throw') throw reason
     }
-  }, [familyResponse?.family.id, returnHome, selectedMembershipEpoch, transport])
+  }, [currentUserId, familyResponse?.family.id, returnHome, selectedMembershipEpoch, transport])
 
   const refreshSelectedEvent = useEffectEvent((options?: { failureMode?: 'global' | 'throw' }) => refreshSelected(options))
 
@@ -741,12 +744,16 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const current = members.find((member) => member.userId === currentUserId)
   const selectedSummary = home?.items.find((item) => item.familyId === familyResponse.family.id && item.membershipEpoch === selectedMembershipEpoch)
   const currentRole = current?.role ?? selectedSummary?.role
-  if ((!familyResponse.child && screen !== 'albums') || editingChild) return <div style={insetsStyle}><FamilyOnboarding familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={familyResponse.child ?? undefined} cancelLabel={familyResponse.child ? 'Отмена' : 'Все семьи'} onCancel={familyResponse.child ? () => setEditingChild(false) : () => returnHome()} onCompleted={async () => {
+  const familyChildList = familyChildren(familyResponse)
+  const editedChild = childEditor?.kind === 'edit' ? familyChildList.find((item) => item.id === childEditor.childId) : undefined
+  const childEditorOpen = childEditor?.kind === 'add' || Boolean(editedChild)
+  const finishChildEditor = async () => {
     await refreshSelected()
     await refreshHome()
     if (!familyResponse.child) setScreen('feed')
-    else setEditingChild(false)
-  }} transport={transport} />{!familyResponse.child ? <BottomNavigation active="family" appearance="memoly" onAlbums={() => switchSurface('albums')} onFamily={() => undefined} onFeed={() => switchSurface('family')} role={currentRole === 'full' ? 'full' : 'viewer'} /> : null}</div>
+    else setChildEditor(null)
+  }
+  if ((!familyResponse.child && screen !== 'albums') || childEditorOpen) return <div style={insetsStyle}><FamilyOnboarding key={childEditor?.kind === 'add' ? 'add' : editedChild ? `edit:${editedChild.id}:${editedChild.version}` : 'first'} addChild={childEditor?.kind === 'add'} canDelete={Boolean(current?.isOwner) && familyChildList.length >= 2} legacyProfileEndpoint={Boolean(editedChild) && editedChild?.id === familyResponse.child?.id} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} initialChild={childEditor?.kind === 'add' ? undefined : editedChild ?? familyResponse.child ?? undefined} cancelLabel={familyResponse.child ? 'Отмена' : 'Все семьи'} onCancel={familyResponse.child ? () => setChildEditor(null) : () => returnHome()} onCompleted={finishChildEditor} onDeleted={finishChildEditor} onRefresh={async () => { await refreshSelected({ failureMode: 'throw' }) }} transport={transport} />{!familyResponse.child ? <BottomNavigation active="family" appearance="memoly" onAlbums={() => switchSurface('albums')} onFamily={() => undefined} onFeed={() => switchSurface('family')} role={currentRole === 'full' ? 'full' : 'viewer'} /> : null}</div>
   const feedActive = screen === 'feed'
   const familyActive = screen === 'family'
   const feedMounted = visitedSurfaces.has('feed') || screen === 'feed'
@@ -756,8 +763,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const albumScope = `${currentUserId}:${familyResponse.family.id}:${selectedMembershipEpoch ?? 'unconfirmed'}`
   const globalComposerOpen = globalComposerScope === albumScope && Boolean(familyResponse.child) && current?.role === 'full'
   return <>
-    {familyResponse.child && feedMounted ? <div aria-hidden={!feedActive || globalComposerOpen} data-navigation-surface="feed" hidden={!feedActive || globalComposerOpen} style={insetsStyle}><FeedPage active={feedActive} key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childAvatarUrl={childAvatar.url} childAvatarStatus={childAvatar.status} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onAddRequestHandled={() => setOpenAddFromFamily(false)} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAllFamilies={() => returnHome()} onAlbums={() => { setOpenAddFromFamily(false); switchSurface('albums') }} onFamily={() => { setOpenAddFromFamily(false); switchSurface('family') }} onOpenChild={readUiVersion() === 'v2' && current?.isOwner ? () => { setEditingChild(true); setOpenAddFromFamily(false); switchSurface('family') } : undefined} onOpenSettings={readUiVersion() === 'v2' ? () => { setFamilySettingsRequest((request) => request + 1); setOpenAddFromFamily(false); switchSurface('family') } : undefined} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div> : null}
-    {familyResponse.child && familyMounted ? <div aria-hidden={!familyActive || globalComposerOpen} data-navigation-surface="family" hidden={!familyActive || globalComposerOpen} style={insetsStyle}><FamilyScreen active={familyActive} settingsRequest={familySettingsRequest} onSettingsRequestHandled={() => setFamilySettingsRequest(0)} canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} childAvatar={childAvatar} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => setGlobalComposerScope(albumScope)} onAlbums={() => switchSurface('albums')} onAllFamilies={() => returnHome()} onEditChild={() => setEditingChild(true)} onFeed={() => { setOpenAddFromFamily(false); switchSurface('feed') }} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); switchSurface('feed') }} onRefresh={refreshSelected} transport={transport} /></div> : null}
+    {familyResponse.child && feedMounted ? <div aria-hidden={!feedActive || globalComposerOpen} data-navigation-surface="feed" hidden={!feedActive || globalComposerOpen} style={insetsStyle}><FeedPage active={feedActive} key={familyResponse.family.id} accountId={currentUserId} childAvatarCrop={familyResponse.child.avatarCrop} childAvatarMediaId={familyResponse.child.avatarMediaId} childAvatarUrl={childAvatar.url} childAvatarStatus={childAvatar.status} childId={familyResponse.child.id} childName={familyResponse.child.name} childSubtitle={feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone)} familyId={familyResponse.family.id} familyName={familyResponse.family.name} familyTimezone={familyResponse.family.timezone} filter={filter} hostBridge={hostBridge} insets={insets} isAppBootstrapped maxVideoUploadAcceptance={maxVideoPending} membershipEpoch={selectedMembershipEpoch} onAddRequestHandled={() => setOpenAddFromFamily(false)} onMaxVideoLaunchHandled={() => { maxVideoPendingRef.current = false; setMaxVideoPending(false) }} onSeenCandidate={(memoryId) => { if (selectedMembershipEpoch !== null) seenQueueRef.current?.enqueue({ accountId: currentUserId, familyId: familyResponse.family.id, membershipEpoch: selectedMembershipEpoch }, memoryId) }} openAddInitially={openAddFromFamily} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAllFamilies={() => returnHome()} onAlbums={() => { setOpenAddFromFamily(false); switchSurface('albums') }} onFamily={() => { setOpenAddFromFamily(false); switchSurface('family') }} onOpenChild={readUiVersion() === 'v2' && current?.isOwner ? () => { setChildEditor({ kind: 'edit', childId: familyResponse.child!.id }); setOpenAddFromFamily(false); switchSurface('family') } : undefined} onOpenSettings={readUiVersion() === 'v2' ? () => { setFamilySettingsRequest((request) => request + 1); setOpenAddFromFamily(false); switchSurface('family') } : undefined} onFilterChange={setFilter} role={current?.role === 'full' ? 'full' : 'viewer'} transport={transport} unreadCount={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadCount ?? null} unreadState={home?.items.find((item) => item.familyId === familyResponse.family.id)?.unreadState ?? 'unavailable'} /></div> : null}
+    {familyResponse.child && familyMounted ? <div aria-hidden={!familyActive || globalComposerOpen} data-navigation-surface="family" hidden={!familyActive || globalComposerOpen} style={insetsStyle}><FamilyScreen active={familyActive} settingsRequest={familySettingsRequest} onSettingsRequestHandled={() => setFamilySettingsRequest(0)} canOpenInstall={isInstallOfferSupported(hostBridge)} installLabel={isMaxIos(hostBridge) ? 'Открыть в браузере' : 'Установить memoLy'} createInviteLink={hostBridge.inviteLink} currentUserId={currentUserId} familyResponse={familyResponse} childAvatar={childAvatar} hostBridge={hostBridge} invites={invites} members={members} onAdd={() => setGlobalComposerScope(albumScope)} onAlbums={() => switchSurface('albums')} onAllFamilies={() => returnHome()} onEditChild={(childId) => setChildEditor({ kind: 'edit', childId })} onAddChild={() => setChildEditor({ kind: 'add' })} childAvatarsEnabled={avatarScopeConfirmed} membershipEpoch={selectedMembershipEpoch} onFeed={() => { setOpenAddFromFamily(false); switchSurface('feed') }} onOpenInstall={() => { setPwaInstallDismissed({ setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) }, false); switchSurface('feed') }} onRefresh={refreshSelected} transport={transport} /></div> : null}
     {albumsMounted && selectedMembershipEpoch !== null ? <div aria-hidden={!albumsActive || globalComposerOpen} data-navigation-surface="albums" hidden={!albumsActive || globalComposerOpen} style={insetsStyle}><AlbumsPage accountId={currentUserId} active={albumsActive && !globalComposerOpen} child={familyResponse.child} childAvatar={childAvatar} childSubtitle={familyResponse.child ? feedChildSubtitle(familyResponse.child.birthDate, familyResponse.family.timezone) : 'Семейные истории'} familyId={familyResponse.family.id} familyName={familyResponse.family.name} hostBridge={hostBridge} key={albumScope} membershipEpoch={selectedMembershipEpoch} onAccessLost={() => { seenQueueRef.current?.cancelFamily(familyResponse.family.id); returnHome('Доступ к этой семье закрыт.', familyResponse.family.id) }} onAdd={() => setGlobalComposerScope(albumScope)} onAllFamilies={() => returnHome()} onFamily={() => switchSurface('family')} onFeed={() => switchSurface('feed')} role={currentRole === 'full' ? 'full' : 'viewer'} timezone={familyResponse.family.timezone} transport={transport} /></div> : null}
     {globalComposerOpen && familyResponse.child ? <ComposerHost childId={familyResponse.child.id} familyId={familyResponse.family.id} familyTimezone={familyResponse.family.timezone} hostBridge={hostBridge} key={`composer:${albumScope}`} onClose={() => setGlobalComposerScope(null)} transport={transport} /> : null}
   </>

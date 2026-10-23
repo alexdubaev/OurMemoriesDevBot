@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { familyHomeResponseSchema, familyMembersResponseSchema, familyResponseSchema, memoryPageSchema } from '@web-app-demo/contracts'
 
-export const PRIVATE_CACHE_SCHEMA = 1
+export const PRIVATE_CACHE_SCHEMA = 2
 export const PRIVATE_CACHE_LIMIT_BYTES = 20 * 1024 * 1024
 export const PRIVATE_CACHE_LIMIT_ENTRIES = 100
 export const PRIVATE_CACHE_MAX_IMAGE_BYTES = 2 * 1024 * 1024

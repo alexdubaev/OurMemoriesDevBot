@@ -6,7 +6,7 @@ import { shouldShowChildAvatarImage } from './child-avatar-state'
 import { avatarCropStyle } from '@/features/avatar'
 
 type AvatarCrop = { x: number; y: number; width: number; height: number } | null
-type ChildAvatarSize = 'family-card' | 'feed-header' | 'feed-author' | 'profile'
+type ChildAvatarSize = 'family-card' | 'family-row' | 'feed-header' | 'feed-author' | 'profile'
 
 export function ChildAvatar({
   avatarCrop,
@@ -22,7 +22,7 @@ export function ChildAvatar({
   size: ChildAvatarSize
 }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null)
-  const sizeClass = size === 'profile' ? 'child-avatar child-profile-avatar' : size === 'feed-header' ? 'size-[60px]' : size === 'feed-author' ? 'size-full' : 'size-11'
+  const sizeClass = size === 'profile' ? 'child-avatar child-profile-avatar' : size === 'feed-header' ? 'size-[60px]' : size === 'feed-author' ? 'size-full' : size === 'family-row' ? 'size-9' : 'size-11'
   const resolvedStatus = status ?? (avatarUrl ? 'ready' : 'absent')
 
   if (resolvedStatus === 'loading') {
@@ -30,11 +30,11 @@ export function ChildAvatar({
   }
 
   if (resolvedStatus === 'error' || (resolvedStatus === 'ready' && !shouldShowChildAvatarImage({ avatarUrl, imageFailed: failedAvatarUrl === avatarUrl }))) {
-    return <span aria-label="Не удалось загрузить фотографию ребёнка" data-avatar-state="error" role="img" style={{ display: 'contents' }} title="Не удалось загрузить фотографию ребёнка"><AvatarLetter className={sizeClass} name={name} size={size === 'family-card' ? 'lg' : size === 'feed-author' ? 'default' : 'xl'} /></span>
+    return <span aria-label="Не удалось загрузить фотографию ребёнка" data-avatar-state="error" role="img" style={{ display: 'contents' }} title="Не удалось загрузить фотографию ребёнка"><AvatarLetter className={sizeClass} name={name} size={(size === 'family-card' || size === 'family-row') ? 'lg' : size === 'feed-author' ? 'default' : 'xl'} /></span>
   }
 
   if (resolvedStatus !== 'ready') {
-    return <AvatarLetter className={sizeClass} name={name} size={size === 'family-card' ? 'lg' : size === 'feed-author' ? 'default' : 'xl'} />
+    return <AvatarLetter className={sizeClass} name={name} size={(size === 'family-card' || size === 'family-row') ? 'lg' : size === 'feed-author' ? 'default' : 'xl'} />
   }
 
   return (
