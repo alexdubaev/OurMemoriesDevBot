@@ -73,11 +73,13 @@ export function finalizeMaxVideo(
   sessionId: string,
   uploadToken: string,
   signal?: AbortSignal,
+  /** Whole-publication child tags of a standalone video; absent keeps the server default rule. */
+  childIds?: string[],
 ) {
   return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}/max-video-uploads/${encodeURIComponent(sessionId)}/finalize`, finalizeResponseSchema, {
     method: 'POST',
     signal,
-    body: { uploadToken },
+    body: { uploadToken, ...(childIds ? { childIds } : {}) },
   })
 }
 

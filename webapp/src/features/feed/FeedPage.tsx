@@ -1,4 +1,4 @@
-import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
+import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject, TouchEvent as ReactTouchEvent } from 'react'
@@ -12,7 +12,10 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AuthContext } from '@/features/auth'
-import { ChildAvatar } from '@/features/family'
+import { ChildAvatar, FamilyChildAvatar, feedChildSubtitle, useChildAvatar } from '@/features/family'
+import { ChildHeader } from '@/components/ChildHeader'
+import { FamilyHeaderV2 } from '@/components/ui-v2/FamilyHeaderV2'
+import { useMemolyTheme } from '@/features/theme'
 import { privateMediaSource } from '@/platform/media/private-media-access'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { toggleAudioPlayback } from './audio-playback'
@@ -20,9 +23,11 @@ import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
 import { loadFeed, loadMemory, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
-import { EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
+import { ChildFilterChips, EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
+import { childFilterChips, composerInitialChildIds, normalizeChildFilter, UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
+import { ChildAlbumsStrip } from './ChildAlbumsStrip'
 import { FeedPresentation, MemoryCardPresentation } from './presentation'
-import { feedQueryKeys, useFeedQuery, useMemoryDelete, useMemoryReaction } from './queries'
+import { feedQueryKeys, isFeedListKey, useFeedQuery, useMemoryDelete, useMemoryReaction } from './queries'
 import { refreshFromTop, shouldCheckForNew, shouldRefreshInitialEmptyFeed } from './live-refresh'
 import { MediaPlaybackCoordinator } from './playback'
 import { PlaybackContext } from './playback-context'
@@ -80,6 +85,12 @@ type Props = {
   openAddInitially?: boolean
   role: 'full' | 'viewer'
   transport: AuthenticatedTransport
+  /** The family's children in server order. Two or more switch on the family header, filters and the composer picker. */
+  childProfiles?: ChildDto[]
+  childFilter?: ChildFilter
+  onChildFilterChange?: (filter: ChildFilter) => void
+  childAvatarsEnabled?: boolean
+  onOpenAlbum?: (album: AlbumDto) => void
 }
 
 function pendingVideoQueryKey(familyId: string, accountId: string, membershipEpoch: number, memoryId: string) {
@@ -112,7 +123,7 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 export function FeedPage({
   active = true, accountId = '', childAvatarCrop = null, childAvatarUrl, childAvatarStatus, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, onOpenChild, onOpenSettings, onAlbums, role, transport,
-  openAddInitially = false,
+  openAddInitially = false, childProfiles, childFilter = null, onChildFilterChange, childAvatarsEnabled = false, onOpenAlbum,
 }: Props) {
   // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
   void filter
@@ -121,7 +132,15 @@ export function FeedPage({
   const displayedChildAvatarStatus = childAvatarStatus ?? (displayedChildAvatarUrl ? 'ready' : 'absent')
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [unreadCycle, setUnreadCycle] = useState(0)
-  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active)
+  const { theme } = useMemolyTheme()
+  const childList = useMemo(() => childProfiles ?? [], [childProfiles])
+  const multiChild = childList.length >= 2
+  const activeChildFilter = normalizeChildFilter(childFilter, childList, { allowUntagged: role === 'full' })
+  const selectedChild = activeChildFilter && activeChildFilter !== UNTAGGED_CHILD_FILTER ? childList.find((item) => item.id === activeChildFilter) : undefined
+  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active, activeChildFilter)
+  // Shares its key with the «Без отметки» list: the chip shows only while untagged memories exist.
+  const untaggedProbe = useFeedQuery(transport, familyId, 'all', false, accountId, membershipEpoch ?? 0, 0, active, UNTAGGED_CHILD_FILTER, active && multiChild && role === 'full')
+  const showUntagged = multiChild && role === 'full' && ((untaggedProbe.data?.pages[0]?.items.length ?? 0) > 0 || activeChildFilter === UNTAGGED_CHILD_FILTER)
   const { fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage } = feed
   const { refetch } = feed
   const reaction = useMemoryReaction(transport, familyId, accountId, membershipEpoch ?? 0)
@@ -145,7 +164,7 @@ export function FeedPage({
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || deleteTarget || commentsSelection), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle }), [familyId, unreadOnly, unreadCycle])
+  const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle, childFilter: activeChildFilter }), [familyId, unreadOnly, unreadCycle, activeChildFilter])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
   const [refreshErrorFor, setRefreshErrorFor] = useState<typeof feedScope | null>(null)
   const newAvailable = newAvailableFor === feedScope
@@ -221,7 +240,7 @@ export function FeedPage({
 
   useEffect(() => {
     knownFirstId.current = null
-  }, [familyId, accountId, membershipEpoch])
+  }, [familyId, accountId, membershipEpoch, activeChildFilter])
 
   useEffect(() => {
     // Reset transient selection when its private route scope changes.
@@ -259,7 +278,7 @@ export function FeedPage({
       if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
-        const latest = await loadFeed(transport, familyId, 'all', null)
+        const latest = await loadFeed(transport, familyId, 'all', null, undefined, false, activeChildFilter)
         if (disposed) return
         const latestFirstId = latest.items[0]?.id ?? null
         if (unreadOnly && knownFirstId.current === null) {
@@ -285,7 +304,7 @@ export function FeedPage({
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [active, familyId, feedScope, refetch, transport, unreadOnly])
+  }, [active, activeChildFilter, familyId, feedScope, refetch, transport, unreadOnly])
 
   useEffect(() => {
     if (active) return
@@ -315,8 +334,16 @@ export function FeedPage({
   }, [active, fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
 
   const closeComposerAfterRefresh = async () => {
-    try { await refetch() } finally { setComposer(null); setEditingMemory(null) }
+    // A new memory can land in several child lists and in «Без отметки»; refresh every list of this family.
+    try { await (multiChild ? queryClient.invalidateQueries({ predicate: (query) => isFeedListKey(query.queryKey, familyId) }) : refetch()) } finally { setComposer(null); setEditingMemory(null) }
   }
+  const selectChildFilter = (next: ChildFilter) => {
+    if (next === activeChildFilter) return
+    window.scrollTo({ top: 0, behavior: 'auto' })
+    onChildFilterChange?.(next)
+  }
+  const composerChildOptions = multiChild ? childList : undefined
+  const composerInitialChildren = composerInitialChildIds(activeChildFilter, childList)
 
   const cancelDelete = useCallback(() => {
     if (deletion.isPending) return
@@ -339,15 +366,15 @@ export function FeedPage({
   }, [active, actionsMemory, hostBridge])
 
   if (active && composer === 'video' && childId) {
-    return <VideoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => { setComposer(null); onMaxVideoLaunchHandled?.() }} onSuccess={async () => { await closeComposerAfterRefresh(); onMaxVideoLaunchHandled?.() }} transport={transport} />
+    return <VideoComposer childId={childId} childOptions={composerChildOptions} initialChildIds={composerInitialChildren} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => { setComposer(null); onMaxVideoLaunchHandled?.() }} onSuccess={async () => { await closeComposerAfterRefresh(); onMaxVideoLaunchHandled?.() }} transport={transport} />
   }
 
   if (active && composer === 'photo' && childId) {
-    return <PhotoComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+    return <PhotoComposer childId={childId} childOptions={composerChildOptions} initialChildIds={composerInitialChildren} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
   if (active && composer === 'note' && childId) {
-    return <NoteComposer childId={childId} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
+    return <NoteComposer childId={childId} childOptions={composerChildOptions} initialChildIds={composerInitialChildren} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => setComposer(null)} onSuccess={closeComposerAfterRefresh} transport={transport} />
   }
 
   if (active && editingMemory) {
@@ -358,7 +385,17 @@ export function FeedPage({
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
-    <FeedPresentation activeFilter="all" childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
+    <FeedPresentation activeFilter="all"
+      header={multiChild ? selectedChild
+        ? <ChildPageHeader child={selectedChild} enabled={childAvatarsEnabled} familyId={familyId} familyTimezone={familyTimezone} membershipEpoch={membershipEpoch} onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} transport={transport} />
+        : <FamilyHeaderV2 childList={childList} familyName={familyName} mode="feed" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={selectChildFilter} renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyId} membershipEpoch={membershipEpoch} transport={transport} />} theme={theme} />
+        : undefined}
+      showUnreadCountInMode={activeChildFilter === null}
+      renderSubheader={multiChild ? () => <>
+        <ChildFilterChips chips={childFilterChips(childList, showUntagged)} onChange={selectChildFilter} value={activeChildFilter} />
+        {selectedChild ? <ChildAlbumsStrip accountId={accountId} active={active && isAppBootstrapped} child={selectedChild} familyId={familyId} key={selectedChild.id} membershipEpoch={membershipEpoch ?? 0} onOpenAlbum={onOpenAlbum} role={role} transport={transport} /> : null}
+      </> : undefined}
+      childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
       onAllFamilies={onAllFamilies} onFamily={onFamily} onAlbums={onAlbums} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
@@ -370,6 +407,7 @@ export function FeedPage({
       {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
+        : activeChildFilter ? <ChildFeedEmpty childName={selectedChild?.name} onAdd={role === 'full' && selectedChild ? () => setAddSheetOpen(true) : undefined} onShowAll={() => selectChildFilter(null)} />
         : <EmptyState filtered={false} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
       {active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
@@ -465,6 +503,25 @@ export function FeedPage({
     </FeedSharedAuthorAvatars>
     </VideoQueryScope.Provider>
   )
+}
+
+/** The child page header: the existing child header with this child's own avatar. */
+function ChildPageHeader({ child, enabled, familyId, familyTimezone, membershipEpoch, onAllFamilies, onOpenSettings, transport }: { child: ChildDto; enabled: boolean; familyId: string; familyTimezone: string; membershipEpoch: number | null; onAllFamilies: () => void; onOpenSettings?: () => void; transport: AuthenticatedTransport }) {
+  const { theme } = useMemolyTheme()
+  const avatar = useChildAvatar(transport, familyId, child.avatarMediaId, { childId: child.id, membershipEpoch, enabled })
+  return <ChildHeader childAvatarCrop={child.avatarCrop} childAvatarStatus={avatar.status} childAvatarUrl={avatar.url} childName={child.name} childSubtitle={feedChildSubtitle(child.birthDate, familyTimezone)} mode="feed" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} theme={theme} uiVersion="v2" />
+}
+
+/** An empty child page invites a Full member to add a memory; an empty «Без отметки» leads back to «Все». */
+function ChildFeedEmpty({ childName, onAdd, onShowAll }: { childName?: string; onAdd?: () => void; onShowAll: () => void }) {
+  return <div className="feed-child-empty" data-slot={childName ? 'child-feed-empty' : 'untagged-feed-empty'} role="status">
+    <span aria-hidden="true" className="feed-child-empty-mark"><WebpIcon decorative name="photo" size={32} state="active" /></span>
+    <Typography as="h2" variant="memoryEmptyTitle">{childName ? `Здесь будут воспоминания: ${childName}` : 'Все воспоминания отмечены'}</Typography>
+    <Typography as="p" variant="memoryBody">{childName
+      ? onAdd ? 'Добавьте первое — оно появится на этой странице и в общей ленте.' : 'Воспоминания появятся, когда их добавят и отметят ребёнка.'
+      : 'Неотмеченных воспоминаний больше нет.'}</Typography>
+    {onAdd ? <Button onClick={onAdd} type="button">Добавить воспоминание</Button> : <Button onClick={onShowAll} type="button" variant="outline">Показать все</Button>}
+  </div>
 }
 
 function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, onPhotoUrlChange, onOpen, returnFocusRef, transport }: {

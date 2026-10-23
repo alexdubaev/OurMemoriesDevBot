@@ -1,5 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- album screens retain semantic headings and native controls. */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AlbumDto, AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts'
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { ChildHeader } from '@/components/ChildHeader'
@@ -23,6 +23,8 @@ export type AlbumsPageProps = {
   child: { id: string; name: string; birthDate: string | null; avatarCrop?: { x: number; y: number; width: number; height: number } | null } | null
   childSubtitle: string; childAvatar?: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' }
   role: 'full' | 'viewer'; transport: AuthenticatedTransport; hostBridge: HostBridge; onFeed: () => void; onFamily: () => void; onAllFamilies: () => void; onAdd: () => void; onAccessLost: () => void
+  /** Opens one album (from a child's page); `nonce` repeats a request for the same album. */
+  openAlbumRequest?: { albumId: string; nonce: number } | null; onOpenAlbumRequestHandled?: () => void
 }
 export function AlbumsPage(props: AlbumsPageProps) {
   const { accountId, familyId, membershipEpoch, active, role, transport, hostBridge } = props
@@ -153,6 +155,15 @@ export function AlbumsPage(props: AlbumsPageProps) {
     setCategory(undefined); setYear(undefined); setEntries([]); setEntryCursor(null); setEntry(null); setAlbum(item); setError(null); setConflict(false); scrolls.current.album = 0; navigate('album')
     try { const result = await api.album(item.id); if (!scopeController.isAborted() && generation === albumRead.current && activeAlbumId.current === item.id) setAlbum(result.album) } catch (reason) { if (generation === albumRead.current && activeAlbumId.current === item.id) fail(reason) }
   }
+  const openRequestedAlbum = useEffectEvent((albumId: string) => {
+    props.onOpenAlbumRequestHandled?.()
+    void api.album(albumId).then((result) => { if (!scopeController.isAborted()) void openAlbum(result.album) }).catch(fail)
+  })
+  const requestedAlbumId = props.openAlbumRequest?.albumId
+  const requestedAlbumNonce = props.openAlbumRequest?.nonce
+  useEffect(() => {
+    if (active && requestedAlbumId) openRequestedAlbum(requestedAlbumId)
+  }, [active, requestedAlbumId, requestedAlbumNonce])
   async function openEntry(item: AlbumEntryDto, trigger?: HTMLElement) {
     if (!album || pending.current) return
     pending.current = true; setBusy(true); setError(null)

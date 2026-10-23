@@ -70,8 +70,11 @@ describe('private cache boundaries', () => {
 
   it('persists only explicit feed and presentation query shapes', () => {
     expect(isPersistableQueryKey(['session', 'persistent-ui', 'user-id'])).toBe(true)
-    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'all', false, 'epoch', 'cursor', 'page'])).toBe(true)
-    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'video', false, 'epoch', 'cursor', 'page'])).toBe(false)
+    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'all', false, 'account', 3, 0, null])).toBe(true)
+    // The list key before the child filter existed is no longer a persisted shape.
+    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'all', false, 'account', 3, 0])).toBe(false)
+    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'all', false, 'account', 3, 0, 'child-id'])).toBe(false)
+    expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'video', false, 'account', 3, 0, null])).toBe(false)
     expect(isPersistableQueryKey(['session', 'member-avatar', 'user-id', 'avatar'])).toBe(false)
     expect(isPersistableQueryKey(['session', 'auth', 'me'])).toBe(false)
   })

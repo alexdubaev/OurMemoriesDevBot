@@ -45,6 +45,8 @@ export type PersistentFamilyPresentation = {
   selectedFamilyId: string | null
   membershipEpoch: number | null
   filter: 'all' | 'photo' | 'video' | 'voice' | 'note'
+  /** Feed child filter: a child id, `'untagged'` or `null` («Все»). Absent in screens saved before filters. */
+  childFilter?: string | null
 }
 
 type QueryRecord = { queryKey: readonly unknown[]; data: unknown; updatedAt: number }
@@ -121,7 +123,9 @@ export async function restorePrivateQueryCache(queryClient: QueryClient, userId:
   }
   for (const query of state.queries) {
     if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
-    if (isPersistableQueryKey(query.queryKey)) queryClient.setQueryData(query.queryKey, query.data, { updatedAt: 0 })
+    if (!isPersistableQueryKey(query.queryKey)) continue
+    const data = query.queryKey[1] === 'persistent-ui' ? withRestorableChildFilter(query.data as PersistentFamilyPresentation) : query.data
+    queryClient.setQueryData(query.queryKey, data, { updatedAt: 0 })
   }
   return isActivePrivateCacheIdentity(userId, generation)
 }
@@ -217,7 +221,7 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
 
 export async function removePrivateFamilyQueries(queryClient: QueryClient, familyId: string) {
   const matchesFamilyPrivateQuery = ({ queryKey }: { queryKey: readonly unknown[] }) => queryKey[0] === 'session' &&
-    ((queryKey[1] === 'feed' && queryKey[2] === familyId) || (queryKey[1] === 'comments' && queryKey[2] === familyId))
+    ['feed', 'comments', 'child-albums'].includes(queryKey[1] as string) && queryKey[2] === familyId
   queryClient.removeQueries({ predicate: matchesFamilyPrivateQuery })
 }
 
@@ -302,7 +306,7 @@ export async function cachePrivateImageResponse(userId: string, path: string, re
 export function isPersistableQueryKey(key: readonly unknown[]) {
   return key[0] === 'session' && (
     (key[1] === 'persistent-ui' && typeof key[2] === 'string') ||
-    (key[1] === 'feed' && typeof key[2] === 'string' && key[3] === 'all' && key[4] === false && key.length === 8)
+    (key[1] === 'feed' && typeof key[2] === 'string' && key[3] === 'all' && key[4] === false && key.length === 9 && key[8] === null)
   )
 }
 
@@ -332,6 +336,17 @@ function validatePresentation(value: unknown): value is PersistentFamilyPresenta
       !(presentation.selectedFamilyId === null || typeof presentation.selectedFamilyId === 'string') ||
       !(presentation.membershipEpoch === null || Number.isSafeInteger(presentation.membershipEpoch))) return false
   return true
+}
+
+/** A child filter the saved family no longer supports becomes «Все»; the rest of the screen stays. */
+function withRestorableChildFilter(presentation: PersistentFamilyPresentation): PersistentFamilyPresentation {
+  const family = presentation.family as { child?: { id: string } | null; children?: Array<{ id: string }> } | null
+  const children = family ? family.children ?? (family.child ? [family.child] : []) : []
+  const saved = presentation.childFilter
+  const childFilter = children.length >= 2 && typeof saved === 'string' && (saved === 'untagged' || children.some((child) => child.id === saved))
+    ? saved
+    : null
+  return { ...presentation, childFilter }
 }
 
 async function discardOtherSchemas(userId: string) {

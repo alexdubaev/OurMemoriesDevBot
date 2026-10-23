@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
@@ -26,9 +27,12 @@ type ComposerFormProps = {
   onCancellationBlockedChange?: (blocked: boolean) => void
   onCancelRequestChange?: (cancel: () => void) => void
   conflictMessage?: boolean
+  /** Extra add-screen fields (the child picker) rendered above the date. */
+  renderExtraFields?: () => ReactNode
+  extraFieldsDirty?: boolean
 }
 
-export function ComposerForm({ title, description, initialBody, initialDate, familyTimezone, save, onCancel, onSuccess, onCommitted, onCancellationBlockedChange, onCancelRequestChange, requireBody = false, onConflict, conflictMessage = false, addPresentation = false, onAddAnother }: ComposerFormProps) {
+export function ComposerForm({ title, description, initialBody, initialDate, familyTimezone, save, onCancel, onSuccess, onCommitted, onCancellationBlockedChange, onCancelRequestChange, requireBody = false, onConflict, conflictMessage = false, addPresentation = false, onAddAnother, renderExtraFields, extraFieldsDirty = false }: ComposerFormProps) {
   const [body, setBody] = useState(initialBody)
   const [occurredDate, setOccurredDate] = useState(initialDate)
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
@@ -101,7 +105,7 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
   }
 
   function cancel() {
-    const dirty = body !== initialBody || occurredDate !== initialDate
+    const dirty = body !== initialBody || occurredDate !== initialDate || extraFieldsDirty
     if (dirty && !window.confirm('Отменить изменения? Введённый текст и дата будут удалены.')) return
     onCancel()
   }
@@ -116,6 +120,7 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
       <header className="memoly-add-topbar"><button aria-label="Назад" className="memoly-add-back" disabled={status === 'saving'} onClick={cancel} type="button"><WebpIcon decorative name="chevron" size={20} /></button><Typography as="h1" variant="memoryScreen">Добавить заметку</Typography><span /></header>
       <div className="memoly-add-body">
         <div className="memoly-add-note-field"><textarea aria-label="Текст заметки" disabled={status === 'saving'} id="memory-composer-body" onChange={(event) => setBody(event.currentTarget.value)} placeholder="Напишите, что хотите сохранить…" value={body} /><Typography as="span" variant="memoryMeta">{[...body].length}/8000</Typography></div>
+        {renderExtraFields?.()}
         <AddDateField id="memory-composer-date" label="Дата воспоминания" onChange={setOccurredDate} today={familyCalendarDate(familyTimezone)} value={occurredDate} />
         <Button className="memoly-add-publish" disabled={status === 'saving' || !body.trim() || [...body].length > 8000} onClick={() => void submit()} type="button">Опубликовать</Button>
         {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><span className="memoly-composer-progress-indeterminate" /><Typography as="span" variant="memoryBody">Сохраняем заметку…</Typography></div> : null}

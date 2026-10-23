@@ -1,0 +1,15 @@
+.ui-v2-family-identity { position: relative; z-index: 2; min-width: 0; }
+.ui-v2-family-name { display: block; margin: 0; }
+.ui-v2-family-identity .ui-v2-child-subtitle { margin: 3px 0 0; }
+.ui-v2-family-children { position: relative; z-index: 2; display: flex; gap: 12px; margin: 2px -4px 0; padding: 2px 4px 4px; overflow-x: auto; list-style: none; scrollbar-width: none; overscroll-behavior-x: contain; }
+.ui-v2-family-children::-webkit-scrollbar { display: none; }
+.ui-v2-family-children > li { flex: 0 0 auto; max-width: 84px; }
+.ui-v2-family-child { display: flex; min-width: 56px; min-height: 44px; flex-direction: column; align-items: center; gap: 4px; padding: 0; border: 0; color: var(--ui-v2-color-text); text-align: center; background: transparent; font: inherit; }
+button.ui-v2-family-child { cursor: pointer; border-radius: 12px; }
+button.ui-v2-family-child:focus-visible { outline: 2px solid var(--ui-v2-color-accent); outline-offset: 2px; }
+.ui-v2-family-child-avatar { display: block; width: 46px; height: 46px; }
+.ui-v2-family-child-avatar [data-slot='child-avatar'],.ui-v2-family-child-avatar [data-slot='avatar-letter'],.ui-v2-family-child-avatar [data-slot='child-avatar-loading'] { display: block; box-sizing: border-box; width: 46px !important; height: 46px !important; border: 1px solid var(--ui-v2-color-line); border-radius: 50%; box-shadow: none; }
+.ui-v2-family-child-avatar [data-slot='avatar-letter'] { display: grid; place-items: center; }
+.ui-v2-family-child-avatar [data-slot='child-avatar']::after,.ui-v2-family-child-avatar [data-slot='avatar-letter']::after { border: 0; }
+.ui-v2-family-child-avatar [data-slot='child-avatar-image'] { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.ui-v2-family-child-name { display: block; max-width: 84px; color: var(--ui-v2-header-age, var(--ui-v2-color-muted)); line-height: 1.25; overflow-wrap: anywhere; }

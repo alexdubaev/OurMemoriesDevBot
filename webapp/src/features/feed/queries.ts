@@ -6,19 +6,27 @@ import { toast } from 'sonner'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './presentation'
+import type { ChildFilter } from './child-filter'
 import { deleteMemory, loadFeed, loadMemory, setMemoryReaction } from './api'
 import { MemoryReactionQueue, reactionCountsAfterChange } from './reaction-queue'
 
 export const feedQueryKeys = {
   all: [...sessionQueryKeys.all, 'feed'] as const,
-  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) =>
-    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle] as const,
+  /** The child filter is last so the positional reaction/persistence checks keep their indexes. */
+  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, childFilter: ChildFilter = null) =>
+    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter] as const,
 }
 
-export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true) {
+/** Feed list keys (any filter) under one family, as opposed to per-memory side queries. */
+export function isFeedListKey(key: readonly unknown[], familyId: string) {
+  return key[0] === 'session' && key[1] === 'feed' && key[2] === familyId && key.length === 9 && typeof key[4] === 'boolean'
+}
+
+export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true, childFilter: ChildFilter = null, enabled = true) {
   return useInfiniteQuery({
-    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle),
-    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly),
+    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter),
+    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly, childFilter),
+    enabled,
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: unreadOnly ? Infinity : 20_000,
@@ -138,7 +146,8 @@ export function useMemoryDelete(
 export function removeMemoryFromCachedFeeds(queryClient: QueryClient, familyId: string, memoryId: string): FeedSnapshot {
   const matches = queryClient.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] })
   for (const [key, current] of matches) {
-    if (!current) continue
+    // Per-memory side queries (video renditions) share the family prefix but hold no pages.
+    if (!current || !Array.isArray(current.pages)) continue
     queryClient.setQueryData<FeedCache>(key, {
       ...current,
       pages: current.pages.map((page) => ({

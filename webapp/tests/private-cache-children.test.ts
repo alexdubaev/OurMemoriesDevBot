@@ -84,3 +84,45 @@ describe('private cache schema 2 with children', () => {
     expect(queryClient.getQueryData(persistentUiQueryKey(userId))).toBeUndefined()
   })
 })
+
+describe('saved child filter', () => {
+  const restoreWith = async (saved: PersistentFamilyPresentation) => {
+    const generation = activatePrivateCacheIdentity(userId)
+    const before = new QueryClient()
+    before.setQueryData(persistentUiQueryKey(userId), saved)
+    await persistPrivateQueryCache(before, userId, generation)
+    const after = new QueryClient()
+    expect(await restorePrivateQueryCache(after, userId, generation)).toBe(true)
+    return after.getQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(userId))
+  }
+
+  test('a selected child survives a restart', async () => {
+    const restored = await restoreWith({ ...presentation(familyWithChildren), screen: 'feed', childFilter: second.id })
+    expect(restored?.childFilter).toBe(second.id)
+  })
+
+  test('«Без отметки» survives a restart', async () => {
+    const restored = await restoreWith({ ...presentation(familyWithChildren), childFilter: 'untagged' })
+    expect(restored?.childFilter).toBe('untagged')
+  })
+
+  test('a removed child falls back to «Все» without dropping the rest of the saved screen', async () => {
+    const restored = await restoreWith({ ...presentation(familyWithChildren), screen: 'feed', childFilter: '019c0000-0000-7000-8000-0000000000a9' })
+    expect(restored?.childFilter).toBeNull()
+    expect(restored?.screen).toBe('feed')
+    expect(restored?.selectedFamilyId).toBe(familyId)
+    expect((restored?.family as typeof familyWithChildren).children.map((item) => item.name)).toEqual(['Лиля', 'Миша'])
+  })
+
+  test('a screen saved before filters existed restores with «Все»', async () => {
+    const restored = await restoreWith(presentation(familyWithChildren))
+    expect(restored?.childFilter).toBeNull()
+    expect(restored?.selectedFamilyId).toBe(familyId)
+  })
+
+  test('a filter for a family that has only one child falls back to «Все»', async () => {
+    const oneChild = { family: familyWithChildren.family, child: first, children: [first] }
+    const restored = await restoreWith({ ...presentation(oneChild), childFilter: first.id })
+    expect(restored?.childFilter).toBeNull()
+  })
+})
