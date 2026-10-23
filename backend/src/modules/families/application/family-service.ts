@@ -121,7 +121,7 @@ export class FamilyService {
           family: {
             select: {
               id: true, name: true, ownerUserId: true, unreadTrackingActivatedAt: true,
-              children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 },
+              children: { ...oldestLiveChild, select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true } },
             },
           },
         },
@@ -290,7 +290,7 @@ export class FamilyService {
               unreadBaselineOrdinal: this.multiFamilyActivation === 'on' ? 0n : null,
             },
           })
-          const response = { family: familyDto(family), child: null }
+          const response: FamilyResponse = { family: familyDto(family), child: null }
           return {
             resourceId: family.id,
             response,
@@ -326,7 +326,7 @@ export class FamilyService {
       if (!locked[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
       const family = await tx.family.findFirst({
         where: { id: scope.familyId, status: 'active' },
-        include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+        include: { children: oldestLiveChild },
       })
       const child = family?.children[0]
       if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
@@ -470,7 +470,7 @@ export class FamilyService {
           },
           select: { id: true, width: true, height: true },
         }),
-        tx.child.findFirst({ where: { familyId: scope.familyId }, orderBy: { createdAt: 'asc' } }),
+        tx.child.findFirst({ where: { familyId: scope.familyId, ...oldestLiveChild.where }, orderBy: oldestLiveChild.orderBy }),
       ])
       if (!avatar) {
         throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
@@ -535,7 +535,7 @@ export class FamilyService {
     await this.access.requireMember(scope)
     const family = await this.db.family.findFirst({
       where: { id: scope.familyId, status: 'active' },
-      include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+      include: { children: oldestLiveChild },
     })
     if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
     return { family: familyDto(family), child: family.children[0] ? childDto(family.children[0]) : null }
@@ -594,7 +594,7 @@ export class FamilyService {
         )
         const family = await tx.family.findFirst({
           where: { id: scope.familyId, status: 'active' },
-          select: { id: true, children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 } },
+          select: { id: true, children: { ...oldestLiveChild, select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true } } },
         })
         if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
         if (!family.children[0] || !isCompletedChild(family.children[0])) {
@@ -1056,6 +1056,13 @@ function familyDto(family: { id: string; name: string; timezone: string; ownerUs
     timezone: family.timezone,
     ownerUserId: family.ownerUserId,
   }
+}
+
+/** Legacy single-child views (home card, `child`, setup, invites) use the oldest live child. */
+const oldestLiveChild = {
+  where: { deletedAt: null },
+  orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+  take: 1,
 }
 
 function childDto(child: {

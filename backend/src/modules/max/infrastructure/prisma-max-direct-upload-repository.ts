@@ -200,7 +200,7 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
   }
 
   async assertChild(familyId: string, childId: string) {
-    const child = await this.db.child.findFirst({ where: { id: childId, familyId }, select: { id: true } })
+    const child = await this.db.child.findFirst({ where: { id: childId, familyId, deletedAt: null }, select: { id: true } })
     return child !== null
   }
 }

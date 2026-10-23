@@ -5,10 +5,14 @@ import type { PrismaTransactionClient } from '../../../idempotency'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
 import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
+import { insertPublicationChildTags, removeDetachedAttachmentTags, resolveCreationChildTags } from './child-tags'
 
 export type SourceMemoryInput = {
   id: string
-  childId: string
+  /** @deprecated Legacy bot/upload target. Ignored: the anchor and tags follow `resolveCreationChildTags`. */
+  childId?: string
+  /** Explicit whole-publication tags; absent applies the default rule (only child, else none). */
+  childIds?: string[]
   kind: MemoryKind
   body: string
   occurredAt: Date
@@ -31,14 +35,15 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         const publication = await lockFullMember(tx, scope)
         const existing = await tx.memory.findUnique({
           where: { id: input.id },
-          select: { id: true, familyId: true, childId: true, authorId: true, kind: true, status: true, deletedAt: true,
+          select: { id: true, familyId: true, authorId: true, kind: true, status: true, deletedAt: true,
             firstPublishedAt: true, sourcePublishedAt: true,
             media: { orderBy: { position: 'asc' }, select: { mediaId: true } } },
         })
         if (existing) {
           if (existing.familyId !== scope.familyId) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
           if (existing.deletedAt || existing.status === 'deleted') throw new MemoryFailure('not_found', 'Воспоминание не найдено')
-          if (existing.childId !== input.childId || existing.kind !== input.kind || existing.authorId !== scope.principal.userId) {
+          // Replays keep their original anchor and tags; the anchor is not part of the source identity.
+          if (existing.kind !== input.kind || existing.authorId !== scope.principal.userId) {
             throw new MemoryFailure('invalid_input', 'Источник не соответствует сохранённому воспоминанию')
           }
           if (existing.sourcePublishedAt && input.sourcePublishedAt && existing.sourcePublishedAt.getTime() !== input.sourcePublishedAt.getTime()) {
@@ -58,8 +63,7 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
           await afterWrite?.(tx, existing.id)
           return existing.id
         }
-        const child = await tx.child.findFirst({ where: { id: input.childId, familyId: scope.familyId }, select: { id: true } })
-        if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
+        const childTags = await resolveCreationChildTags(tx, scope.familyId, input.childIds)
         validateAttachmentShape(input)
         if (input.mediaIds.length) await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
         if (input.mediaIds.length && !(await readyMediaCount(tx, scope.familyId, input.mediaIds, input.kind))) {
@@ -67,10 +71,13 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         }
         const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
         await tx.memory.create({ data: {
-          id: input.id, familyId: scope.familyId, childId: input.childId,
+          id: input.id, familyId: scope.familyId, childId: childTags.anchorChildId,
           authorId: scope.principal.userId, kind: input.kind, body: input.body, occurredAt: input.occurredAt,
           firstPublishedOrdinal, firstPublishedAt: firstPublicationTime(), sourcePublishedAt: input.sourcePublishedAt,
         } })
+        await insertPublicationChildTags(tx, {
+          familyId: scope.familyId, memoryId: input.id, createdBy: scope.principal.userId, childIds: childTags.childIds,
+        })
         if (input.mediaIds.length > 0) await tx.memoryMedia.createMany({ data: input.mediaIds.map((mediaId, position) => ({
           familyId: scope.familyId, memoryId: input.id, mediaId, position,
         })) })
@@ -113,6 +120,7 @@ async function reconcileOrderedMedia(
   if (mediaIds.length > 0) await tx.memoryMedia.createMany({
     data: mediaIds.map((mediaId, position) => ({ familyId, memoryId, mediaId, position })),
   })
+  await removeDetachedAttachmentTags(tx, { familyId, memoryId, attachmentIds: linkedIds.filter((id) => !mediaIds.includes(id)) })
   await tx.memory.update({ where: { id: memoryId }, data: { version: { increment: 1 } } })
 }
 

@@ -31,7 +31,8 @@ export async function loadPublishCandidates(db: DbClient, provider: 'max' | 'tel
       where: { revokedAt: null, role: 'full', family: { status: 'active' } },
       orderBy: { familyId: 'asc' },
       select: { familyId: true, role: true, family: { select: {
-        name: true, children: { orderBy: { createdAt: 'asc' }, take: 1, select: { id: true } },
+        // The oldest live child is only the legacy bot target; tags follow the publisher rule.
+        name: true, children: { where: { deletedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 1, select: { id: true } },
       } } },
     } } } },
   })
@@ -68,6 +69,6 @@ export async function lockBotTarget(tx: PrismaTransactionClient, userId: string,
     SELECT family_id FROM family_members WHERE family_id = ${candidate.familyId}::uuid AND user_id = ${userId}::uuid
       AND role = 'full' AND revoked_at IS NULL FOR SHARE`
   if (!membership[0]) return false
-  const child = await tx.child.findFirst({ where: { id: candidate.childId, familyId: candidate.familyId }, select: { id: true } })
+  const child = await tx.child.findFirst({ where: { id: candidate.childId, familyId: candidate.familyId, deletedAt: null }, select: { id: true } })
   return !!child
 }

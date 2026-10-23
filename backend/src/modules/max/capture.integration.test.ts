@@ -275,6 +275,61 @@ describe('MAX durable capture', () => {
     } finally { await fixture.cleanup(); await voice.cleanup() }
   })
 
+  test('MAX note, photo, video and voice imports tag the only child and leave two children untagged, also on redelivery', async () => {
+    const voice = await oggVoiceFixture()
+    try {
+      for (const [index, childCount] of [[1, 1], [2, 2]] as const) {
+        const subject = `7820${index}`
+        const fixture = await imageFixture(subject, `child-tags-${childCount}`)
+        try {
+          const chatId = -79560265048600n - BigInt(index)
+          await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: chatId } })
+          if (childCount === 2) await prisma.child.create({ data: { familyId: fixture.familyId, displayName: 'Synthetic younger', createdAt: new Date(Date.now() + 60_000) } })
+          const base = { kind: 'message_created' as const, isChannel: true as const, senderId: subject, recipientId: chatId.toString(), occurredAt: '2026-09-30T11:00:00.000Z' }
+          const events: Array<{ event: Extract<MaxInboundEvent, { kind: 'message_created' }>; bytes: Uint8Array; contentType: string }> = [
+            { event: { ...base, messageId: `tags-note-${index}`, text: 'Synthetic note', attachments: [] }, bytes: pngFixture, contentType: 'image/png' },
+            { event: { ...base, messageId: `tags-photo-${index}`, text: null, attachments: [{ kind: 'image', providerAttachmentId: `tag-photo-${index}` }] }, bytes: pngFixture, contentType: 'image/png' },
+            { event: { ...base, messageId: `tags-video-${index}`, text: null, attachments: [{ kind: 'video', providerAttachmentId: `tag-video-${index}`, durationSeconds: 3, width: 320, height: 240 }] }, bytes: pngFixture, contentType: 'image/png' },
+            { event: { ...base, messageId: `tags-voice-${index}`, text: null, attachments: [{ kind: 'voice', providerAttachmentId: `tag-voice-${index}`, url: 'https://i.oneme.ru/tag-voice' }] }, bytes: voice.bytes, contentType: 'audio/ogg' },
+          ]
+          for (const { event, bytes, contentType } of events) {
+            const accepted = await accept(event)
+            const sourceApi = fixture.api(event)
+            const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+              api: { ...sourceApi, getVideo: async () => ({ width: 320, height: 240, durationMs: 3_000,
+                renditions: [{ url: 'https://maxvd1.okcdn.ru/tag-video.mp4', width: 320, height: 240, contentLength: 10 }] }) },
+              download: async () => ({ bytes, contentType, contentLength: bytes.byteLength }) })
+            await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
+            // Redelivery of the same provider message and a repeated task neither fail nor duplicate.
+            expect((await accept(event)).inboxId).toBe(accepted.inboxId)
+            await expect(processor({ inboxId: accepted.inboxId })).resolves.toBeDefined()
+          }
+          const memories = await prisma.memory.findMany({ where: { familyId: fixture.familyId }, include: { childTags: true } })
+          expect(memories.map(({ kind }) => kind).sort()).toEqual(['note', 'photo', 'video', 'voice'])
+          for (const memory of memories) {
+            expect(memory.childId).toBe(fixture.childId)
+            expect(memory.childTags.map(({ childId, attachmentId }) => ({ childId, attachmentId })))
+              .toEqual(childCount === 1 ? [{ childId: fixture.childId, attachmentId: null }] : [])
+          }
+        } finally { await fixture.cleanup() }
+      }
+    } finally { await voice.cleanup() }
+  })
+
+  test('MAX direct import never targets a deleted child and tags the remaining only child', async () => {
+    const actor = await maxFamily('77', 'full')
+    await prisma.child.update({ where: { id: actor.childId! }, data: { deletedAt: new Date() } })
+    const live = await prisma.child.create({ data: { familyId: actor.familyId, displayName: 'Synthetic live child', createdAt: new Date(Date.now() + 60_000) } })
+    const response = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(textUpdate) })
+    expect(response.status).toBe(200)
+    const inbox = await prisma.maxInbox.findFirstOrThrow()
+    await expect(createMaxTaskProcessor({ runtime: { prisma } as unknown as BackendRuntime, crypto })({ inboxId: inbox.id })).resolves.toBe('done')
+    const memory = await prisma.memory.findFirstOrThrow({ include: { childTags: true } })
+    expect(memory.childId).toBe(live.id)
+    expect(memory.childTags.map(({ childId, attachmentId }) => ({ childId, attachmentId }))).toEqual([{ childId: live.id, attachmentId: null }])
+    expect((await prisma.maxSource.findFirstOrThrow()).childId).toBe(live.id)
+  })
+
   test('publishes photo, photo, video from one channel post as one ordered Memory on redelivery', async () => {
     const fixture = await imageFixture('78011', 'channel-mixed')
     const videoFixture = await mp4VideoFixture()

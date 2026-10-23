@@ -457,10 +457,13 @@ model Child {
   avatarMediaId String?     @unique(map: "children_avatar_media_id_key") @map("avatar_media_id") @db.Uuid
   avatarCrop    Json?       @map("avatar_crop")
   version       Int         @default(1)
+  /// Soft delete. A deleted child is never chosen as the oldest live child or tagged again.
+  deletedAt     DateTime?   @map("deleted_at") @db.Timestamptz(6)
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
   memories      Memory[]
+  memoryTags    MemoryChildTag[]
   maxVideoUploadSessions MaxVideoUploadSession[]
   albums        Album[]
   avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
@@ -518,6 +521,8 @@ model Memory {
   occurredAt       DateTime      @map("occurred_at") @db.Timestamptz(6)
   status           MemoryStatus  @default(published)
   version          Int           @default(1)
+  /// Optimistic version of the child tag set; tag edits never change `version`.
+  childTagsVersion Int           @default(1) @map("child_tags_version")
   createdSequence  BigInt        @default(autoincrement()) @map("created_sequence")
   firstPublishedOrdinal BigInt?  @map("first_published_ordinal")
   firstPublishedAt DateTime? @map("first_published_at") @db.Timestamptz(6)
@@ -538,6 +543,7 @@ model Memory {
   maxVideoReferences    MaxVideoReference[]
   maxBackup             MaxMemoryBackup?
   albumSources          AlbumEntrySource[]
+  childTags             MemoryChildTag[]
 
   @@unique([id, familyId], map: "memories_id_family_id_key")
   @@unique([familyId, firstPublishedOrdinal], map: "memories_family_id_first_published_ordinal_key")
@@ -652,6 +658,27 @@ model AlbumSourceOperation {
   @@unique([familyId, actorUserId, albumId, entryId, operation, requestId], map: "album_source_operations_scope_key")
   @@index([familyId, albumId, entryId], map: "album_source_operations_entry_idx")
   @@map("album_source_operations")
+}
+
+/// A child on a memory. `attachmentId = null` tags the whole publication, otherwise one attachment
+/// (MediaAsset, MaxVideoReference or TelegramVideoReference id; validated by the service, no FK).
+/// Partial unique indexes (SQL only): memory_child_tags_publication_key (memory_id, child_id)
+/// WHERE attachment_id IS NULL; memory_child_tags_attachment_key (memory_id, attachment_id, child_id)
+/// WHERE attachment_id IS NOT NULL.
+model MemoryChildTag {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId     String   @map("family_id") @db.Uuid
+  memoryId     String   @map("memory_id") @db.Uuid
+  childId      String   @map("child_id") @db.Uuid
+  attachmentId String?  @map("attachment_id") @db.Uuid
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  memory       Memory   @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "memory_child_tags_memory_id_family_id_fkey")
+  child        Child    @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Restrict, map: "memory_child_tags_child_id_family_id_fkey")
+
+  @@index([familyId, childId, memoryId], map: "memory_child_tags_family_child_memory_idx")
+  @@index([familyId, memoryId], map: "memory_child_tags_family_memory_idx")
+  @@map("memory_child_tags")
 }
 
 model MemoryComment {

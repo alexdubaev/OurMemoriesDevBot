@@ -23,6 +23,7 @@ import { MemoryFailure } from '../domain/errors'
 import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 import type { MemoryRepository } from '../application/ports'
 import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
+import { assertLiveFamilyChildren, insertPublicationChildTags, resolveCreationChildTags } from './child-tags'
 
 type MemberRole = 'full' | 'viewer'
 
@@ -109,11 +110,10 @@ export class PrismaMemoryRepository implements MemoryRepository {
         await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
         const publication = await lockPublicationFamily(tx, scope.familyId)
         const role = await lockMember(tx, scope, 'full')
-        const child = await tx.child.findFirst({
-          where: { id: input.childId, familyId: scope.familyId },
-          select: { id: true },
-        })
-        if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
+        // Old clients still send their single `childId`; it must stay a live child of this family,
+        // but without `childIds` it no longer selects tags (the default rule applies).
+        if (input.childId) await assertLiveFamilyChildren(tx, scope.familyId, [input.childId])
+        const childTags = await resolveCreationChildTags(tx, scope.familyId, input.childIds)
 
         const author = await tx.user.findUnique({
           where: { id: scope.principal.userId },
@@ -150,8 +150,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
           await tx.$queryRaw`SELECT id FROM max_video_upload_sessions WHERE id = ${sessionId}::uuid AND family_id = ${scope.familyId}::uuid FOR UPDATE`
         }
         const sessions = sessionIds.length ? await tx.maxVideoUploadSession.findMany({
+          // The session's own child is only a legacy upload target; tags come from this request.
           where: { id: { in: sessionIds }, familyId: scope.familyId, authorId: scope.principal.userId,
-            childId: input.childId, mode: 'attachment', state: 'finalized' },
+            mode: 'attachment', state: 'finalized' },
           include: { outboundSource: { include: { videoReference: true } } },
         }) : []
         if (sessions.length !== sessionIds.length || sessions.some((session) => !session.outboundSource || session.outboundSource.videoReference)) {
@@ -163,7 +164,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
         const created = await tx.memory.create({
           data: {
             familyId: scope.familyId,
-            childId: input.childId,
+            childId: childTags.anchorChildId,
             authorId: scope.principal.userId,
             kind: input.kind,
             body: input.body,
@@ -172,6 +173,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
             firstPublishedAt,
           },
           include: memoryInclude(),
+        })
+        await insertPublicationChildTags(tx, {
+          familyId: scope.familyId, memoryId: created.id, createdBy: scope.principal.userId, childIds: childTags.childIds,
         })
         if (input.kind !== 'note') {
           if (mediaIds.length) await tx.memoryMedia.createMany({

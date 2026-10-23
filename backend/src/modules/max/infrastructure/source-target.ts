@@ -62,7 +62,7 @@ export async function resolveMaxTarget(db: DbClient, source: MaxSource, now = ne
 async function resolveChannelTarget(db: DbClient, source: MaxSource): Promise<MaxTargetResult> {
   const family = await db.family.findFirst({ where: { status: 'active', maxBackupChatId: source.recipientId }, select: {
     id: true, ownerUserId: true,
-    children: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 1, select: { id: true } },
+    children: { where: { deletedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 1, select: { id: true } },
     members: { where: { revokedAt: null, role: 'full' }, select: { userId: true, user: { select: { externalIdentities: { where: { provider: 'max', subject: source.senderSubject }, select: { id: true }, take: 1 } } } } },
   } })
   if (!family || family.children.length === 0) return { kind: 'unavailable' }
