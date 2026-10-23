@@ -5,12 +5,13 @@ import { Typography } from '@/components/typography'
 import { cn } from '@/lib/utils'
 
 export type BottomNavigationProps = {
-  active: 'feed' | 'family'
+  active: 'feed' | 'family' | 'gifts'
   addButtonRef?: Ref<HTMLButtonElement>
   appearance?: 'default' | 'memoly'
   onAdd?: () => void
   onFamily: () => void
   onFeed: () => void
+  onGifts: () => void
   role: 'full' | 'viewer'
 }
 
@@ -21,6 +22,7 @@ export function BottomNavigation({
   onAdd,
   onFamily,
   onFeed,
+  onGifts,
   role,
 }: BottomNavigationProps) {
   return (
@@ -36,7 +38,7 @@ export function BottomNavigation({
       data-testid="bottom-navigation"
     >
       <div className={cn(
-        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-3 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
+        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-4 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
         appearance === 'memoly' && 'memoly-bottom-nav-grid',
       )}>
         <NavButton
@@ -45,6 +47,13 @@ export function BottomNavigation({
           icon="home"
           label="Лента"
           onClick={onFeed}
+        />
+        <NavButton
+          active={active === 'gifts'}
+          appearance={appearance}
+          icon="gift"
+          label="Подарки"
+          onClick={onGifts}
         />
         {role === 'full' ? (
           <button
@@ -105,7 +114,7 @@ function NavButton({
 }: {
   active: boolean
   appearance: 'default' | 'memoly'
-  icon: 'family' | 'home'
+  icon: 'family' | 'gift' | 'home'
   label: string
   onClick: () => void
 }) {

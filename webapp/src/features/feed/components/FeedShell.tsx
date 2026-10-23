@@ -29,6 +29,7 @@ export type FeedShellProps = {
   onAdd?: () => void
   onFamily?: () => void
   onFeed?: () => void
+  onGifts?: () => void
   onFilterChange: (filter: FeedFilter) => void
   onMore?: () => void
   role: 'full' | 'viewer'
@@ -46,6 +47,7 @@ export function FeedShell({
   onAdd,
   onFamily = noop,
   onFeed = noop,
+  onGifts = noop,
   onFilterChange,
   onMore = noop,
   role,
@@ -124,6 +126,7 @@ export function FeedShell({
         onAdd={onAdd}
         onFamily={onFamily}
         onFeed={onFeed}
+        onGifts={onGifts}
         role={role}
       />
     </div>

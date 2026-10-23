@@ -152,3 +152,11 @@ model Gift {
 - Маршруты под `/api/v1/families/{familyId}/gifts`: GET → 200; POST + `Idempotency-Key` → 201 (200 повтор); PATCH `/{giftId}` → 200; DELETE `/{giftId}` + `If-Match` → 204 (повтор 404); POST/DELETE `/{giftId}/reservation` и `/{giftId}/purchase` с телом `{expectedVersion}` → 200 `{gift}`.
 - Коды: непригодное фото (чужое, не gift, удалённое, занятое) → 422 `INVALID_INPUT`; лимит → 422 «В списке уже 200 подарков — удалите ненужные»; «куплено» без брони → 409 `CONFLICT`, не своя бронь → 403; повтор своей брони, снятие брони свободного, повтор «куплено»/отмены → 200 без изменений.
 - Backend: `createGiftsModule({db, familyAccess, idempotencyExecutor, idempotencySecret?, requireAuth, now?}) → {routes}`, `giftPrivacyMiddleware`; relation `MediaAsset.giftPhotoFor`.
+
+### Таск 02 — вкладка «Подарки» (готово)
+- `GiftsPage({active?, child{id,name}, currentUserId, familyId, hostBridge, isOwner, membershipEpoch: number|null, onAdd, onFamily, onFeed, role, timeZone?, transport})` из `@/features/gifts`.
+- `HostBridge.openExternalLink?(url): boolean`; `isSafeExternalLink(url)` в `platform/external-link` (реэкспорт из `host-bridge`). `openExternalUrl` не изменён.
+- `BottomNavigation`: `active: 'feed'|'family'|'gifts'`, `onGifts` (в FeedPage/FeedPresentation/FamilyScreen необязателен — e2e-харнесы его не передают; App.tsx передаёт везде).
+- `validatePresentation` экспортирован и принимает `screen: 'gifts'`; ключ запросов `giftsQueryKeys.list(familyId, accountId, epoch)`, чистится `removePrivateFamilyQueries`.
+- `@/features/composer` отдаёт `validateSize`, `verifyComposerFile`; `uploadFamilyPhoto` принимает `'gift'`.
+- Иконка `gift` (default/active/white, @2x/@3x) в `assets/icons`, `webapp/public/assets/icons`, `assets/manifest.json`, `webpIconNames`.

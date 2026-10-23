@@ -1,4 +1,5 @@
 import type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
+import { isSafeExternalLink } from '../external-link'
 import { createMaxInviteLink } from '../max-invite-link'
 export type { BrowserDevHostOptions, HostBridge, TelegramHostMetadata, TelegramInsets } from '../host-bridge'
 
@@ -131,6 +132,15 @@ export function createBrowserDevHostBridge(
       const url = `https://max.ru/${options.maxBotUsername}`
       if (typeof browserHost?.open === 'function') browserHost.open(url, '_blank', 'noopener,noreferrer')
       else if (browserHost?.location && typeof browserHost.location.href === 'string') browserHost.location.href = url
+    },
+    openExternalLink: (url: string) => {
+      if (typeof browserHost?.open !== 'function' || !isSafeExternalLink(url)) return false
+      try {
+        browserHost.open(url, '_blank', 'noopener,noreferrer')
+        return true
+      } catch {
+        return false
+      }
     },
     openTelegramVideo: () => false,
     openInvite: () => undefined,

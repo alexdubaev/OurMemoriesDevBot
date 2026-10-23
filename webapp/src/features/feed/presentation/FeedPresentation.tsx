@@ -39,6 +39,7 @@ export type FeedPresentationProps = {
   onOpenSettings?: () => void
   onAllFamilies?: () => void
   onFeed: () => void
+  onGifts?: () => void
   onFilterChange: (filter: FeedFilter) => void
   onMore?: () => void
   role: 'full' | 'viewer'
@@ -75,7 +76,10 @@ export function FeedPresentation(props: FeedPresentationProps) {
         <div className="feed-content">{children}</div>
         </div>
       </main>
-      <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} role={props.role} />
+      <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts ?? noopGifts} role={props.role} />
     </div>
   )
 }
+
+// Screens rendered outside the app shell (fixtures, harnesses) have no gifts tab to open.
+const noopGifts = () => undefined

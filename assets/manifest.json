@@ -1782,6 +1782,60 @@
       "alpha": true,
       "bytes": 1210,
       "sha256": "4754c7af5afcc8ef2b2d3e7e0ee161a29f22db56ec14494e27a113f786d4639e"
+    },
+    {
+      "path": "assets/icons/gift-default@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 690,
+      "sha256": "ffe46b5e25670c53ee54dfb64b9c4f765a8deac373aea4de10aabab67af9d2b2"
+    },
+    {
+      "path": "assets/icons/gift-default@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 928,
+      "sha256": "64b26b27a44585425a466d192311efc2d68c96a9ed25f0d7c5d16dcb4d582a26"
+    },
+    {
+      "path": "assets/icons/gift-active@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 696,
+      "sha256": "89e19ba7c29f92434b10633dd8fbad913c363d2daaf8901c7c5e5bafd9a67889"
+    },
+    {
+      "path": "assets/icons/gift-active@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 922,
+      "sha256": "7418561e397b329edcf38b6c9443237081f0fac1d0fd9ea637abd6988044136f"
+    },
+    {
+      "path": "assets/icons/gift-white@2x.webp",
+      "usage": "runtime-icon",
+      "width": 48,
+      "height": 48,
+      "alpha": true,
+      "bytes": 698,
+      "sha256": "c602d432d1ef85097b60b3c80235c1f46976a0092c489367e93373d2b62a7723"
+    },
+    {
+      "path": "assets/icons/gift-white@3x.webp",
+      "usage": "runtime-icon",
+      "width": 72,
+      "height": 72,
+      "alpha": true,
+      "bytes": 912,
+      "sha256": "735da138b4a497c82911088f0e81168c61bad93e5184d580932bf32efd093451"
     }
   ]
 }

@@ -26,6 +26,7 @@ export function FamilyScreen({
   settingsRequest,
   onSettingsRequestHandled,
   onFeed,
+  onGifts,
   onRefresh,
   createInviteLink,
   canOpenInstall = false,
@@ -46,6 +47,7 @@ export function FamilyScreen({
   settingsRequest?: number
   onSettingsRequestHandled?: () => void
   onFeed: () => void
+  onGifts?: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
   canOpenInstall?: boolean
@@ -228,7 +230,10 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={() => undefined} onFeed={onFeed} onGifts={onGifts ?? noopGifts} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }
+
+// Screens rendered outside the app shell (fixtures, harnesses) have no gifts tab to open.
+const noopGifts = () => undefined
