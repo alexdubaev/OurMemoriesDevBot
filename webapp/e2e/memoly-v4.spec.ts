@@ -221,7 +221,7 @@ test('production App reuses one child avatar across feed, family and same-family
 
 test('welcome CTA is ready immediately, pauses with document visibility, and completes the real App transition', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 740 })
-  await page.goto('/e2e/selected-family-app.harness.html?avatarDelay=250')
+  await page.goto('/e2e/selected-family-app.harness.html?avatarDelay=250&welcomeFirst')
 
   const welcome = page.getByRole('button', { name: 'Продолжить', exact: true })
   await expect(welcome).toBeVisible({ timeout: 1_500 })
@@ -253,10 +253,89 @@ test('welcome CTA is ready immediately, pauses with document visibility, and com
   await expect(page.locator('.memolyWelcome')).toHaveCount(0)
 })
 
+test('production App skips the welcome after the account claim has been used', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/selected-family-app.harness.html?welcomeFirst')
+  const welcome = page.getByRole('button', { name: 'Продолжить', exact: true })
+  await expect(welcome).toBeVisible()
+  await welcome.click()
+  await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
+
+  await page.reload()
+  await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
+  await expect(page.locator('.memolyWelcome')).toHaveCount(0)
+})
+
+test('production entry blocks page pinch zoom while preserving ordinary input and PhotoSwipe gestures', async ({ page }) => {
+  await page.goto('/')
+  const cdp = await page.context().newCDPSession(page)
+  let pinchScale: number
+  try {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 390,
+      height: 740,
+      deviceScaleFactor: 1,
+      mobile: true,
+    })
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await cdp.send('Input.synthesizePinchGesture', {
+      x: 195,
+      y: 300,
+      scaleFactor: 1.6,
+      relativeSpeed: 800,
+      gestureSourceType: 'touch',
+    })
+    pinchScale = await page.evaluate(() => window.visualViewport?.scale ?? 1)
+  } finally {
+    await cdp.detach()
+  }
+
+  const outcomes = await page.evaluate(() => {
+    const dispatch = (target: EventTarget, type: string, properties: Record<string, unknown> = {}) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      for (const [key, value] of Object.entries(properties)) Object.defineProperty(event, key, { configurable: true, value })
+      target.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    const pswp = document.createElement('div')
+    pswp.className = 'pswp'
+    const image = document.createElement('img')
+    pswp.append(image)
+    document.body.append(pswp)
+
+    const outcome = {
+      rootTouchAction: getComputedStyle(document.documentElement).touchAction,
+      gestureStart: dispatch(document, 'gesturestart'),
+      gestureChange: dispatch(document, 'gesturechange'),
+      multiTouch: dispatch(document, 'touchmove', { touches: [{}, {}] }),
+      singleTouch: dispatch(document, 'touchmove', { touches: [{}] }),
+      ctrlWheel: dispatch(document, 'wheel', { ctrlKey: true }),
+      metaWheel: dispatch(document, 'wheel', { metaKey: true }),
+      ordinaryWheel: dispatch(document, 'wheel', { ctrlKey: false, metaKey: false }),
+      photoSwipeGesture: dispatch(image, 'gesturestart'),
+    }
+    pswp.remove()
+    return outcome
+  })
+
+  expect(pinchScale).toBe(1)
+  expect(outcomes).toEqual({
+    rootTouchAction: 'pan-x pan-y',
+    gestureStart: true,
+    gestureChange: true,
+    multiTouch: true,
+    singleTouch: false,
+    ctrlWheel: true,
+    metaWheel: true,
+    ordinaryWheel: false,
+    photoSwipeGesture: false,
+  })
+})
+
 test('production App confirms a cold hub family before loading and keeps its avatar on first selection', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/e2e/selected-family-app.harness.html?hubFirst&onlyOneFamily&homeDelay=450&avatarDelay=180')
+  await page.goto('/e2e/selected-family-app.harness.html?hubFirst&onlyOneFamily&homeDelay=450&avatarDelay=180&welcomeFirst')
   const welcome = page.getByRole('button', { name: 'Продолжить' })
   const card = page.locator('.family-hub-card').filter({ hasText: 'Семья Алисы' })
   await expect(welcome).toBeVisible()
