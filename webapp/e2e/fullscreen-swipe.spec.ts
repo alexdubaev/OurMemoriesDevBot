@@ -154,8 +154,10 @@ test('fullscreen mixed viewer follows the finger and keeps the adjacent photo vi
 
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  expect(await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
   await touchSwipe(page, '.memoly-mixed-viewer-media [data-carousel-active="true"] img', 'left')
   await expect(viewer.locator('.memoly-viewer-count')).toHaveText('2 / 3')
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   const reducedMotionOffset = await viewport.locator('.memoly-mixed-viewer-track').evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)
   expect(reducedMotionOffset).toBeCloseTo(-bounds!.width, 0)
   await touchSwipe(page, '.memoly-mixed-viewer-media [data-carousel-active="true"] img', 'right')
