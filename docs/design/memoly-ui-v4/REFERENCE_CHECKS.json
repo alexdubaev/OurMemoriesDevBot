@@ -1,0 +1,52 @@
+{
+  "task": "MEMOLY-UI-V4-PIXEL-IMPLEMENTATION",
+  "scope": "Published static visual reference; not a production implementation or release",
+  "checked_repository_base": "f0a4e8ba3fa174f43c661ab2a70a6b744c6543f4",
+  "archive": {
+    "file": "reference.zip",
+    "size_bytes": 30078,
+    "git_blob_sha1": "2aac5c19a0d840f2fb9625510f552cd236a8d0de",
+    "sha256": "d15fd7b8ca78bfec494c1f0edbb1fa817eb3097749a7f1af29241ea9e051bcfc",
+    "files": ["reference.html", "reference.css", "fixture-dimensions.json", "provenance.json"],
+    "zip_crc_and_manifest": "PASS"
+  },
+  "source": {
+    "original_v4_html_sha256": "feb6daa6dc01a2af5097b531a23385c0f69e2dd31e6c2e756a5398ef0e951830",
+    "header_art_sha256": "c2eb7ad36fd8922958788b59179065c044042b5523c84d9c64cc746f639000bf",
+    "family_media": "Not uploaded: replaced with neutral same-dimension synthetic fixtures",
+    "names": "Demonstration names",
+    "icons": "Original prototype paths rasterized into WebP alpha masks; production must reuse WebpIcon",
+    "font_files": 0
+  },
+  "browser": {
+    "engine": "Chromium 144.0.7559.96",
+    "driver": "Local Playwright; connected Browser tool exposes read-only tabs, not browser control",
+    "dpr": 1,
+    "javascript": false,
+    "delivery": "set_content; archive HTML/CSS also assembled in memory after checking their exact SHA256",
+    "direct_file_navigation": "BLOCKED by environment: ERR_BLOCKED_BY_ADMINISTRATOR",
+    "physical_MAX_iPhone_PWA": "NOT_RUN"
+  },
+  "viewports": [
+    {"width": 320, "height": 844, "header_height": 96, "first_media": [14,175,292,176.328125], "nav_height": 62, "root_overflow": false},
+    {"width": 390, "height": 844, "header_height": 96, "first_media": [16,175,358,216.1875], "nav_height": 62, "root_overflow": false},
+    {"width": 430, "height": 932, "header_height": 96, "first_media": [16,175,398,240.34375], "nav_height": 62, "root_overflow": false},
+    {"width": 1280, "height": 900, "header_height": 96, "first_media": [652,205,358,216.1875], "nav_height": 62, "root_overflow": false, "note": "Demonstration phone frame only; not production desktop geometry"}
+  ],
+  "verified": {
+    "memory_count": 10,
+    "original_to_public_header_media_nav_geometry": "PASS, compared on same browser and viewport",
+    "navigation_feed_family_invite_settings_feed": "PASS",
+    "demo_reaction_toggle": "PASS",
+    "viewer_open_close": "PASS",
+    "demo_ratio_toggle_4_5": "PASS",
+    "runtime_page_errors": 0,
+    "header_art_checksum_unchanged": true
+  },
+  "limits": [
+    "Only static prototype tested. Real API, React, production, auth, ACL, media playback and physical device acceptance remain future implementation work.",
+    "Video/audio are permitted prototype placeholders, never production substitutes.",
+    "Raw reference preserves accepted v4; SPEC names mandatory production contrast, hit-target and enlarged-text corrections explicitly.",
+    "No independent reviewer was invoked for this documentation package. Implementation requires one bounded independent review."
+  ]
+}
