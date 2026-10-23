@@ -647,7 +647,9 @@ test('photo-only album uses the unified viewer and navigates its loaded slides',
   await thumbnails.nth(1).click()
   await expect(thumbnails.nth(1)).toHaveAttribute('aria-pressed', 'true')
   await expect(viewer.getByText('2 / 3')).toBeVisible()
-  await expect.poll(() => viewer.locator('.memoly-mixed-viewer-media img').evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0)).toBe(true)
+  const activeSlide = viewer.locator('.memoly-mixed-viewer-slide[data-carousel-active="true"]')
+  await expect(activeSlide).toHaveCount(1)
+  await expect.poll(() => activeSlide.locator('.memoly-mixed-viewer-media img').evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0)).toBe(true)
 })
 test('owner family child card opens the editor directly with separate avatar actions', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })

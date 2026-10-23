@@ -543,8 +543,12 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   const ownerToken = await signInMax(page, { id: ownerId, first_name: 'MAX revocation owner' })
   const familyB = await createAuditFamily(page, ownerToken, 'Revoked B family', 'B child', 'B retained history', true)
   await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerId, first_name: 'MAX revocation owner' }, randomUUID(), ''))
+  const retainedHomeResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/me/families') && response.ok())
   await page.reload()
-  await page.getByRole('button', { name: 'Продолжить' }).click()
+  const retainedHome = await retainedHomeResponse
+  const retainedHomeSnapshot = await retainedHome.json() as { items: Array<{ familyId: string }> }
+  expect(retainedHomeSnapshot.items.some((item) => item.familyId === familyB.id)).toBe(true)
+  await expect(page.getByRole('button', { name: /Revoked B family/ })).toBeVisible()
   await selectFamilyFeed(page, 'B child', 'B retained history')
   await page.getByRole('button', { name: 'Семья' }).click()
   await page.getByRole('button', { name: 'Редактировать профиль ребёнка: B child' }).click()
@@ -628,13 +632,7 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
 
   const usedInviteContext = await browser.newContext()
   const usedInvitePage = await usedInviteContext.newPage()
-  await usedInvitePage.addInitScript((data: string) => {
-    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
-  }, signedMaxInitData({ id: viewerId, first_name: 'MAX revocation viewer' }, randomUUID(), `invite_${initialInvite}`))
-  const usedAuth = usedInvitePage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
-  await usedInvitePage.goto('/')
-  await usedInvitePage.getByRole('button', { name: 'Продолжить' }).click()
-  await usedAuth
+  await signInMax(usedInvitePage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${initialInvite}`)
   await expect(usedInvitePage.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
 
   const nextInviteResponse = await page.request.post(`/api/v1/families/${familyB.id}/invites`, {
@@ -665,10 +663,18 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
   await page.addInitScript((data: string) => {
     Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
   }, signedMaxInitData(user, randomUUID(), startParam))
-  const authResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
+  const authResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max'))
   await page.goto('/')
-  await page.getByRole('button', { name: 'Продолжить' }).click()
-  const response = await authResponse
+  const continueButton = page.getByRole('button', { name: 'Продолжить' })
+  const ready = await Promise.race([
+    authResponse.then((response) => ({ response })),
+    continueButton.waitFor({ state: 'visible' }).then(() => ({ continue: true as const })),
+  ])
+  const response = 'response' in ready ? ready.response : await (async () => {
+    await continueButton.click()
+    return authResponse
+  })()
+  expect(response.ok(), `MAX auth failed with HTTP ${response.status()}`).toBe(true)
   const token = (await response.json() as { accessToken: string }).accessToken
   return token
 }
