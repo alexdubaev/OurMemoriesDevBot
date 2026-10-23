@@ -757,7 +757,8 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65:comments"
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1:albums") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1:albums"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:6b6ea0473f2986a7bb0e9cf7432b15260ffeb87fc7d33d2e5a62638dd070dc95:albums") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -826,15 +827,24 @@ rollback_verify_albums_migration_history() {
 	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
 	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
 	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
-	[ "$baseline_count" = 49 ] && [ "$candidate_count" = 52 ] || return 1
+	[ "$baseline_count" = 49 ] && { [ "$candidate_count" = 52 ] || [ "$candidate_count" = 53 ]; } || return 1
 	baseline_names=$(printf '%s\n' "$baseline_catalog" | cut -d: -f1)
 	candidate_names=$(printf '%s\n' "$candidate_catalog" | cut -d: -f1)
 	[ "$(printf '%s\n' "$candidate_names" | head -n 49)" = "$baseline_names" ] || return 1
-	suffix=$(printf '%s\n' "$candidate_names" | tail -n 3)
-	expected_suffix=$(printf '%s\n' \
-		20261023110000_memoly_albums \
-		20261023120000_album_entry_tombstones_year_uniqueness \
-		20261023130000_album_source_operation_receipts)
+	if [ "$candidate_count" = 52 ]; then
+		suffix=$(printf '%s\n' "$candidate_names" | tail -n 3)
+		expected_suffix=$(printf '%s\n' \
+			20261023110000_memoly_albums \
+			20261023120000_album_entry_tombstones_year_uniqueness \
+			20261023130000_album_source_operation_receipts)
+	else
+		suffix=$(printf '%s\n' "$candidate_names" | tail -n 4)
+		expected_suffix=$(printf '%s\n' \
+			20261023110000_memoly_albums \
+			20261023120000_album_entry_tombstones_year_uniqueness \
+			20261023130000_album_source_operation_receipts \
+			20261023150000_album_private_photos)
+	fi
 	[ "$suffix" = "$expected_suffix" ] || return 1
 	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
 	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
@@ -859,16 +869,16 @@ function parse(value) {
 const baseline = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
 const candidate = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
 const phase = process.env.MEMOLY_ALBUMS_LEDGER_PHASE;
-if (baseline.length !== 49 || candidate.length !== 52 ||
+if (baseline.length !== 49 || ![52, 53].includes(candidate.length) ||
     candidate.slice(0, 49).some((row, index) => row.name !== baseline[index].name ||
       ![...row.checksums].some(checksum => baseline[index].checksums.has(checksum))) ||
     !["pre-sql", "complete"].includes(phase)) process.exit(1);
-const minimum = phase === "pre-sql" ? 49 : 52;
+const minimum = phase === "pre-sql" ? 49 : candidate.length;
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 try {
   await client.connect();
   const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
-  if (!Array.isArray(rows) || rows.length < minimum || rows.length > 52 || rows.some(row => !row.finished_at || row.rolled_back_at))
+  if (!Array.isArray(rows) || rows.length < minimum || rows.length > candidate.length || rows.some(row => !row.finished_at || row.rolled_back_at))
     throw new Error("invalid album migration ledger state");
   const seen = new Set();
   for (let index = 0; index < rows.length; index++) {
