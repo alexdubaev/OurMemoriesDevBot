@@ -130,7 +130,7 @@ async function readyMediaCount(
       memoryKind === 'media' && (mediaIds.length < 1 || mediaIds.length > 10) || memoryKind === 'photo' && (mediaIds.length < 1 || mediaIds.length > 10)) return false
   const assets = await tx.mediaAsset.findMany({ where: {
     id: { in: unique }, familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
-    memories: { none: {} },
+    memories: { none: {} }, albumPhoto: { is: null },
   }, select: { mediaKind: true } })
   return assets.length === unique.length && assets.every(({ mediaKind }) => expectedKinds.includes(mediaKind))
 }

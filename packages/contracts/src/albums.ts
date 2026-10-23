@@ -5,8 +5,22 @@ const uuid = z.uuid().toLowerCase()
 const text = (max: number) => z.string().transform((v) => v.trim()).superRefine((v, ctx) => {
   if ([...v].length > max || v.includes('\0')) ctx.addIssue({ code: 'custom', message: `Text must be at most ${max} Unicode code points` })
 })
+function validateAlbumSourceRefs(items: Array<{ memoryId: string | null; sourceKind: z.infer<typeof albumSourceKindSchema>; sourceId: string }>, ctx: z.RefinementCtx) {
+  const keys = new Set<string>()
+  items.forEach((item, index) => {
+    const key = `${item.memoryId ?? 'private'}:${item.sourceKind}:${item.sourceId}`
+    if (keys.has(key)) ctx.addIssue({ code: 'custom', path: [index], message: 'Duplicate sources are not allowed' })
+    keys.add(key)
+  })
+}
 export const albumKindSchema = z.enum(['year', 'events', 'workshop', 'free'])
 export const albumSourceKindSchema = z.enum(['memory', 'private_storage', 'max_video', 'telegram_video'])
+export const albumSourceRefSchema = z.object({ memoryId: uuid.nullable(), sourceKind: albumSourceKindSchema, sourceId: uuid }).strict()
+  .superRefine((value, ctx) => {
+    if (value.memoryId === null && value.sourceKind !== 'private_storage') {
+      ctx.addIssue({ code: 'custom', path: ['memoryId'], message: 'Direct album sources must use private storage' })
+    }
+  })
 export const albumEntryCategorySchema = z.enum(['drawing', 'applique', 'craft', 'building', 'other'])
 export const albumDateSchema = z.discriminatedUnion('precision', [
   z.object({ precision: z.literal('unknown'), value: z.null() }).strict(),
@@ -62,8 +76,8 @@ export const createAlbumEntryRequestSchema = z.object({
   childQuote: text(8000).nullable().optional(),
   category: albumEntryCategorySchema.nullable().optional(),
   date: albumDateSchema.optional(),
-  sources: z.array(z.object({ memoryId: uuid, sourceKind: albumSourceKindSchema, sourceId: uuid }).strict()).max(96).default([])
-    .refine((items) => new Set(items.map((v) => `${v.memoryId}:${v.sourceKind}:${v.sourceId}`)).size === items.length, 'Duplicate sources are not allowed'),
+  sources: z.array(albumSourceRefSchema).max(96).default([])
+    .superRefine(validateAlbumSourceRefs),
 }).strict()
 export const updateAlbumEntryRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -76,8 +90,8 @@ export const updateAlbumEntryRequestSchema = z.object({
 export const clearAlbumEntryRequestSchema = z.object({ expectedVersion: z.number().int().positive() }).strict()
 export const albumSourceSelectionSchema = z.object({
   expectedVersion: z.number().int().positive(),
-  sources: z.array(z.object({ memoryId: uuid, sourceKind: albumSourceKindSchema, sourceId: uuid }).strict()).max(96)
-    .refine((items) => new Set(items.map((v) => `${v.memoryId}:${v.sourceKind}:${v.sourceId}`)).size === items.length, 'Duplicate sources are not allowed'),
+  sources: z.array(albumSourceRefSchema).max(96)
+    .superRefine(validateAlbumSourceRefs),
 }).strict()
 export const reorderAlbumEntryRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -99,7 +113,7 @@ export const mediaPickerQuerySchema = z.object({
 
 export const albumSourceDtoSchema = z.object({
   id: uuid,
-  memoryId: uuid,
+  memoryId: uuid.nullable(),
   sourceKind: albumSourceKindSchema,
   sourceId: uuid,
   kind: z.enum(['photo', 'video', 'voice', 'note']),

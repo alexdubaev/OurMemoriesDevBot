@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { albumDateSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
+import { albumDateSchema, albumSourceRefSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
 
 describe('album contracts', () => {
   test('validates partial calendar dates without inventing a day', () => {
@@ -20,5 +20,9 @@ describe('album contracts', () => {
     const source = { memoryId: randomUUID(), sourceKind: 'private_storage', sourceId: randomUUID() }
     expect(albumSourceSelectionSchema.parse({ expectedVersion: 1, sources: [source] }).sources).toHaveLength(1)
     expect(albumSourceSelectionSchema.safeParse({ expectedVersion: 1, sources: [source, source] }).success).toBe(false)
+    const directPhoto = { memoryId: null, sourceKind: 'private_storage', sourceId: randomUUID() }
+    expect(albumSourceSelectionSchema.parse({ expectedVersion: 1, sources: [directPhoto] }).sources).toEqual([directPhoto])
+    expect(albumSourceRefSchema.safeParse({ ...directPhoto, sourceKind: 'max_video' }).success).toBe(false)
+    expect(albumSourceSelectionSchema.safeParse({ expectedVersion: 1, sources: [{ ...directPhoto, sourceKind: 'memory' }] }).success).toBe(false)
   })
 })

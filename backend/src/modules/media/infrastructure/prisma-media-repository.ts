@@ -108,12 +108,12 @@ export class PrismaMediaRepository implements MediaRepository {
       await lockFamiliesForUpdate(tx, familyIds)
       await lockMediaAssetsForUpdate(tx, familyIds, unique)
       const assets = await tx.mediaAsset.findMany({ where: {
-        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} },
+        id: { in: unique }, sourceKind: input.sourceKind, purpose: 'memory', memories: { none: {} }, albumPhoto: { is: null },
       }, select: { id: true, originalStatus: true } })
       for (const asset of assets) {
         if (asset.originalStatus === 'pending') await abandon(tx, asset.id, input.now, input.sourceKind)
         else if (asset.originalStatus === 'stored') {
-          const changed = await tx.mediaAsset.updateMany({ where: { id: asset.id, sourceKind: input.sourceKind, purpose: 'memory', deletedAt: null, memories: { none: {} }, originalStatus: 'stored' }, data: { deletedAt: input.now } })
+          const changed = await tx.mediaAsset.updateMany({ where: { id: asset.id, sourceKind: input.sourceKind, purpose: 'memory', deletedAt: null, memories: { none: {} }, albumPhoto: { is: null }, originalStatus: 'stored' }, data: { deletedAt: input.now } })
           if (changed.count === 1) await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`, payload: { mediaId: asset.id }, scheduledFor: input.now })
         }
       }
@@ -239,7 +239,7 @@ export class PrismaMediaRepository implements MediaRepository {
     const count = await this.db.mediaAsset.count({
       where: {
         id: { in: unique }, familyId: scope.familyId, purpose: 'memory',
-        originalStatus: 'stored', deletedAt: null, memories: { none: {} },
+        originalStatus: 'stored', deletedAt: null, memories: { none: {} }, albumPhoto: { is: null },
       },
     })
     return count === unique.length
@@ -254,6 +254,7 @@ export class PrismaMediaRepository implements MediaRepository {
         deletedAt: null,
         OR: [
           { purpose: 'memory', memories: { some: { memory: { status: 'published', deletedAt: null } } } },
+          { albumPhoto: { is: { familyId: scope.familyId } } },
           { telegramVideoThumbnailFor: { memory: { status: 'published', deletedAt: null } } },
           { maxVideoThumbnailFor: { familyId: scope.familyId, memory: { status: 'published', deletedAt: null } } },
           { purpose: 'child_avatar', avatarForChildren: { some: { familyId: scope.familyId } } },
