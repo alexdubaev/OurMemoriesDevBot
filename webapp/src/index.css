@@ -53,6 +53,7 @@
   html {
     @apply bg-background font-sans text-foreground;
     font-feature-settings: "liga" 1, "calt" 1;
+    touch-action: pan-x pan-y;
   }
 
   body {
@@ -60,6 +61,11 @@
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
+    touch-action: pan-x pan-y;
+  }
+
+  #root {
+    touch-action: pan-x pan-y;
   }
 
   button,

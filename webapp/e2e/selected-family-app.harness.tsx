@@ -21,6 +21,7 @@ const secondFamilyId = '22222222-2222-4222-8222-222222222222'
 const secondChildId = '66666666-6666-4666-8666-666666666666'
 const secondAvatarMediaId = 'bbb00000-0000-4000-8000-000000000021'
 const params = new URLSearchParams(location.search)
+const welcomeClaimKey = `__selected-family-welcome-claimed:${userId}`
 const user: NonNullable<AuthContextValue['user']> = { id: userId, email: null, displayName: 'Synthetic owner', role: 'user', theme: 'lavender', createdAt: '2026-10-01T00:00:00.000Z' }
 const secondUser = { ...user, id: secondUserId }
 const family = { id: familyId, name: 'Семья Алисы', timezone: 'Europe/Moscow', ownerUserId: userId }
@@ -107,7 +108,13 @@ const transport = {
     if (path === `/api/v1/families/${familyId}/usage` || path === `/api/v1/families/${secondFamilyId}/usage`) return schema.parse({ usedBytes: 0, quotaBytes: null })
     if (path === `/api/v1/families/${familyId}/max-channel` || path === `/api/v1/families/${secondFamilyId}/max-channel`) return schema.parse({ state: 'unconfigured', title: null, canManage: true })
     if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
-    if (path === '/api/v1/me/welcome/claim') return schema.parse({ showWelcome: false })
+    if (path === '/api/v1/me/welcome/claim') {
+      if (!params.has('welcomeFirst') || sessionStorage.getItem(welcomeClaimKey) === 'claimed') {
+        return schema.parse({ showWelcome: false })
+      }
+      sessionStorage.setItem(welcomeClaimKey, 'claimed')
+      return schema.parse({ showWelcome: true })
+    }
     throw new Error(`Unexpected synthetic API request: ${path}`)
   },
   raw: async (path: string) => {
