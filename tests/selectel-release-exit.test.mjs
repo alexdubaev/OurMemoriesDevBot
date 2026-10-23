@@ -384,7 +384,7 @@ const reviewedWelcomeCta6Blobs = [
   ['webapp/src/features/welcome/welcome-splash.css', '18174a67d1aad32d10c509a93e576ccbfadf3936'],
 ]
 const reviewedWelcomeOnceZoomBlobs = [
-  ['webapp/src/features/feed/FeedPage.tsx', '9daee855b3dd3d157a892e6f281dcd85f1ee533b'],
+  ['webapp/src/features/feed/FeedPage.tsx', 'bc57fe068a43611efa80cc7fe5ffd29b3f3e6604'],
   ['webapp/src/features/feed/presentation/memoly-feed.css', 'fee8d9ded865635455fe684c112f513134a6ca13'],
   ['webapp/src/App.tsx', '648381db4d7aa5488a019254cf42d3cb436dbe1b'],
   ['webapp/src/index.css', '8d088751c71a08c43252f31fb1990db124657147'],
@@ -993,7 +993,7 @@ slowTest('exact Welcome CTA and once-zoom source preserves 33a recovery and reje
   source = commitFrozenSourceFiles(source, reviewedWelcomeOnceZoomBlobs,
     'apply exact Welcome once-zoom production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root),
-    '2f0a4f20de43a8d4179545278c30e5430ada194948080efea4e875b097ab525f')
+    '66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65')
 
   const runningPair = 'f6'.repeat(20)
   const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,

@@ -746,9 +746,9 @@ approval. The guarded release stopped before promotion; the production services
 and database were not changed.
 
 The once-per-account welcome and page-zoom correction frozen for candidate
-`9f6cf7c25e4708b933b0a3c4f741356750cb4c84` has executable compatibility
+`c93fc3e37bdcf98b7eab2fd47da8f554668edd17` has executable compatibility
 fingerprint
-`2f0a4f20de43a8d4179545278c30e5430ada194948080efea4e875b097ab525f` for the
+`66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65` for the
 same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
 Its six exact production blobs—the accepted mixed-media viewer source and CSS,
 welcome gate, global touch policy, entrypoint, and zoom guard—are frozen in
@@ -757,6 +757,7 @@ welcome gate, global touch policy, entrypoint, and zoom guard—are frozen in
 checks read-only recovery readiness and preservation of the designated pair,
 then rejects app and zoom-guard drift before service mutation. It does not
 change the recovery target, service configuration, or database rules.
+The frozen viewer source includes the accepted reduced-motion fix from #220.
 
 The code fix follows the server's atomic account claim instead of forcing the
 welcome splash on every launch. It also restores startup gesture prevention and
@@ -767,12 +768,12 @@ coverage now includes a trusted Chromium CDP touch pinch: after a 1.6× pinch,
 `visualViewport.scale` remains 1, while ordinary single-touch and wheel input
 remain uncanceled.
 
-Against an isolated synthetic PostgreSQL `*_test` database, the selected
-welcome-account integration checks passed 4/4 tests with 58 assertions and exit
-code 0 in 39.54 seconds. The actual current → frozen 33a → current application
-roundtrip passed in 34.98 seconds. The webapp production build passed. These
-checks are scoped recovery evidence; the full suite remains waived for this
-task, and no production deployment was performed.
+Against an isolated synthetic PostgreSQL `*_test` database, the selected run
+passed 4/4 tests with 58 assertions and exit code 0 in 39.54 seconds: three
+welcome-account tests and one current → frozen 33a → current application
+roundtrip. The roundtrip completed in 34.98 seconds. The webapp production
+build passed. These checks are scoped recovery evidence; the full suite remains
+waived for this task, and no production deployment was performed.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
