@@ -145,3 +145,10 @@ model Gift {
 
 ## Что построили завершённые таски
 <!-- дописывается оркестратором -->
+
+### Таск 01 — подарки на сервере (готово)
+- Контракты `@web-app-demo/contracts`: `MAX_ACTIVE_GIFTS=200`, `isAllowedGiftUrl(url)`, `giftTitleSchema`, `giftUrlSchema` (trim, ≤2048, http/https, без логина-пароля, без пробелов и управляющих символов), `giftPriceSchema`, `giftsParamsSchema`, `giftParamsSchema`, `giftReservationDtoSchema`, `giftDtoSchema`, `giftListResponseSchema`, `createGiftRequestSchema`, `updateGiftRequestSchema`, `giftVersionRequestSchema`, `deleteGiftHeadersSchema`, `giftMutationResponseSchema`; типы `GiftDto`, `GiftReservationDto`, `GiftListResponse`, `CreateGiftRequest`, `UpdateGiftRequest`, `GiftVersionRequest`, `GiftMutationResponse`. `mediaPurposeSchema` принимает `gift`.
+- `GiftDto = {id, childId, title, url, price: string|null, photoMediaId, createdBy:{userId,name}, reservation:{userId,name,reservedAt,boughtAt|null}|null, version, createdAt, updatedAt}`. Список `{gifts}`, мутации `{gift}`.
+- Маршруты под `/api/v1/families/{familyId}/gifts`: GET → 200; POST + `Idempotency-Key` → 201 (200 повтор); PATCH `/{giftId}` → 200; DELETE `/{giftId}` + `If-Match` → 204 (повтор 404); POST/DELETE `/{giftId}/reservation` и `/{giftId}/purchase` с телом `{expectedVersion}` → 200 `{gift}`.
+- Коды: непригодное фото (чужое, не gift, удалённое, занятое) → 422 `INVALID_INPUT`; лимит → 422 «В списке уже 200 подарков — удалите ненужные»; «куплено» без брони → 409 `CONFLICT`, не своя бронь → 403; повтор своей брони, снятие брони свободного, повтор «куплено»/отмены → 200 без изменений.
+- Backend: `createGiftsModule({db, familyAccess, idempotencyExecutor, idempotencySecret?, requireAuth, now?}) → {routes}`, `giftPrivacyMiddleware`; relation `MediaAsset.giftPhotoFor`.

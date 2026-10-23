@@ -257,6 +257,7 @@ export class PrismaMediaRepository implements MediaRepository {
           { telegramVideoThumbnailFor: { memory: { status: 'published', deletedAt: null } } },
           { maxVideoThumbnailFor: { familyId: scope.familyId, memory: { status: 'published', deletedAt: null } } },
           { purpose: 'child_avatar', avatarForChildren: { some: { familyId: scope.familyId } } },
+          { purpose: 'gift', giftPhotoFor: { some: { familyId: scope.familyId } } },
         ],
       },
       include: { variants: true },
@@ -382,7 +383,7 @@ function pendingDto(reservation: Awaited<ReturnType<typeof reservationFor>> & {}
 function assetDto(asset: {
   id: string
   familyId: string
-  purpose: 'memory' | 'child_avatar'
+  purpose: 'memory' | 'child_avatar' | 'gift'
   mediaKind: 'photo' | 'video' | 'voice'
   originalStatus: 'pending' | 'stored' | 'failed'
   renditionStatus: 'pending' | 'ready' | 'failed'

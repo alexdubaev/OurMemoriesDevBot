@@ -22,6 +22,7 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
+import { createGiftsModule, giftPrivacyMiddleware } from './modules/gifts'
 import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
@@ -86,6 +87,13 @@ export function createApp({
     mediaCatalog: createMediaMemoryCatalog((scope, ids) => media.service.assertReadyForMemory(scope, ids)),
     telegramBotUsername: env.TELEGRAM_BOT_EXPECTED_USERNAME,
   })
+  const gifts = createGiftsModule({
+    db: prisma,
+    familyAccess: families.access,
+    idempotencyExecutor,
+    idempotencySecret: env.JWT_SECRET,
+    requireAuth: auth.requireAuth,
+  })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => c.var.user.id,
@@ -115,6 +123,7 @@ export function createApp({
 
   app.use('*', createRequestContext())
   app.use('*', commentPrivacyMiddleware)
+  app.use('*', giftPrivacyMiddleware)
   app.use(secureHeaders())
   app.use(
     '*',
@@ -197,6 +206,7 @@ export function createApp({
   app.route('/api/v1', families.routes)
   app.route('/api/v1', media.routes)
   app.route('/api/v1', memories.routes)
+  app.route('/api/v1', gifts.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/v1', users.v1UserRoutes)
   app.route('/api/admin', users.adminRoutes)
