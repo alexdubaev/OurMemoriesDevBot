@@ -91,8 +91,16 @@ async function syntheticTouchStep(page: import('@playwright/test').Page, selecto
   }, { type, points })
 }
 
+async function installProductionZoomPrevention(page: import('@playwright/test').Page) {
+  await page.evaluate(async (modulePath) => {
+    const { installAppZoomPrevention } = await import(modulePath) as typeof import('../src/platform/app-zoom')
+    installAppZoomPrevention(document)
+  }, '/src/platform/app-zoom.ts')
+}
+
 test('fullscreen mixed viewer follows the finger and keeps the adjacent photo visible before release', async ({ page }, testInfo) => {
   await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
+  await installProductionZoomPrevention(page)
 
   const card = page.locator('.memory-card').nth(1)
   await card.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
@@ -170,6 +178,7 @@ test('fullscreen photo album and mixed viewer respond to direct single-finger sw
   await page.route('**/api/v1/families/*/media/playback-session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
   await page.route('**/media/videos/*/content', (route) => route.fulfill({ status: 200, contentType: 'video/mp4', body: videoFixture, headers: { 'Access-Control-Allow-Origin': '*' } }))
   await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
+  await installProductionZoomPrevention(page)
 
   const albumCard = page.locator('.memory-card').nth(1)
   await albumCard.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
