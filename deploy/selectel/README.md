@@ -720,6 +720,31 @@ source binding does not establish database compatibility; run the synthetic
 PostgreSQL current → frozen 33a → current compatibility probe against the exact
 release SHA before release.
 
+The Welcome CTA 6 source frozen for release candidate
+`9c6d6071a2b614e073a5f765810d55281b723ef5` has executable compatibility
+fingerprint
+`b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its five exact production Git blobs—the Bun lock, webapp manifest, Comfortaa
+OFL license, welcome component, and welcome CSS—are pinned in
+`tests/selectel-release-exit.test.mjs`. The profile is anchored to the
+full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime. Its focused
+guard regression verifies read-only readiness and designated-pair preservation,
+then rejects a welcome-source change before service mutation.
+
+Database compatibility was separately verified by the synthetic PostgreSQL
+current → frozen 33a → current probe: 1 selected test, 7 filtered, 12 assertions,
+exit code 0 in 36.02 seconds. It ran against a dedicated `*_test` database on
+loopback port 15489; the local `TEST_DATABASE_URL` value is not recorded here:
+
+```sh
+env NODE_ENV=test CHECKPOINT_DISABLE=1 DATABASE_URL="$TEST_DATABASE_URL" bun test backend/scripts/comments-release-compatibility.integration.test.ts --test-name-pattern 'current candidate and permitted rollback preserve comments and unread behavior' --timeout 360000
+```
+
+This is narrow recovery evidence, not a FULL test-suite result or a deployment
+approval. The guarded release stopped before promotion; the production services
+and database were not changed.
+
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises
 activated unread state, multiple active families, Owner/Full/Viewer boundaries,
