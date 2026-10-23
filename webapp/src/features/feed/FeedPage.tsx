@@ -604,12 +604,10 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
   const [photoZoom, setPhotoZoom] = useState(1)
   const [photoPan, setPhotoPan] = useState({ x: 0, y: 0 })
   const photoZoomRef = useRef(1)
-  const [reduceMotion, setReduceMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const reduceMotionRef = useRef(reduceMotion)
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null)
   const swipeStart = useRef<{ id: number; x: number; y: number; axis: 'undecided' | 'horizontal' | 'vertical' | 'cancelled'; direction: -1 | 1 | null } | null>(null)
   const onCloseRef = useRef(onClose)
-  const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: reduceMotion ? 0 : 25, startIndex, watchDrag: (_api, event) => {
+  const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: 25, startIndex, watchDrag: (_api, event) => {
     if (photoZoomRef.current > 1 || pinchStart.current) return false
     if ('touches' in event && event.touches.length !== 1) return false
     const target = event.target
@@ -617,13 +615,6 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
   } })
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => { onIndexChangeRef.current = onIndexChange }, [onIndexChange])
-  useEffect(() => { reduceMotionRef.current = reduceMotion }, [reduceMotion])
-  useEffect(() => {
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const update = () => setReduceMotion(preference.matches)
-    preference.addEventListener('change', update)
-    return () => preference.removeEventListener('change', update)
-  }, [])
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
   useEffect(() => {
     if (!embla) return
@@ -641,7 +632,7 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
       onIndexChangeRef.current(next)
     }
     const settle = () => setSettledIndex(indexRef.current)
-    const pointerUp = () => { if (reduceMotionRef.current) embla.scrollTo(embla.selectedScrollSnap(), true) }
+    const pointerUp = () => { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) embla.scrollTo(embla.selectedScrollSnap(), true) }
     embla.on('select', select)
     embla.on('settle', settle)
     embla.on('pointerUp', pointerUp)
@@ -655,7 +646,7 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
     photoZoomRef.current = 1
     setPhotoZoom(1)
     setPhotoPan({ x: 0, y: 0 })
-    embla.scrollTo(next, reduceMotion)
+    embla.scrollTo(next, window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   }
   const onMediaTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
     const target = event.target
@@ -736,7 +727,6 @@ function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, 
     if (event.touches.length < 2) pinchStart.current = null
     const start = swipeStart.current
     swipeStart.current = null
-    if (start?.axis === 'horizontal' && reduceMotion) embla?.scrollTo(indexRef.current, true)
     if (!start || start.axis === 'cancelled' || (window.visualViewport?.scale ?? 1) > 1 || event.touches.length !== 0 || event.changedTouches.length !== 1 || event.changedTouches[0].identifier !== start.id) return
     const touch = event.changedTouches[0]
     const dx = touch.clientX - start.x
