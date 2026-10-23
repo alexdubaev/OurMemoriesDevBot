@@ -618,10 +618,10 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   → 33a → current recovery probe.
 
 - The exact private-album-photo runtime fingerprint
-  `3dad9a61fbcb5358c1a4c8cc6a7f614b954d84869bdaaca085075a45e5a3225f` may use
+  `f7fa141c71064c21d6941993e414cc53cf50314ad28f9d7b44cc6dcf99347824` may use
   only the same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and
   its existing pinned image pair. This executable compatibility fingerprint
-  is measured from frozen source `51d14a9b25eed565e60f51004328ab5b9202a7da`
+  is measured from frozen source `bbab4462dc0a8be5b6a2bc5539cc9137aea3ce2c`
   and anchored to the unchanged full-attested `dc26ad9` reference; it is
   independent of producer commit reachability.
   The recovery catalog remains anchored to the exact 49-migration `dc26ad9`

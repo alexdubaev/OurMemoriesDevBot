@@ -436,6 +436,7 @@ const reviewedPrivatePhotoProductionBlobs = [
   ['webapp/src/features/composer/PhotoComposer.tsx', '1bba733803603e99bba84e80e6d89c0d60ee8470'],
   ['webapp/src/features/feed/FeedPage.tsx', '5afb5b3b9280ca572f925eee76bc0f176d36dfcf'],
   ['webapp/src/features/memoly-ui/AddSheetPresentation.tsx', '7187fbcdd05fa4f9e9ac46db7104d215fd301d06'],
+  ['webapp/src/platform/app-zoom.ts', 'c1bb21a6cb8bd072f779b662b5a5c628ccbb3af9'],
 ]
 const reviewedFamilyNavigationBlobs = [
   ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
@@ -541,7 +542,7 @@ function rollbackSource(role) {
 	if (role === 'privatePhotos') {
 	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
 	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-	  const expectedCompatibility = '3dad9a61fbcb5358c1a4c8cc6a7f614b954d84869bdaaca085075a45e5a3225f'
+	  const expectedCompatibility = 'f7fa141c71064c21d6941993e414cc53cf50314ad28f9d7b44cc6dcf99347824'
 	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
 	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
 	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-worktree-'))
