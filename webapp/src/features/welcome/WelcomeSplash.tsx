@@ -1,78 +1,22 @@
-/* eslint-disable typographyPolicy/use-typography-component -- The frozen welcome source's exact DOM and text CSS are preserved. */
-import { useEffect, useRef, useState } from 'react'
-import '@fontsource/nunito/cyrillic-800.css'
-import '@fontsource/nunito/latin-800.css'
-import { Button } from '@/components/ui/button'
+/* eslint-disable typographyPolicy/use-typography-component -- The approved welcome reference uses native semantic HTML for its exact copy hierarchy and caption layout. */
+import { useEffect, useRef } from 'react'
 
 import './welcome-splash.css'
 
-const asset = (name: string) => `/assets/welcome/${name}.webp`
-
-// The frozen source's last finite intro is .footer: copyIn .8s after 3.45s.
-export const WELCOME_INTRO_MS = 4_250
-export const WELCOME_FALLBACK_MS = WELCOME_INTRO_MS + 250
-export const WELCOME_REDUCED_DWELL_MS = 180
+const welcomeAsset = (name: string) => `/assets/welcome/${name}.webp`
 
 export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
-  const finishIntroRef = useRef<() => void>(() => undefined)
+  const welcomeRef = useRef<HTMLDivElement>(null)
   const completedRef = useRef(false)
-  const [introFinished, setIntroFinished] = useState(false)
 
   useEffect(() => {
-    const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const bodyOverflow = document.body.style.overflow
-    const rootOverflow = document.documentElement.style.overflow
-    const bodyOverscroll = document.body.style.overscrollBehavior
-    const rootOverscroll = document.documentElement.style.overscrollBehavior
-    document.body.style.overflow = 'hidden'
-    document.documentElement.style.overflow = 'hidden'
-    document.body.style.overscrollBehavior = 'none'
-    document.documentElement.style.overscrollBehavior = 'none'
+    const updateVisibility = () => {
+      welcomeRef.current?.classList.toggle('is-document-hidden', document.visibilityState === 'hidden')
+    }
 
-    let timer: number | undefined
-    let startedAt = 0
-    let remaining = motion.matches ? WELCOME_REDUCED_DWELL_MS : WELCOME_FALLBACK_MS
-    let pendingIntro = false
-    let introIsFinished = false
-    const finishIntro = () => {
-      if (introIsFinished) return
-      if (document.visibilityState === 'hidden') { pendingIntro = true; return }
-      introIsFinished = true
-      window.clearTimeout(timer)
-      setIntroFinished(true)
-    }
-    finishIntroRef.current = finishIntro
-    const schedule = () => {
-      if (introIsFinished || document.visibilityState === 'hidden') return
-      if (pendingIntro) { finishIntro(); return }
-      startedAt = performance.now()
-      timer = window.setTimeout(finishIntro, Math.max(0, remaining))
-    }
-    const visibilityChanged = () => {
-      if (document.visibilityState === 'hidden') {
-        window.clearTimeout(timer)
-        if (timer !== undefined) remaining = Math.max(0, remaining - (performance.now() - startedAt))
-      } else schedule()
-    }
-    const motionChanged = () => {
-      window.clearTimeout(timer)
-      remaining = motion.matches ? WELCOME_REDUCED_DWELL_MS : WELCOME_FALLBACK_MS
-      schedule()
-    }
-    document.addEventListener('visibilitychange', visibilityChanged)
-    motion.addEventListener('change', motionChanged)
-    schedule()
-    return () => {
-      introIsFinished = true
-      finishIntroRef.current = () => undefined
-      window.clearTimeout(timer)
-      document.removeEventListener('visibilitychange', visibilityChanged)
-      motion.removeEventListener('change', motionChanged)
-      document.body.style.overflow = bodyOverflow
-      document.documentElement.style.overflow = rootOverflow
-      document.body.style.overscrollBehavior = bodyOverscroll
-      document.documentElement.style.overscrollBehavior = rootOverscroll
-    }
+    updateVisibility()
+    document.addEventListener('visibilitychange', updateVisibility)
+    return () => document.removeEventListener('visibilitychange', updateVisibility)
   }, [])
 
   const complete = () => {
@@ -81,39 +25,42 @@ export function WelcomeSplash({ onComplete }: { onComplete: () => void }) {
     onComplete()
   }
 
-  return <div className="memolyWelcome" data-slot="welcome-splash">
-    <div className="app">
-      <section aria-label="Добро пожаловать в memoLy" className="hero">
-        <img alt="" className="bg" src={asset('bg')} />
-        <div className="logo-wrap"><img alt="memoLy" className="logo" src={asset('logo')} /></div>
-        <img alt="" className="ribbon" src={asset('ribbon')} />
-        <div aria-hidden="true" className="float-note">Большие истории<br />начинаются<br />с маленьких<br />моментов <span className="heart">♡</span></div>
-        <div className="logo-star"><img alt="" src={asset('star')} /></div>
-        <img alt="" className="card photo" src={asset('photo')} />
-        <img alt="" className="card voice" src={asset('voice')} />
-        <img alt="" className="card video" src={asset('video')} />
-        <img alt="" className="card note" src={asset('note')} />
-        <img alt="" className="star" src={asset('star')} />
-        <img alt="" className="book" src={asset('book')} />
-        <i aria-hidden="true" className="sparkle s1" /><i aria-hidden="true" className="sparkle s2" /><i aria-hidden="true" className="sparkle s3" /><i aria-hidden="true" className="sparkle s4" /><i aria-hidden="true" className="sparkle s5" /><i aria-hidden="true" className="sparkle s6" />
-      </section>
-      <section className="copy">
-        <div className="kicker">Добро пожаловать в memoLy</div>
-        <h1><span className="headline-pink">Маленькие моменты.</span><span>Большая история.</span></h1>
-        <p>Фото, видео, любимый голос и первые слова. Сохраните детство в уютном альбоме для всей семьи.</p>
-        <div aria-label="Что можно сохранить" className="features">
-          <div className="feat active"><img alt="" className="ico" src={asset('photo')} /><span>Фото</span></div>
-          <div className="feat"><img alt="" className="ico" src={asset('video')} /><span>Видео</span></div>
-          <div className="feat"><img alt="" className="ico" src={asset('voice')} /><span>Голос</span></div>
-          <div className="feat"><img alt="" className="ico" src={asset('note')} /><span>Заметки</span></div>
+  return <div className="memolyWelcome" data-slot="welcome-splash" ref={welcomeRef}>
+    <main aria-label="Добро пожаловать в memoLy" className="app">
+      <section aria-label="Семейный альбом воспоминаний" className="hero">
+        <img alt="" className="bg" src={welcomeAsset('bg')} />
+        <img alt="memoLy" className="logo" src={welcomeAsset('logo')} />
+        <div aria-hidden="true" className="art">
+          <img alt="" className="ribbon" src={welcomeAsset('ribbon')} />
+          <div className="book"><img alt="" className="animated-art" src={welcomeAsset('book')} /></div>
+          <div className="card photo"><img alt="" className="animated-art" src={welcomeAsset('photo')} /></div>
+          <div className="card voice"><img alt="" className="animated-art" src={welcomeAsset('voice')} /></div>
+          <div className="card video"><img alt="" className="animated-art" src={welcomeAsset('video')} /></div>
+          <div className="card note"><img alt="" className="animated-art" src={welcomeAsset('note')} /></div>
+          <div className="star"><img alt="" className="animated-art" src={welcomeAsset('star')} /></div>
+          <i className="sparkle one" />
+          <i className="sparkle two" />
         </div>
-        <div className="feature-desc">Сохраняйте любимые фотографии и возвращайтесь к ним всей семьёй.</div>
-        <div className="privacy">🔒 Личная история, которой делятся только с близкими</div>
-        <div className="footer" onAnimationEnd={(event) => {
-          if (event.target === event.currentTarget && event.animationName === 'copyIn') finishIntroRef.current()
-        }}>Создано с теплом <span style={{ color: '#e58cab' }}>♥</span> для самых близких</div>
-        <Button aria-hidden={!introFinished} className={`continue-button${introFinished ? ' is-visible' : ''}`} disabled={!introFinished} onClick={complete} tabIndex={introFinished ? 0 : -1} type="button">Продолжить</Button>
       </section>
-    </div>
+      <section aria-labelledby="welcome-title" className="copy">
+        <h1 id="welcome-title"><span>Маленькие моменты.</span><span>Большая <span className="story">история.</span></span></h1>
+        <p className="description">Сохраните детство в уютном альбоме<br />для всей семьи.</p>
+      </section>
+      <section aria-label="Что можно сохранить" className="formats">
+        <figure className="format"><img alt="" src={welcomeAsset('photo')} /><figcaption>Фото</figcaption></figure>
+        <figure className="format"><img alt="" src={welcomeAsset('video')} /><figcaption>Видео</figcaption></figure>
+        <figure className="format"><img alt="" src={welcomeAsset('voice')} /><figcaption>Голос</figcaption></figure>
+        <figure className="format"><img alt="" src={welcomeAsset('note')} /><figcaption>Заметки</figcaption></figure>
+      </section>
+      <footer className="actions">
+        <button className="continue-button" onClick={complete} type="button">
+          <span className="continue-label">Продолжить</span>
+          <span aria-hidden="true" className="continue-orb">
+            <span className="continue-arrow-line" />
+            <img alt="" className="continue-arrow-head" src="/assets/icons/chevron-active@3x.webp" />
+          </span>
+        </button>
+      </footer>
+    </main>
   </div>
 }
