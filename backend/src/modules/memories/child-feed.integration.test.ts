@@ -102,14 +102,36 @@ describe('feed filtered by child tags', () => {
     expect(rejected.body.error.code).toBe('INVALID_INPUT')
   })
 
-  test('a child of another family filters to nothing and leaks nothing', async () => {
+  test('a child of another family or a deleted child is not found, with and without unreadOnly', async () => {
     const data = await seeded()
     const stranger = await fx.family(undefined, ['Чужой'])
     await fx.memory(stranger, { kind: 'note', tags: [{ childId: stranger.children[0]!.id }] })
-    const foreign = await feed(data.target, `childId=${stranger.children[0]!.id}`)
-    expect(foreign.response.status).toBe(200)
-    expect(foreign.body.items).toEqual([])
-    expect((await feed(data.target, `childId=${data.elder.id}`, stranger.owner.token)).response.status).toBe(404)
+    const deleted = await fx.family(undefined, ['Живой', { name: 'Удалённый', deleted: true }])
+    const deletedChild = deleted.children[1]!
+    await fx.memory(deleted, { kind: 'note', tags: [{ childId: deletedChild.id }] })
+    const cases: Array<[FixtureFamily, string]> = [
+      [data.target, stranger.children[0]!.id],
+      [deleted, deletedChild.id],
+      [data.target, randomUUID()],
+    ]
+    for (const [family, childId] of cases) {
+      for (const unread of ['', '&unreadOnly=true']) {
+        const rejected = await feed(family, `childId=${childId}${unread}`)
+        expect(rejected.response.status, `${childId}${unread}`).toBe(404)
+        expect(rejected.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Профиль ребёнка не найден' })
+      }
+    }
+    expect((await feed(data.target, `childId=${data.elder.id}`, stranger.owner.token)).body.error.message).toBe('Семья не найдена')
+  })
+
+  test('a child deleted between pages ends the paging with not found', async () => {
+    const data = await seeded()
+    const first = await feed(data.target, `childId=${data.elder.id}&limit=1`)
+    expect(first.response.status).toBe(200)
+    await fx.db.child.update({ where: { id: data.elder.id }, data: { deletedAt: new Date() } })
+    const next = await feed(data.target, `childId=${data.elder.id}&limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`)
+    expect(next.response.status).toBe(404)
+    expect(next.body.error.message).toBe('Профиль ребёнка не найден')
   })
 
   test('feed items carry their tags with the children header only', async () => {

@@ -577,6 +577,7 @@ async function findPage(
   before: MemoryCursorPosition | undefined,
   limit: number,
 ) {
+  await assertFilterChild(tx, scope.familyId, filters)
   const memories = await tx.memory.findMany({
     where: {
       familyId: scope.familyId,
@@ -628,6 +629,7 @@ async function lockUnreadContext(tx: PrismaTransactionClient, scope: FamilyScope
 async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, role: MemberRole,
   filters: MemoryCursorFilters, snapshotPublicationOrdinal: string, baselineOrdinal: string,
   membershipEpoch: number, before: MemoryCursorPosition | undefined, limit: number) {
+  await assertFilterChild(tx, scope.familyId, filters)
   const memories = await tx.memory.findMany({
     where: {
       familyId: scope.familyId, status: 'published', deletedAt: null,
@@ -645,6 +647,13 @@ async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, r
   const hasNext = memories.length > limit
   const page = hasNext ? memories.slice(0, limit) : memories
   return { items: page.map((memory) => dto(memory, scope.principal.userId, role)), hasNext }
+}
+
+/** A feed filter by a child of another family or a deleted child is 404, the same as albums. */
+async function assertFilterChild(tx: PrismaTransactionClient, familyId: string, filters: MemoryCursorFilters) {
+  if (!filters.childId) return
+  const child = await tx.child.findFirst({ where: { id: filters.childId, familyId, deletedAt: null }, select: { id: true } })
+  if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
 }
 
 /** Child filters look at tags of any level: a child tagged on one photo selects the whole memory. */
