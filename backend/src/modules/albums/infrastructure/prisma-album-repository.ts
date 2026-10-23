@@ -496,7 +496,9 @@ async function lockScope(tx: PrismaTransactionClient, scope: FamilyScope, write:
   if (!user.length) throw albumScopeUnavailable()
   const session = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM auth_sessions WHERE id=${scope.principal.sessionId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL AND expires_at > now() FOR SHARE`
   if (!session.length) throw albumScopeUnavailable()
-  const family = await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
+  const family = write
+    ? await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR UPDATE`
+    : await tx.$queryRaw<Array<{ id: string; owner_user_id: string }>>`SELECT id, owner_user_id FROM families WHERE id=${scope.familyId}::uuid AND status='active' FOR SHARE`
   if (!family.length) throw albumScopeUnavailable()
   const members = await tx.$queryRaw<Array<{ role: Role; membership_epoch: number }>>`SELECT role::text AS role, membership_epoch FROM family_members WHERE family_id=${scope.familyId}::uuid AND user_id=${scope.principal.userId}::uuid AND revoked_at IS NULL FOR SHARE`
   if (!members.length) throw albumScopeUnavailable()

@@ -159,6 +159,70 @@ describe('album PostgreSQL invariants', () => {
     expect((await viewerEntry.json()).entry.sources).toMatchObject([{ memoryId: null, sourceId: media.id, available: true }])
   })
 
+  test('serializes concurrent photo attaches before taking media locks', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const firstAlbum = await createAlbum()
+    const secondAlbum = await createAlbum()
+    const firstEntry = await createEntry(firstAlbum.id)
+    const secondEntry = await createEntry(secondAlbum.id)
+    const makeReadyPhoto = (sha: string) => db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: sha.repeat(64),
+      byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const firstMedia = await makeReadyPhoto('1')
+    const secondMedia = await makeReadyPhoto('2')
+    const firstPath = `/api/v1/families/${familyId}/albums/${firstAlbum.id}/entries/${firstEntry.id}/sources`
+    const secondPath = `/api/v1/families/${familyId}/albums/${secondAlbum.id}/entries/${secondEntry.id}/sources`
+    let releaseBlocker!: () => void
+    const unblock = new Promise<void>((resolve) => { releaseBlocker = resolve })
+    let blocker: Promise<void> | undefined
+    const requests: Promise<Response>[] = []
+    try {
+      const waitForBlockedQuery = async (pattern: string) => {
+        const deadline = Date.now() + 5_000
+        while (Date.now() < deadline) {
+          const rows = await db.$queryRaw<Array<{ waiting: bigint }>>`
+            SELECT count(*) AS waiting
+              FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock' AND query ILIKE ${pattern}
+          `
+          if (Number(rows[0]?.waiting ?? 0) > 0) return
+          await new Promise((resolve) => setTimeout(resolve, 25))
+        }
+        throw new Error(`Timed out waiting for PostgreSQL lock query ${pattern}`)
+      }
+      // The blocker is acquired first; the first real request then pauses on its media row.
+      // A second real request must queue on the family lock before it can lock another media row.
+      let blockerLockedResolve!: () => void
+      const blockerLocked = new Promise<void>((resolve) => { blockerLockedResolve = resolve })
+      blocker = db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM media_assets WHERE id=${firstMedia.id}::uuid FOR UPDATE`
+        blockerLockedResolve()
+        await unblock
+      })
+      await blockerLocked
+      requests.push(http(firstPath, 'PUT', token,
+        { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: firstMedia.id }] }, randomUUID()))
+      await waitForBlockedQuery('%media_assets%')
+      requests.push(http(secondPath, 'PUT', token,
+        { expectedVersion: 1, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId: secondMedia.id }] }, randomUUID()))
+      await waitForBlockedQuery('%families%')
+      releaseBlocker()
+      await blocker
+      const [firstResponse, secondResponse] = await Promise.all(requests)
+      expect([firstResponse.status, secondResponse.status]).toEqual([200, 200])
+      expect(await db.albumPhoto.count({ where: { mediaId: { in: [firstMedia.id, secondMedia.id] }, familyId } })).toBe(2)
+      expect(await db.albumEntrySource.count({ where: { albumId: { in: [firstAlbum.id, secondAlbum.id] } } })).toBe(2)
+      expect(await db.memory.count({ where: { familyId } })).toBe(0)
+    } finally {
+      releaseBlocker()
+      await Promise.allSettled(requests)
+      if (blocker) await Promise.allSettled([blocker])
+    }
+  }, { timeout: 15_000 })
+
   test('uses a direct private photo as an available year cover and counted source', async () => {
     const token = await auth(userId, scope.principal.sessionId)
     const created = await http(`/api/v1/families/${familyId}/albums`, 'POST', token,
