@@ -3,11 +3,11 @@ import { useRef, useState } from 'react'
 import type { AlbumDto, AlbumEntryDto, CreateAlbumEntryRequest, MemoryDto } from '@web-app-demo/contracts'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import type { AlbumsApi } from './api'
-import { categories, dateLabel, memorySources, monthAgeLabel, sourceDate, sourceKey, sourceRefs, type AlbumSource } from './model'
+import { albumPhotoSources, categories, dateLabel, memorySources, monthAgeLabel, sourceDate, sourceKey, sourceRefs, type AlbumSource } from './model'
 import { SourcePicker } from './SourcePicker'
 import { SourcePreview } from './SourcePreview'
 
-type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; birthDate?: string | null; canUpload: boolean; onUpload: (attach: (memory: MemoryDto) => Promise<void>) => void; onCancel: () => void; onSaved: (version: number) => void }
+type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; birthDate?: string | null; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[]) => Promise<void>) => void; onCancel: () => void; onSaved: (version: number) => void }
 export function EntryEditor(props: Props) {
   const { album, entry, api, accountId, scopeKey, transport, timezone } = props
   const [title, setTitle] = useState(entry?.title ?? props.title ?? '')
@@ -45,7 +45,7 @@ export function EntryEditor(props: Props) {
       if (workshop && !chosen.some((source) => source.available && source.kind === 'photo')) { setError('Для работы нужна хотя бы одна фотография.'); if (propagate) throw new Error('Нужна фотография'); return }
       const chosenDate = uploaded && date.precision === 'unknown' && !entry && chosen[0] ? sourceDate(chosen[0], timezone) : date
       const base: CreateAlbumEntryRequest = { expectedVersion: currentVersion, kind: event ? 'event' : 'work', title: title.trim() || null, caption: caption.trim() || null, childQuote: workshop ? quote.trim() || null : null, category: workshop ? category : null, date: chosenDate, sources: sourceRefs(chosen) }
-      const inputs = workshop && !entry && separate && chosen.length > 1 ? chosen.map((source) => ({ ...base, date: sourceDate(source, timezone), sources: sourceRefs([source]) })) : [base]
+      const inputs = workshop && !entry && separate && chosen.length > 1 ? chosen.map((source) => ({ ...base, date: source.memoryId === null && source.sourceKind === 'private_storage' && date.precision !== 'unknown' ? date : sourceDate(source, timezone), sources: sourceRefs([source]) })) : [base]
       attempt.current = { inputs, keys: inputs.map(() => crypto.randomUUID()), next: 0, version: currentVersion, metadataSaved: false, sourceKey: crypto.randomUUID() }
     }
     const operation = attempt.current; saving.current = true; setBusy(true); setLocked(true)
@@ -102,7 +102,7 @@ export function EntryEditor(props: Props) {
         <h2>Материалы · {sources.length}</h2>
         <div className="albums-selected-sources">{sources.map((source, index) => <div key={sourceKey(source)}><SourcePreview accountId={accountId} scopeKey={scopeKey} source={source} transport={transport} /><button aria-label={`Убрать материал ${index + 1}`} onClick={() => setSources((current) => current.filter((item) => sourceKey(item) !== sourceKey(source)))} type="button">Убрать</button>{index > 0 ? <button aria-label={`Сделать материал ${index + 1} главным`} onClick={() => setSources([source, ...sources.filter((item) => sourceKey(item) !== sourceKey(source))])} type="button">Главный</button> : <small>Главный</small>}</div>)}</div>
         <button className="albums-secondary" onClick={() => setPicker(true)} type="button">Выбрать из воспоминаний</button>
-        {props.canUpload ? <button className="albums-secondary" onClick={() => props.onUpload(async (memory) => { const next = [...new Map([...sources, ...memorySources(memory)].map((source) => [sourceKey(source), source])).values()]; setSources(next); await save(next, true) })} type="button">Загрузить новое</button> : null}
+        {props.canUpload ? <button className="albums-secondary" onClick={() => props.onUpload(async (memory) => { const next = [...new Map([...sources, ...memorySources(memory)].map((source) => [sourceKey(source), source])).values()]; setSources(next); await save(next, true) }, async (mediaIds) => { const next = [...new Map([...sources, ...albumPhotoSources(mediaIds)].map((source) => [sourceKey(source), source])).values()]; setSources(next); await save(next, true) })} type="button">Загрузить новое</button> : null}
         {workshop && !entry && sources.length > 1 ? <label className="albums-checkbox"><input checked={separate} onChange={(event) => setSeparate(event.target.checked)} type="checkbox" />Каждое фото — отдельная работа. Снимите отметку для ракурсов одной работы.</label> : null}
         <p className="albums-muted">{dateLabel(date)} · Убирается только связь с альбомом, оригиналы сохраняются.</p>
       </fieldset>
