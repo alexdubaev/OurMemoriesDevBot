@@ -4,6 +4,7 @@ import type { AlbumDto, AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { ChildHeader } from '@/components/ChildHeader'
 import { WebpIcon } from '@/components/WebpIcon'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { useMemolyTheme } from '@/features/theme'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
@@ -18,6 +19,7 @@ import { SourcePreview } from './SourcePreview'
 import './albums.css'
 
 type Route = 'catalog' | 'create' | 'album' | 'overview' | 'entry' | 'edit-entry' | 'edit-album' | 'cover'
+type DeleteConfirmation = { kind: 'album' | 'entry' | 'month'; albumId: string; entryId?: string; version: number; scopeKey: string; route: Route }
 export type AlbumsPageProps = {
   accountId: string; familyId: string; familyName: string; timezone: string; membershipEpoch: number; active: boolean
   child: { id: string; name: string; birthDate: string | null; avatarCrop?: { x: number; y: number; width: number; height: number } | null } | null
@@ -59,6 +61,12 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const [conflict, setConflict] = useState(false)
   const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
+  const [confirmationLifecycle, setConfirmationLifecycle] = useState({ scopeKey, active })
+  if (confirmationLifecycle.scopeKey !== scopeKey || confirmationLifecycle.active !== active) {
+    setConfirmationLifecycle({ scopeKey, active })
+    setDeleteConfirmation(null)
+  }
   const [offline, setOffline] = useState(() => !navigator.onLine)
   const [upload, setUpload] = useState<{ attach: (memory: MemoryDto) => Promise<void>; attachPhotos: (mediaIds: string[]) => Promise<void> } | null>(null)
   const [revision, setRevision] = useState(0)
@@ -77,6 +85,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     const previous = routeRef.current
     scrolls.current[previous] = window.scrollY
     if (document.activeElement instanceof HTMLElement) focus.current[previous] = document.activeElement
+    setDeleteConfirmation(null)
     setRoute(next)
   }, [])
   useLayoutEffect(() => {
@@ -97,7 +106,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       scopeController.abort()
       setAlbums([]); setCatalogCursor(null); setAlbum(null); setEntries([]); setEntryCursor(null); setEntry(null)
       setGroups([]); setUpload(null); setSuggestedTitle(''); setHiddenSuggestions([]); setCategory(undefined); setYear(undefined)
-      setWorkshopFocusId(null); setWorkshopFocusTop(null); setRoute('catalog')
+      setWorkshopFocusId(null); setWorkshopFocusTop(null); setDeleteConfirmation(null); setRoute('catalog')
       setLoading(false); setLoadingMore(false); setBusy(false); setError(null); setConflict(false); setSavedRefreshFailed(false)
       scrolls.current = { catalog: 0 }; focus.current = {}
       props.onAccessLost()
@@ -137,6 +146,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, album?.id, category, year])
   const back = useCallback(() => {
+    if (deleteConfirmation) { setDeleteConfirmation(null); return }
     if (pending.current) return
     if (upload) return
     if (route === 'edit-entry') { navigate(entry ? 'entry' : 'album'); return }
@@ -144,7 +154,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     if (route === 'album') { activeAlbumId.current = null; albumRead.current += 1; setLoading(true); setError(null); setAlbum(null); setEntry(null); setCategory(undefined); setYear(undefined); setWorkshopFocusId(null); navigate('catalog'); return }
     if (route === 'create') { navigate('catalog'); return }
     props.onFeed()
-  }, [upload, route, entry, navigate, props])
+  }, [deleteConfirmation, upload, route, entry, navigate, props])
   useLayoutEffect(() => { backRef.current = back }, [back])
   useEffect(() => { if (active) return hostBridge.onBack(() => backRef.current()) }, [active, hostBridge])
   async function openAlbum(item: AlbumDto) {
@@ -184,13 +194,13 @@ export function AlbumsPage(props: AlbumsPageProps) {
     // more reads exactly this page/filter snapshot, rebind after each appended page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, route, album?.id, entryCursor, loadingMore, loading, error])
-  async function mutation(action: () => Promise<unknown>, after?: () => void) {
+  async function mutation(action: () => Promise<unknown>, after?: () => void, refreshEntry = route === 'entry') {
     if (pending.current || conflict) return
     pending.current = true; setBusy(true); setError(null)
     try {
       await action(); if (scopeController.isAborted()) return false
       after?.()
-      try { if (album && !after) await refreshAlbum(album.id, route === 'entry'); else reloadCatalog() }
+      try { if (album && !after) await refreshAlbum(album.id, refreshEntry); else reloadCatalog() }
       catch (reason) { if (isAlbumScopeFailure(reason)) { fail(reason); return false } setSavedRefreshFailed(true) }
       return true
     } catch (reason) { fail(reason); return false }
@@ -210,6 +220,33 @@ export function AlbumsPage(props: AlbumsPageProps) {
   function changeCategory(value: string | undefined) { if (value === category) return; setLoading(true); setError(null); setCategory(value) }
   function changeYear(value: number | undefined) { if (value === year) return; setLoading(true); setError(null); setYear(value) }
   function changeCatalogFilter(value: AlbumFilter) { if (value === filter) return; setLoading(true); setError(null); setFilter(value) }
+  function askDeleteAlbum() {
+    if (!album || !editable || busy || conflict) return
+    setDeleteConfirmation({ kind: 'album', albumId: album.id, version: album.version, scopeKey, route: 'edit-album' })
+  }
+  function askRemoveEntry() {
+    if (!album || !entry || !editable || busy || conflict) return
+    setDeleteConfirmation({ kind: entry.kind === 'month' ? 'month' : 'entry', albumId: album.id, entryId: entry.id, version: album.version, scopeKey, route: 'entry' })
+  }
+  function confirmDeletion() {
+    const target = deleteConfirmation
+    if (!target || pending.current || !active || scopeController.isAborted()) return
+    const currentEntry = target.kind === 'album' ? null : entry
+    if (target.scopeKey !== scopeKey || target.route !== route || !album || album.id !== target.albumId || album.version !== target.version || (target.kind !== 'album' && currentEntry?.id !== target.entryId)) {
+      setDeleteConfirmation(null)
+      setConflict(true)
+      setError('Альбом или история уже изменились. Обновите данные перед новым действием.')
+      return
+    }
+    setDeleteConfirmation(null)
+    if (target.kind === 'album') {
+      void mutation(() => api.remove(target.albumId, target.version), () => { setAlbums((old) => old.filter((item) => item.id !== target.albumId)); activeAlbumId.current = null; setAlbum(null); navigate('catalog') })
+      return
+    }
+    void mutation(() => target.kind === 'month' ? api.clear(target.albumId, target.entryId!, target.version) : api.removeEntry(target.albumId, target.entryId!, target.version), undefined, target.kind === 'month').then((committed) => {
+      if (committed && !scopeController.isAborted()) { setEntry(null); navigate('album') }
+    })
+  }
   const newEntry = (title = '') => { setEntry(null); setSuggestedTitle(title); scrolls.current['edit-entry'] = 0; navigate('edit-entry') }
   const image = (source: AlbumSource | null) => <SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} />
   const editable = role === 'full' && album?.capabilities.edit
@@ -228,7 +265,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
           {catalogCursor && !loading ? <button className="albums-secondary" disabled={loadingMore} onClick={() => void more()} type="button">Ещё альбомы</button> : null}
         </> : null}
         {route === 'create' ? <AlbumForm api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbums((old) => [next, ...old]); void openAlbum(next) }} /> : null}
-        {album && route === 'edit-album' ? <><AlbumForm album={album} api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbum(next); navigate('album') }} /><button className="albums-secondary" onClick={() => navigate('cover')} type="button">Выбрать обложку</button><button className="albums-danger" disabled={busy || conflict} onClick={() => { if (window.confirm('Удалить альбом? Исходные материалы сохранятся.')) void mutation(() => api.remove(album.id, album.version), () => { setAlbums((old) => old.filter((item) => item.id !== album.id)); activeAlbumId.current = null; setAlbum(null); navigate('catalog') }) }} type="button">Удалить альбом</button></> : null}
+        {album && route === 'edit-album' ? <><AlbumForm album={album} api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbum(next); navigate('album') }} /><button className="albums-secondary" onClick={() => navigate('cover')} type="button">Выбрать обложку</button><button className="albums-danger" disabled={busy || conflict} onClick={askDeleteAlbum} type="button">Удалить альбом</button></> : null}
         {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => void mutation(async () => { const result = await api.update(album.id, { expectedVersion: album.version, coverSourceId: null }); setAlbum(result.album) })} type="button">Автоматическая обложка</button><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => void mutation(async () => { const result = await api.update(album.id, { expectedVersion: album.version, coverSourceId: source.id }); setAlbum(result.album) })} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</> : null}
         {album && (route === 'album' || route === 'overview') ? <>
           <header className="albums-toolbar"><button onClick={back} type="button">‹ {route === 'overview' ? 'Альбом' : 'Альбомы'}</button><span>{kindNames[album.kind]}</span>{editable ? <button aria-label="Настройки альбома" onClick={() => navigate('edit-album')} type="button">•••</button> : null}</header>
@@ -245,9 +282,21 @@ export function AlbumsPage(props: AlbumsPageProps) {
           <div ref={sentinel} />{entryCursor && !loading ? <button className="albums-secondary" disabled={loadingMore || conflict} onClick={() => void more()} type="button">{loadingMore ? 'Загружаем…' : 'Ещё истории'}</button> : null}
         </> : null}
         {album && route === 'edit-entry' ? <EntryEditor accountId={accountId} album={album} api={api} birthDate={props.child?.birthDate} canUpload={role === 'full' && album.capabilities.edit} entry={entry} key={`${album.id}:${entry?.id ?? 'new'}:${suggestedTitle}`} onCancel={back} onSaved={saved} onUpload={(attach, attachPhotos) => setUpload({ attach, attachPhotos })} scopeKey={scopeKey} timezone={props.timezone} title={suggestedTitle} transport={transport} /> : null}
-          {active && album && route === 'entry' && entry ? <AlbumEntryDetail accountId={accountId} active busy={busy} childName={props.child?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={() => { if (window.confirm(entry.kind === 'month' ? 'Очистить эту главу? Номер месяца и оригиналы сохранятся.' : 'Убрать историю из альбома? Оригиналы сохранятся.')) void mutation(() => entry.kind === 'month' ? api.clear(album.id, entry.id, album.version) : api.removeEntry(album.id, entry.id, album.version)).then((committed) => { if (committed && !scopeController.isAborted()) navigate('album') }) }} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
+          {active && album && route === 'entry' && entry ? <AlbumEntryDetail accountId={accountId} active busy={busy} childName={props.child?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
       </main>
     </div>
+    <AlertDialog onOpenChange={(open) => { if (!open) setDeleteConfirmation(null) }} open={Boolean(deleteConfirmation)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{deleteConfirmation?.kind === 'album' ? 'Удалить альбом?' : deleteConfirmation?.kind === 'month' ? 'Очистить эту главу?' : 'Убрать историю из альбома?'}</AlertDialogTitle>
+          <AlertDialogDescription>{deleteConfirmation?.kind === 'album' ? 'Исходные материалы сохранятся.' : deleteConfirmation?.kind === 'month' ? 'Номер месяца и оригиналы сохранятся.' : 'Оригиналы сохранятся.'}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Отмена</AlertDialogCancel>
+          <AlertDialogAction className="albums-danger" disabled={busy || conflict} onClick={confirmDeletion} variant="destructive">{deleteConfirmation?.kind === 'album' ? 'Удалить альбом' : deleteConfirmation?.kind === 'month' ? 'Очистить главу' : 'Убрать историю'}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     {upload ? <ComposerHost active={active} attach={upload.attach} attachPhotos={upload.attachPhotos} childId={props.child?.id} familyId={familyId} familyTimezone={props.timezone} hostBridge={hostBridge} onClose={() => setUpload(null)} transport={transport} /> : null}
     {showNav ? <BottomNavigation active="albums" appearance="memoly" onAdd={props.child ? props.onAdd : undefined} onAlbums={() => undefined} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts} role={role} /> : null}
   </div>

@@ -36,7 +36,7 @@ test('gift form handles marketplace clipboard shares before the single-line URL 
   await expect(welcome.or(feed).first()).toBeVisible()
   if (await welcome.isVisible()) await welcome.click()
   await expect(feed).toBeVisible()
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить подарок' }).click()
 
   const form = page.locator('[data-slot="gift-form"]')

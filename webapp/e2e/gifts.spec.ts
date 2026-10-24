@@ -15,7 +15,7 @@ test('gift editor stays open through dismissal attempts while save is pending', 
   await page.goto('/e2e/selected-family-app.harness.html?giftSaveDelay=1100')
   await startProductionFeed(page)
 
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   const gift = page.locator('.gift-card').filter({ hasText: 'Конструктор' })
   await expect(gift).toBeVisible()
   await gift.getByRole('button', { name: 'Изменить подарок «Конструктор»' }).click()
@@ -44,7 +44,7 @@ test('gift editor stays open through dismissal attempts while save is pending', 
   await expect(form).toHaveCount(0)
   await expect(page.locator('.gift-card')).toContainText('Новый конструктор')
   const navigation = page.getByRole('navigation', { name: 'Основная навигация' })
-  await expect(navigation.locator('button')).toHaveText(['Лента', 'Альбомы', 'Добавить', 'Подарки', 'Семья'])
+  await expect(navigation.locator('button')).toHaveText(['Лента', 'Альбомы', 'Добавить', 'Вишлист', 'Семья'])
   await page.screenshot({ path: testInfo.outputPath('gifts-five-slot-nav-after-save.png'), fullPage: true })
 })
 
@@ -53,7 +53,7 @@ test('opening gifts after family access is removed clears the stale private list
   await page.goto('/e2e/selected-family-app.harness.html?giftAccessDenied')
   await startProductionFeed(page)
 
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   await expect(page.locator('[data-navigation-surface="gifts"]')).toHaveCount(0)
   await expect(page.getByText('Конструктор', { exact: true })).toHaveCount(0)
@@ -65,7 +65,7 @@ test('creating from a valid URL fills available metadata and uploads the private
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=ready&giftMetadataDelay=500')
   await startProductionFeed(page)
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
 
   const form = page.locator('[data-slot="gift-form"]')
@@ -102,7 +102,7 @@ test('a valid URL saves with the store name and gift icon when metadata is unava
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=unavailable')
   await startProductionFeed(page)
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
 
   const form = page.locator('[data-slot="gift-form"]')
@@ -128,7 +128,7 @@ test('manual values beat delayed metadata, stale lookups are ignored, and editin
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=ready&giftMetadataDelay=650')
   await startProductionFeed(page)
-  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
 
   const createForm = page.locator('[data-slot="gift-form"]')
