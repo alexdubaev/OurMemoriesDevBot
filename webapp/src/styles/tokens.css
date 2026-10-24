@@ -291,6 +291,8 @@ nav[data-bottom-navigation-appearance='memoly'] [data-nav-position] [data-varian
 }
 
 nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='home'][aria-current='page'],
+nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='archive-box'][aria-current='page'],
+nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='gifts'][aria-current='page'],
 nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='family'][aria-current='page'] {
   color: var(--theme-accent-deep) !important;
   font-weight: 760;

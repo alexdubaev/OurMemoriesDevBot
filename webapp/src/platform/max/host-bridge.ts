@@ -3,6 +3,7 @@ import type {
   TelegramHostMetadata,
   TelegramInsets,
 } from '../host-bridge'
+import { isSafeExternalLink } from '../external-link'
 import { createMaxInviteLink } from '../max-invite-link'
 
 type MaxWebApp = {
@@ -143,6 +144,15 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     },
     openExternalUrl: (url: string) => {
       if (!webApp || typeof webApp.openLink !== 'function' || !isOwnHttpsUrl(url, browserHost?.location?.origin)) return false
+      try {
+        webApp.openLink.call(webApp, url)
+        return true
+      } catch {
+        return false
+      }
+    },
+    openExternalLink: (url: string) => {
+      if (!webApp || typeof webApp.openLink !== 'function' || !isSafeExternalLink(url)) return false
       try {
         webApp.openLink.call(webApp, url)
         return true

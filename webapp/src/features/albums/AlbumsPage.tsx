@@ -22,7 +22,7 @@ export type AlbumsPageProps = {
   accountId: string; familyId: string; familyName: string; timezone: string; membershipEpoch: number; active: boolean
   child: { id: string; name: string; birthDate: string | null; avatarCrop?: { x: number; y: number; width: number; height: number } | null } | null
   childSubtitle: string; childAvatar?: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' }
-  role: 'full' | 'viewer'; transport: AuthenticatedTransport; hostBridge: HostBridge; onFeed: () => void; onFamily: () => void; onAllFamilies: () => void; onAdd: () => void; onAccessLost: () => void
+  role: 'full' | 'viewer'; transport: AuthenticatedTransport; hostBridge: HostBridge; onFeed: () => void; onFamily: () => void; onGifts: () => void; onAllFamilies: () => void; onAdd: () => void; onAccessLost: () => void
 }
 export function AlbumsPage(props: AlbumsPageProps) {
   const { accountId, familyId, membershipEpoch, active, role, transport, hostBridge } = props
@@ -249,7 +249,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       </main>
     </div>
     {upload ? <ComposerHost active={active} attach={upload.attach} attachPhotos={upload.attachPhotos} childId={props.child?.id} familyId={familyId} familyTimezone={props.timezone} hostBridge={hostBridge} onClose={() => setUpload(null)} transport={transport} /> : null}
-    {showNav ? <BottomNavigation active="albums" appearance="memoly" onAdd={props.child ? props.onAdd : undefined} onAlbums={() => undefined} onFamily={props.onFamily} onFeed={props.onFeed} role={role} /> : null}
+    {showNav ? <BottomNavigation active="albums" appearance="memoly" onAdd={props.child ? props.onAdd : undefined} onAlbums={() => undefined} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts} role={role} /> : null}
   </div>
 }
 function Loading() { return <div aria-label="Загрузка альбомов" className="albums-loading" role="status"><span /><span /><span /><span /></div> }

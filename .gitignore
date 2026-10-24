@@ -57,3 +57,4 @@ backend/.storage/
 .vscode/
 *.swp
 *.swo
+.autopilot/serve.*

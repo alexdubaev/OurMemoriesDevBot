@@ -41,7 +41,7 @@ export type PersistentFamilyPresentation = {
   home: unknown | null
   family: unknown | null
   members: unknown[]
-  screen: 'hub' | 'family' | 'feed'
+  screen: 'hub' | 'family' | 'feed' | 'gifts'
   selectedFamilyId: string | null
   membershipEpoch: number | null
   filter: 'all' | 'photo' | 'video' | 'voice' | 'note'
@@ -217,7 +217,8 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
 
 export async function removePrivateFamilyQueries(queryClient: QueryClient, familyId: string) {
   const matchesFamilyPrivateQuery = ({ queryKey }: { queryKey: readonly unknown[] }) => queryKey[0] === 'session' &&
-    ((queryKey[1] === 'feed' && queryKey[2] === familyId) || (queryKey[1] === 'comments' && queryKey[2] === familyId))
+    ((queryKey[1] === 'feed' && queryKey[2] === familyId) || (queryKey[1] === 'comments' && queryKey[2] === familyId) ||
+      (queryKey[1] === 'gifts' && queryKey[2] === familyId))
   queryClient.removeQueries({ predicate: matchesFamilyPrivateQuery })
 }
 
@@ -321,13 +322,13 @@ function validatePersistedState(state: PersistedState, userId: string) {
   return true
 }
 
-function validatePresentation(value: unknown): value is PersistentFamilyPresentation {
+export function validatePresentation(value: unknown): value is PersistentFamilyPresentation {
   if (!value || typeof value !== 'object') return false
   const presentation = value as PersistentFamilyPresentation
   if (presentation.home !== null && !familyHomeResponseSchema.safeParse(presentation.home).success) return false
   if (presentation.family !== null && !familyResponseSchema.safeParse(presentation.family).success) return false
   if (!Array.isArray(presentation.members) || !familyMembersResponseSchema.safeParse({ items: presentation.members }).success ||
-      !['hub', 'family', 'feed'].includes(presentation.screen) ||
+      !['hub', 'family', 'feed', 'gifts'].includes(presentation.screen) ||
       !['all', 'photo', 'video', 'voice', 'note'].includes(presentation.filter) ||
       !(presentation.selectedFamilyId === null || typeof presentation.selectedFamilyId === 'string') ||
       !(presentation.membershipEpoch === null || Number.isSafeInteger(presentation.membershipEpoch))) return false

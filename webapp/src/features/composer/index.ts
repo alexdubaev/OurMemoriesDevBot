@@ -17,6 +17,8 @@ export {
   validatePhotoFile,
   validatePhotoFiles,
   validateComposerFiles,
+  validateSize,
+  verifyComposerFile,
 } from './api'
 export type { PhotoFileValidation } from './api'
 export { composerDateOnly, composerOccurredAt, photoOccurredAt } from './date'

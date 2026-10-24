@@ -258,17 +258,30 @@ export class PrismaMediaRepository implements MediaRepository {
           { telegramVideoThumbnailFor: { memory: { status: 'published', deletedAt: null } } },
           { maxVideoThumbnailFor: { familyId: scope.familyId, memory: { status: 'published', deletedAt: null } } },
           { purpose: 'child_avatar', avatarForChildren: { some: { familyId: scope.familyId } } },
+          { purpose: 'gift', giftPhotoFor: { some: { familyId: scope.familyId } } },
         ],
       },
       include: { variants: true },
     })
     if (!asset) return null
     if (variant === 'original') {
-      return { objectKey: asset.originalKey, contentType: asset.verifiedMime!, contentLength: Number(asset.byteSize), etag: asset.sha256 ?? undefined }
+      return {
+        objectKey: asset.originalKey,
+        contentType: asset.verifiedMime!,
+        contentLength: Number(asset.byteSize),
+        cachePolicy: asset.purpose === 'gift' ? 'no-store' : undefined,
+        etag: asset.sha256 ?? undefined,
+      }
     }
     const stored = asset.variants.find((candidate) => candidate.variant === variant)
     return stored
-      ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize), etag: stored.sha256 }
+      ? {
+        objectKey: stored.objectKey,
+        contentType: stored.mime,
+        contentLength: Number(stored.byteSize),
+        cachePolicy: asset.purpose === 'gift' ? 'no-store' : undefined,
+        etag: stored.sha256,
+      }
       : null
   }
 
@@ -383,7 +396,7 @@ function pendingDto(reservation: Awaited<ReturnType<typeof reservationFor>> & {}
 function assetDto(asset: {
   id: string
   familyId: string
-  purpose: 'memory' | 'child_avatar'
+  purpose: 'memory' | 'child_avatar' | 'gift'
   mediaKind: 'photo' | 'video' | 'voice'
   originalStatus: 'pending' | 'stored' | 'failed'
   renditionStatus: 'pending' | 'ready' | 'failed'
