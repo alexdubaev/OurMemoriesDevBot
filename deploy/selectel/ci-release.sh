@@ -430,15 +430,29 @@ prepare_rollback() {
       }
     ' "$ROLLBACK_ENV" > "$verify_env"
     chmod 0600 "$verify_env"
-    if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
-      bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+    if [ "$RUN_MIGRATION" = true ]; then
+      if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql \
+        bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+        candidate_valid=true
+      fi
+    elif ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+      SELECTEL_ALBUMS_LEDGER_PHASE=complete bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
       candidate_valid=true
-    else
+    fi
+    if [ "$candidate_valid" != true ]; then
       # The captured pair can be a healthy running release without being an
       # independently attested recovery target. Keep the already designated
       # recovery only after the same full verifier accepts it against current
       # source and database state.
-      if ! MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
+      if [ "$RUN_MIGRATION" = true ]; then
+        if ! SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+          bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
+          rm -f -- "$verify_env"
+          ROLLBACK_VERIFY_ENV=
+          die 'neither the running images nor the designated rollback pair passed recovery verification'
+        fi
+      elif ! SELECTEL_ALBUMS_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+        bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
         rm -f -- "$verify_env"
         ROLLBACK_VERIFY_ENV=
         die 'neither the running images nor the designated rollback pair passed recovery verification'
@@ -770,6 +784,11 @@ main() {
     fi
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
+  if [ "$RUN_MIGRATION" = true ] && [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
+    SELECTEL_ALBUMS_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+      bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness ||
+      die 'complete post-migration recovery verification failed before promotion'
+  fi
   verify_frontend_recovery_artifact_unchanged
   promote_runtime
   verify_promoted_revision

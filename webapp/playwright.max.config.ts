@@ -79,6 +79,8 @@ export default defineConfig({
   metadata: { ...baseConfig.metadata, commentsServerMode: 'dev-strict' },
   testMatch: [
     '**/max-browser-link.spec.ts',
+    '**/albums.spec.ts',
+    '**/gifts.spec.ts',
     '**/comments.spec.ts',
       '**/shared-author-avatar.spec.ts',
     '**/comments-state.spec.ts',
@@ -91,7 +93,7 @@ export default defineConfig({
     {
       name: 'max-core',
       use: { browserName: 'chromium' },
-        testMatch: ['**/max-browser-link.spec.ts', '**/comments.spec.ts', '**/comments-state.spec.ts', '**/memoly-v4.spec.ts', '**/voice-player.spec.ts', '**/video-lifecycle.spec.ts', '**/shared-author-avatar.spec.ts'],
+        testMatch: ['**/max-browser-link.spec.ts', '**/albums.spec.ts', '**/gifts.spec.ts', '**/comments.spec.ts', '**/comments-state.spec.ts', '**/memoly-v4.spec.ts', '**/voice-player.spec.ts', '**/video-lifecycle.spec.ts', '**/shared-author-avatar.spec.ts'],
     },
     {
       name: 'max-family-scope',

@@ -5,6 +5,7 @@ export const apiErrorCodeSchema = z.enum([
   'UNAUTHORIZED',
   'FORBIDDEN',
   'NOT_FOUND',
+  'ALBUM_SCOPE_UNAVAILABLE',
   'CONFLICT',
   'VERSION_CONFLICT',
   'IDEMPOTENCY_CONFLICT',

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/typography'
@@ -22,10 +22,13 @@ type ComposerFormProps = {
   onCancel: () => void
   onAddAnother?: () => void
   onSuccess: () => void | Promise<void>
+  onCommitted?: (result: unknown) => void
+  onCancellationBlockedChange?: (blocked: boolean) => void
+  onCancelRequestChange?: (cancel: () => void) => void
   conflictMessage?: boolean
 }
 
-export function ComposerForm({ title, description, initialBody, initialDate, familyTimezone, save, onCancel, onSuccess, requireBody = false, onConflict, conflictMessage = false, addPresentation = false, onAddAnother }: ComposerFormProps) {
+export function ComposerForm({ title, description, initialBody, initialDate, familyTimezone, save, onCancel, onSuccess, onCommitted, onCancellationBlockedChange, onCancelRequestChange, requireBody = false, onConflict, conflictMessage = false, addPresentation = false, onAddAnother }: ComposerFormProps) {
   const [body, setBody] = useState(initialBody)
   const [occurredDate, setOccurredDate] = useState(initialDate)
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
@@ -63,10 +66,14 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
     submission.current = { body: trimmedBody, date: occurredDate, occurredAt }
     setError(null)
     setNetworkError(false)
+    onCancellationBlockedChange?.(true)
     setStatus('saving')
     const controller = new AbortController()
+    let committed: unknown
+    let didCommit = false
     try {
-      await save(trimmedBody, occurredAt, controller.signal)
+      committed = await save(trimmedBody, occurredAt, controller.signal)
+      didCommit = true
       setStatus('success')
       if (!addPresentation) try { await onSuccess() } catch { /* the memory is already durable */ }
     } catch (reason) {
@@ -87,7 +94,10 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
       setNetworkError(true)
     } finally {
       submitting.current = false
+      onCancellationBlockedChange?.(false)
     }
+    // Consumers attach the durable memory separately; an attach error must never retry publication.
+    if (didCommit) try { onCommitted?.(committed) } catch { /* publication is already durable */ }
   }
 
   function cancel() {
@@ -95,6 +105,7 @@ export function ComposerForm({ title, description, initialBody, initialDate, fam
     if (dirty && !window.confirm('Отменить изменения? Введённый текст и дата будут удалены.')) return
     onCancel()
   }
+  useEffect(() => { onCancelRequestChange?.(cancel) })
 
   if (addPresentation) return <main className="memoly-add-page" data-add-screen="note">
     {status === 'success' ? <section aria-label="Заметка сохранена" className="memoly-add-success" role="status">

@@ -27,6 +27,7 @@ export function FamilyScreen({
   onSettingsRequestHandled,
   onFeed,
   onGifts,
+  onAlbums,
   onRefresh,
   createInviteLink,
   canOpenInstall = false,
@@ -48,6 +49,7 @@ export function FamilyScreen({
   onSettingsRequestHandled?: () => void
   onFeed: () => void
   onGifts?: () => void
+  onAlbums?: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
   canOpenInstall?: boolean
@@ -230,7 +232,7 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={() => undefined} onFeed={onFeed} onGifts={onGifts ?? noopGifts} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onAlbums={onAlbums ?? noopGifts} onFamily={() => undefined} onFeed={onFeed} onGifts={onGifts ?? noopGifts} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }

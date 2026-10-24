@@ -55,6 +55,7 @@ export function decideReservation(
       assertVersion(gift, expectedVersion)
       return { reservedByUserId: holder, reservedAt: gift.reservedAt, boughtAt: now }
     case 'unmarkBought':
+      if (!holder && !gift.boughtAt) return null
       if (!mine) throw new GiftFailure('forbidden', 'Снять отметку может только тот, кто бронировал')
       if (!gift.boughtAt) return null
       assertVersion(gift, expectedVersion)

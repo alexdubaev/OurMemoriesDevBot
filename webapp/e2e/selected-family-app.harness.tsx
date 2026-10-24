@@ -8,8 +8,11 @@ import App from '@/App'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache, cachePrivateImageResponse, persistentUiQueryKey, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
+import { giftsQueryKeys } from '@/features/gifts/queries'
 import { memolyV4ReferenceImages } from './fixtures/memoly-v4-reference-images'
+import { albumFixture } from './fixtures/albums'
+import type { HttpRequestOptions } from '../src/platform/api/http-client'
 
 const userId = '33333333-3333-4333-8333-333333333333'
 const familyId = '11111111-1111-4111-8111-111111111111'
@@ -21,6 +24,11 @@ const secondFamilyId = '22222222-2222-4222-8222-222222222222'
 const secondChildId = '66666666-6666-4666-8666-666666666666'
 const secondAvatarMediaId = 'bbb00000-0000-4000-8000-000000000021'
 const params = new URLSearchParams(location.search)
+const giftId = '88888888-8888-4888-8888-888888888888'
+const giftPhotoId = '99999999-9999-4999-8999-999999999999'
+const giftFixture = { id: giftId, childId, title: 'Конструктор', url: 'https://shop.example/item', price: '2500 ₽', photoMediaId: giftPhotoId, createdBy: { userId, name: 'Synthetic owner' }, reservation: null, version: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' }
+let currentGift = giftFixture
+const albums = params.has('albums') ? albumFixture(familyId, childId, userId, params) : null
 const welcomeClaimKey = `__selected-family-welcome-claimed:${userId}`
 const user: NonNullable<AuthContextValue['user']> = { id: userId, email: null, displayName: 'Synthetic owner', role: 'user', theme: 'lavender', createdAt: '2026-10-01T00:00:00.000Z' }
 const secondUser = { ...user, id: secondUserId }
@@ -28,9 +36,9 @@ const family = { id: familyId, name: 'Семья Алисы', timezone: 'Europe/
 const secondFamily = { id: secondFamilyId, name: 'Семья Миши', timezone: 'Europe/Moscow', ownerUserId: userId }
 const child = { id: childId, name: 'Алиса', birthDate: '2024-01-17', sex: 'girl', avatarMediaId: avatarMediaId as string | null, avatarCrop: null as { x: number; y: number; width: number; height: number } | null, version: 1, isComplete: true }
 const secondChild = { id: secondChildId, name: 'Миша', birthDate: '2023-08-04', sex: 'boy', avatarMediaId: secondAvatarMediaId as string | null, avatarCrop: null as { x: number; y: number; width: number; height: number } | null, version: 1, isComplete: true }
-const familyResponse = { family, child }
+const familyResponse = { family, child: params.has('noChild') ? null : child }
 const secondFamilyResponse = { family: secondFamily, child: secondChild }
-const member = { userId, avatarPath: null, displayName: 'Synthetic owner', familyDisplayName: null, role: 'full', isOwner: true, joinedAt: '2026-10-01T00:00:00.000Z', version: 1 }
+const member = { userId, avatarPath: null, displayName: 'Synthetic owner', familyDisplayName: null, role: params.has('viewer') ? 'viewer' : 'full', isOwner: !params.has('viewer'), joinedAt: '2026-10-01T00:00:00.000Z', version: 1 }
 const members = [member]
 const home = {
   version: 1, ownFamilyId: familyId, ownFamilyStatus: 'active', canCreateOwnFamily: false,
@@ -92,7 +100,15 @@ Object.assign(window, {
 })
 
 const transport = {
-  request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+  request: async (path: string, schema: { parse: (value: unknown) => unknown }, options?: HttpRequestOptions) => {
+    if (albums) {
+      try { const response = await albums.request(path, options); if (response.handled) return schema.parse(response.value) }
+      catch (reason) {
+        const evidence = (window as typeof window & { __albumsEvidence?: { errors?: string[] } }).__albumsEvidence
+        if (evidence) { evidence.errors ??= []; evidence.errors.push(`${options?.method ?? 'GET'} ${path}: ${reason instanceof Error ? reason.message : String(reason)}`) }
+        throw reason
+      }
+    }
     if (path.startsWith('/api/v1/me/families')) {
       const startedAt = performance.now()
       timeline.push({ stage: 'rights:data:home:start', at: startedAt })
@@ -107,6 +123,18 @@ const transport = {
     if (path === `/api/v1/families/${familyId}/invites` || path === `/api/v1/families/${secondFamilyId}/invites`) return schema.parse({ items: [] })
     if (path === `/api/v1/families/${familyId}/usage` || path === `/api/v1/families/${secondFamilyId}/usage`) return schema.parse({ usedBytes: 0, quotaBytes: null })
     if (path === `/api/v1/families/${familyId}/max-channel` || path === `/api/v1/families/${secondFamilyId}/max-channel`) return schema.parse({ state: 'unconfigured', title: null, canManage: true })
+    if (path === `/api/v1/families/${familyId}/gifts`) {
+      if (params.has('giftAccessDenied')) throw new ApiRequestError(404, 'NOT_FOUND', 'Family membership revoked')
+      return schema.parse({ gifts: [currentGift] })
+    }
+    if (path === `/api/v1/families/${familyId}/gifts/${giftId}` && options?.method === 'PATCH') {
+      ;(window as typeof window & { __selectedFamilyGiftSaveStarted?: boolean }).__selectedFamilyGiftSaveStarted = true
+      const delay = Number(params.get('giftSaveDelay') ?? 0)
+      if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const body = options.body as { title?: string }
+      currentGift = { ...currentGift, title: body.title ?? currentGift.title, version: 2, updatedAt: '2026-10-24T10:00:00.000Z' }
+      return schema.parse({ gift: currentGift })
+    }
     if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
     if (path === '/api/v1/me/welcome/claim') {
       if (!params.has('welcomeFirst') || sessionStorage.getItem(welcomeClaimKey) === 'claimed') {
@@ -119,6 +147,8 @@ const transport = {
   },
   raw: async (path: string) => {
     rawPaths.push(path)
+    const albumImage = await albums?.raw(path)
+    if (albumImage) return albumImage
     if ((child.avatarMediaId && path.startsWith(`/api/v1/families/${familyId}/media/${child.avatarMediaId}/content?variant=display`)) || path.startsWith(`/api/v1/families/${secondFamilyId}/media/${secondChild.avatarMediaId}/content?variant=display`)) {
       const requests = (window as typeof window & { __selectedFamilyAvatarRequests: number[] }).__selectedFamilyAvatarRequests
       requests.push(performance.now())
@@ -155,11 +185,20 @@ function syntheticChannelMemory() {
   }
 }
 
+const hostBridge = (() => {
+  const base = createBrowserDevHostBridge()
+  const handlers: Array<() => void> = []
+  Object.assign(window, { __albumsTriggerBack: () => handlers.at(-1)?.() })
+  return { ...base, onBack: (handler: () => void) => { handlers.push(handler); return () => { const index = handlers.lastIndexOf(handler); if (index >= 0) handlers.splice(index, 1) } } }
+})()
+
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 queryClient.setQueryData(persistentUiQueryKey(userId), params.has('hubFirst')
   ? { home, family: null, members, screen: 'hub', selectedFamilyId: null, membershipEpoch: null, filter: 'all' }
   : { home, family: familyResponse, members, screen: 'feed', selectedFamilyId: familyId, membershipEpoch: 1, filter: 'all' })
 queryClient.setQueryData(persistentUiQueryKey(secondUserId), { home, family: secondFamilyResponse, members, screen: 'feed', selectedFamilyId: secondFamilyId, membershipEpoch: 1, filter: 'all' })
+if (params.has('giftAccessDenied')) queryClient.setQueryData(giftsQueryKeys.list(familyId, userId, 1), [currentGift])
+Object.assign(window, { __selectedFamilyGiftCached: () => queryClient.getQueryData(giftsQueryKeys.list(familyId, userId, 1)) })
 
 export function SelectedFamilyAppHarness() {
   const [activeUser, setActiveUser] = useState(user)
@@ -169,7 +208,7 @@ export function SelectedFamilyAppHarness() {
     setActiveUser(secondUser)
   } })
   return <AuthContext.Provider value={{ user: activeUser, externalIdentityProvider: 'max', isBootstrapping: false, isAuthenticated: true, sessionError: null, retrySession: async () => undefined, transport, updateTheme: async () => undefined, authenticateHost: async () => undefined, authenticateTelegram: async () => undefined, authenticateMax: async () => undefined, startBrowserLink: async () => { throw new Error('not used') }, browserLinkStatus: async () => { throw new Error('not used') }, approveBrowserLink: async () => undefined, redeemBrowserLink: async () => undefined, register: async () => undefined, login: async () => undefined, logout: async () => undefined, requestPasswordReset: async () => undefined, confirmPasswordReset: async () => undefined }}>
-    <QueryClientProvider client={queryClient}><App hostBridge={createBrowserDevHostBridge()} /></QueryClientProvider>
+    <QueryClientProvider client={queryClient}><App hostBridge={hostBridge} /></QueryClientProvider>
   </AuthContext.Provider>
 }
 

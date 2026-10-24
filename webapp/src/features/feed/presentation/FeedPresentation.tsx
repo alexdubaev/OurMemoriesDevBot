@@ -35,6 +35,7 @@ export type FeedPresentationProps = {
   insets: TelegramInsets
   onAdd?: () => void
   onFamily: () => void
+  onAlbums?: () => void
   onOpenChild?: () => void
   onOpenSettings?: () => void
   onAllFamilies?: () => void
@@ -76,7 +77,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
         <div className="feed-content">{children}</div>
         </div>
       </main>
-      <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts ?? noopGifts} role={props.role} />
+      <BottomNavigation appearance="memoly" active="feed" addButtonRef={props.addButtonRef} onAdd={props.onAdd} onAlbums={props.onAlbums} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts ?? noopGifts} role={props.role} />
     </div>
   )
 }

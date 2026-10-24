@@ -19,6 +19,14 @@ type MaxWebApp = {
   openLink?: unknown
   openMaxLink?: unknown
   enableClosingConfirmation?: unknown
+  BackButton?: unknown
+}
+
+type MaxBackButton = {
+  show?: unknown
+  hide?: unknown
+  onClick?: unknown
+  offClick?: unknown
 }
 
 type BrowserHost = {
@@ -52,7 +60,16 @@ const configuredClosingConfirmation = new WeakSet<object>()
 export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions = {}): HostBridge {
   const browserHost = isRecord(host) ? host as BrowserHost : null
   const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  const backButton = isRecord(webApp?.BackButton) ? webApp.BackButton as MaxBackButton : null
   const available = isMeaningfulMaxWebApp(host)
+  const backHandlers: Array<{ handler: () => void }> = []
+  let nativeBackHandlerAttached = false
+  const nativeBackHandler = () => backHandlers.at(-1)?.handler()
+  const supportsBackButton = backButton !== null
+    && typeof backButton.show === 'function'
+    && typeof backButton.hide === 'function'
+    && typeof backButton.onClick === 'function'
+    && typeof backButton.offClick === 'function'
 
   return {
     kind: 'max',
@@ -85,7 +102,40 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     back: () => {
       if (typeof browserHost?.history?.back === 'function') browserHost.history.back()
     },
-    onBack: () => () => undefined,
+    onBack: (handler) => {
+      if (!supportsBackButton || !backButton) return () => undefined
+      if (!nativeBackHandlerAttached) {
+        try {
+          ;(backButton.onClick as (callback: () => void) => void).call(backButton, nativeBackHandler)
+          nativeBackHandlerAttached = true
+        } catch {
+          return () => undefined
+        }
+      }
+
+      const subscription = { handler }
+      backHandlers.push(subscription)
+      if (backHandlers.length === 1) {
+        try { (backButton.show as () => void).call(backButton) } catch { /* Optional host UI method. */ }
+      }
+
+      let subscribed = true
+      return () => {
+        if (!subscribed) return
+        subscribed = false
+        const index = backHandlers.indexOf(subscription)
+        if (index < 0) return
+        backHandlers.splice(index, 1)
+        if (backHandlers.length !== 0) return
+        try {
+          (backButton.offClick as (callback: () => void) => void).call(backButton, nativeBackHandler)
+          nativeBackHandlerAttached = false
+        } catch {
+          // Retain the attached-state flag so a later subscription never adds a duplicate listener.
+        }
+        try { (backButton.hide as () => void).call(backButton) } catch { /* Optional host UI method. */ }
+      }
+    },
     openBot: () => {
       // Direct bot navigation is supported by MAX openLink. openMaxLink is reserved for
       // mini-app startapp links and must not receive an arbitrary direct-chat URL.

@@ -41,14 +41,15 @@ export type GiftFormSheetProps = {
 }
 
 export function GiftFormSheet({ open, onClose, target, ...props }: GiftFormSheetProps) {
+  const [saving, setSaving] = useState(false)
   return (
-    <MemolyBottomSheet onOpenChange={(next) => { if (!next) onClose() }} open={open && target !== null}>
-      {open && target ? <GiftFormBody {...props} onClose={onClose} target={target} /> : null}
+    <MemolyBottomSheet dismissible={!saving} onOpenChange={(next) => { if (!next && !saving) onClose() }} open={open && target !== null}>
+      {open && target ? <GiftFormBody {...props} onBusyChange={setSaving} onClose={onClose} target={target} /> : null}
     </MemolyBottomSheet>
   )
 }
 
-function GiftFormBody({ accountId, familyId, onClose, onSaved, onStale, scopeKey, target, transport }: Omit<GiftFormSheetProps, 'open' | 'target'> & { target: GiftFormTarget }) {
+function GiftFormBody({ accountId, familyId, onBusyChange, onClose, onSaved, onStale, scopeKey, target, transport }: Omit<GiftFormSheetProps, 'open' | 'target'> & { target: GiftFormTarget; onBusyChange: (busy: boolean) => void }) {
   const editing = target.mode === 'edit' ? target.gift : null
   const ids = { url: useId(), title: useId(), price: useId(), photo: useId() }
   const [url, setUrl] = useState(editing?.url ?? '')
@@ -100,6 +101,7 @@ function GiftFormBody({ accountId, familyId, onClose, onSaved, onStale, scopeKey
     event?.preventDefault()
     if (saving.current || !draft.canSave) return
     saving.current = true
+    onBusyChange(true)
     setStatus('saving')
     setFailure(null)
     const abort = new AbortController()
@@ -148,6 +150,7 @@ function GiftFormBody({ accountId, familyId, onClose, onSaved, onStale, scopeKey
         : giftFailureMessage(error))
     } finally {
       saving.current = false
+      onBusyChange(false)
       setStatus((current) => (current === 'saving' ? 'idle' : current))
     }
   }
@@ -236,7 +239,7 @@ function GiftFormBody({ accountId, familyId, onClose, onSaved, onStale, scopeKey
         <button className="gift-button gift-button--primary gift-button--wide" disabled={busy || !draft.canSave} type="submit">
           <Typography as="span" variant="memoryButton">{busy ? 'Сохраняем…' : status === 'error' ? 'Повторить' : 'Сохранить'}</Typography>
         </button>
-        <button className="gift-button gift-button--wide" onClick={onClose} type="button">
+        <button className="gift-button gift-button--wide" disabled={busy} onClick={onClose} type="button">
           <Typography as="span" variant="memoryButton">Отмена</Typography>
         </button>
       </div>

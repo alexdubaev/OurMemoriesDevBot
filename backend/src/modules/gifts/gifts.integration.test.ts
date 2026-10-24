@@ -166,6 +166,10 @@ describe('Gift wishlist API', () => {
     const created = await createGift(owner, family.id, 'Самокат')
     const id = created.id
 
+    const alreadyOpen = await api(full, 'DELETE', purchase(family.id, id), { expectedVersion: 1 })
+    expect(alreadyOpen.status).toBe(200)
+    expect(alreadyOpen.body.gift.version).toBe(1)
+
     const reserved = await api(viewer, 'POST', reservation(family.id, id), { expectedVersion: 1 })
     expect(reserved.status).toBe(200)
     expect(reserved.body.gift.reservation).toMatchObject({ userId: viewer.userId, name: 'Бабушка', boughtAt: null })
@@ -181,6 +185,7 @@ describe('Gift wishlist API', () => {
 
     expect((await api(full, 'DELETE', reservation(family.id, id), { expectedVersion: 2 })).status).toBe(403)
     expect((await api(full, 'POST', purchase(family.id, id), { expectedVersion: 2 })).status).toBe(403)
+    expect((await api(full, 'DELETE', purchase(family.id, id), { expectedVersion: 2 })).status).toBe(403)
 
     const released = await api(owner, 'DELETE', reservation(family.id, id), { expectedVersion: 2 })
     expect(released.status).toBe(200)
@@ -206,6 +211,10 @@ describe('Gift wishlist API', () => {
     expect(unbought.status).toBe(200)
     expect(unbought.body.gift.reservation).toMatchObject({ userId: viewer.userId, boughtAt: null })
     expect((await api(viewer, 'DELETE', reservation(family.id, id), { expectedVersion: 6 })).status).toBe(200)
+    const repeatedUnbought = await api(full, 'DELETE', purchase(family.id, id), { expectedVersion: 7 })
+    expect(repeatedUnbought.status).toBe(200)
+    expect(repeatedUnbought.body.gift.version).toBe(7)
+    expect((await prisma.gift.findUniqueOrThrow({ where: { id } })).version).toBe(7)
   })
 
   test('two members reserving the same gift at once produce one holder', async () => {
@@ -245,6 +254,17 @@ describe('Gift wishlist API', () => {
     const { owner, full, family } = await familyWithMembers()
     const created = await createGift(owner, family.id, 'Пазл')
     const oldPhoto = created.photoMediaId
+    const occupied = await createGift(owner, family.id, 'Другая игрушка')
+    const { owner: foreignOwner, family: foreignFamily } = await familyWithMembers()
+    const foreignPhoto = await giftPhoto(foreignOwner, foreignFamily.id)
+    const memoryPhoto = await uploadPhoto(owner, family.id, 'memory')
+    const rejectedPhotos = [foreignPhoto, memoryPhoto, occupied.photoMediaId]
+    for (const rejectedPhoto of rejectedPhotos) {
+      const rejected = await api(full, 'PATCH', gift(family.id, created.id), { expectedVersion: 1, photoMediaId: rejectedPhoto })
+      expect(rejected.status).toBe(422)
+      expect(await prisma.gift.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ photoMediaId: oldPhoto, version: 1 })
+    }
+    for (const photoMediaId of rejectedPhotos) expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: photoMediaId } })).deletedAt).toBeNull()
 
     const newPhoto = await giftPhoto(full, family.id)
     const updated = await api(full, 'PATCH', gift(family.id, created.id), {
@@ -254,6 +274,7 @@ describe('Gift wishlist API', () => {
     expect(updated.body.gift).toMatchObject({ title: 'Пазл 1000', url: 'http://shop.example/puzzle', price: null, photoMediaId: newPhoto, version: 2 })
     expect((await prisma.mediaAsset.findUniqueOrThrow({ where: { id: oldPhoto } })).deletedAt).not.toBeNull()
     expect(await prisma.taskOutbox.count({ where: { type: 'media:delete', dedupeKey: `media-delete:${oldPhoto}` } })).toBe(1)
+    expect((await api(owner, 'GET', `/api/v1/families/${family.id}/media/${oldPhoto}/content?variant=preview`)).status).toBe(404)
 
     const stale = await api(owner, 'PATCH', gift(family.id, created.id), { expectedVersion: 1, title: 'Старое' })
     expect(stale.status).toBe(409)

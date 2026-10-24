@@ -1789,8 +1789,8 @@
       "width": 48,
       "height": 48,
       "alpha": true,
-      "bytes": 690,
-      "sha256": "ffe46b5e25670c53ee54dfb64b9c4f765a8deac373aea4de10aabab67af9d2b2"
+      "bytes": 850,
+      "sha256": "8797e772e25fa5b166755d53042cbd3caf5772672a47d9a51a175d43218ad043"
     },
     {
       "path": "assets/icons/gift-default@3x.webp",
@@ -1798,8 +1798,8 @@
       "width": 72,
       "height": 72,
       "alpha": true,
-      "bytes": 928,
-      "sha256": "64b26b27a44585425a466d192311efc2d68c96a9ed25f0d7c5d16dcb4d582a26"
+      "bytes": 1376,
+      "sha256": "2d3f49cb684c3daf2ca68e5fe07d4fda04c6b93cef283cc096f00cd8250c9868"
     },
     {
       "path": "assets/icons/gift-active@2x.webp",
@@ -1807,8 +1807,8 @@
       "width": 48,
       "height": 48,
       "alpha": true,
-      "bytes": 696,
-      "sha256": "89e19ba7c29f92434b10633dd8fbad913c363d2daaf8901c7c5e5bafd9a67889"
+      "bytes": 846,
+      "sha256": "38a993dbfd6c493b11c128b6f02e20974c3dabd056d2bfac5a96f1bf9cb5f9f2"
     },
     {
       "path": "assets/icons/gift-active@3x.webp",
@@ -1816,8 +1816,8 @@
       "width": 72,
       "height": 72,
       "alpha": true,
-      "bytes": 922,
-      "sha256": "7418561e397b329edcf38b6c9443237081f0fac1d0fd9ea637abd6988044136f"
+      "bytes": 1374,
+      "sha256": "b3891be9ff24174438c420679b0155bf60a270a21902dc89e28b16c7be12f710"
     },
     {
       "path": "assets/icons/gift-white@2x.webp",
@@ -1825,8 +1825,8 @@
       "width": 48,
       "height": 48,
       "alpha": true,
-      "bytes": 698,
-      "sha256": "c602d432d1ef85097b60b3c80235c1f46976a0092c489367e93373d2b62a7723"
+      "bytes": 850,
+      "sha256": "a388fa6c28828703985e3bab30c2c1c6f30b38a43baf53ff480d28a031d51f2e"
     },
     {
       "path": "assets/icons/gift-white@3x.webp",
@@ -1834,8 +1834,8 @@
       "width": 72,
       "height": 72,
       "alpha": true,
-      "bytes": 912,
-      "sha256": "735da138b4a497c82911088f0e81168c61bad93e5184d580932bf32efd093451"
+      "bytes": 1380,
+      "sha256": "3ffbb822d4061967c1687c9eb7d9207d83c954882c725ae17aa72a98a64a5247"
     }
   ]
 }

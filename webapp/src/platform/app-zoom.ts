@@ -33,6 +33,7 @@ export function installAppZoomPrevention(document: Document): () => void {
   const captureBlocking: AddEventListenerOptions = { capture: true, passive: false }
   let gestureStartArmed = false
   let multiTouchGuardsArmed = false
+  const activeTouchTargets = new Map<EventTarget, { touchEnd: EventListener; touchCancel: EventListener }>()
 
   const armGestureStart = () => {
     if (gestureStartArmed) return
@@ -60,10 +61,19 @@ export function installAppZoomPrevention(document: Document): () => void {
     document.removeEventListener('touchmove', preventMultitouchZoom, true)
   }
 
+  const disarmTouchTargetObservers = () => {
+    for (const [target, observers] of activeTouchTargets) {
+      target.removeEventListener('touchend', observers.touchEnd, true)
+      target.removeEventListener('touchcancel', observers.touchCancel, true)
+    }
+    activeTouchTargets.clear()
+  }
+
   const resetTouchSequence = () => {
     touchSequenceActive = false
     disarmMultiTouchGuards()
     if (touchCapable) disarmGestureStart()
+    disarmTouchTargetObservers()
   }
 
   const observeTouchStart = (event: Event) => {
@@ -73,6 +83,15 @@ export function installAppZoomPrevention(document: Document): () => void {
     if (touchCapable) armGestureStart()
     const touchEvent = event as TouchEvent
     if (touchEvent.touches.length > 1 && !isInsideNativeMedia(event.target)) armMultiTouchGuards()
+    const target = event.target
+    if (!target || target === document || activeTouchTargets.has(target)) return
+    const observers = {
+      touchEnd: ((endEvent: Event) => observeTouchEnd(endEvent)) as EventListener,
+      touchCancel: (() => resetTouchSequence()) as EventListener,
+    }
+    activeTouchTargets.set(target, observers)
+    target.addEventListener('touchend', observers.touchEnd, capturePassive)
+    target.addEventListener('touchcancel', observers.touchCancel, capturePassive)
   }
 
   const observeTouchEnd = (event: Event) => {

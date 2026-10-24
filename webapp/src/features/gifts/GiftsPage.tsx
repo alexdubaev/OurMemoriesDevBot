@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { GiftDto } from '@web-app-demo/contracts'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
@@ -9,6 +9,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
+import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 
 import { cancelGiftReservation, deleteGift, markGiftBought, reserveGift, unmarkGiftBought } from './api'
 import { GiftCard, type GiftActionKind } from './GiftCard'
@@ -28,6 +29,8 @@ export type GiftsPageProps = {
   isOwner: boolean
   membershipEpoch: number | null
   onAdd: () => void
+  onAccessLost: () => void
+  onAlbums: () => void
   onFamily: () => void
   onFeed: () => void
   role: 'full' | 'viewer'
@@ -43,14 +46,21 @@ const actionRequests = {
 } as const
 
 export function GiftsPage({
-  active = true, child, currentUserId, familyId, hostBridge, isOwner, membershipEpoch, onAdd, onFamily, onFeed, role, timeZone, transport,
+  active = true, child, currentUserId, familyId, hostBridge, isOwner, membershipEpoch, onAccessLost, onAdd, onAlbums, onFamily, onFeed, role, timeZone, transport,
 }: GiftsPageProps) {
   const queryClient = useQueryClient()
   const scope = { familyId, accountId: currentUserId, membershipEpoch }
   const query = useGiftList(transport, scope, active)
-  const gifts = query.data
+  const accessLossHandled = useRef(false)
+  const identityGeneration = privateCacheIdentityGeneration()
+  const familyGeneration = privateFamilyCacheGeneration(currentUserId, familyId)
+  const isCurrentScope = () => isActivePrivateCacheIdentity(currentUserId, identityGeneration) &&
+    privateFamilyCacheGeneration(currentUserId, familyId) === familyGeneration
+  const accessDeniedResponse = query.error instanceof ApiRequestError && [403, 404].includes(query.error.status)
+  const gifts = accessDeniedResponse ? undefined : query.data
   const viewer: GiftViewer = { currentUserId, role, isOwner }
   const scopeKey = JSON.stringify([familyId, membershipEpoch])
+  const accessLossScope = useRef(scopeKey)
   const [form, setForm] = useState<GiftFormTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<GiftDto | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -60,7 +70,25 @@ export function GiftsPage({
   const [boughtOpen, setBoughtOpen] = useState(false)
   const busy = useRef(false)
 
-  const refresh = async () => (await query.refetch()).data
+  useEffect(() => {
+    if (accessLossScope.current !== scopeKey) {
+      accessLossScope.current = scopeKey
+      accessLossHandled.current = false
+    }
+  }, [scopeKey])
+
+  useEffect(() => {
+    if (!(query.error instanceof ApiRequestError) || ![403, 404].includes(query.error.status) || accessLossHandled.current) return
+    accessLossHandled.current = true
+    void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] === 'session' && queryKey[2] === familyId })
+    onAccessLost()
+  }, [familyId, onAccessLost, query.error, queryClient, scopeKey])
+
+  const refresh = async () => {
+    if (!isCurrentScope()) return undefined
+    const result = await query.refetch()
+    return isCurrentScope() ? result.data : undefined
+  }
 
   async function runAction(gift: GiftDto, action: GiftActionKind) {
     if (busy.current) return
@@ -70,6 +98,7 @@ export function GiftsPage({
     let refreshed = false
     try {
       const { gift: next } = await actionRequests[action](transport, familyId, gift.id, gift.version)
+      if (!isCurrentScope()) return
       queryClient.setQueryData<GiftDto[]>(
         giftsQueryKeys.list(familyId, currentUserId, membershipEpoch),
         (current) => current?.map((item) => (item.id === next.id ? next : item)),
@@ -83,9 +112,11 @@ export function GiftsPage({
         if (isGiftStateConflict(error)) { refreshed = true; await refresh() }
       }
     } finally {
-      busy.current = false
-      setPending(null)
-      if (!refreshed) void refresh()
+      if (isCurrentScope()) {
+        busy.current = false
+        setPending(null)
+        if (!refreshed) void refresh()
+      }
     }
   }
 
@@ -95,11 +126,12 @@ export function GiftsPage({
   }
 
   async function confirmDelete() {
-    if (!deleteTarget || deleting) return
+    if (!deleteTarget || deleting || !isCurrentScope()) return
     setDeleting(true)
     setDeleteError(null)
     try {
       await deleteGift(transport, familyId, deleteTarget.id, deleteTarget.version)
+      if (!isCurrentScope()) return
       setDeleteTarget(null)
       setNotice('Подарок удалён.')
       void refresh()
@@ -110,11 +142,12 @@ export function GiftsPage({
         void refresh()
       } else setDeleteError(giftFailureMessage(error))
     } finally {
-      setDeleting(false)
+      if (isCurrentScope()) setDeleting(false)
     }
   }
 
   function afterFormSaved(gift: GiftDto) {
+    if (!isCurrentScope()) return
     const wasEdit = form?.mode === 'edit'
     setForm(null)
     setNotice(wasEdit ? 'Изменения сохранены.' : 'Подарок добавлен.')
@@ -222,7 +255,7 @@ export function GiftsPage({
         </section>
       ) : null}
 
-      <BottomNavigation appearance="memoly" active="gifts" onAdd={onAdd} onFamily={onFamily} onFeed={onFeed} onGifts={() => undefined} role={role} />
+      <BottomNavigation appearance="memoly" active="gifts" onAdd={onAdd} onAlbums={onAlbums} onFamily={onFamily} onFeed={onFeed} onGifts={() => undefined} role={role} />
 
       <GiftFormSheet
         accountId={currentUserId}

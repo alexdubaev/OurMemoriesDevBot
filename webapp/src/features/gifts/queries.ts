@@ -1,5 +1,6 @@
 import { CancelledError, useQuery } from '@tanstack/react-query'
 
+import { ApiRequestError } from '@/platform/api'
 import type { AuthenticatedTransport } from '@/platform/api'
 import {
   isActivePrivateCacheIdentity,
@@ -27,7 +28,7 @@ export function useGiftList(transport: AuthenticatedTransport, scope: GiftScope,
     enabled: active && Boolean(scope.accountId),
     staleTime: 0,
     gcTime: 0,
-    retry: 1,
+    retry: (failureCount, error) => !(error instanceof ApiRequestError && [403, 404].includes(error.status)) && failureCount < 1,
     refetchOnWindowFocus: false,
     queryFn: async ({ signal }) => {
       const { gifts } = await loadGifts(transport, scope.familyId, signal)
