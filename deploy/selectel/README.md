@@ -659,7 +659,7 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   unprotected control reproduces a tombstone, an unavailable photo, and queued
   `media:delete` work while the original storage bytes remain present.
 
-- The exact linked-family child-tag production fingerprint
+- The exact stage-1 several-children production fingerprint
   `cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05` is anchored
   to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime and may
   use only the healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its
@@ -681,10 +681,9 @@ The guarded rollback supports these exact measured backend + webapp target pairs
 
   The synthetic current → frozen 33a → current PostgreSQL probe passed against
   a uniquely created `*_test` child database: 1 test, 21 expectations, exit code
-  0. It ran with `bun test backend/scripts/children-release-compatibility.integration.test.ts`
-  in the configured Linux test wrapper; a temporary `bunx` symlink to the
-  configured Bun binary was needed because that wrapper does not install a
-  separate `bunx` executable. The probe verifies the frozen runtime can read a
+  0 on source `9d7b1a0a648fc6069d4b5f9cc638594015381e35`. It ran with
+  `bun test backend/scripts/children-release-compatibility.integration.test.ts`
+  in an isolated Linux environment with Bun and `bunx` on PATH. The probe verifies the frozen runtime can read a
   tagged multi-child photo with an attachment-level tag, create and read a legacy
   child-linked note, and filter the feed without changing either new child tag.
   Returning to current code preserves both tags, attachment, deleted-profile
