@@ -1946,13 +1946,13 @@ test('wishlist recovery accepts only exact 53/54/55 guarded migration states and
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 })
 
-test('wishlist recovery profile is pinned to the frozen d356 production inputs and dc26 target', {
+test('wishlist recovery profile is pinned to the frozen 5f0f854e production inputs and dc26 target', {
   timeout: process.platform === 'win32' ? 180_000 : 60_000,
 }, () => {
-  const producer = 'd35682bfbc777c9cfd012e561ebc05b693c98b1f'
+  const producer = '5f0f854e0843e87bf7d5634114b641b61cbc98f9'
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
-  const expectedCompatibility = '484342277ccd9338402e2841acc1bb719e2fce1ec0c64a8c8d66627369f2fdaa'
+  const expectedCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
   const producerDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-producer-'))
   const producerAdded = spawnSync('git', ['worktree', 'add', '--detach', producerDirectory, producer], { cwd: root, encoding: 'utf8' })
   if (producerAdded.status !== 0) throw new Error(producerAdded.stdout + producerAdded.stderr)

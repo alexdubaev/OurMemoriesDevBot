@@ -638,8 +638,8 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   required; this pin does not authorize database rollback.
 
 - The exact gift-wishlist runtime fingerprint
-  `484342277ccd9338402e2841acc1bb719e2fce1ec0c64a8c8d66627369f2fdaa`, measured
-  from producer `d35682bfbc777c9cfd012e561ebc05b693c98b1f`, may use only the same
+  `9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8`, measured
+  from producer `5f0f854e0843e87bf7d5634114b641b61cbc98f9`, may use only the same
   healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its existing
   pinned image pair. The pin is anchored to the unchanged full-attested `dc26ad9`
   source and authorizes only the exact executable input fingerprint. Its ledger

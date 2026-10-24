@@ -759,9 +759,9 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1:albums"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f:albums"
-				# Exact final wishlist production inputs from d35682bf; this permits only
+				# Exact final wishlist production inputs from 5f0f854e; this permits only
 				# the established dc26 baseline paired with the measured executable tree.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:484342277ccd9338402e2841acc1bb719e2fce1ec0c64a8c8d66627369f2fdaa:wishlist") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8:wishlist") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
