@@ -1,0 +1,9 @@
+# ALBUM-DIRECT-PHOTO
+
+Base c754e2ff55d6cdf3f702156173150535ce1b2824; branch fix/album-direct-photo; isolated .worktrees/album-direct-photo. Owner requests that album «Загрузить новое» open existing «Добавить фото в альбом» immediately, removing the type-choice step.
+
+Accepted behavior: attachPhotos mount starts in photo mode with chooser closed, whether or not a child exists. Global central Add has no attachPhotos and retains type choice. Clean/dirty photo Back keeps existing confirmation and returns to EntryEditor. Album new upload is now the direct photo entry; note/video creation remains in central Add and existing-memory attachment remains available. Do not add another affordance or alter upload/storage/publication contracts to preserve the removed intermediate step.
+
+Implementation delegation: production allowlist webapp/src/features/albums/ComposerHost.tsx, initial presentation state only; test allowlist webapp/e2e/albums.spec.ts. Update obsolete chooser-dependent journey to meaningful direct-photo/dirty-cancel/global-note coverage. Existing backend retry/persistence semantics are unchanged and outside scope. Do not change fixtures/API/auth/media/private storage/config/dependencies. Lead owns plan/evidence.
+
+Verification: before/after short actual App mobile WebKit scenario for child-present direct photo, dirty cancel, re-entry and central Add; existing childless direct photo retained. Production build/typecheck, lint, mapped album units, one fresh exact-range independent review. Latest owner minimal-check instruction persists; no repeated FULL or browser matrices. Treat source as R-range requiring independent semantic review against deployed frontend c754e2f and backend df03a37, exact receipts for both. Final tree equality and narrow repeat before guarded FRONTEND release; preserve all host/scope/recovery/service-retention/manifest guards. No production data mutation for acceptance.
