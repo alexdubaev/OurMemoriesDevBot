@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MAX_DIRECT_VIDEO_MAX_BYTES, type MemoryDto } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, type ChildDto, type MemoryDto } from '@web-app-demo/contracts'
 import { ZodError } from 'zod'
 
 import { Button } from '@/components/ui/button'
@@ -20,15 +20,21 @@ import {
 import type { ComposerMedia } from './api'
 import { composerOccurredAt } from './date'
 import { AddDateField } from './AddDateField'
+import { ChildTagPicker } from '@/components/ui-v2/ChildTagPicker'
+import { composerChildIds } from '@/components/ui-v2/child-tags'
 import '@/styles/composer-skin.css'
 
 export type PhotoComposerProps = {
   childId?: string
+  destination?: 'feed' | 'album'
+  onAlbumPhotosUploaded?: (mediaIds: string[]) => Promise<void>
+  /** The family's children; a picker appears when there are two or more. */
+  childOptions?: ChildDto[]
+  /** Preselected children (the child whose page the add started from). */
+  initialChildIds?: string[]
   familyId: string
   familyTimezone: string
   transport: AuthenticatedTransport
-  destination?: 'feed' | 'album'
-  onAlbumPhotosUploaded?: (mediaIds: string[]) => Promise<void>
   onCancel: () => void
   onSuccess: () => void | Promise<void>
   onPublished?: (memory: MemoryDto) => void
@@ -64,10 +70,11 @@ function safeFinalizeApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function PhotoComposer({ childId, familyId, familyTimezone, transport, destination = 'feed', onAlbumPhotosUploaded, onCancel, onSuccess, onTiming, onPublished, onCancellationBlockedChange, onCancelRequestChange }: PhotoComposerProps) {
+export function PhotoComposer({ childId, childOptions, initialChildIds = [], familyId, familyTimezone, transport, destination = 'feed', onAlbumPhotosUploaded, onCancel, onSuccess, onTiming, onPublished, onCancellationBlockedChange, onCancelRequestChange }: PhotoComposerProps) {
   const albumDestination = destination === 'album'
   const [files, setFiles] = useState<File[]>([])
   const [caption, setCaption] = useState('')
+  const [selectedChildIds, setSelectedChildIds] = useState<string[]>(initialChildIds)
   const [occurredDate, setOccurredDate] = useState(() => familyCalendarDate(familyTimezone))
   const [completedCount, setCompletedCount] = useState(0)
   const [byteProgress, setByteProgress] = useState<number | null>(null)
@@ -259,6 +266,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, de
       setStatus('error')
       return
     }
+    if (!albumDestination && !childId) {
+      setError('Для публикации нужен профиль ребёнка.')
+      setStatus('error')
+      return
+    }
     if ([...caption].length > 8000) {
       setError('Подпись не может быть длиннее 8 000 символов.')
       setStatus('error')
@@ -406,9 +418,11 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, de
         setErrorStage(saveStage.current)
         setCreateUncertain(true)
         const createStartedAt = performance.now()
+        const childIds = composerChildIds(childOptions, selectedChildIds)
         try { publishedMemory = await createMediaMemory(transport, familyId, {
           kind,
           childId,
+          ...(childIds ? { childIds } : {}),
           body: caption.trim(),
           occurredAt,
           ...(kind === 'photo' ? { mediaIds: mediaIds as string[] } : { attachments: mediaIds.map((id, index) => mediaItems[index]!.kind === 'video'
@@ -480,6 +494,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, de
     setByteProgress(null)
     setPreflightKinds(null)
     setCaption('')
+    setSelectedChildIds(initialChildIds)
     setOccurredDate(familyCalendarDate(familyTimezone))
     setCompletedCount(0)
     setStatus('idle')
@@ -510,6 +525,7 @@ export function PhotoComposer({ childId, familyId, familyTimezone, transport, de
         <input accept={albumDestination ? 'image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif' : 'image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/x-matroska,video/webm,.jpg,.jpeg,.png,.webp,.heic,.heif,.mp4,.mov,.mkv,.webm'} className="memoly-add-native-file" disabled={status === 'saving' || createUncertain || albumAttachAttempted || restartRequiredIndex !== null || files.length >= 10} id="photo-composer-files" multiple onChange={(event) => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} ref={fileInput} type="file" />
         {files.length ? <div aria-label={containsVideo ? 'Предпросмотр вложений' : 'Предпросмотр фотографий'} className="memoly-add-photo-grid">{files.map((file, index) => <MediaPreview file={file} index={index} key={`${file.name}-${file.lastModified}-${index}`} kind={preflightKinds?.[index]} onRemove={removeFile} removeDisabled={albumAttachAttempted || restartRequiredIndex !== null && index !== restartRequiredIndex} state={itemStates[index] ?? 'selected'} showState={itemStates.some((state) => state !== 'selected')} />)}{files.length < 10 && !albumAttachAttempted ? <label className="memoly-add-more" htmlFor="photo-composer-files"><WebpIcon decorative name="plus" size={26} /><Typography as="span" variant="memoryMeta">Добавить<br />{albumDestination ? 'до 10 фото' : 'до 10 файлов'}</Typography></label> : null}</div> : <label className="memoly-add-photo-picker" htmlFor="photo-composer-files"><span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span><Typography as="strong" variant="memoryBodyMedium">{albumDestination ? 'Выберите фотографии' : 'Выберите фото и видео'}</Typography><Typography as="span" variant="memoryMeta">Нажмите, чтобы выбрать<br />до 10 {albumDestination ? 'фото' : 'вложений'}</Typography></label>}
         {albumDestination ? null : <><div className="memoly-add-caption"><textarea aria-label={containsVideo ? 'Подпись к воспоминанию' : 'Подпись к фотографиям'} disabled={status === 'saving' || createUncertain} id="photo-composer-caption" onChange={(event) => { if (event.currentTarget.value !== caption) { invalidateMetadata('caption') }; setCaption(event.currentTarget.value) }} placeholder="Добавьте подпись (необязательно)" value={caption} /><Typography as="span" variant="memoryMeta">{[...caption].length}/8000</Typography></div>
+        {childOptions && childOptions.length >= 2 ? <ChildTagPicker childOptions={childOptions} disabled={status === 'saving' || createUncertain} onChange={(next) => { invalidateMetadata('caption'); setSelectedChildIds(next) }} selected={selectedChildIds} /> : null}
         <AddDateField disabled={status === 'saving' || createUncertain} id="photo-composer-date" label={containsVideo ? 'Дата воспоминания' : 'Дата фотографий'} onChange={(value) => { if (value !== occurredDate) { invalidateMetadata('date') }; setOccurredDate(value) }} today={familyCalendarDate(familyTimezone)} value={occurredDate} /></>}
         <Button className="memoly-add-publish" disabled={status === 'saving' || restartRequiredIndex !== null || !files.length || !albumDestination && [...caption].length > 8000} onClick={() => void save()} type="button">{albumDestination ? 'Добавить в альбом' : 'Опубликовать'}{files.length ? ` (${files.length})` : ''}</Button>
         {status === 'saving' ? <div aria-live="polite" className="memoly-add-loading" role="status"><ProgressBar label="Сохранение вложений" value={allBytesAccepted ? 100 : errorStage === 'upload' ? byteProgress : null} /><Typography as="p" variant="memoryBody">{errorStage === 'create' ? 'Публикуем воспоминание…' : allBytesAccepted ? 'Обрабатываем вложения…' : errorStage === 'reserve' ? 'Подготавливаем вложения…' : errorStage === 'upload' ? byteProgress === null ? 'Загружаем вложения…' : `Загружено ${byteProgress}% байт…` : 'Обрабатываем вложения…'}</Typography><Typography as="p" variant="memoryMeta">Готово вложений: {completedCount} из {files.length}</Typography><Button disabled={createUncertain} onClick={cancel} type="button" variant="outline">Отменить</Button></div> : null}

@@ -8,6 +8,7 @@ import { useMemolyTheme } from '@/features/theme'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 
 import './memoly-feed.css'
+import './child-pages.css'
 
 export type FeedFilter = 'all' | 'photo' | 'video' | 'voice' | 'note'
 
@@ -48,6 +49,12 @@ export type FeedPresentationProps = {
   unreadState?: 'ready' | 'unavailable' | 'not_enabled'
   unreadOnly?: boolean
   onUnreadChange?: (unreadOnly: boolean) => void
+  /** Replaces the one-child header (a family with two or more children: family or child page header). */
+  header?: ReactNode
+  /** Child filters and the child's album strip, read right after the header. */
+  renderSubheader?: () => ReactNode
+  /** Whether the family-wide unread count describes the current list. */
+  showUnreadCountInMode?: boolean
 }
 
 export function FeedPresentation(props: FeedPresentationProps) {
@@ -64,15 +71,16 @@ export function FeedPresentation(props: FeedPresentationProps) {
     <div data-memoly-feed="true" style={style}>
       <main className="app" data-slot="feed-scroll">
         <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
-        <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />
+        {props.header ?? <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />}
         <div className="feed-rest">
+        {props.renderSubheader?.()}
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
           <div className="feed-unread-mode">
-            <Typography as="span" className="feed-unread-label" variant="memoryMeta">{props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? `Непросмотренные · ${props.unreadCount}` : 'Непросмотренные'}</Typography>
+            <Typography as="span" className="feed-unread-label" variant="memoryMeta">{props.showUnreadCountInMode !== false && props.unreadState === 'ready' && props.unreadCount !== null && props.unreadCount !== undefined ? `Непросмотренные · ${props.unreadCount}` : 'Непросмотренные'}</Typography>
             <button aria-label="Выйти из режима непросмотренных" onClick={() => props.onUnreadChange?.(false)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryMeta">×</Typography></button>
           </div>
         ) : props.unreadState === 'ready' && (props.unreadCount ?? 0) > 0 && props.onUnreadChange ? (
-          <button aria-label={unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.unreadCount} {props.unreadCount === 1 ? 'новое' : 'новых'}</Typography></button>
+          <button aria-label={props.showUnreadCountInMode === false ? 'Непросмотренные' : unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.showUnreadCountInMode === false ? 'Непросмотренные' : `${props.unreadCount} ${props.unreadCount === 1 ? 'новое' : 'новых'}`}</Typography></button>
         ) : null}
         <div className="feed-content">{children}</div>
         </div>

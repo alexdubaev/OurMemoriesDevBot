@@ -767,7 +767,10 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4:wishlist"
 				# Exact album portal layering input from a33d220; retains the same
 				# dc26 baseline, migration ledger and wishlist recovery profile.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67:wishlist") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67:wishlist"
+				# Exact frozen linked-family production inputs; this remains
+				# limited to the measured dc26 runtime, migration ledger and wishlist profile.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -916,7 +919,7 @@ rollback_verify_wishlist_migration_history() {
 	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
 	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
 	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
-	[ "$baseline_count" = 53 ] && [ "$candidate_count" = 55 ] || return 1
+	[ "$baseline_count" = 53 ] && { [ "$candidate_count" = 55 ] || [ "$candidate_count" = 56 ]; } || return 1
 	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
 	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
 	MEMOLY_WISHLIST_LEDGER_PHASE="$phase" compose run --rm --no-deps \
@@ -943,13 +946,17 @@ const { result: candidate, byName: candidateByName } = parse(process.env.MEMOLY_
 const phase = process.env.MEMOLY_WISHLIST_LEDGER_PHASE;
 const giftName = "20261023120000_gift_wishlist";
 const guardName = "20261024120000_gift_photo_recovery_guard";
-if (baseline.length !== 53 || candidate.length !== 55 || !["pre-sql", "complete"].includes(phase) ||
-    candidate.some(row => !baselineByName.has(row.name) && row.name !== giftName && row.name !== guardName) ||
+const childTagsName = "20261024100000_memory_child_tags";
+const childCandidate = candidate.length === 56;
+if (baseline.length !== 53 || ![55, 56].includes(candidate.length) || !["pre-sql", "complete"].includes(phase) ||
+    candidate.some(row => !baselineByName.has(row.name) && row.name !== giftName && row.name !== guardName && row.name !== childTagsName) ||
     [...baselineByName.keys()].some(name => {
       const base = baselineByName.get(name), next = candidateByName.get(name);
       return !next || ![...next.checksums].some(checksum => base.checksums.has(checksum));
     }) || !candidateByName.has(giftName) || !candidateByName.has(guardName) ||
-    candidateByName.get(giftName).name !== giftName || candidateByName.get(guardName).name !== guardName)
+    candidateByName.has(childTagsName) !== childCandidate ||
+    candidateByName.get(giftName).name !== giftName || candidateByName.get(guardName).name !== guardName ||
+    (childCandidate && candidateByName.get(childTagsName).name !== childTagsName))
   process.exit(1);
 const baselineNames = new Set(baselineByName.keys());
 const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -959,11 +966,15 @@ try {
   if (!Array.isArray(rows) || rows.some(row => !row.finished_at || row.rolled_back_at))
     throw new Error("unfinished or rolled-back wishlist migration");
   const count = rows.length;
-  const permittedCount = phase === "complete" ? [55] : [53, 54, 55];
+  const permittedCount = childCandidate
+    ? (phase === "complete" ? [56] : [53, 54, 55, 56])
+    : (phase === "complete" ? [55] : [53, 54, 55]);
   if (!permittedCount.includes(count)) throw new Error("wishlist migration count mismatch");
   const includeGift = count >= 54;
-  const includeGuard = count === 55;
-  const expectedNames = new Set([...baselineNames, ...(includeGift ? [giftName] : []), ...(includeGuard ? [guardName] : [])]);
+  const includeGuard = count >= 55;
+  const includeChildTags = childCandidate && count === 56;
+  const expectedNames = new Set([...baselineNames, ...(includeGift ? [giftName] : []),
+    ...(includeGuard ? [guardName] : []), ...(includeChildTags ? [childTagsName] : [])]);
   if (expectedNames.size !== count) throw new Error("wishlist ledger has an unexpected migration set");
   const seen = new Set();
   for (const row of rows) {

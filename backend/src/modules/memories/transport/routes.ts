@@ -5,8 +5,11 @@ import {
   ifMatchVersionHeadersSchema,
   likeResponseSchema,
   reactionResponseSchema,
+  replaceMemoryChildTagsRequestSchema,
   listMemoriesQuerySchema,
   memoriesFamilyParamsSchema,
+  MEMOLY_CHILDREN_HEADER,
+  memoryChildTagsResponseSchema,
   memoryDtoSchema,
   memoryPageSchema,
   memoryParamsSchema,
@@ -69,6 +72,11 @@ const updateRoute = createRoute({
   request: { params: memoryParamsSchema, body: { content: json(updateMemoryRequestSchema) } },
   responses: { ...errors, 200: { content: json(memoryDtoSchema), description: 'Updated memory' } },
 })
+const childTagsRoute = createRoute({
+  method: 'put', path: '/families/{familyId}/memories/{memoryId}/child-tags', security: bearerSecurity,
+  request: { params: memoryParamsSchema, body: { content: json(replaceMemoryChildTagsRequestSchema) } },
+  responses: { ...errors, 200: { content: json(memoryChildTagsResponseSchema), description: 'Replaced child tags' } },
+})
 const deleteRoute = createRoute({
   method: 'delete', path: '/families/{familyId}/memories/{memoryId}', security: bearerSecurity,
   request: { params: memoryParamsSchema, headers: ifMatchVersionHeadersSchema },
@@ -104,13 +112,14 @@ export function createMemoryRoutes({
   routes.openapi(listRoute, async (c) => c.json(await executeMemory(() =>
     service.list(scope(c.var.user, c.req.valid('param').familyId), c.req.valid('query'),
       ['1', '2'].includes(c.req.header('X-Memoly-Publication-Attribution') ?? ''),
-      c.req.header('X-Memoly-Publication-Attribution') === '2'),
+      c.req.header('X-Memoly-Publication-Attribution') === '2', wantsChildTags(c)),
   )))
   routes.openapi(createRouteDefinition, async (c) => {
     const result = await executeMemory(() => service.create(
       scope(c.var.user, c.req.valid('param').familyId),
       c.req.valid('json'),
       c.req.valid('header')['idempotency-key'],
+      wantsChildTags(c),
     ))
     return c.json(result.memory, result.replayed ? 200 : 201)
   })
@@ -122,11 +131,15 @@ export function createMemoryRoutes({
     const params = c.req.valid('param')
     return service.get(scope(c.var.user, params.familyId), params.memoryId,
       ['1', '2'].includes(c.req.header('X-Memoly-Publication-Attribution') ?? ''),
-      c.req.header('X-Memoly-Publication-Attribution') === '2')
+      c.req.header('X-Memoly-Publication-Attribution') === '2', wantsChildTags(c))
   })))
   routes.openapi(updateRoute, async (c) => c.json(await executeMemory(() => {
     const params = c.req.valid('param')
-    return service.update(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json'))
+    return service.update(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json'), wantsChildTags(c))
+  })))
+  routes.openapi(childTagsRoute, async (c) => c.json(await executeMemory(() => {
+    const params = c.req.valid('param')
+    return service.replaceChildTags(scope(c.var.user, params.familyId), params.memoryId, c.req.valid('json'))
   })))
   routes.openapi(deleteRoute, async (c) => {
     const params = c.req.valid('param')
@@ -150,6 +163,11 @@ export function createMemoryRoutes({
     return telegramVideoDelivery.request(scope(c.var.user, params.familyId), params.memoryId)
   })))
   return routes
+}
+
+/** Only clients built for several children understand `childTags` in the strict memory DTO. */
+function wantsChildTags(c: { req: { header(name: string): string | undefined } }) {
+  return c.req.header(MEMOLY_CHILDREN_HEADER) === '1'
 }
 
 function scope(user: AuthHttpEnv['Variables']['user'], familyId: string) {

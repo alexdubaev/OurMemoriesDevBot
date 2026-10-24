@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { userSchema } from './auth'
 import { backendMediaPathSchema } from './memories'
 import { avatarCropSchema } from './avatar-crop'
+import { MAX_FAMILY_CHILDREN } from './children'
 
 export const familyRoleSchema = z.enum(['full', 'viewer'])
 
@@ -61,7 +62,33 @@ export const completeChildProfileRequestSchema = z.object({
   expectedVersion: z.int().positive().nullable().default(null),
 }).strict()
 
-const updateChildRequestSchema = z
+/** Adds one more child; every field of a completed profile is required. */
+export const createChildRequestSchema = z.object({
+  name: trimmedName(1, 60),
+  birthDate: birthDateSchema,
+  sex: childSexSchema,
+  avatarMediaId: z.uuid(),
+  avatarCrop: childAvatarCropSchema,
+}).strict()
+
+/** Partial edit of one child addressed by id, guarded by the child's version. */
+export const updateChildRequestSchema = z
+  .object({
+    name: trimmedName(1, 60).optional(),
+    birthDate: birthDateSchema.optional(),
+    sex: childSexSchema.optional(),
+    avatarMediaId: z.uuid().optional(),
+    avatarCrop: childAvatarCropSchema.optional(),
+    expectedVersion: z.int().positive(),
+  })
+  .strict()
+  .refine((input) => (input.avatarMediaId === undefined) === (input.avatarCrop === undefined),
+    'Avatar media ID and crop must be provided together')
+  .refine((input) => input.name !== undefined || input.birthDate !== undefined || input.sex !== undefined || input.avatarMediaId !== undefined,
+    'At least one child field is required')
+
+/** Legacy `PATCH /families/:id` child section; edits the oldest live child. */
+const updateFamilyChildRequestSchema = z
   .object({
     displayName: trimmedName(1, 60).optional(),
     birthDate: birthDateSchema.nullable().optional(),
@@ -79,7 +106,7 @@ export const updateFamilyRequestSchema = z
   .object({
     name: trimmedName(1, 80).optional(),
     timezone: ianaTimezoneSchema.optional(),
-    child: updateChildRequestSchema.optional(),
+    child: updateFamilyChildRequestSchema.optional(),
   })
   .strict()
   .refine((input) => Object.keys(input).length > 0, 'At least one family field is required')
@@ -139,6 +166,7 @@ export const familySchema = z
   .strict()
 
 export const familyParamsSchema = z.object({ familyId: z.uuid() }).strict()
+export const familyChildParamsSchema = familyParamsSchema.extend({ childId: z.uuid() }).strict()
 export const familyMemberParamsSchema = familyParamsSchema.extend({ userId: z.uuid() }).strict()
 export const familyInviteParamsSchema = familyParamsSchema.extend({ inviteId: z.uuid() }).strict()
 
@@ -162,9 +190,14 @@ export const familyMaxChannelStatusSchema = z.object({
 }).strict()
 export type FamilyMaxChannelStatus = z.infer<typeof familyMaxChannelStatusSchema>
 
+export const childResponseSchema = z.object({ child: childSchema }).strict()
+
+/** `child` is the oldest live child (legacy clients). `children` is sent only to clients that
+ * opt in with the children header, ordered by birth date (unknown last), then creation. */
 export const familyResponseSchema = z.object({
   family: familySchema,
   child: childSchema.nullable(),
+  children: z.array(childSchema).max(MAX_FAMILY_CHILDREN).optional(),
 }).strict()
 
 export const familyMembersResponseSchema = z.object({
@@ -267,6 +300,10 @@ export type IdempotencyKeyHeaders = z.infer<typeof idempotencyKeyHeadersSchema>
 export type CreateFamilyRequest = z.infer<typeof createFamilyRequestSchema>
 export type CompleteChildProfileRequest = z.infer<typeof completeChildProfileRequestSchema>
 export type UpdateFamilyRequest = z.infer<typeof updateFamilyRequestSchema>
+export type CreateChildRequest = z.infer<typeof createChildRequestSchema>
+export type UpdateChildRequest = z.infer<typeof updateChildRequestSchema>
+export type ChildDto = z.infer<typeof childSchema>
+export type ChildResponse = z.infer<typeof childResponseSchema>
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>
 export type UpdateMemberRoleRequest = z.infer<typeof updateMemberRoleRequestSchema>

@@ -70,7 +70,6 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
     try {
       const publish = () => publisher.publish(scope, {
         id: source.plannedMemoryId,
-        childId: admission.childId,
         kind: 'video',
         body: policy.body,
         occurredAt: new Date(input.event.occurredAt),

@@ -1,0 +1,13 @@
+/* «Отметить детей»: one choice of children per photo or video. */
+.memoly-tag-editor [data-slot='child-tag-picker'] { margin: 0; }
+.memoly-tag-editor-slots { display: flex; flex-direction: column; gap: 18px; margin: 16px 0 0; padding: 0; list-style: none; }
+.memoly-tag-editor-slot { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 16px; background: var(--ui-v2-color-surface, #fffefa); }
+.memoly-tag-editor-slot-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.memoly-tag-editor-thumb { display: grid; width: 56px; height: 56px; flex: 0 0 56px; place-items: center; overflow: hidden; border-radius: 10px; background: var(--ui-v2-color-accent-soft, #e6eee7); color: var(--ui-v2-color-muted, #596858); }
+.memoly-tag-editor-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.memoly-tag-editor-message { margin: 14px 0 0; color: var(--ui-v2-color-text, #2b3934); overflow-wrap: anywhere; }
+.memoly-tag-editor-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.memoly-tag-editor-button { display: inline-flex; min-height: 48px; flex: 1 1 140px; align-items: center; justify-content: center; padding: 0 18px; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 999px; color: var(--ui-v2-color-text, #2b3934); background: var(--ui-v2-color-surface, #fffefa); font: inherit; cursor: pointer; }
+.memoly-tag-editor-button.is-primary { border-color: var(--ui-v2-color-accent, #416d58); color: #fff; background: var(--ui-v2-color-accent, #416d58); }
+.memoly-tag-editor-button:disabled { cursor: default; opacity: .5; }
+.memoly-tag-editor-button:focus-visible { outline: 2px solid var(--ui-v2-color-accent, #416d58); outline-offset: 2px; }

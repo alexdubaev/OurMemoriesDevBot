@@ -43,6 +43,8 @@ export const albumEntryParamsSchema = albumParamsSchema.extend({ entryId: uuid }
 export const listAlbumsQuerySchema = z.object({
   kind: albumKindSchema.optional(),
   filter: z.enum(['all', 'template', 'custom']).default('all'),
+  /** Only albums of this child (free family albums have no child and are excluded). */
+  childId: uuid.optional(),
   cursor: z.string().min(1).max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict()

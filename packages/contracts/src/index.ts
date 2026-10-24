@@ -1,5 +1,6 @@
 export * from './auth'
 export * from './avatar-crop'
+export * from './children'
 export * from './albums'
 export * from './errors'
 export * from './families'

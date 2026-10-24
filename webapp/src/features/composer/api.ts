@@ -155,10 +155,18 @@ export function createIdempotencyKey() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/**
+ * A family with two or more children sends the chosen children (possibly none); the legacy single
+ * `childId` stays only for the one-child request so the server's default rule applies as before.
+ */
+function childTarget(input: { childId: string; childIds?: string[] }) {
+  return input.childIds ? { childIds: input.childIds } : { childId: input.childId }
+}
+
 export function createNoteMemory(
   transport: AuthenticatedTransport,
   familyId: string,
-  input: { childId: string; body: string; occurredAt: string; idempotencyKey: string },
+  input: { childId: string; childIds?: string[]; body: string; occurredAt: string; idempotencyKey: string },
   signal?: AbortSignal,
 ) {
   return transport.request(
@@ -170,7 +178,7 @@ export function createNoteMemory(
       headers: { 'Idempotency-Key': input.idempotencyKey },
       body: createMemoryRequestSchema.parse({
         kind: 'note',
-        childId: input.childId,
+        ...childTarget(input),
         body: input.body,
         occurredAt: input.occurredAt,
       }),
@@ -212,7 +220,7 @@ export function getMemory(
 export function createPhotoMemory(
   transport: AuthenticatedTransport,
   familyId: string,
-  input: { childId: string; body: string; occurredAt: string; mediaIds: string[]; idempotencyKey: string },
+  input: { childId: string; childIds?: string[]; body: string; occurredAt: string; mediaIds: string[]; idempotencyKey: string },
   signal?: AbortSignal,
 ) {
   return transport.request(
@@ -224,7 +232,7 @@ export function createPhotoMemory(
       headers: { 'Idempotency-Key': input.idempotencyKey },
       body: createMemoryRequestSchema.parse({
         kind: 'photo',
-        childId: input.childId,
+        ...childTarget(input),
         body: input.body,
         occurredAt: input.occurredAt,
         mediaIds: input.mediaIds,
@@ -236,7 +244,7 @@ export function createPhotoMemory(
 export function createMediaMemory(
   transport: AuthenticatedTransport,
   familyId: string,
-  input: { kind: 'photo' | 'video' | 'media'; childId: string; body: string; occurredAt: string; mediaIds?: string[]; attachments?: Array<{ source: 'private_storage'; mediaId: string } | { source: 'max'; sessionId: string }>; idempotencyKey: string },
+  input: { kind: 'photo' | 'video' | 'media'; childId: string; childIds?: string[]; body: string; occurredAt: string; mediaIds?: string[]; attachments?: Array<{ source: 'private_storage'; mediaId: string } | { source: 'max'; sessionId: string }>; idempotencyKey: string },
   signal?: AbortSignal,
 ) {
   return transport.request(
@@ -248,7 +256,7 @@ export function createMediaMemory(
       headers: { 'Idempotency-Key': input.idempotencyKey },
       body: createMemoryRequestSchema.parse({
         kind: input.kind,
-        childId: input.childId,
+        ...childTarget(input),
         body: input.body,
         occurredAt: input.occurredAt,
         ...(input.attachments ? { attachments: input.attachments } : { mediaIds: input.mediaIds }),

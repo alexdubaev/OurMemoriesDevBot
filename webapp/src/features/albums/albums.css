@@ -33,3 +33,4 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .memoly-app-root[data-ui-version='v2'] .albums-surface .albums-field :is(input,select,textarea){color:var(--albums-ink);font-family:inherit;font-size:16px;line-height:1.45}
 @media(max-width:349px){.albums-main{padding-inline:14px}.albums-catalog{gap:20px 13px}.albums-card>strong{font-size:.78rem}.albums-toolbar h1{font-size:.9rem}.albums-workshop-zoom output{min-width:64px}.albums-month-overview{gap:5px}.albums-free-grid{gap:12px 9px}}
 @media(prefers-reduced-motion:reduce){.albums-surface *{scroll-behavior:auto;animation:none!important;transition:none!important}}
+.albums-group{margin-top:22px}.albums-group-title{margin:0;font-size:1rem;font-weight:700;color:var(--albums-ink)}.albums-group .albums-catalog{margin:12px 0 0}

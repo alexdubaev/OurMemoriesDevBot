@@ -22,3 +22,5 @@ export {
 } from './api'
 export type { PhotoFileValidation } from './api'
 export { composerDateOnly, composerOccurredAt, photoOccurredAt } from './date'
+export { ChildTagPicker } from '@/components/ui-v2/ChildTagPicker'
+export { composerChildIds, toggleChildId } from '@/components/ui-v2/child-tags'

@@ -241,6 +241,7 @@ export function expectedMaxHistoricalExclusions(testFile) {
   return [
     'src/modules/auth/max-auth.integration.test.ts',
     'src/modules/families/family-access.integration.test.ts',
+    'src/modules/memories/child-tags-edit.integration.test.ts',
   ].includes(testFile) ? 1 : 0
 }
 

@@ -1,6 +1,6 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import { z } from 'zod'
-import { MAX_DIRECT_VIDEO_MAX_BYTES } from '@web-app-demo/contracts'
+import { MAX_DIRECT_VIDEO_MAX_BYTES, MAX_FAMILY_CHILDREN, MEMOLY_CHILDREN_HEADER } from '@web-app-demo/contracts'
 
 import { AppError, validationErrorHook } from '../../../http/errors'
 import type { AuthHttpEnv } from '../../auth'
@@ -13,14 +13,20 @@ const familyParams = z.object({ familyId: z.uuid() }).strict()
 const sessionParams = z.object({ familyId: z.uuid(), sessionId: z.uuid() }).strict()
 const caption = z.string().refine((value) => [...value].length <= 4_000, 'Caption must be at most 4000 Unicode code points')
 const reserveBody = z.object({
-  childId: z.uuid(), body: caption, mode: z.enum(['standalone', 'attachment']).optional(), occurredAt: z.string().datetime({ offset: true }),
+  /** Legacy upload target; the memory's child tags come from `childIds` at finalize. */
+  childId: z.uuid().optional(), body: caption, mode: z.enum(['standalone', 'attachment']).optional(), occurredAt: z.string().datetime({ offset: true }),
   fileName: z.string().min(1).max(255), fileSize: z.number().int().positive().max(MAX_DIRECT_VIDEO_MAX_BYTES),
   mimeType: z.enum(['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm']),
   idempotencyKey: z.string().min(1).max(128),
 }).strict().superRefine((value, context) => {
   if (value.mode !== 'attachment' && !value.body.trim()) context.addIssue({ code: 'custom', path: ['body'], message: 'Caption is required' })
 })
-const finalizeBody = z.object({ uploadToken: z.string().min(1).max(4_096) }).strict()
+const finalizeBody = z.object({
+  uploadToken: z.string().min(1).max(4_096),
+  /** Whole-publication child tags for a standalone video. Absent: the server default rule applies. */
+  childIds: z.array(z.uuid()).max(MAX_FAMILY_CHILDREN)
+    .refine((ids) => new Set(ids).size === ids.length, 'Дети не должны повторяться').optional(),
+}).strict()
 const reserveResponse = z.object({ state: z.enum(['reserved', 'existing']), sessionId: z.uuid(), expiresAt: z.string().datetime(), uploadUrl: z.string().url().optional(), uploadToken: z.string().optional() }).strict()
 const finalizeResponse = z.object({
   state: z.enum(['finalized', 'processing', 'expired', 'failed']), sessionId: z.uuid(), memoryId: z.uuid().optional(),
@@ -70,8 +76,14 @@ export function createMaxDirectVideoUploadRoutes(options: {
   routes.openapi(finalizeRoute, async (c) => {
     const params = c.req.valid('param')
     try {
-      return c.json(await options.service.finalize(scope(c.var.user, params.familyId), params.sessionId, c.req.valid('json').uploadToken), 200)
+      const body = c.req.valid('json')
+      return c.json(await options.service.finalize(scope(c.var.user, params.familyId), params.sessionId, body.uploadToken, {
+        childIds: body.childIds, includeChildTags: c.req.header(MEMOLY_CHILDREN_HEADER) === '1',
+      }), 200)
     } catch (error) {
+      if (error instanceof MaxDirectUploadFailure && error.code === 'finalize_not_found_child') {
+        console.warn('max_video_finalize_not_found_child')
+      }
       throw toAppError(toFamilyAppError(error))
     }
   })
@@ -87,7 +99,9 @@ function toAppError(error: unknown): Error {
   if (error.kind === 'invalid_input') return new AppError(422, 'INVALID_INPUT', 'Проверьте правильность заполнения полей')
   if (error.kind === 'forbidden') return new AppError(403, 'FORBIDDEN', 'Действие недоступно')
   if (error.code === 'reserve_not_found_membership') return new AppError(404, 'MAX_VIDEO_MEMBERSHIP_NOT_FOUND', 'Семья не найдена')
-  if (error.code === 'reserve_not_found_child') return new AppError(404, 'MAX_VIDEO_CHILD_NOT_FOUND', 'Профиль ребёнка не найден')
+  if (error.code === 'reserve_not_found_child' || error.code === 'finalize_not_found_child') {
+    return new AppError(404, 'MAX_VIDEO_CHILD_NOT_FOUND', 'Профиль ребёнка не найден')
+  }
   if (error.kind === 'not_found') return new AppError(404, 'NOT_FOUND', 'Сессия загрузки не найдена')
   if (error.kind === 'retryable') return new AppError(503, 'UPLOAD_NOT_COMPLETED', 'Видео ещё обрабатывается, повторите попытку')
   return new AppError(409, error.code === 'upload_expired' ? 'UPLOAD_EXPIRED' : 'CONFLICT', 'Сессия загрузки больше недоступна')

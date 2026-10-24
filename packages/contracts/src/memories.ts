@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { avatarCropSchema } from './avatar-crop'
+import { MAX_FAMILY_CHILDREN } from './children'
 
 const uuid = z.uuid()
 
@@ -15,8 +16,16 @@ const plainTextSchema = z.string().superRefine((value, context) => {
 
 const occurredAtSchema = z.string().datetime({ offset: true })
 
+/** Upper bound of child tag rows on one memory: every child on every attachment (≤ 10) and on the whole publication. */
+export const MAX_MEMORY_CHILD_TAGS = MAX_FAMILY_CHILDREN * 11
+
+const uniqueIds = (ids: string[]) => new Set(ids).size === ids.length
+
 const memoryBaseInputSchema = z.object({
-  childId: uuid,
+  /** Legacy single target from old clients. Without `childIds` it means "not specified". */
+  childId: uuid.optional(),
+  /** Publication-level child tags. Absent: the server default rule applies; empty: no tags. */
+  childIds: z.array(uuid).max(MAX_FAMILY_CHILDREN).refine(uniqueIds, 'Дети не должны повторяться').optional(),
   body: plainTextSchema,
   occurredAt: occurredAtSchema,
 }).strict()
@@ -61,6 +70,29 @@ export const listMemoriesQuerySchema = z.object({
   cursor: z.string().min(1).max(2_048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   unreadOnly: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  /** Only memories without any child tag. Cannot be combined with `childId`. */
+  untagged: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+}).strict().refine((query) => !(query.untagged && query.childId), {
+  message: 'Нельзя одновременно выбрать ребёнка и «Без отметки»', path: ['untagged'],
+})
+
+/** One child tag: `attachmentId = null` tags the whole publication, otherwise one attachment. */
+export const memoryChildTagSchema = z.object({
+  childId: uuid,
+  attachmentId: uuid.nullable(),
+}).strict()
+
+export const replaceMemoryChildTagsRequestSchema = z.object({
+  tags: z.array(memoryChildTagSchema).max(MAX_MEMORY_CHILD_TAGS).refine(
+    (tags) => uniqueIds(tags.map(({ childId, attachmentId }) => `${childId}:${attachmentId ?? ''}`)),
+    'Отметки не должны повторяться',
+  ),
+  expectedChildTagsVersion: z.int().positive(),
+}).strict()
+
+export const memoryChildTagsResponseSchema = z.object({
+  childTags: z.array(memoryChildTagSchema).max(MAX_MEMORY_CHILD_TAGS),
+  childTagsVersion: z.int().positive(),
 }).strict()
 
 export const seenMemoriesRequestSchema = z.object({
@@ -224,6 +256,9 @@ export const memoryDtoSchema = z.object({
   currentUserReaction: memoryReactionSchema.nullable(),
   likes: z.object({ count: z.number().int().nonnegative(), likedByMe: z.boolean() }).strict(),
   capabilities: z.object({ edit: z.boolean(), delete: z.boolean(), like: z.boolean() }).strict(),
+  /** Present only for clients that send the children opt-in header. */
+  childTags: z.array(memoryChildTagSchema).max(MAX_MEMORY_CHILD_TAGS).optional(),
+  childTagsVersion: z.int().positive().optional(),
 }).strict()
 
 export const memoryPageSchema = z.object({
@@ -258,6 +293,9 @@ export type SeenMemoriesRequest = z.infer<typeof seenMemoriesRequestSchema>
 export type SetReactionRequest = z.infer<typeof setReactionRequestSchema>
 export type ReactionResponse = z.infer<typeof reactionResponseSchema>
 export type MemoryDto = z.infer<typeof memoryDtoSchema>
+export type MemoryChildTag = z.infer<typeof memoryChildTagSchema>
+export type ReplaceMemoryChildTagsRequest = z.infer<typeof replaceMemoryChildTagsRequestSchema>
+export type MemoryChildTagsResponse = z.infer<typeof memoryChildTagsResponseSchema>
 export type MediaDto = z.infer<typeof mediaDtoSchema>
 export type MaxVideoAttachment = z.infer<typeof maxVideoAttachmentSchema>
 export type MaxVideoPosterReadiness = z.infer<typeof maxVideoPosterReadinessSchema>
