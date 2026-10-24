@@ -659,6 +659,39 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   unprotected control reproduces a tombstone, an unavailable photo, and queued
   `media:delete` work while the original storage bytes remain present.
 
+- The exact linked-family child-tag production fingerprint
+  `cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05` is anchored
+  to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime and may
+  use only the healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its
+  existing pinned image pair. Its literal 76-blob source fixture is reconstructed
+  from the stable `954640d` production baseline; the measured compatibility hash
+  is checked against that fixture, and child-runtime or child-UI drift is rejected.
+  The exact child migration ledger is the 53-migration `b4cdbbc` baseline plus
+  `20261023120000_gift_wishlist`, `20261024120000_gift_photo_recovery_guard`,
+  and `20261024100000_memory_child_tags` (56 total). For this exact source,
+  guarded pre-SQL readiness accepts only the exact completed 53, 54, 55, or 56
+  migration states; ordinary, rollback, and post-SQL readiness require all 56.
+  The deployed 55-migration ledger remains valid despite its guard migration
+  sorting after the child migration in the candidate catalog. The legacy exact
+  55-migration source keeps its existing pre-SQL and complete-ledger rules.
+  Unknown, missing, duplicate, checksum-mismatched, unfinished, rolled-back, or
+  unrelated ledger rows fail closed. Pre-SQL readiness remains under the held
+  host lock in the guarded release path; the profile does not authorize database
+  rollback.
+
+  The synthetic current → frozen 33a → current PostgreSQL probe passed against
+  a uniquely created `*_test` child database: 1 test, 21 expectations, exit code
+  0. It ran with `bun test backend/scripts/children-release-compatibility.integration.test.ts`
+  in the configured Linux test wrapper; a temporary `bunx` symlink to the
+  configured Bun binary was needed because that wrapper does not install a
+  separate `bunx` executable. The probe verifies the frozen runtime can read a
+  tagged multi-child photo with an attachment-level tag, create and read a legacy
+  child-linked note, and filter the feed without changing either new child tag.
+  Returning to current code preserves both tags, attachment, deleted-profile
+  timestamp, migration ledger and rollback-era memory, and a new current-runtime
+  write receives its expected child tag. This targeted compatibility probe is
+  evidence for the exact source pin, not a FULL release-profile result.
+
 - Candidate `a33d220a2edd5c5c883770f793e398fc30752a3d` has measured executable
   compatibility fingerprint
   `e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67` for the
