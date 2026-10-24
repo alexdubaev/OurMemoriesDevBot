@@ -34,10 +34,12 @@ test('a family with two children: filters, add from a child, tags on one photo, 
     await expect(chips.getByRole('button')).toHaveText(['Все', 'Лиля', 'Миша', 'Без отметки'])
     await expect(card(page, lilyaNote)).toBeVisible()
     await expect(card(page, sharedNote)).toBeVisible()
+    await page.screenshot({ path: `${screenshotDir}/family-all-feed-390.png` })
     await chip(page, 'Лиля').click()
     await expect(card(page, lilyaNote)).toBeVisible()
     await expect(card(page, pair.id)).toBeVisible()
     await expect(card(page, sharedNote)).toHaveCount(0)
+    await page.screenshot({ path: `${screenshotDir}/selected-child-page-390.png` })
     await chip(page, 'Без отметки').click()
     await expect(card(page, sharedNote)).toBeVisible()
     await expect(card(page, lilyaNote)).toHaveCount(0)
@@ -76,7 +78,7 @@ test('a family with two children: filters, add from a child, tags on one photo, 
     await slots.nth(0).getByRole('button', { name: 'Миша', exact: true }).click()
     await expect(slots.nth(0).getByRole('button', { name: 'Миша', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(slots.nth(1).getByRole('button', { name: 'Миша', exact: true })).toHaveAttribute('aria-pressed', 'false')
-    await page.screenshot({ path: `${screenshotDir}/tag-editor-2-photos.png` })
+    await page.screenshot({ path: `${screenshotDir}/tag-editor-390.png` })
     // The network drops once: the choice stays and the same save can be repeated.
     let dropped = false
     await page.route('**/child-tags', async (route) => {
@@ -202,6 +204,10 @@ test('a one-child family keeps the plain feed: no filters, no child choice, no m
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
   await expect(page.locator('.albums-card')).toHaveCount(1)
   await expect(page.locator('[data-albums-group]')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Семья', exact: true }).click()
+  await expect(page.locator('[data-slot="family-children"]')).toContainText('Добавить ребёнка')
+  await expect(page.locator('[data-slot="family-children"] .family-child-row')).toHaveCount(0)
 })
 
 test('a child deleted on another device: an open or saved filter on it falls back to «Все» and keeps the family open', async ({ page }) => {
@@ -230,16 +236,9 @@ test('a child deleted on another device: an open or saved filter on it falls bac
     // Let the saved presentation (family with Петя + the Петя filter) reach the private cache.
     await page.waitForTimeout(1_500)
     await removeChild(page, seeded, petya)
-    // The family reload is slow: it waits until the stale filter's feed has failed with all its
-    // retries (or 10 s), so the app meets the 404 before it learns that Петя is gone.
-    let feedFailures = 0
     let releaseFamily: () => void = () => undefined
-    const familyReleased = new Promise<void>((resolve) => { releaseFamily = resolve; setTimeout(resolve, 10_000) })
+    const familyReleased = new Promise<void>((resolve) => { releaseFamily = resolve })
     const staleSeen = page.waitForResponse((response) => response.url().includes(`childId=${petya.id}`))
-    page.on('response', (response) => {
-      const url = new URL(response.url())
-      if (url.pathname.endsWith('/memories') && url.searchParams.get('childId') === petya.id && ++feedFailures >= 4) releaseFamily()
-    })
     let held = false
     await page.route(`**/api/v1/families/${familyId}`, async (route) => {
       if (route.request().method() !== 'GET' || held) return route.continue()
@@ -247,11 +246,98 @@ test('a child deleted on another device: an open or saved filter on it falls bac
       await familyReleased
       await route.continue()
     })
-    await page.reload()
-    expect((await staleSeen).status()).toBe(404)
+    try {
+      const reload = page.reload({ waitUntil: 'domcontentloaded' })
+      const staleResponse = await staleSeen
+      expect(staleResponse.status()).toBe(404)
+      releaseFamily()
+      await reload
+    } finally {
+      releaseFamily()
+    }
     await expectAllFeed(page, shared, 'Петя')
     await page.unroute(`**/api/v1/families/${familyId}`)
   })
+})
+
+test('a removed child albums 404 falls back to the family feed', async ({ page }) => {
+  const seeded = await startFamily(page)
+  const shared = await createNote(page, seeded, 'Общая заметка после удаления', [])
+  const child = await addChild(page, seeded, 'Ваня', '2024-06-07')
+  await page.reload()
+  await page.getByRole('button', { name: 'Лента', exact: true }).click()
+  let releaseAlbums: () => void = () => undefined
+  let albumRequestStarted: () => void = () => undefined
+  const albumRequestHeld = new Promise<void>((resolve) => { releaseAlbums = resolve })
+  const albumRequestReached = new Promise<void>((resolve) => { albumRequestStarted = resolve })
+  const albums404 = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith('/albums') && url.searchParams.get('childId') === child.id
+  })
+  const childFeed = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith('/memories') && url.searchParams.get('childId') === child.id
+  })
+  await page.route(`**/api/v1/families/${seeded.familyId}/albums?*`, async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.searchParams.get('childId') === child.id) {
+      albumRequestStarted()
+      await albumRequestHeld
+    }
+    await route.continue()
+  })
+  try {
+    await chip(page, 'Ваня').click()
+    await expect(chip(page, 'Ваня')).toHaveAttribute('aria-pressed', 'true')
+    expect((await childFeed).status()).toBe(200)
+    await albumRequestReached
+    await removeChild(page, seeded, child)
+    releaseAlbums()
+    expect((await albums404).status()).toBe(404)
+    await expectAllFeed(page, shared, 'Ваня')
+  } finally {
+    releaseAlbums()
+    await page.unroute(`**/api/v1/families/${seeded.familyId}/albums?*`)
+  }
+})
+
+test('a filtered child 404 followed by family access 404 returns to the family hub', async ({ page }) => {
+  const seeded = await startFamily(page)
+  const child = seeded.children[0]!
+  await page.getByRole('button', { name: 'Лента', exact: true }).click()
+  await page.route(`**/api/v1/families/${seeded.familyId}/memories?*`, async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('childId') === child.id) {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Не найдено', requestId: randomUUID() } }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  await page.route(`**/api/v1/families/${seeded.familyId}`, async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Не найдено', requestId: randomUUID() } }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  const filtered404 = page.waitForResponse((response) => response.url().includes(`childId=${child.id}`) && response.status() === 404)
+  const family404 = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname === `/api/v1/families/${seeded.familyId}` && response.request().method() === 'GET' && response.status() === 404
+  })
+  await chip(page, child.name).click()
+  await Promise.all([filtered404, family404])
+  await expect(page.getByText('Доступ к этой семье закрыт.')).toBeVisible()
+  await expect(page.locator('.family-hub-card')).toBeVisible()
+  await expect(page.locator('[data-memoly-feed]')).toHaveCount(0)
 })
 
 async function addChild(page: Page, seeded: SeededFamily, name: string, birthDate: string) {

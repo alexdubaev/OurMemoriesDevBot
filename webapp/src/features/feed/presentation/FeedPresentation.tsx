@@ -53,7 +53,7 @@ export type FeedPresentationProps = {
   header?: ReactNode
   /** Child filters and the child's album strip, read right after the header. */
   renderSubheader?: () => ReactNode
-  /** The family-wide unread count does not describe a filtered list. */
+  /** Whether the family-wide unread count describes the current list. */
   showUnreadCountInMode?: boolean
 }
 
@@ -80,7 +80,7 @@ export function FeedPresentation(props: FeedPresentationProps) {
             <button aria-label="Выйти из режима непросмотренных" onClick={() => props.onUnreadChange?.(false)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryMeta">×</Typography></button>
           </div>
         ) : props.unreadState === 'ready' && (props.unreadCount ?? 0) > 0 && props.onUnreadChange ? (
-          <button aria-label={unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.unreadCount} {props.unreadCount === 1 ? 'новое' : 'новых'}</Typography></button>
+          <button aria-label={props.showUnreadCountInMode === false ? 'Непросмотренные' : unreadCountAnnouncement(props.unreadCount!)} className="feed-unread-action" onClick={() => props.onUnreadChange?.(true)} type="button"><Typography as="span" className="feed-unread-label" variant="memoryFilter">{props.showUnreadCountInMode === false ? 'Непросмотренные' : `${props.unreadCount} ${props.unreadCount === 1 ? 'новое' : 'новых'}`}</Typography></button>
         ) : null}
         <div className="feed-content">{children}</div>
         </div>

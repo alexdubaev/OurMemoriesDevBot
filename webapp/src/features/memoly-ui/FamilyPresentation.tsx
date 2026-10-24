@@ -121,14 +121,15 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
 
 function FamilyOverview({ family, child, childList, canEditChild, onAddChild, onEditChild, renderChildAvatar, childAvatarUrl, childAvatarStatus, members, invites, usage, usageFailed, canInvite, hasError, theme, currentUserId, canManageMaxChannel, maxChannelStatus, maxChannelLoading, maxChannelError, onRetryMaxChannel, onAllFamilies, onOpenChild, onOpenSettings, onOpenInvites, onOpenMember, onInvite, onRefresh, onRefreshUsage }: { family: FamilyResponse['family']; child: FamilyResponse['child']; members: FamilyMemberDto[]; invites: FamilyInviteDto[]; currentUserId: string; usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; canInvite: boolean; hasError: boolean; theme: MemolyTheme; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'; maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void; childList: ChildDto[]; canEditChild: boolean; onAddChild?: () => void; onEditChild: (childId: string) => void; renderChildAvatar?: (child: ChildDto) => ReactNode; onAllFamilies?: () => void; onOpenChild?: () => void; onOpenSettings: () => void; onOpenMember: (member: FamilyMemberDto) => void; onOpenInvites: () => void; onInvite: () => void; onRefresh: () => void; onRefreshUsage: () => void }) {
   // R06: with two or more children the header represents the whole family.
-  const familyHeader = readUiVersion() === 'v2' && childList.length >= 2
+  const uiV2 = readUiVersion() === 'v2'
+  const familyHeader = uiV2 && childList.length >= 2
   return <>
     {familyHeader
       ? <FamilyHeaderV2 childList={childList} familyName={family.name} mode="family" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={canEditChild ? onEditChild : undefined} renderChildAvatar={renderChildAvatar} selectChildLabel={(item) => `Редактировать профиль ребёнка: ${item.name}`} theme={theme} />
       : <ChildHeader childAvatarCrop={child?.avatarCrop ?? null} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} childName={child?.name ?? 'Ребёнок'} childSubtitle={child ? feedChildSubtitle(child.birthDate, family.timezone) : 'Профиль ребёнка'} mode="family" onAllFamilies={onAllFamilies} onOpenChild={child ? onOpenChild : undefined} onOpenSettings={onOpenSettings} theme={theme} />}
     <div className="family-shell family-overview-body">
     {hasError ? <div className="family-error"><InlineError onRetry={onRefresh} /></div> : null}
-    <FamilyChildrenSection canEdit={canEditChild} childList={childList} onAddChild={onAddChild} onEditChild={onEditChild} renderAvatar={renderChildAvatar} timezone={family.timezone} />
+    {uiV2 ? <FamilyChildrenSection canEdit={canEditChild} childList={childList} onAddChild={onAddChild} onEditChild={onEditChild} renderAvatar={renderChildAvatar} timezone={family.timezone} /> : null}
     <div className="family-section-head"><h2>Ваши близкие</h2><span className="family-count">{formatMemberCount(members.length)}</span></div>
     <div className="family-list">{members.map((member) => <FamilyMemberRow key={member.userId} currentUserId={currentUserId} member={member} onOpen={onOpenMember} />)}</div>
     {canInvite ? <button className="family-invite-btn" onClick={onInvite} type="button"><span className="family-invite-plus">+</span><span>Пригласить родственника</span></button> : null}

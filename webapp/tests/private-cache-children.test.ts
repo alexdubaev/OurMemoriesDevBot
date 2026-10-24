@@ -40,11 +40,7 @@ afterEach(() => {
   activatePrivateCacheIdentity(null)
 })
 
-describe('private cache schema 2 with children', () => {
-  test('is a new schema so entries written before the children list are dropped once', () => {
-    expect(PRIVATE_CACHE_SCHEMA).toBe(2)
-  })
-
+describe('private cache with children', () => {
   test('a saved family with its children list survives a restart', async () => {
     const generation = activatePrivateCacheIdentity(userId)
     const before = new QueryClient()

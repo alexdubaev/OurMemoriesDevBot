@@ -3,7 +3,7 @@ import { QueryClient, useInfiniteQuery, useMutation, useQueryClient } from '@tan
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './presentation'
 import type { ChildFilter } from './child-filter'
@@ -27,11 +27,18 @@ export function useFeedQuery(transport: AuthenticatedTransport, familyId: string
     queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter),
     queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly, childFilter),
     enabled,
+    retry: shouldRetryFeedQuery,
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: unreadOnly ? Infinity : 20_000,
     refetchOnWindowFocus: active && !unreadOnly,
   })
+}
+
+/** Access and missing-child errors are terminal; network and server errors retain query retries. */
+export function shouldRetryFeedQuery(failureCount: number, error: unknown) {
+  if (error instanceof ApiRequestError && [403, 404].includes(error.status)) return false
+  return failureCount < 3
 }
 
 export function useMemoryReaction(transport: AuthenticatedTransport, familyId: string, accountId = '', membershipEpoch = 0) {

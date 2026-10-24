@@ -6,7 +6,7 @@ import { childFilterChips, composerInitialChildIds, missingChildFilterId, normal
 import { ApiRequestError } from '../src/platform/api'
 import { loadFeed } from '../src/features/feed/api'
 import { childAlbumsQueryKey, missingChildAlbumTemplates, orderChildAlbums } from '../src/features/feed/child-albums'
-import { feedQueryKeys, matchesReactionFeedScope, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
+import { feedQueryKeys, matchesReactionFeedScope, removeMemoryFromCachedFeeds, shouldRetryFeedQuery } from '../src/features/feed/queries'
 import { isPersistableQueryKey, removePrivateFamilyQueries } from '../src/platform/persistence/private-cache'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HttpRequestOptions } from '../src/platform/api/http-client'
@@ -157,6 +157,16 @@ describe('feed request with a child filter', () => {
     expect(query(calls[0]!.path).has('childId')).toBe(false)
     expect(query(calls[1]!.path).has('childId')).toBe(false)
     expect(query(calls[1]!.path).has('untagged')).toBe(false)
+  })
+})
+
+describe('feed query retries', () => {
+  test('403 and 404 stop immediately while transient errors keep the existing retry limit', () => {
+    expect(shouldRetryFeedQuery(0, new ApiRequestError(403, 'FORBIDDEN', 'Нет доступа'))).toBe(false)
+    expect(shouldRetryFeedQuery(0, new ApiRequestError(404, 'NOT_FOUND', 'Не найдено'))).toBe(false)
+    expect(shouldRetryFeedQuery(0, new Error('network'))).toBe(true)
+    expect(shouldRetryFeedQuery(2, new Error('network'))).toBe(true)
+    expect(shouldRetryFeedQuery(3, new Error('network'))).toBe(false)
   })
 })
 
