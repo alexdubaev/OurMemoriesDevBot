@@ -494,4 +494,3 @@ function expandIpv6(address: string): string[] | null {
   const groups = [...left, ...Array(fill).fill('0'), ...right]
   return groups.length === 8 && groups.every((part) => /^[0-9a-f]{1,4}$/.test(part)) ? groups : null
 }
-
