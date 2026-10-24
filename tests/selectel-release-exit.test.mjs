@@ -439,6 +439,60 @@ const reviewedPrivatePhotoProductionBlobs = [
   ['webapp/src/features/memoly-ui/AddSheetPresentation.tsx', '7187fbcdd05fa4f9e9ac46db7104d215fd301d06'],
   ['webapp/src/platform/app-zoom.ts', 'c1bb21a6cb8bd072f779b662b5a5c628ccbb3af9'],
 ]
+const reviewedWishlistProductionBlobs = [
+  ['backend/prisma/migrations/20261023120000_gift_wishlist/migration.sql', 'bd538f14b50266bff3ad939243ef974cbf2b6291'],
+  ['backend/prisma/migrations/20261024120000_gift_photo_recovery_guard/migration.sql', '01fbd39bed168dd7082c1eb3ce2a940e57c01f06'],
+  ['backend/prisma/schema.prisma', 'ea0ed15d90ba5c8a79b1b42d2ef6fa04ce34fcbe'],
+  ['backend/src/app.ts', '2793eab07c2131cae8d29f1b55a79e4ac8ad5033'],
+  ['backend/src/jobs.ts', '27ed3eec8a245dd81dbf99cc49ec83bb0bd0c504'],
+  ['backend/src/modules/families/application/family-service.ts', 'cde35b90bb7991e3d3b65df9cc009db766163490'],
+  ['backend/src/modules/gifts/application/gift-service.ts', '699500bcea287cf31f0f9068141f912f51b69c60'],
+  ['backend/src/modules/gifts/application/ports.ts', '9678165d143337e24f0423f1a80755f2ec1d3631'],
+  ['backend/src/modules/gifts/domain/errors.ts', '02a51793e602c362cf4fe9b27d4b5caddec0e60b'],
+  ['backend/src/modules/gifts/domain/gift-rules.ts', 'd85cab7d9c1d78c6db9afaf6c817b72fe8d57ae5'],
+  ['backend/src/modules/gifts/index.ts', '3592984c1b5e549afb9a726f50428bc3fe7c2566'],
+  ['backend/src/modules/gifts/infrastructure/prisma-gift-repository.ts', '964d78b903c82bf4eca5f8331f88e297a60af21e'],
+  ['backend/src/modules/gifts/transport/errors.ts', 'a15d325062fc30c553b49908e7ba5c1a7c5c3def'],
+  ['backend/src/modules/gifts/transport/routes.ts', '44500ad2258b02166bd90aa871c7289ab9267d8a'],
+  ['backend/src/modules/media/application/media-service.ts', '4a4199888c7976e26810c130335018c6f2138653'],
+  ['backend/src/modules/media/application/ports.ts', '5132bf16679ff17f2e59e11322d4d1955e4b1e2e'],
+  ['backend/src/modules/media/infrastructure/prisma-media-repository.ts', 'aa7e102090c686dc003229b49be090c14fa7f2f8'],
+  ['packages/contracts/src/gifts.ts', 'bef4a5c1452d9678d13a3f2f954c5e1ba8755c6a'],
+  ['packages/contracts/src/index.ts', '6a42045b46a434c5f95d550e8e5b38c863bb2fc3'],
+  ['packages/contracts/src/media.ts', '92c4a169515dea3d7dda0e387c74c1a7fae82190'],
+  ['webapp/public/assets/icons/gift-active@2x.webp', 'c94e7206795e8573761052f232052b2cacef1278'],
+  ['webapp/public/assets/icons/gift-active@3x.webp', 'c020942a472fb60660dffe96fda87a47ce49d239'],
+  ['webapp/public/assets/icons/gift-default@2x.webp', '2072d352de34e4f6b2b2d22edf068d237103d877'],
+  ['webapp/public/assets/icons/gift-default@3x.webp', '8720943beeb474ffdd7481d805a8c799fcee627c'],
+  ['webapp/public/assets/icons/gift-white@2x.webp', '73377ba98f5acbc93e78ce902bbf5221f04acb0c'],
+  ['webapp/public/assets/icons/gift-white@3x.webp', '6c7edaf9894f477889d2db26abb30df25cddc3e2'],
+  ['webapp/src/App.tsx', 'adb48eecf2ac766005f6d4672152bf4c5281556e'],
+  ['webapp/src/components/BottomNavigation.tsx', '88d36149b66d86116d3f22e8d1ae66508e7b0185'],
+  ['webapp/src/components/MemolyBottomSheet.tsx', '70c895652fd20465797adde164789d2ac1405993'],
+  ['webapp/src/components/ui-v2/shared-skin.css', 'deb25ae9424cdc3ec3b8d7a9a7cc62cbc997d84c'],
+  ['webapp/src/components/webp-icon-types.ts', 'aee2f4c65431ba7b6a6e1492db1027430440bc52'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', 'ab83274d4395749b65639a6b5b9ecb7b724b5a88'],
+  ['webapp/src/features/composer/index.ts', '910428c9617fc8aa5a79f9faa6e4002caf4efcfb'],
+  ['webapp/src/features/family/FamilyScreen.tsx', '40d127c38d3d476b1ca59f68bb35b660614806cd'],
+  ['webapp/src/features/family/api.ts', '5491a286b234e36d8f2501acf984e01c87143f00'],
+  ['webapp/src/features/feed/FeedPage.tsx', '5a8f552ea85f3021c4d9871c1974c75eff0cb881'],
+  ['webapp/src/features/feed/components/FeedShell.tsx', '35db262c02c906dc5d7f64b07a1ca171fff1950b'],
+  ['webapp/src/features/feed/presentation/FeedPresentation.tsx', '090f9758e2f20661031ea8f4abab9fb24d455842'],
+  ['webapp/src/features/gifts/GiftCard.tsx', 'ccbaaf29fa79dba4b0fdacebe54f813411df4300'],
+  ['webapp/src/features/gifts/GiftForm.tsx', '472d45785fa8a9121933bec75bf30ccb802205f5'],
+  ['webapp/src/features/gifts/GiftsPage.tsx', '9b0df56a7822140676e5bb0f17f0e49345053a4c'],
+  ['webapp/src/features/gifts/api.ts', '4c61f1d2d0a9bd2f148d0af7719221f36dc42b07'],
+  ['webapp/src/features/gifts/gifts.css', 'bc0a014dc870e862e22ece8074f1f4a336119d73'],
+  ['webapp/src/features/gifts/index.ts', 'c72f0cd25a7dc997dd046e38d7edf0cc6deac8d9'],
+  ['webapp/src/features/gifts/model.ts', 'cb2b048aec4d76b37ae90885577eb7b12417be65'],
+  ['webapp/src/features/gifts/queries.ts', '4ff5a8ea221db8ba81e289352ae7664df50f6eec'],
+  ['webapp/src/platform/external-link.ts', '91f8e1578be0ddb0b1b14d2a5fb57c7d367f58fa'],
+  ['webapp/src/platform/host-bridge.ts', '4fc26ca7eb1168589f0089d0c915b075a446e3f0'],
+  ['webapp/src/platform/max/host-bridge.ts', '5c96df647667e5af9ec74cd49980682268dc5664'],
+  ['webapp/src/platform/persistence/private-cache.ts', 'bba2bf1b469b2cec0831212a0daa2ef1891129d9'],
+  ['webapp/src/platform/telegram/host-bridge.ts', '9e31299f82c80ed24aaab51a7db42278a9c94089'],
+  ['webapp/src/styles/tokens.css', '717b7fbfabd767a0b7282ca6712ef30acac3dbe0'],
+]
 const reviewedFamilyNavigationBlobs = [
   ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
   ['webapp/src/components/ui-v2/ChildHeaderV2.css', 'd648a7ad8ca15553f78e3adca5a5ac08c2d641ff'],
@@ -619,7 +673,7 @@ function commitFrozenSourceFiles(source, files, message) {
   const paths = []
   for (const [relativePath, blob] of files) {
     mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
-    writeFileSync(resolve(source.root, relativePath), frozenGitBlob(blob, relativePath))
+    writeFileSync(resolve(source.root, relativePath), frozenGitBlobBytes(blob, relativePath))
     paths.push(relativePath)
   }
   const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
@@ -637,6 +691,12 @@ function commitFrozenSourceFiles(source, files, message) {
 function frozenGitBlob(hash, description) {
   const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr}`)
+  return result.stdout
+}
+
+function frozenGitBlobBytes(hash, description) {
+  const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root })
+  if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr.toString('utf8')}`)
   return result.stdout
 }
 
@@ -1946,35 +2006,38 @@ test('wishlist recovery accepts only exact 53/54/55 guarded migration states and
   } finally { rmSync(fixture, { recursive: true, force: true }) }
 })
 
-test('wishlist recovery profile is pinned to the frozen 5f0f854e production inputs and dc26 target', {
+test('wishlist recovery profile is pinned to the exact executable inputs and dc26 target without producer reachability', {
   timeout: process.platform === 'win32' ? 180_000 : 60_000,
 }, () => {
-  const producer = '5f0f854e0843e87bf7d5634114b641b61cbc98f9'
+  const baseline = 'b4cdbbc49500d0850a64075d1bfba683a9bd22ad'
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
   const expectedCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
-  const producerDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-producer-'))
-  const producerAdded = spawnSync('git', ['worktree', 'add', '--detach', producerDirectory, producer], { cwd: root, encoding: 'utf8' })
-  if (producerAdded.status !== 0) throw new Error(producerAdded.stdout + producerAdded.stderr)
-  fixtureWorktrees.push(producerDirectory)
-  assert.equal(productionRuntimeFingerprint(producerDirectory, expectedAnchor),
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
-  assert.equal(productionCompatibilityFingerprint(producerDirectory), expectedCompatibility)
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-source-'))
+  const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedWishlistProductionBlobs,
+    'materialize exact wishlist compatibility source from committed production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+  assert.equal(spawnSync('git', ['rev-parse', `${source.sha}^`], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), baseline)
 
   const profile = (source) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
     encoding: 'utf8', timeout: 30_000,
   })
-  const accepted = profile({ root: producerDirectory, sha: producer })
+  const accepted = profile(source)
   assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
   assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
 
   const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-drift-'))
-  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, producer], { cwd: root, encoding: 'utf8' })
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
   if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
   fixtureWorktrees.push(driftDirectory)
-  const mutated = commitSourceChange({ root: driftDirectory, sha: producer },
+  const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha },
     'backend/src/modules/gifts/application/gift-service.ts',
     '\n// synthetic release compatibility drift control\n', 'mutate a frozen gift production input')
   const rejected = profile(mutated)
