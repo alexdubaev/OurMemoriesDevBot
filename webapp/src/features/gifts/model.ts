@@ -79,7 +79,7 @@ export const giftPriceErrorText = 'Цена — до 30 символов'
 
 /** Parse the two-line title + URL text copied by marketplace share actions. */
 export function parseGiftShareClipboard(text: string): { title: string; url: string } | null {
-  if (/[\u0000-\u001f\u007f]/u.test(text.replace(/\r\n|\r|\n/gu, ''))) return null
+  if (/\p{Cc}/u.test(text.replace(/\r\n|\r|\n/gu, ''))) return null
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   if (lines.length !== 2) return null
   const title = lines[0]?.trim() ?? ''
