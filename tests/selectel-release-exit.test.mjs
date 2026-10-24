@@ -1822,3 +1822,161 @@ test('guarded full release forces complete album readiness after SQL and before 
   assert.ok(!preFailure.actual.some((event) => event.startsWith('preflight:') || event.startsWith('migrate:') || event === 'PROMOTE'),
     preFailure.actual.join(', '))
 })
+
+function wishlistMigrationHistoryProgram() {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch/wishlist-ledger-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, 'b4cdbbc49500d0850a64075d1bfba683a9bd22ad'], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const migrations = [
+    '20261023120000_gift_wishlist',
+    '20261024120000_gift_photo_recovery_guard',
+  ]
+  for (const name of migrations) {
+    const target = resolve(directory, 'backend/prisma/migrations', name)
+    mkdirSync(target, { recursive: true })
+    writeFileSync(resolve(target, 'migration.sql'), readFileSync(resolve(root, 'backend/prisma/migrations', name, 'migration.sql')))
+  }
+  const staged = spawnSync('git', ['add', '--', ...migrations.map((name) => `backend/prisma/migrations/${name}/migration.sql`)], { cwd: directory, encoding: 'utf8' })
+  if (staged.status !== 0) throw new Error(staged.stdout + staged.stderr)
+  const committed = spawnSync('git', ['-c', 'user.name=Recovery Fixture', '-c', 'user.email=recovery-fixture@example.invalid', 'commit', '--quiet', '-m', 'create isolated wishlist migration catalog fixture'], { cwd: directory, encoding: 'utf8' })
+  if (committed.status !== 0) throw new Error(committed.stdout + committed.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).stdout.trim()
+  const captureProgram = resolve(root, '.scratch', `wishlist-ledger-program-${process.pid}.mjs`)
+  const captureCatalog = resolve(root, '.scratch', `wishlist-ledger-catalog-${process.pid}.txt`)
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
+      `APP_ROOT=${shellQuote(directory)}`,
+      `MEMOLY_PRODUCT_SHA=${sha}`,
+      'compose() { printf "%s" "${!#}" > "$CAPTURE_SCRIPT"; printf "%s\n%%CANDIDATE%%\n%s" "$MEMOLY_EXPECTED_BASELINE_MIGRATIONS" "$MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS" > "$CAPTURE_CATALOG"; }',
+      'rollback_verify_wishlist_migration_history pre-sql',
+    ].join('\n'),
+    encoding: 'utf8',
+    env: { ...process.env, CAPTURE_SCRIPT: gitBashPath(captureProgram), CAPTURE_CATALOG: gitBashPath(captureCatalog) },
+    timeout: 120_000,
+  })
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const catalogs = readFileSync(captureCatalog, 'utf8').split('\n%CANDIDATE%\n')
+  const program = readFileSync(captureProgram, 'utf8')
+  rmSync(captureProgram, { force: true })
+  rmSync(captureCatalog, { force: true })
+  return { program, baseline: catalogs[0], candidate: catalogs[1], source: directory, sha }
+}
+
+function runWishlistMigrationHistoryVerifier({ program, baseline, candidate, phase, rows, queryError = false }) {
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'wishlist-migration-ledger-module-'))
+  const moduleDir = resolve(fixture, 'node_modules/pg')
+  mkdirSync(moduleDir, { recursive: true })
+  writeFileSync(resolve(moduleDir, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(moduleDir, 'index.js'), `export class Client {
+    async connect() {}
+    async query() { if (process.env.FIXTURE_MIGRATION_QUERY_ERROR === 'true') throw new Error('synthetic query failure'); return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+    async end() {}
+  }\n`)
+  const result = spawnSync('node', ['--input-type=module', '--eval', program], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: { ...process.env, MEMOLY_EXPECTED_BASELINE_MIGRATIONS: baseline,
+      MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS: candidate, MEMOLY_WISHLIST_LEDGER_PHASE: phase,
+      FIXTURE_MIGRATION_QUERY_ERROR: String(queryError),
+      FIXTURE_MIGRATION_ROWS: JSON.stringify(rows) },
+    timeout: 10_000,
+  })
+  rmSync(fixture, { recursive: true, force: true })
+  return result
+}
+
+test('wishlist recovery accepts only exact 53/54/55 guarded migration states and locks pre-SQL readiness', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const { program, baseline, candidate } = wishlistMigrationHistoryProgram()
+  const lines = (value) => value.trim().split('\n').map((line) => {
+    const [migration_name, checksum] = line.split(':')
+    return { migration_name, checksum, finished_at: '2026-10-24T00:00:00.000Z', rolled_back_at: null }
+  })
+  const baselineRows = lines(baseline)
+  const candidateRows = lines(candidate)
+  const giftRow = candidateRows.find(({ migration_name }) => migration_name === '20261023120000_gift_wishlist')
+  const guardRow = candidateRows.find(({ migration_name }) => migration_name === '20261024120000_gift_photo_recovery_guard')
+  assert.equal(baselineRows.length, 53)
+  assert.equal(candidateRows.length, 55)
+  assert.ok(giftRow)
+  assert.ok(guardRow)
+  const verify = (phase, rows) => runWishlistMigrationHistoryVerifier({ program, baseline, candidate, phase, rows })
+  assert.equal(verify('pre-sql', baselineRows).status, 0, 'exact deployed baseline is accepted before SQL')
+  assert.equal(verify('pre-sql', [...baselineRows, giftRow]).status, 0, 'exact gift migration prefix is accepted before SQL')
+  assert.equal(verify('pre-sql', candidateRows).status, 0, 'exact fully applied candidate is accepted before SQL recovery')
+  assert.equal(verify('complete', candidateRows).status, 0, 'exact 55-migration state is accepted after SQL')
+  assert.notEqual(verify('complete', [...baselineRows, giftRow]).status, 0, 'completed state missing the recovery guard is rejected')
+  assert.notEqual(verify('pre-sql', [...baselineRows, giftRow, { ...guardRow, migration_name: '20990101000000_unrelated' }]).status, 0, 'arbitrary extra migration is rejected')
+  assert.notEqual(verify('pre-sql', [...baselineRows.slice(0, 9), ...baselineRows.slice(10), giftRow, guardRow]).status, 0, 'dropped baseline migration is rejected')
+  assert.notEqual(verify('pre-sql', [{ ...baselineRows[0], checksum: 'f'.repeat(64) }, ...baselineRows.slice(1)]).status, 0, 'baseline checksum mutation is rejected')
+  assert.notEqual(verify('pre-sql', [...candidateRows.slice(0, 54), { ...guardRow, checksum: 'f'.repeat(64) }]).status, 0, 'recovery guard checksum mutation is rejected')
+  assert.notEqual(verify('pre-sql', [baselineRows[0], baselineRows[0], ...baselineRows.slice(1, 51), giftRow, guardRow]).status, 0, 'duplicate migration is rejected')
+  assert.notEqual(verify('pre-sql', [{ ...candidateRows[54], finished_at: null }, ...candidateRows.slice(0, 54)]).status, 0, 'unfinished migration is rejected')
+  assert.notEqual(verify('pre-sql', [{ ...candidateRows[54], rolled_back_at: '2026-10-24T00:01:00.000Z' }, ...candidateRows.slice(0, 54)]).status, 0, 'rolled-back migration is rejected')
+  assert.notEqual(verify('unknown', candidateRows).status, 0, 'unknown phase is rejected')
+  assert.notEqual(runWishlistMigrationHistoryVerifier({ program, baseline, candidate, phase: 'complete', rows: candidateRows, queryError: true }).status, 0,
+    'migration query errors are rejected')
+
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'wishlist-pre-sql-lock-'))
+  try {
+    const serverRoot = resolve(fixture, 'server')
+    mkdirSync(serverRoot, { recursive: true })
+    const lockProbe = spawnSync(bashExecutable, ['-s'], {
+      cwd: root,
+      input: [
+        redeployDefinitions,
+        `SERVER_ROOT=${shellQuote(serverRoot)}`,
+        'SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql',
+        'SELECTEL_CI_RELEASE=true',
+        'SELECTEL_DEPLOY_LOCK_FD=9',
+        'verify_application_rollback() { echo VERIFY_MUST_NOT_RUN; }',
+        'rollback_readiness',
+      ].join('\n'),
+      encoding: 'utf8', timeout: 30_000,
+    })
+    assert.notEqual(lockProbe.status, 0, lockProbe.stdout + lockProbe.stderr)
+    assert.match(`${lockProbe.stdout}${lockProbe.stderr}`, /pre-SQL migration readiness lock/)
+    assert.doesNotMatch(`${lockProbe.stdout}${lockProbe.stderr}`, /VERIFY_MUST_NOT_RUN/)
+  } finally { rmSync(fixture, { recursive: true, force: true }) }
+})
+
+test('wishlist recovery profile is pinned to the frozen d356 production inputs and dc26 target', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const producer = 'd35682bfbc777c9cfd012e561ebc05b693c98b1f'
+  const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedCompatibility = '484342277ccd9338402e2841acc1bb719e2fce1ec0c64a8c8d66627369f2fdaa'
+  const producerDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-producer-'))
+  const producerAdded = spawnSync('git', ['worktree', 'add', '--detach', producerDirectory, producer], { cwd: root, encoding: 'utf8' })
+  if (producerAdded.status !== 0) throw new Error(producerAdded.stdout + producerAdded.stderr)
+  fixtureWorktrees.push(producerDirectory)
+  assert.equal(productionRuntimeFingerprint(producerDirectory, expectedAnchor),
+    '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
+  assert.equal(productionCompatibilityFingerprint(producerDirectory), expectedCompatibility)
+
+  const profile = (source) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile({ root: producerDirectory, sha: producer })
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, producer], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitSourceChange({ root: driftDirectory, sha: producer },
+    'backend/src/modules/gifts/application/gift-service.ts',
+    '\n// synthetic release compatibility drift control\n', 'mutate a frozen gift production input')
+  const rejected = profile(mutated)
+  assert.notEqual(rejected.status, 0, 'changed production source must not inherit the wishlist recovery permission')
+})
