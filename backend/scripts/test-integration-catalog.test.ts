@@ -81,11 +81,39 @@ describe('MAX PostgreSQL verification catalog', () => {
     expect(selected).not.toContain('scripts/historical/telegram-capture.integration.test.ts')
   })
 
-  test('permits only the two declared historical cross-provider exclusions', () => {
+  test('keeps exact per-file cross-provider exclusions', () => {
     expect(expectedMaxHistoricalExclusions('src/modules/auth/max-auth.integration.test.ts')).toBe(1)
     expect(expectedMaxHistoricalExclusions('src/modules/families/family-access.integration.test.ts')).toBe(1)
+    expect(expectedMaxHistoricalExclusions('src/modules/memories/child-tags-edit.integration.test.ts')).toBe(1)
     expect(expectedMaxHistoricalExclusions('src/modules/families/family-review-fixes.integration.test.ts')).toBe(0)
     expect(expectedMaxHistoricalExclusions('src/modules/max/media-flow.integration.test.ts')).toBe(0)
+    expect(expectedMaxHistoricalExclusions('src/modules/memories/child-tags.integration.test.ts')).toBe(0)
+  })
+
+  test('accepts the declared historical case while rejecting unexpected filtering, skips and empty evidence', async () => {
+    const childTagsEdit = 'src/modules/memories/child-tags-edit.integration.test.ts'
+    const integrationTestFiles = [...requiredFixtures(), childTagsEdit]
+    const run = (childTagsOutput: string) => runBackendIntegration({
+      environment: { TEST_SKIP_DOCKER: '1', TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/memoly_catalog_test' },
+      integrationTestFiles,
+      testArgs: ['--max-only'],
+      spawn: (_command, args) => {
+        const testFile = args.at(-1)?.replaceAll('\\', '/')
+        const output = args[0] !== 'test'
+          ? ''
+          : testFile === childTagsEdit
+            ? childTagsOutput
+            : expectedMaxHistoricalExclusions(testFile ?? '') === 1
+              ? '1 pass\n1 filtered out\nRan 2 tests across 1 files'
+              : '1 pass\nRan 1 tests across 1 files'
+        return { status: 0, stdout: output, stderr: '' }
+      },
+    })
+
+    await expect(run('12 pass\n1 filtered out\nRan 13 tests across 1 files')).resolves.toBeUndefined()
+    await expect(run('12 pass\n2 filtered out\nRan 14 tests across 1 files')).rejects.toThrow(/Required integration evidence invalid/)
+    await expect(run('12 pass\n1 skip\n1 filtered out\nRan 14 tests across 1 files')).rejects.toThrow(/Required integration evidence invalid/)
+    await expect(run('Ran 1 tests across 1 files')).rejects.toThrow(/Required integration evidence invalid/)
   })
 
   test('terminates a hung integration child at the configured process deadline', () => {
