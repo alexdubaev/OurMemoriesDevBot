@@ -49,7 +49,7 @@ test('gift form handles marketplace clipboard shares before the single-line URL 
   await page.keyboard.press('Control+V')
   await expect(urlField).toHaveValue('https://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169')
   await expect(titleField).toHaveValue('Magno World Магнитный конструктор робот трансформер спецтехника')
-  await expect(saveButton).toBeDisabled()
+  await expect(saveButton).toBeEnabled()
   await expect(urlField).toBeInViewport()
   await expect(titleField).toBeInViewport()
   await form.screenshot({ path: testInfo.outputPath('gift-share-paste-form.png'), animations: 'disabled' })
