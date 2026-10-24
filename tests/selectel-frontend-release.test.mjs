@@ -77,7 +77,13 @@ main
 test('frontend-rollback entrypoint recovers an interrupted promotion using recorded identities only', () => {
   const backend = '7a24e720cd2cf9ecfefa5344539e3d416999ec58'
   const oldFrontend = '0dbc4c486f3a7841ae2d72d7fc617e552d502941'
-  const candidate = '92b147a746631212dc5dd778bad6c1436c01873f'
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root, encoding: 'utf8' })
+  assert.equal(tree.status, 0, tree.stdout + tree.stderr)
+  const candidateResult = spawnSync('git', ['-c', 'user.name=Frontend recovery fixture', '-c', 'user.email=frontend-fixture@example.invalid',
+    'commit-tree', tree.stdout.trim(), '-p', backend, '-p', oldFrontend,
+    '-m', 'synthetic interrupted frontend promotion candidate'], { cwd: root, encoding: 'utf8' })
+  assert.equal(candidateResult.status, 0, candidateResult.stdout + candidateResult.stderr)
+  const candidate = candidateResult.stdout.trim()
   const result = runBash(`
 set -euo pipefail
 tmp=$(mktemp -d)

@@ -1311,7 +1311,7 @@ test('albums recovery uses frozen production blobs and confines the pending-ledg
   const unguardedPrefix = runApplicationRollback({ sourceRootOverride: source.root, sourceShaOverride: source.sha,
     target: rollbackHealthy, webappTarget: rollbackHealthy, action: 'rollback_readiness', albumPhase: 'pre-sql' })
   assert.notEqual(unguardedPrefix.status, 0, unguardedPrefix.output)
-  assert.match(unguardedPrefix.output, /pre-SQL album readiness is restricted to the guarded CI release/)
+  assert.match(unguardedPrefix.output, /pre-SQL migration readiness is restricted to the guarded CI release/)
   assert.doesNotMatch(unguardedPrefix.events, /ALBUM_HISTORY:|UP:|GATE/)
 
   const rollbackIgnoresPrefix = runApplicationRollback({ sourceRootOverride: source.root, sourceShaOverride: source.sha,
