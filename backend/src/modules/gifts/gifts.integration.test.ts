@@ -112,6 +112,49 @@ describe('Gift wishlist API', () => {
     expect((await api(outsider, 'POST', reservation(otherFamily.id, giftId), { expectedVersion: 1 })).status).toBe(404)
   })
 
+  test('metadata endpoint checks full family access before invoking the injected provider', async () => {
+    const { owner, viewer, full, family } = await familyWithMembers()
+    const outsider = await admittedUser('Чужой', subject())
+    let fetchCount = 0
+    const provider = {
+      async resolve() {
+        fetchCount += 1
+        return { status: 'ready' as const, title: 'Набор кубиков', price: null,
+          photo: { contentType: 'image/webp' as const, dataBase64: 'd2VicA==' } }
+      },
+    }
+    const metadataApp = createApp({ env, prisma, privateStorage: createPrivateStorage(env), giftMetadataProvider: provider })
+    const path = `${gifts(family.id)}/metadata`
+    const input = { url: 'https://www.wildberries.ru/catalog/859795006/detail.aspx' }
+    const request = async (user?: User) => {
+      const response = await metadataApp.request(path, {
+        method: 'POST',
+        headers: { ...(user ? { Authorization: `Bearer ${user.token}` } : {}), 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      return { response, body: await response.json() as any }
+    }
+
+    expect((await request()).response.status).toBe(401)
+    expect((await request(viewer)).response.status).toBe(403)
+    expect((await request(outsider)).response.status).toBe(404)
+    expect(fetchCount).toBe(0)
+
+    const allowed = await request(full)
+    expect(allowed.response.status).toBe(200)
+    expect(allowed.response.headers.get('cache-control')).toBe('private, no-store')
+    expect(allowed.body).toEqual({ status: 'ready', title: 'Набор кубиков', price: null,
+      photo: { contentType: 'image/webp', dataBase64: 'd2VicA==' } })
+    expect(fetchCount).toBe(1)
+
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: family.id, userId: full.userId } }, select: { version: true },
+    })
+    await api(owner, 'DELETE', `/api/v1/families/${family.id}/members/${full.userId}`, { expectedVersion: membership.version })
+    expect((await request(full)).response.status).toBe(404)
+    expect(fetchCount).toBe(1)
+  })
+
   test('creation validates the photo, the input and the idempotency key', async () => {
     const { owner, family } = await familyWithMembers()
     const stranger = await admittedUser('Другая мама', subject())
@@ -458,8 +501,9 @@ describe('Gift wishlist API', () => {
   async function api(
     user: User, method: string, path: string, body?: unknown, idempotencyKey?: string,
     extraHeaders: Record<string, string> = {},
+    targetApp = app,
   ) {
-    const response = await app.request(path, {
+    const response = await targetApp.request(path, {
       method,
       headers: {
         Authorization: `Bearer ${user.token}`,

@@ -25,6 +25,25 @@ export const giftUrlSchema = z
   .refine(isAllowedGiftUrl, 'Нужна ссылка на товар, которая начинается с http:// или https://')
 export const giftPriceSchema = z.string().trim().min(1).max(30)
 
+export const giftMetadataRequestSchema = z.object({ url: giftUrlSchema }).strict()
+export const giftMetadataResponseSchema = z.object({
+  status: z.enum(['ready', 'partial', 'unavailable', 'unsupported']),
+  title: giftTitleSchema.nullable(),
+  price: giftPriceSchema.nullable(),
+  photo: z.object({ contentType: z.literal('image/webp'), dataBase64: z.string().max(700_000) }).strict().nullable(),
+}).strict().superRefine((response, context) => {
+  if (response.status === 'ready' && (!response.title || !response.photo)) {
+    context.addIssue({ code: 'custom', message: 'Ready metadata must include a title and photo' })
+  }
+  if (response.status === 'partial' && !response.title && !response.photo) {
+    context.addIssue({ code: 'custom', message: 'Partial metadata must include a title or photo' })
+  }
+  if ((response.status === 'unavailable' || response.status === 'unsupported')
+    && (response.title || response.price || response.photo)) {
+    context.addIssue({ code: 'custom', message: 'Unavailable metadata must be empty' })
+  }
+})
+
 export const giftsParamsSchema = z.object({ familyId: giftUuidSchema }).strict()
 export const giftParamsSchema = z.object({ familyId: giftUuidSchema, giftId: giftUuidSchema }).strict()
 
@@ -87,3 +106,5 @@ export type CreateGiftRequest = z.infer<typeof createGiftRequestSchema>
 export type UpdateGiftRequest = z.infer<typeof updateGiftRequestSchema>
 export type GiftVersionRequest = z.infer<typeof giftVersionRequestSchema>
 export type GiftMutationResponse = z.infer<typeof giftMutationResponseSchema>
+export type GiftMetadataRequest = z.infer<typeof giftMetadataRequestSchema>
+export type GiftMetadataResponse = z.infer<typeof giftMetadataResponseSchema>

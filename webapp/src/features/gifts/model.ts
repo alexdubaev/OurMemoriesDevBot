@@ -64,13 +64,17 @@ export function splitGifts(gifts: readonly GiftDto[]) {
 /** Host name shown under the title, e.g. "shop.example". Empty when the link is unreadable. */
 export function shopName(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '')
+    if (hostname === 'ozon.ru' || hostname.endsWith('.ozon.ru')) return 'Ozon'
+    if (hostname === 'market.yandex.ru') return 'Яндекс Маркет'
+    if (hostname === 'wildberries.ru' || hostname.endsWith('.wildberries.ru') || hostname === 'wb.ru' || hostname.endsWith('.wb.ru')) return 'Wildberries'
+    return hostname.replace(/[^a-z0-9.-]/g, '').slice(0, 80) || 'Магазин'
   } catch {
     return ''
   }
 }
 
-export type GiftDraft = { url: string; title: string; price: string; hasPhoto: boolean }
+export type GiftDraft = { url: string; title: string; price: string }
 export type GiftDraftErrors = { url?: string; title?: string; price?: string }
 
 export const giftUrlErrorText = 'Нужна ссылка на товар, которая начинается с http:// или https://'
@@ -98,7 +102,7 @@ export function validateGiftDraft(draft: GiftDraft): { errors: GiftDraftErrors; 
   if (url && !giftUrlSchema.safeParse(url).success) errors.url = giftUrlErrorText
   if (title && !giftTitleSchema.safeParse(title).success) errors.title = giftTitleErrorText
   if (price && !giftPriceSchema.safeParse(price).success) errors.price = giftPriceErrorText
-  const canSave = Boolean(url) && Boolean(title) && draft.hasPhoto && Object.keys(errors).length === 0
+  const canSave = Boolean(url) && Object.keys(errors).length === 0
   return { errors, canSave }
 }
 

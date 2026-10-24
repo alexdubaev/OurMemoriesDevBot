@@ -22,7 +22,7 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
-import { createGiftsModule, giftPrivacyMiddleware } from './modules/gifts'
+import { createGiftsModule, giftPrivacyMiddleware, type GiftMetadataProvider } from './modules/gifts'
 import { createAlbumsModule } from './modules/albums'
 import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
@@ -50,6 +50,7 @@ type CreateAppOptions = {
   telegramRoutes?: import('hono').Hono | null
   maxRoutes?: import('hono').Hono | null
   maxVideoPlayback?: MaxVideoPlayback
+  giftMetadataProvider?: GiftMetadataProvider
 }
 
 export function createApp({
@@ -62,6 +63,7 @@ export function createApp({
   telegramRoutes = null,
   maxRoutes = null,
   maxVideoPlayback,
+  giftMetadataProvider,
 }: CreateAppOptions) {
   if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
     throw new Error('Legacy password auth test routes cannot be mounted in production')
@@ -94,6 +96,7 @@ export function createApp({
     idempotencyExecutor,
     idempotencySecret: env.JWT_SECRET,
     requireAuth: auth.requireAuth,
+    ...(giftMetadataProvider ? { metadataProvider: giftMetadataProvider } : {}),
   })
   const albums = createAlbumsModule({ db: prisma, idempotencyExecutor, idempotencySecret: env.JWT_SECRET, requireAuth: auth.requireAuth })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({

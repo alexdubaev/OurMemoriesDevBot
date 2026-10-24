@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test'
 
+type GiftEvidence = {
+  metadataRequests: Array<{ familyId: string; url: string }>
+  uploadReservations: Array<{ purpose: string; contentType: string; byteSize: number }>
+  uploadBytes: Array<{ size: number; type: string; name: string }>
+  finalizedUploads: string[]
+  createBodies: Array<{ title: string; price?: string; photoMediaId: string }>
+  updateBodies: Array<{ url?: string; photoMediaId?: string }>
+}
+
 test('gift editor stays open through dismissal attempts while save is pending', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -49,6 +58,112 @@ test('opening gifts after family access is removed clears the stale private list
   await expect(page.locator('[data-navigation-surface="gifts"]')).toHaveCount(0)
   await expect(page.getByText('Конструктор', { exact: true })).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __selectedFamilyGiftCached?: () => unknown }).__selectedFamilyGiftCached?.())).toBeUndefined()
+})
+
+test('creating from a valid URL fills available metadata and uploads the private photo on save', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=ready&giftMetadataDelay=500')
+  await startProductionFeed(page)
+  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
+
+  const form = page.locator('[data-slot="gift-form"]')
+  await form.getByLabel('Ссылка на товар').fill('https://www.wildberries.ru/catalog/123/detail.aspx')
+  await expect(form.getByLabel('Название')).toHaveValue('Игрушка из магазина')
+  await expect(form.getByLabel('Цена, по желанию')).toHaveValue('3490 ₽')
+  await expect(form.locator('.gift-photo-preview img')).toBeVisible()
+  await expect(form.getByText('Название и фото добавлены. Их можно изменить.')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('gift-create-autofill.png'), fullPage: true })
+
+  await form.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Подарок добавлен.' })).toBeVisible()
+  await expect(page.locator('.gift-card').filter({ hasText: 'Игрушка из магазина' })).toBeVisible()
+  const evidence = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence)
+  expect(evidence.metadataRequests.map(({ url }) => url)).toEqual(['https://www.wildberries.ru/catalog/123/detail.aspx'])
+  expect(evidence.uploadReservations).toEqual([expect.objectContaining({ purpose: 'gift', contentType: 'image/webp' })])
+  expect(evidence.uploadBytes[0]).toEqual(expect.objectContaining({ type: 'image/webp', name: 'gift-product.webp' }))
+  expect(evidence.finalizedUploads).toHaveLength(1)
+  expect(evidence.createBodies[0]).toEqual(expect.objectContaining({ title: 'Игрушка из магазина', price: '3490 ₽', photoMediaId: evidence.finalizedUploads[0] }))
+
+  await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
+  const quickSaveForm = page.locator('[data-slot="gift-form"]')
+  await quickSaveForm.getByLabel('Ссылка на товар').fill('https://www.wildberries.ru/catalog/456/detail.aspx')
+  await quickSaveForm.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(quickSaveForm.getByRole('button', { name: 'Ищем данные товара…' })).toBeVisible()
+  await expect(quickSaveForm).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'Подарок добавлен.' })).toBeVisible()
+  const quickSaveEvidence = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence)
+  expect(quickSaveEvidence.createBodies[1]).toEqual(expect.objectContaining({ title: 'Игрушка из магазина', price: '3490 ₽', photoMediaId: quickSaveEvidence.finalizedUploads[1] }))
+})
+
+test('a valid URL saves with the store name and gift icon when metadata is unavailable', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=unavailable')
+  await startProductionFeed(page)
+  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
+
+  const form = page.locator('[data-slot="gift-form"]')
+  await form.getByLabel('Ссылка на товар').fill('https://market.yandex.ru/cc/BNpQaH')
+  await expect(form.getByText('Не удалось получить данные магазина. Можно сохранить ссылку со значком подарка и изменить название позже.')).toBeVisible()
+  await expect(form.getByLabel('Название')).toHaveValue('')
+  await expect(form.getByRole('button', { name: 'Сохранить' })).toBeEnabled()
+  await page.setViewportSize({ width: 390, height: 1100 })
+  await page.screenshot({ path: testInfo.outputPath('gift-create-fallback.png'), fullPage: true })
+
+  await form.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Подарок добавлен.' })).toBeVisible()
+  await expect(page.locator('.gift-card').filter({ hasText: 'Яндекс Маркет' })).toBeVisible()
+  const evidence = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence)
+  expect(evidence.uploadReservations).toEqual([expect.objectContaining({ purpose: 'gift', contentType: 'image/webp' })])
+  expect(evidence.uploadBytes[0]).toEqual(expect.objectContaining({ type: 'image/webp', name: 'gift-default.webp' }))
+  expect(evidence.finalizedUploads).toHaveLength(1)
+  expect(evidence.createBodies[0]).toEqual(expect.objectContaining({ title: 'Яндекс Маркет', photoMediaId: evidence.finalizedUploads[0] }))
+  expect(evidence.createBodies[0].price).toBeUndefined()
+})
+
+test('manual values beat delayed metadata, stale lookups are ignored, and editing keeps its private photo', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/selected-family-app.harness.html?giftMetadata=ready&giftMetadataDelay=650')
+  await startProductionFeed(page)
+  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить подарок', exact: true }).click()
+
+  const createForm = page.locator('[data-slot="gift-form"]')
+  await createForm.getByLabel('Ссылка на товар').fill('https://www.wildberries.ru/stale/item')
+  await expect(createForm.getByText('Ищем название и фото по ссылке…')).toBeVisible()
+  await createForm.getByLabel('Ссылка на товар').fill('https://www.ozon.ru/current/item')
+  await createForm.getByLabel('Название').fill('Мой выбор')
+  await createForm.getByLabel('Цена, по желанию').fill('5290 ₽')
+  await createForm.getByLabel('Цена, по желанию').fill('')
+  await createForm.locator('input[type="file"]').setInputFiles('public/assets/icons/gift-default@3x.webp')
+  await expect(createForm.locator('.gift-photo-preview img')).toBeVisible()
+  await expect(createForm.getByText('Название и фото добавлены. Их можно изменить.')).toBeVisible()
+  await expect(createForm.getByLabel('Название')).toHaveValue('Мой выбор')
+  await expect(createForm.getByLabel('Цена, по желанию')).toHaveValue('')
+  await createForm.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Подарок добавлен.' })).toBeVisible()
+  const created = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence.createBodies[0])
+  expect(created).toEqual(expect.objectContaining({ title: 'Мой выбор' }))
+  expect(created.price).toBeUndefined()
+  const evidence = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence)
+  expect(evidence.metadataRequests.map(({ url }) => url)).toEqual(['https://www.wildberries.ru/stale/item', 'https://www.ozon.ru/current/item'])
+  expect(evidence.uploadBytes[0]?.name).toBe('gift-default@3x.webp')
+
+  await page.locator('.gift-card').filter({ hasText: 'Конструктор' }).getByRole('button', { name: 'Изменить подарок «Конструктор»' }).click()
+  const editForm = page.locator('[data-slot="gift-form"]')
+  await editForm.getByLabel('Ссылка на товар').fill('https://www.ozon.ru/product/changed-url/')
+  await expect(editForm.getByLabel('Название')).toHaveValue('Конструктор')
+  await expect(editForm.locator('.gift-photo-preview img')).toBeVisible()
+  await editForm.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Изменения сохранены.' })).toBeVisible()
+  const finalEvidence = await page.evaluate(() => (window as typeof window & { __selectedFamilyGiftEvidence: GiftEvidence }).__selectedFamilyGiftEvidence)
+  expect(finalEvidence.metadataRequests).toHaveLength(2)
+  expect(finalEvidence.uploadReservations).toHaveLength(1)
+  expect(finalEvidence.updateBodies.at(-1)).toEqual(expect.objectContaining({ url: 'https://www.ozon.ru/product/changed-url/' }))
+  expect(finalEvidence.updateBodies.at(-1)?.photoMediaId).toBeUndefined()
 })
 
 async function startProductionFeed(page: import('@playwright/test').Page) {

@@ -6,6 +6,8 @@ import {
   createGiftRequestSchema,
   deleteGiftHeadersSchema,
   giftListResponseSchema,
+  giftMetadataRequestSchema,
+  giftMetadataResponseSchema,
   giftMutationResponseSchema,
   giftParamsSchema,
   giftsParamsSchema,
@@ -15,6 +17,7 @@ import {
 } from '@web-app-demo/contracts'
 import type { ZodType } from 'zod'
 import { errorResponse, requestIdFrom, validationErrorHook } from '../../../http/errors'
+import { createFixedWindowRateLimit } from '../../../http/security'
 import type { AuthHttpEnv } from '../../auth'
 import type { GiftService } from '../application/gift-service'
 import { executeGift } from './errors'
@@ -32,6 +35,7 @@ const errors = {
 const security = [{ BearerAuth: [] }]
 const listPath = '/families/{familyId}/gifts'
 const giftPath = `${listPath}/{giftId}`
+const metadataPath = `${listPath}/metadata`
 const mutation = { content: json(giftMutationResponseSchema), description: 'Fresh gift' }
 const versionBody = { body: { content: json(giftVersionRequestSchema), required: true } }
 
@@ -39,6 +43,11 @@ const list = createRoute({
   method: 'get', path: listPath, security,
   request: { params: giftsParamsSchema },
   responses: { ...errors, 200: { content: json(giftListResponseSchema), description: 'Family gift list' } },
+})
+const metadata = createRoute({
+  method: 'post', path: metadataPath, security,
+  request: { params: giftsParamsSchema, body: { content: json(giftMetadataRequestSchema), required: true } },
+  responses: { ...errors, 200: { content: json(giftMetadataResponseSchema), description: 'Bounded product metadata' } },
 })
 const create = createRoute({
   method: 'post', path: listPath, security,
@@ -90,9 +99,11 @@ export const giftPrivacyMiddleware: MiddlewareHandler = async (c, next) => {
 export function createGiftRoutes({
   requireAuth,
   service,
+  metadataRateLimitMax = 12,
 }: {
   requireAuth: MiddlewareHandler<AuthHttpEnv>
   service: GiftService
+  metadataRateLimitMax?: number
 }) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
   const limit = bodyLimit({
@@ -103,6 +114,21 @@ export function createGiftRoutes({
     routes.use(path, requireAuth)
     routes.use(path, limit)
   }
+  const metadataRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
+    errorMessage: 'Слишком много запросов к данным магазина. Попробуйте позже',
+    key: (c) => c.var.user.id,
+    max: metadataRateLimitMax,
+    windowSeconds: 300,
+  })
+  let activeMetadataRequests = 0
+  routes.use('/families/:familyId/gifts/metadata', metadataRateLimit)
+  routes.use('/families/:familyId/gifts/metadata', async (c, next) => {
+    if (activeMetadataRequests >= 2) {
+      return c.json(errorResponse('RATE_LIMITED', 'Слишком много запросов к данным магазина. Попробуйте позже', requestIdFrom(c)), 429)
+    }
+    activeMetadataRequests += 1
+    try { await next() } finally { activeMetadataRequests -= 1 }
+  })
   const scope = (user: AuthHttpEnv['Variables']['user'], familyId: string) => ({
     principal: { userId: user.id, sessionId: user.sessionId },
     familyId,
@@ -110,6 +136,11 @@ export function createGiftRoutes({
 
   routes.openapi(list, async (c) =>
     c.json(await executeGift(() => service.list(scope(c.var.user, c.req.valid('param').familyId))), 200))
+  routes.openapi(metadata, async (c) => {
+    const p = c.req.valid('param')
+    const result = await executeGift(() => service.metadata(scope(c.var.user, p.familyId), c.req.valid('json').url))
+    return c.json(result, 200)
+  })
   routes.openapi(create, async (c) => {
     const result = await executeGift(() => service.create(
       scope(c.var.user, c.req.valid('param').familyId),

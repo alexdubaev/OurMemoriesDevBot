@@ -5,6 +5,8 @@ import {
   createGiftRequestSchema,
   giftDtoSchema,
   giftListResponseSchema,
+  giftMetadataRequestSchema,
+  giftMetadataResponseSchema,
   giftPriceSchema,
   giftTitleSchema,
   giftUrlSchema,
@@ -18,6 +20,14 @@ const photoMediaId = randomUUID()
 const valid = { title: 'Конструктор', url: 'https://shop.example/item/1', photoMediaId }
 
 describe('gift contracts', () => {
+  test('metadata request and bounded response have strict shapes', () => {
+    expect(giftMetadataRequestSchema.parse({ url: 'https://www.ozon.ru/product/a-123' })).toEqual({ url: 'https://www.ozon.ru/product/a-123' })
+    expect(giftMetadataRequestSchema.safeParse({ url: 'https://shop.example/a', title: 'inject' }).success).toBe(false)
+    expect(giftMetadataResponseSchema.safeParse({ status: 'partial', title: 'Подарок', price: null, photo: null }).success).toBe(true)
+    expect(giftMetadataResponseSchema.safeParse({ status: 'ready', title: null, price: null, photo: null }).success).toBe(false)
+    expect(giftMetadataResponseSchema.safeParse({ status: 'unknown', title: null, price: null, photo: null }).success).toBe(false)
+    expect(giftMetadataResponseSchema.safeParse({ status: 'ready', title: null, price: null, photo: { contentType: 'image/png', dataBase64: 'AA==' } }).success).toBe(false)
+  })
   test('accepts http and https shop links', () => {
     expect(giftUrlSchema.parse('https://shop.example/item?id=1')).toBe('https://shop.example/item?id=1')
     expect(giftUrlSchema.parse('http://shop.example/')).toBe('http://shop.example/')
