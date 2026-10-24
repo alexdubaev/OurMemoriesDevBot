@@ -145,6 +145,23 @@ describe('family children API', () => {
       expect((await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: second.id } })).deletedAt).toBeNull()
     })
 
+    test('a photo-only edit that loses its version conflict retires the uploaded avatar', async () => {
+      const target = await family(undefined, ['Лиля', 'Миша'])
+      const younger = target.children[1]!
+      const uploaded = await avatar(target.id, target.owner.id)
+      const concurrentEdit = await patch(target.id, younger.id, { name: 'Михаил', expectedVersion: 1 }, target.owner.token)
+      expect(concurrentEdit.response.status).toBe(200)
+      const stale = await patch(target.id, younger.id, {
+        avatarMediaId: uploaded.id, avatarCrop: FULL_CROP, expectedVersion: 1,
+      }, target.owner.token)
+
+      expect(stale.response.status).toBe(409)
+      expect(stale.body.error.code).toBe('VERSION_CONFLICT')
+      expect((await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: uploaded.id } })).deletedAt).not.toBeNull()
+      expect(await fx.db.taskOutbox.count({ where: { dedupeKey: `media-delete:${uploaded.id}` } })).toBe(1)
+      expect(await fx.db.child.findUniqueOrThrow({ where: { id: younger.id } })).toMatchObject({ avatarMediaId: null, version: 2, displayName: 'Михаил' })
+    })
+
     test('a deleted child or a child of another family is not found', async () => {
       const target = await family(undefined, ['Лиля', { name: 'Удалённый', deleted: true }])
       const stranger = await family(undefined, ['Чужой'])
@@ -208,6 +225,54 @@ describe('family children API', () => {
       const last = await remove(single.id, single.children[0]!.id, 1, single.owner.token)
       expect(last.response.status).toBe(409)
       expect(last.body.error.message).toBe('Нельзя удалить единственного ребёнка семьи')
+    })
+
+    test('expired upload sessions do not block profile removal', async () => {
+      const target = await family(undefined, ['Лиля', 'Миша'])
+      const younger = target.children[1]!
+      await fx.db.maxVideoUploadSession.create({ data: {
+        familyId: target.id, authorId: target.owner.id, childId: younger.id, plannedMemoryId: randomUUID(), body: 'Просрочено',
+        occurredAt: new Date(), idempotencyFingerprint: randomUUID(), idempotencyKey: randomUUID(),
+        expiresAt: new Date(Date.now() - 60_000), state: 'uploaded',
+      } })
+
+      const deleted = await remove(target.id, younger.id, 1, target.owner.token)
+      expect(deleted.response.status, JSON.stringify(deleted.body)).toBe(204)
+      expect((await fx.db.child.findUniqueOrThrow({ where: { id: younger.id } })).deletedAt).not.toBeNull()
+    })
+
+    test('deleting a profile retires its avatar and immediately denies private access exactly once', async () => {
+      const target = await family(undefined, ['Лиля', 'Миша'])
+      const younger = target.children[1]!
+      const profilePhoto = await avatar(target.id, target.owner.id)
+      const edited = await patch(target.id, younger.id, {
+        avatarMediaId: profilePhoto.id, avatarCrop: FULL_CROP, expectedVersion: 1,
+      }, target.owner.token)
+      expect(edited.response.status, JSON.stringify(edited.body)).toBe(200)
+
+      const activeUpload = await fx.db.maxVideoUploadSession.create({ data: {
+        familyId: target.id, authorId: target.owner.id, childId: younger.id, plannedMemoryId: randomUUID(), body: 'В процессе',
+        occurredAt: new Date(), idempotencyFingerprint: randomUUID(), idempotencyKey: randomUUID(),
+        expiresAt: new Date(Date.now() + 60_000), state: 'uploaded',
+      } })
+      const conflictingDelete = await remove(target.id, younger.id, 2, target.owner.token)
+      expect(conflictingDelete.response.status).toBe(409)
+      expect((await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: profilePhoto.id } })).deletedAt).toBeNull()
+      expect(await fx.db.taskOutbox.count({ where: { dedupeKey: `media-delete:${profilePhoto.id}` } })).toBe(0)
+      await fx.db.maxVideoUploadSession.delete({ where: { id: activeUpload.id } })
+
+      const deleted = await remove(target.id, younger.id, 2, target.owner.token)
+      expect(deleted.response.status, JSON.stringify(deleted.body)).toBe(204)
+      const media = await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: profilePhoto.id } })
+      expect(media.deletedAt).not.toBeNull()
+      expect(await fx.db.taskOutbox.count({ where: { dedupeKey: `media-delete:${profilePhoto.id}` } })).toBe(1)
+      const privateRead = await fx.request(`/api/v1/families/${target.id}/media/${profilePhoto.id}/content?variant=original`, target.owner.token)
+      expect(privateRead.response.status).toBe(404)
+
+      const replay = await remove(target.id, younger.id, 2, target.owner.token)
+      expect(replay.response.status).toBe(204)
+      expect(await fx.db.taskOutbox.count({ where: { dedupeKey: `media-delete:${profilePhoto.id}` } })).toBe(1)
+      expect((await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: profilePhoto.id } })).deletedAt).toEqual(media.deletedAt)
     })
 
     test('a tag on a deleted publication does not block deletion', async () => {

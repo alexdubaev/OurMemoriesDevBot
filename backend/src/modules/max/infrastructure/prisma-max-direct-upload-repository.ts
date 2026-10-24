@@ -34,6 +34,17 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
         })
         if (existing) return { session: normalizeSession(existing), created: false }
 
+        // Keep the lock order used by family child removal: family first, then child. A child
+        // that passed the application preflight can be removed before this transaction starts.
+        const family = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM families WHERE id=${input.familyId}::uuid AND status='active' FOR SHARE`
+        if (!family.length) throw new Error('MAX direct upload family is unavailable')
+        const child = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM children
+           WHERE id=${input.childId}::uuid AND family_id=${input.familyId}::uuid AND deleted_at IS NULL
+           FOR SHARE`
+        if (!child.length) throw reserveChildNotFound()
+
         const data = {
           id: randomUUID(),
           familyId: input.familyId,
@@ -210,6 +221,13 @@ export class PrismaMaxDirectUploadRepository implements MaxDirectUploadRepositor
     })
     return child?.id ?? null
   }
+}
+
+function reserveChildNotFound() {
+  return Object.assign(new Error('Профиль ребёнка не найден'), {
+    kind: 'not_found' as const,
+    code: 'reserve_not_found_child' as const,
+  })
 }
 
 function normalizeSession(value: Record<string, unknown>): MaxVideoUploadSession {

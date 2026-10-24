@@ -638,15 +638,16 @@ export class FamilyService {
 
   /**
    * Soft-deletes a profile created by mistake. Allowed only while nothing points at the child:
-   * no tags on live publications, no live albums, no MAX video upload in flight, and never the
-   * last live child. Tag and album writers lock the child row, so the checks cannot race them.
+   * no tags on live publications, no live albums or gifts, no unexpired MAX video upload in
+   * flight, and never the last live child. Writers lock the family/child rows, so the checks
+   * cannot race them.
    */
   async deleteChild(scope: FamilyScope, childId: string, expectedVersion: number): Promise<void> {
     await this.access.requireOwner(scope)
     await this.db.$transaction(async (tx) => {
       await lockActiveFamily(tx, scope.familyId)
-      const rows = await tx.$queryRaw<Array<{ version: number; deletedAt: Date | null }>>`
-        SELECT version, deleted_at AS "deletedAt" FROM children
+      const rows = await tx.$queryRaw<Array<{ version: number; deletedAt: Date | null; avatarMediaId: string | null }>>`
+        SELECT version, deleted_at AS "deletedAt", avatar_media_id AS "avatarMediaId" FROM children
          WHERE id = ${childId}::uuid AND family_id = ${scope.familyId}::uuid
          FOR UPDATE
       `
@@ -666,12 +667,16 @@ export class FamilyService {
       if (tag) throw new FamilyFailure('conflict', 'Ребёнок отмечен в публикациях. Сначала снимите отметки')
       const album = await tx.album.findFirst({ where: { familyId: scope.familyId, childId, deletedAt: null }, select: { id: true } })
       if (album) throw new FamilyFailure('conflict', 'У ребёнка есть альбомы. Сначала удалите их')
+      const gift = await tx.gift.findFirst({ where: { familyId: scope.familyId, childId }, select: { id: true } })
+      if (gift) throw new FamilyFailure('conflict', 'У ребёнка есть подарки в списке желаний. Сначала удалите их')
+      const at = this.now()
       const upload = await tx.maxVideoUploadSession.findFirst({
-        where: { familyId: scope.familyId, childId, state: { in: [...activeUploadStates] } },
+        where: { familyId: scope.familyId, childId, state: { in: [...activeUploadStates] }, expiresAt: { gt: at } },
         select: { id: true },
       })
       if (upload) throw new FamilyFailure('conflict', 'Для ребёнка загружается видео. Дождитесь окончания загрузки')
-      await tx.child.update({ where: { id: childId }, data: { deletedAt: this.now(), version: { increment: 1 } } })
+      await tx.child.update({ where: { id: childId }, data: { deletedAt: at, version: { increment: 1 } } })
+      if (child.avatarMediaId) await retireReplacedAvatar(tx, scope.familyId, child.avatarMediaId, at)
     })
   }
 

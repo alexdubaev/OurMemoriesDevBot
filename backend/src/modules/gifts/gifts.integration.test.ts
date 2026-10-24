@@ -112,6 +112,82 @@ describe('Gift wishlist API', () => {
     expect((await api(outsider, 'POST', reservation(otherFamily.id, giftId), { expectedVersion: 1 })).status).toBe(404)
   })
 
+  test('wishlist follows the oldest live child and profile removal preserves gifts by refusing deletion', async () => {
+    const { owner, family } = await familyWithMembers()
+    const youngest = await prisma.child.create({ data: {
+      familyId: family.id, displayName: 'Младший', createdAt: new Date(Date.now() + 1_000),
+    } })
+    await prisma.child.create({ data: {
+      familyId: family.id, displayName: 'Средний', createdAt: new Date(Date.now() + 2_000),
+    } })
+    await prisma.child.update({ where: { id: family.childId }, data: { deletedAt: new Date() } })
+
+    const photoMediaId = await giftPhoto(owner, family.id)
+    const created = await api(owner, 'POST', gifts(family.id), {
+      title: 'Конструктор', url: 'https://shop.example/item', photoMediaId,
+    }, randomUUID())
+    expect(created.status, JSON.stringify(created.body)).toBe(201)
+    expect(created.body.gift.childId).toBe(youngest.id)
+
+    const listed = await api(owner, 'GET', gifts(family.id))
+    expect(listed.status).toBe(200)
+    expect(listed.body.gifts.map((item: { id: string }) => item.id)).toEqual([created.body.gift.id])
+
+    const deniedDelete = await api(owner, 'DELETE', `/api/v1/families/${family.id}/children/${youngest.id}`,
+      undefined, undefined, { 'If-Match': '1' })
+    expect(deniedDelete.status).toBe(409)
+    expect(deniedDelete.body.error.message).toBe('У ребёнка есть подарки в списке желаний. Сначала удалите их')
+    expect(await prisma.gift.findUniqueOrThrow({ where: { id: created.body.gift.id } })).toMatchObject({ childId: youngest.id })
+    expect((await api(owner, 'GET', gifts(family.id))).body.gifts).toHaveLength(1)
+  })
+
+  test('a deletion queued before gift creation leaves the new gift on the next live child', async () => {
+    const { owner, family } = await familyWithMembers()
+    const next = await prisma.child.create({ data: {
+      familyId: family.id, displayName: 'Младший', createdAt: new Date(Date.now() + 1_000),
+    } })
+    const photoMediaId = await giftPhoto(owner, family.id)
+    let release!: () => void
+    let locked!: () => void
+    const held = new Promise<void>((resolve) => { locked = resolve })
+    const released = new Promise<void>((resolve) => { release = resolve })
+    const blocker = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id=${family.id}::uuid FOR UPDATE`
+      locked()
+      await released
+    })
+    await held
+
+    const deletion = api(owner, 'DELETE', `/api/v1/families/${family.id}/children/${family.childId}`,
+      undefined, undefined, { 'If-Match': '1' })
+    const waitFor = async (fragment: 'FOR UPDATE' | 'FOR SHARE') => {
+      const deadline = Date.now() + 5_000
+      while (Date.now() < deadline) {
+        const waiting = await prisma.$queryRaw<Array<{ pid: number }>>`
+          SELECT pid FROM pg_stat_activity
+           WHERE datname=current_database() AND wait_event_type='Lock'
+             AND query ILIKE '%FROM families%' AND query ILIKE ${`%${fragment}%`}
+        `
+        if (waiting.length) return
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      throw new Error(`No PostgreSQL family row-lock waiter appeared for ${fragment}`)
+    }
+    await waitFor('FOR UPDATE')
+    const creation = api(owner, 'POST', gifts(family.id), {
+      title: 'Игрушка', url: 'https://shop.example/item', photoMediaId,
+    }, randomUUID())
+    await waitFor('FOR SHARE')
+
+    release()
+    await blocker
+    const deleted = await deletion
+    const created = await creation
+    expect(deleted.status).toBe(204)
+    expect(created.status, JSON.stringify(created.body)).toBe(201)
+    expect(created.body.gift.childId).toBe(next.id)
+  })
+
   test('metadata endpoint checks full family access before invoking the injected provider', async () => {
     const { owner, viewer, full, family } = await familyWithMembers()
     const outsider = await admittedUser('Чужой', subject())

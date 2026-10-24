@@ -183,6 +183,9 @@ export function createMaxDirectVideoUploadService(options: {
         if (error instanceof Error && error.message.includes('idempotency')) {
           throw new MaxDirectUploadFailure('conflict', 'Этот ключ уже использован для другого видео', 'idempotency_conflict')
         }
+        if (isFailureCode(error, 'reserve_not_found_child')) {
+          throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'reserve_not_found_child')
+        }
         throw error
       }
 
@@ -345,7 +348,14 @@ export function createMaxDirectVideoUploadService(options: {
       } catch (error) {
         if (error instanceof MaxDirectUploadFailure) {
           if (error.kind === 'retryable') await options.repository.update(session, { state: 'uploaded', lastErrorCode: error.code ?? 'retryable' })
+          else if (error.code === 'finalize_not_found_child') {
+            await options.repository.update(session, { state: 'uploaded', lastErrorCode: error.code })
+          }
           throw error
+        }
+        if (isMissingTaggedChild(error)) {
+          await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'finalize_not_found_child' })
+          throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'finalize_not_found_child')
         }
         if (isAttachmentNotReady(error)) {
           await options.repository.update(session, { state: 'uploaded', lastErrorCode: 'attachment_not_ready' })
@@ -408,6 +418,9 @@ async function assertTaggedChildren(repository: MaxDirectUploadRepository, scope
   if (new Set(childIds).size !== childIds.length || childIds.length > MAX_FAMILY_CHILDREN) {
     throw new MaxDirectUploadFailure('invalid_input', 'Дети не должны повторяться')
   }
+  if (childIds.length > 0 && !repository.assertChild) {
+    throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'finalize_not_found_child')
+  }
   for (const childId of childIds) {
     if (repository.assertChild && !(await repository.assertChild(scope.familyId, childId))) {
       throw new MaxDirectUploadFailure('not_found', 'Профиль ребёнка не найден', 'finalize_not_found_child')
@@ -421,6 +434,15 @@ function withoutChildTags(reader: MemoryReader | undefined): MemoryReader | unde
 
 function isNotFoundFailure(error: unknown) {
   return typeof error === 'object' && error !== null && (error as { kind?: unknown }).kind === 'not_found'
+}
+
+function isFailureCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code
+}
+
+function isMissingTaggedChild(error: unknown) {
+  return isNotFoundFailure(error) && typeof error === 'object' && error !== null
+    && 'message' in error && (error as { message?: unknown }).message === 'Профиль ребёнка не найден'
 }
 
 function validateReservation(input: DirectVideoUploadReserveInput, current: Date) {

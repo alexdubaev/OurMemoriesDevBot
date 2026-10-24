@@ -46,7 +46,7 @@ export class PrismaGiftRepository implements GiftRepository {
     return this.db.$transaction(async (tx) => {
       await lockScope(tx, scope)
       const child = await tx.child.findFirst({
-        where: { familyId: scope.familyId },
+        where: { familyId: scope.familyId, deletedAt: null },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { id: true },
       })
@@ -70,7 +70,7 @@ export class PrismaGiftRepository implements GiftRepository {
       execute: async (tx) => {
         assertMayEditGifts(await lockScope(tx, scope))
         const children = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT id FROM children WHERE family_id=${scope.familyId}::uuid
+          SELECT id FROM children WHERE family_id=${scope.familyId}::uuid AND deleted_at IS NULL
           ORDER BY created_at ASC, id ASC LIMIT 1 FOR UPDATE`
         const childId = children[0]?.id
         if (!childId) throw new GiftFailure('conflict', 'Сначала заполните профиль ребёнка')
