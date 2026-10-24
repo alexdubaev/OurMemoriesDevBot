@@ -24,7 +24,7 @@ import { requestReactionHaptic } from '@/platform/reaction-haptics'
 import { loadFeed, loadMemory, openTelegramVideo } from './api'
 import { navigateToTelegramVideo, useSingleFlightTelegramVideoHandoff } from './telegram-video-handoff'
 import { ChildFilterChips, EmptyState, FeedSkeleton, InlineError, type FeedFilter } from './components'
-import { childFilterChips, composerInitialChildIds, normalizeChildFilter, UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
+import { childFilterChips, composerInitialChildIds, missingChildFilterId, normalizeChildFilter, UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
 import { ChildAlbumsStrip } from './ChildAlbumsStrip'
 import { canEditChildTags } from './child-tag-editor'
 import { MemoryChildTagsEditor } from './MemoryChildTagsEditor'
@@ -91,6 +91,8 @@ type Props = {
   childProfiles?: ChildDto[]
   childFilter?: ChildFilter
   onChildFilterChange?: (filter: ChildFilter) => void
+  /** The filtered child answered 404 (removed elsewhere): reload the family and fall back to «Все» instead of leaving it. */
+  onChildFilterMissing?: (childId: string) => void
   childAvatarsEnabled?: boolean
   onOpenAlbum?: (album: AlbumDto) => void
 }
@@ -125,7 +127,7 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 export function FeedPage({
   active = true, accountId = '', childAvatarCrop = null, childAvatarUrl, childAvatarStatus, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, onOpenChild, onOpenSettings, onAlbums, role, transport,
-  openAddInitially = false, childProfiles, childFilter = null, onChildFilterChange, childAvatarsEnabled = false, onOpenAlbum,
+  openAddInitially = false, childProfiles, childFilter = null, onChildFilterChange, onChildFilterMissing, childAvatarsEnabled = false, onOpenAlbum,
 }: Props) {
   // `filter` remains in the route contract for compatibility; the feed now always includes every memory type.
   void filter
@@ -177,6 +179,10 @@ export function FeedPage({
   const currentScope = useRef(feedScope)
   const onAccessLostRef = useRef(onAccessLost)
   useLayoutEffect(() => { onAccessLostRef.current = onAccessLost }, [onAccessLost])
+  const onChildFilterMissingRef = useRef(onChildFilterMissing)
+  useLayoutEffect(() => { onChildFilterMissingRef.current = onChildFilterMissing }, [onChildFilterMissing])
+  // While the family reloads after a 404 on the filtered child, show the skeleton, not an error.
+  const missingFilterChildId = onChildFilterMissing ? missingChildFilterId(feed.error, activeChildFilter) : null
   const items = useMemo(() => {
     const unique = new Map<string, MemoryDto>()
     for (const page of feed.data?.pages ?? []) {
@@ -265,11 +271,16 @@ export function FeedPage({
   useEffect(() => {
     const error = feed.error
     if (!(error instanceof ApiRequestError) || ![403, 404].includes(error.status)) return
+    const missingChildId = missingChildFilterId(error, activeChildFilter)
+    if (missingChildId && onChildFilterMissingRef.current) {
+      onChildFilterMissingRef.current(missingChildId)
+      return
+    }
     void queryClient.cancelQueries({ queryKey: [...feedQueryKeys.all, familyId] }).finally(() => {
       queryClient.removeQueries({ queryKey: [...feedQueryKeys.all, familyId] })
       onAccessLost()
     })
-  }, [familyId, feed.error, onAccessLost, queryClient])
+  }, [activeChildFilter, familyId, feed.error, onAccessLost, queryClient])
 
   useEffect(() => {
     if (!active) return
@@ -294,7 +305,10 @@ export function FeedPage({
           setNewAvailableFor(feedScope)
         }
       } catch (error) {
-        if (!disposed && error instanceof ApiRequestError && [403, 404].includes(error.status)) onAccessLostRef.current()
+        if (disposed || !(error instanceof ApiRequestError) || ![403, 404].includes(error.status)) return
+        const missingChildId = missingChildFilterId(error, activeChildFilter)
+        if (missingChildId && onChildFilterMissingRef.current) onChildFilterMissingRef.current(missingChildId)
+        else onAccessLostRef.current()
       } finally {
         checking = false
         if (rerunRequested && !disposed) {
@@ -397,7 +411,7 @@ export function FeedPage({
       showUnreadCountInMode={activeChildFilter === null}
       renderSubheader={multiChild ? () => <>
         <ChildFilterChips chips={childFilterChips(childList, showUntagged)} onChange={selectChildFilter} value={activeChildFilter} />
-        {selectedChild ? <ChildAlbumsStrip accountId={accountId} active={active && isAppBootstrapped} child={selectedChild} familyId={familyId} key={selectedChild.id} membershipEpoch={membershipEpoch ?? 0} onOpenAlbum={onOpenAlbum} role={role} transport={transport} /> : null}
+        {selectedChild ? <ChildAlbumsStrip accountId={accountId} active={active && isAppBootstrapped} child={selectedChild} familyId={familyId} key={selectedChild.id} membershipEpoch={membershipEpoch ?? 0} onChildMissing={onChildFilterMissing ? () => onChildFilterMissingRef.current?.(selectedChild.id) : undefined} onOpenAlbum={onOpenAlbum} role={role} transport={transport} /> : null}
       </> : undefined}
       childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
@@ -407,8 +421,8 @@ export function FeedPage({
       {active && isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}
       {unreadOnly ? <div className="feed-unread-note"><Typography as="p" variant="memoryMeta">Просмотренные карточки останутся на месте до обновления списка.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'auto' }); setUnreadCycle((value) => value + 1) }} type="button" variant="outline">Обновить список</Button></div> : null}
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
-      {!isAppBootstrapped || feed.isPending ? <FeedSkeleton /> : null}
-      {shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
+      {!isAppBootstrapped || feed.isPending || missingFilterChildId ? <FeedSkeleton /> : null}
+      {!missingFilterChildId && shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
         : activeChildFilter ? <ChildFeedEmpty childName={selectedChild?.name} onAdd={role === 'full' && selectedChild ? () => setAddSheetOpen(true) : undefined} onShowAll={() => selectChildFilter(null)} />

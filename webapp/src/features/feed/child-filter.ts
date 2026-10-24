@@ -1,5 +1,7 @@
 import type { ChildDto } from '@web-app-demo/contracts'
 
+import { ApiRequestError } from '@/platform/api'
+
 /** `null` = «Все»; a child id = that child's page; `'untagged'` = «Без отметки». */
 export type ChildFilter = string | null
 export const UNTAGGED_CHILD_FILTER = 'untagged'
@@ -29,4 +31,15 @@ export function childFilterChips(children: readonly Pick<ChildDto, 'id' | 'name'
 /** Adding from a child's page starts with that child selected; from «Все» or «Без отметки» with none. */
 export function composerInitialChildIds(filter: ChildFilter, children: readonly Pick<ChildDto, 'id'>[]): string[] {
   return filter && filter !== UNTAGGED_CHILD_FILTER && children.some((child) => child.id === filter) ? [filter] : []
+}
+
+/**
+ * The child whose list answered 404: removed on another device or never in this family. That
+ * closes the child's page, not the family — the caller reloads the family and shows «Все».
+ * `null` for anything else (no child filter, «Без отметки», other errors), which keeps the
+ * usual access-lost handling.
+ */
+export function missingChildFilterId(error: unknown, filter: ChildFilter): string | null {
+  if (!(error instanceof ApiRequestError) || error.status !== 404) return null
+  return filter && filter !== UNTAGGED_CHILD_FILTER ? filter : null
 }

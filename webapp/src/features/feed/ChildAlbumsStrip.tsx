@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AlbumDto, ChildDto } from '@web-app-demo/contracts'
 
@@ -8,12 +8,14 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { createChildAlbum, loadChildAlbums } from './api'
 import { childAlbumsQueryKey, missingChildAlbumTemplates, orderChildAlbums } from './child-albums'
 
-export function ChildAlbumsStrip({ accountId, active, child, familyId, membershipEpoch, onOpenAlbum, role, transport }: {
+export function ChildAlbumsStrip({ accountId, active, child, familyId, membershipEpoch, onChildMissing, onOpenAlbum, role, transport }: {
   accountId: string
   active: boolean
   child: ChildDto
   familyId: string
   membershipEpoch: number
+  /** The child's albums answered 404: the child was removed elsewhere; the page falls back to «Все». */
+  onChildMissing?: () => void
   onOpenAlbum?: (album: AlbumDto) => void
   role: 'full' | 'viewer'
   transport: AuthenticatedTransport
@@ -27,6 +29,10 @@ export function ChildAlbumsStrip({ accountId, active, child, familyId, membershi
     staleTime: 30_000,
     retry: false,
   })
+  const childMissing = Boolean(onChildMissing) && albums.error instanceof ApiRequestError && albums.error.status === 404
+  const onChildMissingRef = useRef(onChildMissing)
+  useEffect(() => { onChildMissingRef.current = onChildMissing }, [onChildMissing])
+  useEffect(() => { if (childMissing) onChildMissingRef.current?.() }, [childMissing])
   const [creating, setCreating] = useState<'year' | 'workshop' | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
   const createKeys = useRef(new Map<string, string>())
@@ -60,7 +66,7 @@ export function ChildAlbumsStrip({ accountId, active, child, familyId, membershi
   return <section aria-label={`Альбомы: ${child.name}`} className="feed-child-albums" data-slot="child-albums-strip">
     <Typography as="h2" className="feed-child-albums-title" variant="memoryBodyMedium">Альбомы</Typography>
     {albums.isPending ? <Typography as="p" className="feed-child-albums-note" role="status" variant="memoryMeta">Загружаем альбомы…</Typography> : null}
-    {albums.isError ? <div className="feed-child-albums-note" role="alert"><Typography as="p" variant="memoryMeta">Не удалось загрузить альбомы.</Typography><button className="feed-child-albums-retry" onClick={() => void albums.refetch()} type="button"><Typography as="span" variant="memoryFilter">Повторить</Typography></button></div> : null}
+    {albums.isError && !childMissing ? <div className="feed-child-albums-note" role="alert"><Typography as="p" variant="memoryMeta">Не удалось загрузить альбомы.</Typography><button className="feed-child-albums-retry" onClick={() => void albums.refetch()} type="button"><Typography as="span" variant="memoryFilter">Повторить</Typography></button></div> : null}
     {albums.isSuccess ? <ul className="feed-child-albums-row">
       {items.map((album) => <li key={album.id}>
         <button className={`feed-child-album feed-child-album-${album.kind}`} onClick={() => onOpenAlbum?.(album)} type="button">

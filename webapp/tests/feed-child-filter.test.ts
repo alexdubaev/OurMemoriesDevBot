@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 import type { AlbumDto, ChildDto, MemoryDto, MemoryPage } from '@web-app-demo/contracts'
 
-import { childFilterChips, composerInitialChildIds, normalizeChildFilter } from '../src/features/feed/child-filter'
+import { childFilterChips, composerInitialChildIds, missingChildFilterId, normalizeChildFilter } from '../src/features/feed/child-filter'
+import { ApiRequestError } from '../src/platform/api'
 import { loadFeed } from '../src/features/feed/api'
 import { childAlbumsQueryKey, missingChildAlbumTemplates, orderChildAlbums } from '../src/features/feed/child-albums'
 import { feedQueryKeys, matchesReactionFeedScope, removeMemoryFromCachedFeeds } from '../src/features/feed/queries'
@@ -41,6 +42,21 @@ describe('child filter state', () => {
 
   test('«Без отметки» is dropped for a member who may not see it', () => {
     expect(normalizeChildFilter('untagged', [lilya, misha], { allowUntagged: false })).toBeNull()
+  })
+})
+
+describe('a 404 on a filtered child', () => {
+  const notFound = new ApiRequestError(404, 'NOT_FOUND', 'Профиль ребёнка не найден')
+
+  test('names the removed child, so the page falls back to «Все» instead of leaving the family', () => {
+    expect(missingChildFilterId(notFound, removedChildId)).toBe(removedChildId)
+  })
+
+  test('without a child filter, for «Без отметки» or another error it stays a loss of access', () => {
+    expect(missingChildFilterId(notFound, null)).toBeNull()
+    expect(missingChildFilterId(notFound, 'untagged')).toBeNull()
+    expect(missingChildFilterId(new ApiRequestError(403, 'FORBIDDEN', 'Нет доступа'), misha.id)).toBeNull()
+    expect(missingChildFilterId(new Error('network'), misha.id)).toBeNull()
   })
 })
 

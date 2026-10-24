@@ -204,6 +204,76 @@ test('a one-child family keeps the plain feed: no filters, no child choice, no m
   await expect(page.locator('[data-albums-group]')).toHaveCount(0)
 })
 
+test('a child deleted on another device: an open or saved filter on it falls back to «Все» and keeps the family open', async ({ page }) => {
+  const seeded = await startFamily(page)
+  const { familyId } = seeded
+  const shared = await createNote(page, seeded, 'Заметка для всех', [])
+  const vanya = await addChild(page, seeded, 'Ваня', '2024-06-07')
+  const petya = await addChild(page, seeded, 'Петя', '2025-01-02')
+  await page.reload()
+  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+  await page.getByRole('button', { name: 'Лента', exact: true }).click()
+
+  await test.step('an open filter: the background check meets the removed child', async () => {
+    await chip(page, 'Ваня').click()
+    await expect(chip(page, 'Ваня')).toHaveAttribute('aria-pressed', 'true')
+    await removeChild(page, seeded, vanya)
+    const stale = page.waitForResponse((response) => response.url().includes(`childId=${vanya.id}`))
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect((await stale).status()).toBe(404)
+    await expectAllFeed(page, shared, 'Ваня')
+  })
+
+  await test.step('a saved filter: the app restarts on a child removed meanwhile', async () => {
+    await chip(page, 'Петя').click()
+    await expect(chip(page, 'Петя')).toHaveAttribute('aria-pressed', 'true')
+    // Let the saved presentation (family with Петя + the Петя filter) reach the private cache.
+    await page.waitForTimeout(1_500)
+    await removeChild(page, seeded, petya)
+    // The family reload is slow: it waits until the stale filter's feed has failed with all its
+    // retries (or 10 s), so the app meets the 404 before it learns that Петя is gone.
+    let feedFailures = 0
+    let releaseFamily: () => void = () => undefined
+    const familyReleased = new Promise<void>((resolve) => { releaseFamily = resolve; setTimeout(resolve, 10_000) })
+    const staleSeen = page.waitForResponse((response) => response.url().includes(`childId=${petya.id}`))
+    page.on('response', (response) => {
+      const url = new URL(response.url())
+      if (url.pathname.endsWith('/memories') && url.searchParams.get('childId') === petya.id && ++feedFailures >= 4) releaseFamily()
+    })
+    let held = false
+    await page.route(`**/api/v1/families/${familyId}`, async (route) => {
+      if (route.request().method() !== 'GET' || held) return route.continue()
+      held = true
+      await familyReleased
+      await route.continue()
+    })
+    await page.reload()
+    expect((await staleSeen).status()).toBe(404)
+    await expectAllFeed(page, shared, 'Петя')
+    await page.unroute(`**/api/v1/families/${familyId}`)
+  })
+})
+
+async function addChild(page: Page, seeded: SeededFamily, name: string, birthDate: string) {
+  const avatar = await uploadImage(page, seeded.headers, seeded.familyId, 'child_avatar', pngImage.buffer, 'image/png')
+  const added = await page.request.post(`/api/v1/families/${seeded.familyId}/children`, { headers: { ...seeded.headers, 'Idempotency-Key': randomUUID() }, data: { name, birthDate, sex: 'boy', avatarMediaId: avatar, avatarCrop: crop } })
+  expect(added.status()).toBe(201)
+  return (await added.json() as { child: { id: string; version: number } }).child
+}
+
+async function removeChild(page: Page, seeded: SeededFamily, child: { id: string; version: number }) {
+  const removed = await page.request.delete(`/api/v1/families/${seeded.familyId}/children/${child.id}`, { headers: { ...seeded.headers, 'If-Match': String(child.version) } })
+  expect(removed.status()).toBe(204)
+}
+
+async function expectAllFeed(page: Page, sharedNote: string, removedName: string) {
+  await expect(card(page, sharedNote)).toBeVisible()
+  await expect(chip(page, 'Все')).toHaveAttribute('aria-pressed', 'true')
+  await expect(chip(page, removedName)).toHaveCount(0)
+  await expect(page.getByText('Доступ к этой семье закрыт.')).toHaveCount(0)
+  await expect(page.locator('.family-hub-card')).toHaveCount(0)
+}
+
 type SeededFamily = { familyId: string; headers: Record<string, string>; children: Array<{ id: string; name: string }> }
 
 function card(page: Page, memoryId: string) { return page.locator(`.memory-card[data-memory-id="${memoryId}"]`) }
