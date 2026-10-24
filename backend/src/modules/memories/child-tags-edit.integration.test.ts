@@ -88,6 +88,21 @@ describe('replacing memory child tags', () => {
   const sorted = (tags: Array<{ childId: string; attachmentId: string | null }>) =>
     [...tags].sort((a, b) => `${a.childId}:${a.attachmentId ?? ''}`.localeCompare(`${b.childId}:${b.attachmentId ?? ''}`))
 
+  async function waitForFamilyLockWait() {
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      const waiting = await fx.db.$queryRaw<Array<{ pid: number }>>`
+        SELECT pid FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+           AND query ILIKE '%FROM families%'
+           AND query ILIKE '%FOR UPDATE%'
+      `
+      if (waiting.length > 0) return
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    throw new Error('No PostgreSQL family row-lock waiter appeared for FOR UPDATE')
+  }
+
   test('a full member who is not the author tags photos and a MAX video; version, text, date and unread order stay', async () => {
     const target = await family(['Старшая', 'Младший'])
     const [elder, younger] = target.children
@@ -269,5 +284,41 @@ describe('replacing memory child tags', () => {
     await publisher.publish(scope, { ...source, mediaIds: [photoIds[0]!, photoIds[2]!] })
     expect(await fx.tags(source.id)).toEqual([{ childId: elder!.id, attachmentId: photoIds[0]! }])
     expect((await fx.db.memory.findUniqueOrThrow({ where: { id: source.id } })).childTagsVersion).toBe(3)
+  })
+
+  test.each(['replaceOrderedMedia', 'publish replay'] as const)('%s serializes attachment removal with child-tag edits', async (path) => {
+    const target = await family(['Старшая', 'Младший'])
+    const [kept, removed, replacement] = await Promise.all([
+      photoAsset(target), photoAsset(target), photoAsset(target),
+    ])
+    const publisher = createSourceMemoryPublisher(fx.db, createPrismaFamilyAccess(fx.db))
+    const scope = { familyId: target.id, principal: { userId: target.owner.id, sessionId: 'synthetic-source' } }
+    const input = { id: randomUUID(), kind: 'photo' as const, body: 'Из источника', occurredAt: new Date(), mediaIds: [kept, removed] }
+    await publisher.publish(scope, input)
+    const taggerLocked = Promise.withResolvers<void>()
+    const releaseTagger = Promise.withResolvers<void>()
+    const tagEdit = fx.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${target.id}::uuid FOR SHARE`
+      await tx.$queryRaw`SELECT id FROM memories WHERE id = ${input.id}::uuid FOR NO KEY UPDATE`
+      const attachments = await tx.memoryMedia.findMany({ where: { memoryId: input.id }, select: { mediaId: true } })
+      expect(attachments.map(({ mediaId }) => mediaId)).toContain(removed)
+      taggerLocked.resolve()
+      await releaseTagger.promise
+      await tx.memoryChildTag.create({ data: {
+        familyId: target.id, memoryId: input.id, childId: target.children[1]!.id,
+        attachmentId: removed, createdBy: target.owner.id,
+      } })
+    })
+    await taggerLocked.promise
+    const publish = path === 'publish replay'
+      ? publisher.publish(scope, { ...input, mediaIds: [kept, replacement] })
+      : publisher.replaceOrderedMedia(scope, input.id, [kept, replacement])
+    try {
+      await waitForFamilyLockWait()
+    } finally {
+      releaseTagger.resolve()
+    }
+    await Promise.all([tagEdit, publish])
+    expect(await fx.tags(input.id)).toEqual([])
   })
 })
