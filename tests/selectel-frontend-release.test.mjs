@@ -17,6 +17,73 @@ function runBash(script, timeout = 30_000) {
   return spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8', timeout })
 }
 
+test('frontend internal smoke waits briefly for loopback HTTP after required artifacts exist', () => {
+  const result = runBash(`
+set -euo pipefail
+SERVER_ROOT=/mock
+. ${library}
+HTTP_ATTEMPTS=0 SLEEPS=0
+trap 'printf "HTTP_ATTEMPTS=%s SLEEPS=%s\\n" "$HTTP_ATTEMPTS" "$SLEEPS"' EXIT
+docker() {
+  [[ "$1" == exec && "$2" == candidate ]] || return 90
+  if [[ "$5" == *wget* ]]; then
+    HTTP_ATTEMPTS=$((HTTP_ATTEMPTS + 1))
+    [[ "$5" == *'-T 2'* ]] || return 91
+    ((HTTP_ATTEMPTS >= 3))
+  else
+    [[ "$5" == 'test -s /srv/index.html && test -s /srv/manifest.webmanifest' ]]
+  fi
+}
+sleep() { [[ "$1" == 1 ]] || return 92; SLEEPS=$((SLEEPS + 1)); }
+frontend_internal_smoke candidate
+printf 'HTTP_ATTEMPTS=%s SLEEPS=%s\\n' "$HTTP_ATTEMPTS" "$SLEEPS"
+`)
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.match(result.stdout, /HTTP_ATTEMPTS=3 SLEEPS=2/)
+})
+
+test('frontend internal smoke fails immediately when required artifacts are missing', () => {
+  const result = runBash(`
+set -euo pipefail
+SERVER_ROOT=/mock
+. ${library}
+HTTP_ATTEMPTS=0 SLEEPS=0
+trap 'printf "HTTP_ATTEMPTS=%s SLEEPS=%s\\n" "$HTTP_ATTEMPTS" "$SLEEPS"' EXIT
+docker() {
+  if [[ "$5" == *wget* ]]; then HTTP_ATTEMPTS=$((HTTP_ATTEMPTS + 1)); return 0; fi
+  return 1
+}
+sleep() { SLEEPS=$((SLEEPS + 1)); }
+frontend_internal_smoke candidate
+`)
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`)
+  assert.match(result.stderr, /artifact health check failed/)
+  assert.match(result.stdout, /HTTP_ATTEMPTS=0 SLEEPS=0/)
+})
+
+test('frontend internal smoke bounds permanent loopback HTTP failure', () => {
+  const result = runBash(`
+set -euo pipefail
+SERVER_ROOT=/mock
+. ${library}
+HTTP_ATTEMPTS=0 SLEEPS=0
+trap 'printf "HTTP_ATTEMPTS=%s SLEEPS=%s\\n" "$HTTP_ATTEMPTS" "$SLEEPS"' EXIT
+docker() {
+  if [[ "$5" == *wget* ]]; then
+    HTTP_ATTEMPTS=$((HTTP_ATTEMPTS + 1))
+    [[ "$5" == *'-T 2'* ]] || return 91
+    return 1
+  fi
+  return 0
+}
+sleep() { [[ "$1" == 1 ]] || return 92; SLEEPS=$((SLEEPS + 1)); }
+frontend_internal_smoke candidate
+`)
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`)
+  assert.match(result.stderr, /HTTP readiness check failed after 15 attempts/)
+  assert.match(result.stdout, /HTTP_ATTEMPTS=15 SLEEPS=14/)
+})
+
 function scopeScript(paths) {
   const cli = gitBashPath(resolve(root, 'deploy/selectel/frontend-scope.sh'))
   return `bash ${cli} classify ${paths.map((path) => JSON.stringify(path)).join(' ')}`

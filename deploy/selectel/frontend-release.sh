@@ -262,9 +262,17 @@ frontend_image_id() {
 }
 
 frontend_internal_smoke() {
-  local container=$1
-  docker exec "$container" /bin/sh -c 'wget -q -O /dev/null http://127.0.0.1/ && test -s /srv/index.html && test -s /srv/manifest.webmanifest' >/dev/null 2>&1 ||
-    frontend_die 'internal static HTTP or artifact health check failed'
+  local container=$1 attempt
+  docker exec "$container" /bin/sh -c 'test -s /srv/index.html && test -s /srv/manifest.webmanifest' >/dev/null 2>&1 ||
+    frontend_die 'internal static artifact health check failed'
+
+  for ((attempt = 1; attempt <= 15; attempt++)); do
+    if docker exec "$container" /bin/sh -c 'wget -q -T 2 -O /dev/null http://127.0.0.1/' >/dev/null 2>&1; then
+      return 0
+    fi
+    if ((attempt < 15)); then sleep 1; fi
+  done
+  frontend_die 'internal static HTTP readiness check failed after 15 attempts'
 }
 
 frontend_public_smoke() {
