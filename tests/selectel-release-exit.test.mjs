@@ -414,6 +414,7 @@ const reviewedMediaUiBlobs = [
   ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
 ]
 const reviewedPrivatePhotoProductionBlobs = [
+  ['bun.lock', '294e9b17d83b38fa6b14feeee949bcac7921ce4e'],
   ['backend/prisma/migrations/20261023150000_album_private_photos/migration.sql', '1a3232d1ee4d53c23205580a5faa13ded2a524d2'],
   ['backend/prisma/schema.prisma', '5e66d187c9b98165928acdd22548785777ee11c0'],
   ['backend/src/jobs.ts', 'b4774dbb15c993fee4b9985dea185808ceb584f0'],
@@ -542,7 +543,7 @@ function rollbackSource(role) {
 	if (role === 'privatePhotos') {
 	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
 	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-	  const expectedCompatibility = 'f7fa141c71064c21d6941993e414cc53cf50314ad28f9d7b44cc6dcf99347824'
+	  const expectedCompatibility = 'f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f'
 	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
 	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
 	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-worktree-'))
