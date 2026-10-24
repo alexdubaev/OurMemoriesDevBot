@@ -347,12 +347,13 @@ test('bottom navigation grows and wraps labels at 200% text without reducing tou
     const labels = buttons.map((button) => {
       const label = button.querySelector<HTMLElement>("[data-variant='memoryNav']")!
       const rect = label.getBoundingClientRect()
-      return { left: rect.left, right: rect.right, width: rect.width, scrollWidth: label.scrollWidth, buttonHeight: button.getBoundingClientRect().height }
+      return { text: label.textContent?.trim(), left: rect.left, right: rect.right, width: rect.width, scrollWidth: label.scrollWidth, buttonHeight: button.getBoundingClientRect().height }
     })
     return { navHeight: navRect.height, labels }
   })
   expect(dimensions.navHeight).toBeGreaterThan(baseHeight)
-  expect(dimensions.labels).toHaveLength(4)
+  expect(dimensions.labels).toHaveLength(5)
+  expect(dimensions.labels.map((label) => label.text)).toEqual(['Лента', 'Альбомы', 'Добавить', 'Подарки', 'Семья'])
   expect(dimensions.labels.every((label) => label.scrollWidth <= label.width + 1 && label.buttonHeight >= 44)).toBe(true)
   for (let index = 1; index < dimensions.labels.length; index += 1) expect(dimensions.labels[index - 1].right).toBeLessThanOrEqual(dimensions.labels[index].left + 1)
 })

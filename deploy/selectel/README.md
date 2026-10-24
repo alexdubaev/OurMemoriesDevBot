@@ -637,6 +637,28 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   ancestry, image, configuration, recovery, and data safeguards remain
   required; this pin does not authorize database rollback.
 
+- The exact gift-wishlist runtime fingerprint
+  `9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8`, measured
+  from producer `5f0f854e0843e87bf7d5634114b641b61cbc98f9`, may use only the same
+  healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its existing
+  pinned image pair. The pin is anchored to the unchanged full-attested `dc26ad9`
+  source and authorizes only the exact executable input fingerprint. Its ledger
+  is the exact 53-migration `b4cdbbc` catalog plus
+  `20261023120000_gift_wishlist` and
+  `20261024120000_gift_photo_recovery_guard` (55 total). Guarded pre-SQL
+  readiness accepts only completed 53, 54, or 55 migration states; ordinary,
+  rollback, and post-SQL readiness require all 55. Unknown, missing, duplicate,
+  checksum-mismatched, unfinished, rolled-back, or unrelated rows fail closed.
+  Pre-SQL readiness remains restricted to the inherited deployment lock in the
+  guarded release path. This pin does not authorize database rollback and still
+  requires the synthetic current → 33a → current compatibility probe.
+  The probe was run with `bun test backend/scripts/wishlist-release-compatibility.integration.test.ts`
+  against a uniquely created `*_test` child database: 1 test passed with 45 assertions.
+  It verified the frozen cleanup leaves registered gift-photo metadata, bytes,
+  family accounting, and outbox unchanged with the guard, while the disposable
+  unprotected control reproduces a tombstone, an unavailable photo, and queued
+  `media:delete` work while the original storage bytes remain present.
+
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
 excluding only the existing backend test/support paths. It survives squash

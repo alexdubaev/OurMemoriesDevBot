@@ -412,6 +412,7 @@ model Family {
   maxMemoryBackups     MaxMemoryBackup[]
   maxBackupAttachments MaxMemoryBackupAttachment[]
   maxChannelBindings MaxChannelBinding[]
+  gifts              Gift[]
   albums               Album[]
   albumEntries         AlbumEntry[]
   albumEntrySources    AlbumEntrySource[]
@@ -443,6 +444,8 @@ model FamilyMember {
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
   captionRequests  CaptionRequest[]
+  createdGifts     Gift[]              @relation("GiftCreatorMembership")
+  reservedGifts    Gift[]              @relation("GiftReserverMembership")
 
   @@id([familyId, userId])
   @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
@@ -463,6 +466,7 @@ model Child {
   family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "children_family_id_fkey")
   memories      Memory[]
   maxVideoUploadSessions MaxVideoUploadSession[]
+  gifts         Gift[]
   albums        Album[]
   avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
 
@@ -691,6 +695,31 @@ model MemoryComment {
   @@map("memory_comments")
 }
 
+model Gift {
+  id               String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId         String       @map("family_id") @db.Uuid
+  childId          String       @map("child_id") @db.Uuid
+  title            String
+  url              String
+  price            String?
+  photoMediaId     String       @unique(map: "gifts_photo_media_id_key") @map("photo_media_id") @db.Uuid
+  createdByUserId  String       @map("created_by_user_id") @db.Uuid
+  reservedByUserId String?      @map("reserved_by_user_id") @db.Uuid
+  reservedAt       DateTime?    @map("reserved_at") @db.Timestamptz(3)
+  boughtAt         DateTime?    @map("bought_at") @db.Timestamptz(3)
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  family           Family       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "gifts_family_id_fkey")
+  child            Child        @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Cascade, map: "gifts_child_id_family_id_fkey")
+  photoMedia       MediaAsset   @relation("GiftPhoto", fields: [photoMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "gifts_photo_media_id_family_id_fkey")
+  creatorMembership FamilyMember @relation("GiftCreatorMembership", fields: [familyId, createdByUserId], references: [familyId, userId], onDelete: Restrict, map: "gifts_creator_membership_fkey")
+  reserverMembership FamilyMember? @relation("GiftReserverMembership", fields: [familyId, reservedByUserId], references: [familyId, userId], onDelete: Restrict, map: "gifts_reserver_membership_fkey")
+
+  @@index([familyId, childId], map: "gifts_family_id_child_id_idx")
+  @@map("gifts")
+}
+
 model MemorySeen {
   familyId        String       @map("family_id") @db.Uuid
   userId          String       @map("user_id") @db.Uuid
@@ -850,6 +879,7 @@ model MediaAsset {
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   maxVideoThumbnailFor MaxVideoReference? @relation("MaxVideoThumbnail")
   avatarForChildren  Child[]              @relation("ChildAvatar")
+  giftPhotoFor       Gift[]               @relation("GiftPhoto")
 
   @@unique([id, familyId], map: "media_assets_id_family_id_key")
   @@index([familyId, originalStatus, deletedAt], map: "media_assets_family_status_idx")
@@ -1123,6 +1153,7 @@ enum MediaSourceKind {
 enum MediaAssetPurpose {
   memory
   child_avatar
+  gift
 
   @@map("media_asset_purpose")
 }

@@ -56,6 +56,7 @@ export type ContentObject = {
   objectKey: string
   contentType: string
   contentLength: number
+  cachePolicy?: 'no-store'
   etag?: string
 }
 

@@ -8,7 +8,8 @@ import App from '@/App'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache, cachePrivateImageResponse, persistentUiQueryKey, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
+import { giftsQueryKeys } from '@/features/gifts/queries'
 import { memolyV4ReferenceImages } from './fixtures/memoly-v4-reference-images'
 import { albumFixture } from './fixtures/albums'
 import type { HttpRequestOptions } from '../src/platform/api/http-client'
@@ -23,6 +24,10 @@ const secondFamilyId = '22222222-2222-4222-8222-222222222222'
 const secondChildId = '66666666-6666-4666-8666-666666666666'
 const secondAvatarMediaId = 'bbb00000-0000-4000-8000-000000000021'
 const params = new URLSearchParams(location.search)
+const giftId = '88888888-8888-4888-8888-888888888888'
+const giftPhotoId = '99999999-9999-4999-8999-999999999999'
+const giftFixture = { id: giftId, childId, title: 'Конструктор', url: 'https://shop.example/item', price: '2500 ₽', photoMediaId: giftPhotoId, createdBy: { userId, name: 'Synthetic owner' }, reservation: null, version: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' }
+let currentGift = giftFixture
 const albums = params.has('albums') ? albumFixture(familyId, childId, userId, params) : null
 const welcomeClaimKey = `__selected-family-welcome-claimed:${userId}`
 const user: NonNullable<AuthContextValue['user']> = { id: userId, email: null, displayName: 'Synthetic owner', role: 'user', theme: 'lavender', createdAt: '2026-10-01T00:00:00.000Z' }
@@ -118,6 +123,18 @@ const transport = {
     if (path === `/api/v1/families/${familyId}/invites` || path === `/api/v1/families/${secondFamilyId}/invites`) return schema.parse({ items: [] })
     if (path === `/api/v1/families/${familyId}/usage` || path === `/api/v1/families/${secondFamilyId}/usage`) return schema.parse({ usedBytes: 0, quotaBytes: null })
     if (path === `/api/v1/families/${familyId}/max-channel` || path === `/api/v1/families/${secondFamilyId}/max-channel`) return schema.parse({ state: 'unconfigured', title: null, canManage: true })
+    if (path === `/api/v1/families/${familyId}/gifts`) {
+      if (params.has('giftAccessDenied')) throw new ApiRequestError(404, 'NOT_FOUND', 'Family membership revoked')
+      return schema.parse({ gifts: [currentGift] })
+    }
+    if (path === `/api/v1/families/${familyId}/gifts/${giftId}` && options?.method === 'PATCH') {
+      ;(window as typeof window & { __selectedFamilyGiftSaveStarted?: boolean }).__selectedFamilyGiftSaveStarted = true
+      const delay = Number(params.get('giftSaveDelay') ?? 0)
+      if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const body = options.body as { title?: string }
+      currentGift = { ...currentGift, title: body.title ?? currentGift.title, version: 2, updatedAt: '2026-10-24T10:00:00.000Z' }
+      return schema.parse({ gift: currentGift })
+    }
     if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
     if (path === '/api/v1/me/welcome/claim') {
       if (!params.has('welcomeFirst') || sessionStorage.getItem(welcomeClaimKey) === 'claimed') {
@@ -180,6 +197,8 @@ queryClient.setQueryData(persistentUiQueryKey(userId), params.has('hubFirst')
   ? { home, family: null, members, screen: 'hub', selectedFamilyId: null, membershipEpoch: null, filter: 'all' }
   : { home, family: familyResponse, members, screen: 'feed', selectedFamilyId: familyId, membershipEpoch: 1, filter: 'all' })
 queryClient.setQueryData(persistentUiQueryKey(secondUserId), { home, family: secondFamilyResponse, members, screen: 'feed', selectedFamilyId: secondFamilyId, membershipEpoch: 1, filter: 'all' })
+if (params.has('giftAccessDenied')) queryClient.setQueryData(giftsQueryKeys.list(familyId, userId, 1), [currentGift])
+Object.assign(window, { __selectedFamilyGiftCached: () => queryClient.getQueryData(giftsQueryKeys.list(familyId, userId, 1)) })
 
 export function SelectedFamilyAppHarness() {
   const [activeUser, setActiveUser] = useState(user)

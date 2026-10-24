@@ -7,6 +7,7 @@ export const webpIconNames = [
   'comments',
   'family',
   'fullscreen',
+  'gift',
   'edit',
   'gear',
   'home',
