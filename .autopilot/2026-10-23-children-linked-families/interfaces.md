@@ -104,3 +104,42 @@ Child.deletedAt DateTime? @map("deleted_at")
 
 ## Что построили законченные таски
 <!-- дописывается по ходу Разработки -->
+
+### T01 — основа (построено)
+- Prisma: `MemoryChildTag` (`memory_child_tags`), `Memory.childTagsVersion`, `Child.deletedAt`; миграция `20261024100000_memory_child_tags` с переносом.
+- Контракты: `packages/contracts/src/children.ts` — `MAX_FAMILY_CHILDREN=12`, `MAX_MEMORY_CHILD_TAGS`, `MEMOLY_CHILDREN_HEADER`, `createChildRequestSchema`, `updateChildRequestSchema {name?, birthDate?, sex?, avatarMediaId?, avatarCrop?, expectedVersion}`, `childResponseSchema`, `familyChildParamsSchema`; типы `CreateChildRequest`, `UpdateChildRequest`, `ChildDto`, `ChildResponse`, `MemoryChildTag`, `ReplaceMemoryChildTagsRequest`, `MemoryChildTagsResponse`.
+- `familyResponseSchema.children?`; `memoryChildTagSchema`, `replaceMemoryChildTagsRequestSchema`, `memoryChildTagsResponseSchema`; `memoryDtoSchema.childTags?/childTagsVersion?`; создание публикации: `childId?`, `childIds?`; `listMemoriesQuerySchema.untagged` (вместе с `childId` — отказ); `listAlbumsQuerySchema.childId?`.
+- `memories/infrastructure/child-tags.ts`: `resolveCreationChildTags(tx, familyId, childIds?) → {anchorChildId, childIds}`, `insertPublicationChildTags`, `normalizeChildTags(tags, attachments)`, `assertLiveFamilyChildren`, `removeDetachedAttachmentTags`. `SourceMemoryInput.childIds?`; `childId?` устарел и игнорируется. Отметка на вложении чужой публикации → 404 «Вложение не найдено»; на вложении публикации без фото и видео → 422.
+- Тестовые фикстуры: `backend/src/test-support/children-fixtures.ts` → `childrenFixtures()`.
+- **Для T03:** видео из Mini App (`max/application/direct-video-upload.ts`) пока передаёт только устаревший `childId`, который игнорируется, — в семье с 2+ детьми такое видео приходит без отметок. T03 пропускает `childIds` из запроса резервирования/финализации до `resolveCreationChildTags`.
+- Известное ограничение: публикации, созданные старым кодом во время отката, приходят без отметок.
+
+### T02 — API детей (построено)
+- `POST /api/v1/families/:familyId/children` (Idempotency-Key, `createChildRequestSchema`) → 201 `{child}`; повтор — 201 с тем же ребёнком. 409 «В семье уже 12 детей»; 409, если аватар уже у другого ребёнка.
+- `PATCH /api/v1/families/:familyId/children/:childId` (`updateChildRequestSchema`) → 200 `{child}`; чужая версия — 409 VERSION_CONFLICT.
+- `DELETE /api/v1/families/:familyId/children/:childId` (`If-Match`: версия) → 204; повтор после успеха — 204. 409 с текстом по-русски: отметки на неудалённых публикациях, живые альбомы, активная загрузка MAX-видео, последний живой ребёнок.
+- `GET /api/v1/families/:familyId` с `X-Memoly-Children: 1` → `children[]` (живые, порядок детей); без заголовка — только `family` и `child`.
+- `FamilyService`: `getFamily(scope, includeChildren=false)`, `createChild(scope, input, key)`, `updateChild(scope, childId, input)`, `deleteChild(scope, childId, expectedVersion)`.
+- `GET …/albums?childId=` → альбомы ребёнка; ребёнок чужой семьи или удалённый — 404 «Профиль ребёнка не найден». Создание альбома блокирует строку живого ребёнка.
+
+### T03 — отметки и лента (построено)
+- `PUT /api/v1/families/:familyId/memories/:memoryId/child-tags` `{tags, expectedChildTagsVersion}` → 200 `{childTags, childTagsVersion}`; только full (viewer — 403); чужая версия — 409 VERSION_CONFLICT «Отметки уже изменили, обновите». Повтор того же набора не меняет версию.
+- `GET …/memories?childId=` — отметка ребёнка любого уровня; `?untagged=true` — без отметок; оба с `unreadOnly` и курсором. Фильтры курсора `{childId, kind, untagged}`.
+- С `X-Memoly-Children: 1` ответы list/get/create/update несут `childTags` (сначала отметки на всю публикацию) и `childTagsVersion`.
+- `MemoryRepository.attachChildTags(scope, memories)`, `replaceChildTags(scope, memoryId, input)`; `MemoryService.list/get/create/update(..., includeChildTags)`.
+- **Видео из Mini App (для T05):** резервирование — `childId` необязателен, `childIds` в резервировании **запрещён** (422 как неизвестное поле); дети передаются в **финализации**: тело `{uploadToken, childIds?}` (уникальные, ≤12). Чужой ребёнок при финализации — 404 MAX_VIDEO_CHILD_NOT_FOUND до отправки в MAX.
+
+### T04 — дети в «Семье» (построено)
+- `features/family/api.ts`: `createChild(transport, familyId, input, idempotencyKey?)`, `updateChild(transport, familyId, childId, input)`, `deleteChild(transport, familyId, childId, expectedVersion)`; `loadFamily` шлёт `X-Memoly-Children: 1`.
+- `features/family` (через index): `familyChildren(resp)`, `hasManyChildren(list)`, `canAddChild(isOwner, list)`, `childActionErrorMessage(err)`, компонент `FamilyChildAvatar`.
+- `PRIVATE_CACHE_SCHEMA = 2`. `childFilter` в сохранённой презентации ещё не добавлен — это T05.
+- `FamilyScreen`: `onEditChild(childId)`, `onAddChild?`, `childAvatarsEnabled`, `membershipEpoch`. `FamilyOnboarding`: `addChild`, `canDelete`, `legacyProfileEndpoint`, `onDeleted`, `onRefresh`.
+- Шапка вкладки «Семья» всё ещё показывает одного ребёнка (`familyResponse.child`) — при 2+ детях её заменяет шапка семьи из T05.
+
+### T05 — лента и страница ребёнка (построено)
+- `feedQueryKeys.list(familyId, filter, unreadOnly, accountId, epoch, cycle, childFilter=null)` — длина 9; `isFeedListKey(key, familyId)`; `useFeedQuery(..., active, childFilter, enabled)`; сохраняется только `key[8] === null`.
+- `loadFeed(..., unreadOnly, childFilter)` шлёт `childId` или `untagged=true`; `loadFeed` и `loadMemory` шлют `X-Memoly-Children: 1`. `loadChildAlbums(transport, familyId, childId)`, `createChildAlbum(...)`. Ключ `['session','child-albums',familyId,accountId,epoch,childId]` чистится вместе с семьёй.
+- `features/feed` index: `ChildFilter`, `UNTAGGED_CHILD_FILTER`, `normalizeChildFilter`, `childFilterChips`, `composerInitialChildIds`, `ChildFilterChips`. `FeedPage`: `childProfiles?`, `childFilter?`, `onChildFilterChange?`, `childAvatarsEnabled?`, `onOpenAlbum?(AlbumDto)`.
+- Композеры Note/Photo/Video: `childOptions?: ChildDto[]`, `initialChildIds?: string[]`; запросы создания с `childIds`; `finalizeMaxVideo(..., childIds?)`.
+- ui-v2: `FamilyHeaderV2`, `ChildTagPicker`, `toggleChildId`, `composerChildIds`, `childCountLabel`. `AlbumsPage`: `openAlbumRequest?`, `onOpenAlbumRequestHandled?`. `PersistentFamilyPresentation.childFilter?`.
+- **Для T06:** глобальное «Добавить» из вкладок «Семья»/«Альбомы» идёт через `features/albums/ComposerHost`, который не передаёт `childOptions` — в семье с 2+ детьми такие публикации уходят без отметок. T06 передаёт туда `childOptions` (и `initialChildIds` выбранного фильтра).
