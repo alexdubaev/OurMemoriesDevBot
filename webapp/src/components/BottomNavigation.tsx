@@ -94,7 +94,7 @@ export function BottomNavigation({
           active={active === 'gifts'}
           appearance={appearance}
           icon="gift"
-          label="Подарки"
+          label="Вишлист"
           onClick={onGifts}
           position="gifts"
         />

@@ -184,9 +184,9 @@ export function GiftsPage({
   )
 
   return (
-    <section aria-label="Подарки" className="gifts-page" data-slot="gifts-page">
+    <section aria-label="Вишлист" className="gifts-page" data-slot="gifts-page">
       <header className="gifts-header">
-        <Typography as="h1" className="gifts-title" variant="memoryScreen">Подарки для {child.name}</Typography>
+        <Typography as="h1" className="gifts-title" variant="memoryScreen">Вишлист для {child.name}</Typography>
         {role === 'full' && gifts && gifts.length > 0 ? (
           <button className="gift-button gift-button--primary" onClick={() => setForm({ mode: 'create' })} type="button">
             <WebpIcon decorative monochrome name="plus" size={18} />
