@@ -93,8 +93,9 @@ describe('MAX PostgreSQL verification catalog', () => {
   test('accepts the declared historical case while rejecting unexpected filtering, skips and empty evidence', async () => {
     const childTagsEdit = 'src/modules/memories/child-tags-edit.integration.test.ts'
     const integrationTestFiles = [...requiredFixtures(), childTagsEdit]
+    const testDatabaseUrl = 'postgresql://synthetic:synthetic@127.0.0.1:5432/memoly_catalog_test'
     const run = (childTagsOutput: string) => runBackendIntegration({
-      environment: { TEST_SKIP_DOCKER: '1', TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/memoly_catalog_test' },
+      environment: { TEST_SKIP_DOCKER: '1', DATABASE_URL: testDatabaseUrl, TEST_DATABASE_URL: testDatabaseUrl },
       integrationTestFiles,
       testArgs: ['--max-only'],
       spawn: (_command, args) => {
