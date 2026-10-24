@@ -178,7 +178,7 @@ try {
   assert.equal(created.response.status, 201, JSON.stringify(created.body))
   const feed = await request('/families/' + seed.familyId + '/memories?childId=' + seed.childId)
   assert.equal(feed.response.status, 200, JSON.stringify(feed.body))
-  assert.deepEqual(feed.body.items.map((item) => item.id).sort(), [seed.memoryId, created.body.id].sort())
+  assert.deepEqual(feed.body.items.map((item) => item.id).sort(), [seed.memoryId, seed.multiMemoryId, created.body.id].sort())
   writeFileSync(statePath, JSON.stringify({ previousRuntimeMemoryId: created.body.id }))
   process.stdout.write(JSON.stringify({ success: true, status: created.response.status }) + '\\n')
 } finally { await prisma.$disconnect() }
