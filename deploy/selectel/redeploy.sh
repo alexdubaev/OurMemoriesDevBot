@@ -761,7 +761,10 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f:albums"
 				# Exact final wishlist production inputs from 5f0f854e; this permits only
 				# the established dc26 baseline paired with the measured executable tree.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8:wishlist") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8:wishlist"
+				# Exact gift URL metadata production inputs from ad7dabc; retains the same
+				# dc26 baseline, migration ledger and wishlist recovery profile.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4:wishlist") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

@@ -493,6 +493,20 @@ const reviewedWishlistProductionBlobs = [
   ['webapp/src/platform/telegram/host-bridge.ts', '9e31299f82c80ed24aaab51a7db42278a9c94089'],
   ['webapp/src/styles/tokens.css', '717b7fbfabd767a0b7282ca6712ef30acac3dbe0'],
 ]
+const reviewedGiftUrlProductionBlobs = [
+  ['backend/package.json', 'fa5532cf516c37784cb39fe6add9c49ec51c5a91'],
+  ['backend/src/app.ts', 'a040659f173d212b3b4a7a302bec3c9d71231195'],
+  ['backend/src/modules/gifts/application/gift-service.ts', 'ca2258fd76ecbf22bb3c5d197532402f1f7a346a'],
+  ['backend/src/modules/gifts/application/ports.ts', '749489c5195fa84bef30d71e6759db6f9468cd2b'],
+  ['backend/src/modules/gifts/index.ts', '03454d9e69bff878ed47d993b33afb701da097dd'],
+  ['backend/src/modules/gifts/infrastructure/gift-metadata.ts', 'e9f89be56a858b511ee4f654aed3120f77d743a9'],
+  ['backend/src/modules/gifts/transport/routes.ts', 'c5c2125617e143369ebbb7cc7257d85687275389'],
+  ['bun.lock', '9667dc24e5aa1a711ddb7ad27ad377565a26802a'],
+  ['packages/contracts/src/gifts.ts', 'a8d39239af8aef964bd03c494929d46d38d8fc0f'],
+  ['webapp/src/features/gifts/GiftForm.tsx', '39e2f6b6cc3310f033954a6d439316122f68745c'],
+  ['webapp/src/features/gifts/api.ts', '25beaa70cf86a9b67d86b5fbbbe7031de87dc766'],
+  ['webapp/src/features/gifts/model.ts', '514aa6a16e2f388da6e796385623de5b9f38fb15'],
+]
 const reviewedFamilyNavigationBlobs = [
   ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
   ['webapp/src/components/ui-v2/ChildHeaderV2.css', 'd648a7ad8ca15553f78e3adca5a5ac08c2d641ff'],
@@ -2012,17 +2026,21 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   const baseline = 'b4cdbbc49500d0850a64075d1bfba683a9bd22ad'
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
-  const expectedCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
+  const expectedWishlistCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
+  const expectedGiftUrlCompatibility = 'fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-source-'))
   const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedWishlistProductionBlobs,
+  const wishlistSource = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedWishlistProductionBlobs,
     'materialize exact wishlist compatibility source from committed production blobs')
-  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
-  assert.equal(spawnSync('git', ['rev-parse', `${source.sha}^`], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), baseline)
+  assert.equal(productionCompatibilityFingerprint(wishlistSource.root), expectedWishlistCompatibility)
+  assert.equal(spawnSync('git', ['rev-parse', `${wishlistSource.sha}^`], { cwd: wishlistSource.root, encoding: 'utf8' }).stdout.trim(), baseline)
+  const source = commitFrozenSourceFiles(wishlistSource, reviewedGiftUrlProductionBlobs,
+    'overlay exact gift URL metadata production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedGiftUrlCompatibility)
 
   const profile = (source) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
@@ -2032,6 +2050,10 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   const accepted = profile(source)
   assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
   assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const existingWishlist = profile(wishlistSource)
+  assert.equal(existingWishlist.status, 0, existingWishlist.stdout + existingWishlist.stderr)
+  assert.equal(existingWishlist.stdout.trim().split('\n').at(-1), 'wishlist')
 
   const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-drift-'))
   const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
