@@ -315,6 +315,23 @@ describe('album PostgreSQL invariants', () => {
   })
 
   test('serializes a private-photo claim against real publication and GC transactions', async () => {
+    let releaseResolve!: () => void
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve })
+    let gcReleaseResolve!: () => void
+    const gcRelease = new Promise<void>((resolve) => { gcReleaseResolve = resolve })
+    const runningTransactions: Promise<unknown>[] = []
+    const waitForSignal = async <T,>(signal: Promise<T>, label: string): Promise<T> => {
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        return await Promise.race([signal, new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5_000)
+        })])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+      }
+    }
+
+    try {
     const media = await db.mediaAsset.create({ data: {
       familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
       originalKey: `synthetic/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', sha256: 'd'.repeat(64),
@@ -323,38 +340,53 @@ describe('album PostgreSQL invariants', () => {
     const memory = await createNote()
     const catalog = createPrismaAlbumPhotoSourceCatalog()
     let claimedResolve!: () => void
-    let releaseResolve!: () => void
-    const claimed = new Promise<void>((resolve) => { claimedResolve = resolve })
-    const release = new Promise<void>((resolve) => { releaseResolve = resolve })
+    let claimedReject!: (error: unknown) => void
+    const claimed = new Promise<void>((resolve, reject) => { claimedResolve = resolve; claimedReject = reject })
     const claimTx = db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM families WHERE id=${familyId}::uuid FOR UPDATE`
       await catalog.claim(tx, scope, [media.id])
       claimedResolve()
       await release
+    }, { timeout: 5_000 }).catch((error) => {
+      claimedReject(error)
+      throw error
     })
-    await claimed
+    runningTransactions.push(claimTx)
+    void claimTx.catch(() => undefined)
+    await waitForSignal(claimed, 'the private-photo claim')
     let publicationStartResolve!: () => void
+    let publicationStartReject!: (error: unknown) => void
     let gcStartResolve!: () => void
-    const publicationStarted = new Promise<void>((resolve) => { publicationStartResolve = resolve })
-    const gcStarted = new Promise<void>((resolve) => { gcStartResolve = resolve })
+    let gcStartReject!: (error: unknown) => void
+    const publicationStarted = new Promise<void>((resolve, reject) => { publicationStartResolve = resolve; publicationStartReject = reject })
+    const gcStarted = new Promise<void>((resolve, reject) => { gcStartResolve = resolve; gcStartReject = reject })
     let publicationSettled = false
     let gcSettled = false
     const publicationTx = db.$transaction(async (tx) => {
       publicationStartResolve()
       await tx.memoryMedia.create({ data: { familyId, memoryId: memory.id, mediaId: media.id, position: 0 } })
-    }).finally(() => { publicationSettled = true })
+    }, { timeout: 5_000 }).finally(() => { publicationSettled = true })
+    runningTransactions.push(publicationTx)
+    void publicationTx.catch(publicationStartReject)
     const gcTx = db.$transaction(async (tx) => {
       gcStartResolve()
       return tx.$executeRaw`UPDATE media_assets SET deleted_at=now() WHERE id=${media.id}::uuid AND deleted_at IS NULL`
-    }).finally(() => { gcSettled = true })
-    await Promise.all([publicationStarted, gcStarted])
+    }, { timeout: 5_000 }).finally(() => { gcSettled = true })
+    runningTransactions.push(gcTx)
+    void gcTx.catch(gcStartReject)
+    await waitForSignal(Promise.all([publicationStarted, gcStarted]).then(() => undefined), 'publication and GC transactions')
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(publicationSettled).toBe(false)
     expect(gcSettled).toBe(false)
     releaseResolve()
-    await claimTx
-    await expect(publicationTx).rejects.toThrow()
-    expect(await gcTx).toBe(0)
+    await waitForSignal(claimTx, 'the private-photo claim transaction')
+    const publicationOutcome = await waitForSignal(
+      publicationTx.then(() => ({ kind: 'fulfilled' as const }), (error) => ({ kind: 'rejected' as const, error })),
+      'the publication transaction',
+    )
+    expect(publicationOutcome.kind).toBe('rejected')
+    if (publicationOutcome.kind === 'rejected') expect(publicationOutcome.error).toBeInstanceOf(Error)
+    expect(await waitForSignal(gcTx, 'the GC transaction')).toBe(0)
     expect(await db.memoryMedia.count({ where: { mediaId: media.id } })).toBe(0)
     expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: media.id } })).deletedAt).toBeNull()
     expect(await db.albumPhoto.count({ where: { mediaId: media.id, familyId } })).toBe(1)
@@ -365,31 +397,45 @@ describe('album PostgreSQL invariants', () => {
       byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
     } })
     let gcLockedResolve!: () => void
-    let gcReleaseResolve!: () => void
     let claimStartResolve!: () => void
-    const gcLocked = new Promise<void>((resolve) => { gcLockedResolve = resolve })
-    const gcRelease = new Promise<void>((resolve) => { gcReleaseResolve = resolve })
-    const claimStarted = new Promise<void>((resolve) => { claimStartResolve = resolve })
+    let gcLockedReject!: (error: unknown) => void
+    let claimStartReject!: (error: unknown) => void
+    const gcLocked = new Promise<void>((resolve, reject) => { gcLockedResolve = resolve; gcLockedReject = reject })
+    const claimStarted = new Promise<void>((resolve, reject) => { claimStartResolve = resolve; claimStartReject = reject })
     let reverseClaimSettled = false
     const gcFirst = db.$transaction(async (tx) => {
       await tx.$executeRaw`UPDATE media_assets SET deleted_at=now() WHERE id=${gcWinnerMedia.id}::uuid AND deleted_at IS NULL`
       gcLockedResolve()
       await gcRelease
-    })
-    await gcLocked
+    }, { timeout: 5_000 }).catch((error) => { gcLockedReject(error); throw error })
+    runningTransactions.push(gcFirst)
+    void gcFirst.catch(() => undefined)
+    await waitForSignal(gcLocked, 'the GC row lock')
     const claimAfterGc = db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM families WHERE id=${familyId}::uuid FOR UPDATE`
       claimStartResolve()
       await catalog.claim(tx, scope, [gcWinnerMedia.id])
-    }).finally(() => { reverseClaimSettled = true })
-    await claimStarted
+    }, { timeout: 5_000 }).finally(() => { reverseClaimSettled = true }).catch((error) => { claimStartReject(error); throw error })
+    runningTransactions.push(claimAfterGc)
+    void claimAfterGc.catch(() => undefined)
+    await waitForSignal(claimStarted, 'the reverse private-photo claim')
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(reverseClaimSettled).toBe(false)
     gcReleaseResolve()
-    await gcFirst
-    await expect(claimAfterGc).rejects.toThrow()
+    await waitForSignal(gcFirst, 'the GC-first transaction')
+    const reverseOutcome = await waitForSignal(
+      claimAfterGc.then(() => ({ kind: 'fulfilled' as const }), (error) => ({ kind: 'rejected' as const, error })),
+      'the reverse claim transaction',
+    )
+    expect(reverseOutcome.kind).toBe('rejected')
+    if (reverseOutcome.kind === 'rejected') expect(reverseOutcome.error).toBeInstanceOf(Error)
     expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: gcWinnerMedia.id } })).deletedAt).not.toBeNull()
     expect(await db.albumPhoto.count({ where: { mediaId: gcWinnerMedia.id, familyId } })).toBe(0)
+    } finally {
+      releaseResolve()
+      gcReleaseResolve()
+      await Promise.allSettled(runningTransactions)
+    }
   })
 
   test('source updates remain replayable after shared idempotency expiry without stale-version conflicts or resurrection', async () => {
