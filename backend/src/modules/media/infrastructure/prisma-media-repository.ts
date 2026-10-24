@@ -265,11 +265,23 @@ export class PrismaMediaRepository implements MediaRepository {
     })
     if (!asset) return null
     if (variant === 'original') {
-      return { objectKey: asset.originalKey, contentType: asset.verifiedMime!, contentLength: Number(asset.byteSize), etag: asset.sha256 ?? undefined }
+      return {
+        objectKey: asset.originalKey,
+        contentType: asset.verifiedMime!,
+        contentLength: Number(asset.byteSize),
+        cachePolicy: asset.purpose === 'gift' ? 'no-store' : undefined,
+        etag: asset.sha256 ?? undefined,
+      }
     }
     const stored = asset.variants.find((candidate) => candidate.variant === variant)
     return stored
-      ? { objectKey: stored.objectKey, contentType: stored.mime, contentLength: Number(stored.byteSize), etag: stored.sha256 }
+      ? {
+        objectKey: stored.objectKey,
+        contentType: stored.mime,
+        contentLength: Number(stored.byteSize),
+        cachePolicy: asset.purpose === 'gift' ? 'no-store' : undefined,
+        etag: stored.sha256,
+      }
       : null
   }
 

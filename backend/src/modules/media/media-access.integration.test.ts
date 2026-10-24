@@ -224,12 +224,14 @@ describe('Private media API', () => {
       headers: { Authorization: `Bearer ${viewer.token}` },
     })
     expect(display.status).toBe(200)
+    expect(display.headers.get('cache-control')).toBe('private, no-cache')
     const displayEtag = display.headers.get('etag')
     expect(displayEtag).toBeTruthy()
     const unchanged = await app.request(displayPath, {
       headers: { Authorization: `Bearer ${viewer.token}`, 'If-None-Match': displayEtag! },
     })
     expect(unchanged.status).toBe(304)
+    expect(unchanged.headers.get('cache-control')).toBe('private, no-cache')
     expect(await unchanged.arrayBuffer()).toHaveLength(0)
 
     const partial = await app.request(contentPath, {

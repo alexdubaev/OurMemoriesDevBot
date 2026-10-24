@@ -69,11 +69,23 @@ describe('Gift wishlist API', () => {
     expect(listed.headers.get('cache-control')).toBe('private, no-store')
     expect(listed.body.gifts.map((gift: { id: string }) => gift.id)).toEqual([giftId])
 
-    const content = await app.request(
-      `/api/v1/families/${family.id}/media/${photoMediaId}/content?variant=preview`,
-      { headers: { Authorization: `Bearer ${viewer.token}` } },
-    )
-    expect(content.status).toBe(200)
+    for (const variant of ['original', 'preview', 'display'] as const) {
+      const contentPath = `/api/v1/families/${family.id}/media/${photoMediaId}/content?variant=${variant}`
+      const headers = { Authorization: `Bearer ${viewer.token}` }
+      const content = await app.request(contentPath, { headers })
+      expect(content.status).toBe(200)
+      expect(content.headers.get('cache-control')).toBe('private, no-store')
+      const etag = content.headers.get('etag')
+      expect(etag).toBeTruthy()
+
+      const head = await app.request(contentPath, { method: 'HEAD', headers })
+      expect(head.status).toBe(200)
+      expect(head.headers.get('cache-control')).toBe('private, no-store')
+
+      const conditional = await app.request(contentPath, { headers: { ...headers, 'If-None-Match': etag! } })
+      expect(conditional.status).toBe(200)
+      expect(conditional.headers.get('cache-control')).toBe('private, no-store')
+    }
     expect((await api(outsider, 'GET', `/api/v1/families/${family.id}/media/${photoMediaId}/content?variant=preview`)).status).toBe(404)
 
     const viewerUpload = await api(viewer, 'POST', `/api/v1/families/${family.id}/uploads`, {
