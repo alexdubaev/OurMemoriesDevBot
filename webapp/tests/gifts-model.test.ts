@@ -7,6 +7,7 @@ import {
   giftActions,
   giftFailureMessage,
   photoErrorMessage,
+  parseGiftShareClipboard,
   reservationConflictMessage,
   reservationStatus,
   shopName,
@@ -137,6 +138,30 @@ describe('validateGiftDraft', () => {
     expect(validateGiftDraft({ ...valid, title: 'я'.repeat(120) }).canSave).toBe(true)
     expect(validateGiftDraft({ ...valid, price: '1'.repeat(31) }).errors.price).toBe('Цена — до 30 символов')
     expect(validateGiftDraft({ ...valid, price: '2 500 ₽' }).canSave).toBe(true)
+  })
+})
+
+describe('parseGiftShareClipboard', () => {
+  const clipboard = 'Magno World Магнитный конструктор робот трансформер спецтехника\nhttps://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169'
+
+  it('extracts the title and complete URL from the marketplace share text', () => {
+    expect(parseGiftShareClipboard(clipboard)).toEqual({
+      title: 'Magno World Магнитный конструктор робот трансформер спецтехника',
+      url: 'https://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169',
+    })
+  })
+
+  it('accepts CRLF, but rejects ambiguity, malformed URLs, controls and credentials', () => {
+    expect(parseGiftShareClipboard(clipboard.replace('\n', '\r\n'))?.url).toBe('https://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169')
+    expect(parseGiftShareClipboard(`Title https://a.example\nhttps://b.example`)).toBeNull()
+    expect(parseGiftShareClipboard('Title\nhttps://shop.example/item trailing')).toBeNull()
+    expect(parseGiftShareClipboard('Title\nhttps://user@shop.example/item')).toBeNull()
+    expect(parseGiftShareClipboard('Title\nhttps://shop.example/item\u0001')).toBeNull()
+  })
+
+  it('leaves an overlong product title for the existing title validation to explain', () => {
+    const title = 'Товар '.repeat(21)
+    expect(parseGiftShareClipboard(`${title}\nhttps://shop.example/item`)).toEqual({ title: title.trim(), url: 'https://shop.example/item' })
   })
 })
 

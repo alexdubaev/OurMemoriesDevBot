@@ -77,6 +77,18 @@ export const giftUrlErrorText = 'Нужна ссылка на товар, кот
 export const giftTitleErrorText = 'Название — до 120 символов'
 export const giftPriceErrorText = 'Цена — до 30 символов'
 
+/** Parse the two-line title + URL text copied by marketplace share actions. */
+export function parseGiftShareClipboard(text: string): { title: string; url: string } | null {
+  if (/\p{Cc}/u.test(text.replace(/\r\n|\r|\n/gu, ''))) return null
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  if (lines.length !== 2) return null
+  const title = lines[0]?.trim() ?? ''
+  const url = lines[1]?.trim() ?? ''
+  if (!title || !giftUrlSchema.safeParse(url).success) return null
+  if ((text.match(/https?:\/\//giu) ?? []).length !== 1) return null
+  return { title, url }
+}
+
 /** Required fields stay quiet while empty (the save button is just disabled); wrong values get a text. */
 export function validateGiftDraft(draft: GiftDraft): { errors: GiftDraftErrors; canSave: boolean } {
   const errors: GiftDraftErrors = {}
