@@ -11,9 +11,9 @@ import type { HostBridge } from '@/platform/telegram'
 
 export function ComposerHost({ active = true, childId, familyId, familyTimezone, hostBridge, transport, onClose, attach, attachPhotos }: { active?: boolean; childId?: string; familyId: string; familyTimezone: string; hostBridge: HostBridge; transport: AuthenticatedTransport; onClose: () => void; attach?: (memory: MemoryDto) => Promise<void>; attachPhotos?: (mediaIds: string[]) => Promise<void> }) {
   const queryClient = useQueryClient()
-  const [mode, setMode] = useState<'photo' | 'note' | 'video' | null>(() => !childId && attachPhotos ? 'photo' : null)
+  const [mode, setMode] = useState<'photo' | 'note' | 'video' | null>(() => attachPhotos ? 'photo' : null)
   const modeRef = useRef(mode)
-  const [sheet, setSheet] = useState(() => Boolean(childId || !attachPhotos))
+  const [sheet, setSheet] = useState(() => !attachPhotos)
   const [published, setPublished] = useState<MemoryDto | { id: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
