@@ -659,6 +659,29 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   unprotected control reproduces a tombstone, an unavailable photo, and queued
   `media:delete` work while the original storage bytes remain present.
 
+- Candidate `a33d220a2edd5c5c883770f793e398fc30752a3d` has measured executable
+  compatibility fingerprint
+  `e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67` for the
+  same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target, the unchanged
+  full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` anchor/runtime
+  fingerprint, and the existing `wishlist` recovery profile. The only
+  production-input difference from the running `ab6b9a55` source is the pinned
+  `webapp/src/features/albums/albums.css` blob
+  `294d51e2f3a46d5e61c890c00c47601bd95dd268`, which adds one album-local portal
+  layering rule; backend, dependencies, schema and contracts are unchanged.
+  The exact final candidate passed the FULL profile in 533.6 seconds after the
+  source passed FULL in 531.9 seconds. Each run passed safety (127 checks),
+  contracts (72), backend (166), web (142), site (4), PostgreSQL (412 tests),
+  and MAX/Web/PWA journeys (60); the database suite reported 41 suites and
+  3,632 assertions. The synthetic current → frozen 33a → current album probe
+  passed 31 assertions, alongside wishlist-photo (45) and comments (12) probes.
+  The first normal FULL deployment built candidate images but stopped before
+  promotion because this exact fingerprint was not yet registered. Production
+  remains on `ab6b9a5`, and `rollback.env` remains pinned to `33a0054`. This
+  registration permits only the measured fingerprint under the existing
+  target, image, ledger, configuration, ancestry, marker and recovery guards;
+  it does not change the recovery policy or authorize database rollback.
+
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
 excluding only the existing backend test/support paths. It survives squash

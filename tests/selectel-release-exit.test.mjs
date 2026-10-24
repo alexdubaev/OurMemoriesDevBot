@@ -2028,6 +2028,7 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
   const expectedWishlistCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
   const expectedGiftUrlCompatibility = 'fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4'
+  const expectedAlbumPortalCompatibility = 'e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-source-'))
@@ -2041,6 +2042,10 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   const source = commitFrozenSourceFiles(wishlistSource, reviewedGiftUrlProductionBlobs,
     'overlay exact gift URL metadata production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedGiftUrlCompatibility)
+  const albumPortalSource = commitFrozenSourceFiles(source,
+    [['webapp/src/features/albums/albums.css', '294d51e2f3a46d5e61c890c00c47601bd95dd268']],
+    'overlay exact album portal layering production blob')
+  assert.equal(productionCompatibilityFingerprint(albumPortalSource.root), expectedAlbumPortalCompatibility)
 
   const profile = (source) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
@@ -2050,6 +2055,10 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   const accepted = profile(source)
   assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
   assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const acceptedAlbumPortal = profile(albumPortalSource)
+  assert.equal(acceptedAlbumPortal.status, 0, acceptedAlbumPortal.stdout + acceptedAlbumPortal.stderr)
+  assert.equal(acceptedAlbumPortal.stdout.trim().split('\n').at(-1), 'wishlist')
 
   const existingWishlist = profile(wishlistSource)
   assert.equal(existingWishlist.status, 0, existingWishlist.stdout + existingWishlist.stderr)
@@ -2064,4 +2073,14 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
     '\n// synthetic release compatibility drift control\n', 'mutate a frozen gift production input')
   const rejected = profile(mutated)
   assert.notEqual(rejected.status, 0, 'changed production source must not inherit the wishlist recovery permission')
+
+  const albumDriftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-album-drift-'))
+  const albumDriftAdded = spawnSync('git', ['worktree', 'add', '--detach', albumDriftDirectory, albumPortalSource.sha], { cwd: root, encoding: 'utf8' })
+  if (albumDriftAdded.status !== 0) throw new Error(albumDriftAdded.stdout + albumDriftAdded.stderr)
+  fixtureWorktrees.push(albumDriftDirectory)
+  const albumMutated = commitSourceChange({ root: albumDriftDirectory, sha: albumPortalSource.sha },
+    'webapp/src/features/albums/albums.css',
+    '\n/* synthetic album production compatibility drift control */\n', 'mutate a frozen album production input')
+  const albumRejected = profile(albumMutated)
+  assert.notEqual(albumRejected.status, 0, 'changed album production CSS must not inherit the wishlist recovery permission')
 })
