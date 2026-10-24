@@ -27,6 +27,61 @@ test('selected child avatar and header stay stable across feed and family', asyn
   expect.soft(returnedGeometry).toEqual(feedGeometry)
 })
 
+test('gift form handles marketplace clipboard shares before the single-line URL field', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.goto('/e2e/selected-family-app.harness.html')
+  const welcome = page.getByRole('button', { name: 'Продолжить' })
+  const feed = page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')
+  await expect(welcome.or(feed).first()).toBeVisible()
+  if (await welcome.isVisible()) await welcome.click()
+  await expect(feed).toBeVisible()
+  await page.getByRole('button', { name: 'Подарки', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить подарок' }).click()
+
+  const form = page.locator('[data-slot="gift-form"]')
+  const urlField = form.getByLabel('Ссылка на товар')
+  const titleField = form.getByLabel('Название')
+  const saveButton = form.getByRole('button', { name: 'Сохранить' })
+  const shareText = 'Magno World Магнитный конструктор робот трансформер спецтехника\nhttps://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169'
+  await page.evaluate(async (text) => navigator.clipboard.writeText(text), shareText)
+  await urlField.focus()
+  await page.keyboard.press('Control+V')
+  await expect(urlField).toHaveValue('https://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169')
+  await expect(titleField).toHaveValue('Magno World Магнитный конструктор робот трансформер спецтехника')
+  await expect(saveButton).toBeDisabled()
+  await page.screenshot({ path: testInfo.outputPath('gift-share-paste-form.png'), fullPage: true, animations: 'disabled' })
+
+  await titleField.fill('Моё название')
+  await page.evaluate(async () => navigator.clipboard.writeText('Неоднозначная ссылка\nhttps://shop.example/one https://shop.example/two'))
+  await urlField.focus()
+  await page.keyboard.press('Control+V')
+  await expect(urlField).toHaveAttribute('aria-invalid', 'true')
+  await expect(titleField).toHaveValue('Моё название')
+  await expect(saveButton).toBeDisabled()
+
+  await page.evaluate(async (text) => navigator.clipboard.writeText(text), shareText)
+  await urlField.focus()
+  await page.keyboard.press('Control+V')
+  await expect(titleField).toHaveValue('Моё название')
+  await expect(urlField).toHaveValue('https://www.wildberries.ru/catalog/859795006/detail.aspx?size=1294253169')
+
+  await form.locator('input[type="file"]').setInputFiles({
+    name: 'photo.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pT8AAAAASUVORK5CYII=', 'base64'),
+  })
+  await expect(saveButton).toBeEnabled()
+
+  const initialValue = 'https://shop.example/keep-this-suffix'
+  await urlField.fill(initialValue)
+  await urlField.evaluate((input: HTMLInputElement) => input.setSelectionRange(8, 18))
+  await page.evaluate(async (text) => navigator.clipboard.writeText(text), 'https://paste.example')
+  await urlField.focus()
+  await page.keyboard.press('Control+V')
+  await expect(urlField).toHaveValue(`${initialValue.slice(0, 8)}https://paste.example${initialValue.slice(18)}`)
+})
+
 test('production App keeps the selected child avatar through tabs and editor return', async ({ page }) => {
   const pageErrors: string[] = []
   page.on('pageerror', (error) => pageErrors.push(error.message))

@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import type { CreateGiftRequest, GiftDto, UpdateGiftRequest } from '@web-app-demo/contracts'
+import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
+import { giftUrlSchema, type CreateGiftRequest, type GiftDto, type UpdateGiftRequest } from '@web-app-demo/contracts'
 
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { Typography } from '@/components/typography'
@@ -11,7 +11,7 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 
 import { createGift, giftPhotoPath, updateGift } from './api'
-import { giftFailureMessage, isGiftStateConflict, photoErrorMessage, validateGiftDraft } from './model'
+import { giftFailureMessage, isGiftStateConflict, parseGiftShareClipboard, photoErrorMessage, validateGiftDraft } from './model'
 
 type PhotoContentType = Parameters<typeof uploadFamilyPhoto>[3]
 
@@ -173,6 +173,20 @@ function GiftFormBody({ accountId, familyId, onBusyChange, onClose, onSaved, onS
           id={ids.url}
           inputMode="url"
           onChange={(event) => setUrl(event.target.value)}
+          onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
+            const clipboardText = event.clipboardData.getData('text/plain')
+            if (!/[\r\n]/u.test(clipboardText) || giftUrlSchema.safeParse(clipboardText.trim()).success) {
+              return
+            }
+            event.preventDefault()
+            const share = parseGiftShareClipboard(clipboardText)
+            if (!share) {
+              setUrl(clipboardText.replace(/\r\n|[\r\n]/gu, ' '))
+              return
+            }
+            setUrl(share.url)
+            if (!title.trim()) setTitle(share.title)
+          }}
           placeholder="https://"
           spellCheck={false}
           type="text"
