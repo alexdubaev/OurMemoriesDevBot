@@ -10,18 +10,24 @@ import {
 } from '@web-app-demo/contracts'
 import type { FamilyAccess, FamilyScope } from '../../families'
 import { decideReservation, type ReservationAction } from '../domain/gift-rules'
-import type { GiftRepository } from './ports'
+import type { GiftMetadataProvider, GiftRepository } from './ports'
 
 export class GiftService {
   constructor(
     private readonly access: FamilyAccess,
     private readonly repository: GiftRepository,
+    private readonly metadataProvider: GiftMetadataProvider,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   async list(scope: FamilyScope): Promise<GiftListResponse> {
     await this.access.requireMember(scope)
     return { gifts: await this.repository.list(scope) }
+  }
+
+  async metadata(scope: FamilyScope, url: string) {
+    await this.access.requireFull(scope)
+    return this.metadataProvider.resolve(url)
   }
 
   async create(scope: FamilyScope, input: CreateGiftRequest, key: string) {

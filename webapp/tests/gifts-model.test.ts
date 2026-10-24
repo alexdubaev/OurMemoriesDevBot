@@ -113,16 +113,24 @@ describe('shopName', () => {
     expect(shopName('http://market.example.test')).toBe('market.example.test')
     expect(shopName('not a link')).toBe('')
   })
+
+  it('uses friendly names for supported marketplaces', () => {
+    const shops = [
+      ['https://www.ozon.ru/product/item', 'Ozon'],
+      ['https://www.wildberries.ru/catalog/123/detail.aspx', 'Wildberries'],
+      ['https://market.yandex.ru/cc/BNpQaH', 'Яндекс Маркет'],
+    ] as const
+    for (const [url, name] of shops) expect(shopName(url)).toBe(name)
+  })
 })
 
 describe('validateGiftDraft', () => {
-  const valid = { url: 'https://shop.example.test/item', title: 'Конструктор', price: '', hasPhoto: true }
+  const valid = { url: 'https://shop.example.test/item', title: '', price: '' }
 
-  it('allows saving only with a link, a title and a photo', () => {
+  it('allows saving with a valid link and blank optional fields', () => {
     expect(validateGiftDraft(valid)).toEqual({ errors: {}, canSave: true })
     expect(validateGiftDraft({ ...valid, url: '' }).canSave).toBe(false)
-    expect(validateGiftDraft({ ...valid, title: '   ' }).canSave).toBe(false)
-    expect(validateGiftDraft({ ...valid, hasPhoto: false }).canSave).toBe(false)
+    expect(validateGiftDraft({ ...valid, title: '   ', price: '   ' }).canSave).toBe(true)
   })
 
   it('stays quiet about empty required fields but names the problem for a bad value', () => {

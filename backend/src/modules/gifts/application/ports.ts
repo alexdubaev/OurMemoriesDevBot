@@ -1,4 +1,4 @@
-import type { CreateGiftRequest, GiftDto, UpdateGiftRequest } from '@web-app-demo/contracts'
+import type { CreateGiftRequest, GiftDto, GiftMetadataResponse, UpdateGiftRequest } from '@web-app-demo/contracts'
 import type { FamilyScope } from '../../families'
 import type { GiftActor, GiftReservationState, ReservationDecision } from '../domain/gift-rules'
 
@@ -22,3 +22,4 @@ export interface GiftRepository {
     decide: (gift: GiftReservationState, actor: GiftActor) => ReservationDecision,
   ): Promise<GiftDto>
 }
+export type GiftMetadataProvider = { resolve(url: string): Promise<GiftMetadataResponse> }

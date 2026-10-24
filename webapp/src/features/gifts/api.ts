@@ -1,4 +1,5 @@
 import {
+  giftMetadataResponseSchema,
   giftListResponseSchema,
   giftMutationResponseSchema,
   type CreateGiftRequest,
@@ -16,6 +17,12 @@ export const giftPhotoPath = (familyId: string, mediaId: string) =>
 
 export function loadGifts(transport: AuthenticatedTransport, familyId: string, signal?: AbortSignal) {
   return transport.request(giftsPath(familyId), giftListResponseSchema, { signal, timeoutMs: 15_000 })
+}
+
+export function loadGiftMetadata(transport: AuthenticatedTransport, familyId: string, url: string, signal?: AbortSignal) {
+  return transport.request(`${giftsPath(familyId)}/metadata`, giftMetadataResponseSchema, {
+    method: 'POST', body: { url }, signal, timeoutMs: 9_000,
+  })
 }
 
 export function createGift(
