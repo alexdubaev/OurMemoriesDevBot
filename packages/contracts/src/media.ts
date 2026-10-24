@@ -6,7 +6,7 @@ import { uploadTicketSchema } from './uploads'
 const uuid = z.uuid()
 const minMediaBytes = 64
 
-export const mediaPurposeSchema = z.enum(['memory', 'child_avatar'])
+export const mediaPurposeSchema = z.enum(['memory', 'child_avatar', 'gift'])
 export const privateMediaKindSchema = z.enum(['photo', 'video', 'voice'])
 export const mediaOriginalStatusSchema = z.enum(['pending', 'stored', 'failed'])
 export const mediaRenditionStatusSchema = z.enum(['pending', 'ready', 'failed'])

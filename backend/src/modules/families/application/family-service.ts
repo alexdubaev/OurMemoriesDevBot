@@ -1077,6 +1077,12 @@ export class FamilyService {
         where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
         data: { revokedAt: this.now() },
       })
+      // A removed member can no longer act on the wishlist: free their unbought reservations so
+      // others can take them. Bought gifts keep the holder's name in «Подарено».
+      await tx.gift.updateMany({
+        where: { familyId: scope.familyId, reservedByUserId: userId, boughtAt: null },
+        data: { reservedByUserId: null, reservedAt: null, version: { increment: 1 } },
+      })
     })
   }
 

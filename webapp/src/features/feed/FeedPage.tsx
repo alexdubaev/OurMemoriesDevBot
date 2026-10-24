@@ -1,6 +1,6 @@
 import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject, TouchEvent as ReactTouchEvent } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import useEmblaCarousel from 'embla-carousel-react'
@@ -78,6 +78,7 @@ type Props = {
   onMaxVideoLaunchHandled?: () => void
   onAddRequestHandled?: () => void
   onFamily: () => void
+  onGifts?: () => void
   onAlbums?: () => void
   onOpenChild?: () => void
   onOpenSettings?: () => void
@@ -125,7 +126,7 @@ function withCurrentVideoRenditions(memory: MemoryDto, current: MemoryDto | unde
 }
 
 export function FeedPage({
-  active = true, accountId = '', childAvatarCrop = null, childAvatarUrl, childAvatarStatus, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onAllFamilies,
+  active = true, accountId = '', childAvatarCrop = null, childAvatarUrl, childAvatarStatus, childId, childName, childSubtitle, familyId, familyName, familyTimezone, filter, hostBridge, insets, membershipEpoch = null, unreadCount = null, unreadState = 'not_enabled', onSeenCandidate, onFamily, onGifts, onAllFamilies,
   isAppBootstrapped = true, maxVideoUploadAcceptance = false, onMaxVideoLaunchHandled, onAddRequestHandled, onAccessLost, onFilterChange, onOpenChild, onOpenSettings, onAlbums, role, transport,
   openAddInitially = false, childProfiles, childFilter = null, onChildFilterChange, onChildFilterMissing, childAvatarsEnabled = false, onOpenAlbum,
 }: Props) {
@@ -415,7 +416,7 @@ export function FeedPage({
       </> : undefined}
       childAvatarCrop={childAvatarCrop} childAvatarStatus={displayedChildAvatarStatus} childAvatarUrl={displayedChildAvatarUrl} childName={childName} childSubtitle={childSubtitle} familyName={familyName} insets={insets}
       addButtonRef={addButtonRef} onAdd={() => setAddSheetOpen(true)}
-      onAllFamilies={onAllFamilies} onFamily={onFamily} onAlbums={onAlbums} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
+      onAllFamilies={onAllFamilies} onFamily={onFamily} onAlbums={onAlbums} onGifts={onGifts} onOpenChild={onOpenChild} onOpenSettings={onOpenSettings} onFeed={() => undefined} onFilterChange={() => { if (unreadOnly) setUnreadCycle((value) => value + 1); onFilterChange('all') }}
       onUnreadChange={(next) => { if (next && !unreadOnly) setUnreadCycle((value) => value + 1); setUnreadOnly(next) }}
       role={role} unreadCount={unreadCount} unreadOnly={unreadOnly} unreadState={unreadState}>
       {active && isAppBootstrapped ? <PwaInstallPrompt familyId={familyId} hostBridge={hostBridge} /> : null}
@@ -667,7 +668,7 @@ export function MemoryMediaScope({ accountId, membershipEpoch, children }: { acc
   return <VideoQueryScope.Provider value={{ accountId, membershipEpoch }}>{children}</VideoQueryScope.Provider>
 }
 
-export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport, preferReturnFocus = false, sourceMemories }: { childAvatarCrop?: Props['childAvatarCrop']; childAvatarStatus?: Props['childAvatarStatus']; childAvatarUrl?: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport; preferReturnFocus?: boolean; sourceMemories?: Record<string, MemoryDto> }) {
+export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport, preferReturnFocus = false, sourceMemories, sourcePresentation }: { childAvatarCrop?: Props['childAvatarCrop']; childAvatarStatus?: Props['childAvatarStatus']; childAvatarUrl?: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport; preferReturnFocus?: boolean; sourceMemories?: Record<string, MemoryDto>; sourcePresentation?: Record<string, { authorLabel: string; dateLabel: string }> }) {
   const playbackCoordinator = useContext(PlaybackContext)
   useLayoutEffect(() => { playbackCoordinator?.pauseAll() }, [playbackCoordinator])
   const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
@@ -677,11 +678,12 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
   const onIndexChangeRef = useRef(onIndexChange)
   const media = memory.attachments[index]
   const activeMemory = sourceMemories?.[media.id] ?? memory
+  const presentation = sourcePresentation?.[media.id]
   const attribution = activeMemory.publicationAttribution
-  const authorName = attribution?.name ?? activeMemory.author.name
-  const isChannelAuthor = attribution?.kind === 'channel'
-  const authorAvatarPath = attribution?.kind === 'channel' ? null : activeMemory.author.avatarPath
-  const authorAvatarCrop = isChannelAuthor ? null : activeMemory.author.avatarCrop
+  const authorName = presentation?.authorLabel ?? attribution?.name ?? activeMemory.author.name
+  const isChannelAuthor = !presentation && attribution?.kind === 'channel'
+  const authorAvatarPath = presentation || attribution?.kind === 'channel' ? null : activeMemory.author.avatarPath
+  const authorAvatarCrop = presentation || isChannelAuthor ? null : activeMemory.author.avatarCrop
   const authorAvatarFallback = <span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{initials(authorName)}</Typography></span>
   const root = useRef<HTMLDivElement | null>(null)
   const [photoZoom, setPhotoZoom] = useState(1)
@@ -690,6 +692,8 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null)
   const swipeStart = useRef<{ id: number; x: number; y: number; axis: 'undecided' | 'horizontal' | 'vertical' | 'cancelled'; direction: -1 | 1 | null } | null>(null)
   const onCloseRef = useRef(onClose)
+  const historyMarkerId = useId()
+  const historyCleanupTimerRef = useRef<number | null>(null)
   const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: 25, startIndex, watchDrag: (_api, event) => {
     if (photoZoomRef.current > 1 || pinchStart.current) return false
     if ('touches' in event && event.touches.length !== 1) return false
@@ -818,17 +822,27 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
     if (media.kind === 'photo' && start.axis === 'vertical' && start.direction === 1 && dy >= 96 && dy >= Math.abs(dx) * 1.3) onCloseRef.current()
   }
   useEffect(() => {
+    if (historyCleanupTimerRef.current !== null) {
+      window.clearTimeout(historyCleanupTimerRef.current)
+      historyCleanupTimerRef.current = null
+    }
     const close = () => onCloseRef.current()
     const onPopState = () => close()
     const unsubscribeBack = hostBridge.onBack(close)
-    window.history.pushState({ ...(window.history.state ?? {}), mixedMediaViewer: true }, '')
+    const currentState = window.history.state ?? {}
+    const nextState = { ...currentState, mixedMediaViewer: true, mixedMediaViewerId: historyMarkerId }
+    if (currentState.mixedMediaViewer) window.history.replaceState(nextState, '')
+    else window.history.pushState(nextState, '')
     window.addEventListener('popstate', onPopState, { once: true })
     return () => {
       window.removeEventListener('popstate', onPopState)
       unsubscribeBack()
-      if (window.history.state?.mixedMediaViewer) window.history.back()
+      if (window.history.state?.mixedMediaViewerId === historyMarkerId) historyCleanupTimerRef.current = window.setTimeout(() => {
+        historyCleanupTimerRef.current = null
+        if (window.history.state?.mixedMediaViewerId === historyMarkerId) window.history.back()
+      }, 0)
     }
-  }, [hostBridge])
+  }, [hostBridge, historyMarkerId])
   return <DialogPrimitive.Root onOpenChange={(open) => { if (!open) onClose() }} open>
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="memoly-mixed-viewer-overlay" />
@@ -850,7 +864,7 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
               : <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={authorAvatarFallback} />}
             <div className="memoly-viewer-author-copy">
               <Typography as="span" variant="memoryMeta">{authorName}</Typography>
-              <Typography as="span" variant="memoryMeta">{timeLabel(activeMemory.occurredAt, familyTimezone)}</Typography>
+              <Typography as="span" variant="memoryMeta">{presentation?.dateLabel ?? timeLabel(activeMemory.occurredAt, familyTimezone)}</Typography>
             </div>
           </div>
           <Typography as="span" className="memoly-viewer-count" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography>

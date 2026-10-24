@@ -5,13 +5,14 @@ import { Typography } from '@/components/typography'
 import { cn } from '@/lib/utils'
 
 export type BottomNavigationProps = {
-  active: 'feed' | 'albums' | 'family'
+  active: 'feed' | 'albums' | 'family' | 'gifts'
   addButtonRef?: Ref<HTMLButtonElement>
   appearance?: 'default' | 'memoly'
   onAdd?: () => void
   onFamily: () => void
   onAlbums?: () => void
   onFeed: () => void
+  onGifts?: () => void
   role: 'full' | 'viewer'
 }
 
@@ -23,6 +24,7 @@ export function BottomNavigation({
   onFamily,
   onAlbums,
   onFeed,
+  onGifts = noop,
   role,
 }: BottomNavigationProps) {
   return (
@@ -38,7 +40,7 @@ export function BottomNavigation({
       data-testid="bottom-navigation"
     >
       <div className={cn(
-        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-4 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
+        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-5 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
         appearance === 'memoly' && 'memoly-bottom-nav-grid',
       )}>
         <NavButton
@@ -89,6 +91,14 @@ export function BottomNavigation({
           </div>
         )}
         <NavButton
+          active={active === 'gifts'}
+          appearance={appearance}
+          icon="gift"
+          label="Вишлист"
+          onClick={onGifts}
+          position="gifts"
+        />
+        <NavButton
           active={active === 'family'}
           appearance={appearance}
           icon="family"
@@ -105,12 +115,14 @@ function NavButton({
   icon,
   label,
   onClick,
+  position = icon,
 }: {
   active: boolean
   appearance: 'default' | 'memoly'
-  icon: 'family' | 'home' | 'archive-box'
+  icon: 'family' | 'gift' | 'home' | 'archive-box'
   label: string
   onClick: () => void
+  position?: string
 }) {
   return (
     <button
@@ -120,7 +132,7 @@ function NavButton({
         appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
         active ? 'text-primary' : 'text-muted-foreground',
       )}
-      data-nav-position={icon}
+      data-nav-position={position}
       data-v2-active={active ? 'true' : undefined}
       onClick={onClick}
       type="button"
@@ -130,3 +142,5 @@ function NavButton({
     </button>
   )
 }
+
+function noop() {}

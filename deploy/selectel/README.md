@@ -617,6 +617,71 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   a date or descendant allowlist, and still requires the real synthetic current
   → 33a → current recovery probe.
 
+- The exact private-album-photo runtime fingerprint
+  `f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f` may use
+  only the same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and
+  its existing pinned image pair. This executable compatibility fingerprint
+  is measured from frozen source `785458f911c2a5e45c830ebbfc4220ab155f27da`
+  and anchored to the unchanged full-attested `dc26ad9` reference; it is
+  independent of producer commit reachability.
+  The recovery catalog remains anchored to the exact 49-migration `dc26ad9`
+  baseline and recognizes only either the original three reviewed album
+  migrations (52 total) or those same three plus
+  `20261023150000_album_private_photos` (53 total). In the guarded
+  `ci-release` path with `RUN_MIGRATION=true`, pre-SQL readiness accepts only a
+  completed exact ordered prefix from 49 through the selected candidate's full
+  catalog. Ordinary readiness, rollback, and post-SQL readiness require all 52
+  or all 53 migrations for that exact catalog. Unknown suffixes and all
+  incomplete, duplicate, checksum-mismatched, unfinished, rolled-back, or
+  unrelated ledger rows fail closed. The existing deployment lock, backup,
+  ancestry, image, configuration, recovery, and data safeguards remain
+  required; this pin does not authorize database rollback.
+
+- The exact gift-wishlist runtime fingerprint
+  `9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8`, measured
+  from producer `5f0f854e0843e87bf7d5634114b641b61cbc98f9`, may use only the same
+  healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its existing
+  pinned image pair. The pin is anchored to the unchanged full-attested `dc26ad9`
+  source and authorizes only the exact executable input fingerprint. Its ledger
+  is the exact 53-migration `b4cdbbc` catalog plus
+  `20261023120000_gift_wishlist` and
+  `20261024120000_gift_photo_recovery_guard` (55 total). Guarded pre-SQL
+  readiness accepts only completed 53, 54, or 55 migration states; ordinary,
+  rollback, and post-SQL readiness require all 55. Unknown, missing, duplicate,
+  checksum-mismatched, unfinished, rolled-back, or unrelated rows fail closed.
+  Pre-SQL readiness remains restricted to the inherited deployment lock in the
+  guarded release path. This pin does not authorize database rollback and still
+  requires the synthetic current → 33a → current compatibility probe.
+  The probe was run with `bun test backend/scripts/wishlist-release-compatibility.integration.test.ts`
+  against a uniquely created `*_test` child database: 1 test passed with 45 assertions.
+  It verified the frozen cleanup leaves registered gift-photo metadata, bytes,
+  family accounting, and outbox unchanged with the guard, while the disposable
+  unprotected control reproduces a tombstone, an unavailable photo, and queued
+  `media:delete` work while the original storage bytes remain present.
+
+- Candidate `a33d220a2edd5c5c883770f793e398fc30752a3d` has measured executable
+  compatibility fingerprint
+  `e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67` for the
+  same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target, the unchanged
+  full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` anchor/runtime
+  fingerprint, and the existing `wishlist` recovery profile. The only
+  production-input difference from the running `ab6b9a55` source is the pinned
+  `webapp/src/features/albums/albums.css` blob
+  `294d51e2f3a46d5e61c890c00c47601bd95dd268`, which adds one album-local portal
+  layering rule; backend, dependencies, schema and contracts are unchanged.
+  The exact final candidate passed the FULL profile in 533.6 seconds after the
+  source passed FULL in 531.9 seconds. Each run passed safety (127 checks),
+  contracts (72), backend (166), web (142), site (4), PostgreSQL (412 tests),
+  and MAX/Web/PWA journeys (60); the database suite reported 41 suites and
+  3,632 assertions. The synthetic current → frozen 33a → current album probe
+  passed 31 assertions, alongside wishlist-photo (45) and comments (12) probes.
+  The first normal FULL deployment built candidate images but stopped before
+  promotion because this exact fingerprint was not yet registered. Production
+  remains on `ab6b9a5`, and `rollback.env` remains pinned to `33a0054`. This
+  registration permits only the measured fingerprint under the existing
+  target, image, ledger, configuration, ancestry, marker and recovery guards;
+  it does not change the recovery policy or authorize database rollback.
+
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
 excluding only the existing backend test/support paths. It survives squash

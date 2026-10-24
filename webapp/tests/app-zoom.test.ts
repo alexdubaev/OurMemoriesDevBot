@@ -38,7 +38,79 @@ function active(surface: ReturnType<typeof makeSurface>, type: string) {
   return surface.registrations.filter((entry) => entry.type === type)
 }
 
+function invoke(listener: EventListenerOrEventListenerObject, event: Event) {
+  if (typeof listener === 'function') listener(event)
+  else listener.handleEvent(event)
+}
+
+function trackedEventTarget() {
+  const target = new EventTarget()
+  const registrations: Registration[] = []
+  const add = target.addEventListener.bind(target)
+  const remove = target.removeEventListener.bind(target)
+  target.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+    const normalized = typeof options === 'boolean' ? { capture: options } : options
+    registrations.push({ type, listener, passive: normalized?.passive === true, capture: normalized?.capture === true })
+    add(type, listener, options)
+  }) as typeof target.addEventListener
+  target.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+    const capture = typeof options === 'boolean' ? options : options?.capture === true
+    const index = registrations.findIndex((entry) => entry.type === type && entry.listener === listener && entry.capture === capture)
+    if (index >= 0) registrations.splice(index, 1)
+    remove(type, listener, options)
+  }) as typeof target.removeEventListener
+  return { target, registrations }
+}
+
 describe('app zoom prevention listener lifecycle', () => {
+  test('cleans up through detached touch targets and removes all target observers at sequence end', () => {
+    const surface = makeSurface(5)
+    const firstTarget = trackedEventTarget()
+    const secondTarget = trackedEventTarget()
+    const dispose = installAppZoomPrevention(surface.document)
+    const touchStart = active(surface, 'touchstart')[0].listener
+    const startAt = (target: EventTarget, touches: unknown[]) => {
+      const event = new Event('touchstart')
+      Object.defineProperties(event, {
+        target: { configurable: true, value: target },
+        touches: { configurable: true, value: touches },
+      })
+      // Model document capture seeing touchstart before the original target leaves its event path.
+      invoke(touchStart, event)
+    }
+
+    startAt(firstTarget.target, [{}])
+    startAt(secondTarget.target, [{}, {}])
+    expect(active(surface, 'gesturestart')).toHaveLength(1)
+    expect(firstTarget.registrations.map(({ type, passive }) => [type, passive])).toEqual([
+      ['touchend', true],
+      ['touchcancel', true],
+    ])
+    expect(secondTarget.registrations.map(({ type, passive }) => [type, passive])).toEqual([
+      ['touchend', true],
+      ['touchcancel', true],
+    ])
+
+    const firstEnd = new Event('touchend')
+    Object.defineProperties(firstEnd, { touches: { configurable: true, value: [{}] } })
+    firstTarget.target.dispatchEvent(firstEnd)
+    expect(active(surface, 'gesturestart')).toHaveLength(1)
+
+    const finalEnd = new Event('touchend')
+    Object.defineProperties(finalEnd, { touches: { configurable: true, value: [] } })
+    secondTarget.target.dispatchEvent(finalEnd)
+    expect(active(surface, 'gesturestart')).toHaveLength(0)
+    expect(firstTarget.registrations).toHaveLength(0)
+    expect(secondTarget.registrations).toHaveLength(0)
+
+    const canceledTarget = trackedEventTarget()
+    startAt(canceledTarget.target, [{}])
+    canceledTarget.target.dispatchEvent(new Event('touchcancel'))
+    expect(active(surface, 'gesturestart')).toHaveLength(0)
+    expect(canceledTarget.registrations).toHaveLength(0)
+    dispose()
+  })
+
   test('keeps touch listeners passive at rest and arms blockers only after gesturestart', () => {
     const surface = makeSurface(5)
     const dispose = installAppZoomPrevention(surface.document)

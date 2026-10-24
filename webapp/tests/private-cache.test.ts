@@ -15,6 +15,7 @@ import {
   clearPrivateUserCache,
   restorePrivateQueryCache,
   cachePrivateImageResponse,
+  validatePresentation,
 } from '../src/platform/persistence/private-cache'
 
 const familyId = '11111111-1111-4111-8111-111111111111'
@@ -77,6 +78,17 @@ describe('private cache boundaries', () => {
     expect(isPersistableQueryKey(['session', 'feed', 'family-id', 'video', false, 'account', 3, 0, null])).toBe(false)
     expect(isPersistableQueryKey(['session', 'member-avatar', 'user-id', 'avatar'])).toBe(false)
     expect(isPersistableQueryKey(['session', 'auth', 'me'])).toBe(false)
+  })
+
+  it('restores every navigation screen including gifts and rejects unknown ones', () => {
+    const presentation = {
+      home: null, family: null, members: [], screen: 'hub', selectedFamilyId: null, membershipEpoch: null, filter: 'all',
+    }
+    for (const screen of ['hub', 'family', 'feed', 'gifts']) {
+      expect(validatePresentation({ ...presentation, screen })).toBe(true)
+    }
+    expect(validatePresentation({ ...presentation, screen: 'wishlist' })).toBe(false)
+    expect(validatePresentation({ ...presentation, screen: undefined })).toBe(false)
   })
 
   it('invalidates old work when the authenticated identity changes', () => {

@@ -1,6 +1,97 @@
 import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 
+test('album deletion confirmations work without native dialogs', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const initData = signedInitData()
+  await page.addInitScript((data) => {
+    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'android', ready() {} } })
+  }, initData)
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const auth = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${auth.accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
+  const home = await page.request.get('/api/v1/me/families', { headers })
+  expect(home.status()).toBe(200)
+  const familyId = ((await home.json()) as { ownFamilyId: string }).ownFamilyId
+  expect(familyId).toBeTruthy()
+  await page.evaluate(() => { window.confirm = () => false })
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.getByRole('button', { name: /Свободный альбом/ }).click()
+  await page.getByLabel('Название альбома').fill('Архив путешествия')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Архив путешествия', exact: true })).toBeVisible()
+
+  const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  for (const names of [['first-a.png', 'first-b.png'], ['second.png']]) {
+    await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+    await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+    await page.locator('#photo-composer-files').setInputFiles(names.map((name) => ({ name, mimeType: 'image/png', buffer: photoBytes })))
+    await page.getByRole('button', { name: `Добавить в альбом (${names.length})`, exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  }
+  const catalog = await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json() as { items: { id: string; version: number }[] }
+  const album = catalog.items[0]
+  const entriesPath = `/api/v1/families/${familyId}/albums/${album.id}/entries`
+  const attached = await (await page.request.get(entriesPath, { headers })).json() as { items: { id: string; sources: { sourceId: string }[] }[] }
+  expect(attached.items).toHaveLength(2)
+  const [first, second] = attached.items
+  expect(first.sources).toHaveLength(2)
+  const detachedMediaId = first.sources[0].sourceId
+  const retainedMediaId = first.sources[1].sourceId
+  const secondMediaId = second.sources[0].sourceId
+
+  await page.getByRole('button', { name: 'Открыть историю', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByRole('button', { name: 'Убрать материал 1', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  const afterUnlink = await (await page.request.get(`${entriesPath}/${first.id}`, { headers })).json() as { entry: { sources: { sourceId: string }[] } }
+  expect(afterUnlink.entry.sources.map((source) => source.sourceId)).toEqual([retainedMediaId])
+  const detachedOriginal = await page.request.get(`/api/v1/families/${familyId}/media/${detachedMediaId}/content?variant=original`, { headers: { ...headers, 'X-Private-Media-Purpose': 'image' } })
+  expect(detachedOriginal.status()).toBe(200)
+  expect(await detachedOriginal.body()).toEqual(photoBytes)
+  await page.getByRole('button', { name: 'Открыть историю', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Убрать из альбома', exact: true }).click()
+  const confirmation = page.getByRole('alertdialog')
+  await expect(confirmation).toBeVisible()
+  await expect(confirmation).toContainText('Оригиналы сохранятся')
+  await confirmation.getByRole('button', { name: 'Отмена', exact: true }).click()
+  await expect(confirmation).toHaveCount(0)
+  await page.getByRole('button', { name: 'Убрать из альбома', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: /Убрать историю/ }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect.poll(async () => ((await (await page.request.get(entriesPath, { headers })).json()) as { items: unknown[] }).items.length).toBe(1)
+
+  const privateHeaders = { ...headers, 'X-Private-Media-Purpose': 'image' }
+  for (const mediaId of [retainedMediaId, secondMediaId]) {
+    const original = await page.request.get(`/api/v1/families/${familyId}/media/${mediaId}/content?variant=original`, { headers: privateHeaders })
+    expect(original.status()).toBe(200)
+    expect(await original.body()).toEqual(photoBytes)
+  }
+
+  await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
+  await page.getByRole('button', { name: 'Удалить альбом', exact: true }).click()
+  const albumConfirmation = page.getByRole('alertdialog')
+  await expect(albumConfirmation).toContainText('Исходные материалы сохранятся')
+  await albumConfirmation.getByRole('button', { name: 'Отмена', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Удалить альбом', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Удалить альбом', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Удалить альбом', exact: true }).click()
+  await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  await expect.poll(async () => ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: unknown[] }).items.length).toBe(0)
+  await page.reload()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await expect(page.getByText('Архив путешествия', { exact: true })).toHaveCount(0)
+  const retained = await page.request.get(`/api/v1/families/${familyId}/media/${secondMediaId}/content?variant=original`, { headers: privateHeaders })
+  expect(retained.status()).toBe(200)
+  expect(await retained.body()).toEqual(photoBytes)
+})
+
 test('MAX authenticated albums persist year chapters and a text event through real API and navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const initData = signedInitData()
@@ -30,7 +121,84 @@ test('MAX authenticated albums persist year chapters and a text event through re
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Семейная поездка', exact: true })).toBeVisible()
   const freePage = await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })
-  expect((await freePage.json()).items).toHaveLength(1)
+  const freeAlbums = ((await freePage.json()) as { items: { id: string }[] }).items
+  expect(freeAlbums).toHaveLength(1)
+  const freeAlbumId = freeAlbums[0].id
+
+  const publishedBeforeUpload = await page.request.get(`/api/v1/families/${familyId}/memories?limit=20`, { headers })
+  expect(publishedBeforeUpload.status()).toBe(200)
+  const publishedBeforeCount = ((await publishedBeforeUpload.json()) as { items: unknown[] }).items.length
+  let memoryPosts = 0
+  let uploadReservations = 0
+  const albumAttachRequests: Array<{ key: string | undefined; body: unknown }> = []
+  const memoryReads: string[] = []
+  let loseFirstAttachResponse = true
+  page.on('request', (request) => { if (request.method() === 'POST' && /\/api\/v1\/families\/[^/]+\/memories$/.test(new URL(request.url()).pathname)) memoryPosts += 1 })
+  page.on('request', (request) => { if (request.method() === 'POST' && /\/api\/v1\/families\/[^/]+\/uploads$/.test(new URL(request.url()).pathname)) uploadReservations += 1 })
+  page.on('request', (request) => { const url = new URL(request.url()); if (request.method() === 'GET' && /\/api\/v1\/families\/[^/]+\/memories(?:\/|$)/.test(url.pathname)) memoryReads.push(url.pathname) })
+  await page.route('**/api/v1/families/*/albums/*/entries', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'POST') return route.continue()
+    albumAttachRequests.push({ key: request.headers()['idempotency-key'], body: request.postDataJSON() })
+    if (loseFirstAttachResponse) {
+      loseFirstAttachResponse = false
+      const committed = await route.fetch()
+      expect(committed.status()).toBe(201)
+      await route.abort('failed')
+      return
+    }
+    await route.continue()
+  })
+  await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом' })).toBeVisible()
+  await expect(page.locator('.memoly-add-page .memoly-add-caption')).toHaveCount(0)
+  await expect(page.locator('.memoly-add-page .memoly-add-date')).toHaveCount(0)
+  const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.locator('#photo-composer-files').setInputFiles({ name: 'album-photo.png', mimeType: 'image/png', buffer: photoBytes })
+  await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Повторить только прикрепление', exact: true })).toBeVisible()
+  expect(uploadReservations).toBe(1)
+  expect(albumAttachRequests).toHaveLength(1)
+  await page.getByRole('button', { name: 'Повторить только прикрепление', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  expect(memoryPosts).toBe(0)
+  expect(uploadReservations).toBe(1)
+  expect(albumAttachRequests).toHaveLength(2)
+  expect(albumAttachRequests[0]?.key).toBe(albumAttachRequests[1]?.key)
+  expect(albumAttachRequests[0]?.body).toEqual(albumAttachRequests[1]?.body)
+  const publishedAfterUpload = await page.request.get(`/api/v1/families/${familyId}/memories?limit=20`, { headers })
+  expect(((await publishedAfterUpload.json()) as { items: unknown[] }).items).toHaveLength(publishedBeforeCount)
+  await page.reload()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: /Семейная поездка/ }).click()
+  const attachedAlbum = await page.request.get(`/api/v1/families/${familyId}/albums/${freeAlbumId}/entries`, { headers })
+  expect(attachedAlbum.status()).toBe(200)
+  const attachedEntry = ((await attachedAlbum.json()) as { items: { sources: { memoryId: string | null; sourceKind: string; sourceId: string; kind: string; attachment: { id: string; source: string } | null }[] }[] }).items[0]
+  expect(attachedEntry.sources).toHaveLength(1)
+  expect(attachedEntry.sources[0]).toEqual(expect.objectContaining({ memoryId: null, sourceKind: 'private_storage', sourceId: expect.any(String), kind: 'photo', available: true, attachment: expect.objectContaining({ id: expect.any(String), source: 'private_storage' }) }))
+  await page.getByRole('button', { name: 'Открыть историю', exact: true }).click()
+  await expect(page.locator('.albums-entry-detail')).toBeVisible()
+  if (process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT) await page.screenshot({ fullPage: false, path: process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT })
+  const readsBeforeViewer = memoryReads.length
+  await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  await expect(page.getByText('Фото в альбоме', { exact: true })).toBeVisible()
+  await expect(page.getByText('Без даты', { exact: true })).toBeVisible()
+  await expect.poll(() => page.locator('[data-mixed-viewer] img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  expect(memoryReads.slice(readsBeforeViewer)).toEqual([])
+  const openMaterial = page.getByRole('button', { name: 'Открыть материал 1', exact: true })
+  await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+  await expect(openMaterial).toBeFocused()
+  await openMaterial.click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  await page.goBack()
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+  await openMaterial.click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  expect(memoryReads.slice(readsBeforeViewer)).toEqual([])
+  expect(memoryPosts).toBe(0)
 
   const avatar = await uploadAvatar(page, headers, familyId)
   const childResponse = await page.request.put(`/api/v1/families/${familyId}/child`, { headers, data: { name: 'Альбомная Алиса', birthDate: '2024-01-02', sex: 'girl', avatarMediaId: avatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null } })
@@ -77,40 +245,38 @@ test('MAX authenticated albums persist year chapters and a text event through re
   expect(stories.items[0].sources).toEqual([])
 })
 
-test('existing composer publishes once and album attach retries the same operation only', async ({ page }) => {
-  await openSynthetic(page, 'albums=24&attachFail&delayedPublish')
+test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
+  await openSynthetic(page, 'albums=24&delayedPublish')
   await page.getByRole('button', { name: /У бабушки/ }).click()
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByText('Будет сохранено в семейную ленту и этот альбом')).toBeVisible()
-  await page.getByRole('button', { name: 'Добавить заметку', exact: true }).click()
-  await page.getByLabel('Текст заметки').fill('Синтетическая публикация для альбома')
-  await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
-  await expect(page.getByText('Сохраняем заметку…', { exact: true })).toBeVisible()
-  await page.evaluate(() => (window as unknown as { __albumsTriggerBack: () => void }).__albumsTriggerBack())
-  await expect(page.getByText('Сохраняем заметку…', { exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Сохранено в семейную ленту' })).toBeVisible()
-  await page.getByRole('button', { name: 'Прикрепить к альбому', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Повторить только прикрепление', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Повторить только прикрепление', exact: true }).click()
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __albumsEvidence: { log: { method: string; path: string }[] } }).__albumsEvidence.log.filter((request) => request.method === 'POST' && /\/albums\/[^/]+\/entries$/.test(request.path)).length)).toBe(2)
-  const retryErrors = await page.evaluate(() => (window as unknown as { __albumsEvidence: { errors?: string[] } }).__albumsEvidence.errors ?? [])
-  expect(retryErrors).toHaveLength(1)
-  expect(retryErrors[0]).toContain('Synthetic lost attach response before commit')
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
+  await expect(page.getByText('Выберите материал для альбома.')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Добавить фото', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Загрузить новое', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
+  const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.locator('#photo-composer-files').setInputFiles({ name: 'synthetic-draft.png', mimeType: 'image/png', buffer: photoBytes })
+  let photoConfirmation = ''
+  page.once('dialog', async (dialog) => { photoConfirmation = dialog.message(); await dialog.dismiss() })
+  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
+  expect(photoConfirmation).toContain('Удалить несохранённые изменения?')
+  page.once('dialog', async (dialog) => { await dialog.accept() })
+  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Загрузить новое', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-  const evidence = await page.evaluate(() => {
-    const data = (window as unknown as { __albumsEvidence: { published: number; log: { method: string; path: string; key: string; body: unknown }[]; albums: { id: string; kind: string }[]; entries: Map<string, { sources: { body: string | null }[] }[]> } }).__albumsEvidence
-    const free = data.albums.find((album) => album.kind === 'free')!
-    return { ...data, attached: data.entries.get(free.id)!.at(-1) }
-  })
-  expect(evidence.published).toBe(1)
-  expect(evidence.attached?.sources[0]?.body).toBe('Синтетическая публикация для альбома')
-  const attaches = evidence.log.filter((request) => request.method === 'POST' && /\/albums\/[^/]+\/entries$/.test(request.path))
-  expect(attaches).toHaveLength(2)
-  expect(attaches[0].key).toBe(attaches[1].key)
-  expect(attaches[0].body).toEqual(attaches[1].body)
   await page.getByRole('button', { name: 'Семья', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить воспоминание', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Добавить фото и видео', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Добавить голос или видео', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Добавить заметку', exact: true }).click()
   await page.getByLabel('Текст заметки').fill('Черновик с подтверждением отмены')
   let confirmation = ''
@@ -268,12 +434,13 @@ test('bottom navigation grows and wraps labels at 200% text without reducing tou
     const labels = buttons.map((button) => {
       const label = button.querySelector<HTMLElement>("[data-variant='memoryNav']")!
       const rect = label.getBoundingClientRect()
-      return { left: rect.left, right: rect.right, width: rect.width, scrollWidth: label.scrollWidth, buttonHeight: button.getBoundingClientRect().height }
+      return { text: label.textContent?.trim(), left: rect.left, right: rect.right, width: rect.width, scrollWidth: label.scrollWidth, buttonHeight: button.getBoundingClientRect().height }
     })
     return { navHeight: navRect.height, labels }
   })
   expect(dimensions.navHeight).toBeGreaterThan(baseHeight)
-  expect(dimensions.labels).toHaveLength(4)
+  expect(dimensions.labels).toHaveLength(5)
+  expect(dimensions.labels.map((label) => label.text)).toEqual(['Лента', 'Альбомы', 'Добавить', 'Вишлист', 'Семья'])
   expect(dimensions.labels.every((label) => label.scrollWidth <= label.width + 1 && label.buttonHeight >= 44)).toBe(true)
   for (let index = 1; index < dimensions.labels.length; index += 1) expect(dimensions.labels[index - 1].right).toBeLessThanOrEqual(dimensions.labels[index].left + 1)
 })

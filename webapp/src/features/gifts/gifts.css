@@ -1,0 +1,127 @@
+/* Gifts tab. Colours come from the accepted memoLy v4 tokens (--ui-v2-*) with the legacy
+   theme tokens as fallback, so the tab matches the rest of the app in both skins. */
+:is(.gifts-page, .gift-form) {
+  --gift-text: var(--ui-v2-color-text, var(--theme-text, #2b3934));
+  --gift-muted: var(--ui-v2-color-muted, var(--theme-text-muted, #596858));
+  --gift-surface: var(--ui-v2-color-surface, var(--theme-surface-hi, #fffefa));
+  --gift-field: var(--ui-v2-color-field, var(--theme-inset-hi, #fffefa));
+  --gift-line: var(--ui-v2-color-line, rgb(0 0 0 / 8%));
+  --gift-accent: var(--ui-v2-color-accent, var(--theme-accent-deep, #416d58));
+  --gift-accent-soft: var(--ui-v2-color-accent-soft, var(--theme-accent-soft, #e6eee7));
+  --gift-danger: var(--ui-v2-color-danger, #a33f3b);
+  --gift-danger-soft: var(--ui-v2-color-danger-soft, #f9e9e6);
+  --gift-radius: var(--ui-v2-radius-surface, 22px);
+  --gift-shadow: var(--ui-v2-shadow-surface, 0 4px 20px rgb(102 90 69 / 6%));
+}
+
+.gifts-page {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--layout-max-width, 480px);
+  margin: 0 auto;
+  padding: calc(var(--host-inset-top, 0px) + 14px) clamp(12px, 3.5vw, 16px) calc(var(--layout-bottom-nav, 96px) + var(--host-inset-bottom, 0px) + 28px);
+  color: var(--gift-text);
+}
+.gifts-page *, .gifts-page *::before, .gifts-page *::after { box-sizing: border-box; }
+
+.gifts-header { display: flex; flex-direction: column; gap: 12px; padding: 6px 2px 0; }
+.gifts-title { margin: 0; overflow-wrap: anywhere; }
+
+.gifts-notice, .gifts-loading { margin: 0; color: var(--gift-muted); }
+.gifts-notice { padding: 10px 12px; border-radius: 12px; background: var(--gift-accent-soft); color: var(--gift-text); }
+.gifts-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--gift-danger-soft); color: var(--gift-danger);
+}
+
+.gifts-state {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 36px 12px; text-align: center;
+}
+.gifts-state h2 { margin: 0; }
+.gifts-state-text { max-width: 320px; margin: 0; color: var(--gift-muted); }
+.gifts-state [data-slot='webp-icon'] { color: var(--gift-accent); }
+
+.gifts-list { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+
+.gift-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px;
+  border: 1px solid var(--gift-line); border-radius: var(--gift-radius);
+  background: var(--gift-surface); box-shadow: var(--gift-shadow);
+}
+.gifts-page button.gift-card-link {
+  display: flex; align-items: stretch; gap: 12px; width: 100%; min-height: 44px; padding: 0;
+  border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.gifts-page button.gift-card-link:focus-visible, :is(.gifts-page, .gift-form) :is(button, label).gift-button:focus-visible, .gifts-page button.gift-icon-button:focus-visible, .gifts-page button.gifts-bought-toggle:focus-visible,
+.gifts-page button.gift-link-button:focus-visible, .gift-field input:focus-visible {
+  outline: 2px solid var(--gift-accent); outline-offset: 2px;
+}
+.gift-card-photo {
+  display: grid; flex: 0 0 88px; width: 88px; height: 88px; place-items: center; overflow: hidden;
+  border-radius: 16px; background: var(--gift-accent-soft); color: var(--gift-accent);
+}
+.gift-card-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gift-card-body { display: flex; min-width: 0; flex: 1; flex-direction: column; justify-content: center; gap: 3px; }
+.gift-card-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.gift-card-meta { display: block; overflow: hidden; color: var(--gift-muted); text-overflow: ellipsis; white-space: nowrap; }
+.gift-card-status { display: block; color: var(--gift-muted); overflow-wrap: anywhere; }
+.gift-card-status[data-status='mine'] { color: var(--gift-accent); font-weight: 600; }
+.gift-card-status[data-status='other'] { color: var(--gift-text); }
+.gift-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+:is(.gifts-page, .gift-form) :is(button, label).gift-button {
+  display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 16px;
+  border: 1px solid var(--gift-line); border-radius: var(--ui-v2-button-radius, 14px);
+  background: var(--gift-field); color: var(--gift-text); font: inherit; cursor: pointer;
+}
+:is(.gifts-page, .gift-form) :is(button, label).gift-button--primary { border-color: transparent; background: var(--gift-accent); color: #fff; }
+:is(.gifts-page, .gift-form) :is(button, label).gift-button--danger { border-color: transparent; background: var(--gift-danger); color: #fff; }
+:is(.gifts-page, .gift-form) :is(button, label).gift-button--wide { width: 100%; min-height: 48px; }
+:is(.gifts-page, .gift-form) :is(button, label).gift-button:disabled, .gifts-page button.gift-icon-button:disabled, .gifts-page button.gift-link-button:disabled { opacity: .55; cursor: default; }
+.gifts-page button.gift-icon-button {
+  display: inline-grid; width: 44px; height: 44px; place-items: center; margin-left: 0;
+  border: 0; border-radius: 12px; background: transparent; color: var(--gift-muted); cursor: pointer;
+}
+.gift-card-actions button.gift-icon-button:first-of-type { margin-left: auto; }
+.gifts-page button.gift-link-button { min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+
+.gifts-bought { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.gifts-page button.gifts-bought-toggle {
+  display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 14px;
+  border: 1px solid var(--gift-line); border-radius: var(--gift-radius);
+  background: var(--gift-surface); color: var(--gift-text); font: inherit; cursor: pointer;
+}
+.gifts-bought-chevron { display: inline-grid; place-items: center; color: var(--gift-muted); transform: rotate(90deg); transition: transform .18s ease; }
+.gifts-bought-chevron[data-open='true'] { transform: rotate(-90deg); }
+.gift-card[data-gift-variant='bought'] .gift-card-photo { flex-basis: 56px; width: 56px; height: 56px; border-radius: 12px; }
+
+/* Bottom sheet form */
+.gift-form { display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 8px; color: var(--ui-v2-color-text, var(--theme-text, #2b3934)); }
+.gift-form-title { margin: 0; font-size: 1.125rem; font-weight: 700; line-height: 1.3; }
+.gift-form-subtitle { margin: -8px 0 0; color: var(--ui-v2-color-muted, var(--theme-text-muted, #596858)); font-size: .8125rem; line-height: 1.4; overflow-wrap: anywhere; }
+.gift-field { display: flex; flex-direction: column; gap: 6px; }
+.gift-field > label, .gift-field-label { color: var(--ui-v2-color-muted, var(--theme-text-muted, #596858)); }
+.gift-field input[type='text'] {
+  width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--ui-v2-color-line, rgb(0 0 0 / 10%)); border-radius: var(--ui-v2-radius-field, 14px);
+  background: var(--ui-v2-color-field, var(--theme-inset-hi, #fffefa)); color: inherit; font: inherit; font-size: 16px;
+}
+.gift-field input[aria-invalid='true'] { border-color: var(--ui-v2-color-danger, #a33f3b); }
+.gift-field-error { color: var(--ui-v2-color-danger, #a33f3b); }
+.gift-photo-picker { position: relative; display: flex; align-items: center; gap: 12px; }
+.gift-photo-preview {
+  display: grid; flex: 0 0 72px; width: 72px; height: 72px; place-items: center; overflow: hidden;
+  border-radius: 14px; background: var(--ui-v2-color-accent-soft, var(--theme-accent-soft, #e6eee7)); color: var(--ui-v2-color-accent, #416d58);
+}
+.gift-photo-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gift-photo-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); opacity: 0; }
+.gift-form-failure { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--ui-v2-color-danger-soft, #f9e9e6); color: var(--ui-v2-color-danger, #a33f3b); }
+.gift-form-actions { display: flex; flex-direction: column; gap: 8px; }
+.gift-form :is(button, label).gift-button { border: 1px solid var(--ui-v2-color-line, rgb(0 0 0 / 10%)); background: var(--ui-v2-color-field, var(--theme-inset-hi, #fffefa)); color: inherit; }
+.gift-form :is(button, label).gift-button--primary { border-color: transparent; background: var(--ui-v2-color-accent, #416d58); color: #fff; }
+.gift-form :is(button, label).gift-button--danger { border-color: transparent; background: var(--ui-v2-color-danger, #a33f3b); color: #fff; }
+.gift-form :is(button, label).gift-button:disabled { opacity: .55; }

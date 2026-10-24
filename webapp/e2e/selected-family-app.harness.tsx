@@ -2,13 +2,16 @@ import '../src/production.css'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { GiftDto } from '@web-app-demo/contracts'
 import { AuthContext } from '@/features/auth'
 import type { AuthContextValue } from '@/features/auth'
 import App from '@/App'
 import { createBrowserDevHostBridge } from '@/platform/telegram'
 import { activatePrivateCacheIdentity, allowPrivateFamilyCache, cachePrivateImageResponse, persistentUiQueryKey, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import { syncPrivateMediaAccessToken } from '@/platform/media/private-media-access'
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
+import { giftsQueryKeys } from '@/features/gifts/queries'
+import { resolveWebpIconSource } from '@/components/webp-icon-manifest'
 import { memolyV4ReferenceImages } from './fixtures/memoly-v4-reference-images'
 import { albumFixture } from './fixtures/albums'
 import type { HttpRequestOptions } from '../src/platform/api/http-client'
@@ -23,6 +26,12 @@ const secondFamilyId = '22222222-2222-4222-8222-222222222222'
 const secondChildId = '66666666-6666-4666-8666-666666666666'
 const secondAvatarMediaId = 'bbb00000-0000-4000-8000-000000000021'
 const params = new URLSearchParams(location.search)
+const giftId = '88888888-8888-4888-8888-888888888888'
+const giftPhotoId = '99999999-9999-4999-8999-999999999999'
+const giftFixture = { id: giftId, childId, title: 'Конструктор', url: 'https://shop.example/item', price: '2500 ₽', photoMediaId: giftPhotoId, createdBy: { userId, name: 'Synthetic owner' }, reservation: null, version: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' }
+let currentGift: GiftDto = giftFixture
+const createdGifts: GiftDto[] = []
+const giftEvidence = { metadataRequests: [] as Array<{ familyId: string; url: string }>, uploadReservations: [] as Array<{ purpose: string; contentType: string; byteSize: number; uploadId: string; assetId: string }>, uploadBytes: [] as Array<{ size: number; type: string; name: string }>, finalizedUploads: [] as string[], createBodies: [] as Array<Record<string, unknown>>, updateBodies: [] as Array<Record<string, unknown>> }
 const albums = params.has('albums') ? albumFixture(familyId, childId, userId, params) : null
 const welcomeClaimKey = `__selected-family-welcome-claimed:${userId}`
 const user: NonNullable<AuthContextValue['user']> = { id: userId, email: null, displayName: 'Synthetic owner', role: 'user', theme: 'lavender', createdAt: '2026-10-01T00:00:00.000Z' }
@@ -92,7 +101,18 @@ Object.assign(window, {
   },
   __selectedFamilyRevokeAccess: () => window.dispatchEvent(new CustomEvent('memoly:private-family-access-revoked', { detail: { userId, familyId } })),
   __selectedFamilyChangeAccount: () => undefined as void,
+  __selectedFamilyGiftEvidence: giftEvidence,
 })
+const nativeFetch = window.fetch.bind(window)
+window.fetch = (async (input, init) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href)
+  if (url.pathname.startsWith('/e2e/gift-upload/')) {
+    const body = init?.body
+    if (body instanceof Blob) giftEvidence.uploadBytes.push({ size: body.size, type: body.type, name: body instanceof File ? body.name : '' })
+    return new Response(null, { status: 200 })
+  }
+  return nativeFetch(input, init)
+}) as typeof window.fetch
 
 const transport = {
   request: async (path: string, schema: { parse: (value: unknown) => unknown }, options?: HttpRequestOptions) => {
@@ -118,6 +138,53 @@ const transport = {
     if (path === `/api/v1/families/${familyId}/invites` || path === `/api/v1/families/${secondFamilyId}/invites`) return schema.parse({ items: [] })
     if (path === `/api/v1/families/${familyId}/usage` || path === `/api/v1/families/${secondFamilyId}/usage`) return schema.parse({ usedBytes: 0, quotaBytes: null })
     if (path === `/api/v1/families/${familyId}/max-channel` || path === `/api/v1/families/${secondFamilyId}/max-channel`) return schema.parse({ state: 'unconfigured', title: null, canManage: true })
+    if (path === `/api/v1/families/${familyId}/gifts/metadata` && options?.method === 'POST') {
+      const body = options.body as { url: string }
+      giftEvidence.metadataRequests.push({ familyId, url: body.url })
+      const delay = Number(params.get('giftMetadataDelay') ?? 0)
+      if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const state = params.get('giftMetadata') ?? 'ready'
+      if (state === 'unavailable' || state === 'unsupported') return schema.parse({ status: state, title: null, price: null, photo: null })
+      if (state === 'partial') return schema.parse({ status: 'partial', title: 'Кукла для игры', price: null, photo: null })
+      const bytes = new Uint8Array(await (await nativeFetch(resolveWebpIconSource('gift', 'default', 3).src)).arrayBuffer())
+      let binary = ''
+      for (const byte of bytes) binary += String.fromCharCode(byte)
+      return schema.parse({ status: 'ready', title: 'Игрушка из магазина', price: '3490 ₽', photo: { contentType: 'image/webp', dataBase64: btoa(binary) } })
+    }
+    if (path === `/api/v1/families/${familyId}/uploads` && options?.method === 'POST') {
+      const body = options.body as { purpose: string; contentType: string; byteSize: number }
+      const uploadId = crypto.randomUUID()
+      const assetId = crypto.randomUUID()
+      giftEvidence.uploadReservations.push({ ...body, uploadId, assetId })
+      return schema.parse({ assetId, upload: { uploadId, method: 'PUT', url: `${location.origin}/e2e/gift-upload/${uploadId}`, headers: { 'Content-Type': body.contentType, 'If-None-Match': '*' }, contentLength: body.byteSize, expiresAt: '2026-10-24T12:00:00.000Z' }, reservationExpiresAt: '2026-10-24T12:00:00.000Z' })
+    }
+    if (path.startsWith(`/api/v1/families/${familyId}/uploads/`) && path.endsWith('/finalize') && options?.method === 'POST') {
+      const uploadId = path.split('/').at(-2)!
+      const reservation = giftEvidence.uploadReservations.find((entry) => entry.uploadId === uploadId)!
+      const assetId = reservation.assetId
+      giftEvidence.finalizedUploads.push(assetId)
+      return schema.parse({ asset: { id: assetId, purpose: reservation.purpose, kind: 'photo', originalStatus: 'stored', renditionStatus: 'ready', width: 72, height: 72, durationMs: null, waveform: null, previewPath: `/api/v1/families/${familyId}/media/${assetId}/content?variant=preview`, displayPath: `/api/v1/families/${familyId}/media/${assetId}/content?variant=display`, playbackPath: null, originalDownloadPath: `/api/v1/families/${familyId}/media/${assetId}/content?variant=original` } })
+    }
+    if (path === `/api/v1/families/${familyId}/gifts` && options?.method === 'POST') {
+      const body = options.body as { title: string; url: string; price?: string; photoMediaId: string }
+      giftEvidence.createBodies.push(body)
+      const created = { ...giftFixture, id: crypto.randomUUID(), title: body.title, url: body.url, price: body.price ?? null, photoMediaId: body.photoMediaId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+      createdGifts.unshift(created)
+      return schema.parse({ gift: created })
+    }
+    if (path === `/api/v1/families/${familyId}/gifts`) {
+      if (params.has('giftAccessDenied')) throw new ApiRequestError(404, 'NOT_FOUND', 'Family membership revoked')
+      return schema.parse({ gifts: [...createdGifts, currentGift] })
+    }
+    if (path === `/api/v1/families/${familyId}/gifts/${giftId}` && options?.method === 'PATCH') {
+      ;(window as typeof window & { __selectedFamilyGiftSaveStarted?: boolean }).__selectedFamilyGiftSaveStarted = true
+      const delay = Number(params.get('giftSaveDelay') ?? 0)
+      if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+      const body = options.body as { title?: string; url?: string; price?: string | null; photoMediaId?: string }
+      giftEvidence.updateBodies.push(body)
+      currentGift = { ...currentGift, title: body.title ?? currentGift.title, url: body.url ?? currentGift.url, price: body.price === undefined ? currentGift.price : body.price, photoMediaId: body.photoMediaId ?? currentGift.photoMediaId, version: 2, updatedAt: '2026-10-24T10:00:00.000Z' }
+      return schema.parse({ gift: currentGift })
+    }
     if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
     if (path === '/api/v1/me/welcome/claim') {
       if (!params.has('welcomeFirst') || sessionStorage.getItem(welcomeClaimKey) === 'claimed') {
@@ -180,6 +247,8 @@ queryClient.setQueryData(persistentUiQueryKey(userId), params.has('hubFirst')
   ? { home, family: null, members, screen: 'hub', selectedFamilyId: null, membershipEpoch: null, filter: 'all' }
   : { home, family: familyResponse, members, screen: 'feed', selectedFamilyId: familyId, membershipEpoch: 1, filter: 'all' })
 queryClient.setQueryData(persistentUiQueryKey(secondUserId), { home, family: secondFamilyResponse, members, screen: 'feed', selectedFamilyId: secondFamilyId, membershipEpoch: 1, filter: 'all' })
+if (params.has('giftAccessDenied')) queryClient.setQueryData(giftsQueryKeys.list(familyId, userId, 1), [currentGift])
+Object.assign(window, { __selectedFamilyGiftCached: () => queryClient.getQueryData(giftsQueryKeys.list(familyId, userId, 1)) })
 
 export function SelectedFamilyAppHarness() {
   const [activeUser, setActiveUser] = useState(user)

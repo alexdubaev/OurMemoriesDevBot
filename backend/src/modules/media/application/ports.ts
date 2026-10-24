@@ -9,6 +9,22 @@ import type {
 } from '@web-app-demo/contracts'
 
 import type { FamilyScope } from '../../families'
+import type { PrismaTransactionClient } from '../../../idempotency'
+import type { MemoryAttachment } from '@web-app-demo/contracts'
+
+export type AlbumPhotoSourceProjection = {
+  mediaId: string
+  familyId: string
+  kind: 'photo'
+  available: boolean
+  attachment: MemoryAttachment | null
+  occurredAt: null
+}
+
+export type AlbumPhotoSourceCatalog = {
+  claim(tx: PrismaTransactionClient, scope: FamilyScope, mediaIds: string[]): Promise<AlbumPhotoSourceProjection[]>
+  project(tx: PrismaTransactionClient, scope: FamilyScope, mediaIds: string[]): Promise<AlbumPhotoSourceProjection[]>
+}
 
 export type PendingMediaUpload = {
   uploadId: string
@@ -40,6 +56,7 @@ export type ContentObject = {
   objectKey: string
   contentType: string
   contentLength: number
+  cachePolicy?: 'no-store'
   etag?: string
 }
 

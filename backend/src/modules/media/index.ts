@@ -15,6 +15,7 @@ import type { FamilyAccess } from '../families'
 import { MediaService } from './application/media-service'
 export { MediaFailure } from './domain/errors'
 import { PrismaMediaRepository } from './infrastructure/prisma-media-repository'
+import { createPrismaAlbumPhotoSourceCatalog } from './infrastructure/prisma-album-photo-source-catalog'
 import { processPhoto } from './infrastructure/photo-processor'
 import { probeMediaWithRunner } from './infrastructure/media-probe'
 import { assertFfmpegCapabilities, createFfmpegRunner } from './infrastructure/ffmpeg-runner'
@@ -24,6 +25,8 @@ export { detectVoiceMime } from './domain/media-policy'
 import { createMediaRoutes } from './transport/routes'
 import type { MaxVideoPlayback } from './application/ports'
 export type { MaxVideoPlayback } from './application/ports'
+export type { AlbumPhotoSourceCatalog, AlbumPhotoSourceProjection } from './application/ports'
+export { createPrismaAlbumPhotoSourceCatalog }
 
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
   authenticateMediaAccess: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>

@@ -412,9 +412,11 @@ model Family {
   maxMemoryBackups     MaxMemoryBackup[]
   maxBackupAttachments MaxMemoryBackupAttachment[]
   maxChannelBindings MaxChannelBinding[]
+  gifts              Gift[]
   albums               Album[]
   albumEntries         AlbumEntry[]
   albumEntrySources    AlbumEntrySource[]
+  albumPhotos          AlbumPhoto[]
   albumSourceOperations AlbumSourceOperation[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
@@ -442,6 +444,8 @@ model FamilyMember {
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
   captionRequests  CaptionRequest[]
+  createdGifts     Gift[]              @relation("GiftCreatorMembership")
+  reservedGifts    Gift[]              @relation("GiftReserverMembership")
 
   @@id([familyId, userId])
   @@index([userId, revokedAt], map: "family_members_user_id_revoked_at_idx")
@@ -465,6 +469,7 @@ model Child {
   memories      Memory[]
   memoryTags    MemoryChildTag[]
   maxVideoUploadSessions MaxVideoUploadSession[]
+  gifts         Gift[]
   albums        Album[]
   avatarMedia   MediaAsset? @relation("ChildAvatar", fields: [avatarMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "children_avatar_media_id_family_id_fkey")
 
@@ -621,7 +626,8 @@ model AlbumEntrySource {
   familyId   String                 @map("family_id") @db.Uuid
   albumId    String                 @map("album_id") @db.Uuid
   entryId    String                 @map("entry_id") @db.Uuid
-  memoryId   String                 @map("memory_id") @db.Uuid
+  memoryId   String?                @map("memory_id") @db.Uuid
+  albumPhotoMediaId String?          @map("album_photo_media_id") @db.Uuid
   sourceKind AlbumEntrySourceKind   @map("source_kind")
   kind       AlbumSourceMediaKind
   sourceId   String                 @map("source_id") @db.Uuid
@@ -630,7 +636,8 @@ model AlbumEntrySource {
   family     Family                 @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entry_sources_family_id_fkey")
   album      Album                  @relation("AlbumSources", fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_album_id_family_id_fkey")
   entry      AlbumEntry             @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_entry_sources_entry_id_album_id_family_id_fkey")
-  memory     Memory                 @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
+  memory     Memory?                @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
+  albumPhoto AlbumPhoto?             @relation(fields: [albumPhotoMediaId, familyId], references: [mediaId, familyId], onDelete: Cascade, map: "album_entry_sources_album_photo_family_fkey")
   coverFor   Album?                 @relation("AlbumCoverSource")
 
   @@unique([id, albumId, familyId], map: "album_entry_sources_id_album_id_family_id_key")
@@ -638,6 +645,20 @@ model AlbumEntrySource {
   @@index([familyId, albumId, entryId, position], map: "album_entry_sources_entry_order_idx")
   @@index([familyId, memoryId], map: "album_entry_sources_memory_idx")
   @@map("album_entry_sources")
+}
+
+model AlbumPhoto {
+  mediaId   String   @map("media_id") @db.Uuid
+  familyId  String   @map("family_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_photos_family_id_fkey")
+  media     MediaAsset @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_photos_media_id_family_id_fkey")
+  sources   AlbumEntrySource[]
+
+  @@id([mediaId])
+  @@unique([mediaId, familyId], map: "album_photos_media_id_family_id_key")
+  @@index([familyId, createdAt, mediaId], map: "album_photos_family_created_idx")
+  @@map("album_photos")
 }
 
 model AlbumSourceOperation {
@@ -699,6 +720,31 @@ model MemoryComment {
   @@unique([familyId, authorId, createRequestId], map: "memory_comments_create_marker_key")
   @@index([familyId, memoryId, deletedAt, createdAt(sort: Desc), id(sort: Desc)], map: "memory_comments_read_idx")
   @@map("memory_comments")
+}
+
+model Gift {
+  id               String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId         String       @map("family_id") @db.Uuid
+  childId          String       @map("child_id") @db.Uuid
+  title            String
+  url              String
+  price            String?
+  photoMediaId     String       @unique(map: "gifts_photo_media_id_key") @map("photo_media_id") @db.Uuid
+  createdByUserId  String       @map("created_by_user_id") @db.Uuid
+  reservedByUserId String?      @map("reserved_by_user_id") @db.Uuid
+  reservedAt       DateTime?    @map("reserved_at") @db.Timestamptz(3)
+  boughtAt         DateTime?    @map("bought_at") @db.Timestamptz(3)
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  family           Family       @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "gifts_family_id_fkey")
+  child            Child        @relation(fields: [childId, familyId], references: [id, familyId], onDelete: Cascade, map: "gifts_child_id_family_id_fkey")
+  photoMedia       MediaAsset   @relation("GiftPhoto", fields: [photoMediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "gifts_photo_media_id_family_id_fkey")
+  creatorMembership FamilyMember @relation("GiftCreatorMembership", fields: [familyId, createdByUserId], references: [familyId, userId], onDelete: Restrict, map: "gifts_creator_membership_fkey")
+  reserverMembership FamilyMember? @relation("GiftReserverMembership", fields: [familyId, reservedByUserId], references: [familyId, userId], onDelete: Restrict, map: "gifts_reserver_membership_fkey")
+
+  @@index([familyId, childId], map: "gifts_family_id_child_id_idx")
+  @@map("gifts")
 }
 
 model MemorySeen {
@@ -855,10 +901,12 @@ model MediaAsset {
   variants           MediaVariant[]
   reservation        UploadReservation?
   memories           MemoryMedia[]
+  albumPhoto         AlbumPhoto?
   backupAttachments  MaxMemoryBackupAttachment[]
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   maxVideoThumbnailFor MaxVideoReference? @relation("MaxVideoThumbnail")
   avatarForChildren  Child[]              @relation("ChildAvatar")
+  giftPhotoFor       Gift[]               @relation("GiftPhoto")
 
   @@unique([id, familyId], map: "media_assets_id_family_id_key")
   @@index([familyId, originalStatus, deletedAt], map: "media_assets_family_status_idx")
@@ -1132,6 +1180,7 @@ enum MediaSourceKind {
 enum MediaAssetPurpose {
   memory
   child_avatar
+  gift
 
   @@map("media_asset_purpose")
 }
