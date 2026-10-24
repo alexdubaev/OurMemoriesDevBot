@@ -15,7 +15,7 @@ import { signAccessToken } from '../src/modules/auth'
 const backendRoot = resolve(import.meta.dir, '..')
 const root = resolve(backendRoot, '..')
 /** Runtime released before child tags: it must keep working on the expanded schema (rollback). */
-const previousRuntime = 'c829c886f5d0a0712eb2016dc0e4ebc25ff888d0'
+const previousRuntime = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
 
 function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeout = 120_000) {
   const result = spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 })
@@ -84,30 +84,60 @@ test('the runtime before child tags creates and reads memories on the migrated s
       await tx.family.create({ data: { id: familyId, ownerUserId: user.id, name: 'Children rollback synthetic family', timezone: 'Europe/Moscow' } })
       await tx.familyMember.create({ data: { familyId, userId: user.id, role: 'full' } })
     })
-    const child = await db.child.create({ data: { familyId, displayName: 'Synthetic child' } })
+    const child = await db.child.create({ data: { familyId, displayName: 'Synthetic child one' } })
     const session = await db.authSession.create({ data: {
       userId: user.id, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 3_600_000),
     } })
     const appEnv = loadEnv({ DATABASE_URL: databaseUrl.toString(), NODE_ENV: 'test', JWT_SECRET: '0123456789abcdef'.repeat(4), CORS_ORIGINS: 'http://localhost:5173', AUTH_RATE_LIMIT_MAX: '10000' })
     const app = createApp({ env: appEnv, prisma: db })
     const token = `Bearer ${await signAccessToken({ sub: user.id, sessionId: session.id }, appEnv)}`
-    const request = async (path: string, method = 'GET', body?: unknown, key?: string) => {
+    const request = async (path: string, method = 'GET', body?: unknown, key?: string, extraHeaders: Record<string, string> = {}) => {
       const response = await app.request(`/api/v1${path}`, { method, headers: {
         authorization: token,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(key ? { 'idempotency-key': key } : {}),
+        ...extraHeaders,
       }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
       const text = await response.text()
       return { response, body: text ? JSON.parse(text) : null }
     }
 
-    const current = await request(`/families/${familyId}/memories`, 'POST', { kind: 'note', body: 'written by current runtime', occurredAt: new Date().toISOString() }, randomUUID())
+    const current = await request(`/families/${familyId}/memories`, 'POST', {
+      kind: 'note', body: 'written by current runtime with one-child auto tag', occurredAt: new Date().toISOString(),
+    }, randomUUID())
     expect(current.response.status, JSON.stringify(current.body)).toBe(201)
-    expect(await db.memoryChildTag.count({ where: { memoryId: current.body.id, childId: child.id, attachmentId: null } })).toBe(1)
+    expect(await db.memoryChildTag.findMany({ where: { memoryId: current.body.id }, select: { childId: true, attachmentId: true } }))
+      .toEqual([{ childId: child.id, attachmentId: null }])
+    const secondChild = await db.child.create({ data: { familyId, displayName: 'Synthetic child two' } })
+    const deletedChild = await db.child.create({ data: { familyId, displayName: 'Synthetic deleted profile' } })
+    const attachment = await db.mediaAsset.create({ data: {
+      familyId, uploaderId: user.id, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${familyId}/children-rollback-${randomUUID()}`, declaredMime: 'image/png', verifiedMime: 'image/png',
+      sha256: 'a'.repeat(64), byteSize: 10n, width: 64, height: 48, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const multi = await request(`/families/${familyId}/memories`, 'POST', {
+      kind: 'photo', childIds: [child.id, secondChild.id], mediaIds: [attachment.id], body: 'written by current runtime for two children', occurredAt: new Date().toISOString(),
+    }, randomUUID())
+    expect(multi.response.status, JSON.stringify(multi.body)).toBe(201)
+    const updatedTags = await request(`/families/${familyId}/memories/${multi.body.id}/child-tags`, 'PUT', {
+      expectedChildTagsVersion: 1,
+      tags: [
+        { childId: child.id, attachmentId: null },
+        { childId: secondChild.id, attachmentId: attachment.id },
+      ],
+    })
+    expect(updatedTags.response.status, JSON.stringify(updatedTags.body)).toBe(200)
+    const deleted = await request(`/families/${familyId}/children/${deletedChild.id}`, 'DELETE', undefined, undefined, { 'if-match': '1' })
+    expect(deleted.response.status, JSON.stringify(deleted.body)).toBe(204)
+    const deletedAt = (await db.child.findUniqueOrThrow({ where: { id: deletedChild.id } })).deletedAt
+    expect(deletedAt).not.toBeNull()
+    const childTagSnapshot = await db.memoryChildTag.findMany({ where: { memoryId: multi.body.id }, orderBy: [{ attachmentId: 'asc' }, { childId: 'asc' }] })
+    expect(childTagSnapshot).toHaveLength(2)
 
     const seedPath = resolve(fixture, 'seed.json')
     const statePath = resolve(fixture, 'runtime-state.json')
-    writeFileSync(seedPath, JSON.stringify({ userId: user.id, familyId, childId: child.id, memoryId: current.body.id, sessionId: session.id }))
+    writeFileSync(seedPath, JSON.stringify({ userId: user.id, familyId, childId: child.id, secondChildId: secondChild.id,
+      memoryId: current.body.id, multiMemoryId: multi.body.id, attachmentId: attachment.id, deletedChildId: deletedChild.id, sessionId: session.id }))
     const probeSource = `
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -137,7 +167,13 @@ try {
   assert.equal(family.body.child.id, seed.childId)
   const memory = await request('/families/' + seed.familyId + '/memories/' + seed.memoryId)
   assert.equal(memory.response.status, 200, JSON.stringify(memory.body))
-  assert.equal(memory.body.body, 'written by current runtime')
+  assert.equal(memory.body.body, 'written by current runtime with one-child auto tag')
+  assert.equal(memory.body.childId, seed.childId)
+  const multi = await request('/families/' + seed.familyId + '/memories/' + seed.multiMemoryId)
+  assert.equal(multi.response.status, 200, JSON.stringify(multi.body))
+  assert.equal(multi.body.body, 'written by current runtime for two children')
+  assert.equal(multi.body.kind, 'photo')
+  assert.deepEqual((await prisma.memoryMedia.findMany({ where: { memoryId: seed.multiMemoryId } })).map((media) => media.mediaId), [seed.attachmentId])
   const created = await request('/families/' + seed.familyId + '/memories', 'POST', { kind: 'note', childId: seed.childId, body: 'written by previous runtime', occurredAt: new Date().toISOString() }, crypto.randomUUID())
   assert.equal(created.response.status, 201, JSON.stringify(created.body))
   const feed = await request('/families/' + seed.familyId + '/memories?childId=' + seed.childId)
@@ -152,6 +188,13 @@ try {
     expect(JSON.parse(output.trim().split('\n').at(-1)!)).toMatchObject({ success: true, status: 201 })
     const { previousRuntimeMemoryId } = JSON.parse(readFileSync(statePath, 'utf8')) as { previousRuntimeMemoryId: string }
 
+    const tagsAfterRollback = await db.memoryChildTag.findMany({ where: { memoryId: multi.body.id }, orderBy: [{ attachmentId: 'asc' }, { childId: 'asc' }] })
+    expect(tagsAfterRollback).toEqual(childTagSnapshot)
+    expect(tagsAfterRollback.map(({ childId: taggedChildId, attachmentId }) => [taggedChildId, attachmentId]).sort()).toEqual([
+      [child.id, null], [secondChild.id, attachment.id],
+    ].sort())
+    expect(await db.child.findUniqueOrThrow({ where: { id: deletedChild.id } })).toMatchObject({ deletedAt })
+
     // Back on current code: the rollback-era memory is intact, readable and keeps its legacy child.
     const rollbackMemory = await db.memory.findUniqueOrThrow({ where: { id: previousRuntimeMemoryId } })
     expect(rollbackMemory).toMatchObject({ childId: child.id, body: 'written by previous runtime', childTagsVersion: 1 })
@@ -160,7 +203,10 @@ try {
     const feed = await request(`/families/${familyId}/memories`)
     expect(feed.response.status).toBe(200)
     expect(feed.body.items.map((item: { id: string }) => item.id)).toContain(previousRuntimeMemoryId)
-    const after = await request(`/families/${familyId}/memories`, 'POST', { kind: 'note', childId: child.id, body: 'current after rollback', occurredAt: new Date().toISOString() }, randomUUID())
+    expect(await db.memoryChildTag.count({ where: { memoryId: previousRuntimeMemoryId } })).toBe(0)
+    const after = await request(`/families/${familyId}/memories`, 'POST', {
+      kind: 'note', childIds: [child.id], body: 'current after rollback', occurredAt: new Date().toISOString(),
+    }, randomUUID())
     expect(after.response.status).toBe(201)
     expect(await db.memoryChildTag.count({ where: { memoryId: after.body.id, childId: child.id } })).toBe(1)
     expect(await ledgerSnapshot()).toEqual(beforeLedger)
