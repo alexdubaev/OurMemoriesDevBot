@@ -2489,6 +2489,271 @@ test('Control recovery permits only its exact current executable fingerprint and
   }
 })
 
+test('MAX video recovery accepts only its exact reconstructed executable profile', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = '92a4fb7d732339927fb3ac0c38c8bbe18f655ad4'
+  const target = rollbackHealthy
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
+  const expectedCompatibility = '8684495791decc9a1e506584555f3db4ea306eedf5fa0c410140d58a482b7be0'
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
+  const files = [
+    ['backend/prisma/migrations/20261025110000_max_multivideo_references/migration.sql', '420ebe5bed78dda6d557c2eb06b3e8869d8efbaa'],
+    ['backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql', 'e0eb07374b9ccbfe9be1b3f102427a0141e69c1d'],
+    ['backend/prisma/schema.prisma', '52eea5d114e9bbfc14a9c16da265a279601cc285'],
+    ['backend/scripts/migrate-max-legacy-videos.ts', '6c724b9fb23ccaac2aadf878b089a5d4969f748c'],
+    ['backend/src/jobs.ts', '9e7702f8839cfa5c724843c41d6a9c83cdfc1a14'],
+    ['backend/src/modules/max/index.ts', 'd3d27174bb4304736fdbde67e9f9b47c054cf268'],
+    ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '4d5429372126a7d7274da5b620001f6b7148af9b'],
+    ['backend/src/modules/max/infrastructure/process-image.ts', '3fe3519067439ad7b1017b3c31b747b5e686a1c8'],
+    ['backend/src/modules/max/infrastructure/process-task.ts', 'd4780c4b14d61f9c5c13c36f6b94b99c4bb94d73'],
+    ['backend/src/modules/max/infrastructure/process-video.ts', '9b522ef666a31e67f9780273ac8df379fa1e30c4'],
+    ['backend/src/modules/max/infrastructure/video-playback.ts', 'c5ff9dce1fd39625c7c44f0681e7afec45d27062'],
+    ['backend/src/modules/media/index.ts', '9fe5b2c07d3c800715c233129ded680cc9924546'],
+    ['backend/src/modules/memories/infrastructure/album-memory-source-catalog.ts', '833b33b4390a8fc419690050413631c8da68a33c'],
+    ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', '7ee3912dbca0088e9d4f881e840de5604ea1158e'],
+    ['backend/src/modules/memories/infrastructure/source-memory-publisher.ts', '7679b7fae1dc6e697075a8e34f1f30d2610498c5'],
+  ]
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-video-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, files,
+    'reconstruct the exact MAX legacy-video recovery source')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+
+  const profile = (candidate) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video')
+
+  for (const [relativePath, marker] of [
+    ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '\n// synthetic MAX recovery source drift\n'],
+    ['backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql', '\n-- synthetic MAX retention migration drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-video-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+      `mutate exact MAX video recovery input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `MAX video recovery must reject changed production or migration input: ${relativePath}`)
+  }
+})
+
+test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
+  const run = (mode) => {
+    const events = resolve(root, '.scratch', `max-video-readiness-${process.pid}-${mode}.log`)
+    const script = [
+      'set -euo pipefail', redeployDefinitions,
+      `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+      `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
+      'docker() { if [ "$1" = image ]; then if [ "$4" = \'{{.Id}}\' ]; then echo sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; else echo "$MEMOLY_PRODUCT_SHA"; fi; return 0; fi; printf "docker:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; }',
+      `compose() { printf "compose:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; case "$*" in *legacy_video_retained_at*) [ "${mode}" != unsafe ] ;; *--recover-all*) [ "${mode}" != missing ] ;; *) return 0 ;; esac; }`,
+      'rollback_verify_max_video_recovery_readiness',
+    ].join('\n')
+    const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: script, encoding: 'utf8', timeout: 30_000 })
+    const output = existsSync(events) ? readFileSync(events, 'utf8') : ''
+    return { result, output }
+  }
+
+  const ready = run('ready')
+  assert.equal(ready.result.status, 0, ready.result.stderr || ready.result.stdout)
+  assert.match(ready.output, /compose:run --rm --no-deps backend bun -e/)
+  assert.match(ready.output, /compose:run --rm --no-deps backend bun scripts\/migrate-max-legacy-videos.ts --recover-all/)
+  assert.doesNotMatch(ready.output, /docker:stop|compose:up/)
+
+  const tombstoned = run('unsafe')
+  assert.notEqual(tombstoned.result.status, 0)
+  assert.match(tombstoned.result.stderr, /already tombstoned/)
+  assert.doesNotMatch(tombstoned.output, /--recover-all|docker:stop|compose:up/)
+
+  const missing = run('missing')
+  assert.notEqual(missing.result.status, 0)
+  assert.match(missing.result.stderr, /readiness failed/)
+  assert.doesNotMatch(missing.output, /docker:stop|compose:up/)
+})
+
+test('MAX video apply uses the candidate image and preserves the recovery exit code', () => {
+  const events = resolve(root, '.scratch', `max-video-apply-${process.pid}.log`)
+  const script = [
+    'set -euo pipefail', redeployDefinitions,
+    `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+    `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
+    'rollback_verify_max_video_migration_history() { echo present; }',
+    'docker() { if [ "$1" = image ]; then if [ "$4" = \'{{.Id}}\' ]; then echo sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; else echo "$MEMOLY_PRODUCT_SHA"; fi; return 0; fi; if [ "$1" = ps ]; then case "$*" in *service=backend*) [ "${STOPPED_backend:-false}" = true ] || echo backend-id ;; *service=worker*) [ "${STOPPED_worker:-false}" = true ] || echo worker-id ;; *service=scheduler*) [ "${STOPPED_scheduler:-false}" = true ] || echo scheduler-id ;; esac; return 0; fi; if [ "$1" = stop ]; then case "$4" in backend-id) STOPPED_backend=true ;; worker-id) STOPPED_worker=true ;; scheduler-id) STOPPED_scheduler=true ;; esac; printf "stop:%s\\n" "$4" >> "$MAX_VIDEO_EVENTS"; return 0; fi; }',
+    'compose() { printf "compose:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; case "$*" in *--recover-all*--apply*) echo recovery-partial-failure; return 7 ;; *--recover-all*) return 0 ;; *max_video_legacy_retention*) return 0 ;; *) return 0 ;; esac; }',
+    'readiness() { printf "current-readiness\\n" >> "$MAX_VIDEO_EVENTS"; }',
+    'rollback_apply_max_video_recovery',
+  ].join('\n')
+  const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: script, encoding: 'utf8', timeout: 30_000 })
+  const output = existsSync(events) ? readFileSync(events, 'utf8') : ''
+  assert.equal(result.status, 7, `${result.stdout}${result.stderr}`)
+  assert.match(output, /backend bun scripts\/migrate-max-legacy-videos.ts --recover-all --apply/)
+  assert.match(output, /stop:backend-id[\s\S]*stop:worker-id[\s\S]*stop:scheduler-id[\s\S]*compose:up -d --no-deps --force-recreate backend worker scheduler[\s\S]*current-readiness/)
+  assert.doesNotMatch(result.stderr, /recovery-partial-failure/)
+  assert.doesNotMatch(output, /33a0054c3c71372aa5509ee8ebfa4578ad512ea1|rollback promotion/)
+})
+
+test('MAX video apply accepts silent candidate recovery only after readiness and ledger verification', () => {
+  const events = resolve(root, '.scratch', `max-video-apply-success-${process.pid}.log`)
+  const script = [
+    'set -euo pipefail', redeployDefinitions,
+    `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+    `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
+    'rollback_verify_max_video_migration_history() { echo present; }',
+    'rollback_verify_max_video_recovery_readiness() { printf "readiness\\n" >> "$MAX_VIDEO_EVENTS"; }',
+    'docker() { if [ "$1" = image ]; then if [ "$4" = \'{{.Id}}\' ]; then echo sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; else echo "$MEMOLY_PRODUCT_SHA"; fi; return 0; fi; if [ "$1" = ps ]; then case "$*" in *service=backend*) [ "${STOPPED_backend:-false}" = true ] || echo backend-id ;; *service=worker*) [ "${STOPPED_worker:-false}" = true ] || echo worker-id ;; *service=scheduler*) [ "${STOPPED_scheduler:-false}" = true ] || echo scheduler-id ;; esac; return 0; fi; if [ "$1" = stop ]; then case "$4" in backend-id) STOPPED_backend=true ;; worker-id) STOPPED_worker=true ;; scheduler-id) STOPPED_scheduler=true ;; esac; printf "stop:%s\\n" "$4" >> "$MAX_VIDEO_EVENTS"; return 0; fi; }',
+    'compose() { printf "compose:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; return 0; }',
+    'rollback_apply_max_video_recovery',
+  ].join('\n')
+  const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: script, encoding: 'utf8', timeout: 30_000 })
+  const output = existsSync(events) ? readFileSync(events, 'utf8') : ''
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.match(output, /readiness[\s\S]*stop:backend-id[\s\S]*stop:worker-id[\s\S]*stop:scheduler-id[\s\S]*--recover-all --apply[\s\S]*max_video_legacy_retention[\s\S]*readiness/)
+  assert.doesNotMatch(output, /33a0054c3c71372aa5509ee8ebfa4578ad512ea1/)
+})
+
+test('MAX video rollback pre-SQL verification uses the exact-prefix helper while complete state rejects 57 migrations', () => {
+  const serverRoot = mkdtempSync(resolve(root, '.scratch', 'max-video-pre-sql-dispatch-'))
+  const events = resolve(serverRoot, 'events.log')
+  const rollbackEnv = resolve(serverRoot, 'rollback.env')
+  const pgFixture = resolve(serverRoot, 'node_modules/pg')
+  mkdirSync(pgFixture, { recursive: true })
+  writeFileSync(resolve(pgFixture, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(pgFixture, 'index.js'), `export class Client {
+    async connect() {}
+    async end() {}
+    async query(sql) {
+      const count = Number(process.env.FIXTURE_LEDGER_COUNT)
+      const candidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n').map((line) => line.split(':'))
+      const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
+      if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
+      if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
+      if (sql.includes('to_regclass')) return { rows: [{ present: count === 59 }] }
+      if (sql.includes('SELECT EXISTS')) return { rows: [{ unread: false, multiple: false, unfinished: false }] }
+      throw new Error('unexpected release-verification SQL')
+    }
+  }\n`)
+  writeFileSync(rollbackEnv, `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}\nPREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}\nMEMOLY_DB_ROLLBACK_ALLOWED=false\n`)
+  const run = (phase, variant = 'exact') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail', redeployDefinitions,
+      `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
+      `ROLLBACK_ENV=${shellQuote(rollbackEnv)}`, `FORWARD_MARKER=${shellQuote(resolve(serverRoot, 'no-b2-marker'))}`,
+      `MM0_FORWARD_MARKER=${shellQuote(resolve(serverRoot, 'no-mm0-marker'))}`,
+      'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+      'validate_rollback_file() { :; }',
+      'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
+      'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
+      'rollback_runtime_fingerprint() { printf "ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87\\n"; }',
+      'rollback_control_host_inputs_match() { return 0; }',
+      'rollback_control_installed_inputs_match() { return 0; }',
+      'load_runtime_secrets() { :; }',
+      'validate_inputs() { :; }',
+      'configuration_backup_dir() { printf "%s\\n" "$SERVER_ROOT"; }',
+      `docker() { case "$*" in *"{{.Id}}"*"memoly-backend:"*) printf "sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9\\n" ;; *"{{.Id}}"*"memoly-webapp:"*) printf "sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74\\n" ;; *"org.opencontainers.image.revision"*) printf "%s\\n" "${rollbackHealthy}" ;; *) return 0 ;; esac; }`,
+      `compose() { local program; for program; do :; done; if [[ "$*" == *"bun -e"* ]]; then printf "ledger-check\\n" >> "$FIXTURE_EVENTS"; (cd "$FIXTURE_PG_DIR" && node --input-type=module --eval "$program"); else return 0; fi; }`,
+      `migration_status() { printf "migration-status:%s\\n" "$FIXTURE_PHASE" >> ${shellQuote(events)}; [ "$FIXTURE_PHASE" = complete ]; }`,
+      'rollback_verify_max_video_recovery_readiness() { printf "readiness\\n" >> "$FIXTURE_EVENTS"; }',
+      `FIXTURE_PHASE=${shellQuote(phase)}`,
+      `FIXTURE_EVENTS=${shellQuote(events)}`,
+      `FIXTURE_PG_DIR=${shellQuote(gitBashPath(serverRoot))}`,
+      `FIXTURE_LEDGER_VARIANT=${shellQuote(variant)}`,
+      'FIXTURE_LEDGER_COUNT=57',
+      'if verify_application_rollback "$FIXTURE_PHASE"; then printf "accepted\\n"; else status=$?; printf "rejected:%s\\n" "$status"; fi',
+    ].join('\n'),
+    encoding: 'utf8', env: { ...process.env, FIXTURE_PHASE: phase, FIXTURE_EVENTS: gitBashPath(events), FIXTURE_PG_DIR: gitBashPath(serverRoot), FIXTURE_LEDGER_COUNT: '57', FIXTURE_LEDGER_VARIANT: variant }, timeout: 30_000,
+  })
+  try {
+    const preSql = run('pre-sql')
+    assert.equal(preSql.status, 0, preSql.stdout + preSql.stderr)
+    assert.match(preSql.stdout, /accepted/)
+    const preEvents = existsSync(events) ? readFileSync(events, 'utf8') : ''
+    assert.match(preEvents, /ledger-check/)
+    assert.doesNotMatch(preEvents, /migration-status/)
+
+    writeFileSync(events, '')
+    const unreviewed = run('pre-sql', 'wrong')
+    assert.equal(unreviewed.status, 0, unreviewed.stdout + unreviewed.stderr)
+    assert.match(unreviewed.stdout, /rejected:1/)
+    assert.doesNotMatch(existsSync(events) ? readFileSync(events, 'utf8') : '', /migration-status/)
+
+    writeFileSync(events, '')
+    const complete = run('complete')
+    assert.equal(complete.status, 0, complete.stdout + complete.stderr)
+    assert.match(complete.stdout, /rejected:1/)
+    const completeEvents = existsSync(events) ? readFileSync(events, 'utf8') : ''
+    assert.match(completeEvents, /migration-status:complete[\s\S]*ledger-check/)
+  } finally {
+    rmSync(serverRoot, { recursive: true, force: true })
+  }
+})
+
+test('MAX video migration stops all old writers after backup and before migration DDL', () => {
+  const serverRoot = mkdtempSync(resolve(root, '.scratch', 'max-video-quiescence-'))
+  const events = resolve(serverRoot, 'events.log')
+  const script = [
+    'set -euo pipefail', redeployDefinitions,
+    `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
+    `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
+    'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+    'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
+    'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
+    'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',
+    'backup_database() { echo backup >> "$MAX_VIDEO_EVENTS"; }',
+    'install() { mkdir -p "${@: -1}"; }',
+    'chmod() { return 0; }',
+    `rollback_source_compatibility_profile() { echo max-video; }`,
+    'rollback_verify_max_video_migration_history() { echo absent; }',
+    'docker() { if [ "$1" = ps ]; then case "$*" in *service=backend*) [ "${STOPPED_backend:-false}" = true ] || echo backend-id ;; *service=worker*) [ "${STOPPED_worker:-false}" = true ] || echo worker-id ;; *service=scheduler*) [ "${STOPPED_scheduler:-false}" = true ] || echo scheduler-id ;; esac; return 0; fi; if [ "$1" = stop ]; then case "$4" in backend-id) STOPPED_backend=true ;; worker-id) STOPPED_worker=true ;; scheduler-id) STOPPED_scheduler=true ;; esac; printf "stop:%s\\n" "$4" >> "$MAX_VIDEO_EVENTS"; return 0; fi; }',
+    'compose() { printf "sql:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; return 0; }',
+    'migration_status() { echo migration-status >> "$MAX_VIDEO_EVENTS"; }',
+    'migrate',
+  ].join('\n')
+  const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: script, encoding: 'utf8', timeout: 30_000 })
+  const output = existsSync(events) ? readFileSync(events, 'utf8') : ''
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+  assert.ok(output.indexOf('backup') < output.indexOf('stop:backend-id'), output)
+  assert.ok(output.indexOf('stop:backend-id') < output.indexOf('stop:worker-id'), output)
+  assert.ok(output.indexOf('stop:worker-id') < output.indexOf('stop:scheduler-id'), output)
+  assert.ok(output.indexOf('stop:scheduler-id') < output.indexOf('sql:'), output)
+  rmSync(serverRoot, { recursive: true, force: true })
+})
+
+test('MAX retention migration refuses to run when its exact candidate fingerprint fails', () => {
+  const serverRoot = mkdtempSync(resolve(root, '.scratch', 'max-video-fingerprint-failure-'))
+  const events = resolve(serverRoot, 'events.log')
+  const script = [
+    'set -euo pipefail', redeployDefinitions,
+    `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
+    `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
+    'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+    'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
+    'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
+    'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',
+    'backup_database() { echo backup >> "$MAX_VIDEO_EVENTS"; }',
+    'rollback_source_compatibility_profile() { return 1; }',
+    'docker() { printf "docker:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; }',
+    'compose() { printf "sql:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; }',
+    'migrate',
+  ].join('\n')
+  const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: script, encoding: 'utf8', timeout: 30_000 })
+  const output = existsSync(events) ? readFileSync(events, 'utf8') : ''
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`)
+  assert.match(result.stderr, /exact reviewed source compatibility profile/)
+  assert.match(output, /backup/)
+  assert.doesNotMatch(output, /docker:|sql:/)
+  rmSync(serverRoot, { recursive: true, force: true })
+})
+
 test('child linked-family recovery pins frozen production inputs to dc26 and rejects runtime or UI drift', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
