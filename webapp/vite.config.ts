@@ -14,6 +14,10 @@ const diagnosticsBootstrap = readFileSync(path.resolve(__dirname, 'src/platform/
 export default defineConfig({
   build: {
     rolldownOptions: {
+      input: {
+        family: path.resolve(__dirname, 'index.html'),
+        control: path.resolve(__dirname, 'control/index.html'),
+      },
       output: {
         strictExecutionOrder: true,
         codeSplitting: {

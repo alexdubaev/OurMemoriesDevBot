@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="theme-color" content="#f7f8fa" />
+    <title>memoLy · Панель владельца</title>
+    <style>
+      html,body{margin:0;min-height:100%;background:#f7f8fa;color:#1e293b;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+      .control-start{max-width:720px;margin:12vh auto;padding:24px 20px}
+      #control-start[hidden]{display:none!important}
+      .control-start h1{font-size:24px;line-height:1.25;margin:0 0 8px}.control-start p{color:#64748b}
+      .control-start button{border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:10px 14px;color:inherit;font:inherit;cursor:pointer}
+    </style>
+    <script>
+      window.addEventListener('error',function(e){if(e.target&&e.target.tagName==='SCRIPT'){var s=document.getElementById('control-start');if(s){s.hidden=false;s.querySelector('[data-error]').textContent='Не удалось загрузить интерфейс. Проверьте соединение и попробуйте снова.'}}},true)
+      window.addEventListener('unhandledrejection',function(){var s=document.getElementById('control-start');if(s){s.hidden=false;s.querySelector('[data-error]').textContent='Интерфейс завершился с ошибкой. Перезагрузите страницу или попробуйте снова.'}})
+    </script>
+  </head>
+  <body>
+    <div id="control-start" class="control-start" role="status">
+      <h1>memoLy</h1><p>Панель владельца загружается…</p>
+      <noscript><p>Для работы панели требуется JavaScript. Данные семей в этой оболочке не загружаются.</p></noscript>
+      <p data-error></p><button type="button" onclick="location.reload()">Повторить</button>
+    </div>
+    <div id="memoly-control-root"></div>
+    <script type="module" src="/src/control/main.tsx"></script>
+  </body>
+</html>

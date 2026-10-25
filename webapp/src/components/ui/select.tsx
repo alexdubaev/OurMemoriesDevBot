@@ -36,9 +36,11 @@ function SelectTrigger({
   className,
   size = "default",
   children,
+  showIcon = true,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
+  showIcon?: boolean
 }) {
   return (
     <SelectPrimitive.Trigger
@@ -51,9 +53,7 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon asChild>
-        <HugeiconsIcon icon={UnfoldMoreIcon} strokeWidth={2} className="pointer-events-none size-4 text-muted-foreground" />
-      </SelectPrimitive.Icon>
+      {showIcon && <SelectPrimitive.Icon asChild><HugeiconsIcon icon={UnfoldMoreIcon} strokeWidth={2} className="pointer-events-none size-4 text-muted-foreground" /></SelectPrimitive.Icon>}
     </SelectPrimitive.Trigger>
   )
 }
@@ -63,10 +63,15 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  portalContainer,
+  hideScrollIcons = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { portalContainer?: HTMLElement | null; hideScrollIcons?: boolean }) {
+  const container = portalContainer === undefined && typeof document !== 'undefined'
+    ? document.querySelector('.memoly-control-root') as HTMLElement | null
+    : portalContainer
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container ?? undefined}>
       <SelectPrimitive.Content
         data-slot="select-content"
         data-align-trigger={position === "item-aligned"}
@@ -75,7 +80,7 @@ function SelectContent({
         align={align}
         {...props}
       >
-        <SelectScrollUpButton />
+        <SelectScrollUpButton hideIcon={hideScrollIcons} />
         <SelectPrimitive.Viewport
           data-position={position}
           className={cn(
@@ -85,7 +90,7 @@ function SelectContent({
         >
           {children}
         </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
+        <SelectScrollDownButton hideIcon={hideScrollIcons} />
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   )
@@ -107,8 +112,9 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  hideCheckIcon = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & { hideCheckIcon?: boolean }) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -120,7 +126,7 @@ function SelectItem({
     >
       <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
         <SelectPrimitive.ItemIndicator>
-          <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="pointer-events-none" />
+          {!hideCheckIcon && <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="pointer-events-none" />}
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
@@ -143,8 +149,9 @@ function SelectSeparator({
 
 function SelectScrollUpButton({
   className,
+  hideIcon = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
+}: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton> & { hideIcon?: boolean }) {
   return (
     <SelectPrimitive.ScrollUpButton
       data-slot="select-scroll-up-button"
@@ -154,15 +161,16 @@ function SelectScrollUpButton({
       )}
       {...props}
     >
-      <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
+      {!hideIcon && <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />}
     </SelectPrimitive.ScrollUpButton>
   )
 }
 
 function SelectScrollDownButton({
   className,
+  hideIcon = false,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
+}: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton> & { hideIcon?: boolean }) {
   return (
     <SelectPrimitive.ScrollDownButton
       data-slot="select-scroll-down-button"
@@ -172,7 +180,7 @@ function SelectScrollDownButton({
       )}
       {...props}
     >
-      <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
+      {!hideIcon && <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />}
     </SelectPrimitive.ScrollDownButton>
   )
 }

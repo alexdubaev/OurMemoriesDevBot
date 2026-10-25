@@ -52,12 +52,14 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  portalContainer?: HTMLElement | null
 }) {
   return (
-    <DialogPortal>
+    <DialogPrimitive.Portal container={portalContainer ?? undefined}>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
@@ -81,7 +83,7 @@ function DialogContent({
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>
-    </DialogPortal>
+    </DialogPrimitive.Portal>
   )
 }
 
