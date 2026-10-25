@@ -13,7 +13,7 @@ import { decodeEventCursor, eventCursor, exportCsv, familyCsvRow, notFound, pars
 import { familyWhere, listChildren, listFamilies, listUsers, queryEvents, queryFamilyById, queryOverview, queryStorage, queryUserById, queryFamilies, queryUsers, userWhere } from './infrastructure/control-read-repository'
 import { z } from 'zod'
 export { collectControlMetrics, createControlCollection, pruneControlTelemetry, readControlMetric, recordControlProgress, withControlReadTimeout } from './infrastructure/control-collection'
-import { readControlMetric } from './infrastructure/control-collection'
+import { CONTROL_STALE_AFTER_SECONDS, readControlMetric } from './infrastructure/control-collection'
 import { withControlReadTimeout } from './infrastructure/control-collection'
 
 export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }: {
@@ -179,34 +179,37 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   routes.get('/control/storage', async (c) => {
     const nowDate = new Date()
     const [totals, pg, host, media, backup] = await Promise.all([
-      queryStorage(db), readControlMetric(db, 'postgres_size', 300, nowDate), readControlMetric(db, 'host_filesystem', 60, nowDate), readControlMetric(db, 'media_storage', 86_400, nowDate), readControlMetric(db, 'backup_storage', 86_400, nowDate),
+      queryStorage(db), readControlMetric(db, 'postgres_size', CONTROL_STALE_AFTER_SECONDS.postgres_size, nowDate), readControlMetric(db, 'host_filesystem', CONTROL_STALE_AFTER_SECONDS.host_filesystem, nowDate),
+      readControlMetric(db, 'media_storage', CONTROL_STALE_AFTER_SECONDS.media_storage, nowDate, env.PRIVATE_STORAGE_DRIVER === 'filesystem' ? undefined : 'unsupported'),
+      readControlMetric(db, 'backup_storage', CONTROL_STALE_AFTER_SECONDS.backup_storage, nowDate),
     ])
     const now = nowDate.toISOString()
     const hostValue = host.value as { filesystems?: Array<{ id:string; scope:'host'|'media'|'backups'; usedBytes:string; availableBytes:string; capacityBytes:string; parentResourceId:string|null }> } | null
     const hostFs = hostValue?.filesystems?.find((entry) => entry.scope === 'host')
     const mediaValue = media.value as { usedBytes:string; resourceId:string; parentResourceId:string|null } | null
     const result = {
-      familyAccounting: sample({ resourceId:'family-quota-total', parentResourceId:null, scopeLabel:'Учёт квоты семей', accountingBasis:'Сумма счётчиков хранилища активных и сохранённых семей', capacityKind:'configured_budget' as const, usedBytes: String(totals.totals.used), reservedBytes: String(totals.totals.reserved), quotaBytes: String(env.MEDIA_FAMILY_QUOTA_BYTES), capacityBytes: null, availableBytes:null }, 'ok', 'product_db', 30, now),
-      mediaStorage: sample(mediaValue ? { resourceId:mediaValue.resourceId, parentResourceId:mediaValue.parentResourceId, scopeLabel:'Логические байты текущих файлов', accountingBasis:'Ограниченный обход хоста: размеры файлов без выделенных блоков диска', capacityKind:'unknown' as const, usedBytes:mediaValue.usedBytes, capacityBytes:null, availableBytes:null } : null, media.status, 'media_storage', 86_400, media.observedAt, media.lastAttemptAt, media.coverageFrom, media.errorCode),
-      hostFilesystem: sample(hostFs ? { resourceId:hostFs.id, parentResourceId:hostFs.parentResourceId, scopeLabel:'Файловая система хоста', accountingBasis:'statvfs для разрешённого пути', capacityKind:'physical' as const, usedBytes:hostFs.usedBytes, capacityBytes:hostFs.capacityBytes, availableBytes:hostFs.availableBytes } : null, host.status, 'host_filesystem', 60, host.observedAt, host.lastAttemptAt, host.coverageFrom, host.errorCode),
-      postgres: sample(pg.value ? { resourceId:'postgres-database', parentResourceId:null, scopeLabel:'База данных PostgreSQL', accountingBasis:'pg_database_size(current_database()); входит в диск хоста, если размещена там же', capacityKind:'unknown' as const, usedBytes:String((pg.value as {usedBytes:string}).usedBytes), capacityBytes:null, availableBytes:null } : null, pg.status, 'postgres_size', 300, pg.observedAt, pg.lastAttemptAt, pg.coverageFrom, pg.errorCode),
-      backup: sample(backup.value ? { ...(backup.value as {resourceId:string;parentResourceId:string|null;usedBytes:string;entries:number;artifactAt:string|null;validation:'valid'|'invalid'|'unknown';restoreTestAt:string|null}), scopeLabel:'Логические байты файлов резервных копий', accountingBasis:'Ограниченный обход регулярных файлов; отдельно от statvfs файловой системы', capacityKind:'unknown' as const, capacityBytes:null, availableBytes:null } : null, backup.status, 'backup_storage', 86_400, backup.observedAt, backup.lastAttemptAt, backup.coverageFrom, backup.errorCode),
+      familyAccounting: sample({ resourceId:'family-quota-total', parentResourceId:null, scopeLabel:'Учёт квоты семей', accountingBasis:'Сумма счётчиков хранилища активных и сохранённых семей', capacityKind:'configured_budget' as const, usedBytes: String(totals.totals.used), reservedBytes: String(totals.totals.reserved), quotaBytes: String(env.MEDIA_FAMILY_QUOTA_BYTES), capacityBytes: null, availableBytes:null }, 'ok', 'product_db', CONTROL_STALE_AFTER_SECONDS.product_db, now),
+      mediaStorage: sample(mediaValue ? { resourceId:mediaValue.resourceId, parentResourceId:mediaValue.parentResourceId, scopeLabel:'Логические байты текущих файлов', accountingBasis:'Ограниченный обход хоста: размеры файлов без выделенных блоков диска', capacityKind:'unknown' as const, usedBytes:mediaValue.usedBytes, capacityBytes:null, availableBytes:null } : null, media.status, 'media_storage', CONTROL_STALE_AFTER_SECONDS.media_storage, media.observedAt, media.lastAttemptAt, media.coverageFrom, media.errorCode),
+      hostFilesystem: sample(hostFs ? { resourceId:hostFs.id, parentResourceId:hostFs.parentResourceId, scopeLabel:'Файловая система хоста', accountingBasis:'statvfs для разрешённого пути', capacityKind:'physical' as const, usedBytes:hostFs.usedBytes, capacityBytes:hostFs.capacityBytes, availableBytes:hostFs.availableBytes } : null, host.status, 'host_filesystem', CONTROL_STALE_AFTER_SECONDS.host_filesystem, host.observedAt, host.lastAttemptAt, host.coverageFrom, host.errorCode),
+      postgres: sample(pg.value ? { resourceId:'postgres-database', parentResourceId:null, scopeLabel:'База данных PostgreSQL', accountingBasis:'pg_database_size(current_database()); входит в диск хоста, если размещена там же', capacityKind:'unknown' as const, usedBytes:String((pg.value as {usedBytes:string}).usedBytes), capacityBytes:null, availableBytes:null } : null, pg.status, 'postgres_size', CONTROL_STALE_AFTER_SECONDS.postgres_size, pg.observedAt, pg.lastAttemptAt, pg.coverageFrom, pg.errorCode),
+      backup: sample(backup.value ? { ...(backup.value as {resourceId:string;parentResourceId:string|null;usedBytes:string;entries:number;artifactAt:string|null;validation:'valid'|'invalid'|'unknown';restoreTestAt:string|null}), scopeLabel:'Логические байты файлов резервных копий', accountingBasis:'Ограниченный обход регулярных файлов; отдельно от statvfs файловой системы', capacityKind:'unknown' as const, capacityBytes:null, availableBytes:null } : null, backup.status, 'backup_storage', CONTROL_STALE_AFTER_SECONDS.backup_storage, backup.observedAt, backup.lastAttemptAt, backup.coverageFrom, backup.errorCode),
     }
     return c.json(controlStorageSchema.parse(result))
   })
   routes.get('/control/sources', async (c) => {
     const now = new Date().toISOString()
     const ids = ['product_db','postgres_size','media_storage','backup_storage','host_filesystem','service_probes','max_binding_state','release_evidence'] as const
-    const samples = await Promise.all(ids.map(async (id) => ({ id, ...(await readControlMetric(db, id, id === 'postgres_size' ? 300 : id === 'media_storage' || id === 'backup_storage' ? 86_400 : 60)) })))
+    const samples = await Promise.all(ids.map(async (id) => ({ id, ...(await readControlMetric(db, id, CONTROL_STALE_AFTER_SECONDS[id], new Date(), id === 'media_storage' && env.PRIVATE_STORAGE_DRIVER !== 'filesystem' ? 'unsupported' : undefined)) })))
     return c.json(z.array(controlSourceSchema).parse([
       ...samples.map(({id, status, observedAt, lastAttemptAt, errorCode}) => ({ id, kind:id, status, observedAt, lastAttemptAt, errorCode })),
     ]))
   })
   routes.get('/control/system', async (c) => {
     const nowDate = new Date(); const now = nowDate.toISOString()
-    const [database, product, probes, progress] = await Promise.all([
-      readControlMetric(db, 'postgres_size', 300, nowDate), readControlMetric(db, 'product_db', 30, nowDate),
-      readControlMetric(db, 'service_probes', 60, nowDate),
+    const [database, product, probes, releaseEvidence, progress] = await Promise.all([
+      readControlMetric(db, 'postgres_size', CONTROL_STALE_AFTER_SECONDS.postgres_size, nowDate), readControlMetric(db, 'product_db', CONTROL_STALE_AFTER_SECONDS.product_db, nowDate),
+      readControlMetric(db, 'service_probes', CONTROL_STALE_AFTER_SECONDS.service_probes, nowDate),
+      readControlMetric(db, 'release_evidence', CONTROL_STALE_AFTER_SECONDS.release_evidence, nowDate),
       withControlReadTimeout(db, async (tx) => Promise.all([
         tx.controlCollectionState.findUnique({ where:{id:'worker_progress'}, select:{startedAt:true} }),
         tx.controlCollectionState.findUnique({ where:{id:'scheduler_progress'}, select:{startedAt:true} }),
@@ -219,13 +222,13 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const probeError = (value: unknown) => value ? probes.errorCode : probes.status === 'ok' ? 'unavailable' as const : probes.errorCode
     const result = {
       serverNow: now,
-      backend: sample(probeValue?.backend ? {live:true,ready:probeValue.backend.ok,readinessProbeLatencyMs:probeValue.backend.latencyMs} : null, probeStatus(probeValue?.backend), 'service_probes', 60, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.backend)),
-      postgresSizeBytes: sample(database.value ? String((database.value as {usedBytes:string}).usedBytes) : null, database.status, 'postgres_size', 300, database.observedAt, database.lastAttemptAt, database.coverageFrom, database.errorCode),
-      staticEntry: sample(probeValue?.static ? {available:probeValue.static.ok,probeLatencyMs:probeValue.static.latencyMs} : null, probeStatus(probeValue?.static), 'service_probes', 60, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.static)),
-      worker: sample(workerProgress ? {progressAt:workerProgress.startedAt.toISOString()} : null, workerProgress ? nowDate.getTime()-workerProgress.startedAt.getTime() <= 60_000 ? 'ok' : 'stale' : 'not_configured', 'worker_progress', 60, workerProgress?.startedAt.toISOString() ?? null),
-      scheduler: sample(schedulerProgress ? {progressAt:schedulerProgress.startedAt.toISOString()} : null, schedulerProgress ? nowDate.getTime()-schedulerProgress.startedAt.getTime() <= 120_000 ? 'ok' : 'stale' : 'not_configured', 'scheduler_progress', 120, schedulerProgress?.startedAt.toISOString() ?? null),
-      outbox: sample(productValue ? { pending: Number(productValue.outbox_pending ?? 0), oldestDueAgeSeconds: productValue.oldest_due_age_seconds === null || productValue.oldest_due_age_seconds === undefined ? null : Number(productValue.oldest_due_age_seconds) } : null, product.status, 'product_db', 30, product.observedAt, product.lastAttemptAt, product.coverageFrom, product.errorCode),
-      release: sample(null, 'not_configured', 'release_evidence', 86_400, null),
+      backend: sample(probeValue?.backend ? {live:true,ready:probeValue.backend.ok,readinessProbeLatencyMs:probeValue.backend.latencyMs} : null, probeStatus(probeValue?.backend), 'service_probes', CONTROL_STALE_AFTER_SECONDS.service_probes, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.backend)),
+      postgresSizeBytes: sample(database.value ? String((database.value as {usedBytes:string}).usedBytes) : null, database.status, 'postgres_size', CONTROL_STALE_AFTER_SECONDS.postgres_size, database.observedAt, database.lastAttemptAt, database.coverageFrom, database.errorCode),
+      staticEntry: sample(probeValue?.static ? {available:probeValue.static.ok,probeLatencyMs:probeValue.static.latencyMs} : null, probeStatus(probeValue?.static), 'service_probes', CONTROL_STALE_AFTER_SECONDS.service_probes, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.static)),
+      worker: sample(workerProgress ? {progressAt:workerProgress.startedAt.toISOString()} : null, workerProgress ? nowDate.getTime()-workerProgress.startedAt.getTime() <= CONTROL_STALE_AFTER_SECONDS.worker_progress * 1000 ? 'ok' : 'stale' : 'not_configured', 'worker_progress', CONTROL_STALE_AFTER_SECONDS.worker_progress, workerProgress?.startedAt.toISOString() ?? null),
+      scheduler: sample(schedulerProgress ? {progressAt:schedulerProgress.startedAt.toISOString()} : null, schedulerProgress ? nowDate.getTime()-schedulerProgress.startedAt.getTime() <= CONTROL_STALE_AFTER_SECONDS.scheduler_progress * 1000 ? 'ok' : 'stale' : 'not_configured', 'scheduler_progress', CONTROL_STALE_AFTER_SECONDS.scheduler_progress, schedulerProgress?.startedAt.toISOString() ?? null),
+      outbox: sample(productValue ? { pending: Number(productValue.outbox_pending ?? 0), oldestDueAgeSeconds: productValue.oldest_due_age_seconds === null || productValue.oldest_due_age_seconds === undefined ? null : Number(productValue.oldest_due_age_seconds) } : null, product.status, 'product_db', CONTROL_STALE_AFTER_SECONDS.product_db, product.observedAt, product.lastAttemptAt, product.coverageFrom, product.errorCode),
+      release: sample(releaseEvidence.value ? releaseEvidence.value as {backendSha:string;staticSha:string;migrationCatalogCount:number;migrationStatus:'up_to_date';lastSuccessfulReleaseAt:string} : null, releaseEvidence.status, 'release_evidence', CONTROL_STALE_AFTER_SECONDS.release_evidence, releaseEvidence.observedAt, releaseEvidence.lastAttemptAt, releaseEvidence.coverageFrom, releaseEvidence.errorCode),
     }
     return c.json(controlSystemSchema.parse(result))
   })

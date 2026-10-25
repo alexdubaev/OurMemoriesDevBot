@@ -10,9 +10,23 @@ export type ControlSourceSnapshot = { value: unknown; observedAt: Date }
 export type ControlMetricSource = {
   id: string
   intervalSeconds: number
+  shouldCollect?(): Promise<boolean>
   collect(signal: AbortSignal): Promise<ControlSourceSnapshot>
 }
 class SourceUnavailableError extends Error {}
+
+export const CONTROL_STALE_AFTER_SECONDS = Object.freeze({
+  product_db: 120,
+  postgres_size: 600,
+  host_filesystem: 180,
+  service_probes: 180,
+  max_binding_state: 180,
+  worker_progress: 180,
+  scheduler_progress: 180,
+  media_storage: 90_000,
+  backup_storage: 90_000,
+  release_evidence: 86_400,
+})
 
 const hostSnapshotSchema = z.object({
   version: z.literal(1),
@@ -27,6 +41,7 @@ const hostSnapshotSchema = z.object({
   media: z.object({ usedBytes: z.string().regex(/^(0|[1-9]\d{0,39})$/), entries: z.number().int().nonnegative().max(1_000_000) }).strict().nullable(),
   backupStorage: z.object({ usedBytes: z.string().regex(/^(0|[1-9]\d{0,39})$/), entries: z.number().int().nonnegative().max(1_000_000), resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), artifactAt:z.string().datetime({offset:true}).nullable(), validation:z.enum(['valid','invalid','unknown']), restoreTestAt:z.string().datetime({offset:true}).nullable() }).strict().nullable(),
   backup: z.object({ artifactAt: z.string().datetime({ offset: true }).nullable(), validation: z.enum(['valid', 'invalid', 'unknown']), restoreTestAt: z.string().datetime({ offset: true }).nullable() }).strict().nullable(),
+  release: z.object({ backendSha:z.string().regex(/^[0-9a-f]{40}$/), staticSha:z.string().regex(/^[0-9a-f]{40}$/), migrationCatalogCount:z.number().int().nonnegative().max(1_000_000), migrationStatus:z.literal('up_to_date'), lastSuccessfulReleaseAt:z.string().datetime({offset:true}) }).strict().nullable(),
 }).strict()
 
 export function withControlReadTimeout<T>(db: DbClient, read: (tx: Parameters<Parameters<DbClient['$transaction']>[0]>[0]) => Promise<T>) {
@@ -67,8 +82,8 @@ export async function readBoundedBody(response: Response, maximumBytes = 32_768)
   catch { throw new z.ZodError([]) }
 }
 
-async function fetchBounded(fetcher: typeof fetch, url: string, signal: AbortSignal) {
-  const response = await fetcher(url, { method: 'GET', redirect: 'error', signal, headers: { accept: 'application/json' } })
+async function fetchBounded(fetcher: typeof fetch, url: string, signal: AbortSignal, accept = 'application/json') {
+  const response = await fetcher(url, { method: 'GET', redirect: 'error', signal, headers: { accept } })
   return { response, text: await readBoundedBody(response) }
 }
 
@@ -170,13 +185,15 @@ export function createControlCollection({ db, env, fetcher = fetch, now = () => 
         ].map(async ([id, url]) => {
           try {
             const started = performance.now()
-            const { response, text } = await fetchBounded(fetcher, url!, signal)
+            const { response, text } = await fetchBounded(fetcher, url!, signal, id === 'static' ? 'text/html' : 'application/json')
             if (id === 'backend') {
               const parsed = z.object({ status: z.enum(['ok','unavailable']) }).strict().parse(JSON.parse(text))
               return [id, { ok: response.ok && parsed.status === 'ok', latencyMs: Math.round(performance.now() - started) }] as const
             }
             if (!response.ok) throw new SourceUnavailableError()
-            return [id, { ok: response.ok && text.length > 0, latencyMs: Math.round(performance.now() - started) }] as const
+            const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+            if (contentType !== 'text/html' || !/\bid=["']memoly-control-root["']/.test(text)) throw new SourceUnavailableError()
+            return [id, { ok: true, latencyMs: Math.round(performance.now() - started) }] as const
           } catch {
             return [id, null] as const
           }
@@ -199,6 +216,7 @@ export function createControlCollection({ db, env, fetcher = fetch, now = () => 
     },
     {
       id: 'media_storage', intervalSeconds: 86_400,
+      shouldCollect: async () => env.PRIVATE_STORAGE_DRIVER === 'filesystem',
       collect: async (signal) => {
         signal.throwIfAborted()
         const path = env.CONTROL_HOST_SNAPSHOT_PATH
@@ -211,7 +229,8 @@ export function createControlCollection({ db, env, fetcher = fetch, now = () => 
       },
     },
     {
-      id: 'backup_storage', intervalSeconds: 86_400,
+      // The inventory is daily, while evidence metadata in the host snapshot refreshes each minute.
+      id: 'backup_storage', intervalSeconds: 60,
       collect: async (signal) => {
         signal.throwIfAborted()
         const parsed = hostSnapshotSchema.parse(JSON.parse(await readBoundedSnapshot(env.CONTROL_HOST_SNAPSHOT_PATH)))
@@ -219,6 +238,24 @@ export function createControlCollection({ db, env, fetcher = fetch, now = () => 
         const observedAt = new Date(parsed.backupStorageObservedAt)
         if (observedAt.getTime() > now().getTime() + 60_000) throw new z.ZodError([])
         return { value: parsed.backupStorage, observedAt }
+      },
+    },
+    {
+      id: 'release_evidence', intervalSeconds: 60,
+      shouldCollect: async () => {
+        if (!env.CONTROL_HOST_SNAPSHOT_PATH) return false
+        try {
+          const snapshot = hostSnapshotSchema.parse(JSON.parse(await readBoundedSnapshot(env.CONTROL_HOST_SNAPSHOT_PATH)))
+          return snapshot.release !== null
+        } catch { return false }
+      },
+      collect: async (signal) => {
+        signal.throwIfAborted()
+        const parsed = hostSnapshotSchema.parse(JSON.parse(await readBoundedSnapshot(env.CONTROL_HOST_SNAPSHOT_PATH)))
+        if (!parsed.release) throw new SourceUnavailableError()
+        const observedAt = new Date(parsed.release.lastSuccessfulReleaseAt)
+        if (observedAt.getTime() > now().getTime() + 60_000) throw new z.ZodError([])
+        return { value: parsed.release, observedAt }
       },
     },
   ]
@@ -233,6 +270,7 @@ export function createControlCollection({ db, env, fetcher = fetch, now = () => 
         const index = next++
         if (index >= sources.length) return
         const source = sources[index]!
+        if (source.shouldCollect && !(await source.shouldCollect())) continue
         const previous = await db.controlMetricSnapshot.findUnique({ where: { sourceId_utcDay: { sourceId: source.id, utcDay: day } } })
         if (previous?.lastAttemptAt && now().getTime() - previous.lastAttemptAt.getTime() < source.intervalSeconds * 1000) continue
         const attemptedAt = now()
@@ -267,7 +305,8 @@ export async function collectControlMetrics(input: Parameters<typeof createContr
   return createControlCollection(input).collect()
 }
 
-export async function readControlMetric(db: DbClient, sourceId: string, staleAfterSeconds: number, now = new Date()) {
+export async function readControlMetric(db: DbClient, sourceId: string, staleAfterSeconds: number, now = new Date(), unavailableStatus?: 'unsupported' | 'not_configured') {
+  if (unavailableStatus) return { value:null, status:unavailableStatus, observedAt:null, lastAttemptAt:null, errorCode:null, coverageFrom:null }
   return withControlReadTimeout(db, async (tx) => {
     const rows = await tx.controlMetricSnapshot.findMany({ where: { sourceId }, orderBy: { utcDay: 'desc' }, take: 100 })
     const coverage = await tx.controlCollectionState.findUnique({ where: { id: `metric:${sourceId}` }, select: { startedAt: true } })

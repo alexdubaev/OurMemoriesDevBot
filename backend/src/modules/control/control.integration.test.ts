@@ -81,8 +81,13 @@ describe('control owner read API authorization', () => {
     return signAccessToken({ sub: id, sessionId: session.id }, { JWT_SECRET: jwtSecret, ACCESS_TOKEN_TTL_SECONDS: 900 })
   }
 
-  function app(enabled: string, allowlist: string) {
-    const env = loadEnv({ ...baseEnv, CONTROL_ENABLED: enabled, CONTROL_OWNER_USER_IDS: allowlist })
+  function app(enabled: string, allowlist: string, storageDriver?: 'filesystem' | 's3') {
+    const s3Fixture = storageDriver === 's3' ? {
+      PRIVATE_STORAGE_DRIVER: 's3', PRIVATE_STORAGE_REGION: 'test-region', PRIVATE_STORAGE_BUCKET: 'control-test',
+      PRIVATE_STORAGE_ENDPOINT: 'https://s3.example.test', PRIVATE_STORAGE_ACCESS_KEY_ID: 'synthetic-control-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'synthetic-control-secret', PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    } : {}
+    const env = loadEnv({ ...baseEnv, ...s3Fixture, CONTROL_ENABLED: enabled, CONTROL_OWNER_USER_IDS: allowlist })
     return createApp({ env, prisma })
   }
 
@@ -201,11 +206,60 @@ describe('control owner read API authorization', () => {
     expect((await control.request(`/api/v1/control/families?sort=activeMembers&cursor=${malformedCountCursor}`, { headers })).status).toBe(400)
     expect((await control.request(`/api/v1/control/families/20000000-0000-4000-8000-000000000001/members?cursor=${malformedTimestampCursor}`, { headers })).status).toBe(400)
     expect((await control.request(`/api/v1/control/users/${ordinaryId}/memberships?cursor=${malformedTimestampCursor}`, { headers })).status).toBe(400)
-    const collection=await collectControlMetrics({db:prisma,env:loadEnv({...baseEnv,CONTROL_ENABLED:'true'}),fetcher:(async (input)=>new Response(String(input).includes('/health/ready')?JSON.stringify({status:'ok'}):'static-ready',{status:200})) as typeof fetch})
+    const collection=await collectControlMetrics({db:prisma,env:loadEnv({...baseEnv,CONTROL_ENABLED:'true'}),fetcher:(async (input)=>String(input).includes('/health/ready')
+      ? new Response(JSON.stringify({status:'ok'}), {status:200,headers:{'content-type':'application/json'}})
+      : new Response('<main id="memoly-control-root"></main>', {status:200,headers:{'content-type':'text/html; charset=utf-8'}})) as typeof fetch})
     expect(collection.succeeded).toBe(4)
     const systemResponse = await control.request('/api/v1/control/system', { headers })
     expect(systemResponse.status).toBe(200)
     expect((await systemResponse.json()).outbox.value).toMatchObject({ pending: 1, oldestDueAgeSeconds: null })
+  })
+
+  test('rejects a wrong static shell and keeps S3 media bytes unsupported despite older filesystem samples', async () => {
+    const nextDay = new Date(); nextDay.setUTCDate(nextDay.getUTCDate() + 1); nextDay.setUTCHours(12, 0, 0, 0)
+    await collectControlMetrics({ db:prisma, env:loadEnv({...baseEnv,CONTROL_ENABLED:'true'}), now:()=>nextDay,
+      fetcher:(async (input) => String(input).includes('/health/ready')
+        ? new Response(JSON.stringify({status:'ok'}), {status:200,headers:{'content-type':'application/json'}})
+        : new Response('<main>Families</main>', {status:200,headers:{'content-type':'text/html'}})) as typeof fetch })
+    const probe = await prisma.controlMetricSnapshot.findUniqueOrThrow({ where:{sourceId_utcDay:{sourceId:'service_probes',utcDay:new Date(Date.UTC(nextDay.getUTCFullYear(),nextDay.getUTCMonth(),nextDay.getUTCDate()))}} })
+    expect((probe.value as {static:unknown}).static).toBeNull()
+
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0)
+    await prisma.controlMetricSnapshot.upsert({
+      where:{sourceId_utcDay:{sourceId:'media_storage',utcDay:today}},
+      create:{sourceId:'media_storage',utcDay:today,value:{usedBytes:'98765',entries:3,resourceId:'media-logical-files',parentResourceId:null},observedAt:new Date(),lastAttemptAt:new Date(),status:'ok',attempts:1,successes:1},
+      update:{value:{usedBytes:'98765',entries:3,resourceId:'media-logical-files',parentResourceId:null},observedAt:new Date(),lastAttemptAt:new Date(),status:'ok',errorCode:null},
+    })
+    const control = app('true', ownerId, 's3')
+    const headers = {Authorization:`Bearer ${await token(ownerId)}`}
+    const storage = await control.request('/api/v1/control/storage', {headers})
+    expect(storage.status).toBe(200)
+    expect((await storage.json()).mediaStorage).toMatchObject({value:null,status:'unsupported'})
+    const sources = await (await control.request('/api/v1/control/sources', {headers})).json() as Array<{id:string;status:string}>
+    expect(sources.find(({id})=>id==='media_storage')?.status).toBe('unsupported')
+  })
+
+  test('uses source freshness windows for recent and stale persisted progress and host observations', async () => {
+    const control = app('true', ownerId)
+    const headers = {Authorization:`Bearer ${await token(ownerId)}`}
+    const recentAt = new Date(Date.now() - 85_000)
+    await prisma.controlCollectionState.createMany({data:[{id:'worker_progress',startedAt:recentAt},{id:'scheduler_progress',startedAt:recentAt}]})
+    const today = new Date(); today.setUTCHours(0,0,0,0)
+    await prisma.controlMetricSnapshot.create({data:{sourceId:'host_filesystem',utcDay:today,value:{filesystems:[{id:'fs-host',scope:'host',usedBytes:'1',availableBytes:'2',capacityBytes:'3',parentResourceId:null}]},observedAt:recentAt,lastAttemptAt:recentAt,status:'ok',attempts:1,successes:1}})
+    const freshSystem = await (await control.request('/api/v1/control/system',{headers})).json()
+    const freshStorage = await (await control.request('/api/v1/control/storage',{headers})).json()
+    expect(freshSystem.worker.status).toBe('ok')
+    expect(freshSystem.scheduler.status).toBe('ok')
+    expect(freshStorage.hostFilesystem.status).toBe('ok')
+
+    const oldAt = new Date(Date.now() - 181_000)
+    await prisma.controlCollectionState.updateMany({where:{id:{in:['worker_progress','scheduler_progress']}},data:{startedAt:oldAt}})
+    await prisma.controlMetricSnapshot.update({where:{sourceId_utcDay:{sourceId:'host_filesystem',utcDay:today}},data:{observedAt:oldAt,lastAttemptAt:oldAt}})
+    const staleSystem = await (await control.request('/api/v1/control/system',{headers})).json()
+    const staleStorage = await (await control.request('/api/v1/control/storage',{headers})).json()
+    expect(staleSystem.worker.status).toBe('stale')
+    expect(staleSystem.scheduler.status).toBe('stale')
+    expect(staleStorage.hostFilesystem.status).toBe('stale')
   })
 
   test('rejects a revoked session and no longer allowlisted owner', async () => {
