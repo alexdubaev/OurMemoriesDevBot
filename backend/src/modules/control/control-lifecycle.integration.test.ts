@@ -115,6 +115,8 @@ async function clean() {
   await prisma.controlUserDeletion.deleteMany()
   await prisma.controlFamilyDeletion.deleteMany()
   await prisma.taskOutbox.deleteMany()
+  await prisma.gift.deleteMany()
+  await prisma.mediaAsset.deleteMany()
   await prisma.memory.deleteMany()
   await prisma.child.deleteMany()
   await prisma.authSession.deleteMany()
@@ -197,6 +199,30 @@ describe('Control account lifecycle', () => {
       confirmation: upperId,
     })).rejects.toMatchObject({ code: 'protected_account' })
     expect(await prisma.user.findUniqueOrThrow({ where: { id: protectedHexOwnerId } })).toMatchObject({ controlState: 'active' })
+  })
+
+  test('releases a target gift reservation immediately and never takes a later reservation on restore', async () => {
+    const giftPhotoId = '73300000-0000-4000-8000-000000000001'
+    await prisma.mediaAsset.create({ data: {
+      id: giftPhotoId, familyId: sharedFamilyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'gift', mediaKind: 'photo',
+      originalKey: 'media-originals/control-lifecycle-gift/photo.jpg', declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+      sha256: 'c'.repeat(64), byteSize: 7n, originalStatus: 'stored',
+    } })
+    const reservedAt = new Date('2026-10-24T12:00:00Z')
+    await prisma.gift.create({ data: {
+      familyId: sharedFamilyId, childId: sharedChildId, title: 'Synthetic reserved gift', url: 'https://example.test/gift',
+      photoMediaId: giftPhotoId, createdByUserId: actorId, reservedByUserId: targetId, reservedAt,
+    } })
+    const before = await previewUserDeletion(prisma, targetId, protectedIds)
+    const trashed = await trashControlUser(prisma, {
+      actorId, targetId, protectedIds, key: '70000000-0000-4000-8000-000000000130',
+      fingerprint: before.fingerprint, confirmation: targetId,
+    })
+    const gift = await prisma.gift.findFirstOrThrow({ where: { photoMediaId: giftPhotoId } })
+    expect(gift).toMatchObject({ reservedByUserId: null, reservedAt: null })
+    await prisma.gift.update({ where: { id: gift.id }, data: { reservedByUserId: formerMemberId, reservedAt: new Date() } })
+    await restoreControlUser(prisma, { actorId, targetId, protectedIds, key: '70000000-0000-4000-8000-000000000131', deletionId: trashed.deletionId })
+    expect(await prisma.gift.findUniqueOrThrow({ where: { id: gift.id } })).toMatchObject({ reservedByUserId: formerMemberId })
   })
 
   test('restores live snapshots but keeps prior revocations and independently purged family access closed', async () => {

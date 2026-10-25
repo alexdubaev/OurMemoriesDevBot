@@ -271,6 +271,10 @@ export async function trashControlUser(
         data: { revokedAt: actionNow, version: { increment: 1 }, membershipEpoch: { increment: 1 } },
       })
     }
+    await tx.gift.updateMany({
+      where: { reservedByUserId: input.targetId, boughtAt: null, family: { status: 'active' } },
+      data: { reservedByUserId: null, reservedAt: null, version: { increment: 1 } },
+    })
     if (ownedFamilyIds.length) {
       await tx.controlUserDeletionFamily.createMany({
         data: familyIds.map(({ id: familyId, originalStatus }) => ({
