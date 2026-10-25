@@ -43,7 +43,7 @@ const request = async (path, token, method = 'GET', body, key = randomUUID(), co
 }
 const signed = (subject, startParam) => {
   const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: randomUUID(),
-    user: JSON.stringify({ id: String(subject), first_name: 'Deletion recovery synthetic' }) })
+    user: JSON.stringify({ id: Number(subject), first_name: 'Deletion recovery synthetic' }) })
   if (startParam) params.set('start_param', startParam)
   const check = [...params].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join('\n')
   const secret = createHmac('sha256', 'WebAppData').update(maxBotToken).digest()
