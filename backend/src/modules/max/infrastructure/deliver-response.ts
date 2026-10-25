@@ -24,7 +24,7 @@ export function createMaxResponseDelivery(options: {
     const responseId = responsePayload(payload)
     const response = await options.prisma.maxOutgoingResponse.findUnique({ where: { id: responseId }, include: { inbox: { include: { source: true } }, channelDecision: true } })
     if (!response || response.deliveredAt) return 'skipped'
-    const familyId = response.inbox.source?.familyId ?? response.channelDecision?.familyId ?? null
+    const familyId = response.inbox.source?.familyId ?? null
     if (familyId && !await options.prisma.family.findFirst({ where: { id: familyId, status: 'active' }, select: { id: true } })) return 'skipped'
     if (response.channelDecisionId && response.channelDecision) {
       const decision = response.channelDecision
