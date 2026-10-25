@@ -62,7 +62,7 @@ Lead owns final verification, scope/security adjudication and publication; bound
 
 - [ ] FULL source gate and additional focused control tests on exact committed source; inspect actual diff and secret scan.
 - [ ] One fresh independent Luna High read-only whole-change review; one bounded fix pass and narrow closure check. No repeated formality reviews.
-- [ ] Prove telemetry migration/current -> designated accepted-v4 -> current roundtrip, preserving family data/permissions/media. Register only exact frozen runtime compatibility; test source/config/schema drift rejection. Preserve images and recovery config.
+- [x] Prove telemetry migration/current -> designated accepted-v4 -> current roundtrip, preserving family data/permissions/media. Register only exact frozen runtime compatibility; test source/config/schema drift rejection. Preserve images and recovery config.
 - [ ] Confirm main freshness; normal branch merge if changed, repeat affected checks. Create PR from template with exact evidence, squash expected HEAD, confirm final tree/main.
 - [ ] FULL final SHA against deployed base; confirmed owner UUID provisioning through protected server config. Owner identity must be confirmed before granting; no identity inferred from names.
 - [ ] Disk >=4GiB via individually proven safe recovery-artifact maintenance, fixed host sampler installation, host lock, immutable images, backup/migration/readiness guards, guarded full ci-release.
@@ -70,6 +70,8 @@ Lead owns final verification, scope/security adjudication and publication; bound
 - [ ] Synchronize primary main without touching untracked work. Delete only own clean merged branch/worktree when safe; report git refusal rather than force-delete. Final Russian summary + copyable HANDOFF.
 
 ## Execution evidence
+
+- Final release-component closure `21445f6a5d2f004edaeaefbf768ecf89ef6c58c2` includes accepted main `a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4` (PR241, compact first-year album presentation) through clean merge `fe4c0467b31384ff6585f46b6b4f01f733b7b77b`. Backend/schema/contracts bytes were unchanged by that synchronization. Exact candidate compatibility fingerprint is `7642cc877150a93657fb394e7d4e59bb28c9beb55eff166da697f5e7f120500a`, anchored to the unchanged measured dc26 runtime and designated33a pair. Frozen exact-profile/drift regression and designated-pair preservation each passed1/1 exit0; six host artifact blob pins match committed source. The sampler has9 Python tests, verification runner20/117 assertions; installed byte/mode/symlink/interpreter and complete56/57 ledger regressions passed. This is component evidence, not a claim that final FULL/review/production release has already passed.
 
 - Task4 component checkpoint `7283e1a8a652c1b37b8f555814a95122d6c51fd5`: real isolated PostgreSQL current → actual archived33a → current replay passed, including old-runtime family/media bytes/invite writes, guest denial, current member Control403 and owner200, all four telemetry models and exact migration ledger preservation. Owner API integration14/204 assertions, Python sampler8 tests, backend typecheck and dedicated exact-ledger/path regressions passed. These are focused component results; the final source FULL, independent review, merge and production verification below remain pending until actually executed.
 
