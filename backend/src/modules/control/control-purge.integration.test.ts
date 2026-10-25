@@ -113,7 +113,7 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
     verifiedMime: 'video/mp4', sha256: 'b'.repeat(64), byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
   } })
   if (putExpiresAt) await prisma.uploadReservation.create({ data: {
-    familyId, userId: targetId, mediaId, bytes: 7n, expiresAt: putExpiresAt, finalizedAt: epoch,
+    familyId, userId: targetId, mediaId, bytes: 7n, expiresAt: putExpiresAt, finalizedAt: epoch, releasedAt: epoch,
   } })
   await prisma.family.update({ where: { id: familyId }, data: { storageUsedBytes: 14n } })
   const localStorage = storage()
