@@ -468,7 +468,11 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
         const box = element.getBoundingClientRect()
         return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }
       }
-        return { width: innerWidth, height: innerHeight, scrollY, documentWidth: document.documentElement.scrollWidth, horizontalOverflow: document.documentElement.scrollWidth > innerWidth, fontsStatus: document.fonts.status, intro: rect('.albums-year-intro, .albums-intro'), cover: rect('.albums-year-cover'), progress: rect('.albums-year-progress progress'), modes: rect('.albums-year-modes'), catalog: rect('.albums-catalog'), card: rect('.albums-card'), chips: rect('.albums-chips'), firstRow: rect('.albums-entry-card') }
+      const computed = (selector: string, property: 'fontSize' | 'flexBasis') => {
+        const element = document.querySelector(selector)
+        return element ? getComputedStyle(element)[property] : null
+      }
+      return { width: innerWidth, height: innerHeight, scrollY, documentWidth: document.documentElement.scrollWidth, horizontalOverflow: document.documentElement.scrollWidth > innerWidth, fontsStatus: document.fonts.status, rootFontSize: getComputedStyle(document.documentElement).fontSize, yearTitleFontSize: computed('.albums-year-copy h1', 'fontSize'), yearModesFontSize: computed('.albums-year-modes button', 'fontSize'), yearCopyFlexBasis: computed('.albums-year-copy', 'flexBasis'), intro: rect('.albums-year-intro, .albums-intro'), cover: rect('.albums-year-cover'), yearCopy: rect('.albums-year-copy'), yearTitle: rect('.albums-year-copy h1'), progress: rect('.albums-year-progress progress'), modes: rect('.albums-year-modes'), catalog: rect('.albums-catalog'), card: rect('.albums-card'), chips: rect('.albums-chips'), yearAddBadge: rect('.albums-year-add'), firstRow: rect('.albums-entry-card') }
     })
     await page.screenshot({ path: join(dir, `${name}.png`), fullPage: name.startsWith('catalog-'), animations: 'disabled' })
     appendFileSync(join(dir, 'geometry.jsonl'), `${JSON.stringify({ name, ...geometry })}\n`)
