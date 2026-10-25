@@ -243,8 +243,16 @@ async function waitForTemporaryPart(objectPath) {
 
 async function seedRetainedVideo({ familyId, ownerId, subject, label }) {
   const child = await prisma.child.create({ data: { familyId, displayName: `Synthetic ${label} child` } })
-  const memory = await prisma.memory.create({ data: { familyId, childId: child.id, authorId: ownerId, kind: 'video',
-    body: `Synthetic ${label} retained MAX archive`, occurredAt: new Date(), firstPublishedAt: new Date() } })
+  const memory = await prisma.$transaction(async (tx) => {
+    const [allocated] = await tx.$queryRaw`
+      UPDATE families SET publication_ordinal = publication_ordinal + 1
+       WHERE id = ${familyId}::uuid AND unread_tracking_activated_at IS NOT NULL
+       RETURNING publication_ordinal AS ordinal
+    `
+    return tx.memory.create({ data: { familyId, childId: child.id, authorId: ownerId, kind: 'video',
+      body: `Synthetic ${label} retained MAX archive`, occurredAt: new Date(), firstPublishedAt: new Date(),
+      ...(allocated ? { firstPublishedOrdinal: allocated.ordinal } : {}) } })
+  })
   const mediaId = randomUUID()
   const inbox = await prisma.maxInbox.create({ data: { eventKey: `control-delete-recovery-${label}-${randomUUID()}`,
     botId: 1n, eventKind: 'message_created', encryptedPayload: new Uint8Array([1]), encryptionIv: new Uint8Array([2]),
