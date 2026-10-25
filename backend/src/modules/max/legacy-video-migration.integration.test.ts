@@ -333,6 +333,20 @@ describe('MAX legacy video retention and recovery', () => {
     await memoryRepository.delete(scope, memory.id, edited.version, new Date())
     await expect(memoryRepository.get(scope, memory.id)).rejects.toThrow()
     expect(await fx.db.family.findUniqueOrThrow({ where: { id: family.id }, select: { storageUsedBytes: true } })).toEqual(originalFamily)
+
+    const purgeIntent = await fx.db.controlFamilyDeletion.create({ data: {
+      familyId: family.id, actorUserId: family.owner.id, requestedAt: new Date(),
+    } })
+    await storage.deleteObject(originalKey)
+    try {
+      expect(await migration.recoveryReadiness()).toMatchObject({ total: 0, excluded: 2, inspected: 0, ready: 0, missingObjects: 0, invalid: [] })
+      expect(await migration.recoverAll({ apply: true })).toMatchObject({ inspected: 0, excluded: 2, recovered: 0, refused: 0, remaining: 0 })
+      expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
+    } finally {
+      await storage.writeObject({ key: originalKey, body: new Response(new Uint8Array([0, 1, 2])).body!, contentLength: 3, contentType: 'video/mp4' })
+      await fx.db.controlFamilyDeletion.delete({ where: { id: purgeIntent.id } })
+    }
+
     expect(await migration.recoveryReadiness()).toMatchObject({ total: 2, inspected: 2, ready: 2, missingObjects: 0, invalid: [] })
     const cliReadiness = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all'], { cwd: process.cwd(), env: cliEnv })
     expect(cliReadiness.exitCode).toBe(0)
