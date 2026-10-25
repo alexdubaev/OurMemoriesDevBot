@@ -40,7 +40,8 @@ export async function queryFamilies(db: DbClient, where: Prisma.Sql, limit: numb
       (SELECT CASE WHEN f.max_backup_chat_id IS NULL THEN 'unconfigured' WHEN (SELECT b.state FROM max_channel_bindings b WHERE b.chat_id=f.max_backup_chat_id AND b.family_id=f.id LIMIT 1)='connected' THEN 'configured' ELSE 'disconnected' END) max_state,
       CASE WHEN f.status='deleted' OR cfd.purged_at IS NOT NULL THEN 'purged'
            WHEN cfd.id IS NOT NULL THEN 'purging'
-           WHEN f.status='deleting' THEN 'trashed' ELSE 'active' END lifecycle_state,
+           WHEN user_deletion.deletion_id IS NOT NULL THEN 'trashed'
+           WHEN f.status='deleting' THEN 'inactive' ELSE 'active' END lifecycle_state,
       COALESCE(cfd.id, user_deletion.deletion_id) deletion_id,
       user_deletion.purge_after,
       COALESCE(cfd.purge_stage, user_deletion.purge_stage) operation_status,

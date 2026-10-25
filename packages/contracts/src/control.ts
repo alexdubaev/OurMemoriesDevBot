@@ -55,7 +55,7 @@ export const controlLifecycleErrorCodeSchema = z.enum([
 export const controlFamilyRowSchema = z.object({
   id: z.string().uuid(), name: boundedText.nullable(), childName: boundedText.nullable(),
   ownerName: boundedText.nullable(), status: z.enum(['active','deleting','deleted']), createdAt: isoDate,
-  lifecycleState: z.enum(['active','trashed','purging','purged']), deletionId: z.string().uuid().nullable(),
+  lifecycleState: z.enum(['active','trashed','purging','purged','inactive']), deletionId: z.string().uuid().nullable(),
   purgeAfter: isoDate.nullable(), operationStatus: z.string().max(48).nullable(),
   errorCode: controlLifecycleErrorCodeSchema.nullable(),
   activeMembers: count, storageUsedBytes: bytes, storageReservedBytes: bytes,

@@ -183,8 +183,10 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   })
   routes.get('/control/families/:familyId/deletion-preview', async (c) => {
     const id = uuidParam(c.req.param('familyId')).toLowerCase()
-    const preview = await previewFamilyDeletion(db, id)
-    return c.json(controlFamilyDeletionPreviewSchema.parse({ ...preview, serverNow: new Date().toISOString() }))
+    try {
+      const preview = await previewFamilyDeletion(db, id)
+      return c.json(controlFamilyDeletionPreviewSchema.parse({ ...preview, serverNow: new Date().toISOString() }))
+    } catch (error) { throw lifecycleAppError(error) }
   })
   routes.post('/control/families/:familyId/purge', mutationRateLimit, async (c) => {
     const id = uuidParam(c.req.param('familyId')).toLowerCase()
@@ -219,20 +221,22 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   })
   routes.get('/control/users/:userId/deletion-preview', async (c) => {
     const id = uuidParam(c.req.param('userId')).toLowerCase()
-    const preview = await previewUserDeletion(db, id, protectedOwnerIds)
-    const [lifecycle] = await queryUserById(db, id)
-    const protectedAccount = protectedOwnerIds.some((ownerId) => ownerId.toLowerCase() === id)
-    const serverNow = new Date().toISOString()
-    const lifecycleMatches = lifecycle?.lifecycleState === preview.state
-    return c.json(controlUserDeletionPreviewSchema.parse({
-      ...preview, deletionId: lifecycleMatches ? lifecycle.deletionId : null,
-      purgeAfter: lifecycleMatches ? lifecycle.purgeAfter : null,
-      operationStatus: lifecycleMatches ? lifecycle.operationStatus : null,
-      errorCode: lifecycleMatches ? lifecycle.errorCode : null,
-      protectedAccount, canTrash: preview.state === 'active' && !protectedAccount,
-      canRestore: lifecycleMatches && preview.state === 'trashed' && lifecycle.operationStatus === 'waiting' && Boolean(lifecycle.purgeAfter && Date.parse(lifecycle.purgeAfter) > Date.parse(serverNow)),
-      serverNow,
-    }))
+    try {
+      const preview = await previewUserDeletion(db, id, protectedOwnerIds)
+      const [lifecycle] = await queryUserById(db, id)
+      const protectedAccount = protectedOwnerIds.some((ownerId) => ownerId.toLowerCase() === id)
+      const serverNow = new Date().toISOString()
+      const lifecycleMatches = lifecycle?.lifecycleState === preview.state
+      return c.json(controlUserDeletionPreviewSchema.parse({
+        ...preview, deletionId: lifecycleMatches ? lifecycle.deletionId : null,
+        purgeAfter: lifecycleMatches ? lifecycle.purgeAfter : null,
+        operationStatus: lifecycleMatches ? lifecycle.operationStatus : null,
+        errorCode: lifecycleMatches ? lifecycle.errorCode : null,
+        protectedAccount, canTrash: preview.state === 'active' && !protectedAccount,
+        canRestore: lifecycleMatches && preview.state === 'trashed' && lifecycle.operationStatus === 'waiting' && Boolean(lifecycle.purgeAfter && Date.parse(lifecycle.purgeAfter) > Date.parse(serverNow)),
+        serverNow,
+      }))
+    } catch (error) { throw lifecycleAppError(error) }
   })
   routes.post('/control/users/:userId/trash', mutationRateLimit, async (c) => {
     const id = uuidParam(c.req.param('userId')).toLowerCase()

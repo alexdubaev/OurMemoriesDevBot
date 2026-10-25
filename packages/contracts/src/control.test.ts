@@ -20,6 +20,7 @@ describe('control contracts', () => {
       maxLastCheckedAt: null, maxVerificationAgeSeconds: null,
     })
     expect(family.success).toBe(true)
+    expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), status: 'deleting', lifecycleState: 'inactive' }).success).toBe(true)
     expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), storageUsedBytes: 9007199254740993 }).success).toBe(false)
     expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), maxState: 'mystery' }).success).toBe(false)
     expect(controlPageSchema(controlMeSchema).safeParse({ items: [{ allowed: true, serverNow: new Date().toISOString(), features: ['read'], extra: true }], nextCursor: null }).success).toBe(false)

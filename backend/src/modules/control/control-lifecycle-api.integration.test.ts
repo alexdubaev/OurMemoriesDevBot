@@ -98,5 +98,15 @@ describe('Control lifecycle API', () => {
       body: JSON.stringify({ oversized: 'x'.repeat(1_100_000) }),
     })
     expect(oversized.status).toBe(413)
+
+    const ownerHeaders = { Authorization: `Bearer ${await token(ownerId)}` }
+    expect((await control.request('/api/v1/control/users/90000000-0000-4000-8000-000000000099/deletion-preview', { headers: ownerHeaders })).status).toBe(404)
+    expect((await control.request('/api/v1/control/families/91000000-0000-4000-8000-000000000099/deletion-preview', { headers: ownerHeaders })).status).toBe(404)
+    const familyPreviewResponse = await control.request(`/api/v1/control/families/${familyId}/deletion-preview`, { headers: ownerHeaders })
+    expect(familyPreviewResponse.status).toBe(200)
+    await prisma.family.update({ where: { id: familyId }, data: { status: 'deleting' } })
+    const legacyFamily = await control.request(`/api/v1/control/families/${familyId}`, { headers: ownerHeaders })
+    expect(legacyFamily.status).toBe(200)
+    expect(await legacyFamily.json()).toMatchObject({ status: 'deleting', lifecycleState: 'inactive', deletionId: null, purgeAfter: null })
   })
 })
