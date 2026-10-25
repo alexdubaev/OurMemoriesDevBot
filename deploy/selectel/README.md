@@ -570,6 +570,31 @@ recovery profile; the 33a target remains rejected. Backend, schema, dependencies
 and contracts remain pinned by the executable fingerprint, and all existing
 image, migration, ancestry, lock, configuration and readiness guards still apply.
 
+The Control account-deletion source has a separate `max-video-retirement` profile,
+bound to executable fingerprint
+`df407cf52c8fa4a495a11019d1917943b939177ccc813c10d1d5ddd6704f19c4`
+and the unchanged d299 image pair above. It requires the effective storage driver
+to be `filesystem`. Its exact migration catalog extends d299's 59 entries with
+`20261025160000_control_user_lifecycle`, `20261025170000_control_durable_purge`
+and `20261025180000_control_purge_fences`. Pre-SQL verification accepts only a
+completed, checksum-matching prefix of 59–62 entries; complete verification
+requires all 62. The older 56–59 profile retains its own reviewed scope.
+
+Grace-trashed archives still require their original objects and normal MAX
+metadata recovery. Only a durable irreversible deletion intent for an inactive
+family is excluded from that inverse. Recovery refuses an unfinished intent
+until its keys are captured and every existing media asset is fenced; storage
+failures do not prevent this database-only fencing stage. Filesystem retirement
+erases content and retains empty directory barriers plus zero-byte technical
+markers, preventing the archived writer from relinking a late upload. Do not
+remove these barriers during disk maintenance. Completed queue entries remain
+available for bounded cleanup of late temporary files. S3 Control trash/purge is
+disabled until equivalent retirement is attested; ordinary reads and restoration
+are retained. The compatibility proof runs current → archived d299 → current
+against real test PostgreSQL and filesystem storage, including late writes,
+partial cleanup, restored grants, retained originals and unchanged migration
+history. It does not restore a production database.
+
 For a UI-only rollback, run `bash deploy/selectel/redeploy.sh rollback-static` on the
 host. The action uses the normal deployment lock and reads the previous webapp
 SHA from the root-owned mode-0600 `/opt/memoly/rollback.env`. It requires the
