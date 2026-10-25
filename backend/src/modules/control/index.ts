@@ -27,9 +27,10 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   const ownerSet = new Set(env.CONTROL_OWNER_USER_IDS)
 
   routes.post('/activity', requireAuth, async (c) => {
-    if (!env.CONTROL_ENABLED || c.var.user.externalIdentity?.provider !== 'max') {
+    if (c.var.user.externalIdentity?.provider !== 'max') {
       throw new AppError(404, 'NOT_FOUND', 'Запись не найдена')
     }
+    if (!env.CONTROL_ENABLED) return c.body(null, 204)
     let body: unknown
     try { body = await c.req.json() } catch { throw new AppError(400, 'INVALID_INPUT', 'Некорректное тело запроса') }
     const parsed = z.object({

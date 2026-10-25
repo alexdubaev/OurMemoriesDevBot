@@ -310,10 +310,44 @@ describe('control owner read API authorization', () => {
     expect(await prisma.controlFamilyActivity.count()).toBe(0)
   })
 
-  test('does not record activity while the feature is disabled', async () => {
-    const response=await app('false',ownerId).request('/api/v1/activity',{method:'POST',headers:{Authorization:`Bearer ${await token(ordinaryId)}`,'Content-Type':'application/json'},body:JSON.stringify({surface:'browser'})})
-    expect(response.status).toBe(404)
+  test('acknowledges authenticated MAX activity as a no-op while disabled without activity work', async () => {
+    let transactions = 0
+    const transaction = prisma.$transaction.bind(prisma)
+    const observedPrisma = new Proxy(prisma, {
+      get(target, property) {
+        if (property === '$transaction') {
+          return (...args: unknown[]) => {
+            transactions += 1
+            return Reflect.apply(transaction, prisma, args)
+          }
+        }
+        return Reflect.get(target, property, target)
+      },
+    })
+    const disabled = createApp({
+      env: loadEnv({ ...baseEnv, CONTROL_ENABLED: 'false', CONTROL_OWNER_USER_IDS: ownerId }),
+      prisma: observedPrisma,
+    })
+    expect((await disabled.request('/api/v1/activity', { method: 'POST' })).status).toBe(401)
+    const response = await disabled.request('/api/v1/activity', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await token(ordinaryId)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ surface: 'max_mini_app', familyId: '20000000-0000-4000-8000-000000000001' }),
+    })
+    expect(response.status).toBe(204)
+    expect(transactions).toBe(0)
     expect(await prisma.controlUserActivity.count()).toBe(0)
+    expect(await prisma.controlFamilyActivity.count()).toBe(0)
+    expect(await prisma.controlCollectionState.findUnique({ where: { id: 'user_activity' } })).toBeNull()
+
+    await prisma.externalIdentity.updateMany({ where: { userId: adminId }, data: { provider: 'telegram' } })
+    const nonMax = await disabled.request('/api/v1/activity', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await token(adminId)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ surface: 'max_mini_app' }),
+    })
+    expect(nonMax.status).toBe(404)
+    expect(transactions).toBe(0)
   })
 
   test('reports UTC activity history only from exact partial coverage start', async () => {
