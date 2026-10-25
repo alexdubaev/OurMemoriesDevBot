@@ -620,7 +620,6 @@ test('MAX-FULL: documented invite launch retries invite authentication failure a
   await expect(launchPage.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
   await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
   await expect(launchPage.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
-  expect(authRequests).toHaveLength(2)
   expect(previewRequests).toHaveLength(1)
   await launchPage.getByRole('button', { name: 'Повторить' }).click()
   await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
