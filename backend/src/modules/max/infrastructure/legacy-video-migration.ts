@@ -11,7 +11,7 @@ import { enqueueMaxVideoPoster } from './video-poster'
 import { MaxProviderError } from './max-api'
 
 const MAX_BATCH_SIZE = 10
-const MAX_RECOVERY_BASELINE_CATALOG_SHA256 = '36325f2ffca824fb7cac4e90bf98e85e3cd81c02e181c2e58eb931c183d89713'
+const MAX_RECOVERY_BASELINE_CATALOG_SHA256 = 'f5f2033cdb89806b6741dc1037c92f2134ba96587a8b50df2c12334337a12eb8'
 const MAX_RECOVERY_LIFECYCLE_MIGRATIONS = [
   ['20261025160000_control_user_lifecycle', '910ee6aeda44457ae611a69994cd7f11eb6c1e0936ac33874cdcb8bd59f5df57'],
   ['20261025170000_control_durable_purge', 'f9ff69a061afefeceaeda618c4aeaf424563b2fed850d6e17808e23554b2fa8d'],
