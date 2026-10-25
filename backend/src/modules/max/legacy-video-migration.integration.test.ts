@@ -333,50 +333,54 @@ describe('MAX legacy video retention and recovery', () => {
     await memoryRepository.delete(scope, memory.id, edited.version, new Date())
     await expect(memoryRepository.get(scope, memory.id)).rejects.toThrow()
     expect(await fx.db.family.findUniqueOrThrow({ where: { id: family.id }, select: { storageUsedBytes: true } })).toEqual(originalFamily)
+    expect(await migration.recoveryReadiness()).toMatchObject({ total: 2, inspected: 2, ready: 2, missingObjects: 0, invalid: [] })
+    const cliReadiness = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all'], { cwd: process.cwd(), env: cliEnv })
+    expect(cliReadiness.exitCode).toBe(0)
+    expect(JSON.parse(cliReadiness.stdout.toString())).toMatchObject({ total: 2, inspected: 2, ready: 2, missingObjects: 0, invalid: 0 })
+    expect(await migration.recoverAll({ apply: false })).toMatchObject({ inspected: 2, recovered: 0, refused: 0 })
+    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
+    const providerRequestCountBeforeRecovery = requests.length
+    await fx.db.maxSourceAttachment.updateMany({ where: { mediaId }, data: { providerAttachmentId: 'temporarily-changed-provider-id' } })
+    const refusedRecovery = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply', '--batch-size', '1'], { cwd: process.cwd(), env: cliEnv })
+    expect(refusedRecovery.exitCode).toBe(2)
+    expect(JSON.parse(refusedRecovery.stdout.toString())).toMatchObject({ refused: 1, remaining: 1 })
+    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
+    await fx.db.maxSourceAttachment.updateMany({ where: { mediaId }, data: { providerAttachmentId: 'video-attachment-1' } })
+    const cliRecovery = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply', '--batch-size', '1'], { cwd: process.cwd(), env: cliEnv })
+    expect(cliRecovery.exitCode).toBe(0)
+    expect(JSON.parse(cliRecovery.stdout.toString())).toMatchObject({ inspected: 2, recovered: 2, refused: 0, remaining: 0 })
+    expect(requests).toHaveLength(providerRequestCountBeforeRecovery)
+    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).toBeNull()
+    expect(await fx.db.memoryMedia.findUnique({ where: { memoryId_position: { memoryId: memory.id, position: 1 } } })).toMatchObject({ mediaId })
+    expect(await fx.db.maxVideoLegacyRetention.findUniqueOrThrow({ where: { mediaId } })).toMatchObject({ recoveredAt: expect.any(Date) })
+
+    await createMediaTasks({ prisma: fx.db, privateStorage: { storage }, env: {} }).deleteAsset({ mediaId })
+    expect(await storage.headObject(originalKey)).not.toBeNull()
+    expect(await storage.headObject(previewKey)).not.toBeNull()
+    expect(await storage.headObject(playbackKey)).not.toBeNull()
+    expect(await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })).toMatchObject({ deletedAt: null, storageDeletedAt: null })
+    expect((await fx.db.mediaAsset.deleteMany({ where: { id: mediaId } })).count).toBe(0)
+    expect(await fx.db.mediaAsset.findUnique({ where: { id: mediaId } })).not.toBeNull()
 
     const purgeIntent = await fx.db.controlFamilyDeletion.create({ data: {
       familyId: family.id, actorUserId: family.owner.id, requestedAt: new Date(),
     } })
     await fx.db.family.update({ where: { id: family.id }, data: { status: 'deleting' } })
+    await fx.db.maxVideoLegacyRetention.update({ where: { mediaId }, data: { recoveredAt: null } })
+    await fx.db.maxVideoReference.create({ data: {
+      id: mediaId, sourceId: source.id, memoryId: memory.id, familyId: family.id,
+      attachmentPosition: 1, providerAttachmentId: 'video-attachment-1',
+    } })
     await storage.deleteObject(originalKey)
     try {
-      expect(await migration.recoveryReadiness()).toMatchObject({ total: 1, excluded: 2, inspected: 1, ready: 1, missingObjects: 0, invalid: [] })
-      expect(await migration.recoverAll({ apply: false })).toMatchObject({ inspected: 1, excluded: 2, recovered: 0, refused: 0, remaining: 1 })
+      expect(await migration.recoveryReadiness()).toMatchObject({ total: 0, excluded: 1, inspected: 0, ready: 0, missingObjects: 0, invalid: [] })
+      expect(await migration.recoverAll({ apply: true })).toMatchObject({ inspected: 0, excluded: 1, recovered: 0, refused: 0, remaining: 0 })
       expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
       expect(await storage.headObject(secondOriginalKey)).not.toBeNull()
     } finally {
       await storage.writeObject({ key: originalKey, body: new Response(new Uint8Array([0, 1, 2])).body!, contentLength: 3, contentType: 'video/mp4' })
+      await fx.db.controlFamilyDeletion.delete({ where: { id: purgeIntent.id } })
     }
-
-    expect(await migration.recoveryReadiness()).toMatchObject({ total: 1, excluded: 2, inspected: 1, ready: 1, missingObjects: 0, invalid: [] })
-    const cliReadiness = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all'], { cwd: process.cwd(), env: cliEnv })
-    expect(cliReadiness.exitCode).toBe(0)
-    expect(JSON.parse(cliReadiness.stdout.toString())).toMatchObject({ total: 1, excluded: 2, inspected: 1, ready: 1, missingObjects: 0, invalid: 0 })
-    expect(await migration.recoverAll({ apply: false })).toMatchObject({ inspected: 1, excluded: 2, recovered: 0, refused: 0, remaining: 1 })
-    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
-    const providerRequestCountBeforeRecovery = requests.length
-    await fx.db.maxSourceAttachment.updateMany({ where: { mediaId: secondMediaId }, data: { providerAttachmentId: 'temporarily-changed-provider-id' } })
-    const refusedRecovery = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply', '--batch-size', '1'], { cwd: process.cwd(), env: cliEnv })
-    expect(refusedRecovery.exitCode).toBe(2)
-    expect(JSON.parse(refusedRecovery.stdout.toString())).toMatchObject({ refused: 1, remaining: 1 })
-    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
-    await fx.db.maxSourceAttachment.updateMany({ where: { mediaId: secondMediaId }, data: { providerAttachmentId: 'second-family-attachment' } })
-    const cliRecovery = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply', '--batch-size', '1'], { cwd: process.cwd(), env: cliEnv })
-    expect(cliRecovery.exitCode).toBe(0)
-    expect(JSON.parse(cliRecovery.stdout.toString())).toMatchObject({ inspected: 1, recovered: 1, refused: 0, remaining: 0 })
-    expect(requests).toHaveLength(providerRequestCountBeforeRecovery)
-    expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
-    expect(await fx.db.maxVideoReference.findUnique({ where: { id: secondMediaId } })).toBeNull()
-    expect(await fx.db.memoryMedia.findUnique({ where: { memoryId_position: { memoryId: memory.id, position: 1 } } })).toMatchObject({ mediaId })
-    expect(await fx.db.maxVideoLegacyRetention.findUniqueOrThrow({ where: { mediaId } })).toMatchObject({ recoveredAt: null })
-    expect(await fx.db.maxVideoLegacyRetention.findUniqueOrThrow({ where: { mediaId: secondMediaId } })).toMatchObject({ recoveredAt: expect.any(Date) })
-
-    await createMediaTasks({ prisma: fx.db, privateStorage: { storage }, env: {} }).deleteAsset({ mediaId: secondMediaId })
-    expect(await storage.headObject(secondOriginalKey)).not.toBeNull()
-    expect(await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: secondMediaId } })).toMatchObject({ deletedAt: null, storageDeletedAt: null })
-    expect((await fx.db.mediaAsset.deleteMany({ where: { id: secondMediaId } })).count).toBe(0)
-    expect(await fx.db.mediaAsset.findUnique({ where: { id: secondMediaId } })).not.toBeNull()
-    await fx.db.controlFamilyDeletion.delete({ where: { id: purgeIntent.id } })
     } finally {
       globalThis.fetch = originalFetch
     }
