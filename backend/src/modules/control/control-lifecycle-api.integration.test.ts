@@ -78,7 +78,7 @@ describe('Control lifecycle API', () => {
     const owner = await control.request(path, { headers: { Authorization: `Bearer ${await token(ownerId)}` } })
     expect(owner.status).toBe(200)
     expect(owner.headers.get('cache-control')).toContain('no-store')
-    const preview = await owner.json() as { targetId: string; state: string; members: number; protectedAccount: boolean; canTrash: boolean; fingerprint: string }
+    const preview = await owner.json() as { targetId: string; state: string; members: number; protectedAccount: boolean; retirementSupported: boolean; canTrash: boolean; fingerprint: string }
     expect(preview.targetId).toBe(targetId)
     expect(preview.state).toBe('active')
     expect(preview.members).toBe(1)
