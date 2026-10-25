@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { link, lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { Readable, Transform } from 'node:stream'
@@ -30,6 +30,7 @@ import {
 } from './request-guards'
 
 export const filesystemStorageRoutePrefix = '/storage/objects'
+const retirementWritePollIntervalMs = 25
 
 export type StoredObjectMetadata = {
   contentType: string
@@ -113,6 +114,12 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     const objectPath = this.objectPath(safeKey)
     await mkdir(dirname(objectPath), { recursive: true })
     const temporaryPath = `${objectPath}.${randomUUID()}.part`
+    let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined
+    let retirementPollTimer: ReturnType<typeof setTimeout> | undefined
+    let retirementMonitorFinished = false
+    let retirementMonitor: Promise<void> | undefined
+    let retirementError: unknown
+    const retirementAbort = new AbortController()
     const hash = createHash('md5')
     let written = 0
     const meter = new Transform({
@@ -128,14 +135,53 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     })
 
     try {
-      await pipeline(
-        Readable.fromWeb(input.body as never),
-        meter,
-        createWriteStream(temporaryPath, { flags: 'wx' }),
-      )
+      // Create the named temporary path before the second marker read. Retirement can then
+      // either observe and remove this file, or make the writer see its durable marker before
+      // it is allowed to consume private bytes from the request body.
+      temporaryHandle = await open(temporaryPath, 'wx')
+      if (await this.isRetired(safeKey)) {
+        throw new StorageError('already_exists', 'Storage object key was retired')
+      }
+
+      retirementMonitor = (async () => {
+        while (!retirementMonitorFinished && !retirementAbort.signal.aborted) {
+          await new Promise<void>((resolve) => {
+            retirementPollTimer = setTimeout(resolve, retirementWritePollIntervalMs)
+          })
+          retirementPollTimer = undefined
+          if (retirementMonitorFinished || retirementAbort.signal.aborted) break
+          try {
+            if (await this.isRetired(safeKey)) {
+              retirementError = new StorageError('already_exists', 'Storage object key was retired')
+              retirementAbort.abort(retirementError)
+              break
+            }
+          } catch (error) {
+            retirementError = error
+            retirementAbort.abort(error)
+            break
+          }
+        }
+      })()
+
+      try {
+        await pipeline(
+          Readable.fromWeb(input.body as never, { signal: retirementAbort.signal }),
+          meter,
+          temporaryHandle.createWriteStream({ autoClose: false }),
+        )
+      } catch (error) {
+        if (retirementError) throw retirementError
+        throw error
+      }
+      if (retirementError) throw retirementError
+      if (await this.isRetired(safeKey)) {
+        throw new StorageError('already_exists', 'Storage object key was retired')
+      }
       if (written !== contentLength) {
         throw new StorageError('invalid_request', 'Stream does not match its declared length')
       }
+      await temporaryHandle.sync()
       try {
         await link(temporaryPath, objectPath)
       } catch (error) {
@@ -153,7 +199,18 @@ export class FilesystemPrivateStorage implements PrivateStorage {
       )
       return { key: safeKey, contentLength, contentType, etag }
     } finally {
-      await unlinkIfPresent(temporaryPath)
+      retirementMonitorFinished = true
+      if (retirementPollTimer) clearTimeout(retirementPollTimer)
+      retirementAbort.abort()
+      try {
+        await retirementMonitor
+      } finally {
+        try {
+          await temporaryHandle?.close()
+        } finally {
+          await unlinkIfPresent(temporaryPath)
+        }
+      }
     }
   }
 
