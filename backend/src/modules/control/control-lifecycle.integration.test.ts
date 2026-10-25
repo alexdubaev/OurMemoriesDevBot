@@ -200,6 +200,15 @@ describe('Control account lifecycle', () => {
       fingerprint: familyPreview.fingerprint,
       confirmation: sharedFamilyId,
     })
+    const ownedPreview = await previewFamilyDeletion(prisma, ownedFamilyId)
+    await purgeControlFamily(prisma, {
+      actorId,
+      targetId: ownedFamilyId,
+      protectedIds,
+      key: '70000000-0000-4000-8000-000000000117',
+      fingerprint: ownedPreview.fingerprint,
+      confirmation: ownedFamilyId,
+    })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: sharedFamilyId } })).toMatchObject({ status: 'deleting' })
 
     await restoreControlUser(prisma, {
@@ -210,6 +219,17 @@ describe('Control account lifecycle', () => {
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'active' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'active' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleted' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'deleting' })
+    await expect(Promise.resolve(prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.control_user_restore_cycle', ${trashed.deletionId}, true)`
+      await tx.family.update({ where: { id: ownedFamilyId }, data: { status: 'active' } })
+    }))).rejects.toBeDefined()
+    await expect(Promise.resolve(prisma.$transaction(async (tx) => {
+      await tx.familyMember.update({
+        where: { familyId_userId: { familyId: ownedFamilyId, userId: targetId } },
+        data: { revokedAt: null },
+      })
+    }))).rejects.toBeDefined()
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: actorId } } })).toMatchObject({ role: 'viewer', revokedAt: null })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: formerMemberId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } } })).toMatchObject({ revokedAt: expect.any(Date) })

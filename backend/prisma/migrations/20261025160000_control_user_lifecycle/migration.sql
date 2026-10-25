@@ -162,6 +162,10 @@ BEGIN
          AND deletion."restored_at" IS NOT NULL
          AND deletion."purge_after" > clock_timestamp()
          AND owner."control_state" = 'active'
+         AND NOT EXISTS (
+           SELECT 1 FROM "control_family_deletions" purge
+            WHERE purge."family_id" = NEW."id"
+         )
     ) THEN
       RAISE EXCEPTION 'an inactive family cannot be reactivated' USING ERRCODE = '23514';
     END IF;
