@@ -180,6 +180,9 @@ describe('Control account lifecycle', () => {
         expiresAt: new Date(Date.now() + 60_000),
         metadata: { userAgent: null, ipAddress: null },
       },
+    }).catch((error) => {
+      console.log('CONTROL FENCE ERROR', error.code, error.message, error.meta, error.cause)
+      throw error
     })).resolves.toEqual({ state: 'invalid_session' })
   })
 
@@ -516,6 +519,12 @@ describe('Control account lifecycle', () => {
     const purgeAfter = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000)
     await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT set_config('TimeZone', 'Europe/Berlin', true)`
+      const diagnostic = await tx.$queryRaw<Array<{ deletedEpoch: string; purgeEpoch: string; elapsed: string }>>`
+        SELECT extract(epoch FROM ${deletedAt}::timestamptz)::text AS "deletedEpoch",
+          extract(epoch FROM ${purgeAfter}::timestamptz)::text AS "purgeEpoch",
+          (extract(epoch FROM ${purgeAfter}::timestamptz) - extract(epoch FROM ${deletedAt}::timestamptz))::text AS "elapsed"
+      `
+      console.log('CONTROL DST INSTANTS', diagnostic)
       const deletion = await tx.controlUserDeletion.create({
         data: { targetUserId: targetId, actorUserId: actorId, deletedAt, purgeAfter },
       })

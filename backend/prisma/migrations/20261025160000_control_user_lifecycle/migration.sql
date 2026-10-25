@@ -16,7 +16,7 @@ CREATE TABLE "control_user_deletions" (
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "control_user_deletions_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "control_user_deletions_purge_after_check"
-    CHECK (abs(extract(epoch FROM ("purge_after" - "deleted_at")) - 2592000) < 0.001)
+    CHECK (extract(epoch FROM "purge_after") - extract(epoch FROM "deleted_at") = 2592000)
 );
 CREATE INDEX "control_user_deletions_target_deleted_idx"
   ON "control_user_deletions"("target_user_id", "deleted_at" DESC);
