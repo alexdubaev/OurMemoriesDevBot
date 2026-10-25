@@ -57,7 +57,7 @@ export function createMaxResponseDelivery(options: {
         const button = state.status === 'valid'
           ? { type: 'open_app' as const, text: 'Открыть приглашение', webApp: openButton.webApp, payload: `invite_${inviteContext.token}` }
           : state.status === 'already_member'
-            ? openButton : undefined
+            ? { ...openButton, payload: `invite_${inviteContext.token}` } : undefined
         await options.api.sendMessage({
           userId: response.destinationUserId.toString(),
           text: state.status === 'valid' ? inviteWelcome ? inviteStartText(state, inviteWelcome.returning) : response.text : inviteStartText(state),

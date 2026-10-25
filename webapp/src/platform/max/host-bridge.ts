@@ -1,4 +1,5 @@
 import type {
+  InviteLaunch,
   HostBridge,
   TelegramHostMetadata,
   TelegramInsets,
@@ -36,6 +37,8 @@ type BrowserHost = {
 }
 
 export type MaxHostBridgeOptions = { maxBotUsername?: string }
+
+export type MaxInviteLaunch = InviteLaunch
 
 export type MaxRuntimeDiagnostic = {
   hostDetected: boolean
@@ -76,10 +79,10 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     isAvailable: available,
     initData: () => rawInitData(webApp),
     rawAuthData: () => rawInitData(webApp),
+    inviteLaunch: () => resolveMaxInviteLaunch(webApp, browserHost?.location),
     inviteToken: () => {
-      const signed = startParamResult(rawInitData(webApp))
-      if (signed.present) return inviteTokenFromStartParam(signed.value)
-      return inviteTokenFromSearch(browserHost?.location?.search)
+      const launch = resolveMaxInviteLaunch(webApp, browserHost?.location)
+      return launch.kind === 'valid' ? launch.token : null
     },
     inviteLink: (rawToken) => createMaxInviteLink(rawToken, options.maxBotUsername),
     metadata: (): TelegramHostMetadata | null => {
@@ -191,6 +194,34 @@ export function isMeaningfulMaxWebApp(host: unknown): boolean {
     || typeof webApp.version === 'string'
     || typeof webApp.platform === 'string'
     || typeof webApp.colorScheme === 'string'
+}
+
+/** Resolves invite intent from supported launch carriers without treating hints as identity data. */
+export function readMaxInviteLaunch(host: unknown): MaxInviteLaunch {
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  return resolveMaxInviteLaunch(webApp, browserHost?.location)
+}
+
+function resolveMaxInviteLaunch(webApp: MaxWebApp | null, location: BrowserHost['location']): MaxInviteLaunch {
+  const search = location?.search
+  const carriers = [
+    startParamResult(rawInitData(webApp)),
+    unsafeStartParamResult(webApp),
+    queryStartParamResult(search, 'WebAppStartParam'),
+    queryStartParamResult(search, 'startapp'),
+  ]
+  for (let index = 0; index < carriers.length; index += 1) {
+    const carrier = carriers[index]!
+    if (!carrier.present) continue
+    const launch = inviteLaunchFromCarrier(carrier)
+    if (launch.kind !== 'none') return launch
+    if (carrier.value !== null && carrier.value !== '') return launch
+
+    const lowerInviteHint = carriers.slice(index + 1).some((lower) => lower.present && hasInviteIntent(lower))
+    return lowerInviteHint ? { kind: 'invalid' } : launch
+  }
+  return { kind: 'none' }
 }
 
 /** The direct video composer is intentionally reachable only from the acceptance launch. */
@@ -309,14 +340,28 @@ function startParamResult(initData: string | null) {
 function unsafeStartParamResult(webApp: MaxWebApp | null) {
   const value = webApp?.initDataUnsafe?.start_param
   return typeof value === 'string'
-    ? { present: true, value }
-    : { present: false, value: null as string | null }
+    ? { present: true, value, values: [value] }
+    : { present: false, value: null as string | null, values: [] as string[] }
 }
 
 function queryStartParamResult(search: unknown, name: string) {
-  if (typeof search !== 'string') return { present: false, value: null as string | null }
+  if (typeof search !== 'string') return { present: false, value: null as string | null, values: [] as string[] }
   const values = new URLSearchParams(search).getAll(name)
-  return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null }
+  return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null, values }
+}
+
+function inviteLaunchFromCarrier(carrier: { present: boolean; value: string | null; values?: string[] }): MaxInviteLaunch {
+  if (!carrier.present) return { kind: 'none' }
+  const value = carrier.value
+  if (!hasInviteIntent(carrier)) return { kind: 'none' }
+  if (!value) return { kind: 'invalid' }
+  const token = inviteTokenFromStartParam(value)
+  return token ? { kind: 'valid', token } : { kind: 'invalid' }
+}
+
+function hasInviteIntent(carrier: { value: string | null; values?: string[] }) {
+  return carrier.value?.startsWith('invite_')
+    || carrier.values?.some((candidate) => candidate.startsWith('invite_')) === true
 }
 
 function resolveStartParam(
@@ -333,11 +378,6 @@ function resolveStartParam(
 function queryKeys(search: unknown) {
   if (typeof search !== 'string') return []
   return [...new Set([...new URLSearchParams(search).keys()])]
-}
-
-function inviteTokenFromSearch(search: unknown) {
-  if (typeof search !== 'string') return null
-  return inviteTokenFromStartParam(new URLSearchParams(search).get('startapp'))
 }
 
 function inviteTokenFromStartParam(startParam: string | null) {

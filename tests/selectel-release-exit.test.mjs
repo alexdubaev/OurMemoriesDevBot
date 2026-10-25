@@ -781,6 +781,13 @@ const reviewedMemberAvatarProductionBlobs = [
   ['webapp/src/features/memoly-ui/MemberProfile.tsx', 'fc9fde2931149b48925d3a76cb9551773d262d90'],
   ['webapp/src/platform/persistence/private-cache.ts', 'db62855b99016fd50b0070a76c54064699e5e6fa'],
 ]
+const reviewedFamilyInviteEntryProductionBlobs = [
+  ['backend/src/modules/families/application/family-service.ts', 'a53db0d019c693609423ee4ebf09254c4e34ddc4'],
+  ['backend/src/modules/max/infrastructure/deliver-response.ts', '9ee442ba871a91fd905c962fa599d1971ecbced5'],
+  ['webapp/src/App.tsx', '32f0b69fd500725d8a0a730339e2459f792b5eac'],
+  ['webapp/src/platform/host-bridge.ts', '10e0e6c1d8ce4e3c8bc9adf17d6c0d372ddfd3f5'],
+  ['webapp/src/platform/max/host-bridge.ts', '0fa5b4297712c17685413cb6bd041bb6d245b168'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -2561,7 +2568,7 @@ test('member avatar frontend retains only the measured d299 MAX recovery pair', 
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'apply exact member-avatar production blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
     readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
@@ -2593,6 +2600,60 @@ test('member avatar frontend retains only the measured d299 MAX recovery pair', 
       `mutate member-avatar recovery input ${relativePath}`)
     const rejected = profile(mutated)
     assert.notEqual(rejected.status, 0, `member-avatar MAX recovery must reject changed production input: ${relativePath}`)
+  }
+})
+
+test('MAX family invite entry retains only its measured d299 recovery pair', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = maxVideoRecoveryBackend
+  const target = maxVideoRecoveryBackend
+  const expectedCompatibility = 'cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179'
+  assert.equal(productionRuntimeFingerprint(root, baseline), maxVideoRecoveryRuntime)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-family-invite-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const avatarSource = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
+    'reconstruct exact member-avatar production inputs')
+  const source = commitFrozenSourceFilesFromHead(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
+    'freeze exact family-invite production input blobs')
+  const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
+    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    'pin the exact accepted MAX rollback verifier installer')
+  assert.equal(productionCompatibilityFingerprint(installed.root), expectedCompatibility)
+
+  const profile = (candidate, rollbackTarget = target) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackTarget}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(installed)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video')
+
+  const oldTarget = profile(installed, rollbackHealthy)
+  assert.notEqual(oldTarget.status, 0, 'family-invite candidate must not reuse the incompatible 33a pair')
+
+  for (const [relativePath, marker] of [
+    ['webapp/src/platform/max/host-bridge.ts', '\n// synthetic invite bridge drift\n'],
+    ['webapp/src/platform/host-bridge.ts', '\n// synthetic invite bridge contract drift\n'],
+    ['webapp/src/App.tsx', '\n// synthetic invite auth UI drift\n'],
+    ['backend/src/modules/families/application/family-service.ts', '\n// synthetic invite service drift\n'],
+    ['backend/src/modules/max/infrastructure/deliver-response.ts', '\n// synthetic MAX delivery drift\n'],
+    ['backend/prisma/schema.prisma', '\n// synthetic schema drift\n'],
+    ['deploy/selectel/compose.yml.template', '\n# synthetic MAX host-input drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-family-invite-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, installed.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: installed.sha }, relativePath, marker,
+      `mutate exact family-invite recovery input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `MAX family-invite recovery must reject changed source before mutation: ${relativePath}`)
+    assert.doesNotMatch(`${rejected.stdout}${rejected.stderr}`, /UP:|GATE/)
   }
 })
 

@@ -5,6 +5,11 @@ export type HostKind = 'max' | 'telegram' | 'browser'
 
 export type TelegramInsets = { top: number; right: number; bottom: number; left: number }
 
+export type InviteLaunch =
+  | { kind: 'none' }
+  | { kind: 'invalid' }
+  | { kind: 'valid'; token: string }
+
 export type TelegramHostMetadata = {
   version: string
   platform: string
@@ -19,6 +24,8 @@ export type HostBridge = {
   /** Raw signed platform launch data. Never use an unsafe parsed user object for auth. */
   initData(): string | null
   rawAuthData(): string | null
+  /** Opaque launch routing hint; never trusted for identity or authorization. */
+  inviteLaunch?(): InviteLaunch
   inviteToken(): string | null
   inviteLink(rawToken: string): string | null
   metadata(): TelegramHostMetadata | null
