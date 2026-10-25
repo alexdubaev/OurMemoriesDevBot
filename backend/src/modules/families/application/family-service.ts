@@ -1064,10 +1064,11 @@ export class FamilyService {
       throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
     }
 
-    await this.db.$transaction(async (tx) => {
+    const revokedAt = this.now()
+    const revoked = await this.db.$transaction(async (tx) => {
       const revoked = await tx.familyMember.updateMany({
         where: { familyId: scope.familyId, userId, revokedAt: null, version: expectedVersion },
-        data: { revokedAt: this.now(), version: { increment: 1 } },
+        data: { revokedAt, version: { increment: 1 } },
       })
       if (revoked.count === 0) {
         const currentMember = await tx.familyMember.findUnique({
@@ -1075,7 +1076,7 @@ export class FamilyService {
           select: { revokedAt: true, version: true },
         })
         if (!currentMember) throw new FamilyFailure('not_found', 'Участник не найден')
-        if (currentMember.revokedAt && currentMember.version === expectedVersion + 1) return
+        if (currentMember.revokedAt && currentMember.version === expectedVersion + 1) return false
         throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
       }
       await tx.familyInvite.updateMany({
@@ -1088,7 +1089,23 @@ export class FamilyService {
         where: { familyId: scope.familyId, reservedByUserId: userId, boughtAt: null },
         data: { reservedByUserId: null, reservedAt: null, version: { increment: 1 } },
       })
+      return true
     })
+    if (revoked) {
+      try {
+        console.info('Family membership revoked', {
+          event: 'family_member_revoked',
+          actorUserId: scope.principal.userId,
+          targetUserId: userId,
+          familyId: scope.familyId,
+          action: removingSelf ? 'self_leave' : 'owner_remove',
+          version: expectedVersion + 1,
+          timestamp: revokedAt.toISOString(),
+        })
+      } catch {
+        // Diagnostic logging must not change a committed access revocation.
+      }
+    }
   }
 
 }

@@ -537,7 +537,7 @@ test('MAX user can leave a terminal unavailable invitation and continue to My Fa
   expect(acceptRequests).toBe(0)
 })
 
-test('MAX documented invite launch authenticates current identity and opens the invited family despite its incomplete own family', async ({ browser, page }) => {
+test('MAX-FULL: documented invite launch replaces a different cookie identity and opens the invited family despite its incomplete own family', async ({ browser, page }) => {
   const recipientId = 7_750_000 + Math.floor(Math.random() * 100_000)
   const inviterId = recipientId + 200_000
   const recipientContext = await browser.newContext()
@@ -556,9 +556,14 @@ test('MAX documented invite launch authenticates current identity and opens the 
   })
   expect(inviteResponse.status()).toBe(201)
   const rawInvite = (await inviteResponse.json() as { rawToken: string }).rawToken
-  const recipientState = await recipientContext.storageState()
+  const priorIdentityState = await page.context().storageState()
+  const inviterMe = await page.request.get('/api/v1/me')
+  expect(inviterMe.status()).toBe(200)
 
-  const launchContext = await browser.newContext({ storageState: recipientState })
+  const launchContext = await browser.newContext({ storageState: priorIdentityState })
+  const priorCookieMe = await launchContext.request.get('/api/v1/me')
+  expect((await priorCookieMe.json() as { user: { id: string } }).user.id)
+    .toBe((await inviterMe.json() as { user: { id: string } }).user.id)
   await launchContext.addInitScript((data: string) => {
     Object.defineProperty(window, 'WebApp', {
       configurable: true,
@@ -590,6 +595,11 @@ test('MAX documented invite launch authenticates current identity and opens the 
   await launchPage.getByRole('button', { name: 'Повторить' }).click()
   await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   expect(previewRequests).toHaveLength(2)
+  const recipientMe = await recipientPage.request.get('/api/v1/me', { headers: { Authorization: `Bearer ${recipientToken}` } })
+  const authenticatedMe = await launchPage.request.get('/api/v1/me')
+  expect(authenticatedMe.status()).toBe(200)
+  expect((await authenticatedMe.json() as { user: { id: string } }).user.id)
+    .toBe((await recipientMe.json() as { user: { id: string } }).user.id)
   await launchPage.getByRole('button', { name: 'Присоединиться' }).click()
   await expect(launchPage.getByText('Invited family history', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
@@ -598,7 +608,7 @@ test('MAX documented invite launch authenticates current identity and opens the 
   await recipientContext.close()
 })
 
-test('MAX malformed invite intent stays on the invitation issue flow instead of own-family creation', async ({ page }) => {
+test('MAX-FULL: malformed invite intent stays on the invitation issue flow instead of own-family creation', async ({ page }) => {
   const maxId = 7_760_000 + Math.floor(Math.random() * 100_000)
   let familyCreates = 0
   await page.route('**/api/v1/families', async (route) => {

@@ -234,12 +234,46 @@ describe('MAX family invitation and access audit', () => {
     expect((await request(`/api/v1/families/${familyA.id}/members`, guest.token)).body.items
       .find((member: any) => member.userId === guest.userId).role).toBe('viewer')
 
-    const removal = await request(`/api/v1/families/${familyA.id}/members/${guest.userId}`, owner.token, 'DELETE', {
-      expectedVersion: demoted.body.membership.version,
+    const removal = await captureConsoleInfo(async () => {
+      const first = await request(`/api/v1/families/${familyA.id}/members/${guest.userId}`, owner.token, 'DELETE', {
+        expectedVersion: demoted.body.membership.version,
+      })
+      expect(first.response.status).toBe(204)
+      const duplicate = await request(`/api/v1/families/${familyA.id}/members/${guest.userId}`, owner.token, 'DELETE', {
+        expectedVersion: demoted.body.membership.version,
+      })
+      expect(duplicate.response.status).toBe(204)
+      return first
     })
-    expect(removal.response.status).toBe(204)
+    expect(removal.result.response.status).toBe(204)
+    const removalEvents = securityEvents(removal.records)
+    expect(removalEvents).toHaveLength(1)
+    expect(removalEvents[0]).toMatchObject({
+      event: 'family_member_revoked', actorUserId: owner.userId, targetUserId: guest.userId,
+      familyId: familyA.id, action: 'owner_remove', version: demoted.body.membership.version + 1,
+    })
+    expect(removalEvents[0]?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(Object.keys(removalEvents[0] ?? {}).sort()).toEqual([
+      'action', 'actorUserId', 'event', 'familyId', 'targetUserId', 'timestamp', 'version',
+    ])
     expect((await request(`/api/v1/families/${familyA.id}`, guest.token)).response.status).toBe(404)
     expect((await request(`/api/v1/families/${ownFamily.id}`, guest.token)).response.status).toBe(200)
+
+    const selfLeaver = await maxActor(710005, 'Self leaver')
+    const selfInvite = await createInvite(owner.token, familyA.id, 'viewer')
+    expect((await request('/api/v1/invites/accept', selfLeaver.token, 'POST', { token: selfInvite.body.rawToken })).response.status).toBe(200)
+    const selfMember = (await request(`/api/v1/families/${familyA.id}/members`, owner.token)).body.items
+      .find((candidate: any) => candidate.userId === selfLeaver.userId)
+    const selfRemoval = await captureConsoleInfo(() => request(
+      `/api/v1/families/${familyA.id}/members/${selfLeaver.userId}`, selfLeaver.token, 'DELETE',
+      { expectedVersion: selfMember.version },
+    ))
+    expect(selfRemoval.result.response.status).toBe(204)
+    expect(securityEvents(selfRemoval.records)).toHaveLength(1)
+    expect(securityEvents(selfRemoval.records)[0]).toMatchObject({
+      event: 'family_member_revoked', actorUserId: selfLeaver.userId, targetUserId: selfLeaver.userId,
+      familyId: familyA.id, action: 'self_leave', version: selfMember.version + 1,
+    })
   })
 
   test('enforces invite-role capabilities on real memory actions and ignores invite identity tampering', async () => {
@@ -642,6 +676,23 @@ describe('MAX family invitation and access audit', () => {
     return { response, body: text ? JSON.parse(text) as any : null }
   }
 })
+
+async function captureConsoleInfo<T>(action: () => Promise<T>) {
+  const originalInfo = console.info
+  const records: unknown[][] = []
+  console.info = (...args: Parameters<typeof console.info>) => { records.push(args) }
+  try {
+    return { result: await action(), records }
+  } finally {
+    console.info = originalInfo
+  }
+}
+
+function securityEvents(records: unknown[][]) {
+  return records.map((args) => args[1]).filter((value): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    'event' in value && value.event === 'family_member_revoked')
+}
 
 function signMaxInitData(user: { id: number; first_name: string }, queryId: string, startParam?: string) {
   const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: queryId, user: JSON.stringify(user) })

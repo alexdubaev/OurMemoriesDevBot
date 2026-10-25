@@ -36,7 +36,7 @@ import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
-import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
+import { isMaxVideoUploadAcceptanceLaunch, readMaxInviteLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
 import { claimWelcome, WelcomeSplash } from '@/features/welcome'
@@ -60,6 +60,12 @@ export default function App(props: AppProps) {
 
 function AppContent({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
+  const maxInviteLaunch = hostBridge.kind === 'max'
+    ? readMaxInviteLaunch(typeof window === 'undefined' ? undefined : window)
+    : null
+  const explicitInviteIntent = maxInviteLaunch !== null && maxInviteLaunch.kind !== 'none'
+  const inviteToken = maxInviteLaunch?.kind === 'valid' ? maxInviteLaunch.token : hostBridge.kind === 'max' ? null : hostBridge.inviteToken()
+  const invalidInviteIntent = maxInviteLaunch?.kind === 'invalid'
   const maxBrowserChallengeId = hostBridge.kind === 'max'
     ? maxBrowserLinkChallengeId(typeof window === 'undefined' ? undefined : window)
     : null
@@ -71,7 +77,7 @@ function AppContent({ hostBridge }: AppProps) {
     auth,
     initData,
     isHostAvailable: hostBridge.isAvailable,
-    forceAuth: Boolean(maxBrowserChallengeId),
+    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent),
     provider: hostAuthProvider,
   })
   const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
@@ -83,8 +89,8 @@ function AppContent({ hostBridge }: AppProps) {
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
-    forceAuth: Boolean(maxBrowserChallengeId),
-  } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable])
+    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent),
+  } : null, [auth, authAttemptKey, explicitInviteIntent, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable])
 
   const [hostLayout, setHostLayout] = useState<HostLayoutSnapshot>(() => readHostLayout(hostBridge))
   useEffect(() => {
@@ -139,6 +145,11 @@ function AppContent({ hostBridge }: AppProps) {
       }} type="button"><Typography variant="memoryButton">Повторить</Typography></Button>
     </section>
   </main>
+  if (explicitInviteIntent && initData && hostAuthError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" role="alert" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <div className="mt-8"><InlineError onRetry={resetHostAuth} /></div>
+    <Typography className="mt-3" tone="muted" variant="memoryMeta">Не удалось подтвердить вход через MAX. Повторите попытку.</Typography>
+  </main>
   if (!auth.user) {
     if (hostBridge.kind === 'browser') {
       return <BrowserLinkLogin style={style} />
@@ -168,7 +179,8 @@ function AppContent({ hostBridge }: AppProps) {
   }
   const maxVideoUploadAcceptance = hostBridge.kind === 'max'
     && isMaxVideoUploadAcceptanceLaunch(typeof window === 'undefined' ? undefined : window)
-  return <FamilyController key={auth.user.id} currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteToken={hostBridge.inviteToken()} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
+  const inviteEntryKey = inviteToken ? `invite:${inviteToken}` : invalidInviteIntent ? 'invite:invalid' : ''
+  return <FamilyController key={`${auth.user.id}:${inviteEntryKey}`} currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteIntentInvalid={invalidInviteIntent} inviteToken={inviteToken} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
 }
 
 function MaxRuntimeDiagnosticPanel({ diagnostic, style }: { diagnostic: MaxRuntimeDiagnostic; style: CSSProperties }) {
@@ -202,9 +214,10 @@ function yesNo(value: boolean) {
   return value ? 'yes' : 'no'
 }
 
-function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
+function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, inviteIntentInvalid, inviteToken, maxVideoUploadAcceptance, transport }: { currentUserId: string; hostBridge: HostBridge; insets: TelegramInsets; insetsStyle: CSSProperties; inviteIntentInvalid: boolean | undefined; inviteToken: string | null; maxVideoUploadAcceptance: boolean; transport: AuthenticatedTransport }) {
   const queryClient = useQueryClient()
-  const savedPresentation = inviteToken ? undefined : queryClient.getQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(currentUserId))
+  const explicitInviteIntent = Boolean(inviteToken || inviteIntentInvalid)
+  const savedPresentation = explicitInviteIntent ? undefined : queryClient.getQueryData<PersistentFamilyPresentation>(persistentUiQueryKey(currentUserId))
   const hasCachedHome = Boolean(savedPresentation?.home)
   const installIntent = useMemo(() => hostBridge.kind === 'browser' ? readPwaInstallIntent(window.location) : null, [hostBridge.kind])
   const [home, setHome] = useState<FamilyHomeResponse | null>(() => savedPresentation?.home as FamilyHomeResponse | null ?? null)
@@ -260,7 +273,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [dismissedInviteToken, setDismissedInviteToken] = useState<string | null>(null)
-  const [invitePending, setInvitePending] = useState(Boolean(inviteToken))
+  const [invitePending, setInvitePending] = useState(explicitInviteIntent)
+  const [dismissedInvalidInvite, setDismissedInvalidInvite] = useState(false)
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
   const maxVideoPendingRef = useRef(maxVideoUploadAcceptance)
   const selectionVersion = useRef(0)
@@ -279,7 +293,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [welcomeClaimRetry, setWelcomeClaimRetry] = useState(0)
 
   useEffect(() => {
-    if (inviteToken) return
+    if (explicitInviteIntent) return
     const presentation: PersistentFamilyPresentation = {
       home,
       family: familyResponse,
@@ -291,7 +305,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       childFilter: normalizeChildFilter(childFilter, familyResponse ? familyChildren(familyResponse) : []),
     }
     queryClient.setQueryData(persistentUiQueryKey(currentUserId), presentation)
-  }, [childFilter, currentUserId, familyResponse, filter, home, inviteToken, members, queryClient, screen, selectedMembershipEpoch])
+  }, [childFilter, currentUserId, explicitInviteIntent, familyResponse, filter, home, members, queryClient, screen, selectedMembershipEpoch])
 
   const finishWelcome = useCallback(() => {
     if (!welcomeResolve.current) return
@@ -638,6 +652,11 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         if (cancelled) return
       }
       setWelcomeGateComplete(true)
+      if (inviteIntentInvalid && !dismissedInvalidInvite) {
+        setInviteIssue('UNKNOWN')
+        setInvitePending(false)
+        return
+      }
       if (inviteToken && inviteToken !== dismissedInviteToken) {
         try {
           const preview = await previewInvite(transport, inviteToken)
@@ -705,7 +724,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       welcomeResolve.current = null
       resolve?.()
     }
-  }, [currentUserId, dismissedInviteToken, hostBridge.kind, installIntent, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
+  }, [currentUserId, dismissedInvalidInvite, dismissedInviteToken, hostBridge.kind, installIntent, inviteIntentInvalid, inviteToken, maxVideoUploadAcceptance, refreshHome, selectFamily, transport, welcomeClaimRetry])
 
   const loadMore = async () => {
     if (!home?.nextCursor || loadingMore) return
@@ -759,17 +778,24 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (!welcomeGateComplete || invitePending) return <BootPreloader style={insetsStyle} />
   if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onMyFamilies={() => {
     if (inviteToken) setDismissedInviteToken(inviteToken)
+    if (inviteIntentInvalid) setDismissedInvalidInvite(true)
     setInviteIssue(null)
     setInvitePreview(null)
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href)
       url.searchParams.delete('startapp')
+      url.searchParams.delete('WebAppStartParam')
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
     }
     returnHome()
   }} onRetry={async () => {
     setInviteIssue(null)
     setInvitePending(true)
+    if (!inviteToken) {
+      setInviteIssue('NOT_FOUND')
+      setInvitePending(false)
+      return
+    }
     try { setInvitePreview(await previewInvite(transport, inviteToken ?? '')) }
     catch (reason) { setInviteIssue(inviteIssueCode(reason)) }
     finally { setInvitePending(false) }

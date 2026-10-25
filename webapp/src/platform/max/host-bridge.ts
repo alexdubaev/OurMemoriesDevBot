@@ -37,6 +37,11 @@ type BrowserHost = {
 
 export type MaxHostBridgeOptions = { maxBotUsername?: string }
 
+export type MaxInviteLaunch =
+  | { kind: 'none' }
+  | { kind: 'invalid' }
+  | { kind: 'valid'; token: string }
+
 export type MaxRuntimeDiagnostic = {
   hostDetected: boolean
   webAppPresent: boolean
@@ -77,9 +82,8 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     initData: () => rawInitData(webApp),
     rawAuthData: () => rawInitData(webApp),
     inviteToken: () => {
-      const signed = startParamResult(rawInitData(webApp))
-      if (signed.present) return inviteTokenFromStartParam(signed.value)
-      return inviteTokenFromSearch(browserHost?.location?.search)
+      const launch = readMaxInviteLaunch(host)
+      return launch.kind === 'valid' ? launch.token : null
     },
     inviteLink: (rawToken) => createMaxInviteLink(rawToken, options.maxBotUsername),
     metadata: (): TelegramHostMetadata | null => {
@@ -191,6 +195,22 @@ export function isMeaningfulMaxWebApp(host: unknown): boolean {
     || typeof webApp.version === 'string'
     || typeof webApp.platform === 'string'
     || typeof webApp.colorScheme === 'string'
+}
+
+/** Resolves invite intent from supported launch carriers without treating hints as identity data. */
+export function readMaxInviteLaunch(host: unknown): MaxInviteLaunch {
+  const browserHost = isRecord(host) ? host as BrowserHost : null
+  const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  const signed = startParamResult(rawInitData(webApp))
+  if (signed.present) return inviteLaunchFromCarrier(signed)
+
+  const unsafe = unsafeStartParamResult(webApp)
+  if (unsafe.present) return inviteLaunchFromCarrier(unsafe)
+
+  const documented = queryStartParamResult(browserHost?.location?.search, 'WebAppStartParam')
+  if (documented.present) return inviteLaunchFromCarrier(documented)
+
+  return inviteLaunchFromCarrier(queryStartParamResult(browserHost?.location?.search, 'startapp'))
 }
 
 /** The direct video composer is intentionally reachable only from the acceptance launch. */
@@ -309,14 +329,25 @@ function startParamResult(initData: string | null) {
 function unsafeStartParamResult(webApp: MaxWebApp | null) {
   const value = webApp?.initDataUnsafe?.start_param
   return typeof value === 'string'
-    ? { present: true, value }
-    : { present: false, value: null as string | null }
+    ? { present: true, value, values: [value] }
+    : { present: false, value: null as string | null, values: [] as string[] }
 }
 
 function queryStartParamResult(search: unknown, name: string) {
-  if (typeof search !== 'string') return { present: false, value: null as string | null }
+  if (typeof search !== 'string') return { present: false, value: null as string | null, values: [] as string[] }
   const values = new URLSearchParams(search).getAll(name)
-  return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null }
+  return { present: values.length > 0, value: values.length === 1 ? values[0] ?? null : null, values }
+}
+
+function inviteLaunchFromCarrier(carrier: { present: boolean; value: string | null; values?: string[] }): MaxInviteLaunch {
+  if (!carrier.present) return { kind: 'none' }
+  const value = carrier.value
+  const includesInviteIntent = value?.startsWith('invite_')
+    || carrier.values?.some((candidate) => candidate.startsWith('invite_')) === true
+  if (!includesInviteIntent) return { kind: 'none' }
+  if (!value) return { kind: 'invalid' }
+  const token = inviteTokenFromStartParam(value)
+  return token ? { kind: 'valid', token } : { kind: 'invalid' }
 }
 
 function resolveStartParam(
@@ -333,11 +364,6 @@ function resolveStartParam(
 function queryKeys(search: unknown) {
   if (typeof search !== 'string') return []
   return [...new Set([...new URLSearchParams(search).keys()])]
-}
-
-function inviteTokenFromSearch(search: unknown) {
-  if (typeof search !== 'string') return null
-  return inviteTokenFromStartParam(new URLSearchParams(search).get('startapp'))
 }
 
 function inviteTokenFromStartParam(startParam: string | null) {

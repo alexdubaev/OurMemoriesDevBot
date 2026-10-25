@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createMaxHostBridge } from '../src/platform/max/host-bridge'
+import { createMaxHostBridge, readMaxInviteLaunch } from '../src/platform/max/host-bridge'
 
 const signedToken = 's'.repeat(43)
 const unsafeToken = 'u'.repeat(43)
@@ -73,5 +73,18 @@ describe('MAX invite launch parameter precedence', () => {
 
   test('retains the legacy startapp invitation carrier when supported fields are absent', () => {
     expect(bridge({ search: `?startapp=invite_${legacyToken}` }).inviteToken()).toBe(legacyToken)
+  })
+
+  test('distinguishes malformed explicit invite intent from an ordinary or other-flow launch', () => {
+    const malformed = {
+      WebApp: { initData: 'user=%7B%7D', version: '1.0', ready() {} },
+      location: { search: '?WebAppStartParam=invite_short' },
+    }
+    const otherFlow = {
+      WebApp: { initData: 'user=%7B%7D&start_param=browser_123', version: '1.0', ready() {} },
+      location: { search: `?startapp=invite_${legacyToken}` },
+    }
+    expect(readMaxInviteLaunch(malformed)).toEqual({ kind: 'invalid' })
+    expect(readMaxInviteLaunch(otherFlow)).toEqual({ kind: 'none' })
   })
 })
