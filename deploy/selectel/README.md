@@ -1086,6 +1086,18 @@ use the no-migration flag to avoid an unmet required postcondition. When the
 schema is demonstrably current and all procedure postconditions have passed,
 the normal checked-schema update remains available.
 
+For the schema-59 MAX migration, backend, worker and scheduler are stopped before
+SQL because the previous runtime cannot safely write against the expanded
+reference schema. If promotion is interrupted after the 59-migration ledger is
+complete, keep those writers stopped. The guarded application rollback verifies
+the complete ledger and exact pinned compatible recovery pair, applies only the
+MAX metadata inverse, starts that backend and waits for internal readiness before
+checking normal auth routing, then starts worker, scheduler and static. The SQL
+schema remains at 59. Once the compatible pair is healthy, retry the same guarded
+full release; it rechecks the ledger and recovery readiness before promotion.
+Never restart the prior incompatible writers, edit `rollback.env`, fabricate a
+forward-only marker or alter the migration ledger.
+
 Normal release source must contain the accepted v4 commit
 `afdb408f8bbf22b564c86bb8d33a83261f55cc48`. This is checked after a read-only fetch
 and before checkout, config changes, resumed writer quiescence or promotion.

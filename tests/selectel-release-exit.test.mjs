@@ -1022,14 +1022,18 @@ function runApplicationRollback(options = {}) {
     FIXTURE_WEBAPP_ID: options.badWebappImage ? 'sha256:' + 'e'.repeat(64) : maxVideoPair ? maxVideoRecoveryWebappId : healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId,
     FIXTURE_LABEL: backendTargetLabel, FIXTURE_BACKEND_LABEL: backendTargetLabel, FIXTURE_WEBAPP_LABEL: webappTargetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
+    FIXTURE_BACKEND_STOPPED: String(options.stoppedBackend ?? false),
+    FIXTURE_PARENT_SECRET_FAILURE: String(options.parentSecretFailure ?? false),
+    FIXTURE_RUNNING_BACKEND_TAG: options.runningBackend ?? (maxVideoPair ? maxVideoRecoveryBackend : rollbackBaseline),
     FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
   }
   const mocks = [
+    'FIXTURE_TOP_BASHPID=$BASHPID',
     'stat() { case "$2" in %u) printf "0\\n" ;; %a) printf "600\\n" ;; %i) printf "1\\n" ;; *) return 2 ;; esac; }',
     'install() { local target=${!#}; if [ "$1" = -d ]; then mkdir -p "$target"; else : > "$target"; fi; }',
     'chmod() { :; }',
-    'load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }',
+    `load_runtime_secrets() { if [ "$FIXTURE_PARENT_SECRET_FAILURE" = true ] && [ "$BASHPID" = "$FIXTURE_TOP_BASHPID" ]; then echo PARENT_SECRET_INIT_FAILED >> "$FIXTURE_EVENTS"; return 1; fi; export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; ${options.trackRollbackOrder ? 'echo SECRET_INIT >> "$FIXTURE_EVENTS";' : ''} }`,
     'gateway_preflight() { :; }',
     'docker() {',
     ' case "$*" in',
@@ -1038,6 +1042,8 @@ function runApplicationRollback(options = {}) {
     ' *"org.opencontainers.image.revision"*memoly-backend*) echo "$FIXTURE_BACKEND_LABEL" ;;',
     ' *"org.opencontainers.image.revision"*memoly-webapp*) echo "$FIXTURE_WEBAPP_LABEL" ;;',
     ' *"image inspect --format "*org.opencontainers.image.revision*) echo "$FIXTURE_LABEL" ;;',
+    ' *"inspect --format {{.Config.Image}}|{{.Image}}"*) echo "memoly-backend:$FIXTURE_RUNNING_BACKEND_TAG|$FIXTURE_BACKEND_ID" ;;',
+    ' *"service=backend"*) [ "$FIXTURE_BACKEND_STOPPED" = true ] || echo backend-container ;;',
     ' *) return 0 ;;',
     ' esac',
     '}',
@@ -1063,10 +1069,14 @@ function runApplicationRollback(options = {}) {
       'rollback_control_installed_inputs_match() { :; }',
       'rollback_verify_max_video_migration_history() { echo present; }',
       'rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }',
-      'rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; }',
+      'rollback_apply_max_video_recovery() { [ -n "${MAX_BOT_TOKEN:-}" ] || { echo RECOVERY_SECRET_MISSING >> "$FIXTURE_EVENTS"; return 1; }; echo MAX_INVERSE >> "$FIXTURE_EVENTS"; }',
+    ] : []),
+    ...(options.trackRollbackOrder ? [
+      'wait_backend_internal() { echo BACKEND_INTERNAL_READY >> "$FIXTURE_EVENTS"; }',
     ] : []),
     'curl() {',
     ' if [[ "$*" == *"/api/v1/auth/max"* ]]; then',
+    ...(options.trackRollbackOrder ? ['  echo AUTH_ROUTE_CHECK >> "$FIXTURE_EVENTS";'] : []),
     '  if [ -n "$FIXTURE_AUTH_RESPONSE" ]; then printf "%s" "$FIXTURE_AUTH_RESPONSE"; elif grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 404; fi',
     ' fi',
     ' return 0',
@@ -2629,9 +2639,24 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.match(oldPair.output, /application runtime differs from the verified rollback source/)
   assert.doesNotMatch(oldPair.events, /UP:|GATE/)
 
-  const restored = runApplicationRollback({ ...compatiblePair, failure: true })
+  const restored = runApplicationRollback({ ...compatiblePair, failure: true, stoppedBackend: true, trackRollbackOrder: true })
   assert.equal(restored.status, 42, restored.output)
-  assert.match(restored.events, new RegExp(`MAX_INVERSE[\\s\\S]*UP:${maxVideoRecoveryBackend}[\\s\\S]*PAIR:${maxVideoRecoveryBackend}:${maxVideoRecoveryWebapp}`))
+  assert.match(restored.events, new RegExp(`SECRET_INIT[\\s\\S]*MAX_INVERSE[\\s\\S]*UP:${maxVideoRecoveryBackend}:.*backend[\\s\\S]*BACKEND_INTERNAL_READY[\\s\\S]*GATE[\\s\\S]*AUTH_ROUTE_CHECK[\\s\\S]*UP:${maxVideoRecoveryBackend}:.*worker scheduler static`))
+
+  const missingParentSecrets = runApplicationRollback({ ...compatiblePair, parentSecretFailure: true })
+  assert.notEqual(missingParentSecrets.status, 0, missingParentSecrets.output)
+  assert.match(missingParentSecrets.events, /PARENT_SECRET_INIT_FAILED/)
+  assert.doesNotMatch(missingParentSecrets.events, /MAX_INVERSE|UP:|GATE/)
+
+  const exactRunningBackend = runApplicationRollback({ ...compatiblePair, trackRollbackOrder: true })
+  assert.equal(exactRunningBackend.status, 0, exactRunningBackend.output)
+  assert.match(exactRunningBackend.events, new RegExp(`BACKEND_INTERNAL_READY[\\s\\S]*GATE[\\s\\S]*AUTH_ROUTE_CHECK[\\s\\S]*UP:${maxVideoRecoveryBackend}:.*worker scheduler static`))
+
+  const unexpectedRunningBackend = runApplicationRollback({ ...compatiblePair,
+    runningBackend: 'a'.repeat(40), trackRollbackOrder: true })
+  assert.notEqual(unexpectedRunningBackend.status, 0, unexpectedRunningBackend.output)
+  assert.match(unexpectedRunningBackend.output, /running backend image revision label does not match its tag/)
+  assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
@@ -2705,6 +2730,81 @@ test('MAX video apply accepts silent candidate recovery only after readiness and
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
   assert.match(output, /readiness[\s\S]*stop:backend-id[\s\S]*stop:worker-id[\s\S]*stop:scheduler-id[\s\S]*--recover-all --apply[\s\S]*max_video_legacy_retention[\s\S]*readiness/)
   assert.doesNotMatch(output, /33a0054c3c71372aa5509ee8ebfa4578ad512ea1/)
+})
+
+test('membership guard allows quiesced promotion only through exact complete MAX verification', () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
+  const current = currentGitHead()
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+fixture=$(mktemp -d /tmp/max-stopped-promotion.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+APP_ROOT='${linuxPath(root)}'
+SERVER_ROOT="$fixture"
+ROLLBACK_ENV="$fixture/rollback.env"
+FORWARD_MARKER="$fixture/no-b2-marker"
+MM0_FORWARD_MARKER="$fixture/no-mm0-marker"
+COMPOSE_PROJECT=fixture
+MEMOLY_PRODUCT_SHA='${current}'
+SELECTEL_CI_RELEASE=true
+SELECTEL_DEPLOY_LOCK_FD=9
+exec 9>"$fixture/.selectel-deploy.lock"
+flock -n 9
+printf 'PREVIOUS_BACKEND_IMAGE_TAG=%s\\nPREVIOUS_WEBAPP_IMAGE_TAG=%s\\nMEMOLY_DB_ROLLBACK_ALLOWED=false\\n' \\
+  "$MAX_VIDEO_RECOVERY_BACKEND_SHA" "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" > "$ROLLBACK_ENV"
+chmod 0600 "$ROLLBACK_ENV"
+FIXTURE_EVENTS="$fixture/events"
+FIXTURE_WRITERS=running
+FIXTURE_PROFILE=max-video
+FIXTURE_VERIFY=pass
+git() {
+  case "$*" in
+    *'rev-parse refs/remotes/origin/main'*) printf '%s\\n' "$MEMOLY_PRODUCT_SHA" ;;
+    *'rev-parse HEAD'*) printf '%s\\n' "$MEMOLY_PRODUCT_SHA" ;;
+    *'cat-file -e'*) return 0 ;;
+    *'merge-base --is-ancestor'*) return 0 ;;
+    *) command git "$@" ;;
+  esac
+}
+docker() {
+  case "$*" in
+    *'service=backend'*) [ "$FIXTURE_WRITERS" != stopped ] && printf 'backend-container\\n' || true ;;
+    *'service=worker'*) [ "$FIXTURE_WRITERS" = running ] && printf 'worker-container\\n' || true ;;
+    *'service=scheduler'*) [ "$FIXTURE_WRITERS" = running ] && printf 'scheduler-container\\n' || true ;;
+    *'inspect --format {{.Config.Image}}'*) printf 'memoly-backend:%s\\n' "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ;;
+    *) return 0 ;;
+  esac
+}
+rollback_source_compatibility_profile() { printf '%s\\n' "$FIXTURE_PROFILE"; }
+load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic MAX_WEBHOOK_SECRET=synthetic MAX_INBOX_ENCRYPTION_KEY=synthetic; echo SECRET_INIT >> "$FIXTURE_EVENTS"; }
+verify_application_rollback() { echo "VERIFY:$1" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_VERIFY" = pass ] && [ -n "$MAX_BOT_TOKEN" ]; }
+
+# Real migration guard accepts the running B2 services before quiescence.
+guard_membership_transition
+FIXTURE_WRITERS=stopped
+# Its default migration context still rejects the stopped set.
+if ( guard_membership_transition ); then echo 'stopped writers passed migration guard' >&2; exit 41; fi
+# Only promotion context can proceed, after exact source/pair/readiness checks.
+guard_membership_transition promotion
+FIXTURE_PROFILE=other
+if ( guard_membership_transition promotion ); then echo 'wrong source profile accepted' >&2; exit 42; fi
+FIXTURE_PROFILE=max-video
+FIXTURE_VERIFY=fail
+if ( guard_membership_transition promotion ); then echo 'incomplete ledger/readiness accepted' >&2; exit 43; fi
+FIXTURE_VERIFY=pass
+FIXTURE_WRITERS=partial
+if ( guard_membership_transition promotion ); then echo 'partial writer set accepted' >&2; exit 44; fi
+FIXTURE_WRITERS=stopped
+sed -i 's/^PREVIOUS_BACKEND_IMAGE_TAG=.*/PREVIOUS_BACKEND_IMAGE_TAG=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' "$ROLLBACK_ENV"
+if ( guard_membership_transition promotion ); then echo 'unpinned rollback pair accepted' >&2; exit 45; fi
+grep -q '^SECRET_INIT$' "$FIXTURE_EVENTS"
+grep -q '^VERIFY:complete$' "$FIXTURE_EVENTS"
+printf 'PASS: only exact stopped-writer MAX promotion accepted; migration and drift checks preserved\\n'
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /PASS: only exact stopped-writer MAX promotion accepted/)
+  assert.match(result.stderr, /B2 release without a forward-only marker requires one running compatible backend/)
 })
 
 test('MAX video rollback pre-SQL verification uses the exact-prefix helper while complete state rejects 57 migrations', {
