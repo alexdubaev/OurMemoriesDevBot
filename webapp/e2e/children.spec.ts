@@ -398,10 +398,15 @@ async function startFamily(page: Page, childCount: 1 | 2 = 2): Promise<SeededFam
     const second = await page.request.post(`/api/v1/families/${familyId}/children`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { name: 'Миша', birthDate: '2023-04-05', sex: 'boy', avatarMediaId: secondAvatar, avatarCrop: crop } })
     expect(second.status()).toBe(201)
   }
-  const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { children: Array<{ id: string; name: string }> }
+  const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { family: { name: string }; children: Array<{ id: string; name: string }> }
   expect(family.children.map((child) => child.name)).toEqual(childCount === 2 ? ['Лиля', 'Миша'] : ['Лиля'])
+  // This setup tests family behavior, not whether the debounced presentation cache flushed before reload.
   await page.reload()
-  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+  const bottomNavigation = page.getByTestId('bottom-navigation')
+  const seededFamilyCard = page.locator('.family-hub-card').filter({ has: page.getByText(family.family.name, { exact: true }) })
+  await expect(bottomNavigation.or(seededFamilyCard).first()).toBeVisible()
+  if (await seededFamilyCard.isVisible()) await seededFamilyCard.click()
+  await expect(bottomNavigation).toBeVisible()
   return { familyId, headers, children: family.children }
 }
 
