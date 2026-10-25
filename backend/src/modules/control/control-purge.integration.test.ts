@@ -49,6 +49,7 @@ async function clean() {
   await prisma.maxOutgoingResponse.deleteMany({ where: { inboxId: channelInboxId } })
   await prisma.maxChannelDecision.deleteMany({ where: { id: channelDecisionId } })
   await prisma.maxInbox.deleteMany({ where: { id: channelInboxId } })
+  await prisma.child.updateMany({ where: { familyId }, data: { avatarMediaId: null } })
   await prisma.userAvatar.deleteMany()
   await prisma.mediaAsset.deleteMany()
   await prisma.family.deleteMany()
