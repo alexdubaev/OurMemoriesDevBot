@@ -365,12 +365,12 @@ describe('MAX legacy video retention and recovery', () => {
     const purgeIntent = await fx.db.controlFamilyDeletion.create({ data: {
       familyId: family.id, actorUserId: family.owner.id, requestedAt: new Date(),
     } })
-    await fx.db.family.update({ where: { id: family.id }, data: { status: 'deleting' } })
     await fx.db.maxVideoLegacyRetention.update({ where: { mediaId }, data: { recoveredAt: null } })
     await fx.db.maxVideoReference.create({ data: {
       id: mediaId, sourceId: source.id, memoryId: memory.id, familyId: family.id,
       attachmentPosition: 1, providerAttachmentId: 'video-attachment-1',
     } })
+    await fx.db.family.update({ where: { id: family.id }, data: { status: 'deleting' } })
     await storage.deleteObject(originalKey)
     try {
       expect(await migration.recoveryReadiness()).toMatchObject({ total: 0, excluded: 1, inspected: 0, ready: 0, missingObjects: 0, invalid: [] })
