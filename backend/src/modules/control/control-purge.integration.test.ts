@@ -38,6 +38,7 @@ async function clean() {
   })
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT set_config('app.control_family_purge_operation', ${cleanupOperation.id}, true)`
+    await tx.$executeRaw`UPDATE children SET avatar_media_id = NULL, avatar_crop = NULL WHERE family_id = ${familyId}::uuid`
     await tx.$executeRaw`DELETE FROM "media_assets" WHERE "family_id" = ${familyId}::uuid`
   })
   await prisma.controlStorageDelete.deleteMany()
@@ -49,7 +50,6 @@ async function clean() {
   await prisma.maxOutgoingResponse.deleteMany({ where: { inboxId: channelInboxId } })
   await prisma.maxChannelDecision.deleteMany({ where: { id: channelDecisionId } })
   await prisma.maxInbox.deleteMany({ where: { id: channelInboxId } })
-  await prisma.child.updateMany({ where: { familyId }, data: { avatarMediaId: null } })
   await prisma.userAvatar.deleteMany()
   await prisma.mediaAsset.deleteMany()
   await prisma.family.deleteMany()
