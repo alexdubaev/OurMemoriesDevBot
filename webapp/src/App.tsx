@@ -36,7 +36,7 @@ import type { HostBridge } from '@/platform/telegram'
 import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
-import { isMaxVideoUploadAcceptanceLaunch, readMaxInviteLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
+import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowMaxRuntimeDiagnostic, type MaxRuntimeDiagnostic } from '@/platform/max/host-bridge'
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
 import { claimWelcome, WelcomeSplash } from '@/features/welcome'
@@ -61,7 +61,10 @@ export default function App(props: AppProps) {
 function AppContent({ hostBridge }: AppProps) {
   const auth = useContext(AuthContext)
   const maxInviteLaunch = hostBridge.kind === 'max'
-    ? readMaxInviteLaunch(typeof window === 'undefined' ? undefined : window)
+    ? hostBridge.inviteLaunch?.() ?? (() => {
+      const token = hostBridge.inviteToken()
+      return token ? { kind: 'valid' as const, token } : { kind: 'none' as const }
+    })()
     : null
   const explicitInviteIntent = maxInviteLaunch !== null && maxInviteLaunch.kind !== 'none'
   const inviteToken = maxInviteLaunch?.kind === 'valid' ? maxInviteLaunch.token : hostBridge.kind === 'max' ? null : hostBridge.inviteToken()
@@ -273,6 +276,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [invitePreview, setInvitePreview] = useState<InvitePreviewResponse | null>(null)
   const [inviteIssue, setInviteIssue] = useState<string | null>(null)
   const [dismissedInviteToken, setDismissedInviteToken] = useState<string | null>(null)
+  const [inviteHandled, setInviteHandled] = useState(false)
   const [invitePending, setInvitePending] = useState(explicitInviteIntent)
   const [dismissedInvalidInvite, setDismissedInvalidInvite] = useState(false)
   const [maxVideoPending, setMaxVideoPending] = useState(maxVideoUploadAcceptance)
@@ -293,7 +297,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [welcomeClaimRetry, setWelcomeClaimRetry] = useState(0)
 
   useEffect(() => {
-    if (explicitInviteIntent) return
+    if (explicitInviteIntent && !inviteHandled) return
     const presentation: PersistentFamilyPresentation = {
       home,
       family: familyResponse,
@@ -305,7 +309,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       childFilter: normalizeChildFilter(childFilter, familyResponse ? familyChildren(familyResponse) : []),
     }
     queryClient.setQueryData(persistentUiQueryKey(currentUserId), presentation)
-  }, [childFilter, currentUserId, explicitInviteIntent, familyResponse, filter, home, members, queryClient, screen, selectedMembershipEpoch])
+  }, [childFilter, currentUserId, explicitInviteIntent, familyResponse, filter, home, inviteHandled, members, queryClient, screen, selectedMembershipEpoch])
 
   const finishWelcome = useCallback(() => {
     if (!welcomeResolve.current) return
@@ -408,7 +412,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     selectedFamilyIdRef.current = null
     try {
       const response = await loadFamily(transport, familyId)
-      if (version !== selectionVersion.current) return
+      if (version !== selectionVersion.current) return false
       let summary = homeRef.current?.items.find((item) => item.familyId === familyId)
       if (!summary) {
         let page = await loadFamilyHome(transport)
@@ -418,7 +422,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
           summary = page.items.find((item) => item.familyId === familyId)
         }
       }
-      if (version !== selectionVersion.current) return
+      if (version !== selectionVersion.current) return false
       if (!summary) throw new ApiRequestError(404, 'NOT_FOUND', 'Семья не найдена')
       if (homeRef.current && !homeRef.current.items.some((item) => item.familyId === familyId)) {
         const updated = { ...homeRef.current, items: [...homeRef.current.items, summary] }
@@ -431,7 +435,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
           loadFamilyInvites(transport, familyId).catch(() => ({ items: [] as FamilyInviteDto[] })),
         ])
         : [{ items: [] as FamilyMemberDto[] }, { items: [] as FamilyInviteDto[] }]
-      if (version !== selectionVersion.current) return
+      if (version !== selectionVersion.current) return false
       if (maxVideoPendingRef.current && !canStartMaxVideoUpload(
         homeRef.current?.items.find((item) => item.familyId === familyId),
         nextMembers.items.find((member) => member.userId === currentUserId),
@@ -439,7 +443,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       )) {
         setNotice('Для этой семьи загрузка видео недоступна. Выберите другую семью.')
         setScreen('hub')
-        return
+        return false
       }
       allowPrivateFamilyCache(currentUserId, familyId, summary.membershipEpoch)
       setVisitedSurfaces(new Set(response.child ? ['feed'] : ['family']))
@@ -452,8 +456,9 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
       setInvites(nextInvites.items)
       lastSelectedRole.current = { familyId, epoch: summary.membershipEpoch, role: summary.role }
       setScreen(response.child ? 'feed' : 'family')
+      return true
     } catch (reason) {
-      if (version !== selectionVersion.current) return
+      if (version !== selectionVersion.current) return false
       const denied = reason instanceof ApiRequestError && [403, 404].includes(reason.status)
       if (denied) {
         const updated = homeRef.current && { ...homeRef.current, items: homeRef.current.items.filter((item) => item.familyId !== familyId) }
@@ -465,6 +470,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
         : 'Не удалось открыть семью. Повторите попытку.')
       setScreen('hub')
       void refreshHome()
+      return false
     } finally {
       if (version === selectionVersion.current) setBusy(false)
     }
@@ -672,7 +678,8 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
             cursor = next.nextCursor
           }
           if (alreadyMember) {
-            void selectFamily(preview.family.id)
+            if (await selectFamily(preview.family.id)) setInviteHandled(true)
+            else if (!cancelled) setInviteIssue('UNKNOWN')
             return
           }
           if (hostBridge.kind === 'browser') {
@@ -681,7 +688,10 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
             catch (reason) { autoAcceptingInvite.current = null; throw reason }
             if (cancelled) return
             await refreshHome(true)
-            if (!cancelled) void selectFamily(preview.family.id)
+            if (!cancelled) {
+              if (await selectFamily(preview.family.id)) setInviteHandled(true)
+              else setInviteIssue('UNKNOWN')
+            }
           } else {
             setInvitePreview(preview)
           }
@@ -777,6 +787,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   if (welcomeClaimError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" style={insetsStyle}><BrandLogo className="w-[148px]" /><div className="mt-8"><InlineError onRetry={() => { setWelcomeClaimError(false); setWelcomeClaimRetry((count) => count + 1) }} /></div></main>
   if (!welcomeGateComplete || invitePending) return <BootPreloader style={insetsStyle} />
   if (inviteIssue) return <IncomingInviteIssue code={inviteIssue} onMyFamilies={() => {
+    setInviteHandled(true)
     if (inviteToken) setDismissedInviteToken(inviteToken)
     if (inviteIntentInvalid) setDismissedInvalidInvite(true)
     setInviteIssue(null)
@@ -801,15 +812,19 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     finally { setInvitePending(false) }
   }} style={insetsStyle} />
   if (invitePreview && inviteToken) return <IncomingInvite preview={invitePreview} style={insetsStyle} onAccept={async () => {
+    setInvitePending(true)
     try {
       await acceptInvite(transport, inviteToken)
       const familyId = invitePreview.family.id
       setInvitePreview(null)
       await refreshHome(true)
-      await selectFamily(familyId)
+      if (await selectFamily(familyId)) setInviteHandled(true)
+      else setInviteIssue('UNKNOWN')
     } catch (reason) {
       setInviteIssue(inviteIssueCode(reason))
       setInvitePreview(null)
+    } finally {
+      setInvitePending(false)
     }
   }} />
   if (screen === 'hub' || !familyResponse) return <div style={insetsStyle}><FamilyHubPage avatarAccessConfirmed={homeAccessConfirmed} busy={busy} error={homeError} home={home} loading={homeLoading} loadingMore={loadingMore} notice={notice} onCreate={() => void createOwnFamily()} onLoadMore={() => void loadMore()} onRetry={() => void refreshHome(true)} onSelect={(id) => void selectFamily(id)} transport={transport} /></div>

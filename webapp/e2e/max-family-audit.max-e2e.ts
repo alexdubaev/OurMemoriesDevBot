@@ -537,7 +537,7 @@ test('MAX user can leave a terminal unavailable invitation and continue to My Fa
   expect(acceptRequests).toBe(0)
 })
 
-test('MAX-FULL: documented invite launch replaces a different cookie identity and opens the invited family despite its incomplete own family', async ({ browser, page }) => {
+test('MAX-FULL: documented invite launch retries invite authentication failure and opens the exact family despite its incomplete own family', async ({ browser, page }) => {
   const recipientId = 7_750_000 + Math.floor(Math.random() * 100_000)
   const inviterId = recipientId + 200_000
   const recipientContext = await browser.newContext()
@@ -556,14 +556,20 @@ test('MAX-FULL: documented invite launch replaces a different cookie identity an
   })
   expect(inviteResponse.status()).toBe(201)
   const rawInvite = (await inviteResponse.json() as { rawToken: string }).rawToken
+  const inviterMe = await cookieAuthenticatedMe(page)
+  const recipientMe = await recipientPage.request.get(new URL('/api/v1/me', recipientPage.url()).toString(), { headers: { Authorization: `Bearer ${recipientToken}` } })
+  const recipientAppUserId = (await recipientMe.json() as { user: { id: string } }).user.id
   const priorIdentityState = await page.context().storageState()
-  const inviterMe = await page.request.get('/api/v1/me')
-  expect(inviterMe.status()).toBe(200)
-
   const launchContext = await browser.newContext({ storageState: priorIdentityState })
-  const priorCookieMe = await launchContext.request.get('/api/v1/me')
-  expect((await priorCookieMe.json() as { user: { id: string } }).user.id)
-    .toBe((await inviterMe.json() as { user: { id: string } }).user.id)
+  const priorRefresh = await launchContext.request.post(new URL('/api/v1/auth/refresh', page.url()).toString(), {
+    headers: { Origin: new URL(page.url()).origin },
+  })
+  expect(priorRefresh.status()).toBe(200)
+  const priorAccessToken = (await priorRefresh.json() as { accessToken: string }).accessToken
+  const priorCookieMe = await launchContext.request.get(new URL('/api/v1/me', page.url()).toString(), { headers: { Authorization: `Bearer ${priorAccessToken}` } })
+  expect((await priorCookieMe.json() as { user: { id: string } }).user.id).toBe(inviterMe.user.id)
+  expect(inviterMe.user.id).not.toBe(recipientAppUserId)
+
   await launchContext.addInitScript((data: string) => {
     Object.defineProperty(window, 'WebApp', {
       configurable: true,
@@ -573,10 +579,22 @@ test('MAX-FULL: documented invite launch replaces a different cookie identity an
   const launchPage = await launchContext.newPage()
   const authRequests: string[] = []
   const previewRequests: string[] = []
+  let acceptRequests = 0
+  let familyCreates = 0
+  let failFirstAuth = true
   let failFirstPreview = true
   launchPage.on('request', (request) => {
     if (request.url().endsWith('/api/v1/auth/max')) authRequests.push(request.url())
     if (request.url().endsWith('/api/v1/invites/preview')) previewRequests.push(request.url())
+    if (request.url().endsWith('/api/v1/invites/accept')) acceptRequests += 1
+    if (request.url().endsWith('/api/v1/families') && request.method() === 'POST') familyCreates += 1
+  })
+  await launchPage.route('**/api/v1/auth/max', async (route) => {
+    if (!failFirstAuth) return route.continue()
+    failFirstAuth = false
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({
+      error: { code: 'INTERNAL_ERROR', message: 'synthetic auth failure', requestId: randomUUID() },
+    }) })
   })
   await launchPage.route('**/api/v1/invites/preview', async (route) => {
     if (!failFirstPreview) return route.continue()
@@ -587,22 +605,42 @@ test('MAX-FULL: documented invite launch replaces a different cookie identity an
   })
   await launchPage.goto(`/?WebAppStartParam=invite_${rawInvite}`)
 
+  await expect(launchPage.getByText('Не удалось подтвердить вход через MAX. Повторите попытку.', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+  await expect(launchPage.getByText('Exact invited family')).toHaveCount(0)
+  await expect(launchPage.getByRole('heading', { name: 'Мои семьи' })).toHaveCount(0)
+  await expect(launchPage.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
+  await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toHaveCount(0)
+  expect(authRequests).toHaveLength(1)
+  expect(previewRequests).toHaveLength(0)
+  expect(acceptRequests).toBe(0)
+  expect(familyCreates).toBe(0)
+  await launchPage.getByRole('button', { name: 'Повторить' }).click()
+
   await expect(launchPage.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
   await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
   await expect(launchPage.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
-  expect(authRequests).toHaveLength(1)
+  expect(authRequests).toHaveLength(2)
   expect(previewRequests).toHaveLength(1)
   await launchPage.getByRole('button', { name: 'Повторить' }).click()
   await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   expect(previewRequests).toHaveLength(2)
-  const recipientMe = await recipientPage.request.get('/api/v1/me', { headers: { Authorization: `Bearer ${recipientToken}` } })
-  const authenticatedMe = await launchPage.request.get('/api/v1/me')
-  expect(authenticatedMe.status()).toBe(200)
-  expect((await authenticatedMe.json() as { user: { id: string } }).user.id)
-    .toBe((await recipientMe.json() as { user: { id: string } }).user.id)
+  const authenticatedMe = await cookieAuthenticatedMe(launchPage)
+  expect(authenticatedMe.user.id).toBe(recipientAppUserId)
   await launchPage.getByRole('button', { name: 'Присоединиться' }).click()
   await expect(launchPage.getByText('Invited family history', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+
+  await expect.poll(() => persistedSelectedFamilyId(launchPage, recipientAppUserId)).toBe(invitedFamily.id)
+  await launchPage.evaluate(() => history.replaceState(history.state, '', '/'))
+  await launchPage.reload()
+  await expect(launchPage.getByText('Invited family history', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+
+  await launchPage.goto(`/?WebAppStartParam=invite_${rawInvite}`)
+  await expect(launchPage.getByText('Invited family history', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+  expect(acceptRequests).toBe(1)
 
   await launchContext.close()
   await recipientContext.close()
@@ -878,6 +916,38 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
   expect(response.ok(), `MAX auth failed with HTTP ${response.status()}`).toBe(true)
   const token = (await response.json() as { accessToken: string }).accessToken
   return token
+}
+
+async function cookieAuthenticatedMe(page: import('@playwright/test').Page) {
+  const refresh = await page.request.post(new URL('/api/v1/auth/refresh', page.url()).toString(), {
+    headers: { Origin: new URL(page.url()).origin },
+  })
+  expect(refresh.status(), 'refresh cookie must resolve an access token').toBe(200)
+  const { accessToken } = await refresh.json() as { accessToken: string }
+  const response = await page.request.get(new URL('/api/v1/me', page.url()).toString(), { headers: { Authorization: `Bearer ${accessToken}` } })
+  expect(response.status()).toBe(200)
+  return await response.json() as { user: { id: string } }
+}
+
+async function persistedSelectedFamilyId(page: import('@playwright/test').Page, userId: string) {
+  return page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('memoly-private-cache')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      return await new Promise<string | null>((resolve, reject) => {
+        const transaction = db.transaction('entries', 'readonly')
+        const request = transaction.objectStore('entries').get(`memoLy:2:${id}:queries:state`)
+        request.onsuccess = () => {
+          const queries = request.result?.data?.queries as Array<{ queryKey?: unknown[]; data?: { selectedFamilyId?: string | null } }> | undefined
+          resolve(queries?.find((query) => query.queryKey?.[1] === 'persistent-ui')?.data?.selectedFamilyId ?? null)
+        }
+        request.onerror = () => reject(request.error)
+      })
+    } finally { db.close() }
+  }, userId)
 }
 
 async function openFamilyChooser(page: import('@playwright/test').Page) {

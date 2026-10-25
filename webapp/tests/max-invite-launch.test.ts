@@ -75,6 +75,25 @@ describe('MAX invite launch parameter precedence', () => {
     expect(bridge({ search: `?startapp=invite_${legacyToken}` }).inviteToken()).toBe(legacyToken)
   })
 
+  test('bridge launch parsing uses its captured MAX WebApp and the live location', () => {
+    const host = {
+      WebApp: { initData: `user=%7B%7D&start_param=invite_${signedToken}`, version: '1.0', ready() {} },
+      location: { search: '' },
+    }
+    const maxBridge = createMaxHostBridge(host)
+    host.WebApp = { initData: `user=%7B%7D&start_param=invite_${unsafeToken}`, version: '1.0', ready() {} }
+    expect(maxBridge.inviteLaunch?.()).toEqual({ kind: 'valid', token: signedToken })
+
+    host.location.search = `?WebAppStartParam=invite_${documentedToken}`
+    expect(maxBridge.inviteLaunch?.()).toEqual({ kind: 'valid', token: signedToken })
+
+    const noSignedStart = createMaxHostBridge({
+      WebApp: { initData: 'user=%7B%7D', version: '1.0', ready() {} },
+      location: host.location,
+    })
+    expect(noSignedStart.inviteLaunch?.()).toEqual({ kind: 'valid', token: documentedToken })
+  })
+
   test('distinguishes malformed explicit invite intent from an ordinary or other-flow launch', () => {
     const malformed = {
       WebApp: { initData: 'user=%7B%7D', version: '1.0', ready() {} },
@@ -85,6 +104,7 @@ describe('MAX invite launch parameter precedence', () => {
       location: { search: `?startapp=invite_${legacyToken}` },
     }
     expect(readMaxInviteLaunch(malformed)).toEqual({ kind: 'invalid' })
+    expect(createMaxHostBridge(malformed).inviteLaunch?.()).toEqual({ kind: 'invalid' })
     expect(readMaxInviteLaunch(otherFlow)).toEqual({ kind: 'none' })
   })
 })

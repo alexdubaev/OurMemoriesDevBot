@@ -1,4 +1,5 @@
 import type {
+  InviteLaunch,
   HostBridge,
   TelegramHostMetadata,
   TelegramInsets,
@@ -37,10 +38,7 @@ type BrowserHost = {
 
 export type MaxHostBridgeOptions = { maxBotUsername?: string }
 
-export type MaxInviteLaunch =
-  | { kind: 'none' }
-  | { kind: 'invalid' }
-  | { kind: 'valid'; token: string }
+export type MaxInviteLaunch = InviteLaunch
 
 export type MaxRuntimeDiagnostic = {
   hostDetected: boolean
@@ -81,8 +79,9 @@ export function createMaxHostBridge(host: unknown, options: MaxHostBridgeOptions
     isAvailable: available,
     initData: () => rawInitData(webApp),
     rawAuthData: () => rawInitData(webApp),
+    inviteLaunch: () => resolveMaxInviteLaunch(webApp, browserHost?.location),
     inviteToken: () => {
-      const launch = readMaxInviteLaunch(host)
+      const launch = resolveMaxInviteLaunch(webApp, browserHost?.location)
       return launch.kind === 'valid' ? launch.token : null
     },
     inviteLink: (rawToken) => createMaxInviteLink(rawToken, options.maxBotUsername),
@@ -201,16 +200,21 @@ export function isMeaningfulMaxWebApp(host: unknown): boolean {
 export function readMaxInviteLaunch(host: unknown): MaxInviteLaunch {
   const browserHost = isRecord(host) ? host as BrowserHost : null
   const webApp = isRecord(browserHost?.WebApp) ? browserHost.WebApp as MaxWebApp : null
+  return resolveMaxInviteLaunch(webApp, browserHost?.location)
+}
+
+function resolveMaxInviteLaunch(webApp: MaxWebApp | null, location: BrowserHost['location']): MaxInviteLaunch {
+  const search = location?.search
   const signed = startParamResult(rawInitData(webApp))
   if (signed.present) return inviteLaunchFromCarrier(signed)
 
   const unsafe = unsafeStartParamResult(webApp)
   if (unsafe.present) return inviteLaunchFromCarrier(unsafe)
 
-  const documented = queryStartParamResult(browserHost?.location?.search, 'WebAppStartParam')
+  const documented = queryStartParamResult(search, 'WebAppStartParam')
   if (documented.present) return inviteLaunchFromCarrier(documented)
 
-  return inviteLaunchFromCarrier(queryStartParamResult(browserHost?.location?.search, 'startapp'))
+  return inviteLaunchFromCarrier(queryStartParamResult(search, 'startapp'))
 }
 
 /** The direct video composer is intentionally reachable only from the acceptance launch. */
