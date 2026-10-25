@@ -86,7 +86,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         if (!currentSource || currentSource.familyId !== admission.familyId || currentSource.status !== 'published' || !currentSource.memoryId || (changed.count !== 1 && currentSource.memoryId !== memoryId)) {
           throw new Error('MAX source publication state changed')
         }
-        const reference = await tx.maxVideoReference.upsert({ where: { sourceId: source.id }, update: {
+        const reference = await tx.maxVideoReference.upsert({ where: { sourceId_attachmentPosition: { sourceId: source.id, attachmentPosition: 0 } }, update: {
           memoryId: currentSource.memoryId, familyId: admission.familyId, attachmentPosition: 0, providerAttachmentId: attachment.providerAttachmentId,
           ...resolveVideoDimensions(rendition, attachment, video), durationMs,
         }, create: {

@@ -114,7 +114,7 @@ describe('MAX forward import integration', () => {
 
     const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: retry.inboxId } })
     const memory = await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })
-    const reference = await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })
+    const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })
     expect(messageLookups).toEqual(['original-mid-synthetic', 'outer-mid-synthetic', 'original-mid-synthetic', 'original-mid-synthetic'])
     expect(videoTokens).toEqual(['original-rotating-token'])
     expect(source).toMatchObject({ status: 'published', senderSubject: '7001', messageId: 'outer-mid-retry',
@@ -256,7 +256,6 @@ describe('MAX forward import integration', () => {
     const fixture = await familyFixture('7005', 'forward-media')
     const originalTime = Date.parse('2025-06-07T08:09:10.000Z')
     const audio = await oggVoiceFixture()
-    const video = await mp4VideoFixture()
     try {
       const cases: Array<{ messageId: string; text: string; attachments: MaxResolvedMessage['attachments'] }> = [
         { messageId: 'forward-album-original', text: 'Original album caption', attachments: [
@@ -277,18 +276,22 @@ describe('MAX forward import integration', () => {
           recipientType: 'channel', text: item.text, timestamp: originalTime + index, attachments: item.attachments }
         const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
           api: apiFor(async () => resolved, { getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000,
-            renditions: [{ url: 'https://maxvd123.okcdn.ru/forward-mixed.mp4', width: 320, height: 240, contentLength: video.bytes.byteLength }] }) }),
+            renditions: [{ url: 'https://maxvd123.okcdn.ru/forward-mixed.mp4', width: 320, height: 240, contentLength: 12 }] }) }),
           download: async (url) => url.includes('voice-703')
             ? { bytes: audio.bytes, contentType: 'audio/ogg', contentLength: audio.bytes.byteLength }
             : { bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength },
-          videoDownload: async () => videoStream(video.bytes),
+          videoDownload: async () => { throw new Error('MAX video bytes must not be downloaded') },
         })
         await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
         const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId, body: item.text },
           include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } } })
         expect(memory.occurredAt).toEqual(new Date(originalTime + index))
-        expect(memory.media.map((entry) => entry.asset.mediaKind)).toEqual(index === 0 ? ['photo', 'photo'] : index === 1 ? ['voice'] : ['photo', 'video'])
-        expect(memory.media.map(({ position }) => position)).toEqual(memory.media.map((_, position) => position))
+        expect(memory.media.map((entry) => entry.asset.mediaKind)).toEqual(index === 0 ? ['photo', 'photo'] : index === 1 ? ['voice'] : ['photo'])
+        expect(memory.media.map(({ position }) => position)).toEqual(index === 2 ? [0] : memory.media.map((_, position) => position))
+        if (index === 2) {
+          const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+          expect(await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })).toMatchObject({ attachmentPosition: 1, providerAttachmentId: '705' })
+        }
         if (index === 0) {
           const canonicalSource = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId }, include: { attachments: { orderBy: { position: 'asc' } } } })
           expect(canonicalSource.attachments.map((row) => row.providerAttachmentId)).toEqual(['701', '702'])
@@ -314,7 +317,6 @@ describe('MAX forward import integration', () => {
       expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
     } finally {
       await audio.cleanup()
-      await video.cleanup()
       await fixture.cleanup()
     }
   })
@@ -322,7 +324,6 @@ describe('MAX forward import integration', () => {
   test('imports linked captions for forwarded photo albums and mixed photo/video through the real MAX API normalizer', async () => {
     const fixture = await familyFixture('7008', 'forward-caption-album-mixed')
     await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
-    const video = await mp4VideoFixture()
     try {
       const cases: Array<{ suffix: string; originalId: string; caption: string; attachments: Array<Record<string, unknown>>;
         kinds: Array<'photo' | 'video'>; memoryKind: 'photo' | 'media' }> = [
@@ -360,20 +361,23 @@ describe('MAX forward import integration', () => {
         } })
         const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
           api: apiFor(api.getMessage, { getVideo: async () => ({ width: 320, height: 240, durationMs: 1_000,
-            renditions: [{ url: 'https://maxvd123.okcdn.ru/caption-mixed.mp4', width: 320, height: 240, contentLength: video.bytes.byteLength }] }) }),
+            renditions: [{ url: 'https://maxvd123.okcdn.ru/caption-mixed.mp4', width: 320, height: 240, contentLength: 12 }] }) }),
           download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
-          videoDownload: async () => videoStream(video.bytes),
+          videoDownload: async () => { throw new Error('MAX video bytes must not be downloaded') },
         })
         await expect(processor({ inboxId: accepted.inboxId })).resolves.toBe('done')
         const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId, body: item.caption },
           include: { media: { orderBy: { position: 'asc' }, include: { asset: true } } } })
         expect(memory.kind).toBe(item.memoryKind)
-        expect(memory.media.map(({ position }) => position)).toEqual(item.kinds.map((_, index) => index))
-        expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(item.kinds)
+        expect(memory.media.map(({ position }) => position)).toEqual(item.kinds.flatMap((kind, index) => kind === 'photo' ? [index] : []))
+        expect(memory.media.map(({ asset }) => asset.mediaKind)).toEqual(item.kinds.filter((kind) => kind === 'photo'))
+        if (item.suffix === 'mixed') {
+          const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: accepted.inboxId } })
+          expect(await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })).toMatchObject({ attachmentPosition: 1, providerAttachmentId: '814' })
+        }
       }
       expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(2)
     } finally {
-      await video.cleanup()
       await fixture.cleanup()
     }
   })
@@ -774,7 +778,7 @@ describe('MAX forward import integration', () => {
     expect(source).toMatchObject({ status: 'published', senderSubject: '7024', originalChannelId: null,
       originalMessageId: 'private-dialog-original' })
     expect(memory).toMatchObject({ authorId: fixture.userId, familyId: fixture.familyId, kind: 'video', body: 'Provider linked caption' })
-    expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({
+    expect(await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })).toMatchObject({
       providerAttachmentId: 'confirmed-envelope-video',
     })
   })
@@ -976,7 +980,7 @@ describe('MAX forward import integration', () => {
     expect(source).toMatchObject({ status: 'published', originalMessageId: 'bound-video-original', originalChannelId: channelId })
     expect(await prisma.memory.findUniqueOrThrow({ where: { id: source.plannedMemoryId } })).toMatchObject({ body: 'Bound video caption' })
     expect(await prisma.memory.count({ where: { familyId: fixture.familyId, kind: 'video', occurredAt: new Date(originalDate) } })).toBe(1)
-    expect(await prisma.maxVideoReference.findUniqueOrThrow({ where: { sourceId: source.id } })).toMatchObject({ width: 1920, height: 1080, durationMs: 12_000 })
+    expect(await prisma.maxVideoReference.findFirstOrThrow({ where: { sourceId: source.id } })).toMatchObject({ width: 1920, height: 1080, durationMs: 12_000 })
     expect(await prisma.maxMemoryBackup.count()).toBe(0)
     expect(await prisma.taskOutbox.count({ where: { type: 'max:backup-media' } })).toBe(0)
     expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: accepted.inboxId, kind: 'saved' } })).toBe(1)
@@ -1213,15 +1217,6 @@ function apiFor(getMessage: MaxApiPort['getMessage'], rest: Partial<MaxApiPort> 
   }
 }
 
-async function mp4VideoFixture() {
-  const root = await mkdtemp(join(process.env.TEMP ?? process.env.TMP ?? '.', 'max-forward-video-'))
-  const output = join(root, 'video.mp4')
-  const ffmpeg = Bun.spawn([process.env.FFMPEG_PATH ?? 'ffmpeg', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i',
-    'color=c=blue:s=320x240:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', output], { stdout: 'ignore', stderr: 'ignore' })
-  if (await ffmpeg.exited !== 0) throw new Error('Could not create the synthetic forward video')
-  return { bytes: new Uint8Array(await Bun.file(output).arrayBuffer()), cleanup: () => rm(root, { recursive: true, force: true }) }
-}
-
 async function oggVoiceFixture() {
   const root = await mkdtemp(join(process.env.TEMP ?? process.env.TMP ?? '.', 'max-forward-voice-'))
   const output = join(root, 'voice.ogg')
@@ -1229,9 +1224,4 @@ async function oggVoiceFixture() {
     'sine=frequency=440:duration=1', '-c:a', 'libopus', '-y', output], { stdout: 'ignore', stderr: 'ignore' })
   if (await ffmpeg.exited !== 0) throw new Error('Could not create the synthetic forward voice')
   return { bytes: new Uint8Array(await Bun.file(output).arrayBuffer()), cleanup: () => rm(root, { recursive: true, force: true }) }
-}
-
-function videoStream(bytes: Uint8Array) {
-  return { body: new Blob([bytes.slice().buffer as ArrayBuffer]).stream(), contentType: 'video/mp4' as const,
-    contentLength: bytes.byteLength, failure: () => null }
 }

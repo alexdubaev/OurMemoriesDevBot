@@ -66,19 +66,30 @@ test('current Control, frozen 33a runtime, then current preserve family, media, 
         await admin.query(`CREATE DATABASE "${name}"`)
         created = true
         checked('apply exact current migration catalog', 'bunx', ['--bun', 'prisma', 'migrate', 'deploy', '--config', resolve(backendRoot, 'prisma.config.ts')], backendRoot)
-        const probe = resolve(backendRoot, 'scripts/test-support/control-compatibility-probe.mjs')
-        checked('current application and Control telemetry', 'bun', [probe, root, 'current-before', stateFile, storageRoot])
-        const oldOutput = checked('actual archived 33a application against expanded schema', 'bun', [probe, archived, 'rollback', stateFile, storageRoot], archived)
-        expect(JSON.parse(oldOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'rollback', success: true })
-        const currentOutput = checked('current application after 33a runtime', 'bun', [probe, root, 'current-after', stateFile, storageRoot])
-        expect(JSON.parse(currentOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'current-after', success: true })
         const db = new Client({ connectionString: ownUrl.toString() })
         await db.connect()
         try {
-          const ledger = await db.query<{ count: string; unfinished: string }>(
-            `SELECT count(*)::text AS count, count(*) FILTER (WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL)::text AS unfinished FROM _prisma_migrations`,
-          )
-          expect(ledger.rows).toEqual([{ count: '57', unfinished: '0' }])
+          const readLedger = async () => (await db.query<{
+            migration_name: string
+            checksum: string
+            finished_at: string | null
+            rolled_back_at: string | null
+          }>(
+            `SELECT migration_name, checksum, finished_at::text AS finished_at, rolled_back_at::text AS rolled_back_at
+             FROM _prisma_migrations ORDER BY migration_name, started_at, id`,
+          )).rows
+          const ledgerBefore = await readLedger()
+          expect(ledgerBefore.length).toBeGreaterThan(0)
+          expect(ledgerBefore.every((row) => row.finished_at !== null && row.rolled_back_at === null)).toBe(true)
+          const probe = resolve(backendRoot, 'scripts/test-support/control-compatibility-probe.mjs')
+          checked('current application and Control telemetry', 'bun', [probe, root, 'current-before', stateFile, storageRoot])
+          const oldOutput = checked('actual archived 33a application against expanded schema', 'bun', [probe, archived, 'rollback', stateFile, storageRoot], archived)
+          expect(JSON.parse(oldOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'rollback', success: true })
+          const currentOutput = checked('current application after 33a runtime', 'bun', [probe, root, 'current-after', stateFile, storageRoot])
+          expect(JSON.parse(currentOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'current-after', success: true })
+          const ledgerAfter = await readLedger()
+          expect(ledgerAfter).toEqual(ledgerBefore)
+          expect(ledgerAfter.every((row) => row.finished_at !== null && row.rolled_back_at === null)).toBe(true)
         } finally { await db.end() }
       } finally {
         if (created) await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`)

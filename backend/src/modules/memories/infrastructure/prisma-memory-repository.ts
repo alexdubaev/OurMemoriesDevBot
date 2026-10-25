@@ -815,7 +815,7 @@ function dto(
     version: memory.version,
     status: memory.status,
     attachments: [
-      ...memory.media.map(({ asset, position }) => {
+      ...memory.media.filter(({ asset, position }) => !(asset.mediaKind === 'video' && memory.maxVideoReferences.some((reference) => reference.id === asset.id && reference.attachmentPosition === position))).map(({ asset, position }) => {
       const path = (variant: string) => `/api/v1/families/${memory.familyId}/media/${asset.id}/content?variant=${variant}`
       const variants = new Set(asset.variants.map(({ variant }) => variant))
       return { position, attachment: {
@@ -853,9 +853,9 @@ function dto(
         height: reference.height,
         durationMs: reference.durationMs,
         playbackPath: `/api/v1/families/${memory.familyId}/media/max-videos/${reference.id}/content`,
-        posterState: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display') ? 'ready' as const : 'pending' as const,
-        posterPath: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display')
-          ? `/api/v1/families/${memory.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display`
+        posterState: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display' || variant === 'preview') ? 'ready' as const : 'pending' as const,
+        posterPath: reference.thumbnailMedia?.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display' || variant === 'preview')
+          ? `/api/v1/families/${memory.familyId}/media/${reference.thumbnailMedia.id}/content?variant=${reference.thumbnailMedia.variants.some(({ variant }) => variant === 'display') ? 'display' : 'preview'}`
           : null,
       } })),
     ].sort((a, b) => a.position - b.position).map((entry) => entry.attachment),

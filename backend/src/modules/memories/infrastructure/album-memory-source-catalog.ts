@@ -123,6 +123,19 @@ function projectOne(memory: SourceMemory, familyId: string, ref: AlbumMemorySour
     const relation = memory.media.find(({ asset }) => asset.id === ref.sourceId)
     if (!relation) return null
     const { asset } = relation
+    const migrated = memory.maxVideoReferences.find(({ id, attachmentPosition }) => id === asset.id && attachmentPosition === relation.position)
+    if (migrated && asset.mediaKind === 'video') {
+      const thumb = migrated.thumbnailMedia
+      const thumbReady = thumb && thumb.deletedAt === null && thumb.originalStatus === 'stored' && thumb.variants.some(({ variant }) => variant === 'display' || variant === 'preview')
+      const variant = thumb?.variants.some(({ variant }) => variant === 'display') ? 'display' : 'preview'
+      const attachment = maxVideoAttachmentSchema.parse({
+        id: migrated.id, source: 'max', kind: 'video', width: migrated.width, height: migrated.height, durationMs: migrated.durationMs,
+        playbackPath: `/api/v1/families/${familyId}/media/max-videos/${migrated.id}/content`,
+        posterState: thumbReady ? 'ready' : 'pending',
+        posterPath: thumbReady && thumb ? `/api/v1/families/${familyId}/media/${thumb.id}/content?variant=${variant}` : null,
+      })
+      return { ...base, kind: 'video', available: true, attachment }
+    }
     const available = asset.originalStatus === 'stored' && asset.deletedAt === null && asset.purpose === 'memory'
     const attachment = available ? privateAttachment(memory, familyId, asset) : null
     return { ...base, kind: asset.mediaKind, available, attachment }
@@ -131,12 +144,13 @@ function projectOne(memory: SourceMemory, familyId: string, ref: AlbumMemorySour
     const source = memory.maxVideoReferences.find(({ id }) => id === ref.sourceId)
     if (!source) return null
     const thumb = source.thumbnailMedia
-    const thumbReady = thumb && thumb.deletedAt === null && thumb.originalStatus === 'stored' && thumb.variants.some(({ variant }) => variant === 'display')
+    const thumbReady = thumb && thumb.deletedAt === null && thumb.originalStatus === 'stored' && thumb.variants.some(({ variant }) => variant === 'display' || variant === 'preview')
+    const variant = thumb?.variants.some(({ variant }) => variant === 'display') ? 'display' : 'preview'
     const attachment = maxVideoAttachmentSchema.parse({
       id: source.id, source: 'max', kind: 'video', width: source.width, height: source.height, durationMs: source.durationMs,
       playbackPath: `/api/v1/families/${familyId}/media/max-videos/${source.id}/content`,
       posterState: thumbReady ? 'ready' : 'pending',
-      posterPath: thumbReady ? `/api/v1/families/${familyId}/media/${thumb.id}/content?variant=display` : null,
+      posterPath: thumbReady ? `/api/v1/families/${familyId}/media/${thumb.id}/content?variant=${variant}` : null,
     })
     return { ...base, kind: 'video', available: true, attachment }
   }
@@ -169,23 +183,20 @@ function pickerSources(memory: SourceMemory, familyId: string, kind: AlbumSource
 }
 
 function allAttachments(memory: SourceMemory, familyId: string): AlbumMemorySourceProjection[] {
-  const sources: AlbumMemorySourceProjection[] = []
-  for (const { asset } of memory.media) {
-    const ref = { memoryId: memory.id, sourceKind: 'private_storage' as const, sourceId: asset.id }
-    const item = projectOne(memory, familyId, ref)
-    if (item) sources.push(item)
+  const indexed: Array<{ position: number; sourceKind: AlbumMemorySourceRef['sourceKind']; sourceId: string }> = []
+  for (const { asset, position } of memory.media) {
+    if (asset.mediaKind === 'video' && memory.maxVideoReferences.some(({ id, attachmentPosition }) => id === asset.id && attachmentPosition === position)) continue
+    indexed.push({ position, sourceKind: 'private_storage', sourceId: asset.id })
   }
-  for (const { id } of memory.maxVideoReferences) {
-    const ref = { memoryId: memory.id, sourceKind: 'max_video' as const, sourceId: id }
-    const item = projectOne(memory, familyId, ref)
-    if (item) sources.push(item)
+  for (const reference of memory.maxVideoReferences) {
+    indexed.push({ position: reference.attachmentPosition, sourceKind: 'max_video', sourceId: reference.id })
   }
-  if (memory.telegramVideoReference) {
-    const ref = { memoryId: memory.id, sourceKind: 'telegram_video' as const, sourceId: memory.telegramVideoReference.id }
+  if (memory.telegramVideoReference) indexed.push({ position: memory.media.length, sourceKind: 'telegram_video', sourceId: memory.telegramVideoReference.id })
+  return indexed.sort((a, b) => a.position - b.position).flatMap(({ sourceKind, sourceId }) => {
+    const ref = { memoryId: memory.id, sourceKind, sourceId }
     const item = projectOne(memory, familyId, ref)
-    if (item) sources.push(item)
-  }
-  return sources
+    return item ? [item] : []
+  })
 }
 
 function privateAttachment(memory: SourceMemory, familyId: string, asset: SourceMemory['media'][number]['asset']): MemoryAttachment {

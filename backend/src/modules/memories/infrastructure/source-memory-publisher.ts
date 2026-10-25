@@ -17,6 +17,10 @@ export type SourceMemoryInput = {
   body: string
   occurredAt: Date
   mediaIds: string[]
+  /** Trusted MAX source adapter positions for private media, parallel to mediaIds. */
+  mediaPositions?: number[]
+  /** Trusted MAX source adapter positions occupied by provider video references. */
+  externalVideoPositions?: number[]
   /** Trusted source/provider publication instant. Never accepted by the HTTP create/edit DTO. */
   sourcePublishedAt?: Date
   externalAttachment?: 'max-video' | 'telegram-video'
@@ -31,13 +35,16 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
     async publish(scope: FamilyScope, input: SourceMemoryInput, afterWrite?: AfterMemoryWrite) {
       await access.requireFull(scope)
       validateAttachmentShape(input)
+      if (input.externalVideoPositions?.length && !afterWrite) {
+        throw new MemoryFailure('invalid_input', 'Видеоссылки источника не подтверждены')
+      }
       return db.$transaction(async (tx) => {
         const publication = await lockFullMember(tx, scope)
         const existing = await tx.memory.findUnique({
           where: { id: input.id },
           select: { id: true, familyId: true, authorId: true, kind: true, status: true, deletedAt: true,
             firstPublishedAt: true, sourcePublishedAt: true,
-            media: { orderBy: { position: 'asc' }, select: { mediaId: true } } },
+            media: { orderBy: { position: 'asc' }, select: { mediaId: true, position: true } } },
         })
         if (existing) {
           if (existing.familyId !== scope.familyId) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
@@ -50,7 +57,8 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
             throw new MemoryFailure('invalid_input', 'Источник не соответствует сохранённому времени публикации')
           }
           await lockMediaAssetsForUpdate(tx, scope.familyId, input.mediaIds)
-          await reconcileOrderedMedia(tx, scope.familyId, existing.id, existing.kind, existing.media.map(({ mediaId }) => mediaId), input.mediaIds)
+          await reconcileOrderedMedia(tx, scope.familyId, existing.id, existing.kind,
+            existing.media.map(({ mediaId, position }) => ({ mediaId, position })), orderedMedia(input), input.mediaIds)
           if (existing.status !== 'published') {
             const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, scope.familyId, publication.trackingActivated)
             await tx.memory.update({ where: { id: existing.id }, data: { status: 'published', firstPublishedOrdinal,
@@ -78,8 +86,8 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         await insertPublicationChildTags(tx, {
           familyId: scope.familyId, memoryId: input.id, createdBy: scope.principal.userId, childIds: childTags.childIds,
         })
-        if (input.mediaIds.length > 0) await tx.memoryMedia.createMany({ data: input.mediaIds.map((mediaId, position) => ({
-          familyId: scope.familyId, memoryId: input.id, mediaId, position,
+        if (input.mediaIds.length > 0) await tx.memoryMedia.createMany({ data: input.mediaIds.map((mediaId, index) => ({
+          familyId: scope.familyId, memoryId: input.id, mediaId, position: input.mediaPositions?.[index] ?? index,
         })) })
         await afterWrite?.(tx, input.id)
         return input.id
@@ -93,8 +101,9 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
         const memory = await tx.memory.findFirst({ where: { id: memoryId, familyId: scope.familyId, deletedAt: null }, select: { id: true, kind: true } })
         if (!memory) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
         validateAttachmentShape({ kind: memory.kind, mediaIds })
-        const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, orderBy: { position: 'asc' }, select: { mediaId: true } })
-        await reconcileOrderedMedia(tx, scope.familyId, memoryId, memory.kind, linked.map(({ mediaId }) => mediaId), mediaIds)
+        const linked = await tx.memoryMedia.findMany({ where: { memoryId, familyId: scope.familyId }, orderBy: { position: 'asc' }, select: { mediaId: true, position: true } })
+        await reconcileOrderedMedia(tx, scope.familyId, memoryId, memory.kind,
+          linked.map(({ mediaId, position }) => ({ mediaId, position })), mediaIds.map((mediaId, position) => ({ mediaId, position })), mediaIds)
         await afterWrite?.(tx, memoryId)
         return memoryId
       })
@@ -107,18 +116,21 @@ async function reconcileOrderedMedia(
   familyId: string,
   memoryId: string,
   memoryKind: MemoryKind,
-  linkedIds: string[],
+  linked: Array<{ mediaId: string; position: number }>,
+  desired: Array<{ mediaId: string; position: number }>,
   mediaIds: string[],
 ) {
   await lockMediaAssetsForUpdate(tx, familyId, mediaIds)
+  const linkedIds = linked.map(({ mediaId }) => mediaId)
   const newlyAttached = mediaIds.filter((id) => !linkedIds.includes(id))
   if (!(await readyMediaCount(tx, familyId, newlyAttached, memoryKind))) {
     throw new MemoryFailure('not_found', 'Медиа недоступно для публикации')
   }
-  if (linkedIds.length === mediaIds.length && linkedIds.every((id, index) => id === mediaIds[index])) return
+  if (linked.length === desired.length && linked.every(({ mediaId, position }, index) =>
+    mediaId === desired[index]?.mediaId && position === desired[index]?.position)) return
   await tx.memoryMedia.deleteMany({ where: { memoryId, familyId } })
-  if (mediaIds.length > 0) await tx.memoryMedia.createMany({
-    data: mediaIds.map((mediaId, position) => ({ familyId, memoryId, mediaId, position })),
+  if (desired.length > 0) await tx.memoryMedia.createMany({
+    data: desired.map(({ mediaId, position }) => ({ familyId, memoryId, mediaId, position })),
   })
   await removeDetachedAttachmentTags(tx, { familyId, memoryId, attachmentIds: linkedIds.filter((id) => !mediaIds.includes(id)) })
   await tx.memory.update({ where: { id: memoryId }, data: { version: { increment: 1 } } })
@@ -143,10 +155,31 @@ async function readyMediaCount(
   return assets.length === unique.length && assets.every(({ mediaKind }) => expectedKinds.includes(mediaKind))
 }
 
-function validateAttachmentShape(input: Pick<SourceMemoryInput, 'kind' | 'mediaIds' | 'externalAttachment'>) {
+function orderedMedia(input: SourceMemoryInput) {
+  return input.mediaIds.map((mediaId, index) => ({ mediaId, position: input.mediaPositions?.[index] ?? index }))
+}
+
+function validateAttachmentShape(input: Pick<SourceMemoryInput, 'kind' | 'mediaIds' | 'externalAttachment' | 'mediaPositions' | 'externalVideoPositions'>) {
   const count = input.mediaIds.length
+  const mediaPositions = input.mediaPositions ?? input.mediaIds.map((_, index) => index)
+  const externalVideoPositions = input.externalVideoPositions ?? []
+  if ((input.mediaPositions !== undefined || externalVideoPositions.length > 0) && input.kind !== 'media') {
+    throw new MemoryFailure('invalid_input', 'Неподходящий состав вложений')
+  }
+  if (mediaPositions.length !== count || mediaPositions.some((position) => !Number.isInteger(position) || position < 0) ||
+      externalVideoPositions.some((position) => !Number.isInteger(position) || position < 0)) {
+    throw new MemoryFailure('invalid_input', 'Неподходящий состав вложений')
+  }
+  const positions = [...mediaPositions, ...externalVideoPositions]
+  if (input.mediaPositions !== undefined || externalVideoPositions.length > 0) {
+    const sorted = [...positions].sort((a, b) => a - b)
+    if (sorted.length < 1 || sorted.length > 10 || new Set(sorted).size !== sorted.length || sorted.some((position, index) => position !== index)) {
+      throw new MemoryFailure('invalid_input', 'Неподходящий состав вложений')
+    }
+  }
+  const logicalCount = positions.length
   const valid = input.kind === 'note' ? count === 0
-    : input.kind === 'media' ? count >= 1 && count <= 10
+    : input.kind === 'media' ? (input.externalVideoPositions?.length ? logicalCount >= 1 && logicalCount <= 10 : count >= 1 && count <= 10)
       : input.kind === 'photo' ? count >= 1 && count <= 10
         : input.kind === 'video' ? count === 1 || (count === 0 && (input.externalAttachment === 'max-video' || input.externalAttachment === 'telegram-video'))
           : count === 1

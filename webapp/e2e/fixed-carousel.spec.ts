@@ -253,3 +253,46 @@ test('MAX video in a mixed carousel plays inline, releases its source off-screen
   await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Смотреть видео' }).click()
   await expect.poll(() => card.locator('[data-carousel-position="1"] video').evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0.1)
 })
+
+test('four MAX videos keep their order through playback, source release, and reopening', async ({ page }) => {
+  const videoFixture = await readFile(fileURLToPath(new URL('./fixtures/portrait-edges.mp4', import.meta.url)))
+  const orderedIds = ['99999999-9999-4999-8999-999999999901', '99999999-9999-4999-8999-999999999902', '99999999-9999-4999-8999-999999999903', '99999999-9999-4999-8999-999999999904']
+  await page.route('**/api/v1/families/*/media/playback-session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
+  await page.route(/\/max-videos\/[^/]+\/content/, (route) => route.fulfill({ status: 200, contentType: 'video/mp4', body: videoFixture, headers: { 'Access-Control-Allow-Origin': '*' } }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/fixed-carousel.harness.html?four-max-videos')
+  const card = page.locator('.memory-card').first()
+  const carousel = card.locator('.memoly-mixed-carousel')
+  await expect(carousel.locator('[data-carousel-position]')).toHaveCount(4)
+  await expect(carousel.locator('[data-carousel-dot]')).toHaveCount(4)
+  const posterIds = async () => page.evaluate(() => window.__fixedCarouselProbe!.posterRequests
+    .map((path) => path.match(/\/max-videos\/([^/]+)\/poster/)?.[1]).filter((id): id is string => Boolean(id)))
+  const firstPoster = card.locator('[data-carousel-position="1"] img[alt="Кадр видео"]')
+  await expect(firstPoster).toBeVisible()
+  const firstVideo = card.locator('[data-carousel-position="1"] video')
+  await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Смотреть видео' }).click()
+  await expect.poll(() => firstVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1)
+  const firstVideoElement = await firstVideo.elementHandle()
+  await card.locator('[data-carousel-dot="2"]').click()
+  await expect.poll(() => firstVideoElement!.evaluate((video: HTMLVideoElement) => [video.paused, video.getAttribute('src'), video.networkState, video.buffered.length])).toEqual([true, null, 0, 0])
+  const secondPoster = card.locator('[data-carousel-position="2"] img[alt="Кадр видео"]')
+  await expect(secondPoster).toBeVisible()
+  const secondVideo = card.locator('[data-carousel-position="2"] video')
+  await card.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Смотреть видео' }).click()
+  await expect.poll(() => secondVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1)
+
+  await page.reload()
+  const reopenedCard = page.locator('.memory-card')
+  await expect(reopenedCard).toHaveCount(1)
+  const reopenedCarousel = reopenedCard.locator('.memoly-mixed-carousel')
+  await expect(reopenedCarousel.locator('[data-carousel-position]')).toHaveCount(4)
+  await expect(reopenedCarousel.locator('[data-carousel-dot]')).toHaveCount(4)
+  for (const [index, id] of orderedIds.entries()) {
+    await reopenedCard.locator(`[data-carousel-dot="${index + 1}"]`).click()
+    await expect.poll(posterIds).toContain(id)
+  }
+  const requestedIds = await posterIds()
+  const firstSeen = [...new Set(requestedIds)]
+  expect(firstSeen).toEqual(orderedIds)
+  await expect(reopenedCard.locator('[data-carousel-position] button[aria-label="Смотреть видео"]')).toHaveCount(1)
+})

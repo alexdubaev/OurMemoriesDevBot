@@ -76,12 +76,13 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
         id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
       }, select: { id: true, familyId: true, thumbnailMediaId: true, thumbnailMedia: { select: {
         id: true, originalStatus: true, deletedAt: true,
-        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+        variants: { where: { variant: { in: ['display', 'preview'] } }, select: { variant: true, objectKey: true, mime: true, byteSize: true, sha256: true } },
       } } } })
       if (!reference) throw new MediaFailure('not_found', 'Медиа не найдено')
-      const display = reference.thumbnailMedia?.variants[0]
-      if (reference.thumbnailMedia && reference.thumbnailMedia.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && display) {
-        return { state: 'ready', posterPath: `/api/v1/families/${scope.familyId}/media/${reference.thumbnailMedia.id}/content?variant=display` }
+      const display = reference.thumbnailMedia?.variants.find(({ variant }) => variant === 'display')
+      const poster = display ?? reference.thumbnailMedia?.variants.find(({ variant }) => variant === 'preview')
+      if (reference.thumbnailMedia && reference.thumbnailMedia.deletedAt === null && reference.thumbnailMedia.originalStatus === 'stored' && poster) {
+        return { state: 'ready', posterPath: `/api/v1/families/${scope.familyId}/media/${reference.thumbnailMedia.id}/content?variant=${poster.variant}` }
       }
       const task = await options.runtime.prisma.taskOutbox.findUnique({ where: {
         type_dedupeKey: { type: 'max:video-poster', dedupeKey: `max-video-poster:${reference.id}` },
@@ -101,19 +102,20 @@ export function createMaxVideoPlayback(options: { runtime: BackendRuntime; api: 
       const reference = await options.runtime.prisma.maxVideoReference.findFirst({ where: {
         id: referenceId, familyId: scope.familyId, memory: { familyId: scope.familyId, status: 'published', deletedAt: null },
       }, select: { id: true, thumbnailMedia: { select: { id: true, familyId: true, originalStatus: true, deletedAt: true,
-        variants: { where: { variant: 'display' }, select: { objectKey: true, mime: true, byteSize: true, sha256: true } },
+        variants: { where: { variant: { in: ['display', 'preview'] } }, select: { variant: true, objectKey: true, mime: true, byteSize: true, sha256: true } },
       } } } })
-      const display = reference?.thumbnailMedia?.variants[0]
+      const display = reference?.thumbnailMedia?.variants.find(({ variant }) => variant === 'display')
+      const poster = display ?? reference?.thumbnailMedia?.variants.find(({ variant }) => variant === 'preview')
       if (!reference?.thumbnailMedia || reference.thumbnailMedia.familyId !== scope.familyId || reference.thumbnailMedia.deletedAt !== null ||
-          reference.thumbnailMedia.originalStatus !== 'stored' || !display) return null
-      const stored = await options.runtime.privateStorage.storage.readObject({ key: display.objectKey })
+          reference.thumbnailMedia.originalStatus !== 'stored' || !poster) return null
+      const stored = await options.runtime.privateStorage.storage.readObject({ key: poster.objectKey })
       if (!stored) return null
       const bytes = new Uint8Array(await new Response(stored.body).arrayBuffer())
       return {
         body: bytes,
-        contentType: display.mime as 'image/jpeg' | 'image/png' | 'image/webp',
+        contentType: poster.mime as 'image/jpeg' | 'image/png' | 'image/webp',
         contentLength: bytes.byteLength,
-        etag: `"${display.sha256}"`,
+        etag: `"${poster.sha256}"`,
       }
     },
   }

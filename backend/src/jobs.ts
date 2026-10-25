@@ -136,7 +136,7 @@ export const backgroundJobs = {
         if (released.count === 0) return
         releasedCount += 1
         await tx.family.update({ where: { id: reservation.familyId }, data: { storageReservedBytes: { decrement: reservation.bytes } } })
-        await tx.mediaAsset.updateMany({ where: { id: reservation.mediaId, deletedAt: null },
+        await tx.mediaAsset.updateMany({ where: { id: reservation.mediaId, deletedAt: null, legacyVideoRetainedAt: null },
           data: { deletedAt: now, originalStatus: 'failed', renditionStatus: 'failed' } })
         const { insertTask } = await import('./outbox/store')
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${reservation.mediaId}`,
@@ -145,12 +145,12 @@ export const backgroundJobs = {
     }
     const abandoned = await prisma.mediaAsset.findMany({
       where: { originalStatus: 'stored', deletedAt: null, createdAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
-        memories: { none: {} }, albumPhoto: { is: null }, avatarForChildren: { none: {} }, giftPhotoFor: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null } }, select: { id: true }, take: 500,
+        memories: { none: {} }, albumPhoto: { is: null }, avatarForChildren: { none: {} }, giftPhotoFor: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null }, maxVideoLegacyRetention: { is: null }, legacyVideoRetainedAt: null }, select: { id: true }, take: 500,
     })
     for (const asset of abandoned) {
       await prisma.$transaction(async (tx) => {
         const marked = await tx.mediaAsset.updateMany({ where: { id: asset.id, deletedAt: null,
-          memories: { none: {} }, albumPhoto: { is: null }, avatarForChildren: { none: {} }, giftPhotoFor: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null } }, data: { deletedAt: now } })
+          memories: { none: {} }, albumPhoto: { is: null }, avatarForChildren: { none: {} }, giftPhotoFor: { none: {} }, telegramVideoThumbnailFor: { is: null }, maxVideoThumbnailFor: { is: null }, maxVideoLegacyRetention: { is: null }, legacyVideoRetainedAt: null }, data: { deletedAt: now } })
         if (marked.count === 0) return
         const { insertTask } = await import('./outbox/store')
         await insertTask(tx, { type: 'media:delete', dedupeKey: `media-delete:${asset.id}`,
@@ -163,7 +163,7 @@ export const backgroundJobs = {
     const { prisma, privateStorage } = runtime
     const { createMediaTasks } = await import('./modules/media')
     const pendingDeletes = await prisma.mediaAsset.findMany({
-      where: { deletedAt: { not: null }, storageDeletedAt: null }, select: { id: true }, take: 500,
+      where: { deletedAt: { not: null }, storageDeletedAt: null, maxVideoLegacyRetention: { is: null }, legacyVideoRetainedAt: null }, select: { id: true }, take: 500,
     })
     for (const asset of pendingDeletes) {
       try { await createMediaTasks(runtime).deleteAsset({ mediaId: asset.id }) }
