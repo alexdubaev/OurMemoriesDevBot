@@ -169,6 +169,8 @@ test('a one-child family keeps the plain feed: no filters, no child choice, no m
   const seeded = await startFamily(page, 1)
   const lilya = seeded.children[0]!
   const first = await createNote(page, seeded, 'Первая заметка', undefined)
+  await page.reload()
+  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
   await page.getByRole('button', { name: 'Лента', exact: true }).click()
   await expect(card(page, first)).toBeVisible()
   await expect(page.locator('[data-family-header="true"][data-child-header-mode="feed"]')).toHaveCount(0)

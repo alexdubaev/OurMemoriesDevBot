@@ -432,10 +432,11 @@ const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
 const rollbackV4 = '4b4edc0992803b84c919aadb835e8d2e21095c51'
 const rollbackHealthy = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
-const maxVideoRecoveryBackend = '0486e79947f6612d0eed05207c1cd30d0c4ace65'
-const maxVideoRecoveryWebapp = '0f2e8a432b5712d17b67d63f99439d16f33e7721'
-const maxVideoRecoveryBackendId = 'sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094'
-const maxVideoRecoveryWebappId = 'sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843'
+const maxVideoRecoveryBackend = 'd2999cca6e4e5980cc2277de7453440353f5b392'
+const maxVideoRecoveryWebapp = 'd2999cca6e4e5980cc2277de7453440353f5b392'
+const maxVideoRecoveryBackendId = 'sha256:cb1f1e3aca79452701d7410e5bccef7e93a1eda08de5c36cfab19202f0632309'
+const maxVideoRecoveryWebappId = 'sha256:6d77034ed1be4f8fea0d86ee7f0fb8fdfebb5706c5c4358d8b608d7e32f1e62d'
+const maxVideoRecoveryRuntime = 'b3afd175383307713f5a86470db755b621c9eec0ff93fcfff4e97e1150d41dc9'
 const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
@@ -2525,35 +2526,19 @@ test('Control recovery permits only its exact current executable fingerprint and
 test('MAX video recovery accepts only its exact reconstructed executable profile', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
-  const baseline = maxVideoRecoveryWebapp
+  const baseline = maxVideoRecoveryBackend
   const target = maxVideoRecoveryBackend
-  const expectedAnchor = maxVideoRecoveryWebapp
-  const expectedRuntime = '74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026'
+  const expectedAnchor = maxVideoRecoveryBackend
+  const expectedRuntime = maxVideoRecoveryRuntime
   const expectedCompatibility = 'ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
-  const files = [
-    ['backend/prisma/migrations/20261025110000_max_multivideo_references/migration.sql', '420ebe5bed78dda6d557c2eb06b3e8869d8efbaa'],
-    ['backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql', 'e0eb07374b9ccbfe9be1b3f102427a0141e69c1d'],
-    ['backend/prisma/schema.prisma', '52eea5d114e9bbfc14a9c16da265a279601cc285'],
-    ['backend/scripts/migrate-max-legacy-videos.ts', '6c724b9fb23ccaac2aadf878b089a5d4969f748c'],
-    ['backend/src/jobs.ts', '9e7702f8839cfa5c724843c41d6a9c83cdfc1a14'],
-    ['backend/src/modules/max/index.ts', 'd3d27174bb4304736fdbde67e9f9b47c054cf268'],
-    ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '4d5429372126a7d7274da5b620001f6b7148af9b'],
-    ['backend/src/modules/max/infrastructure/process-image.ts', '3fe3519067439ad7b1017b3c31b747b5e686a1c8'],
-    ['backend/src/modules/max/infrastructure/process-task.ts', 'd4780c4b14d61f9c5c13c36f6b94b99c4bb94d73'],
-    ['backend/src/modules/max/infrastructure/process-video.ts', '9b522ef666a31e67f9780273ac8df379fa1e30c4'],
-    ['backend/src/modules/max/infrastructure/video-playback.ts', 'c5ff9dce1fd39625c7c44f0681e7afec45d27062'],
-    ['backend/src/modules/media/index.ts', '9fe5b2c07d3c800715c233129ded680cc9924546'],
-    ['backend/src/modules/memories/infrastructure/album-memory-source-catalog.ts', '833b33b4390a8fc419690050413631c8da68a33c'],
-    ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', '7ee3912dbca0088e9d4f881e840de5604ea1158e'],
-    ['backend/src/modules/memories/infrastructure/source-memory-publisher.ts', '7679b7fae1dc6e697075a8e34f1f30d2610498c5'],
-  ]
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-video-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, files,
-    'reconstruct the exact MAX legacy-video recovery source')
+  const source = commitSourceFile({ root: sourceDirectory, sha: baseline }, 'deploy/selectel/ci-release.sh',
+    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    'pin the exact MAX rollback verifier installer')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
   const profile = (candidate) => spawnSync(bashExecutable, ['-s'], {
@@ -2569,11 +2554,12 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
     encoding: 'utf8', timeout: 30_000,
   })
-  assert.notEqual(oldTarget.status, 0, 'MAX video candidate must not roll back to the old 33a UI/runtime pair')
+  assert.notEqual(oldTarget.status, 0, 'MAX video candidate must not roll back to the incompatible old UI/runtime pair')
 
   for (const [relativePath, marker] of [
     ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '\n// synthetic MAX recovery source drift\n'],
     ['backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql', '\n-- synthetic MAX retention migration drift\n'],
+    ['deploy/selectel/ci-release.sh', '\n# synthetic MAX installer drift\n'],
   ]) {
     const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-video-drift-'))
     const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
@@ -2592,6 +2578,25 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.match(captured.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${maxVideoRecoveryBackend}$`, 'm'))
   assert.match(captured.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${maxVideoRecoveryWebapp}$`, 'm'))
   assert.equal(captured.rollbackBackups.length, 1)
+
+  const recoveredPair = runApplicationRollback({ ...compatiblePair,
+    runningBackend: '0486e79947f6612d0eed05207c1cd30d0c4ace65',
+    runningWebapp: '0f2e8a432b5712d17b67d63f99439d16f33e7721', runMigration: true,
+    ciRelease: true, syntheticLock: true, action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(recoveredPair.status, 0, recoveredPair.output)
+  assert.match(recoveredPair.output, /exact accepted MAX recovery pair passed readiness/)
+  assert.match(recoveredPair.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${maxVideoRecoveryBackend}$`, 'm'))
+  assert.match(recoveredPair.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${maxVideoRecoveryWebapp}$`, 'm'))
+  assert.equal(recoveredPair.rollbackBackups.length, 1)
+
+  const unavailableRecovery = runApplicationRollback({ ...compatiblePair, badImage: true,
+    runningBackend: '0486e79947f6612d0eed05207c1cd30d0c4ace65',
+    runningWebapp: '0f2e8a432b5712d17b67d63f99439d16f33e7721', runMigration: true,
+    ciRelease: true, syntheticLock: true, action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(unavailableRecovery.status, 0, unavailableRecovery.output)
+  assert.match(unavailableRecovery.output, /neither the running images nor the designated rollback pair passed recovery verification/)
+  assert.match(unavailableRecovery.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${maxVideoRecoveryBackend}$`, 'm'))
+  assert.deepEqual(unavailableRecovery.rollbackBackups, [])
 
   const changedWebapp = runApplicationRollback({ ...compatiblePair, badWebappLabel: true, action: 'rollback_readiness' })
   assert.notEqual(changedWebapp.status, 0, changedWebapp.output)
@@ -2626,7 +2631,7 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
 
   const restored = runApplicationRollback({ ...compatiblePair, failure: true })
   assert.equal(restored.status, 42, restored.output)
-  assert.match(restored.events, /MAX_INVERSE[\s\S]*UP:0486e79947f6612d0eed05207c1cd30d0c4ace65[\s\S]*PAIR:0486e79947f6612d0eed05207c1cd30d0c4ace65:0f2e8a432b5712d17b67d63f99439d16f33e7721/)
+  assert.match(restored.events, new RegExp(`MAX_INVERSE[\\s\\S]*UP:${maxVideoRecoveryBackend}[\\s\\S]*PAIR:${maxVideoRecoveryBackend}:${maxVideoRecoveryWebapp}`))
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
@@ -2744,8 +2749,9 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       `FIXTURE_CANDIDATE_CATALOG=${shellQuote(fixtureCandidateCatalog)}`,
       'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else printf "%s\\n" "$FIXTURE_CANDIDATE_CATALOG"; fi; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
-      'rollback_runtime_fingerprint() { if [ "$1" = 0486e79947f6612d0eed05207c1cd30d0c4ace65 ]; then printf "66c335c5ae307509ef35e8efc1c43ec4c7c5f7728b30b69792e42e6903a18cd3\\n"; else printf "74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026\\n"; fi; }',
+      `rollback_runtime_fingerprint() { printf "%s\\n" "${maxVideoRecoveryRuntime}"; }`,
       'rollback_control_host_inputs_match() { return 0; }',
+      'rollback_max_video_host_inputs_match() { return 0; }',
       'rollback_control_installed_inputs_match() { return 0; }',
       'load_runtime_secrets() { :; }',
       'validate_inputs() { :; }',

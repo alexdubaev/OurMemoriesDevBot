@@ -191,15 +191,15 @@ test('retention migration holds preexisting legacy videos without changing times
       expect(await fx.db.maxVideoReference.count({ where: { providerAttachmentId: 'second-non-ledger-video' } })).toBe(1)
       expect((await privateStorage.headObject(originalKey))?.contentLength).toBe(videoBytes.length)
 
-      const archived = resolve(fixture, 'runtime-0486')
+      const archived = resolve(fixture, 'runtime-d299')
       mkdirSync(archived, { recursive: true })
-      const frozenArchive = spawnSync('git', ['archive', '0486e79947f6612d0eed05207c1cd30d0c4ace65', 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'],
+      const frozenArchive = spawnSync('git', ['archive', 'd2999cca6e4e5980cc2277de7453440353f5b392', 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'],
         { cwd: root, env, encoding: null, timeout: 60_000, maxBuffer: 64 * 1024 * 1024 })
-      if (frozenArchive.status !== 0 || !frozenArchive.stdout) throw new Error(`Cannot archive frozen 0486 runtime: ${frozenArchive.stderr}`)
+      if (frozenArchive.status !== 0 || !frozenArchive.stdout) throw new Error(`Cannot archive frozen d299 runtime: ${frozenArchive.stderr}`)
       const frozenExtract = spawnSync('tar', ['-x', '-C', archived], { cwd: root, input: frozenArchive.stdout, encoding: 'utf8', timeout: 60_000 })
-      if (frozenExtract.status !== 0) throw new Error(`Cannot extract frozen 0486 runtime: ${frozenExtract.stderr}`)
-      checked('frozen 0486 runtime dependency install', 'bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], archived)
-      checked('frozen 0486 Prisma generation', 'bun', ['run', '--cwd', 'backend', 'prisma:generate'], archived)
+      if (frozenExtract.status !== 0) throw new Error(`Cannot extract frozen d299 runtime: ${frozenExtract.stderr}`)
+      checked('frozen d299 runtime dependency install', 'bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], archived)
+      checked('frozen d299 Prisma generation', 'bun', ['run', '--cwd', 'backend', 'prisma:generate'], archived)
       const frozenProbe = resolve(archived, 'backend/scripts/test-support/max-video-release-probe.mjs')
       writeFileSync(frozenProbe, `
 import { createPrisma } from '../../src/db.ts'
@@ -208,27 +208,42 @@ import { createPrismaIdempotencyExecutor } from '../../src/idempotency/index.ts'
 import { PrismaMemoryRepository } from '../../src/modules/memories/index.ts'
 import { createMediaTasks } from '../../src/modules/media/index.ts'
 import { createPrivateStorage } from '../../src/storage/index.ts'
-const [databaseUrl, familyId, memoryId, userId, videoId, storageRoot] = process.argv.slice(2)
+import { randomUUID } from 'node:crypto'
+const [databaseUrl, familyId, memoryId, userId, sourceId, videoId, storageRoot] = process.argv.slice(2)
 const env = loadEnv({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', JWT_SECRET: '0123456789abcdef'.repeat(4),
   CORS_ORIGINS: 'http://localhost:5173', PRIVATE_STORAGE_DRIVER: 'filesystem', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot })
 const prisma = createPrisma(databaseUrl)
-const scope = { familyId, principal: { userId, sessionId: 'frozen-0486-probe' } }
+const scope = { familyId, principal: { userId, sessionId: 'frozen-d299-probe' } }
 try {
+  const upsert = async (attachmentPosition, providerAttachmentId) => prisma.maxVideoReference.upsert({
+    where: { sourceId_attachmentPosition: { sourceId, attachmentPosition } },
+    create: { id: randomUUID(), sourceId, memoryId, familyId, attachmentPosition, providerAttachmentId },
+    update: { memoryId, familyId, providerAttachmentId },
+    select: { id: true, attachmentPosition: true, providerAttachmentId: true },
+  })
+  const createdPositionThree = await upsert(3, 'frozen-d299-video-three')
+  const replayedPositionThree = await upsert(3, 'frozen-d299-video-three-replayed')
+  const createdPositionFour = await upsert(4, 'frozen-d299-video-four')
+  const referenceCount = await prisma.maxVideoReference.count({ where: { sourceId } })
   const repository = new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma))
   const before = await repository.get(scope, memoryId)
-  const updated = await repository.update(scope, memoryId, { expectedVersion: before.version, body: 'edited by frozen 0486', occurredAt: before.occurredAt })
+  const updated = await repository.update(scope, memoryId, { expectedVersion: before.version, body: 'edited by frozen d299', occurredAt: before.occurredAt })
   await repository.delete(scope, memoryId, updated.version, new Date())
   const storage = createPrivateStorage(env)
   await createMediaTasks({ prisma, privateStorage: storage, env }).deleteAsset({ mediaId: videoId })
-  console.log(JSON.stringify({ attachments: before.attachments.map(({ id, source }) => [id, source]), editedBody: updated.body, deleted: true }))
+  console.log(JSON.stringify({ attachments: before.attachments.map(({ id, source }) => [id, source]),
+    stableReplayId: createdPositionThree.id === replayedPositionThree.id, replayedProviderId: replayedPositionThree.providerAttachmentId,
+    createdPositionFour: createdPositionFour.attachmentPosition, referenceCount, editedBody: updated.body, deleted: true }))
 } finally { await prisma.$disconnect() }
 `)
-      const frozenOutput = checked('frozen 0486 reads, edits, deletes, and runs its media delete task', 'bun', [frozenProbe,
-        ownUrl.toString(), family.id, memory.id, family.owner.id, videoId, storageRoot], archived)
+      const frozenOutput = checked('frozen d299 performs native composite create/replay and reads, edits, deletes, and runs its media delete task', 'bun', [frozenProbe,
+        ownUrl.toString(), family.id, memory.id, family.owner.id, source.id, videoId, storageRoot], archived)
       const oldBehavior = JSON.parse(frozenOutput.trim().split('\n').at(-1)!)
       expect(oldBehavior).toMatchObject({ attachments: [
         [videoId, 'private_storage'], [expect.any(String), 'max'], [expect.any(String), 'max'],
-      ], editedBody: 'edited by frozen 0486', deleted: true })
+        [expect.any(String), 'max'], [expect.any(String), 'max'],
+      ], stableReplayId: true, replayedProviderId: 'frozen-d299-video-three-replayed', createdPositionFour: 4,
+      referenceCount: 4, editedBody: 'edited by frozen d299', deleted: true })
       expect((await privateStorage.headObject(originalKey))?.contentLength).toBe(videoBytes.length)
       const afterOldWorker = await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: videoId } })
       expect(afterOldWorker).toMatchObject({ deletedAt: null, storageDeletedAt: null, legacyVideoRetainedAt: expect.any(Date) })
@@ -239,7 +254,7 @@ try {
       const currentReturn = await migration.recoverAll({ apply: true })
       expect(currentReturn).toMatchObject({ inspected: 0, recovered: 0, refused: 0, remaining: 0 })
       expect({ messageReads, videoReads }).toEqual(callsBeforeCurrentReturn)
-      expect(await fx.db.maxVideoReference.count({ where: { memoryId: memory.id } })).toBe(2)
+      expect(await fx.db.maxVideoReference.count({ where: { memoryId: memory.id } })).toBe(4)
       expect((await privateStorage.headObject(originalKey))?.contentLength).toBe(videoBytes.length)
       expect(await fx.db.family.findUniqueOrThrow({ where: { id: family.id }, select: { storageUsedBytes: true } })).toEqual({ storageUsedBytes: asset.byteSize })
     } finally { globalThis.fetch = originalFetch }

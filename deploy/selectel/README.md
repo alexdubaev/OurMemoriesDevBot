@@ -547,14 +547,20 @@ change quota, or roll back migrations. If recovery fails, the old runtime is not
 promoted; the action attempts to restore and verify the current candidate and
 returns the original recovery failure status.
 
-The designated MAX recovery target for this migration release is the exact mixed pair: backend,
-worker and scheduler `0486e79947f6612d0eed05207c1cd30d0c4ace65` (image ID
-`sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094`)
-with static frontend `0f2e8a432b5712d17b67d63f99439d16f33e7721` (image ID
-`sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843`).
-`prepare_rollback` captures both running tags and readiness accepts only this
-exact pair and pinned image IDs/revision labels. The earlier 33a pair is not a
-MAX recovery target because it would remove the accepted Android safe-area UI.
+The designated MAX recovery target for this migration release is the exact
+accepted d299 pair: backend, worker, scheduler and static frontend all use
+`d2999cca6e4e5980cc2277de7453440353f5b392`; the pinned image IDs are
+`sha256:cb1f1e3aca79452701d7410e5bccef7e93a1eda08de5c36cfab19202f0632309`
+for the backend and
+`sha256:6d77034ed1be4f8fea0d86ee7f0fb8fdfebb5706c5c4358d8b608d7e32f1e62d`
+for the frontend. `prepare_rollback` captures and verifies the running pair
+first. When the exact pre-schema-59 pair (`0486e79947f6612d0eed05207c1cd30d0c4ace65`
+backend and `0f2e8a432b5712d17b67d63f99439d16f33e7721` frontend) cannot pass
+schema-59 readiness for a candidate containing the retention migration, it
+verifies this fixed d299 pair through the same readiness checks before
+atomically designating it. The earlier 33a pair remains in its historical
+profile but is not a MAX recovery target because it would remove the accepted
+Android safe-area UI.
 
 For a UI-only rollback, run `bash deploy/selectel/redeploy.sh rollback-static` on the
 host. The action uses the normal deployment lock and reads the previous webapp
