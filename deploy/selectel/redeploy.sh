@@ -11,6 +11,8 @@ B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
 MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
 MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 MM0_SPIKE_CONTAINER=memoly-spike-max-video-backend-1
+MAX_VIDEO_RECOVERY_BACKEND_SHA=0486e79947f6612d0eed05207c1cd30d0c4ace65
+MAX_VIDEO_RECOVERY_WEBAPP_SHA=0f2e8a432b5712d17b67d63f99439d16f33e7721
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
 ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
@@ -632,7 +634,7 @@ migrate() {
 	fi
 	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
 		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
-		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" 33a0054c3c71372aa5509ee8ebfa4578ad512ea1) ||
+		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 			die 'MAX video migration requires the exact reviewed source compatibility profile'
 		[ "$max_video_profile" = max-video ] || die 'MAX video migration requires the exact MAX-only video compatibility profile'
 		rollback_verify_max_video_migration_history pre-sql >/dev/null ||
@@ -798,10 +800,12 @@ rollback_source_compatibility_profile() {
 				# limited to the measured dc26 runtime, migration ledger and wishlist profile.
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist"
 				# Control recovery is limited to the exact measured candidate executable tree.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538:control"
-				# MAX legacy-video recovery is limited to the exact current executable tree,
-				# the same measured dc26/33a pair, and the unchanged Control host inputs.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:8684495791decc9a1e506584555f3db4ea306eedf5fa0c410140d58a482b7be0:max-video") ;;
+				# keep the pinned Control profile; no MAX profile is bound to 33a.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538:control") ;;
+		0486e79947f6612d0eed05207c1cd30d0c4ace65)
+			# Recovery uses the exact currently deployed pair: backend 0486 with
+			# the accepted frontend-only 0f2 release. Keep the Android UI fix.
+			exact_compatibility_attestations=("0f2e8a432b5712d17b67d63f99439d16f33e7721:74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026:ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4:max-video") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -1311,24 +1315,26 @@ rollback_auth_gate_for_verified_pair() {
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
 	local healthy_target=33a0054c3c71372aa5509ee8ebfa4578ad512ea1
+	local max_video_backend_target=$MAX_VIDEO_RECOVERY_BACKEND_SHA
+	local max_video_webapp_target=$MAX_VIDEO_RECOVERY_WEBAPP_SHA
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
 	local target=${PREVIOUS_BACKEND_IMAGE_TAG:-} gate
-	[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$target" ] || die 'rollback target pair has no verified runtime compatibility attestation'
-	case "$target" in
-		"$legacy_target")
+	case "$target:${PREVIOUS_WEBAPP_IMAGE_TAG:-}" in
+		"$legacy_target:$legacy_target")
 			gate=true
 			;;
-		"$candidate_target")
+		"$candidate_target:$candidate_target")
 			gate=false
 			;;
-		"$accepted_v4_target")
+		"$accepted_v4_target:$accepted_v4_target")
 		gate=false
 			;;
-		"$healthy_target")
+		"$healthy_target:$healthy_target")
 		gate=false
 			;;
+		"$max_video_backend_target:$max_video_webapp_target") gate=false ;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "${MEMOLY_PRODUCT_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
@@ -1336,6 +1342,8 @@ rollback_auth_gate_for_verified_pair() {
 		die 'rollback source differs from the checked-out release'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
 		die 'rollback source is outside the exact target release lineage'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "${PREVIOUS_WEBAPP_IMAGE_TAG}" "$MEMOLY_PRODUCT_SHA" ||
+		die 'rollback source is outside the exact webapp target release lineage'
 	rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$target" >/dev/null ||
 		die 'application runtime differs from the verified rollback source'
 	printf '%s\n' "$gate"
@@ -1367,10 +1375,12 @@ verify_application_rollback() {
 	local candidate_target=3fce2739205da927b95eb3379b1d066b61282965
 	local accepted_v4_target=4b4edc0992803b84c919aadb835e8d2e21095c51
 	local healthy_target=33a0054c3c71372aa5509ee8ebfa4578ad512ea1
+	local max_video_backend_target=$MAX_VIDEO_RECOVERY_BACKEND_SHA
+	local max_video_webapp_target=$MAX_VIDEO_RECOVERY_WEBAPP_SHA
 	local new_comments_runtime=9afbb1656016effbac74a367b23a7608494b7834e8091f375d20fea858e4c468
 	local com_ux_runtime=ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87
 	local feed_photo_runtime=9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda
-	local target expected_target_runtime profile=candidate
+	local target target_runtime_revision expected_target_runtime expected_backend_target_runtime= profile=candidate
 	case "$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" in
 		"$legacy_target:$legacy_target")
 			target=$legacy_target
@@ -1390,10 +1400,18 @@ verify_application_rollback() {
 			expected_target_runtime=$com_ux_runtime
 			profile=comments
 			;;
+		"$max_video_backend_target:$max_video_webapp_target")
+			target=$max_video_backend_target
+			target_runtime_revision=$max_video_webapp_target
+			expected_backend_target_runtime=66c335c5ae307509ef35e8efc1c43ec4c7c5f7728b30b69792e42e6903a18cd3
+			expected_target_runtime=74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026
+			profile=max-video
+			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
-	for revision in "$target" "$MEMOLY_PRODUCT_SHA"; do
+	: "${target_runtime_revision:=$target}"
+	for revision in "$target" "$target_runtime_revision" "$MEMOLY_PRODUCT_SHA"; do
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e "$revision^{commit}" 2>/dev/null ||
 			die 'rollback compatibility revision is unavailable'
 	done
@@ -1401,6 +1419,8 @@ verify_application_rollback() {
 		die 'rollback source differs from the checked-out release'
 	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target" "$MEMOLY_PRODUCT_SHA" ||
 		die 'rollback source is outside the exact target release lineage'
+	git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" merge-base --is-ancestor "$target_runtime_revision" "$MEMOLY_PRODUCT_SHA" ||
+		die 'rollback source is outside the exact webapp target release lineage'
 	local source_status
 	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
 	[ -z "$source_status" ] ||
@@ -1408,7 +1428,13 @@ verify_application_rollback() {
 	local target_runtime
 	profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$target") ||
 		die 'application runtime differs from the verified rollback source'
-	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
+	if [ -n "$expected_backend_target_runtime" ]; then
+		local backend_target_runtime
+		backend_target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback backend target runtime'
+		[ "$backend_target_runtime" = "$expected_backend_target_runtime" ] ||
+			die 'rollback backend target runtime differs from the verified compatibility target'
+	fi
+	target_runtime=$(rollback_runtime_fingerprint "$target_runtime_revision") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
 	if [ "$profile" = control ] || [ "$profile" = max-video ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
@@ -1457,15 +1483,19 @@ verify_application_rollback() {
 			expected_backend_id=sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9
 			expected_webapp_id=sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74
 			;;
+		"$max_video_backend_target")
+			expected_backend_id=sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094
+			expected_webapp_id=sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843
+			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
 		die 'rollback backend image differs from the verified production artifact'
-	[ "$(docker image inspect --format '{{.Id}}' "memoly-webapp:$target")" = "$expected_webapp_id" ] ||
+	[ "$(docker image inspect --format '{{.Id}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG")" = "$expected_webapp_id" ] ||
 		die 'rollback webapp image differs from the verified production artifact'
-	for image in "memoly-backend:$target" "memoly-webapp:$target"; do
-		[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$target" ] ||
-			die 'rollback image revision label mismatch'
-	done
+	[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "memoly-backend:$PREVIOUS_BACKEND_IMAGE_TAG")" = "$PREVIOUS_BACKEND_IMAGE_TAG" ] ||
+		die 'rollback backend image revision label mismatch'
+	[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG")" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] ||
+		die 'rollback webapp image revision label mismatch'
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
 	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ]; } && [ "$migration_phase" = pre-sql ]; then
 		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
@@ -1507,7 +1537,7 @@ verify_application_rollback() {
 
 rollback() {
 	verify_application_rollback complete || die 'application rollback compatibility could not be verified'
-	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" 33a0054c3c71372aa5509ee8ebfa4578ad512ea1)" = max-video ]; then
+	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA")" = max-video ]; then
 		rollback_apply_max_video_recovery
 	fi
 	set -a

@@ -191,15 +191,15 @@ test('retention migration holds preexisting legacy videos without changing times
       expect(await fx.db.maxVideoReference.count({ where: { providerAttachmentId: 'second-non-ledger-video' } })).toBe(1)
       expect((await privateStorage.headObject(originalKey))?.contentLength).toBe(videoBytes.length)
 
-      const archived = resolve(fixture, 'runtime-33a')
+      const archived = resolve(fixture, 'runtime-0486')
       mkdirSync(archived, { recursive: true })
-      const frozenArchive = spawnSync('git', ['archive', '33a0054c3c71372aa5509ee8ebfa4578ad512ea1', 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'],
+      const frozenArchive = spawnSync('git', ['archive', '0486e79947f6612d0eed05207c1cd30d0c4ace65', 'backend', 'packages', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'],
         { cwd: root, env, encoding: null, timeout: 60_000, maxBuffer: 64 * 1024 * 1024 })
-      if (frozenArchive.status !== 0 || !frozenArchive.stdout) throw new Error(`Cannot archive frozen 33a runtime: ${frozenArchive.stderr}`)
+      if (frozenArchive.status !== 0 || !frozenArchive.stdout) throw new Error(`Cannot archive frozen 0486 runtime: ${frozenArchive.stderr}`)
       const frozenExtract = spawnSync('tar', ['-x', '-C', archived], { cwd: root, input: frozenArchive.stdout, encoding: 'utf8', timeout: 60_000 })
-      if (frozenExtract.status !== 0) throw new Error(`Cannot extract frozen 33a runtime: ${frozenExtract.stderr}`)
-      checked('frozen 33a runtime dependency install', 'bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], archived)
-      checked('frozen 33a Prisma generation', 'bun', ['run', '--cwd', 'backend', 'prisma:generate'], archived)
+      if (frozenExtract.status !== 0) throw new Error(`Cannot extract frozen 0486 runtime: ${frozenExtract.stderr}`)
+      checked('frozen 0486 runtime dependency install', 'bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'], archived)
+      checked('frozen 0486 Prisma generation', 'bun', ['run', '--cwd', 'backend', 'prisma:generate'], archived)
       const frozenProbe = resolve(archived, 'backend/scripts/test-support/max-video-release-probe.mjs')
       writeFileSync(frozenProbe, `
 import { createPrisma } from '../../src/db.ts'
@@ -212,23 +212,23 @@ const [databaseUrl, familyId, memoryId, userId, videoId, storageRoot] = process.
 const env = loadEnv({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', JWT_SECRET: '0123456789abcdef'.repeat(4),
   CORS_ORIGINS: 'http://localhost:5173', PRIVATE_STORAGE_DRIVER: 'filesystem', PRIVATE_STORAGE_LOCAL_ROOT: storageRoot })
 const prisma = createPrisma(databaseUrl)
-const scope = { familyId, principal: { userId, sessionId: 'frozen-33a-probe' } }
+const scope = { familyId, principal: { userId, sessionId: 'frozen-0486-probe' } }
 try {
   const repository = new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma))
   const before = await repository.get(scope, memoryId)
-  const updated = await repository.update(scope, memoryId, { expectedVersion: before.version, body: 'edited by frozen 33a', occurredAt: before.occurredAt })
+  const updated = await repository.update(scope, memoryId, { expectedVersion: before.version, body: 'edited by frozen 0486', occurredAt: before.occurredAt })
   await repository.delete(scope, memoryId, updated.version, new Date())
   const storage = createPrivateStorage(env)
   await createMediaTasks({ prisma, privateStorage: storage, env }).deleteAsset({ mediaId: videoId })
   console.log(JSON.stringify({ attachments: before.attachments.map(({ id, source }) => [id, source]), editedBody: updated.body, deleted: true }))
 } finally { await prisma.$disconnect() }
 `)
-      const frozenOutput = checked('frozen 33a reads, edits, deletes, and runs its media delete task', 'bun', [frozenProbe,
+      const frozenOutput = checked('frozen 0486 reads, edits, deletes, and runs its media delete task', 'bun', [frozenProbe,
         ownUrl.toString(), family.id, memory.id, family.owner.id, videoId, storageRoot], archived)
       const oldBehavior = JSON.parse(frozenOutput.trim().split('\n').at(-1)!)
       expect(oldBehavior).toMatchObject({ attachments: [
         [videoId, 'private_storage'], [expect.any(String), 'max'], [expect.any(String), 'max'],
-      ], editedBody: 'edited by frozen 33a', deleted: true })
+      ], editedBody: 'edited by frozen 0486', deleted: true })
       expect((await privateStorage.headObject(originalKey))?.contentLength).toBe(videoBytes.length)
       const afterOldWorker = await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: videoId } })
       expect(afterOldWorker).toMatchObject({ deletedAt: null, storageDeletedAt: null, legacyVideoRetainedAt: expect.any(Date) })

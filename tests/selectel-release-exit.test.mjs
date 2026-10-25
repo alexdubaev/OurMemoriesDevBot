@@ -432,6 +432,10 @@ const rollbackBaseline = 'e383d79269a3595f4c6cabedf167335aea042cf3'
 const rollback180 = '3fce2739205da927b95eb3379b1d066b61282965'
 const rollbackV4 = '4b4edc0992803b84c919aadb835e8d2e21095c51'
 const rollbackHealthy = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+const maxVideoRecoveryBackend = '0486e79947f6612d0eed05207c1cd30d0c4ace65'
+const maxVideoRecoveryWebapp = '0f2e8a432b5712d17b67d63f99439d16f33e7721'
+const maxVideoRecoveryBackendId = 'sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094'
+const maxVideoRecoveryWebappId = 'sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843'
 const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
@@ -986,9 +990,11 @@ function runApplicationRollback(options = {}) {
   const candidatePair = target === rollback180
   const v4Pair = target === rollbackV4
   const healthyPair = target === rollbackHealthy
+  const maxVideoPair = target === maxVideoRecoveryBackend && options.webappTarget === maxVideoRecoveryWebapp
   if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
   if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
-  const targetLabel = options.badLabel ? 'wrong' : target
+  const backendTargetLabel = options.badLabel || options.badBackendLabel ? 'wrong' : target
+  const webappTargetLabel = options.badLabel || options.badWebappLabel ? 'wrong' : (options.webappTarget ?? target)
   const events = resolve(fixture, 'events')
   const env = {
     SERVER_ROOT: server, APP_ROOT: source.root, BACKUPS_DIR: resolve(server, 'backups'), PRODUCT_SHA: source.sha, SCRIPT_DIR: resolve(root, 'deploy/selectel'),
@@ -1011,8 +1017,9 @@ function runApplicationRollback(options = {}) {
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
     FIXTURE_MIGRATION_HISTORY_MISMATCH: String(options.historyMismatch ?? false),
     FIXTURE_MIGRATION_HISTORY_ERROR: String(options.historyError ?? false),
-    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (healthyPair ? healthyBackendId : v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
-    FIXTURE_WEBAPP_ID: healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId, FIXTURE_LABEL: targetLabel,
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (maxVideoPair ? maxVideoRecoveryBackendId : healthyPair ? healthyBackendId : v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
+    FIXTURE_WEBAPP_ID: options.badWebappImage ? 'sha256:' + 'e'.repeat(64) : maxVideoPair ? maxVideoRecoveryWebappId : healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId,
+    FIXTURE_LABEL: backendTargetLabel, FIXTURE_BACKEND_LABEL: backendTargetLabel, FIXTURE_WEBAPP_LABEL: webappTargetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
     FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
@@ -1027,6 +1034,8 @@ function runApplicationRollback(options = {}) {
     ' case "$*" in',
     ' *"image inspect --format {{.Id}}"*memoly-backend*) echo "$FIXTURE_BACKEND_ID" ;;',
     ' *"image inspect --format {{.Id}}"*memoly-webapp*) echo "$FIXTURE_WEBAPP_ID" ;;',
+    ' *"org.opencontainers.image.revision"*memoly-backend*) echo "$FIXTURE_BACKEND_LABEL" ;;',
+    ' *"org.opencontainers.image.revision"*memoly-webapp*) echo "$FIXTURE_WEBAPP_LABEL" ;;',
     ' *"image inspect --format "*org.opencontainers.image.revision*) echo "$FIXTURE_LABEL" ;;',
     ' *) return 0 ;;',
     ' esac',
@@ -1045,10 +1054,16 @@ function runApplicationRollback(options = {}) {
     '   echo "STATE unread=$FIXTURE_UNREAD multiple=$FIXTURE_MULTIPLE" >> "$FIXTURE_EVENTS"',
     '   [ "$FIXTURE_STATE_ERROR" = false ]; return',
     ' fi',
-    ' if [ "$1" = up ]; then echo "UP:$MEMOLY_BACKEND_IMAGE_TAG:$*" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_PROMOTION_FAIL" = false ];',
+    ' if [ "$1" = up ]; then echo "UP:$MEMOLY_BACKEND_IMAGE_TAG:$*" >> "$FIXTURE_EVENTS"; echo "PAIR:$MEMOLY_BACKEND_IMAGE_TAG:$MEMOLY_WEBAPP_IMAGE_TAG" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_PROMOTION_FAIL" = false ];',
     ' elif [ "$1" = ps ]; then printf "backend\\nworker\\nscheduler\\nstatic\\n"; fi',
     '}',
     'activate_gateway() { cp "$EDGE_CANDIDATE" "$SERVER_EDGE_CADDYFILE"; echo GATE >> "$FIXTURE_EVENTS"; }',
+    ...(options.maxVideoMocks ? [
+      'rollback_control_installed_inputs_match() { :; }',
+      'rollback_verify_max_video_migration_history() { echo present; }',
+      'rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }',
+      'rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; }',
+    ] : []),
     'curl() {',
     ' if [[ "$*" == *"/api/v1/auth/max"* ]]; then',
     '  if [ -n "$FIXTURE_AUTH_RESPONSE" ]; then printf "%s" "$FIXTURE_AUTH_RESPONSE"; elif grep -q rollback_auth_maintenance "$SERVER_EDGE_CADDYFILE"; then printf 503; else printf 404; fi',
@@ -1059,7 +1074,7 @@ function runApplicationRollback(options = {}) {
       'bash() {',
       ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
       '   shift',
-      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR' : '$APP_ROOT'}/deploy/selectel/redeploy.sh"; require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
+      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
       ' else command bash "$@"; fi',
       '}',
     ] : []),
@@ -2510,11 +2525,11 @@ test('Control recovery permits only its exact current executable fingerprint and
 test('MAX video recovery accepts only its exact reconstructed executable profile', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
-  const baseline = '92a4fb7d732339927fb3ac0c38c8bbe18f655ad4'
-  const target = rollbackHealthy
-  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
-  const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-  const expectedCompatibility = '8684495791decc9a1e506584555f3db4ea306eedf5fa0c410140d58a482b7be0'
+  const baseline = maxVideoRecoveryWebapp
+  const target = maxVideoRecoveryBackend
+  const expectedAnchor = maxVideoRecoveryWebapp
+  const expectedRuntime = '74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026'
+  const expectedCompatibility = 'ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
   const files = [
     ['backend/prisma/migrations/20261025110000_max_multivideo_references/migration.sql', '420ebe5bed78dda6d557c2eb06b3e8869d8efbaa'],
@@ -2537,7 +2552,7 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, files,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, files,
     'reconstruct the exact MAX legacy-video recovery source')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
@@ -2549,6 +2564,12 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   const accepted = profile(source)
   assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
   assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video')
+  const oldTarget = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.notEqual(oldTarget.status, 0, 'MAX video candidate must not roll back to the old 33a UI/runtime pair')
 
   for (const [relativePath, marker] of [
     ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '\n// synthetic MAX recovery source drift\n'],
@@ -2563,6 +2584,49 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
     const rejected = profile(mutated)
     assert.notEqual(rejected.status, 0, `MAX video recovery must reject changed production or migration input: ${relativePath}`)
   }
+
+  const compatiblePair = { target: maxVideoRecoveryBackend, webappTarget: maxVideoRecoveryWebapp,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha, maxVideoMocks: true }
+  const captured = runApplicationRollback({ ...compatiblePair, action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(captured.status, 0, captured.output)
+  assert.match(captured.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${maxVideoRecoveryBackend}$`, 'm'))
+  assert.match(captured.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${maxVideoRecoveryWebapp}$`, 'm'))
+  assert.equal(captured.rollbackBackups.length, 1)
+
+  const changedWebapp = runApplicationRollback({ ...compatiblePair, badWebappLabel: true, action: 'rollback_readiness' })
+  assert.notEqual(changedWebapp.status, 0, changedWebapp.output)
+  assert.match(changedWebapp.output, /rollback webapp image revision label mismatch/)
+  assert.doesNotMatch(changedWebapp.events, /UP:|GATE/)
+
+  const changedBackend = runApplicationRollback({ ...compatiblePair, badBackendLabel: true, action: 'rollback_readiness' })
+  assert.notEqual(changedBackend.status, 0, changedBackend.output)
+  assert.match(changedBackend.output, /rollback backend image revision label mismatch/)
+  assert.doesNotMatch(changedBackend.events, /UP:|GATE/)
+
+  const changedBackendImage = runApplicationRollback({ ...compatiblePair, badImage: true, action: 'rollback_readiness' })
+  assert.notEqual(changedBackendImage.status, 0, changedBackendImage.output)
+  assert.match(changedBackendImage.output, /rollback backend image differs from the verified production artifact/)
+  assert.doesNotMatch(changedBackendImage.events, /UP:|GATE/)
+
+  const changedWebappImage = runApplicationRollback({ ...compatiblePair, badWebappImage: true, action: 'rollback_readiness' })
+  assert.notEqual(changedWebappImage.status, 0, changedWebappImage.output)
+  assert.match(changedWebappImage.output, /rollback webapp image differs from the verified production artifact/)
+  assert.doesNotMatch(changedWebappImage.events, /UP:|GATE/)
+
+  const wrongPair = runApplicationRollback({ ...compatiblePair, webappTarget: rollbackHealthy, action: 'rollback_readiness' })
+  assert.notEqual(wrongPair.status, 0, wrongPair.output)
+  assert.match(wrongPair.output, /rollback target pair has no verified runtime compatibility attestation/)
+  assert.doesNotMatch(wrongPair.events, /UP:|GATE/)
+
+  const oldPair = runApplicationRollback({ ...compatiblePair, target: rollbackHealthy, webappTarget: rollbackHealthy,
+    action: 'rollback_readiness' })
+  assert.notEqual(oldPair.status, 0, oldPair.output)
+  assert.match(oldPair.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(oldPair.events, /UP:|GATE/)
+
+  const restored = runApplicationRollback({ ...compatiblePair, failure: true })
+  assert.equal(restored.status, 42, restored.output)
+  assert.match(restored.events, /MAX_INVERSE[\s\S]*UP:0486e79947f6612d0eed05207c1cd30d0c4ace65[\s\S]*PAIR:0486e79947f6612d0eed05207c1cd30d0c4ace65:0f2e8a432b5712d17b67d63f99439d16f33e7721/)
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
@@ -2638,7 +2702,9 @@ test('MAX video apply accepts silent candidate recovery only after readiness and
   assert.doesNotMatch(output, /33a0054c3c71372aa5509ee8ebfa4578ad512ea1/)
 })
 
-test('MAX video rollback pre-SQL verification uses the exact-prefix helper while complete state rejects 57 migrations', () => {
+test('MAX video rollback pre-SQL verification uses the exact-prefix helper while complete state rejects 57 migrations', {
+  timeout: 30_000,
+}, () => {
   const serverRoot = mkdtempSync(resolve(root, '.scratch', 'max-video-pre-sql-dispatch-'))
   const events = resolve(serverRoot, 'events.log')
   const rollbackEnv = resolve(serverRoot, 'rollback.env')
@@ -2659,7 +2725,11 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       throw new Error('unexpected release-verification SQL')
     }
   }\n`)
-  writeFileSync(rollbackEnv, `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}\nPREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}\nMEMOLY_DB_ROLLBACK_ALLOWED=false\n`)
+  writeFileSync(rollbackEnv, `PREVIOUS_BACKEND_IMAGE_TAG=${maxVideoRecoveryBackend}\nPREVIOUS_WEBAPP_IMAGE_TAG=${maxVideoRecoveryWebapp}\nMEMOLY_DB_ROLLBACK_ALLOWED=false\n`)
+  const checksum = 'a'.repeat(64)
+  const fixtureBaselineCatalog = Array.from({ length: 56 }, (_, index) =>
+    `20200101000000_fixture_${String(index).padStart(2, '0')}:${checksum}:${checksum}`).join('\n')
+  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:${checksum}:${checksum}\n20261025110000_max_multivideo_references:${checksum}:${checksum}\n20261025120000_max_video_legacy_retention:${checksum}:${checksum}`
   const run = (phase, variant = 'exact') => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: [
@@ -2670,14 +2740,17 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
       'validate_rollback_file() { :; }',
       'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
+      `FIXTURE_BASELINE_CATALOG=${shellQuote(fixtureBaselineCatalog)}`,
+      `FIXTURE_CANDIDATE_CATALOG=${shellQuote(fixtureCandidateCatalog)}`,
+      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else printf "%s\\n" "$FIXTURE_CANDIDATE_CATALOG"; fi; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
-      'rollback_runtime_fingerprint() { printf "ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87\\n"; }',
+      'rollback_runtime_fingerprint() { if [ "$1" = 0486e79947f6612d0eed05207c1cd30d0c4ace65 ]; then printf "66c335c5ae307509ef35e8efc1c43ec4c7c5f7728b30b69792e42e6903a18cd3\\n"; else printf "74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026\\n"; fi; }',
       'rollback_control_host_inputs_match() { return 0; }',
       'rollback_control_installed_inputs_match() { return 0; }',
       'load_runtime_secrets() { :; }',
       'validate_inputs() { :; }',
       'configuration_backup_dir() { printf "%s\\n" "$SERVER_ROOT"; }',
-      `docker() { case "$*" in *"{{.Id}}"*"memoly-backend:"*) printf "sha256:50ef108db452f8da24a159161edb0510ed3fe5612275ac701bf883327315dfd9\\n" ;; *"{{.Id}}"*"memoly-webapp:"*) printf "sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74\\n" ;; *"org.opencontainers.image.revision"*) printf "%s\\n" "${rollbackHealthy}" ;; *) return 0 ;; esac; }`,
+      `docker() { case "$*" in *"{{.Id}}"*"memoly-backend:"*) printf "%s\\n" "${maxVideoRecoveryBackendId}" ;; *"{{.Id}}"*"memoly-webapp:"*) printf "%s\\n" "${maxVideoRecoveryWebappId}" ;; *"org.opencontainers.image.revision"*"memoly-backend:"*) printf "%s\\n" "${maxVideoRecoveryBackend}" ;; *"org.opencontainers.image.revision"*"memoly-webapp:"*) printf "%s\\n" "${maxVideoRecoveryWebapp}" ;; *) return 0 ;; esac; }`,
       `compose() { local program; for program; do :; done; if [[ "$*" == *"bun -e"* ]]; then printf "ledger-check\\n" >> "$FIXTURE_EVENTS"; (cd "$FIXTURE_PG_DIR" && node --input-type=module --eval "$program"); else return 0; fi; }`,
       `migration_status() { printf "migration-status:%s\\n" "$FIXTURE_PHASE" >> ${shellQuote(events)}; [ "$FIXTURE_PHASE" = complete ]; }`,
       'rollback_verify_max_video_recovery_readiness() { printf "readiness\\n" >> "$FIXTURE_EVENTS"; }',

@@ -538,14 +538,23 @@ not restart an unverified pre-migration runtime. Rollback readiness validates
 the exact 56-to-59 migration history and runs the candidate image's read-only
 MAX recovery checks without changing services or references. It fails closed if
 a held video is already tombstoned for storage cleanup (`deleted_at` set while
-`storage_deleted_at` is null), because the frozen 33a worker deletes objects
-before attempting its database update. On an eligible rollback, the guarded
+`storage_deleted_at` is null), because an older worker deletes objects before
+attempting its database update. On an eligible rollback, the guarded
 action stops current writers, applies metadata-only recovery with the current
 candidate image, verifies no ledger references remain, and only then promotes
 the configured previous runtime. Recovery does not call MAX, delete storage,
 change quota, or roll back migrations. If recovery fails, the old runtime is not
 promoted; the action attempts to restore and verify the current candidate and
 returns the original recovery failure status.
+
+The designated MAX recovery target for this migration release is the exact mixed pair: backend,
+worker and scheduler `0486e79947f6612d0eed05207c1cd30d0c4ace65` (image ID
+`sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094`)
+with static frontend `0f2e8a432b5712d17b67d63f99439d16f33e7721` (image ID
+`sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843`).
+`prepare_rollback` captures both running tags and readiness accepts only this
+exact pair and pinned image IDs/revision labels. The earlier 33a pair is not a
+MAX recovery target because it would remove the accepted Android safe-area UI.
 
 For a UI-only rollback, run `bash deploy/selectel/redeploy.sh rollback-static` on the
 host. The action uses the normal deployment lock and reads the previous webapp
