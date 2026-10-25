@@ -2962,40 +2962,13 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   const pgFixture = resolve(serverRoot, 'node_modules/pg')
   mkdirSync(pgFixture, { recursive: true })
   writeFileSync(resolve(pgFixture, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
-  writeFileSync(resolve(pgFixture, 'index.js'), `import { appendFileSync } from 'node:fs'
-const expectedBase = (process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS ?? '').trim().split('\\n')
-const expectedCandidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n')
-const baseParts = expectedBase.map(line => line.split(':'))
-const candidateParts = expectedCandidate.map(line => line.split(':'))
-const prefixMismatches = candidateParts.slice(0, 56).flatMap((row, index) => row[0] !== baseParts[index]?.[0] ||
-  ![row[1], row[2]].some(checksum => [baseParts[index]?.[1], baseParts[index]?.[2]].includes(checksum)) ? [index] : [])
-const profile = process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE
-const phase = process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE
-const reviewedSuffix = [
-  ['20261025100000_control_observability', '479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557'],
-  ['20261025110000_max_multivideo_references', '9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90'],
-  ['20261025120000_max_video_legacy_retention', '7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0'],
-]
-const invalidRows = [...baseParts, ...candidateParts].flatMap((row, index) => !row[0] || row.length !== 3 ||
-  !/^\\d+_[a-z0-9_]+$/.test(row[0]) || !/^[0-9a-f]{64}$/.test(row[1] ?? '') ||
-  !/^[0-9a-f]{64}$/.test(row[2] ?? '') ? [index] : [])
-const suffixMismatches = reviewedSuffix.flatMap(([name, checksum], index) => candidateParts[56 + index]?.[0] !== name ||
-  ![candidateParts[56 + index]?.[1], candidateParts[56 + index]?.[2]].includes(checksum) ? [index] : [])
-const originalExit = process.exit.bind(process)
-process.exit = (code) => {
-  appendFileSync(process.env.FIXTURE_EVENTS, 'mock-exit=' + code + '\\n')
-  return originalExit(code)
-}
-appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' phase=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE + ' baseline=' + expectedBase.length + ' candidate=' + expectedCandidate.length + ' prefixMismatches=' + prefixMismatches.join(',') + ' suffix=' + expectedCandidate.slice(-3).map(line => line.split(':')[0]).join(',') + ' checksums=' + expectedCandidate.slice(-3).map(line => line.split(':')[1]).join(',') + '\\n')
-appendFileSync(process.env.FIXTURE_EVENTS, 'verifier-invalidRows=' + invalidRows.join(',') + ' verifier-suffixMismatches=' + suffixMismatches.join(',') + ' verifier-profile=' + profile + ' verifier-phase=' + phase + '\\n')
-export class Client {
-    async connect() { appendFileSync(process.env.FIXTURE_EVENTS, 'pg-connect\\n') }
+  writeFileSync(resolve(pgFixture, 'index.js'), `export class Client {
+    async connect() {}
     async end() {}
     async query(sql) {
       const count = Number(process.env.FIXTURE_LEDGER_COUNT)
       const candidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n').map((line) => line.split(':'))
       const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
-      appendFileSync(process.env.FIXTURE_EVENTS, 'pg-count=' + count + ' profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' sql=' + sql.replace(/\\s+/g, ' ').slice(0, 180) + '\\n')
       if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
       if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
       if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false }] }
@@ -3007,7 +2980,7 @@ export class Client {
   const checksum = 'a'.repeat(64)
   const fixtureBaselineCatalog = Array.from({ length: 56 }, (_, index) =>
     `20200101000000_fixture_${String(index).padStart(2, '0')}:${checksum}:${checksum}`).join('\n')
-  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557\n20261025110000_max_multivideo_references:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90\n20261025120000_max_video_legacy_retention:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0}`
+  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557\n20261025110000_max_multivideo_references:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90\n20261025120000_max_video_legacy_retention:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0`
   const run = (phase, variant = 'exact', ledgerCount = 57) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: [
