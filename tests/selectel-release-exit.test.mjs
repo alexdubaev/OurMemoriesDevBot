@@ -786,7 +786,7 @@ const reviewedFamilyInviteEntryProductionBlobs = [
   ['backend/src/modules/max/infrastructure/deliver-response.ts', '9ee442ba871a91fd905c962fa599d1971ecbced5'],
   ['webapp/src/App.tsx', '32f0b69fd500725d8a0a730339e2459f792b5eac'],
   ['webapp/src/platform/host-bridge.ts', '10e0e6c1d8ce4e3c8bc9adf17d6c0d372ddfd3f5'],
-  ['webapp/src/platform/max/host-bridge.ts', '26b0ed32b383b5b760c0c91912080f2823ac7db4'],
+  ['webapp/src/platform/max/host-bridge.ts', '0fa5b4297712c17685413cb6bd041bb6d245b168'],
 ]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()

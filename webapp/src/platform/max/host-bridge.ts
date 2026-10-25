@@ -205,16 +205,23 @@ export function readMaxInviteLaunch(host: unknown): MaxInviteLaunch {
 
 function resolveMaxInviteLaunch(webApp: MaxWebApp | null, location: BrowserHost['location']): MaxInviteLaunch {
   const search = location?.search
-  const signed = startParamResult(rawInitData(webApp))
-  if (signed.present) return inviteLaunchFromCarrier(signed)
+  const carriers = [
+    startParamResult(rawInitData(webApp)),
+    unsafeStartParamResult(webApp),
+    queryStartParamResult(search, 'WebAppStartParam'),
+    queryStartParamResult(search, 'startapp'),
+  ]
+  for (let index = 0; index < carriers.length; index += 1) {
+    const carrier = carriers[index]!
+    if (!carrier.present) continue
+    const launch = inviteLaunchFromCarrier(carrier)
+    if (launch.kind !== 'none') return launch
+    if (carrier.value !== null && carrier.value !== '') return launch
 
-  const unsafe = unsafeStartParamResult(webApp)
-  if (unsafe.present) return inviteLaunchFromCarrier(unsafe)
-
-  const documented = queryStartParamResult(search, 'WebAppStartParam')
-  if (documented.present) return inviteLaunchFromCarrier(documented)
-
-  return inviteLaunchFromCarrier(queryStartParamResult(search, 'startapp'))
+    const lowerInviteHint = carriers.slice(index + 1).some((lower) => lower.present && hasInviteIntent(lower))
+    return lowerInviteHint ? { kind: 'invalid' } : launch
+  }
+  return { kind: 'none' }
 }
 
 /** The direct video composer is intentionally reachable only from the acceptance launch. */
@@ -346,12 +353,15 @@ function queryStartParamResult(search: unknown, name: string) {
 function inviteLaunchFromCarrier(carrier: { present: boolean; value: string | null; values?: string[] }): MaxInviteLaunch {
   if (!carrier.present) return { kind: 'none' }
   const value = carrier.value
-  const includesInviteIntent = value?.startsWith('invite_')
-    || carrier.values?.some((candidate) => candidate.startsWith('invite_')) === true
-  if (!includesInviteIntent) return { kind: 'none' }
+  if (!hasInviteIntent(carrier)) return { kind: 'none' }
   if (!value) return { kind: 'invalid' }
   const token = inviteTokenFromStartParam(value)
   return token ? { kind: 'valid', token } : { kind: 'invalid' }
+}
+
+function hasInviteIntent(carrier: { value: string | null; values?: string[] }) {
+  return carrier.value?.startsWith('invite_')
+    || carrier.values?.some((candidate) => candidate.startsWith('invite_')) === true
 }
 
 function resolveStartParam(

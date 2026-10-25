@@ -60,6 +60,29 @@ describe('MAX invite launch parameter precedence', () => {
     }).inviteToken()).toBeNull()
   })
 
+  test('marks a lower invite hint invalid when an empty or ambiguous higher carrier masks it', () => {
+    const maskedLaunches = [
+      bridge({
+        initData: 'user=%7B%7D&start_param=',
+        search: `?WebAppStartParam=invite_${documentedToken}`,
+      }),
+      bridge({
+        unsafeStartParam: '',
+        search: `?WebAppStartParam=invite_${documentedToken}`,
+      }),
+      bridge({ search: `?WebAppStartParam=&startapp=invite_${legacyToken}` }),
+      bridge({
+        initData: 'user=%7B%7D&start_param=browser_123&start_param=other_flow',
+        search: `?WebAppStartParam=invite_${documentedToken}`,
+      }),
+    ]
+
+    for (const maxBridge of maskedLaunches) {
+      expect(maxBridge.inviteLaunch?.()).toEqual({ kind: 'invalid' })
+      expect(maxBridge.inviteToken()).toBeNull()
+    }
+  })
+
   test('uses WebAppStartParam ahead of legacy startapp when higher-priority values are absent', () => {
     expect(bridge({ search: `?WebAppStartParam=invite_${documentedToken}&startapp=invite_${legacyToken}` }).inviteToken())
       .toBe(documentedToken)

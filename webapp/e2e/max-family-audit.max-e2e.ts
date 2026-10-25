@@ -648,6 +648,10 @@ test('MAX-FULL: documented invite launch retries invite authentication failure a
 test('MAX-FULL: malformed invite intent stays on the invitation issue flow instead of own-family creation', async ({ page }) => {
   const maxId = 7_760_000 + Math.floor(Math.random() * 100_000)
   let familyCreates = 0
+  let invitePreviews = 0
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/v1/invites/preview')) invitePreviews += 1
+  })
   await page.route('**/api/v1/families', async (route) => {
     if (route.request().method() === 'POST') familyCreates += 1
     await route.continue()
@@ -660,6 +664,12 @@ test('MAX-FULL: malformed invite intent stays on the invitation issue flow inste
   await expect(page.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
   expect(familyCreates).toBe(0)
+
+  await page.goto(`/?WebAppStartParam=&startapp=invite_${'m'.repeat(43)}`)
+  await expect(page.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
+  expect(familyCreates).toBe(0)
+  expect(invitePreviews).toBe(0)
 })
 
 test('MAX-FULL: owner switches family data while an older feed response is pending', async ({ browser, page }, testInfo) => {
