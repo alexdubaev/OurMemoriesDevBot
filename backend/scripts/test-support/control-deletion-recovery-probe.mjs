@@ -275,8 +275,8 @@ async function seedRetainedVideo({ familyId, ownerId, subject, label }) {
   await prisma.mediaAsset.create({ data: { id: mediaId, familyId, uploaderId: ownerId, sourceKind: 'max', purpose: 'memory',
     mediaKind: 'video', originalKey, declaredMime: 'video/mp4', verifiedMime: 'video/mp4', sha256: originalSha,
     byteSize: BigInt(originalBytes.length), originalStatus: 'stored', renditionStatus: 'ready', variants: { create: [
-      { familyId, variant: 'preview', objectKey: previewKey, sha256: previewSha, byteSize: BigInt(previewBytes.length), mime: 'image/webp', width: 640, height: 360 },
-      { familyId, variant: 'playback', objectKey: playbackKey, sha256: playbackSha, byteSize: BigInt(playbackBytes.length), mime: 'video/mp4', width: 640, height: 360 },
+      { variant: 'preview', objectKey: previewKey, sha256: previewSha, byteSize: BigInt(previewBytes.length), mime: 'image/webp', width: 640, height: 360 },
+      { variant: 'playback', objectKey: playbackKey, sha256: playbackSha, byteSize: BigInt(playbackBytes.length), mime: 'video/mp4', width: 640, height: 360 },
     ] } } })
   await prisma.memoryMedia.create({ data: { familyId, memoryId: memory.id, mediaId, position: 0 } })
   const attachmentId = `attachment-${label}`
