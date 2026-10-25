@@ -11,7 +11,8 @@ const prisma = createPrisma(databaseUrl)
 const jwtSecret = '0123456789abcdef'.repeat(4)
 const ownerId = '90000000-0000-4000-8000-000000000001'
 const targetId = '90000000-0000-4000-8000-000000000002'
-const ordinaryId = '90000000-0000-4000-8000-000000000003'
+const familyOwnerId = '90000000-0000-4000-8000-000000000003'
+const legacyAdminId = '90000000-0000-4000-8000-000000000004'
 const familyId = '91000000-0000-4000-8000-000000000001'
 const baseEnv = { DATABASE_URL: databaseUrl, JWT_SECRET: jwtSecret, MAX_ENABLED: 'false', CORS_ORIGINS: 'http://localhost:5173' }
 
@@ -24,16 +25,16 @@ describe('Control lifecycle API', () => {
     await prisma.controlStorageDelete.deleteMany({ where: { OR: [{ familyId }, { userId: targetId }] } })
     await prisma.controlUserDeletion.deleteMany({ where: { targetUserId: targetId } })
     await prisma.taskOutbox.deleteMany()
-    await prisma.authSession.deleteMany({ where: { userId: { in: [ownerId, targetId, ordinaryId] } } })
-    await prisma.externalIdentity.deleteMany({ where: { userId: { in: [ownerId, targetId, ordinaryId] } } })
+    await prisma.authSession.deleteMany({ where: { userId: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
+    await prisma.externalIdentity.deleteMany({ where: { userId: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
     await prisma.family.deleteMany({ where: { id: familyId } })
-    await prisma.user.deleteMany({ where: { id: { in: [ownerId, targetId, ordinaryId] } } })
-    for (const [index, id] of [ownerId, targetId, ordinaryId].entries()) {
-      await prisma.user.create({ data: { id, displayName: `Synthetic lifecycle ${index}` } })
+    await prisma.user.deleteMany({ where: { id: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
+    for (const [index, id] of [ownerId, targetId, familyOwnerId, legacyAdminId].entries()) {
+      await prisma.user.create({ data: { id, displayName: `Synthetic lifecycle ${index}`, ...(id === legacyAdminId ? { role: 'admin' } : {}) } })
       const identity = await prisma.externalIdentity.create({ data: { userId: id, provider: 'max', subject: `9876500${index}` } })
       await prisma.authSession.create({ data: { userId: id, externalIdentityId: identity.id, refreshTokenHash: `lifecycle-api-${index}`, expiresAt: new Date(Date.now() + 60_000) } })
     }
-    await prisma.family.create({ data: { id: familyId, ownerUserId: targetId, name: 'Synthetic lifecycle family', timezone: 'UTC', members: { create: [{ userId: targetId, role: 'full' }, { userId: ordinaryId, role: 'viewer' }] } } })
+    await prisma.family.create({ data: { id: familyId, ownerUserId: familyOwnerId, name: 'Synthetic lifecycle family', timezone: 'UTC', members: { create: [{ userId: targetId, role: 'full' }, { userId: familyOwnerId, role: 'full' }] } } })
   })
 
   afterAll(async () => {
@@ -43,10 +44,10 @@ describe('Control lifecycle API', () => {
     await prisma.controlFamilyDeletion.deleteMany({ where: { familyId } })
     await prisma.controlStorageDelete.deleteMany({ where: { OR: [{ familyId }, { userId: targetId }] } })
     await prisma.controlUserDeletion.deleteMany({ where: { targetUserId: targetId } })
-    await prisma.authSession.deleteMany({ where: { userId: { in: [ownerId, targetId, ordinaryId] } } })
-    await prisma.externalIdentity.deleteMany({ where: { userId: { in: [ownerId, targetId, ordinaryId] } } })
+    await prisma.authSession.deleteMany({ where: { userId: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
+    await prisma.externalIdentity.deleteMany({ where: { userId: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
     await prisma.family.deleteMany({ where: { id: familyId } })
-    await prisma.user.deleteMany({ where: { id: { in: [ownerId, targetId, ordinaryId] } } })
+    await prisma.user.deleteMany({ where: { id: { in: [ownerId, targetId, familyOwnerId, legacyAdminId] } } })
     await prisma.$disconnect()
   })
 
@@ -65,8 +66,10 @@ describe('Control lifecycle API', () => {
     const anonymous = await control.request(path)
     expect(anonymous.status).toBe(401)
     expect(anonymous.headers.get('cache-control')).toContain('no-store')
-    const ordinary = await control.request(path, { headers: { Authorization: `Bearer ${await token(ordinaryId)}` } })
-    expect(ordinary.status).toBe(403)
+    const familyOwner = await control.request(path, { headers: { Authorization: `Bearer ${await token(familyOwnerId)}` } })
+    expect(familyOwner.status).toBe(403)
+    const legacyAdmin = await control.request(path, { headers: { Authorization: `Bearer ${await token(legacyAdminId)}` } })
+    expect(legacyAdmin.status).toBe(403)
     const owner = await control.request(path, { headers: { Authorization: `Bearer ${await token(ownerId)}` } })
     expect(owner.status).toBe(200)
     expect(owner.headers.get('cache-control')).toContain('no-store')
@@ -89,5 +92,11 @@ describe('Control lifecycle API', () => {
       body: JSON.stringify({ key: randomUUID(), fingerprint: preview.fingerprint, confirmation: targetId, actorId: ownerId }),
     })
     expect(malformed.status).toBe(400)
+
+    const oversized = await control.request(`/api/v1/control/users/${targetId}/trash`, {
+      method: 'POST', headers: { Authorization: `Bearer ${await token(ownerId)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oversized: 'x'.repeat(1_100_000) }),
+    })
+    expect(oversized.status).toBe(413)
   })
 })
