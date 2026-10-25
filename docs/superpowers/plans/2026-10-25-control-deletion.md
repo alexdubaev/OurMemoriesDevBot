@@ -86,8 +86,8 @@
 **Files:**
 - Modify `packages/contracts/src/control.ts` and contract tests.
 - Modify `backend/src/modules/control/index.ts`, `application/control-helpers.ts`, `infrastructure/control-read-repository.ts`, relevant integration tests.
-- Modify `webapp/src/control/ControlApp.tsx`, `api.ts`, `queries.ts`, scoped components/styles as needed.
-- Modify `webapp/e2e/control.spec.ts` and synthetic fixtures only as needed for one short lifecycle journey.
+- Modify `webapp/src/control/ControlApp.tsx`, `control-api.ts`, scoped components/styles as needed (queries currently live in ControlApp, no separate queries.ts).
+- Modify `webapp/e2e/control-browser-link.spec.ts` and its existing synthetic fixtures/config only as needed for one short lifecycle journey.
 
 **Interfaces:**
 - `GET /control/users/:id/deletion-preview`, `POST /control/users/:id/trash`, `POST /control/users/:id/restore`.
