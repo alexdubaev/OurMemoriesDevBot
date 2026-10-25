@@ -15,6 +15,7 @@
 }
 
 .gifts-page {
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   box-sizing: border-box;
   display: flex;
   min-height: 100dvh;
@@ -23,7 +24,7 @@
   width: 100%;
   max-width: var(--layout-max-width, 480px);
   margin: 0 auto;
-  padding: calc(var(--host-inset-top, 0px) + 14px) clamp(12px, 3.5vw, 16px) calc(var(--layout-bottom-nav, 96px) + var(--host-inset-bottom, 0px) + 28px);
+  padding: calc(var(--host-inset-top, 0px) + 14px) clamp(12px, 3.5vw, 16px) calc(var(--layout-bottom-nav, 96px) + var(--ui-v2-effective-bottom-inset, var(--host-inset-bottom, 0px)) + 28px);
   color: var(--gift-text);
 }
 .gifts-page *, .gifts-page *::before, .gifts-page *::after { box-sizing: border-box; }

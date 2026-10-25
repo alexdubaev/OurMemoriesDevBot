@@ -46,6 +46,7 @@ import { readUiVersion } from '@/features/ui-version'
 import { allowPrivateFamilyCache, persistentUiQueryKey, privateFamilyAccessRevokedEvent, removePrivateFamilyCache, type PersistentFamilyPresentation } from '@/platform/persistence/private-cache'
 import { invalidatePrivateChildAvatar } from '@/platform/media/use-private-image-url'
 import { attachControlActivity } from '@/platform/control-activity'
+import { readHostLayout, sameHostLayout, subscribeHostLayoutRefresh, type HostLayoutSnapshot } from '@/platform/host-layout'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -85,7 +86,16 @@ function AppContent({ hostBridge }: AppProps) {
     forceAuth: Boolean(maxBrowserChallengeId),
   } : null, [auth, authAttemptKey, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable])
 
-  const insets = hostBridge.getInsets()
+  const [hostLayout, setHostLayout] = useState<HostLayoutSnapshot>(() => readHostLayout(hostBridge))
+  useEffect(() => {
+    const refresh = () => {
+      const next = readHostLayout(hostBridge)
+      setHostLayout((current) => sameHostLayout(current, next) ? current : next)
+    }
+    refresh()
+    return subscribeHostLayoutRefresh(window, refresh)
+  }, [hostBridge])
+  const { insets, platform } = hostLayout
   useEffect(() => {
     // Sheets and dialogs portal to document.body, outside the page wrapper.
     const root = document.documentElement
@@ -97,13 +107,17 @@ function AppContent({ hostBridge }: AppProps) {
     }
     const previous = Object.keys(values).map((name) => [name, root.style.getPropertyValue(name)] as const)
     for (const [name, value] of Object.entries(values)) root.style.setProperty(name, value)
+    const previousPlatform = root.dataset.hostLayoutPlatform
+    root.dataset.hostLayoutPlatform = platform
     return () => {
       for (const [name, value] of previous) {
         if (value) root.style.setProperty(name, value)
         else root.style.removeProperty(name)
       }
+      if (previousPlatform) root.dataset.hostLayoutPlatform = previousPlatform
+      else delete root.dataset.hostLayoutPlatform
     }
-  }, [insets.top, insets.right, insets.bottom, insets.left])
+  }, [insets.top, insets.right, insets.bottom, insets.left, platform])
 
   if (!hostBridge.isAvailable) return <OpenInTelegram />
 
