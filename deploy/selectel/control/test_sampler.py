@@ -98,6 +98,14 @@ class HostSamplerTests(unittest.TestCase):
                 self.assertIsNone(sampler.release_evidence())
                 evidence.write_text(json.dumps({**receipt, "lastSuccessfulReleaseAt": "2999-10-25T10:00:00Z"}), encoding="utf-8")
                 self.assertIsNone(sampler.release_evidence())
+                evidence.write_text(json.dumps({**receipt, "lastSuccessfulReleaseAt": self.old_timestamp().replace("Z", "+00:00")}), encoding="utf-8")
+                self.assertIsNone(sampler.release_evidence())
+
+    def test_receipt_timestamp_requires_iso_utc_z(self):
+        self.assertTrue(sampler.timestamp_is_safe(self.old_timestamp()))
+        past = self.old_timestamp()
+        self.assertFalse(sampler.timestamp_is_safe(past.replace("Z", "+00:00")))
+        self.assertFalse(sampler.timestamp_is_safe(past.replace("T", " ", 1)))
 
     def test_backup_receipt_is_atomic_structural_evidence_and_rejects_unknown_or_future_data(self):
         with tempfile.TemporaryDirectory() as temporary:

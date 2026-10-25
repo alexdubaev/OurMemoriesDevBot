@@ -27,10 +27,11 @@ def utc_now():
 
 
 def timestamp_is_safe(value):
-    if not isinstance(value, str) or len(value) > 40:
+    if not isinstance(value, str) or len(value) > 40 or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", value):
         return False
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError:
         return False
     return parsed.tzinfo is not None and parsed <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)
@@ -152,15 +153,16 @@ def backup_evidence():
         with open(BACKUP_EVIDENCE, "r", encoding="utf-8") as handle:
             value = json.load(handle)
         allowed = {"artifactAt", "validation", "restoreTestAt"}
-        if set(value) - allowed:
+        if set(value) != allowed:
             return {"artifactAt": None, "validation": "unknown", "restoreTestAt": None}
         validation = value.get("validation")
         if validation not in ("valid", "invalid", "unknown"):
             validation = "unknown"
-        def timestamp(item):
-            return item if timestamp_is_safe(item) else None
-        return {"artifactAt": timestamp(value.get("artifactAt")), "validation": validation,
-                "restoreTestAt": timestamp(value.get("restoreTestAt"))}
+        artifact_at = value.get("artifactAt")
+        restore_test_at = value.get("restoreTestAt")
+        if not timestamp_is_safe(artifact_at) or (restore_test_at is not None and not timestamp_is_safe(restore_test_at)):
+            return {"artifactAt": None, "validation": "unknown", "restoreTestAt": None}
+        return {"artifactAt": artifact_at, "validation": validation, "restoreTestAt": restore_test_at}
     except (OSError, ValueError, TypeError):
         return {"artifactAt": None, "validation": "unknown", "restoreTestAt": None}
 
