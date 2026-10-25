@@ -13,6 +13,7 @@ describe('control contracts', () => {
       status: 'active', createdAt: new Date().toISOString(), activeMembers: 0,
       storageUsedBytes: '9007199254740993', storageReservedBytes: '0', quotaBytes: null,
       publishedMemories: 0, mediaAttachments: 0, maxState: null, lastObservedAt: null,
+      maxLastCheckedAt: null, maxVerificationAgeSeconds: null,
     })
     expect(family.success).toBe(true)
     expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), storageUsedBytes: 9007199254740993 }).success).toBe(false)
