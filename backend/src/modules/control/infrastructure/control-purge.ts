@@ -332,6 +332,10 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
       `
       const ids = rows.map(({ id }) => id)
       if (ids.length) {
+        // A stale or partially completed earlier stage must not leave a child FK
+        // pointing at a media row when this bounded batch is deleted.
+        await tx.$executeRaw`UPDATE children SET avatar_media_id = NULL, avatar_crop = NULL
+          WHERE avatar_media_id = ANY(${ids}::uuid[])`
         await tx.$executeRaw`DELETE FROM max_video_legacy_retention WHERE family_id = ${operation.familyId}::uuid AND media_id = ANY(${ids}::uuid[])`
         await tx.$executeRaw`DELETE FROM media_assets WHERE id = ANY(${ids}::uuid[])`
       }
