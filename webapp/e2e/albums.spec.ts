@@ -92,6 +92,111 @@ test('album deletion confirmations work without native dialogs', async ({ page }
   expect(await retained.body()).toEqual(photoBytes)
 })
 
+test('MAX authenticated album cover choices save and complete the picker', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const consoleErrors: string[] = []
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  page.on('pageerror', (error) => consoleErrors.push(error.message))
+  const initData = signedInitData()
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'ios', ready() {} } }) }, initData)
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const auth = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${auth.accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  let familyId = ''
+  await page.route('**/api/v1/families', async (route) => {
+    if (route.request().method() !== 'POST' || familyId) return route.continue()
+    const response = await route.fetch()
+    expect(response.status()).toBe(201)
+    familyId = ((await response.json()) as { family: { id: string } }).family.id
+    await route.fulfill({ response })
+  })
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect.poll(() => familyId).not.toBe('')
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.getByRole('button', { name: /Свободный альбом/ }).click()
+  await page.getByLabel('Название альбома').fill('Обложка для проверки')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Обложка для проверки', exact: true })).toBeVisible()
+
+  const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  for (const name of ['cover-first.png', 'cover-second.png']) {
+    await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+    await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+    await page.locator('#photo-composer-files').setInputFiles({ name, mimeType: 'image/png', buffer: photoBytes })
+    await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  }
+
+  const catalogPath = `/api/v1/families/${familyId}/albums`
+  const initialCatalogResponse = await page.request.get(catalogPath, { headers })
+  expect(initialCatalogResponse.status()).toBe(200)
+  const initialCatalog = (await initialCatalogResponse.json()) as { items: { id: string; title: string; version: number; cover: { id: string } | null }[] }
+  const album = initialCatalog.items.find((item) => item.title === 'Обложка для проверки')!
+  const entriesResponse = await page.request.get(`/api/v1/families/${familyId}/albums/${album.id}/entries`, { headers })
+  expect(entriesResponse.status()).toBe(200)
+  const entries = (await entriesResponse.json()) as { items: { sources: { id: string; sourceId: string; available: boolean; kind: string }[] }[] }
+  const sourceIds = entries.items.flatMap((entry) => entry.sources).filter((source) => source.available && source.kind === 'photo').map((source) => source.id)
+  expect(sourceIds).toHaveLength(2)
+  expect(sourceIds[0]).not.toBe(sourceIds[1])
+
+  const capture = async (name: string) => {
+    const directory = process.env.MEMOLY_ALBUM_COVER_EVIDENCE_DIR
+    if (directory) await page.screenshot({ fullPage: false, path: `${directory}/${name}.png` })
+  }
+  await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
+  await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(2)
+  await capture('picker-before-selection')
+  const manualResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  const manualResponse = await manualResponsePromise
+  const manualPayload = await manualResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
+  const routeAfterManual = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
+  await capture('picker-after-manual-selection')
+  const manualCatalogResponse = await page.request.get(catalogPath, { headers })
+  const manualCatalog = (await manualCatalogResponse.json()) as { items: { id: string; version: number; cover: { id: string } | null }[] }
+  const persistedManualCoverId = manualCatalog.items.find((item) => item.id === album.id)?.cover?.id ?? null
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
+  const autoResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
+  await page.getByRole('button', { name: 'Автоматическая обложка', exact: true }).click()
+  const autoResponse = await autoResponsePromise
+  const autoPayload = await autoResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
+  const routeAfterAutomatic = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
+  await capture('picker-after-automatic-selection')
+  const autoCatalogResponse = await page.request.get(catalogPath, { headers })
+  const autoCatalog = (await autoCatalogResponse.json()) as { items: { id: string; version: number; cover: { id: string } | null }[] }
+  const persistedAutomaticCoverId = autoCatalog.items.find((item) => item.id === album.id)?.cover?.id ?? null
+  const automaticFallbackSourceId = sourceIds[0]
+  await page.reload()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  const catalogCard = page.locator('.albums-card').filter({ hasText: 'Обложка для проверки' })
+  await expect(catalogCard).toBeVisible()
+  await capture('catalog-after-reload')
+
+  console.log('ALBUM_COVER_EVIDENCE ' + JSON.stringify({
+    manual: { status: manualResponse.status(), payloadCoverId: manualPayload.album?.cover?.id ?? null, persistedCoverId: persistedManualCoverId, selectedSourceId: sourceIds[1], routeAfterChoice: routeAfterManual },
+    automatic: { status: autoResponse.status(), payloadCoverId: autoPayload.album?.cover?.id ?? null, persistedCoverId: persistedAutomaticCoverId, fallbackSourceId: automaticFallbackSourceId, routeAfterChoice: routeAfterAutomatic },
+    consoleErrors,
+  }))
+  expect(manualResponse.status()).toBe(200)
+  expect(manualPayload.album?.cover?.id).toBe(sourceIds[1])
+  expect(persistedManualCoverId).toBe(sourceIds[1])
+  expect(autoResponse.status()).toBe(200)
+  expect(autoPayload.album?.cover?.id).toBe(automaticFallbackSourceId)
+  expect(persistedAutomaticCoverId).toBe(automaticFallbackSourceId)
+  expect(routeAfterManual).toBe('album')
+  expect(routeAfterAutomatic).toBe('album')
+  await expect(catalogCard.locator('.albums-cover img')).toBeVisible()
+  expect(consoleErrors).toEqual([])
+})
+
 test('MAX authenticated albums persist year chapters and a text event through real API and navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const initData = signedInitData()
