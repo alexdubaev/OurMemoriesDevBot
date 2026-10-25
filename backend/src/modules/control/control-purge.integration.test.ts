@@ -288,10 +288,12 @@ describe('Control bounded deletion maintenance', () => {
     await seed()
     const oldFamilyIds = [familyId, otherFamilyId,
       '79100000-0000-4000-8000-000000000003', '79100000-0000-4000-8000-000000000004']
-    for (const extraFamilyId of oldFamilyIds.slice(2)) {
+    for (const [index, extraFamilyId] of oldFamilyIds.slice(2).entries()) {
+      const ownerId = `79000000-0000-4000-8000-00000000000${3 + index}`
+      await prisma.user.create({ data: { id: ownerId, displayName: 'Synthetic archive owner' } })
       await prisma.family.create({ data: {
-        id: extraFamilyId, ownerUserId: actorId, name: 'Synthetic blocked archive', timezone: 'UTC',
-        members: { create: [{ userId: actorId, role: 'full' }] },
+        id: extraFamilyId, ownerUserId: ownerId, name: 'Synthetic blocked archive', timezone: 'UTC',
+        members: { create: [{ userId: ownerId, role: 'full' }] },
       } })
     }
     await prisma.family.updateMany({ where: { id: { in: oldFamilyIds }, status: 'active' }, data: { status: 'deleting' } })
@@ -306,9 +308,11 @@ describe('Control bounded deletion maintenance', () => {
       } })
     }
     const freshFamilyId = '79100000-0000-4000-8000-000000000005'
+    const freshOwnerId = '79000000-0000-4000-8000-000000000005'
+    await prisma.user.create({ data: { id: freshOwnerId, displayName: 'Synthetic fresh owner' } })
     await prisma.family.create({ data: {
-      id: freshFamilyId, ownerUserId: actorId, name: 'Synthetic fresh archive', timezone: 'UTC',
-      members: { create: [{ userId: actorId, role: 'full' }] },
+      id: freshFamilyId, ownerUserId: freshOwnerId, name: 'Synthetic fresh archive', timezone: 'UTC',
+      members: { create: [{ userId: freshOwnerId, role: 'full' }] },
     } })
     await prisma.family.update({ where: { id: freshFamilyId }, data: { status: 'deleting' } })
     await prisma.controlFamilyDeletion.create({ data: {
