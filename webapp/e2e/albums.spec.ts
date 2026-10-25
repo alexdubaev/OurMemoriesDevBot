@@ -513,11 +513,12 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
   await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  await expect(page.locator('.albums-card')).toHaveCount(4)
   const catalogScrollAfterReturn = await page.evaluate(() => window.scrollY)
   const catalogScrollDelta = Math.abs(catalogScrollAfterReturn - catalogScrollBeforeYear)
-  expect(catalogScrollDelta).toBeLessThanOrEqual(2)
   const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear: catalogScrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta }
   console.log('FIRST_YEAR_SCROLL_RESTORE', JSON.stringify(scrollEvidence))
+  expect(catalogScrollDelta).toBeLessThanOrEqual(2)
   const evidenceDir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
   if (evidenceDir) appendFileSync(join(evidenceDir, 'geometry.jsonl'), `${JSON.stringify(scrollEvidence)}\n`)
   await page.setViewportSize({ width: 390, height: 844 })
