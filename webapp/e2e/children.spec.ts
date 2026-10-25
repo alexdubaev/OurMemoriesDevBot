@@ -400,7 +400,19 @@ async function startFamily(page: Page, childCount: 1 | 2 = 2): Promise<SeededFam
   }
   const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { children: Array<{ id: string; name: string }> }
   expect(family.children.map((child) => child.name)).toEqual(childCount === 2 ? ['Лиля', 'Миша'] : ['Лиля'])
+  const homeResponse = await page.request.get('/api/v1/me/families', { headers })
+  expect(homeResponse.status()).toBe(200)
+  const home = await homeResponse.json() as { items: Array<{ familyId: string; name: string; setupStatus: string }> }
+  const seededFamily = home.items.find((item) => item.familyId === familyId)
+  expect(seededFamily?.setupStatus).toBe('ready')
   await page.reload()
+  const navigation = page.getByTestId('bottom-navigation')
+  const seededFamilyCard = page.locator('.family-hub-card').filter({ hasText: seededFamily!.name })
+  await expect.poll(async () => await navigation.isVisible().catch(() => false) || await seededFamilyCard.isVisible().catch(() => false)).toBe(true)
+  if (await seededFamilyCard.isVisible()) {
+    await expect(seededFamilyCard).toHaveCount(1)
+    await seededFamilyCard.click()
+  }
   await expect(page.getByTestId('bottom-navigation')).toBeVisible()
   return { familyId, headers, children: family.children }
 }
