@@ -178,6 +178,104 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
   }
 })
 
+test('Control fails closed on access loss, restores an owner session, and revalidates BFCache returns', async ({ browser, page }) => {
+  await authenticateOwner(page, browser)
+
+  for (const width of [768, 320]) {
+    await page.setViewportSize({ width, height: 850 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+
+  let releaseStorageFailure: () => void = () => undefined
+  const storageRequestGate = new Promise<void>((resolve) => { releaseStorageFailure = resolve })
+  await page.route('**/api/v1/control/storage', async (route) => {
+    await storageRequestGate
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'UNAVAILABLE', message: 'Synthetic display failure' }) })
+  })
+  await page.getByRole('button', { name: 'Хранилище', exact: true }).click()
+  await expect(page.getByLabel('Загрузка данных')).toBeVisible()
+  releaseStorageFailure()
+  await expect(page.getByText('Не удалось получить данные', { exact: true })).toBeVisible()
+  await page.unroute('**/api/v1/control/storage')
+  await page.getByRole('button', { name: 'Повторить' }).click()
+  await expect(page.getByRole('heading', { name: 'Хранилище' })).toBeVisible()
+
+  await page.route('**/api/v1/control/sources', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{ id: 'product_db', kind: 'product_db', status: 'stale', observedAt: null, lastAttemptAt: null, errorCode: null }]),
+  }))
+  await page.getByRole('button', { name: 'Подключения', exact: true }).click()
+  await expect(page.getByText('Устарело', { exact: true })).toBeVisible()
+  await page.unroute('**/api/v1/control/sources')
+
+  await page.route('**/api/v1/control/families**', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await route.continue()
+  })
+  await page.getByRole('button', { name: 'Семьи', exact: true }).click()
+  await expect(page.locator('.control-table-scroll [data-slot="skeleton"]')).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: 'Control E2E Garden' })).toBeVisible()
+  await page.unroute('**/api/v1/control/families**')
+
+  let releaseLateMe: () => void = () => undefined
+  let markLateMeStarted: () => void = () => undefined
+  const lateMeGate = new Promise<void>((resolve) => { releaseLateMe = resolve })
+  const lateMeStarted = new Promise<void>((resolve) => { markLateMeStarted = resolve })
+  await page.route('**/api/v1/control/me', async (route) => {
+    markLateMeStarted()
+    await lateMeGate
+    try { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ allowed: true, serverNow: new Date().toISOString(), features: ['read', 'csv_export'] }) }) } catch { /* The hidden-page request may already be aborted. */ }
+  })
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
+  await lateMeStarted
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Семьи' })).toHaveCount(0)
+  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  releaseLateMe()
+  await page.waitForTimeout(100)
+  await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
+  await page.unroute('**/api/v1/control/me')
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+  })
+  await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Семьи' })).toBeVisible()
+
+  await page.route('**/api/v1/control/me', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'Synthetic owner access loss' }) }))
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
+  await expect(page.getByRole('heading', { name: 'У этой учётной записи нет доступа' })).toBeVisible()
+  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  await page.unroute('**/api/v1/control/me')
+  await page.getByRole('button', { name: 'Повторить' }).click()
+  await expect(page.getByRole('heading', { name: 'Семьи' })).toBeVisible()
+
+  await page.route('**/api/v1/control/me', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'UNAUTHORIZED', message: 'Synthetic session expiry' }) }))
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
+  await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
+  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+})
+
+test('Control retries cookie refresh after a startup network failure', async ({ page }) => {
+  let refreshAttempts = 0
+  await page.route('**/api/v1/auth/refresh', async (route) => {
+    refreshAttempts += 1
+    if (refreshAttempts === 1) await route.abort('failed')
+    else await route.continue()
+  })
+  await page.goto('/control/')
+  await expect(page.getByRole('heading', { name: 'Не удалось проверить доступ' })).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить' }).click()
+  await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
+  expect(refreshAttempts).toBeGreaterThanOrEqual(2)
+})
+
 test('Control static entry stays standalone and includes its no-JavaScript message', async ({ request }) => {
   const entry = await request.get('/control/')
   expect(entry.status()).toBe(200)
@@ -189,6 +287,34 @@ test('Control static entry stays standalone and includes its no-JavaScript messa
 
   expect(html).toContain('Для работы панели требуется JavaScript.')
 })
+
+async function authenticateOwner(page: import('@playwright/test').Page, browser: import('@playwright/test').Browser) {
+  await page.goto('/control/')
+  await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
+  const started = page.waitForResponse((response) => response.url().includes('/api/v1/auth/browser-link/start'))
+  await page.getByRole('button', { name: 'Начать вход' }).click()
+  const challenge = await (await started).json() as { challengeId: string; startParam: string }
+  const maxContext = await browser.newContext()
+  try {
+    const apiOrigin = new URL(process.env.VITE_API_URL ?? 'http://127.0.0.1:56701').origin
+    const login = await maxContext.request.post(`${apiOrigin}/api/v1/auth/max`, {
+      headers: { Origin: new URL(page.url()).origin },
+      data: { initData: signedMaxInitData() },
+    })
+    expect(login.status()).toBe(200)
+    const session = await login.json() as { accessToken: string }
+    const status = page.waitForResponse((response) => response.url().includes(`/browser-link/${challenge.challengeId}/status`))
+    const approval = await maxContext.request.post(`${apiOrigin}/api/v1/auth/browser-link/${challenge.challengeId}/approve`, {
+      headers: { Origin: new URL(page.url()).origin, Authorization: `Bearer ${session.accessToken}` },
+      data: { initData: signedMaxInitData(challenge.startParam), approved: true },
+    })
+    expect(approval.status()).toBe(200)
+    expect((await status).status()).toBe(200)
+    await expect(page.getByRole('heading', { name: 'Обзор' })).toBeVisible()
+  } finally {
+    await maxContext.close()
+  }
+}
 
 function signedMaxInitDataFor(userId: number, startParam = '') {
   const fields = new Map([

@@ -63,6 +63,7 @@ function ControlSessionApp({ onReady, queryClient }: { onReady: () => void; quer
   const authorizeRef = useRef<(currentApi: AuthApi, signal?: AbortSignal) => Promise<void>>(async () => undefined)
   const [notice, setNotice] = useState('')
   const [isVisible, setIsVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible')
+  const visibleRef = useRef(typeof document === 'undefined' || document.visibilityState === 'visible')
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try { return localStorage.getItem('memoly-control-theme') === 'dark' ? 'dark' : 'light' } catch { return 'light' }
   })
@@ -100,8 +101,7 @@ function ControlSessionApp({ onReady, queryClient }: { onReady: () => void; quer
     setPhase('checking')
     try {
       await client.me(controller.signal)
-      if (generation === sessionRuntimeRef.current.generation && !controller.signal.aborted && currentApi.isSessionEpochCurrent(epoch)) {
-        rootElement?.removeAttribute('data-private-hidden')
+      if (generation === sessionRuntimeRef.current.generation && !controller.signal.aborted && visibleRef.current && document.visibilityState === 'visible' && currentApi.isSessionEpochCurrent(epoch)) {
         setPhase('allowed')
       }
     } catch (error) {
@@ -109,7 +109,7 @@ function ControlSessionApp({ onReady, queryClient }: { onReady: () => void; quer
       if (isAccessError(error)) accessFailure(error)
       else setPhase('error')
     }
-  }, [api, accessFailure, cancelPrivate, client, epoch, rootElement])
+  }, [api, accessFailure, cancelPrivate, client, epoch])
   useEffect(() => { authorizeRef.current = authorize }, [authorize])
 
   useEffect(() => {
@@ -140,15 +140,15 @@ function ControlSessionApp({ onReady, queryClient }: { onReady: () => void; quer
   }, [api, authorize, cancelPrivate, epoch])
 
   useEffect(() => {
-    const onPageHide = () => { setIsVisible(false); if (phase === 'allowed') { rootElement?.setAttribute('data-private-hidden','true'); flushSync(() => { cancelPrivate(); setPhase('checking') }) } }
-    const onPageShow = (event: PageTransitionEvent) => { setIsVisible(document.visibilityState === 'visible'); if (event.persisted || document.visibilityState === 'visible') revalidate() }
-    const onVisibility = () => { const visible = document.visibilityState === 'visible'; setIsVisible(visible); if (visible) { if (phase === 'allowed' || (phase === 'checking' && sessionRuntimeRef.current.token)) revalidate() } else if (phase === 'allowed') { rootElement?.setAttribute('data-private-hidden','true'); flushSync(() => { cancelPrivate(); setPhase('checking') }) } }
+    const onPageHide = () => { visibleRef.current = false; setIsVisible(false); if (phase === 'allowed' || (phase === 'checking' && sessionRuntimeRef.current.token)) flushSync(() => { cancelPrivate(); if (phase === 'allowed') setPhase('checking') }) }
+    const onPageShow = (event: PageTransitionEvent) => { const visible = document.visibilityState === 'visible'; visibleRef.current = visible; setIsVisible(visible); if (visible && (event.persisted || visible)) revalidate() }
+    const onVisibility = () => { const visible = document.visibilityState === 'visible'; visibleRef.current = visible; setIsVisible(visible); if (visible) { if (phase === 'allowed' || (phase === 'checking' && sessionRuntimeRef.current.token)) revalidate() } else if (phase === 'allowed' || (phase === 'checking' && sessionRuntimeRef.current.token)) flushSync(() => { cancelPrivate(); if (phase === 'allowed') setPhase('checking') }) }
     const onOnline = () => { if (document.visibilityState === 'visible') revalidate() }
     const onHash = () => setSection(sectionFromHash())
     const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandOpen(true) } if (event.key === 'Escape') { setCommandOpen(false); setCommandQuery('') } }
     window.addEventListener('pagehide', onPageHide); window.addEventListener('pageshow', onPageShow); window.addEventListener('hashchange', onHash); window.addEventListener('online', onOnline); window.addEventListener('keydown', onKey); document.addEventListener('visibilitychange', onVisibility)
     return () => { window.removeEventListener('pagehide', onPageHide); window.removeEventListener('pageshow', onPageShow); window.removeEventListener('hashchange', onHash); window.removeEventListener('online', onOnline); window.removeEventListener('keydown', onKey); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [cancelPrivate, phase, revalidate, rootElement])
+  }, [cancelPrivate, phase, revalidate])
 
   const changeTheme = (value: 'light' | 'dark') => { setTheme(value); try { localStorage.setItem('memoly-control-theme', value) } catch { /* Preference is optional. */ } }
   const onLogout = async () => { cancelPrivate(); setPhase('signed-out'); sessionRuntimeRef.current.token = null; try { await api.logout() } catch { /* Local privacy state is already cleared. */ } finally { setEpoch(currentBrowserSessionEpoch()) } }
