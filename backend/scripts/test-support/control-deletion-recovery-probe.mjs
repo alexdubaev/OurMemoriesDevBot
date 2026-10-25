@@ -84,6 +84,7 @@ try {
     const targetMedia = await seedRetainedVideo({ familyId: targetFamilyId, ownerId: target.id, subject: target.subject, label: 'grace' })
     const purgeMedia = await seedRetainedVideo({ familyId: purgeFamilyId, ownerId: purgeOwner.id, subject: purgeOwner.subject, label: 'purge' })
     const activeMedia = await seedRetainedVideo({ familyId: activeFamilyId, ownerId: activeOwner.id, subject: activeOwner.subject, label: 'active' })
+    await completeFirstFamilyChild(activeFamilyId, activeOwner.id)
     await prisma.familyMember.createMany({ data: [
       { familyId: targetFamilyId, userId: activeGuest.id, role: 'viewer' },
       { familyId: targetFamilyId, userId: revokedMember.id, role: 'viewer', revokedAt: new Date('2026-01-01T00:00:00Z') },
@@ -299,6 +300,21 @@ async function seedRetainedVideo({ familyId, ownerId, subject, label }) {
     position: 0, providerMessageId: source.messageId, providerAttachmentId: attachmentId, providerRecipientId: 1n,
     providerChannelId: null, snapshot: snapshot[0].snapshot } })
   return { mediaId, familyId, memoryId: memory.id, originalKey, previewKey, playbackKey, originalSha }
+}
+
+async function completeFirstFamilyChild(familyId, ownerId) {
+  let child = await prisma.child.findFirst({ where: { familyId, deletedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+  if (!child) child = await prisma.child.create({ data: { familyId, displayName: 'Synthetic active child' } })
+  const avatar = await prisma.mediaAsset.create({ data: {
+    familyId, uploaderId: ownerId, sourceKind: 'upload', purpose: 'child_avatar', mediaKind: 'photo',
+    originalKey: `media-originals/control-delete-recovery/avatar/${randomUUID()}`, declaredMime: 'image/png',
+    verifiedMime: 'image/png', sha256: createHash('sha256').update('synthetic avatar').digest('hex'),
+    byteSize: 14n, width: 64, height: 64, originalStatus: 'stored', renditionStatus: 'ready',
+  } })
+  await prisma.child.update({ where: { id: child.id }, data: {
+    displayName: 'Synthetic active child', birthDate: new Date('2024-03-04T00:00:00.000Z'), sex: 'boy',
+    avatarMediaId: avatar.id, avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+  } })
 }
 
 async function ledgerSnapshot() {
