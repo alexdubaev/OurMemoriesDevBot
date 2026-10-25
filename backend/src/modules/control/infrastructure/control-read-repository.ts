@@ -37,8 +37,23 @@ export async function queryFamilies(db: DbClient, where: Prisma.Sql, limit: numb
       ) attachments) media_attachments,
       (SELECT max(a.last_observed_at) FROM control_family_activity a WHERE a.family_id=f.id) last_observed_at,
       (SELECT max(b.last_provider_check_at) FROM max_channel_bindings b WHERE b.chat_id=f.max_backup_chat_id AND b.family_id=f.id) max_last_checked_at,
-      (SELECT CASE WHEN f.max_backup_chat_id IS NULL THEN 'unconfigured' WHEN (SELECT b.state FROM max_channel_bindings b WHERE b.chat_id=f.max_backup_chat_id AND b.family_id=f.id LIMIT 1)='connected' THEN 'configured' ELSE 'disconnected' END) max_state
-    FROM families f JOIN users u ON u.id=f.owner_user_id ${where}
+      (SELECT CASE WHEN f.max_backup_chat_id IS NULL THEN 'unconfigured' WHEN (SELECT b.state FROM max_channel_bindings b WHERE b.chat_id=f.max_backup_chat_id AND b.family_id=f.id LIMIT 1)='connected' THEN 'configured' ELSE 'disconnected' END) max_state,
+      CASE WHEN f.status='deleted' OR cfd.purged_at IS NOT NULL THEN 'purged'
+           WHEN cfd.id IS NOT NULL THEN 'purging'
+           WHEN f.status='deleting' THEN 'trashed' ELSE 'active' END lifecycle_state,
+      COALESCE(cfd.id, user_deletion.deletion_id) deletion_id,
+      user_deletion.purge_after,
+      COALESCE(cfd.purge_stage, user_deletion.purge_stage) operation_status,
+      CASE WHEN COALESCE(cfd.last_error_code, user_deletion.last_error_code) IN
+        ('profile_cleanup_failed','archive_cleanup_failed','storage_timeout','storage_not_found','storage_invalid_request','storage_forbidden','storage_unavailable')
+        THEN COALESCE(cfd.last_error_code, user_deletion.last_error_code) ELSE NULL END error_code
+    FROM families f JOIN users u ON u.id=f.owner_user_id
+    LEFT JOIN control_family_deletions cfd ON cfd.family_id=f.id
+    LEFT JOIN LATERAL (
+      SELECT d.id AS deletion_id, d.purge_after, d.purge_stage, d.last_error_code
+        FROM control_user_deletion_families df JOIN control_user_deletions d ON d.id=df.deletion_id
+       WHERE df.family_id=f.id AND d.restored_at IS NULL ORDER BY d.deleted_at DESC LIMIT 1
+    ) user_deletion ON TRUE ${where}
     ORDER BY ${order.expression} ${direction}, f.id ${direction} LIMIT ${limit}
   `
   return rows.map(familyRow)
@@ -47,6 +62,8 @@ export async function queryFamilies(db: DbClient, where: Prisma.Sql, limit: numb
 export async function queryFamilyById(db:DbClient,id:string,quotaBytes:number) { return queryFamilies(db,Prisma.sql`WHERE f.id=${id}::uuid`,1,quotaBytes,'createdAt') }
 function familyRow(r: Row) {
   return { id: r.id, name: r.name, childName: r.child_name, ownerName: r.owner_name, status: r.status,
+    lifecycleState:r.lifecycle_state, deletionId:r.deletion_id, purgeAfter:r.purge_after ? (r.purge_after as Date).toISOString() : null,
+    operationStatus:r.operation_status, errorCode:r.error_code,
     createdAt: (r.created_at as Date).toISOString(), activeMembers: Number(r.active_members), storageUsedBytes: String(r.storage_used_bytes),
     storageReservedBytes: String(r.storage_reserved_bytes), quotaBytes: String(r.quota_bytes), publishedMemories: Number(r.published_memories),
     mediaAttachments: Number(r.media_attachments), maxState: r.max_state, lastObservedAt: r.last_observed_at ? (r.last_observed_at as Date).toISOString() : null,
@@ -64,25 +81,36 @@ export function userWhere(query: ControlListQuery) {
   const expression=desc?Prisma.raw('u.created_at'):Prisma.raw("coalesce(u.display_name,'')")
   const valueCast=desc?Prisma.sql`${cursor?.value ?? null}::timestamptz`:Prisma.sql`${cursor?.value ?? null}::text`
   const seek = cursor ? desc?Prisma.sql`AND (${expression},u.id)<(${valueCast},${cursor.id}::uuid)`:Prisma.sql`AND (${expression},u.id)>(${valueCast},${cursor.id}::uuid)` : Prisma.empty
-  return Prisma.sql`WHERE (${query.q ?? null}::text IS NULL OR coalesce(u.display_name,'') ILIKE ${query.q ? `%${query.q}%` : null}) ${seek}`
+  return Prisma.sql`WHERE u.control_state <> 'purged'
+    AND (${query.userState ?? null}::text IS NULL OR u.control_state::text=${query.userState ?? null})
+    AND (${query.q ?? null}::text IS NULL OR coalesce(u.display_name,'') ILIKE ${query.q ? `%${query.q}%` : null}) ${seek}`
 }
 export async function queryUsers(db: DbClient, where: Prisma.Sql, limit: number, sort = 'createdAt') {
   return withControlReadTimeout(db, async (tx) => {
   const rows = await tx.$queryRaw<Array<Row>>`
-    SELECT u.id,u.display_name,u.created_at,
+    SELECT u.id,u.display_name,u.created_at,u.control_state::text AS lifecycle_state,
+      CASE WHEN u.control_state='active' THEN NULL ELSE deletion.id END AS deletion_id,
+      CASE WHEN u.control_state='active' THEN NULL ELSE deletion.purge_after END AS purge_after,
+      CASE WHEN u.control_state='active' THEN NULL WHEN u.control_state='purged' THEN 'purged' ELSE deletion.purge_stage END AS operation_status,
+      CASE WHEN deletion.last_error_code IN ('profile_cleanup_failed','archive_cleanup_failed','storage_timeout','storage_not_found','storage_invalid_request','storage_forbidden','storage_unavailable') THEN deletion.last_error_code ELSE NULL END AS error_code,
       (SELECT count(DISTINCT f.id) FROM family_members m JOIN families f ON f.id=m.family_id WHERE m.user_id=u.id AND m.revoked_at IS NULL AND f.status='active') active_families,
       (SELECT array_agg(f.name ORDER BY f.name) FROM (SELECT f.name FROM family_members m JOIN families f ON f.id=m.family_id WHERE m.user_id=u.id AND m.revoked_at IS NULL AND f.status='active' ORDER BY f.name LIMIT 5) f) family_names,
       (SELECT greatest(count(DISTINCT f.id)-5,0) FROM family_members m JOIN families f ON f.id=m.family_id WHERE m.user_id=u.id AND m.revoked_at IS NULL AND f.status='active') more_families,
       (SELECT max(s.created_at) FROM auth_sessions s WHERE s.user_id=u.id) last_session_created_at,
       (SELECT a.last_observed_at FROM control_user_activity a WHERE a.user_id=u.id ORDER BY a.last_observed_at DESC,a.utc_day DESC LIMIT 1) last_activity_at,
       (SELECT a.surface FROM control_user_activity a WHERE a.user_id=u.id ORDER BY a.last_observed_at DESC,a.utc_day DESC LIMIT 1) last_activity_surface
-    FROM users u ${where} ORDER BY ${sort==='createdAt'?Prisma.raw('u.created_at DESC,u.id DESC'):Prisma.raw("coalesce(u.display_name,'') ASC,u.id ASC")} LIMIT ${limit}
+    FROM users u LEFT JOIN LATERAL (
+      SELECT id, purge_after, purge_stage, last_error_code FROM control_user_deletions
+       WHERE target_user_id=u.id ORDER BY deleted_at DESC LIMIT 1
+    ) deletion ON TRUE ${where} ORDER BY ${sort==='createdAt'?Prisma.raw('u.created_at DESC,u.id DESC'):Prisma.raw("coalesce(u.display_name,'') ASC,u.id ASC")} LIMIT ${limit}
   `
   return rows.map(userRow)
   })
 }
 export async function queryUserById(db:DbClient,id:string) { return queryUsers(db,Prisma.sql`WHERE u.id=${id}::uuid`,1) }
-function userRow(r: Row) { return { id:r.id, displayName:r.display_name, createdAt:(r.created_at as Date).toISOString(), activeFamilies:Number(r.active_families),
+function userRow(r: Row) { return { id:r.id, displayName:r.display_name, createdAt:(r.created_at as Date).toISOString(), lifecycleState:r.lifecycle_state,
+  deletionId:r.deletion_id, purgeAfter:r.purge_after ? (r.purge_after as Date).toISOString() : null, operationStatus:r.operation_status, errorCode:r.error_code,
+  activeFamilies:Number(r.active_families),
   familyNames:(r.family_names as string[] | null) ?? [], moreFamilies:Number(r.more_families), lastSessionCreatedAt:r.last_session_created_at ? (r.last_session_created_at as Date).toISOString() : null, lastActivityAt:r.last_activity_at ? (r.last_activity_at as Date).toISOString() : null, lastActivitySurface:r.last_activity_surface ?? null } }
 export async function listUsers(db: DbClient, query: ControlListQuery) { return pageRows(await queryUsers(db,userWhere(query),query.limit+1,query.sort),query, 'user') }
 function pageRows<T extends Record<string, unknown>>(rows:T[], query:ControlListQuery, kind:'family'|'user') { const hasNext=rows.length>query.limit; const items=rows.slice(0,query.limit); const last=items.at(-1); const cursorKey=query.sort==='name'?(kind==='family'?'name':'displayName'):query.sort; const rawValue=last?.[cursorKey]; const value=query.sort==='lastObservedAt'&&rawValue===null?new Date(0).toISOString():String(rawValue??''); return {items,nextCursor:hasNext && last ? encodeCursor({v:1,filter:filterHash(query),scope:kind==='family'?'families':'users',id:String(last.id),value}) : null} }
@@ -120,12 +148,15 @@ export async function listChildren(db:DbClient,id:string,query:ControlListQuery,
 export async function queryOverview(db:DbClient, from:Date, now:Date) {
   return withControlReadTimeout(db, async (tx) => {
   const [totals] = await tx.$queryRaw<Array<Row>>`
-    SELECT (SELECT count(*) FROM users) AS accounts_total,
+    SELECT (SELECT count(*) FROM users WHERE control_state <> 'purged') AS accounts_total,
+      (SELECT count(*) FROM users WHERE control_state = 'active') AS accounts_active,
+      (SELECT count(*) FROM users WHERE control_state = 'trashed') AS accounts_trashed,
+      (SELECT count(*) FROM users WHERE control_state = 'purging') AS accounts_purging,
       (SELECT count(*) FROM families WHERE status='active') AS families_active,
       (SELECT count(*) FROM family_members m JOIN families f ON f.id=m.family_id WHERE m.revoked_at IS NULL AND f.status='active') AS active_memberships,
-      (SELECT count(DISTINCT m.user_id) FROM family_members m JOIN families f ON f.id=m.family_id WHERE m.revoked_at IS NULL AND f.status='active') AS accounts_with_family,
+      (SELECT count(DISTINCT m.user_id) FROM family_members m JOIN families f ON f.id=m.family_id JOIN users u ON u.id=m.user_id WHERE m.revoked_at IS NULL AND f.status='active' AND u.control_state='active') AS accounts_with_family,
       (SELECT count(*) FROM family_invites i JOIN families f ON f.id=i.family_id WHERE i.revoked_at IS NULL AND i.accepted_at IS NULL AND i.expires_at>${now} AND f.status='active') AS invite_pending,
-      (SELECT count(*) FROM auth_sessions WHERE revoked_at IS NULL AND expires_at>${now}) AS valid_sessions,
+      (SELECT count(*) FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.revoked_at IS NULL AND s.expires_at>${now} AND u.control_state='active') AS valid_sessions,
       (SELECT coalesce(sum(storage_used_bytes),0)::text FROM families) AS storage_bytes`
   const registrations = await tx.$queryRaw<Array<{ day:Date; count:bigint }>>`
     SELECT date_trunc('day', created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day,count(*) AS count

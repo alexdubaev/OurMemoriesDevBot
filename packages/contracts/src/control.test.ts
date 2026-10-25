@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { controlCursorQuerySchema, controlFamilyRowSchema, controlSampleSchema, controlMeSchema, controlPageSchema } from './control'
+import { controlCursorQuerySchema, controlFamilyRowSchema, controlSampleSchema, controlMeSchema, controlPageSchema, controlUserDeletionPreviewSchema } from './control'
 import { z } from 'zod'
 
 describe('control contracts', () => {
@@ -8,6 +8,9 @@ describe('control contracts', () => {
     expect(controlCursorQuerySchema.safeParse({ limit: 101 }).success).toBe(false)
     expect(controlCursorQuerySchema.safeParse({ q: 'x'.repeat(101) }).success).toBe(false)
     expect(controlCursorQuerySchema.safeParse({ userId: '00000000-0000-4000-8000-000000000001' }).success).toBe(false)
+    expect(controlCursorQuerySchema.safeParse({ userState: 'trashed' }).success).toBe(true)
+    expect(controlCursorQuerySchema.safeParse({ userState: 'deleted' }).success).toBe(false)
+    expect(controlCursorQuerySchema.safeParse({ status: 'active', userState: 'trashed' }).success).toBe(true)
     const family = controlFamilyRowSchema.safeParse({
       id: '00000000-0000-4000-8000-000000000001', name: null, childName: null, ownerName: null,
       status: 'active', createdAt: new Date().toISOString(), activeMembers: 0,
@@ -28,5 +31,18 @@ describe('control contracts', () => {
     expect(schema.safeParse({ ...base, value: 0 }).success).toBe(true)
     expect(schema.safeParse({ ...base, status: 'not_configured', value: null }).success).toBe(true)
     expect(schema.safeParse({ ...base, status: 'ok', value: null }).success).toBe(true)
+  })
+
+  test('keeps deletion previews bounded to safe lifecycle data', () => {
+    const preview = {
+      targetId: '00000000-0000-4000-8000-000000000001', targetVersion: 1, state: 'active',
+      deletionId: null, purgeAfter: null, operationStatus: null, errorCode: null,
+      families: 2, activeFamilies: 1, members: 4, memories: 5, storageUsedBytes: '9007199254740993',
+      fingerprint: 'a'.repeat(64), confirmation: '00000000-0000-4000-8000-000000000001',
+      protectedAccount: false, canTrash: true, canRestore: false, serverNow: new Date().toISOString(),
+    }
+    expect(controlUserDeletionPreviewSchema.safeParse(preview).success).toBe(true)
+    expect(controlUserDeletionPreviewSchema.safeParse({ ...preview, providerSubject: 'private' }).success).toBe(false)
+    expect(controlUserDeletionPreviewSchema.safeParse({ ...preview, fingerprint: 'short' }).success).toBe(false)
   })
 })

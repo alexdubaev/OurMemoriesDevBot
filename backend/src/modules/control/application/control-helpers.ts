@@ -2,7 +2,7 @@ import { AppError } from '../../../http/errors'
 import { controlCursorQuerySchema } from '@web-app-demo/contracts'
 import { z } from 'zod'
 
-export type ControlListQuery = { limit: number; cursor?: string; q?: string; sort: string; status?: string; maxState?: string }
+export type ControlListQuery = { limit: number; cursor?: string; q?: string; sort: string; status?: string; maxState?: string; userState?: string }
 
 export function sample<T>(value: T | null, status: 'ok'|'stale'|'error'|'not_configured'|'unsupported'|'insufficient_history', sourceId: string, staleAfterSeconds: number, observedAt: string | null, lastAttemptAt: string | null = observedAt, coverageFrom: string | null = null, errorCode: 'timeout'|'unavailable'|'invalid_payload'|'permission_denied'|'unknown'|null = null) {
   return { value, status, sourceId, observedAt, lastAttemptAt, staleAfterSeconds, coverageFrom, coverageRatio: null, errorCode }
@@ -13,14 +13,15 @@ export function uuidParam(value: string) { const parsed = z.string().uuid().safe
 export function parseListQuery(raw: Record<string, string | undefined>, { compositeCursor = false }: { compositeCursor?: boolean } = {}): ControlListQuery {
   const parsed = controlCursorQuerySchema.safeParse(raw)
   if (!parsed.success) throw new AppError(400, 'INVALID_INPUT', 'Некорректные параметры списка')
-  const { limit, cursor, q, status, maxState } = parsed.data
-  const result = { limit, cursor, q, sort: parsed.data.sort ?? 'createdAt', status, maxState }
+  const { limit, cursor, q, status, maxState, userState } = parsed.data
+  const result = { limit, cursor, q, sort: parsed.data.sort ?? 'createdAt', status, maxState, userState }
   if (cursor) compositeCursor ? decodeEventCursor(cursor, result) : decodeCursor(cursor, result)
   return result
 }
 export function validateUserSort(query: ControlListQuery) { if (!['createdAt','name'].includes(query.sort) || query.status || query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимая сортировка или фильтр для пользователей') }
-export function validateChildListQuery(query:ControlListQuery) { if(query.sort!=='createdAt'||query.status||query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр списка') }
-export function filterHash(query:ControlListQuery) { return JSON.stringify({q:query.q ?? '',sort:query.sort,status:query.status ?? '',maxState:query.maxState ?? ''}) }
+export function validateFamilyListQuery(query: ControlListQuery) { if (query.userState) throw new AppError(400,'INVALID_INPUT','Фильтр состояния пользователя неприменим к семьям') }
+export function validateChildListQuery(query:ControlListQuery) { if(query.sort!=='createdAt'||query.status||query.maxState||query.userState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр списка') }
+export function filterHash(query:ControlListQuery) { return JSON.stringify({q:query.q ?? '',sort:query.sort,status:query.status ?? '',maxState:query.maxState ?? '',userState:query.userState ?? ''}) }
 export function encodeCursor(value:unknown) { return Buffer.from(JSON.stringify(value)).toString('base64url') }
 export function decodeCursor(value:string,query:ControlListQuery,scope?:string):{v:number;filter:string;scope:string;id:string;value:string} {
   try {
@@ -48,8 +49,8 @@ export function decodeEventCursor(value:string,query:ControlListQuery):{v:number
 }
 export function eventCursor(query:ControlListQuery,id:string,value:string) { return encodeCursor({v:1,filter:filterHash(query),scope:'events',id,value}) }
 
-export function familyCsvRow(r:Record<string,unknown>) { return [r.id,r.name,r.childName,r.ownerName,r.status,r.createdAt,r.activeMembers,r.storageUsedBytes,r.storageReservedBytes,r.quotaBytes,r.publishedMemories,r.mediaAttachments,r.maxState,r.lastObservedAt] }
-export function userCsvRow(r:Record<string,unknown>) { return [r.id,r.displayName,r.createdAt,r.activeFamilies,(r.familyNames as string[]).join('; '),r.moreFamilies,r.lastSessionCreatedAt,r.lastActivityAt,r.lastActivitySurface] }
+export function familyCsvRow(r:Record<string,unknown>) { return [r.id,r.name,r.childName,r.ownerName,r.status,r.lifecycleState,r.deletionId,r.purgeAfter,r.operationStatus,r.errorCode,r.createdAt,r.activeMembers,r.storageUsedBytes,r.storageReservedBytes,r.quotaBytes,r.publishedMemories,r.mediaAttachments,r.maxState,r.lastObservedAt] }
+export function userCsvRow(r:Record<string,unknown>) { return [r.id,r.displayName,r.createdAt,r.lifecycleState,r.deletionId,r.purgeAfter,r.operationStatus,r.errorCode,r.activeFamilies,(r.familyNames as string[]).join('; '),r.moreFamilies,r.lastSessionCreatedAt,r.lastActivityAt,r.lastActivitySurface] }
 export async function exportCsv(c:{var:{user:{id:string}};body:(body:string,status:200,headers:Record<string,string>)=>Response},limits:Map<string,number[]>,headers:string[],rowsFn:()=>Promise<unknown[][]>) {
   const owner=c.var.user.id; const now=Date.now(); const recent=(limits.get(owner)??[]).filter((time)=>now-time<60_000)
   if(recent.length>=2) throw new AppError(429,'RATE_LIMITED','Экспорт доступен не чаще двух раз в минуту')

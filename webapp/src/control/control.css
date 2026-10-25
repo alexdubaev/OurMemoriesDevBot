@@ -148,6 +148,24 @@
 .memoly-control-root .control-skeleton-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
 .memoly-control-root .control-empty { min-height:190px;color:var(--control-text); }
 .memoly-control-root .control-detail-sheet { width:min(600px,100vw);max-width:100vw;gap:0;border-color:var(--control-border);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-lifecycle-card { border-color:var(--control-border);background:var(--control-surface); }
+.memoly-control-root .control-lifecycle-actions { display:flex;flex-wrap:wrap;align-items:center;gap:12px; }
+.memoly-control-root .control-lifecycle-dialog { width:min(560px,calc(100vw - 24px));max-height:min(88dvh,820px);overflow-y:auto;border-color:var(--control-border);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-lifecycle-dialog [data-slot="dialog-description"] { color:var(--control-muted); }
+.memoly-control-root .control-lifecycle-impact { display:flex;flex-direction:column;gap:8px;min-width:0; }
+.memoly-control-root .control-lifecycle-impact > code { overflow-wrap:anywhere;font-size:12px; }
+.memoly-control-root .control-lifecycle-impact dl { display:grid;gap:8px;margin:4px 0; }
+.memoly-control-root .control-lifecycle-impact dl > div { display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--control-border);padding-bottom:6px; }
+.memoly-control-root .control-lifecycle-impact dt { color:var(--control-muted); }
+.memoly-control-root .control-lifecycle-impact dd { margin:0;text-align:right; }
+.memoly-control-root .control-lifecycle-fingerprint { display:block;max-height:72px;overflow:auto;white-space:normal; }
+.memoly-control-root .control-lifecycle-form { display:flex;flex-direction:column;gap:10px; }
+.memoly-control-root .control-lifecycle-form > label { font-size:13px;font-weight:600; }
+@media (max-width:520px) {
+  .memoly-control-root .control-lifecycle-dialog { gap:16px;padding:18px; }
+  .memoly-control-root .control-lifecycle-impact dl > div { align-items:flex-start;flex-direction:column;gap:2px; }
+  .memoly-control-root .control-lifecycle-impact dd { text-align:left;overflow-wrap:anywhere; }
+}
 .memoly-control-root .control-detail-sheet [data-slot="sheet-header"] { border-bottom:1px solid var(--control-border);padding:22px 24px 16px; }
 .memoly-control-root .control-detail-sheet [data-slot="sheet-title"] { font-size:20px;line-height:1.3;overflow-wrap:anywhere; }
 .memoly-control-root .control-detail-body { flex:1;overflow:auto;padding:16px 20px 28px; }
