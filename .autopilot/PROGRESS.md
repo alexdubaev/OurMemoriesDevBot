@@ -50,3 +50,5 @@
 Статус: IN_PROGRESS, merge origin/main 954640d34f73103a577b497ec237c7701fcfad56 в PR #231 продолжается. Child-ветка содержит stage 1; wishlist/main conflict resolution и обязательные focused checks ещё не завершены. Не объявлять FULL, review, merge или deploy PASS.
 
 Известный интеграционный риск: App.tsx, albums composer и PhotoComposer совмещают multi-child tags с прямой загрузкой фото в альбом из current main. Сохранять оба пути и проверять gifts navigation/cache при завершении интеграции. Проверки по текущему незавершённому merge пока не запускались.
+
+- 2026-10-26 — CONTROL-USER-DELETE Task3 реализовал Control transport/contracts и интерфейс владельца: предпросмотр/удаление/восстановление MAX-пользователя и отдельная очистка семьи, фильтрацию purge в Control, fail-closed обработку 401/403 и состояние legacy inactive. Source HEAD 3c4873e; API/PG 16 тестов, 274 assertions, contracts 84/382, lint/build/typecheck PASS; Chromium+WebKit synthetic owner journey 2/2. Детали и external screenshots — в локальном Task3 evidence report; полный профиль/review/integration остаются за lead.
