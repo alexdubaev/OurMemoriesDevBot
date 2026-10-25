@@ -189,16 +189,15 @@ CREATE TRIGGER "max_channel_decisions_control_active_candidates"
 -- Old runtimes cannot turn a redacted processed inbox event back into content or a response.
 CREATE FUNCTION "control_reject_redacted_source_replay"() RETURNS trigger AS $$
 DECLARE payload_length INTEGER;
-DECLARE processed_at TIMESTAMPTZ(6);
 BEGIN
   IF TG_OP = 'UPDATE' AND OLD."rejection_code" = 'control_archive_purged' THEN
     RAISE EXCEPTION 'redacted provider source is immutable'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
   IF TG_OP = 'UPDATE' THEN RETURN NEW; END IF;
-  SELECT octet_length("encrypted_payload"), "processed_at" INTO payload_length, processed_at
+  SELECT octet_length("encrypted_payload") INTO payload_length
     FROM "telegram_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 OR processed_at IS NOT NULL THEN
+  IF payload_length = 0 THEN
     RAISE EXCEPTION 'redacted provider event cannot recreate content'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
@@ -210,16 +209,15 @@ CREATE TRIGGER "telegram_sources_control_no_redacted_replay"
 
 CREATE FUNCTION "control_reject_redacted_max_replay"() RETURNS trigger AS $$
 DECLARE payload_length INTEGER;
-DECLARE inbox_status "max_inbox_status";
 BEGIN
   IF TG_OP = 'UPDATE' AND OLD."rejection_code" = 'control_archive_purged' THEN
     RAISE EXCEPTION 'redacted provider source is immutable'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
   IF TG_OP = 'UPDATE' THEN RETURN NEW; END IF;
-  SELECT octet_length("encrypted_payload"), "status" INTO payload_length, inbox_status
+  SELECT octet_length("encrypted_payload") INTO payload_length
     FROM "max_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 OR inbox_status = 'processed' THEN
+  IF payload_length = 0 THEN
     RAISE EXCEPTION 'redacted provider event cannot recreate content'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
@@ -258,11 +256,10 @@ CREATE TRIGGER "max_source_attachments_control_active_family"
 
 CREATE FUNCTION "control_reject_response_for_redacted_inbox"() RETURNS trigger AS $$
 DECLARE payload_length INTEGER;
-DECLARE inbox_status "max_inbox_status";
 BEGIN
-  SELECT octet_length("encrypted_payload"), "status" INTO payload_length, inbox_status
+  SELECT octet_length("encrypted_payload") INTO payload_length
     FROM "max_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 OR inbox_status = 'processed' THEN
+  IF payload_length = 0 THEN
     RAISE EXCEPTION 'redacted provider event cannot create a response'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_response';
   END IF;
