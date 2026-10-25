@@ -70,6 +70,7 @@ try {
     const activeGuest = await actor(`${suffix}05`, 'Active guest')
     const revokedMember = await actor(`${suffix}06`, 'Previously revoked member')
     const browser = await actor(`${suffix}07`, 'Browser')
+    const createOwner = await actor(`${suffix}08`, 'Archived runtime create owner')
     app = createApp({ env: envFor(operator.id), prisma })
     const targetFamily = await request('/families', target.token, 'POST', { name: 'Synthetic grace archive', timezone: 'UTC' })
     assert.equal(targetFamily.status, 201)
@@ -134,7 +135,7 @@ try {
     assert.notEqual(await storage.headObject(targetMedia.originalKey), null)
     assert.notEqual(await storage.headObject(activeMedia.originalKey), null)
 
-    writeFileSync(statePath, JSON.stringify({ operator, target, purgeOwner, activeOwner, activeGuest, revokedMember, browser, targetFamilyId, purgeFamilyId, activeFamilyId,
+    writeFileSync(statePath, JSON.stringify({ operator, target, purgeOwner, activeOwner, activeGuest, revokedMember, browser, createOwner, targetFamilyId, purgeFamilyId, activeFamilyId,
       targetMedia, purgeMedia, activeMedia, browserChallenge: challengeId, verifierCookie,
       browserRefreshCookie: browser.cookie, trashDeletionId: trashed.deletionId, familyPurgeId: deletion.id,
       migrationLedger: await ledgerSnapshot(), }, null, 2))
@@ -159,7 +160,7 @@ try {
       assert.equal(redeemed.headers.get('set-cookie'), null)
 
       assert.equal((await request(`/families/${state.activeFamilyId}`, state.activeOwner.token)).status, 200)
-      const created = await request('/families', state.activeOwner.token, 'POST', { name: 'Archived runtime creation', timezone: 'UTC' })
+      const created = await request('/families', state.createOwner.token, 'POST', { name: 'Archived runtime creation', timezone: 'UTC' })
       assert.equal(created.status, 201)
       const invite = await request(`/families/${state.activeFamilyId}/invites`, state.activeOwner.token, 'POST', { role: 'full' })
       assert.equal(invite.status, 201)
