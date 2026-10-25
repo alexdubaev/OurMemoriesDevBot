@@ -16,6 +16,7 @@ const prisma = createPrisma(requireIntegrationDatabaseUrl())
 const actorId = '79000000-0000-4000-8000-000000000001'
 const targetId = '79000000-0000-4000-8000-000000000002'
 const familyId = '79100000-0000-4000-8000-000000000001'
+const otherFamilyId = '79100000-0000-4000-8000-000000000002'
 const mediaId = '79200000-0000-4000-8000-000000000001'
 const retainedMediaId = '79200000-0000-4000-8000-000000000002'
 const epoch = new Date('2030-01-01T00:00:00.000Z')
@@ -56,6 +57,23 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
   await prisma.family.create({ data: {
     id: familyId, ownerUserId: targetId, name: 'Synthetic private archive', timezone: 'UTC',
     members: { create: [{ userId: targetId, role: 'full' }] },
+  } })
+  const ownChild = await prisma.child.create({ data: { familyId, displayName: 'Private child name' } })
+  await prisma.memory.create({ data: {
+    familyId, childId: ownChild.id, authorId: targetId, kind: 'note', body: 'Private family memory',
+    occurredAt: epoch, firstPublishedAt: epoch,
+  } })
+  await prisma.family.create({ data: {
+    id: otherFamilyId, ownerUserId: actorId, name: 'Other owner archive', timezone: 'UTC',
+    members: { create: [
+      { userId: actorId, role: 'full' },
+      { userId: targetId, role: 'viewer', revokedAt: epoch, familyDisplayName: 'Former member alias' },
+    ] },
+  } })
+  const otherChild = await prisma.child.create({ data: { familyId: otherFamilyId, displayName: 'Other owner child' } })
+  await prisma.memory.create({ data: {
+    familyId: otherFamilyId, childId: otherChild.id, authorId: targetId, kind: 'note', body: 'Other owner memory',
+    occurredAt: epoch, firstPublishedAt: epoch,
   } })
   await prisma.controlUserDeletion.create({ data: {
     id: '79300000-0000-4000-8000-000000000001', targetUserId: targetId, actorUserId: actorId,
@@ -138,6 +156,11 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purged', displayName: null, email: null, passwordHash: null })
     expect(await prisma.mediaAsset.findUnique({ where: { id: mediaId } })).toBeNull()
     expect(await prisma.mediaAsset.findUnique({ where: { id: retainedMediaId } })).toBeNull()
+    expect(await prisma.memory.count({ where: { familyId } })).toBe(0)
+    expect(await prisma.child.count({ where: { familyId } })).toBe(0)
+    expect(await prisma.memory.count({ where: { familyId: otherFamilyId, body: 'Other owner memory' } })).toBe(1)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: otherFamilyId } })).toMatchObject({ name: 'Other owner archive', status: 'active' })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: otherFamilyId, userId: targetId } } })).toMatchObject({ familyDisplayName: null, revokedAt: epoch })
   })
 
   test('resumes a failed object delete after restart and leaves no false purged state', async () => {
