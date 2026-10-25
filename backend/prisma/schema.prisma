@@ -478,6 +478,10 @@ model ControlUserDeletion {
   deletedAt    DateTime  @map("deleted_at") @db.Timestamptz(6)
   purgeAfter   DateTime  @map("purge_after") @db.Timestamptz(6)
   restoredAt   DateTime? @map("restored_at") @db.Timestamptz(6)
+  purgeStage   String    @default("waiting") @map("purge_stage") @db.VarChar(24)
+  purgeCursor  String?   @map("purge_cursor") @db.VarChar(128)
+  purgedAt     DateTime? @map("purged_at") @db.Timestamptz(6)
+  lastErrorCode String?  @map("last_error_code") @db.VarChar(48)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   families     ControlUserDeletionFamily[]
 
@@ -504,9 +508,35 @@ model ControlFamilyDeletion {
   familyId     String   @unique(map: "control_family_deletions_family_id_key") @map("family_id") @db.Uuid
   actorUserId  String   @map("actor_user_id") @db.Uuid
   requestedAt  DateTime @map("requested_at") @db.Timestamptz(6)
+  purgeStage   String   @default("capture_media") @map("purge_stage") @db.VarChar(24)
+  purgeCursor  String?  @map("purge_cursor") @db.VarChar(128)
+  notBefore    DateTime @default(now()) @map("not_before") @db.Timestamptz(6)
+  keysCapturedAt DateTime? @map("keys_captured_at") @db.Timestamptz(6)
+  purgedAt     DateTime? @map("purged_at") @db.Timestamptz(6)
+  lastErrorCode String? @map("last_error_code") @db.VarChar(48)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("control_family_deletions")
+}
+
+/// Durable server-only object keys. No source-table FK by design: the source may be erased only
+/// after every key is confirmed absent, and this queue survives source deletion and restarts.
+model ControlStorageDelete {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  operationId    String    @map("operation_id") @db.Uuid
+  familyId       String?   @map("family_id") @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  objectKey      String    @unique(map: "control_storage_deletes_object_key_key") @map("object_key")
+  notBefore      DateTime  @default(now()) @map("not_before") @db.Timestamptz(6)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  attempts       Int       @default(0)
+  lastErrorCode  String?   @map("last_error_code") @db.VarChar(48)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([operationId, objectKey], map: "control_storage_deletes_operation_object_key_key")
+  @@index([operationId, completedAt, nextAttemptAt], map: "control_storage_deletes_due_idx")
+  @@map("control_storage_deletes")
 }
 
 model ControlLifecycleCommand {

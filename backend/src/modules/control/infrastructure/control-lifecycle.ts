@@ -399,7 +399,10 @@ export async function purgeControlFamily(
     }
     const family = await tx.family.findUniqueOrThrow({ where: { id: input.targetId }, select: { status: true, controlVersion: true } })
     const actionNow = now ?? new Date()
-    await tx.controlFamilyDeletion.create({ data: { familyId: input.targetId, actorUserId: input.actorId, requestedAt: actionNow } })
+    await tx.controlFamilyDeletion.create({ data: {
+      familyId: input.targetId, actorUserId: input.actorId, requestedAt: actionNow,
+      notBefore: new Date(actionNow.getTime() + 16 * 60 * 1000),
+    } })
     if (family.status === 'active') {
       await tx.family.update({ where: { id: input.targetId }, data: { status: 'deleting', controlVersion: family.controlVersion + 1 } })
     }

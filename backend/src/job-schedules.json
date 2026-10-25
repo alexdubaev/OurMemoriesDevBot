@@ -24,6 +24,14 @@
     "yandexExecutionTimeoutSeconds": 180
   },
   {
+    "key": "control-deletion",
+    "job": "control:deletion",
+    "expression": "* * * * *",
+    "yandexExpression": "* * ? * * *",
+    "lockTimeoutMs": 900000,
+    "yandexExecutionTimeoutSeconds": 840
+  },
+  {
     "key": "uploads",
     "job": "uploads:pending:cleanup",
     "expression": "15 * * * *",

@@ -43,7 +43,7 @@ type Backup = {
   channelChatId: bigint | null
   providerMessageId: string | null
   sendIntentAt: Date | null
-  family: { maxBackupChatId: bigint | null }
+  family: { maxBackupChatId: bigint | null; status: string }
   channelState?: string | null
   memory: { familyId: string; status: string; deletedAt: Date | null }
   attachments: BackupAttachment[]
@@ -71,6 +71,7 @@ export function createMaxMemoryBackupProcessor(options: {
     let backup = await options.repository.load(memoryId)
     if (!backup) throw new TerminalTaskError('MAX backup reservation does not exist')
     if (backup.state === 'sent' || backup.state === 'ambiguous' || backup.state === 'failed' || backup.state === 'needs_configuration') return
+    if (backup.family.status !== 'active') return
     // Another delivery may be the worker that owns this send. Never start a second POST from
     // this durable intent; provider outcomes are ambiguous until that worker records its result.
     if (backup.state === 'send_intent' || backup.sendIntentAt) return
@@ -225,7 +226,7 @@ export function createPrismaMaxMemoryBackupRepository(prisma: DbClient): MaxMemo
       const backup = await prisma.maxMemoryBackup.findUnique({
         where: { memoryId },
         include: {
-          family: { select: { maxBackupChatId: true } },
+          family: { select: { maxBackupChatId: true, status: true } },
           memory: { select: { familyId: true, status: true, deletedAt: true } },
           attachments: { orderBy: { position: 'asc' }, include: { media: true, uploadSession: true } },
         },

@@ -53,6 +53,16 @@ export const backgroundJobs = {
       console.error('Job control:retention failed.')
     }
   },
+  'control:deletion': async ({ prisma, privateStorage }, now) => {
+    try {
+      // Lifecycle cleanup is an already-approved obligation; CONTROL_ENABLED gates new owner
+      // commands and must not strand operations that were previously initiated.
+      const { runControlDeletionMaintenance } = await import('./modules/control')
+      await runControlDeletionMaintenance({ db: prisma, storage: privateStorage.storage }, now)
+    } catch {
+      console.error('Job control:deletion failed.')
+    }
+  },
   'auth:sessions:cleanup': async ({ env, prisma }, now) => {
     const dayMs = 24 * 60 * 60 * 1000
     const retentionCutoff = new Date(

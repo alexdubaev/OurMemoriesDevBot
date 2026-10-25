@@ -28,6 +28,24 @@ export type { MaxVideoPlayback } from './application/ports'
 export type { AlbumPhotoSourceCatalog, AlbumPhotoSourceProjection } from './application/ports'
 export { createPrismaAlbumPhotoSourceCatalog }
 
+/** All known and deterministic object keys for one family-owned media asset. */
+export function mediaPurgeObjectKeys(asset: {
+  originalKey: string
+  mediaKind: 'photo' | 'video' | 'voice'
+  variants: readonly { objectKey: string }[]
+}) {
+  const keys = [asset.originalKey, ...asset.variants.map(({ objectKey }) => objectKey)]
+  if (asset.mediaKind === 'photo') keys.push(
+    asset.originalKey.replace('media-originals/', 'media-display/'),
+    asset.originalKey.replace('media-originals/', 'media-preview/'),
+  )
+  if (asset.mediaKind === 'video') keys.push(videoPosterObjectKey(asset.originalKey))
+  if (asset.mediaKind === 'video' || asset.mediaKind === 'voice') {
+    keys.push(asset.originalKey.replace('media-originals/', 'media-playback/'))
+  }
+  return [...new Set(keys)]
+}
+
 export function createMediaModule(options: { db: DbClient; env: AppEnv; familyAccess: FamilyAccess;
   authenticateMediaAccess: (accessToken: string | undefined) => Promise<AuthenticatedPrincipal>
   requireAuth: MiddlewareHandler<AuthHttpEnv>; storage: PrivateStorage; maxVideoPlayback?: MaxVideoPlayback }) {
@@ -88,7 +106,7 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
       }, { maxWait: 5_000, timeout: 30_000 })
     },
     async prepareAsset({ mediaId, signal }: { mediaId: string; signal?: AbortSignal }) {
-      const asset = await runtime.prisma.mediaAsset.findUnique({ where: { id: mediaId } })
+      const asset = await runtime.prisma.mediaAsset.findFirst({ where: { id: mediaId, family: { status: 'active' } } })
       if (!asset || asset.deletedAt || asset.originalStatus !== 'stored' || asset.renditionStatus === 'ready' ||
           (asset.mediaKind !== 'voice' && asset.mediaKind !== 'video')) return
       const runner = createFfmpegRunner({ ffmpegPath: runtime.env.FFMPEG_PATH, ffprobePath: runtime.env.FFPROBE_PATH })
@@ -117,7 +135,7 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
           if (storedHash !== sha256) throw new Error('existing playback rendition hash does not match the prepared output')
         }
         await runtime.prisma.$transaction(async (tx) => {
-          const active = await tx.mediaAsset.findFirst({ where: { id: mediaId, deletedAt: null, originalStatus: 'stored' } })
+          const active = await tx.mediaAsset.findFirst({ where: { id: mediaId, deletedAt: null, originalStatus: 'stored', family: { status: 'active' } } })
           if (!active) return
           await tx.mediaVariant.upsert({ where: { mediaId_variant: { mediaId, variant: 'playback' } }, create: {
             familyId: asset.familyId, mediaId, variant: 'playback', objectKey, sha256, byteSize: BigInt(bytes.byteLength),
@@ -138,7 +156,8 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
       const asset = await runtime.prisma.mediaAsset.findUnique({
         where: { id: mediaId }, include: { variants: { where: { variant: { in: ['preview', 'display'] } } } },
       })
-      if (!asset || asset.deletedAt || asset.storageDeletedAt || asset.originalStatus !== 'stored' || asset.mediaKind !== 'video') return
+      if (!asset || asset.deletedAt || asset.storageDeletedAt || asset.originalStatus !== 'stored' || asset.mediaKind !== 'video' ||
+          !(await runtime.prisma.family.findFirst({ where: { id: asset.familyId, status: 'active' }, select: { id: true } }))) return
       if (hasExistingPoster(asset.variants)) return
 
       const operationSignal = signal
@@ -196,7 +215,8 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
               originalStatus: 'stored', mediaKind: 'video' },
             include: { variants: { where: { variant: { in: ['preview', 'display'] } } } },
           })
-          if (!current) return
+          const activeFamily = await tx.family.findFirst({ where: { id: asset.familyId, status: 'active' }, select: { id: true } })
+          if (!current || !activeFamily) return
           if (hasExistingPoster(current.variants)) return
           operationSignal.throwIfAborted()
 
@@ -266,7 +286,8 @@ async function removeLatePosterIfInactive(
        FOR UPDATE
     `)
     const current = await tx.mediaAsset.findUnique({ where: { id: mediaId } })
-    if (current && !current.deletedAt && !current.storageDeletedAt) return
+    const family = await tx.family.findFirst({ where: { id: familyId, status: 'active' }, select: { id: true } })
+    if (current && family && !current.deletedAt && !current.storageDeletedAt) return
     await waitWithSignal(() => runtime.privateStorage.storage.deleteObject(objectKey), cleanupSignal)
   }, { timeout: 15_000 })
 }

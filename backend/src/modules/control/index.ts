@@ -13,6 +13,7 @@ import { decodeEventCursor, eventCursor, exportCsv, familyCsvRow, notFound, pars
 import { familyWhere, listChildren, listFamilies, listUsers, queryEvents, queryFamilyById, queryOverview, queryStorage, queryUserById, queryFamilies, queryUsers, userWhere } from './infrastructure/control-read-repository'
 import { z } from 'zod'
 export { collectControlMetrics, createControlCollection, pruneControlTelemetry, readControlMetric, recordControlProgress, withControlReadTimeout } from './infrastructure/control-collection'
+export { runControlDeletionMaintenance } from './infrastructure/control-purge'
 import { CONTROL_STALE_AFTER_SECONDS, readControlMetric } from './infrastructure/control-collection'
 import { withControlReadTimeout } from './infrastructure/control-collection'
 
