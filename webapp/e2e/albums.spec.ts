@@ -500,7 +500,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
     await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
   }
   const initialYearCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
-  await page.setViewportSize({ width: 390, height: 500 })
+  await page.setViewportSize({ width: 390, height: 400 })
   const catalogMetrics = await page.evaluate(() => ({ viewportHeight: innerHeight, documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight) }))
   const targetCatalogScroll = Math.min(240, catalogMetrics.maxScrollY)
   expect(targetCatalogScroll).toBeGreaterThan(0)
