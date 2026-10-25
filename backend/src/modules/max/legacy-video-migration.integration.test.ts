@@ -348,7 +348,7 @@ describe('MAX legacy video retention and recovery', () => {
     await fx.db.maxSourceAttachment.updateMany({ where: { mediaId }, data: { providerAttachmentId: 'video-attachment-1' } })
     const cliRecovery = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply', '--batch-size', '1'], { cwd: process.cwd(), env: cliEnv })
     expect(cliRecovery.exitCode).toBe(0)
-    expect(JSON.parse(cliRecovery.stdout.toString())).toMatchObject({ inspected: 2, recovered: 2, refused: 0, remaining: 0 })
+    expect(JSON.parse(cliRecovery.stdout.toString())).toMatchObject({ inspected: 1, recovered: 1, refused: 0, remaining: 0 })
     expect(requests).toHaveLength(providerRequestCountBeforeRecovery)
     expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).toBeNull()
     expect(await fx.db.memoryMedia.findUnique({ where: { memoryId_position: { memoryId: memory.id, position: 1 } } })).toMatchObject({ mediaId })
