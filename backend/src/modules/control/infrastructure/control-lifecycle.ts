@@ -161,7 +161,7 @@ async function lockUsers(tx: Tx, userIds: readonly string[]) {
   if (ids.length === 0) return []
   return tx.$queryRaw<Array<{ id: string; state: LifecycleState }>>`
     SELECT id, control_state::text AS state FROM users
-     WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE
+     WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR NO KEY UPDATE
   `
 }
 
@@ -185,7 +185,7 @@ async function recordCommand(tx: Tx, input: { actorId: string; key: string; oper
 export async function trashControlUser(
   db: DbClient,
   input: { actorId: string; targetId: string; protectedIds: readonly string[]; key: string; fingerprint: string; confirmation: string },
-  now = new Date(),
+  now?: Date,
 ): Promise<LifecycleResult & { deletionId: string; purgeAfter: string }> {
   assertUuid(input.actorId, 'actorId'); assertUuid(input.targetId, 'targetId'); assertUuid(input.key, 'key')
   protectTarget(input.targetId, input.protectedIds); assertConfirmation(input.confirmation, input.targetId)
@@ -194,23 +194,13 @@ export async function trashControlUser(
   return db.$transaction(async (tx) => {
     await lifecycleLock(tx)
     await acquireUserAuthenticationAuthorityLock(tx, input.targetId)
-    const [target] = await lockUsers(tx, [input.targetId])
     const replay = await findReplay(tx, { actorId: input.actorId, key: input.key, hash })
     if (replay) return replay as LifecycleResult & { deletionId: string; purgeAfter: string }
-    if (!target || target.state !== 'active') throw new ControlLifecycleFailure('conflict', 'User is not active')
+    const target = await tx.user.findUnique({ where: { id: input.targetId }, select: { controlState: true } })
+    if (!target || target.controlState !== 'active') throw new ControlLifecycleFailure('conflict', 'User is not active')
 
     const currentPreview = await userPreview(tx, input.targetId)
     if (currentPreview.fingerprint !== input.fingerprint) throw new ControlLifecycleFailure('stale_preview', 'Impact changed; preview again')
-    const deletion = await tx.controlUserDeletion.create({ data: {
-      targetUserId: input.targetId,
-      actorUserId: input.actorId,
-      deletedAt: now,
-      purgeAfter: new Date(now.getTime() + USER_PURGE_GRACE_MS),
-    } })
-    const familyIds = await tx.$queryRaw<Array<{ id: string; originalStatus: FamilyState }>>`
-      SELECT id, status::text AS "originalStatus" FROM families WHERE owner_user_id = ${input.targetId}::uuid ORDER BY id
-    `
-    const ownedFamilyIds = familyIds.map(({ id }) => id)
     const affected = await tx.$queryRaw<Array<{ familyId: string; userId: string; role: Role; version: number; epoch: number }>>`
       SELECT fm.family_id AS "familyId", fm.user_id AS "userId", fm.role::text AS role,
              fm.version, fm.membership_epoch AS epoch
@@ -219,7 +209,14 @@ export async function trashControlUser(
          AND (fm.user_id = ${input.targetId}::uuid OR f.owner_user_id = ${input.targetId}::uuid)
        ORDER BY fm.family_id, fm.user_id
     `
-    await lockUsers(tx, affected.map(({ userId }) => userId))
+    const lockedUsers = await lockUsers(tx, [input.targetId, ...affected.map(({ userId }) => userId)])
+    if (!lockedUsers.some(({ id, state }) => id === input.targetId && state === 'active')) {
+      throw new ControlLifecycleFailure('conflict', 'User is not active')
+    }
+    const familyIds = await tx.$queryRaw<Array<{ id: string; originalStatus: FamilyState }>>`
+      SELECT id, status::text AS "originalStatus" FROM families WHERE owner_user_id = ${input.targetId}::uuid ORDER BY id
+    `
+    const ownedFamilyIds = familyIds.map(({ id }) => id)
     const allFamilyIds = [...new Set([...ownedFamilyIds, ...affected.map(({ familyId }) => familyId)])].sort()
     if (allFamilyIds.length) await tx.$queryRaw`SELECT id FROM families WHERE id = ANY(${allFamilyIds}::uuid[]) ORDER BY id FOR UPDATE`
 
@@ -240,6 +237,13 @@ export async function trashControlUser(
     }
     const lockedPreview = await userPreview(tx, input.targetId)
     if (lockedPreview.fingerprint !== input.fingerprint) throw new ControlLifecycleFailure('stale_preview', 'Impact changed; preview again')
+    const actionNow = now ?? new Date()
+    const deletion = await tx.controlUserDeletion.create({ data: {
+      targetUserId: input.targetId,
+      actorUserId: input.actorId,
+      deletedAt: actionNow,
+      purgeAfter: new Date(actionNow.getTime() + USER_PURGE_GRACE_MS),
+    } })
 
     for (const member of stable) {
       await tx.controlAccessSnapshot.upsert({
@@ -248,11 +252,18 @@ export async function trashControlUser(
           familyId: member.familyId, userId: member.userId, deletionId: deletion.id, role: member.role,
           expectedRevokedVersion: member.version + 1, expectedRevokedEpoch: member.epoch + 1,
         },
-        update: {},
+        update: {
+          deletionId: deletion.id,
+          role: member.role,
+          expectedRevokedVersion: member.version + 1,
+          expectedRevokedEpoch: member.epoch + 1,
+          cancelledAt: null,
+          createdAt: actionNow,
+        },
       })
       await tx.familyMember.update({
         where: { familyId_userId: { familyId: member.familyId, userId: member.userId } },
-        data: { revokedAt: now, version: { increment: 1 }, membershipEpoch: { increment: 1 } },
+        data: { revokedAt: actionNow, version: { increment: 1 }, membershipEpoch: { increment: 1 } },
       })
     }
     if (ownedFamilyIds.length) {
@@ -267,11 +278,11 @@ export async function trashControlUser(
       })
     }
     await tx.user.update({ where: { id: input.targetId }, data: { controlState: 'trashed', controlVersion: { increment: 1 } } })
-    await tx.authSession.updateMany({ where: { userId: input.targetId, revokedAt: null }, data: { revokedAt: now } })
-    await tx.passwordResetToken.updateMany({ where: { userId: input.targetId, usedAt: null }, data: { usedAt: now } })
+    await tx.authSession.updateMany({ where: { userId: input.targetId, revokedAt: null }, data: { revokedAt: actionNow } })
+    await tx.passwordResetToken.updateMany({ where: { userId: input.targetId, usedAt: null }, data: { usedAt: actionNow } })
     await tx.browserLoginChallenge.updateMany({
       where: { approvedUserId: input.targetId, state: 'approved', redeemedAt: null },
-      data: { state: 'redeemed', redeemedAt: now },
+      data: { state: 'redeemed', redeemedAt: actionNow },
     })
     const result: LifecycleResult & { deletionId: string; purgeAfter: string } = {
       operation: 'user_trashed', targetId: input.targetId, deletionId: deletion.id, state: 'trashed', purgeAfter: deletion.purgeAfter.toISOString(),
@@ -283,7 +294,7 @@ export async function trashControlUser(
 export async function restoreControlUser(
   db: DbClient,
   input: { actorId: string; targetId: string; protectedIds: readonly string[]; key: string; deletionId: string },
-  now = new Date(),
+  now?: Date,
 ): Promise<LifecycleResult> {
   assertUuid(input.actorId, 'actorId'); assertUuid(input.targetId, 'targetId'); assertUuid(input.key, 'key'); assertUuid(input.deletionId, 'deletionId')
   protectTarget(input.targetId, input.protectedIds)
@@ -299,29 +310,33 @@ export async function restoreControlUser(
       where: { id: input.deletionId, targetUserId: input.targetId, restoredAt: null },
     })
     if (!deletion || !target || target.state !== 'trashed') throw new ControlLifecycleFailure('stale_deletion_cycle', 'This deletion cycle is no longer restorable')
-    if (deletion.purgeAfter <= now) throw new ControlLifecycleFailure('restore_expired', 'The restore period has ended')
-
-    const pendingSnapshots = await tx.controlAccessSnapshot.findMany({
-      where: { deletionId: deletion.id, cancelledAt: null },
-      select: { familyId: true, userId: true, role: true, expectedRevokedVersion: true, expectedRevokedEpoch: true },
-      orderBy: [{ familyId: 'asc' }, { userId: 'asc' }],
-    })
-    await lockUsers(tx, [...pendingSnapshots.map(({ userId }) => userId), input.targetId])
     const familyIds = await tx.controlUserDeletionFamily.findMany({
       where: { deletionId: deletion.id }, select: { familyId: true, restoreEligible: true }, orderBy: { familyId: 'asc' },
     })
     const ownedFamilyIds = familyIds.map(({ familyId }) => familyId)
     const restoreEligibleIds = familyIds.filter(({ restoreEligible }) => restoreEligible).map(({ familyId }) => familyId)
-    const allFamilyIds = [...new Set([...ownedFamilyIds, ...pendingSnapshots.map(({ familyId }) => familyId)])].sort()
-    if (allFamilyIds.length) await tx.$queryRaw`SELECT id FROM families WHERE id = ANY(${allFamilyIds}::uuid[]) ORDER BY id FOR UPDATE`
-    const snapshots = await tx.controlAccessSnapshot.findMany({
-      where: { deletionId: deletion.id, cancelledAt: null },
+    const candidateFilter = {
+      cancelledAt: null,
+      OR: [{ userId: input.targetId }, ...(ownedFamilyIds.length ? [{ familyId: { in: ownedFamilyIds } }] : [])],
+    }
+    const pendingSnapshots = await tx.controlAccessSnapshot.findMany({
+      where: candidateFilter,
       select: { familyId: true, userId: true, role: true, expectedRevokedVersion: true, expectedRevokedEpoch: true },
       orderBy: [{ familyId: 'asc' }, { userId: 'asc' }],
     })
+    await lockUsers(tx, [...pendingSnapshots.map(({ userId }) => userId), input.targetId])
+    const allFamilyIds = [...new Set([...ownedFamilyIds, ...pendingSnapshots.map(({ familyId }) => familyId)])].sort()
+    if (allFamilyIds.length) await tx.$queryRaw`SELECT id FROM families WHERE id = ANY(${allFamilyIds}::uuid[]) ORDER BY id FOR UPDATE`
+    const snapshots = await tx.controlAccessSnapshot.findMany({
+      where: candidateFilter,
+      select: { familyId: true, userId: true, role: true, expectedRevokedVersion: true, expectedRevokedEpoch: true },
+      orderBy: [{ familyId: 'asc' }, { userId: 'asc' }],
+    })
+    const actionNow = now ?? new Date()
+    if (deletion.purgeAfter <= actionNow) throw new ControlLifecycleFailure('restore_expired', 'The restore period has ended')
 
     await tx.user.update({ where: { id: input.targetId }, data: { controlState: 'active', controlVersion: { increment: 1 } } })
-    await tx.controlUserDeletion.update({ where: { id: deletion.id }, data: { restoredAt: now } })
+    await tx.controlUserDeletion.update({ where: { id: deletion.id }, data: { restoredAt: actionNow } })
     await tx.$queryRaw`SELECT set_config('app.control_user_restore_cycle', ${deletion.id}, true)`
     const independentlyDeleting = restoreEligibleIds.length
       ? await tx.controlFamilyDeletion.findMany({ where: { familyId: { in: restoreEligibleIds } }, select: { familyId: true } })
@@ -360,7 +375,7 @@ export async function restoreControlUser(
 export async function purgeControlFamily(
   db: DbClient,
   input: { actorId: string; targetId: string; protectedIds: readonly string[]; key: string; fingerprint: string; confirmation: string },
-  now = new Date(),
+  now?: Date,
 ): Promise<LifecycleResult> {
   assertUuid(input.actorId, 'actorId'); assertUuid(input.targetId, 'targetId'); assertUuid(input.key, 'key')
   assertConfirmation(input.confirmation, input.targetId)
@@ -381,7 +396,8 @@ export async function purgeControlFamily(
       throw new ControlLifecycleFailure('already_purging', 'Family purge has already started')
     }
     const family = await tx.family.findUniqueOrThrow({ where: { id: input.targetId }, select: { status: true, controlVersion: true } })
-    await tx.controlFamilyDeletion.create({ data: { familyId: input.targetId, actorUserId: input.actorId, requestedAt: now } })
+    const actionNow = now ?? new Date()
+    await tx.controlFamilyDeletion.create({ data: { familyId: input.targetId, actorUserId: input.actorId, requestedAt: actionNow } })
     if (family.status === 'active') {
       await tx.family.update({ where: { id: input.targetId }, data: { status: 'deleting', controlVersion: family.controlVersion + 1 } })
     }

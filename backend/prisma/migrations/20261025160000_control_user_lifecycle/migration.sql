@@ -160,7 +160,7 @@ BEGIN
          AND link."restore_eligible"
          AND NEW."owner_user_id" = deletion."target_user_id"
          AND deletion."restored_at" IS NOT NULL
-         AND deletion."purge_after" > CURRENT_TIMESTAMP
+         AND deletion."purge_after" > clock_timestamp()
          AND owner."control_state" = 'active'
     ) THEN
       RAISE EXCEPTION 'an inactive family cannot be reactivated' USING ERRCODE = '23514';

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createPrisma } from '../../db'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createPrismaAuthRepository, createPrismaBrowserLinkRepository, createPrismaMaxAuthRepository } from '../auth/infrastructure/auth-repository'
+import { FamilyService } from '../families/application/family-service'
 import {
   previewFamilyDeletion,
   previewUserDeletion,
@@ -15,9 +16,11 @@ const prisma = createPrisma(databaseUrl)
 const actorId = '70000000-0000-4000-8000-000000000001'
 const targetId = '70000000-0000-4000-8000-000000000002'
 const formerMemberId = '70000000-0000-4000-8000-000000000003'
+const overlappingUserId = '70000000-0000-4000-8000-000000000004'
 const ownedFamilyId = '71000000-0000-4000-8000-000000000001'
 const sharedFamilyId = '71000000-0000-4000-8000-000000000002'
 const legacyFamilyId = '71000000-0000-4000-8000-000000000003'
+const sharedChildId = '72000000-0000-4000-8000-000000000002'
 const protectedIds = [actorId]
 
 async function seed() {
@@ -25,6 +28,7 @@ async function seed() {
     { id: actorId, displayName: 'Control operator' },
     { id: targetId, displayName: 'Synthetic target' },
     { id: formerMemberId, displayName: 'Synthetic former member' },
+    { id: overlappingUserId, displayName: 'Synthetic overlapping deletion target' },
   ] })
   const identity = await prisma.externalIdentity.create({
     data: { userId: targetId, provider: 'max', subject: '987654321' },
@@ -70,6 +74,7 @@ async function seed() {
         { userId: targetId, role: 'full' },
         { userId: actorId, role: 'viewer' },
         { userId: formerMemberId, role: 'viewer', revokedAt: new Date('2026-01-01T00:00:00Z') },
+        { userId: overlappingUserId, role: 'viewer' },
       ] },
     },
   })
@@ -82,9 +87,11 @@ async function seed() {
       members: { create: [
         { userId: actorId, role: 'full' },
         { userId: targetId, role: 'viewer' },
+        { userId: overlappingUserId, role: 'viewer' },
       ] },
     },
   })
+  await prisma.child.create({ data: { id: sharedChildId, familyId: sharedFamilyId, displayName: 'Synthetic shared child' } })
   const child = await prisma.child.create({ data: { familyId: ownedFamilyId, displayName: 'Synthetic child' } })
   await prisma.memory.create({
     data: {
@@ -207,6 +214,249 @@ describe('Control account lifecycle', () => {
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: formerMemberId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.authSession.count({ where: { userId: targetId, revokedAt: null } })).toBe(0)
+  })
+
+  test('keeps an overlapping member grant pending when the family owner restores first', async () => {
+    const ownerPreview = await previewUserDeletion(prisma, targetId, protectedIds)
+    const ownerTrash = await trashControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000112',
+      fingerprint: ownerPreview.fingerprint,
+      confirmation: targetId,
+    })
+    const memberPreview = await previewUserDeletion(prisma, overlappingUserId, protectedIds)
+    const memberTrash = await trashControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000113',
+      fingerprint: memberPreview.fingerprint,
+      confirmation: overlappingUserId,
+    })
+    await restoreControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000114',
+      deletionId: ownerTrash.deletionId,
+    })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: overlappingUserId } } })).toMatchObject({ revokedAt: expect.any(Date) })
+    await restoreControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000115',
+      deletionId: memberTrash.deletionId,
+    })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: overlappingUserId } } })).toMatchObject({ role: 'viewer', revokedAt: null })
+  })
+
+  test('keeps an overlapping member grant pending when the member restores first', async () => {
+    const ownerPreview = await previewUserDeletion(prisma, targetId, protectedIds)
+    const ownerTrash = await trashControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000116',
+      fingerprint: ownerPreview.fingerprint,
+      confirmation: targetId,
+    })
+    const memberPreview = await previewUserDeletion(prisma, overlappingUserId, protectedIds)
+    const memberTrash = await trashControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000117',
+      fingerprint: memberPreview.fingerprint,
+      confirmation: overlappingUserId,
+    })
+    await restoreControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000118',
+      deletionId: memberTrash.deletionId,
+    })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: overlappingUserId } } })).toMatchObject({ revokedAt: expect.any(Date) })
+    await restoreControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000119',
+      deletionId: ownerTrash.deletionId,
+    })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: overlappingUserId } } })).toMatchObject({ role: 'viewer', revokedAt: null })
+  })
+
+  test('rejoin after an explicit revoke replaces the cancelled access snapshot', async () => {
+    const ownerPreview = await previewUserDeletion(prisma, targetId, protectedIds)
+    await trashControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000120',
+      fingerprint: ownerPreview.fingerprint,
+      confirmation: targetId,
+    })
+    const memberPreview = await previewUserDeletion(prisma, overlappingUserId, protectedIds)
+    const memberTrash = await trashControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000121',
+      fingerprint: memberPreview.fingerprint,
+      confirmation: overlappingUserId,
+    })
+    const familyService = new FamilyService(
+      prisma,
+      { requireOwner: async () => undefined } as never,
+      {} as never,
+      {} as never,
+      'synthetic-idempotency-secret',
+      1_000_000,
+    )
+    await familyService.removeMember({ familyId: sharedFamilyId, principal: { userId: actorId, sessionId: 'synthetic-session' } }, overlappingUserId, 1)
+    expect(await prisma.controlAccessSnapshot.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: overlappingUserId } } })).toMatchObject({ cancelledAt: expect.any(Date) })
+    await restoreControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000122',
+      deletionId: memberTrash.deletionId,
+    })
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: sharedFamilyId, userId: overlappingUserId } },
+      data: { role: 'full', revokedAt: null, version: { increment: 1 }, membershipEpoch: { increment: 1 } },
+    })
+
+    const nextPreview = await previewUserDeletion(prisma, overlappingUserId, protectedIds)
+    const nextTrash = await trashControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000123',
+      fingerprint: nextPreview.fingerprint,
+      confirmation: overlappingUserId,
+    })
+    await restoreControlUser(prisma, {
+      actorId, targetId: overlappingUserId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000124',
+      deletionId: nextTrash.deletionId,
+    })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: overlappingUserId } } })).toMatchObject({ role: 'full', revokedAt: null })
+  })
+
+  test('serializes a real memory foreign-key write with account trash without lock inversion', async () => {
+    const preview = await previewUserDeletion(prisma, targetId, protectedIds)
+    let releaseWriter!: () => void
+    let signalFamilyLock!: () => void
+    const holdWriter = new Promise<void>((resolve) => { releaseWriter = resolve })
+    const familyLocked = new Promise<void>((resolve) => { signalFamilyLock = resolve })
+    const child = await prisma.child.findFirstOrThrow({ where: { familyId: ownedFamilyId } })
+    const writer = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${ownedFamilyId}::uuid FOR KEY SHARE`
+      signalFamilyLock()
+      await holdWriter
+      return tx.memory.create({
+        data: {
+          familyId: ownedFamilyId,
+          childId: child.id,
+          authorId: targetId,
+          kind: 'note',
+          body: 'Memory inserted while deletion waits on the family row',
+          occurredAt: new Date(),
+          firstPublishedAt: new Date(),
+        },
+      })
+    })
+    await familyLocked
+    const deletion = trashControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000125',
+      fingerprint: preview.fingerprint,
+      confirmation: targetId,
+    })
+
+    let blocked = false
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*)::bigint AS count FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `
+      if (row!.count > 0n) { blocked = true; break }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(blocked).toBe(true)
+    releaseWriter()
+    await writer
+    await expect(Promise.resolve(deletion)).rejects.toMatchObject({ code: 'stale_preview' })
+    expect(await prisma.memory.count({ where: { familyId: ownedFamilyId, body: 'Memory inserted while deletion waits on the family row' } })).toBe(1)
+
+    const familyPreview = await previewFamilyDeletion(prisma, sharedFamilyId)
+    let releaseFamilyWriter!: () => void
+    let signalSharedLock!: () => void
+    const holdFamilyWriter = new Promise<void>((resolve) => { releaseFamilyWriter = resolve })
+    const sharedLocked = new Promise<void>((resolve) => { signalSharedLock = resolve })
+    const familyWriter = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${sharedFamilyId}::uuid FOR KEY SHARE`
+      signalSharedLock()
+      await holdFamilyWriter
+      return tx.memory.create({
+        data: {
+          familyId: sharedFamilyId,
+          childId: sharedChildId,
+          authorId: actorId,
+          kind: 'note',
+          body: 'Memory inserted while family purge waits on the family row',
+          occurredAt: new Date(),
+          firstPublishedAt: new Date(),
+        },
+      })
+    })
+    await sharedLocked
+    const familyPurge = purgeControlFamily(prisma, {
+      actorId,
+      targetId: sharedFamilyId,
+      protectedIds,
+      key: '70000000-0000-4000-8000-000000000128',
+      fingerprint: familyPreview.fingerprint,
+      confirmation: sharedFamilyId,
+    })
+    blocked = false
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*)::bigint AS count FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `
+      if (row!.count > 0n) { blocked = true; break }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(blocked).toBe(true)
+    releaseFamilyWriter()
+    await familyWriter
+    await expect(Promise.resolve(familyPurge)).rejects.toMatchObject({ code: 'stale_preview' })
+    expect(await prisma.memory.count({ where: { familyId: sharedFamilyId, body: 'Memory inserted while family purge waits on the family row' } })).toBe(1)
+  })
+
+  test('samples restore time after waiting on the family lock at the deadline', async () => {
+    const preview = await previewUserDeletion(prisma, targetId, protectedIds)
+    const requestedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000 + 1_500)
+    const trashed = await trashControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000126',
+      fingerprint: preview.fingerprint,
+      confirmation: targetId,
+    }, requestedAt)
+    const purgeAfter = new Date(trashed.purgeAfter)
+
+    let releaseFamily!: () => void
+    let signalFamilyLock!: () => void
+    const holdFamily = new Promise<void>((resolve) => { releaseFamily = resolve })
+    const familyLocked = new Promise<void>((resolve) => { signalFamilyLock = resolve })
+    const blocker = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${ownedFamilyId}::uuid FOR UPDATE`
+      signalFamilyLock()
+      await holdFamily
+    })
+    await familyLocked
+    const restoration = restoreControlUser(prisma, {
+      actorId, targetId, protectedIds,
+      key: '70000000-0000-4000-8000-000000000127',
+      deletionId: trashed.deletionId,
+    })
+    let blocked = false
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [row] = await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*)::bigint AS count FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `
+      if (row!.count > 0n) { blocked = true; break }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(blocked).toBe(true)
+    while (Date.now() <= purgeAfter.getTime() + 100) await new Promise((resolve) => setTimeout(resolve, 25))
+    releaseFamily()
+    await blocker
+    await expect(Promise.resolve(restoration)).rejects.toMatchObject({ code: 'restore_expired' })
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'trashed' })
   })
 
   test('replays the exact result without extending the deadline and rejects a stale cycle', async () => {
