@@ -14,6 +14,7 @@ describe('control contracts', () => {
     const family = controlFamilyRowSchema.safeParse({
       id: '00000000-0000-4000-8000-000000000001', name: null, childName: null, ownerName: null,
       status: 'active', createdAt: new Date().toISOString(), activeMembers: 0,
+      lifecycleState: 'active', deletionId: null, purgeAfter: null, operationStatus: null, errorCode: null,
       storageUsedBytes: '9007199254740993', storageReservedBytes: '0', quotaBytes: null,
       publishedMemories: 0, mediaAttachments: 0, maxState: null, lastObservedAt: null,
       maxLastCheckedAt: null, maxVerificationAgeSeconds: null,
