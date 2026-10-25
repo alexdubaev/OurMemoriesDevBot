@@ -2963,6 +2963,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   mkdirSync(pgFixture, { recursive: true })
   writeFileSync(resolve(pgFixture, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
   writeFileSync(resolve(pgFixture, 'index.js'), `import { appendFileSync } from 'node:fs'
+appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' baseline=' + (process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS ?? '').split('\\n').length + ' candidate=' + (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').split('\\n').length + '\\n')
 export class Client {
     async connect() {}
     async end() {}
