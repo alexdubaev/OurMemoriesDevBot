@@ -2965,7 +2965,11 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   writeFileSync(resolve(pgFixture, 'index.js'), `import { appendFileSync } from 'node:fs'
 const expectedBase = (process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS ?? '').trim().split('\\n')
 const expectedCandidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n')
-appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' phase=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE + ' baseline=' + expectedBase.length + ' candidate=' + expectedCandidate.length + ' suffix=' + expectedCandidate.slice(-3).map(line => line.split(':')[0]).join(',') + ' checksums=' + expectedCandidate.slice(-3).map(line => line.split(':')[1]).join(',') + '\\n')
+const baseParts = expectedBase.map(line => line.split(':'))
+const candidateParts = expectedCandidate.map(line => line.split(':'))
+const prefixMismatches = candidateParts.slice(0, 56).flatMap((row, index) => row[0] !== baseParts[index]?.[0] ||
+  ![row[1], row[2]].some(checksum => [baseParts[index]?.[1], baseParts[index]?.[2]].includes(checksum)) ? [index] : [])
+appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' phase=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE + ' baseline=' + expectedBase.length + ' candidate=' + expectedCandidate.length + ' prefixMismatches=' + prefixMismatches.join(',') + ' suffix=' + expectedCandidate.slice(-3).map(line => line.split(':')[0]).join(',') + ' checksums=' + expectedCandidate.slice(-3).map(line => line.split(':')[1]).join(',') + '\\n')
 export class Client {
     async connect() {}
     async end() {}
