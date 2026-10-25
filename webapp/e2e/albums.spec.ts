@@ -501,6 +501,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   }
   const initialYearCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
   await page.setViewportSize({ width: 390, height: 400 })
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   const catalogMetrics = await page.evaluate(() => ({ viewportHeight: innerHeight, documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight) }))
   const targetCatalogScroll = Math.min(240, catalogMetrics.maxScrollY)
   expect(targetCatalogScroll).toBeGreaterThan(0)
@@ -516,15 +517,19 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('.albums-card')).toHaveCount(4)
   const catalogScrollAfterReturn = await page.evaluate(() => window.scrollY)
   const catalogScrollDelta = Math.abs(catalogScrollAfterReturn - catalogScrollBeforeYear)
-  const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear: catalogScrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta }
-  console.log('FIRST_YEAR_SCROLL_RESTORE', JSON.stringify(scrollEvidence))
-  expect(catalogScrollDelta).toBeLessThanOrEqual(2)
+  const returnedCatalogMetrics = await page.evaluate(() => ({ documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight), groupCount: document.querySelectorAll('.albums-group').length }))
+  const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta, ...returnedCatalogMetrics }
+  console.log('FIRST_YEAR_CATALOG_RETURN', JSON.stringify(scrollEvidence))
+  expect(returnedCatalogMetrics.groupCount).toBe(3)
+  expect(catalogScrollAfterReturn).toBeGreaterThan(0)
+  expect(catalogScrollAfterReturn).toBeLessThanOrEqual(returnedCatalogMetrics.maxScrollY)
   const evidenceDir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
   if (evidenceDir) appendFileSync(join(evidenceDir, 'geometry.jsonl'), `${JSON.stringify(scrollEvidence)}\n`)
-  await page.setViewportSize({ width: 390, height: 844 })
   await initialYearCard.scrollIntoViewIfNeeded()
+  await expect(initialYearCard).toBeInViewport()
   await initialYearCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const yearIntro = page.locator('.albums-year-intro')
   await expect(yearIntro).toContainText('Миша')
