@@ -65,12 +65,12 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
   await prisma.mediaAsset.create({ data: {
     id: mediaId, familyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
     originalKey: 'media-originals/control-purge-test/original.jpg', declaredMime: 'image/jpeg',
-    verifiedMime: 'image/jpeg', byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
+    verifiedMime: 'image/jpeg', sha256: 'a'.repeat(64), byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
   } })
   await prisma.mediaAsset.create({ data: {
     id: retainedMediaId, familyId, uploaderId: targetId, sourceKind: 'max', purpose: 'memory', mediaKind: 'video',
     originalKey: 'media-originals/control-purge-test/retained.mp4', declaredMime: 'video/mp4',
-    verifiedMime: 'video/mp4', byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
+    verifiedMime: 'video/mp4', sha256: 'b'.repeat(64), byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
   } })
   await prisma.family.update({ where: { id: familyId }, data: { storageUsedBytes: 14n } })
   const localStorage = storage()
