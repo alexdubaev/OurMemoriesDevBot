@@ -424,6 +424,84 @@ test('MAX user can leave a terminal unavailable invitation and continue to My Fa
   expect(acceptRequests).toBe(0)
 })
 
+test('MAX documented invite launch authenticates current identity and opens the invited family despite its incomplete own family', async ({ browser, page }) => {
+  const recipientId = 7_750_000 + Math.floor(Math.random() * 100_000)
+  const inviterId = recipientId + 200_000
+  const recipientContext = await browser.newContext()
+  const recipientPage = await recipientContext.newPage()
+  const recipientToken = await signInMax(recipientPage, { id: recipientId, first_name: 'Invite recipient' })
+  const ownFamilyResponse = await recipientPage.request.post('/api/v1/families', {
+    headers: { Authorization: `Bearer ${recipientToken}`, 'Idempotency-Key': randomUUID() },
+    data: { name: 'Recipient incomplete family', timezone: 'Europe/Moscow' },
+  })
+  expect(ownFamilyResponse.status()).toBe(201)
+
+  const inviterToken = await signInMax(page, { id: inviterId, first_name: 'Invite owner' })
+  const invitedFamily = await createAuditFamily(page, inviterToken, 'Exact invited family', 'Invited child', 'Invited family history')
+  const inviteResponse = await page.request.post(`/api/v1/families/${invitedFamily.id}/invites`, {
+    headers: { Authorization: `Bearer ${inviterToken}`, 'Idempotency-Key': randomUUID() }, data: { role: 'viewer' },
+  })
+  expect(inviteResponse.status()).toBe(201)
+  const rawInvite = (await inviteResponse.json() as { rawToken: string }).rawToken
+  const recipientState = await recipientContext.storageState()
+
+  const launchContext = await browser.newContext({ storageState: recipientState })
+  await launchContext.addInitScript((data: string) => {
+    Object.defineProperty(window, 'WebApp', {
+      configurable: true,
+      value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} },
+    })
+  }, signedMaxInitData({ id: recipientId, first_name: 'Invite recipient' }, randomUUID(), null))
+  const launchPage = await launchContext.newPage()
+  const authRequests: string[] = []
+  const previewRequests: string[] = []
+  let failFirstPreview = true
+  launchPage.on('request', (request) => {
+    if (request.url().endsWith('/api/v1/auth/max')) authRequests.push(request.url())
+    if (request.url().endsWith('/api/v1/invites/preview')) previewRequests.push(request.url())
+  })
+  await launchPage.route('**/api/v1/invites/preview', async (route) => {
+    if (!failFirstPreview) return route.continue()
+    failFirstPreview = false
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({
+      error: { code: 'INTERNAL_ERROR', message: 'synthetic preview failure', requestId: randomUUID() },
+    }) })
+  })
+  await launchPage.goto(`/?WebAppStartParam=invite_${rawInvite}`)
+
+  await expect(launchPage.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
+  await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+  await expect(launchPage.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
+  expect(authRequests).toHaveLength(1)
+  expect(previewRequests).toHaveLength(1)
+  await launchPage.getByRole('button', { name: 'Повторить' }).click()
+  await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
+  expect(previewRequests).toHaveLength(2)
+  await launchPage.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(launchPage.getByText('Invited family history', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(launchPage.getByText('Recipient incomplete family')).toHaveCount(0)
+
+  await launchContext.close()
+  await recipientContext.close()
+})
+
+test('MAX malformed invite intent stays on the invitation issue flow instead of own-family creation', async ({ page }) => {
+  const maxId = 7_760_000 + Math.floor(Math.random() * 100_000)
+  let familyCreates = 0
+  await page.route('**/api/v1/families', async (route) => {
+    if (route.request().method() === 'POST') familyCreates += 1
+    await route.continue()
+  })
+  await page.addInitScript((data: string) => {
+    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
+  }, signedMaxInitData({ id: maxId, first_name: 'MAX malformed invite' }, randomUUID(), null))
+  await page.goto('/?WebAppStartParam=invite_short')
+  await page.getByRole('button', { name: 'Продолжить' }).click()
+  await expect(page.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
+  expect(familyCreates).toBe(0)
+})
+
 test('MAX-FULL: owner switches family data while an older feed response is pending', async ({ browser, page }, testInfo) => {
   const actorId = 7_800_000 + Math.floor(Math.random() * 100_000)
   const hostId = actorId + 200_000
@@ -731,13 +809,13 @@ async function createAuditFamily(page: import('@playwright/test').Page, token: s
   return { id: family.id, noteId: (await noteResponse.json() as ApiMemory).id, photoId }
 }
 
-function signedMaxInitData(user: { id: number; first_name: string }, queryId: string, startParam: string) {
+function signedMaxInitData(user: { id: number; first_name: string }, queryId: string, startParam: string | null) {
   const params = new URLSearchParams({
     auth_date: String(Math.floor(Date.now() / 1000)),
     query_id: queryId,
-    start_param: startParam,
     user: JSON.stringify(user),
   })
+  if (startParam !== null) params.set('start_param', startParam)
   const dataCheck = [...params.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
     .map(([key, value]) => `${key}=${value}`).join('\n')
   const secret = createHmac('sha256', 'WebAppData').update(maxBotToken).digest()

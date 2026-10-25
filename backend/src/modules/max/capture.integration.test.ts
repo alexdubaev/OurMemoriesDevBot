@@ -1905,9 +1905,8 @@ describe('MAX durable capture', () => {
     await expect(alreadyDelivery({ responseId: alreadyResponse.id })).resolves.toBe('done')
     expect(alreadySent[0]).toMatchObject({
       text: 'Вы уже состоите в этой семье. Откройте memoLy.',
-      buttons: [{ type: 'open_app', text: 'Открыть memoLy', webApp: 'OurMemoriesMaxBot' }],
+      buttons: [{ type: 'open_app', text: 'Открыть memoLy', webApp: 'OurMemoriesMaxBot', payload: `invite_${usedToken}` }],
     })
-    expect(alreadySent[0]?.buttons?.[0]).not.toHaveProperty('payload')
     expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: alreadyAccepted.inboxId } })).encryptedPayload.byteLength).toBe(0)
   })
 
