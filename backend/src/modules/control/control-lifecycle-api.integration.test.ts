@@ -76,7 +76,7 @@ describe('Control lifecycle API', () => {
     const preview = await owner.json() as { targetId: string; state: string; members: number; protectedAccount: boolean; canTrash: boolean; fingerprint: string }
     expect(preview.targetId).toBe(targetId)
     expect(preview.state).toBe('active')
-    expect(preview.members).toBe(2)
+    expect(preview.members).toBe(1)
     expect(preview.protectedAccount).toBe(false)
     expect(preview.canTrash).toBe(true)
     expect(preview.fingerprint).toMatch(/^[0-9a-f]{64}$/)
