@@ -479,6 +479,7 @@ quiesce_mm0_spike() {
 }
 
 guard_membership_transition() {
+	local context=${1:-migration}
 	[ "${SELECTEL_CI_RELEASE:-false}" = true ] && [[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] ||
 		die 'migration and promotion require the guarded ci-release entry point and inherited release lock'
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'B2 release guard requires an immutable release SHA'
@@ -500,7 +501,33 @@ guard_membership_transition() {
 		return 0
 	fi
 	[ ! -e "$MM0_FORWARD_MARKER" ] || die 'MM0 forward-only release requires guarded forward recovery'
-	local service running image tag
+	local service running image tag count stopped_count=0
+	if [ "$context" = promotion ]; then
+		for service in backend worker scheduler; do
+			running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+				--filter "label=com.docker.compose.service=$service") || die "cannot enumerate running $service service"
+			count=$(printf '%s\n' "$running" | awk 'NF { count += 1 } END { print count + 0 }')
+			[ "$count" -eq 0 ] && stopped_count=$((stopped_count + 1))
+		done
+		if [ "$stopped_count" -eq 3 ]; then
+			[ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA")" = max-video ] ||
+				die 'stopped-writer promotion requires the exact MAX video recovery profile'
+			validate_rollback_file
+			set -a
+			. "$ROLLBACK_ENV"
+			set +a
+			[ "${PREVIOUS_BACKEND_IMAGE_TAG:-}" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
+				[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] ||
+				die 'stopped-writer promotion requires the exact pinned MAX recovery pair'
+			load_runtime_secrets
+			verify_application_rollback complete ||
+				die 'stopped-writer promotion requires exact completed MAX migration history and recovery readiness'
+			printf 'Exact MAX migration and recovery readiness verified for stopped-writer promotion.\n'
+			return 0
+		fi
+	elif [ "$context" != migration ]; then
+		die 'unknown membership transition context'
+	fi
 	for service in backend worker scheduler; do
 		running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
 			--filter "label=com.docker.compose.service=$service")
@@ -1564,6 +1591,9 @@ verify_application_rollback() {
 
 rollback() {
 	verify_application_rollback complete || die 'application rollback compatibility could not be verified'
+	# The application verifier loads secrets in a subshell. Initialize the parent
+	# Compose credential context before recovery history/readiness and inverse.
+	load_runtime_secrets
 	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA")" = max-video ]; then
 		rollback_apply_max_video_recovery
 	fi
@@ -1573,7 +1603,6 @@ rollback() {
 	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
-	load_runtime_secrets
 	gateway_preflight
 	if [ "${SELECTEL_CI_RELEASE:-false}" = true ]; then
 		restore_configuration_backup
@@ -1590,6 +1619,22 @@ rollback() {
 	gate_policy=$(rollback_auth_gate_for_verified_pair) || die 'application rollback gate policy could not be verified'
 	# Install and verify this exact pair's gateway policy before promoting application processes.
 	ROLLBACK_AUTH_GATE=$gate_policy render_edge_candidate
+	local running_backend backend_count backend_started=false
+	if [ "$gate_policy" = false ]; then
+		running_backend=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+			--filter 'label=com.docker.compose.service=backend') || die 'cannot enumerate running backend service before rollback routing'
+		backend_count=$(printf '%s\n' "$running_backend" | awk 'NF { count += 1 } END { print count + 0 }')
+		[ "$backend_count" -le 1 ] || die 'running backend service identity is ambiguous before rollback routing'
+		if [ "$backend_count" -eq 0 ]; then
+			[ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
+				[ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] &&
+				[ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG")" = max-video ] ||
+				die 'stopped-backend restoration requires the exact verified MAX recovery pair'
+			compose up -d --no-deps --force-recreate backend || die 'compatible rollback backend promotion failed before auth routing verification'
+			wait_backend_internal
+			backend_started=true
+		fi
+	fi
 	activate_gateway
 	gate_status=$(curl --silent --show-error --max-time 5 -o /dev/null -w '%{http_code}' "$PUBLIC_URL/api/v1/auth/max") ||
 		die 'cannot verify rollback authentication maintenance'
@@ -1598,9 +1643,14 @@ rollback() {
 	else
 		[ "$gate_status" = 404 ] || die 'normal authentication routing is not active for the verified rollback target'
 	fi
-	compose up -d --no-deps --force-recreate backend worker scheduler static ||
-		die 'application rollback service promotion failed'
-	wait_backend_internal
+	if [ "$backend_started" = true ]; then
+		compose up -d --no-deps --force-recreate worker scheduler static ||
+			die 'application rollback jobs and static promotion failed'
+	else
+		compose up -d --no-deps --force-recreate backend worker scheduler static ||
+			die 'application rollback service promotion failed'
+		wait_backend_internal
+	fi
 	verify_static_internal
 	docker exec "$GATEWAY_CONTAINER" caddy validate --config "$GATEWAY_CADDYFILE" --adapter caddyfile
 	docker exec "$GATEWAY_CONTAINER" caddy reload --config "$GATEWAY_CADDYFILE" --adapter caddyfile
@@ -1732,7 +1782,7 @@ rollback_static() {
 deploy() {
 	read_static_rollback_tag
 	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
-	guard_membership_transition
+	guard_membership_transition promotion
 	preflight
 	backup_server_state
 	if [ "${MM0_BOUNDARY:-false}" != true ] && [ ! -e "$FORWARD_MARKER" ]; then
