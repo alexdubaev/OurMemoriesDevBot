@@ -80,14 +80,14 @@ $$ LANGUAGE plpgsql;
 -- consuming an already-approved challenge must not introduce a reverse lock order.
 CREATE FUNCTION "control_require_active_browser_approval"() RETURNS trigger AS $$
 DECLARE
-  control_state "control_user_state";
+  user_control_state "control_user_state";
 BEGIN
   IF NEW."state" = 'approved' AND NEW."approved_user_id" IS NOT NULL AND
      (TG_OP = 'INSERT' OR OLD."state" IS DISTINCT FROM 'approved' OR
       OLD."approved_user_id" IS DISTINCT FROM NEW."approved_user_id") THEN
-    SELECT "control_state" INTO control_state
+    SELECT "control_state" INTO user_control_state
       FROM "users" WHERE "id" = NEW."approved_user_id" FOR NO KEY UPDATE;
-    IF control_state IS DISTINCT FROM 'active'::"control_user_state" THEN
+    IF user_control_state IS DISTINCT FROM 'active'::"control_user_state" THEN
       RAISE EXCEPTION 'browser approval requires an active user'
         USING ERRCODE = '23514', CONSTRAINT = 'browser_login_challenges_active_control_user';
     END IF;
