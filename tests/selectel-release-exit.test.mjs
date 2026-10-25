@@ -765,6 +765,22 @@ const reviewedWelcomeOnceZoomBlobs = [
   ['webapp/src/main.tsx', '5468ed089f85d2f243e2a893264f104d199687b3'],
   ['webapp/src/platform/app-zoom.ts', '4561b0c501136d38473905497643247ab688bb03'],
 ]
+const reviewedMemberAvatarProductionBlobs = [
+  ['webapp/src/App.tsx', '3d6918955368efb06348bd7ff324bfd365e7f15d'],
+  ['webapp/src/features/avatar/index.ts', 'a60d1edb610a7b889085c6bd3f6823814e5a6ce9'],
+  ['webapp/src/features/avatar/member-avatar-directory-context.ts', '92efe6e33ae5d364a3708b5f18bc64fa1db75073'],
+  ['webapp/src/features/avatar/member-avatar-directory-query.ts', '03e0b7ebccbde17487070d467971ac4fd2689591'],
+  ['webapp/src/features/avatar/member-avatar-directory.tsx', '8e6b374bca94b803133035a4bdaeee991325ef61'],
+  ['webapp/src/features/avatar/member-avatar.tsx', 'ec69fcf879605b7a211aeedc41bce206095aa35d'],
+  ['webapp/src/features/comments/CommentItem.tsx', '6b39b43930876b42e1c4cbf983d77b4962718ed7'],
+  ['webapp/src/features/comments/CommentsPanel.tsx', 'ef42d54bb60f83ed92c3cd05ad90715a4d71cfae'],
+  ['webapp/src/features/feed/FeedPage.tsx', 'dde42e52092ff5f885994f611ef772e3018042ce'],
+  ['webapp/src/features/feed/presentation/MemoryCardPresentation.tsx', 'c9b2c93d8cb0e44230bed1c43d0c0064c2dd3e4f'],
+  ['webapp/src/features/feed/shared-author-avatars.tsx', '5c54e771539f2cdbdcdc6f086f33b1c87f9985be'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '693d4f584c13a0db66a3d64f023781b2bc65118c'],
+  ['webapp/src/features/memoly-ui/MemberProfile.tsx', 'fc9fde2931149b48925d3a76cb9551773d262d90'],
+  ['webapp/src/platform/persistence/private-cache.ts', 'db62855b99016fd50b0070a76c54064699e5e6fa'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -2530,6 +2546,53 @@ test('Control recovery permits only its exact current executable fingerprint and
     const rejected = profile(mutated)
     assert.notEqual(rejected.status, 0, `Control profile must reject changed source before any service mutation: ${path}`)
     assert.doesNotMatch(`${rejected.stdout}${rejected.stderr}`, /UP:|GATE/)
+  }
+})
+
+test('member avatar frontend retains only the measured d299 MAX recovery pair', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = maxVideoRecoveryBackend
+  const target = maxVideoRecoveryBackend
+  const expectedCompatibility = 'a4d194873593bc2c0770e8ee491e295075cf9f60a39550f3f7bbaaebb55b17f9'
+  assert.equal(productionRuntimeFingerprint(root, baseline), maxVideoRecoveryRuntime)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-member-avatar-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
+    'apply exact member-avatar production blobs')
+  const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
+    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    'pin the exact accepted MAX rollback verifier installer')
+  assert.equal(productionCompatibilityFingerprint(installed.root), expectedCompatibility)
+
+  const profile = (candidate, rollbackTarget = target) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackTarget}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(installed)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video')
+
+  const oldTarget = profile(installed, rollbackHealthy)
+  assert.notEqual(oldTarget.status, 0, 'the avatar candidate must not reuse the incompatible 33a pair')
+
+  for (const [relativePath, marker] of [
+    ['webapp/src/features/avatar/member-avatar-directory.tsx', '\n// synthetic member-avatar source drift\n'],
+    ['backend/src/app.ts', '\n// synthetic backend production drift\n'],
+    ['backend/prisma/schema.prisma', '\n// synthetic schema drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-member-avatar-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, installed.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: installed.sha }, relativePath, marker,
+      `mutate member-avatar recovery input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `member-avatar MAX recovery must reject changed production input: ${relativePath}`)
   }
 })
 
