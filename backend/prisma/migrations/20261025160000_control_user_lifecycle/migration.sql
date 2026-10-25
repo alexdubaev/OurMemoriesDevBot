@@ -25,6 +25,8 @@ CREATE INDEX "control_user_deletions_purge_idx"
 CREATE TABLE "control_user_deletion_families" (
   "deletion_id" UUID NOT NULL,
   "family_id" UUID NOT NULL,
+  "original_status" "family_status" NOT NULL,
+  "restore_eligible" BOOLEAN NOT NULL DEFAULT FALSE,
   CONSTRAINT "control_user_deletion_families_pkey" PRIMARY KEY ("deletion_id", "family_id"),
   CONSTRAINT "control_user_deletion_families_deletion_id_fkey"
     FOREIGN KEY ("deletion_id") REFERENCES "control_user_deletions"("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -154,6 +156,7 @@ BEGIN
         JOIN "users" owner ON owner."id" = deletion."target_user_id"
        WHERE link."deletion_id" = restore_cycle
          AND link."family_id" = NEW."id"
+         AND link."restore_eligible"
          AND deletion."restored_at" IS NOT NULL
          AND deletion."purge_after" > CURRENT_TIMESTAMP
          AND owner."control_state" = 'active'

@@ -14,6 +14,7 @@ export type UserDeletionPreview = {
   targetVersion: number
   state: LifecycleState
   families: number
+  activeFamilies: number
   members: number
   memories: number
   storageUsedBytes: string
@@ -75,10 +76,10 @@ async function userPreview(db: DbClient | Tx, userId: string): Promise<UserDelet
       FROM users WHERE id = ${userId}::uuid
   `
   if (!user) throw new ControlLifecycleFailure('not_found', 'User not found')
-  const rows = await db.$queryRaw<Array<{ families: bigint; members: bigint; memories: bigint; storageUsedBytes: bigint; scope: string }>>`
+  const rows = await db.$queryRaw<Array<{ families: bigint; activeFamilies: bigint; members: bigint; memories: bigint; storageUsedBytes: bigint; scope: string }>>`
     WITH owned AS (
       SELECT f.id, f.control_version, f.status::text AS state, f.storage_used_bytes
-        FROM families f WHERE f.owner_user_id = ${userId}::uuid AND f.status = 'active'
+        FROM families f WHERE f.owner_user_id = ${userId}::uuid
     ), impact_members AS (
       SELECT fm.family_id, fm.user_id, fm.role::text AS role, fm.version, fm.membership_epoch,
              f.control_version, f.status::text AS family_state
@@ -92,6 +93,7 @@ async function userPreview(db: DbClient | Tx, userId: string): Promise<UserDelet
       ) AS value
     )
     SELECT (SELECT COUNT(*) FROM owned)::bigint AS families,
+           (SELECT COUNT(*) FROM owned WHERE state = 'active')::bigint AS "activeFamilies",
            (SELECT COUNT(*) FROM impact_members)::bigint AS members,
            (SELECT COUNT(*) FROM memories m JOIN owned f ON f.id = m.family_id WHERE m.deleted_at IS NULL)::bigint AS memories,
            COALESCE((SELECT SUM(storage_used_bytes) FROM owned), 0)::bigint AS "storageUsedBytes",
@@ -99,12 +101,13 @@ async function userPreview(db: DbClient | Tx, userId: string): Promise<UserDelet
       FROM scope
   `
   const row = rows[0]!
-  const fingerprint = digest({ targetId: user.id, targetVersion: user.version, state: user.state, scope: JSON.parse(row.scope), families: Number(row.families), members: Number(row.members), memories: Number(row.memories), storageUsedBytes: row.storageUsedBytes.toString() })
+  const fingerprint = digest({ targetId: user.id, targetVersion: user.version, state: user.state, scope: JSON.parse(row.scope), families: Number(row.families), activeFamilies: Number(row.activeFamilies), members: Number(row.members), memories: Number(row.memories), storageUsedBytes: row.storageUsedBytes.toString() })
   return {
     targetId: user.id,
     targetVersion: user.version,
     state: user.state,
     families: Number(row.families),
+    activeFamilies: Number(row.activeFamilies),
     members: Number(row.members),
     memories: Number(row.memories),
     storageUsedBytes: row.storageUsedBytes.toString(),
@@ -204,8 +207,8 @@ export async function trashControlUser(
       deletedAt: now,
       purgeAfter: new Date(now.getTime() + USER_PURGE_GRACE_MS),
     } })
-    const familyIds = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM families WHERE owner_user_id = ${input.targetId}::uuid AND status = 'active' ORDER BY id
+    const familyIds = await tx.$queryRaw<Array<{ id: string; originalStatus: FamilyState }>>`
+      SELECT id, status::text AS "originalStatus" FROM families WHERE owner_user_id = ${input.targetId}::uuid ORDER BY id
     `
     const ownedFamilyIds = familyIds.map(({ id }) => id)
     const affected = await tx.$queryRaw<Array<{ familyId: string; userId: string; role: Role; version: number; epoch: number }>>`
@@ -253,9 +256,13 @@ export async function trashControlUser(
       })
     }
     if (ownedFamilyIds.length) {
-      await tx.controlUserDeletionFamily.createMany({ data: ownedFamilyIds.map((familyId) => ({ deletionId: deletion.id, familyId })) })
+      await tx.controlUserDeletionFamily.createMany({
+        data: familyIds.map(({ id: familyId, originalStatus }) => ({
+          deletionId: deletion.id, familyId, originalStatus, restoreEligible: originalStatus === 'active',
+        })),
+      })
       await tx.family.updateMany({
-        where: { id: { in: ownedFamilyIds }, status: 'active' },
+        where: { id: { in: familyIds.filter(({ originalStatus }) => originalStatus === 'active').map(({ id }) => id) }, status: 'active' },
         data: { status: 'deleting', controlVersion: { increment: 1 } },
       })
     }
@@ -301,9 +308,10 @@ export async function restoreControlUser(
     })
     await lockUsers(tx, [...pendingSnapshots.map(({ userId }) => userId), input.targetId])
     const familyIds = await tx.controlUserDeletionFamily.findMany({
-      where: { deletionId: deletion.id }, select: { familyId: true }, orderBy: { familyId: 'asc' },
+      where: { deletionId: deletion.id }, select: { familyId: true, restoreEligible: true }, orderBy: { familyId: 'asc' },
     })
     const ownedFamilyIds = familyIds.map(({ familyId }) => familyId)
+    const restoreEligibleIds = familyIds.filter(({ restoreEligible }) => restoreEligible).map(({ familyId }) => familyId)
     const allFamilyIds = [...new Set([...ownedFamilyIds, ...pendingSnapshots.map(({ familyId }) => familyId)])].sort()
     if (allFamilyIds.length) await tx.$queryRaw`SELECT id FROM families WHERE id = ANY(${allFamilyIds}::uuid[]) ORDER BY id FOR UPDATE`
     const snapshots = await tx.controlAccessSnapshot.findMany({
@@ -315,13 +323,13 @@ export async function restoreControlUser(
     await tx.user.update({ where: { id: input.targetId }, data: { controlState: 'active', controlVersion: { increment: 1 } } })
     await tx.controlUserDeletion.update({ where: { id: deletion.id }, data: { restoredAt: now } })
     await tx.$queryRaw`SELECT set_config('app.control_user_restore_cycle', ${deletion.id}, true)`
-    const independentlyDeleting = ownedFamilyIds.length
-      ? await tx.controlFamilyDeletion.findMany({ where: { familyId: { in: ownedFamilyIds } }, select: { familyId: true } })
+    const independentlyDeleting = restoreEligibleIds.length
+      ? await tx.controlFamilyDeletion.findMany({ where: { familyId: { in: restoreEligibleIds } }, select: { familyId: true } })
       : []
     const independentlyDeletingIds = independentlyDeleting.map(({ familyId }) => familyId)
-    if (ownedFamilyIds.length) {
+    if (restoreEligibleIds.length) {
       await tx.family.updateMany({
-        where: { id: { in: ownedFamilyIds.filter((id) => !independentlyDeletingIds.includes(id)) }, status: 'deleting' },
+        where: { id: { in: restoreEligibleIds.filter((id) => !independentlyDeletingIds.includes(id)) }, status: 'deleting' },
         data: { status: 'active', controlVersion: { increment: 1 } },
       })
     }

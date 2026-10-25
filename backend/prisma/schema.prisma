@@ -487,8 +487,10 @@ model ControlUserDeletion {
 }
 
 model ControlUserDeletionFamily {
-  deletionId String             @map("deletion_id") @db.Uuid
-  familyId   String             @map("family_id") @db.Uuid
+  deletionId      String             @map("deletion_id") @db.Uuid
+  familyId        String             @map("family_id") @db.Uuid
+  originalStatus  FamilyStatus       @map("original_status")
+  restoreEligible Boolean            @default(false) @map("restore_eligible")
   deletion   ControlUserDeletion @relation(fields: [deletionId], references: [id], onDelete: Cascade, map: "control_user_deletion_families_deletion_id_fkey")
   family     Family             @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "control_user_deletion_families_family_id_fkey")
 
