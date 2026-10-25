@@ -2,8 +2,6 @@ import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-declare global { interface Window { __fixedCarouselProbe?: { posterRequests: string[] } } }
-
 test('production feed carousel selects attachments through drags and opens the selection fullscreen', async ({ page }) => {
   const portraitVideo = await readFile(fileURLToPath(new URL('./fixtures/portrait-edges.mp4', import.meta.url)))
   const landscapeVideo = await readFile(fileURLToPath(new URL('./fixtures/landscape-edges.mp4', import.meta.url)))

@@ -51,7 +51,7 @@ const maxAttachmentId = '99999999-9999-4999-8999-999999999998'
 const maxPlaybackPath = `/api/v1/families/${familyId}/media/max-videos/${maxVideoId}/content`
 const maxVideoMemory = { ...memory, id: maxAttachmentId, kind: 'video', body: 'Lifecycle MAX video', attachments: [{ id: maxVideoId, source: 'max', kind: 'video', width: 720, height: 1280, durationMs: 5000, playbackPath: maxPlaybackPath, posterState: 'ready', posterPath: maxPlaybackPath.replace('/content', '/poster') }] }
 const maxMixedMemory = { ...memory, id: '22222222-2222-4222-8222-222222222230', kind: 'media', body: 'Synthetic MAX mixed media', attachments: [maxVideoMemory.attachments[0], attachments[3]] }
-const fourMaxVideoAttachments = ['99999999-9999-4999-8999-999999999901', '99999999-9999-4999-8999-999999999902', '99999999-9999-4999-8999-999999999903', '99999999-9999-4999-8999-999999999904'].map((id, index) => ({
+const fourMaxVideoAttachments = ['99999999-9999-4999-8999-999999999901', '99999999-9999-4999-8999-999999999902', '99999999-9999-4999-8999-999999999903', '99999999-9999-4999-8999-999999999904'].map((id) => ({
   id, source: 'max', kind: 'video', width: 720, height: 1280, durationMs: 5000,
   playbackPath: `/api/v1/families/${familyId}/media/max-videos/${id}/content`, posterState: 'ready',
   posterPath: `/api/v1/families/${familyId}/media/max-videos/${id}/poster`,
