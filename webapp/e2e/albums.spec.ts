@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { expect, test, type Page } from '@playwright/test'
+import { deflateSync } from 'node:zlib'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 test('album deletion confirmations work without native dialogs', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -90,6 +91,146 @@ test('album deletion confirmations work without native dialogs', async ({ page }
   const retained = await page.request.get(`/api/v1/families/${familyId}/media/${secondMediaId}/content?variant=original`, { headers: privateHeaders })
   expect(retained.status()).toBe(200)
   expect(await retained.body()).toEqual(photoBytes)
+})
+
+test('MAX authenticated album cover choices save and complete the picker', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const consoleErrors: string[] = []
+  const pageErrors: string[] = []
+  const initData = signedInitData()
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'ios', ready() {} } }) }, initData)
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const auth = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${auth.accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  let familyId = ''
+  await page.route('**/api/v1/families', async (route) => {
+    if (route.request().method() !== 'POST' || familyId) return route.continue()
+    const response = await route.fetch()
+    expect(response.status()).toBe(201)
+    familyId = ((await response.json()) as { family: { id: string } }).family.id
+    await route.fulfill({ response })
+  })
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect.poll(() => familyId).not.toBe('')
+  page.on('console', (message) => {
+    if (message.type() === 'error' && !message.text().includes('status of 503 (Service Unavailable)')) consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.getByRole('button', { name: /Свободный альбом/ }).click()
+  await page.getByLabel('Название альбома').fill('Обложка для проверки')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Обложка для проверки', exact: true })).toBeVisible()
+
+  const photos = [
+    { name: 'cover-first-red.png', bytes: solidPng(240, 24, 24) },
+    { name: 'cover-second-blue.png', bytes: solidPng(24, 48, 240) },
+  ]
+  for (const photo of photos) {
+    await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+    await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+    await page.locator('#photo-composer-files').setInputFiles({ name: photo.name, mimeType: 'image/png', buffer: photo.bytes })
+    await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  }
+
+  const catalogPath = `/api/v1/families/${familyId}/albums`
+  const initialCatalogResponse = await page.request.get(catalogPath, { headers })
+  expect(initialCatalogResponse.status()).toBe(200)
+  const initialCatalog = (await initialCatalogResponse.json()) as { items: { id: string; title: string; version: number; cover: { id: string } | null }[] }
+  const album = initialCatalog.items.find((item) => item.title === 'Обложка для проверки')!
+  const entriesResponse = await page.request.get(`/api/v1/families/${familyId}/albums/${album.id}/entries`, { headers })
+  expect(entriesResponse.status()).toBe(200)
+  const entries = (await entriesResponse.json()) as { items: { sources: { id: string; sourceId: string; available: boolean; kind: string }[] }[] }
+  const sourceIds = entries.items.flatMap((entry) => entry.sources).filter((source) => source.available && source.kind === 'photo').map((source) => source.id)
+  expect(sourceIds).toHaveLength(2)
+  expect(sourceIds[0]).not.toBe(sourceIds[1])
+
+  const capture = async (name: string) => {
+    const directory = process.env.MEMOLY_ALBUM_COVER_EVIDENCE_DIR
+    if (directory) await page.screenshot({ fullPage: false, path: `${directory}/${name}.png` })
+  }
+  await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
+  await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(2)
+  await capture('picker-before-selection')
+  let failNextCoverPatch = true
+  await page.route(`**/api/v1/families/${familyId}/albums/${album.id}`, async (route) => {
+    if (!failNextCoverPatch || route.request().method() !== 'PATCH') return route.continue()
+    failNextCoverPatch = false
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic temporary failure', requestId: randomUUID() } }) })
+  })
+  const failedResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  const failedResponse = await failedResponsePromise
+  const routeAfterFailedPatch = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить альбомы.')
+  await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
+  await capture('picker-after-failed-patch')
+  const manualResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  const manualResponse = await manualResponsePromise
+  const manualPayload = await manualResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  const routeAfterManual = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
+  await capture('picker-after-manual-selection')
+  const manualCatalogResponse = await page.request.get(catalogPath, { headers })
+  const manualCatalog = (await manualCatalogResponse.json()) as { items: { id: string; version: number; cover: { id: string } | null }[] }
+  const persistedManualCoverId = manualCatalog.items.find((item) => item.id === album.id)?.cover?.id ?? null
+  await page.reload()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  let catalogCard = page.locator('.albums-card').filter({ hasText: 'Обложка для проверки' })
+  await expect(catalogCard).toBeVisible()
+  const manualCardPixel = await readImagePixel(catalogCard.locator('.albums-cover img'))
+  expectDominantColor(manualCardPixel, 'blue')
+  await capture('catalog-after-manual-reload')
+  await catalogCard.click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
+  const autoResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
+  await page.getByRole('button', { name: 'Автоматическая обложка', exact: true }).click()
+  const autoResponse = await autoResponsePromise
+  const autoPayload = await autoResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  const routeAfterAutomatic = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
+  await capture('picker-after-automatic-selection')
+  const autoCatalogResponse = await page.request.get(catalogPath, { headers })
+  const autoCatalog = (await autoCatalogResponse.json()) as { items: { id: string; version: number; cover: { id: string } | null }[] }
+  const persistedAutomaticCoverId = autoCatalog.items.find((item) => item.id === album.id)?.cover?.id ?? null
+  const automaticFallbackSourceId = sourceIds[0]
+  await page.reload()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  catalogCard = page.locator('.albums-card').filter({ hasText: 'Обложка для проверки' })
+  await expect(catalogCard).toBeVisible()
+  const automaticCardPixel = await readImagePixel(catalogCard.locator('.albums-cover img'))
+  expectDominantColor(automaticCardPixel, 'red')
+  await capture('catalog-after-reload')
+
+  console.log('ALBUM_COVER_EVIDENCE ' + JSON.stringify({
+    failed: { status: failedResponse.status(), routeAfterResponse: routeAfterFailedPatch },
+    manual: { status: manualResponse.status(), payloadCoverId: manualPayload.album?.cover?.id ?? null, persistedCoverId: persistedManualCoverId, selectedSourceId: sourceIds[1], routeAfterChoice: routeAfterManual, catalogPixelAfterReload: manualCardPixel },
+    automatic: { status: autoResponse.status(), payloadCoverId: autoPayload.album?.cover?.id ?? null, persistedCoverId: persistedAutomaticCoverId, fallbackSourceId: automaticFallbackSourceId, routeAfterChoice: routeAfterAutomatic, catalogPixelAfterReload: automaticCardPixel },
+    consoleErrors,
+    pageErrors,
+  }))
+  expect(failedResponse.status()).toBe(503)
+  expect(routeAfterFailedPatch).toBe('cover')
+  expect(manualResponse.status()).toBe(200)
+  expect(manualPayload.album?.cover?.id).toBe(sourceIds[1])
+  expect(persistedManualCoverId).toBe(sourceIds[1])
+  expect(autoResponse.status()).toBe(200)
+  expect(autoPayload.album?.cover?.id).toBe(automaticFallbackSourceId)
+  expect(persistedAutomaticCoverId).toBe(automaticFallbackSourceId)
+  await expect(catalogCard.locator('.albums-cover img')).toBeVisible()
+  expect(routeAfterManual).toBe('album')
+  expect(routeAfterAutomatic).toBe('album')
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })
 
 test('MAX authenticated albums persist year chapters and a text event through real API and navigation', async ({ page }) => {
@@ -451,6 +592,55 @@ async function openSynthetic(page: Page, query: string) {
   await page.goto(`/e2e/selected-family-app.harness.html?${query}`)
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Альбомы', exact: true })).toBeVisible()
+}
+
+async function readImagePixel(image: Locator) {
+  await expect(image).toBeVisible()
+  await expect.poll(() => image.evaluate((element) => {
+    const imageElement = element as HTMLImageElement
+    return imageElement.complete && imageElement.naturalWidth > 0
+  })).toBe(true)
+  return image.evaluate((element) => {
+    const imageElement = element as HTMLImageElement
+    const canvas = document.createElement('canvas')
+    canvas.width = imageElement.naturalWidth
+    canvas.height = imageElement.naturalHeight
+    const context = canvas.getContext('2d')!
+    context.drawImage(imageElement, 0, 0)
+    return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
+  })
+}
+
+function expectDominantColor(pixel: number[], color: 'red' | 'blue') {
+  const dominantChannel = color === 'red' ? 0 : 2
+  expect(pixel[dominantChannel]).toBeGreaterThan(200)
+  pixel.forEach((channel, index) => { if (index !== dominantChannel) expect(channel).toBeLessThan(80) })
+}
+
+function solidPng(red: number, green: number, blue: number) {
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(1, 0)
+  header.writeUInt32BE(1, 4)
+  header[8] = 8
+  header[9] = 2
+  const imageData = Buffer.from([0, red, green, blue])
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(imageData)), pngChunk('IEND', Buffer.alloc(0))])
+}
+
+function pngChunk(type: string, data: Buffer) {
+  const name = Buffer.from(type, 'ascii')
+  const checksumInput = Buffer.concat([name, data])
+  let checksum = 0xffffffff
+  for (const byte of checksumInput) {
+    checksum ^= byte
+    for (let bit = 0; bit < 8; bit += 1) checksum = (checksum >>> 1) ^ (checksum & 1 ? 0xedb88320 : 0)
+  }
+  const chunk = Buffer.alloc(12 + data.length)
+  chunk.writeUInt32BE(data.length, 0)
+  name.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE((checksum ^ 0xffffffff) >>> 0, 8 + data.length)
+  return chunk
 }
 
 function signedInitData() {
