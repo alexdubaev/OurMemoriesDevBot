@@ -144,6 +144,131 @@ git_root() {
   git -c safe.directory="$APP_ROOT" -C "$APP_ROOT" "$@"
 }
 
+assert_root_owned_path() {
+  local path=$1 kind=$2 missing_final=${3:-false} current=/ part mode write_bits index=0 count
+  local -a components=()
+  [[ "$path" = /* ]] || die 'fixed control host path must be absolute'
+  IFS='/' read -r -a components <<< "${path#/}"
+  count=${#components[@]}
+  for part in "${components[@]}"; do
+    [ -n "$part" ] || continue
+    current=${current%/}/$part
+    index=$((index + 1))
+    if [ -L "$current" ]; then die 'fixed control host path contains a symlink'; fi
+    if [ ! -e "$current" ]; then
+      [ "$missing_final" = true ] && [ "$index" -eq "$count" ] && return 0
+      die 'fixed control host path is missing'
+    fi
+    [ "$(stat -c '%u' -- "$current")" = 0 ] || die 'fixed control host path is not root-owned'
+    mode=$(stat -c '%a' -- "$current") || die 'cannot inspect fixed control host path mode'
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || die 'fixed control host path mode is invalid'
+    write_bits=$((8#$mode & 022))
+    [ "$write_bits" -eq 0 ] || die 'fixed control host path is group/world writable'
+    if [ "$index" -lt "$count" ]; then
+      [ -d "$current" ] || die 'fixed control host path ancestor is not a directory'
+    elif [ "$kind" = directory ]; then
+      [ -d "$current" ] || die 'fixed control host path is not a directory'
+    else
+      [ -f "$current" ] || die 'fixed control host path is not a regular file'
+    fi
+  done
+}
+
+ensure_root_directory() {
+  local path=$1
+  assert_root_owned_path "$path" directory true
+  install -d -o root -g root -m 0755 -- "$path" || die 'cannot create the fixed Control host directory'
+  assert_root_owned_path "$path" directory
+}
+
+assert_root_controlled_interpreter() {
+  local interpreter=${1:-/usr/bin/python3} parent target resolved
+  parent=$(dirname -- "$interpreter")
+  assert_root_owned_path "$parent" directory
+  if [ -L "$interpreter" ]; then
+    [ "$(stat -c '%u:%g' -- "$interpreter")" = 0:0 ] || die 'Python interpreter link is not root-owned'
+    target=$(readlink -- "$interpreter") || die 'cannot inspect Python interpreter link'
+    case "$target" in
+      python3.[0-9]*|"$parent"/python3.[0-9]*) ;;
+      *) die 'Python interpreter link must target a versioned interpreter in its root-controlled directory' ;;
+    esac
+    resolved=$(readlink -f -- "$interpreter") || die 'cannot resolve Python interpreter executable'
+    [[ "$resolved" = "$parent"/python3.[0-9]* ]] || die 'Python interpreter resolves outside its root-controlled directory'
+    assert_root_owned_path "$resolved" file
+  else
+    resolved=$interpreter
+    assert_root_owned_path "$resolved" file
+  fi
+  [ -x "$resolved" ] || die 'Python interpreter executable is not runnable'
+}
+
+install_pinned_control_host_inputs() {
+  local control_root=$1 systemd_dir=$2 relative source_path target_path mode source_tmp target_tmp
+  local -a files=(
+    "deploy/selectel/control/sampler.py:$control_root/sampler.py:0644"
+    "deploy/selectel/control/memoly-control-sampler.service:$systemd_dir/memoly-control-sampler.service:0644"
+    "deploy/selectel/control/memoly-control-sampler.timer:$systemd_dir/memoly-control-sampler.timer:0644"
+  )
+  for relative in "${files[@]}"; do
+    IFS=: read -r source_path target_path mode <<< "$relative"
+    assert_root_owned_path "$target_path" file true
+    source_tmp=$(mktemp "$control_root/.install-control-XXXXXX") || die 'cannot create a protected sampler install temporary'
+    if ! git_root show "$PRODUCT_SHA:$source_path" > "$source_tmp"; then rm -f -- "$source_tmp"; die 'cannot read a pinned Control host input'; fi
+    local expected_blob actual_blob
+    expected_blob=$(git_root rev-parse "$PRODUCT_SHA:$source_path") || { rm -f -- "$source_tmp"; die 'cannot resolve a pinned Control host input'; }
+    actual_blob=$(git_root hash-object -- "$source_tmp") || { rm -f -- "$source_tmp"; die 'cannot hash a pinned Control host input'; }
+    [ "$actual_blob" = "$expected_blob" ] || { rm -f -- "$source_tmp"; die 'Control host input differs from the accepted source blob'; }
+    target_tmp="${target_path}.tmp.$$"
+    assert_root_owned_path "$(dirname -- "$target_path")" directory
+    [ ! -L "$target_tmp" ] || { rm -f -- "$source_tmp"; die 'Control host install target is a symlink'; }
+    install -o root -g root -m "$mode" -- "$source_tmp" "$target_tmp" || { rm -f -- "$source_tmp"; die 'cannot stage a pinned Control host input'; }
+    mv -f -- "$target_tmp" "$target_path" || { rm -f -- "$source_tmp"; die 'cannot install a pinned Control host input'; }
+    local installed_blob
+    installed_blob=$(git_root hash-object -- "$target_path") || { rm -f -- "$source_tmp"; die 'cannot verify installed Control host input'; }
+    [ "$installed_blob" = "$expected_blob" ] || { rm -f -- "$source_tmp"; die 'installed Control host input checksum differs from accepted source'; }
+    rm -f -- "$source_tmp"
+    assert_root_owned_path "$target_path" file
+    [ "$((8#$(stat -c '%a' -- "$target_path")))" -eq "$((8#$mode))" ] || die 'installed Control host input has an unexpected mode'
+  done
+}
+
+install_control_sampler() {
+  local control_root=/opt/memoly/control metrics_dir=/opt/memoly/control/metrics systemd_dir=/etc/systemd/system
+  require_command systemctl
+  require_command python3
+  ensure_root_directory "$control_root"
+  ensure_root_directory "$metrics_dir"
+  assert_root_owned_path "$systemd_dir" directory
+  assert_root_controlled_interpreter /usr/bin/python3
+  install_pinned_control_host_inputs "$control_root" "$systemd_dir"
+  systemctl daemon-reload || die 'cannot reload the systemd unit catalog for Control sampler'
+  systemctl enable --now memoly-control-sampler.timer >/dev/null || die 'cannot enable the Control sampler timer'
+  systemctl start memoly-control-sampler.service || die 'initial Control sampler run failed'
+  systemctl is-active --quiet memoly-control-sampler.timer || die 'Control sampler timer is not active'
+  assert_root_owned_path /opt/memoly/control/metrics/snapshot.json file
+  printf 'Pinned Control sampler installed and first snapshot verified.\n'
+}
+
+write_control_release_receipt() {
+  local backend_sha=$1 static_sha=$2 migration_count=$3 receipt=/opt/memoly/control/release-evidence.json temp timestamp
+  [[ "$backend_sha" =~ ^[0-9a-f]{40}$ && "$static_sha" =~ ^[0-9a-f]{40}$ && "$migration_count" =~ ^[0-9]+$ ]] ||
+    die 'Control release receipt inputs are invalid'
+  ensure_root_directory /opt/memoly/control
+  assert_root_owned_path "$receipt" file true
+  if [ -e "$receipt" ]; then
+    [ "$(stat -c '%a' -- "$receipt")" = 600 ] || die 'existing Control release evidence has an unexpected mode'
+  fi
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  temp=$(mktemp /opt/memoly/control/.release-evidence-XXXXXX) || die 'cannot create a protected release evidence temporary'
+  chmod 0600 "$temp" || { rm -f -- "$temp"; die 'cannot secure release evidence temporary'; }
+  printf '{"backendSha":"%s","staticSha":"%s","migrationCatalogCount":%s,"migrationStatus":"up_to_date","lastSuccessfulReleaseAt":"%s"}\n' \
+    "$backend_sha" "$static_sha" "$migration_count" "$timestamp" > "$temp"
+  chmod 0600 "$temp"
+  mv -f -- "$temp" "$receipt" || { rm -f -- "$temp"; die 'cannot publish successful Control release evidence'; }
+  assert_root_owned_path "$receipt" file
+  [ "$(stat -c '%a' -- "$receipt")" = 600 ] || die 'published Control release evidence has an unexpected mode'
+}
+
 validate_repository() {
   [ -d "$APP_ROOT/.git" ] || die "application checkout is missing: $APP_ROOT"
   local origin status
@@ -431,12 +556,12 @@ prepare_rollback() {
     ' "$ROLLBACK_ENV" > "$verify_env"
     chmod 0600 "$verify_env"
     if [ "$RUN_MIGRATION" = true ]; then
-      if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql \
+      if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql \
         bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
         candidate_valid=true
       fi
     elif ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
-      SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+      SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
       candidate_valid=true
     fi
     if [ "$candidate_valid" != true ]; then
@@ -445,13 +570,13 @@ prepare_rollback() {
       # recovery only after the same full verifier accepts it against current
       # source and database state.
       if [ "$RUN_MIGRATION" = true ]; then
-        if ! SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+        if ! SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
           bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
           rm -f -- "$verify_env"
           ROLLBACK_VERIFY_ENV=
           die 'neither the running images nor the designated rollback pair passed recovery verification'
         fi
-      elif ! SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+      elif ! SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
         bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
         rm -f -- "$verify_env"
         ROLLBACK_VERIFY_ENV=
@@ -563,6 +688,7 @@ PUBLIC_ICON_512_SHA256=$PUBLIC_ICON_512_SHA256
 UTC=$timestamp
 EOF
   chmod 0600 "$manifest"
+  write_control_release_receipt "$PRODUCT_SHA" "$PRODUCT_SHA" "$migration_count"
   printf 'Release manifest written: %s\n' "$(basename "$manifest")"
 }
 
@@ -721,6 +847,9 @@ main() {
     # shellcheck disable=SC1090
     . "$APP_ROOT/deploy/selectel/frontend-release.sh"
     frontend_release_main
+    local frontend_migration_count
+    frontend_migration_count=$(find "$APP_ROOT/backend/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | wc -l | tr -d ' ')
+    write_control_release_receipt "$FRONTEND_BACKEND_SHA" "$PRODUCT_SHA" "$frontend_migration_count"
     exit 0
   fi
   trap release_failure EXIT
@@ -733,6 +862,7 @@ main() {
   fi
   fetch_and_checkout
   verify_frontend_recovery_artifact_unchanged
+  install_control_sampler
   validate_prebuilt_images
   detect_membership_rollback_boundary
   detect_mm0_boundary
@@ -785,7 +915,7 @@ main() {
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
   if [ "$RUN_MIGRATION" = true ] && [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
-    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
       bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness ||
       die 'complete post-migration recovery verification failed before promotion'
   fi
