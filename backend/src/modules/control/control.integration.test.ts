@@ -199,7 +199,9 @@ describe('control owner read API authorization', () => {
     const nextPreview = await (await control.request(`/api/v1/control/users/${ordinaryId}/deletion-preview`, { headers: ownerHeaders })).json() as typeof preview
     const secondTrash = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: nextPreview.fingerprint, confirmation: nextPreview.confirmation }) })
     const secondCycle = await secondTrash.json() as { deletionId: string }
-    await prisma.controlUserDeletion.update({ where: { id: secondCycle.deletionId }, data: { purgeAfter: new Date(Date.now() - 1) } })
+    const expiredAt = new Date(Date.now() - 1)
+    const deletedAt = new Date(expiredAt.getTime() - 30 * 24 * 60 * 60 * 1000)
+    await prisma.$executeRaw`UPDATE control_user_deletions SET deleted_at=${deletedAt.toISOString()}::timestamptz, purge_after=${expiredAt.toISOString()}::timestamptz WHERE id=${secondCycle.deletionId}::uuid`
     const expiredRestore = await control.request(`/api/v1/control/users/${ordinaryId}/restore`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), deletionId: secondCycle.deletionId }) })
     expect(expiredRestore.status).toBe(409)
   })
