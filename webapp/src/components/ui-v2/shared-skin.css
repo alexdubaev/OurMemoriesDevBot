@@ -44,9 +44,17 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] { color: var(--ui-v2-color-text); background: var(--ui-v2-color-canvas); }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] :where(.ui-v2-header-back, .ui-v2-settings) { color: var(--ui-v2-color-accent); background: var(--ui-v2-header-action); font-family: var(--ui-v2-font-family); }
 
+/* Each layout surface can receive fresh host insets independently during rotation. */
+.memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'],
+.memoly-app-root[data-ui-version='v2'] .family-screen:not(.child-screen),
+.memoly-app-root[data-ui-version='v2'] .family-screen.child-screen:has(.child-profile),
+.memoly-app-root[data-ui-version='v2'] .family-management-page,
+.memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .app {
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
+}
+
 /* Controller-owned navigation retains compact geometry and one safe-area inset. */
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] {
-  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   left: 0 !important; right: 0 !important; bottom: 0 !important;
   box-sizing: border-box; width: 100% !important; height: auto !important; min-height: calc(var(--layout-bottom-nav) + var(--ui-v2-effective-bottom-inset)) !important;
   transform: none; padding: 0 0 var(--ui-v2-effective-bottom-inset) !important;
@@ -71,16 +79,13 @@ html[data-ui-version='v2'] .memoly-mixed-viewer button { color: var(--ui-v2-colo
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] .memoly-nav-add-circle { color: var(--ui-v2-color-white) !important; }
 .memoly-app-root[data-ui-version='v2'] nav[data-bottom-navigation-appearance='memoly'] [data-nav-position='add'] > [data-slot='typography'] { font-size: .625rem; }
 .memoly-app-root[data-ui-version='v2'] .family-screen:not(.child-screen) {
-  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   padding-bottom: calc(var(--layout-bottom-nav) + var(--ui-v2-effective-bottom-inset));
 }
 .memoly-app-root[data-ui-version='v2'] .family-screen.child-screen:has(.child-profile),
 .memoly-app-root[data-ui-version='v2'] .family-management-page {
-  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   padding-bottom: calc(var(--layout-bottom-nav) + 50px + var(--ui-v2-effective-bottom-inset));
 }
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .app {
-  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
   padding-bottom: calc(var(--layout-bottom-nav) + 28px + var(--ui-v2-effective-bottom-inset));
 }
 .memoly-app-root[data-ui-version='v2'] .ui-v2-child-name .ui-v2-child-name-text { font: inherit; letter-spacing: inherit; }

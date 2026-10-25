@@ -79,7 +79,13 @@
   --host-inset-right: 0px;
   --host-inset-bottom: 0px;
   --host-inset-left: 0px;
+  --ui-v2-effective-safe-top: max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px));
+  --ui-v2-effective-bottom-inset: max(var(--host-inset-bottom, 0px), var(--ui-v2-browser-safe-area-bottom, 0px));
 }
+
+:root[data-host-layout-platform='android'],
+:root[data-host-layout-platform='android'][data-ui-version='v2'],
+:root[data-host-layout-platform='android'] .memoly-app-root[data-ui-version='v2'] { --layout-bottom-nav: 64px; }
 
 @media (prefers-reduced-motion: reduce) {
   :root {

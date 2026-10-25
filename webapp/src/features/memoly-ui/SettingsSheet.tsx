@@ -38,7 +38,7 @@ export function SettingsSheet({ hostBridge, open, onOpenChange, returnFocusRef, 
 export function SettingsMenu({ onAbout, onAppearance, onHelp, onFamilySettings, onArchive, onOpenInstall, canOpenInstall = false, installLabel = 'Установить memoLy', canManageFamily, theme }: { onAbout: () => void; onAppearance: () => void; onHelp: () => void; onFamilySettings: () => void; onArchive: () => void; onOpenInstall?: () => void; canOpenInstall?: boolean; installLabel?: string; canManageFamily: boolean; theme: MemolyTheme }) {
   const isV2 = readUiVersion() === 'v2'
   return <div className="ml-settings-list ml-sheet-panel--list">
-    <SettingsRow icon="palette" onClick={onAppearance} title={isV2 ? 'Оформление шапки профиля' : 'Оформление'} subtitle={isV2 ? `Иллюстрация: ${HEADER_ART_LABELS[theme]}` : theme === 'mint' ? 'Мята или тёплая розовая палитра' : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
+    <SettingsRow icon="palette" onClick={onAppearance} title={isV2 ? 'Оформление шапки профиля' : 'Оформление'} subtitle={isV2 ? `Иллюстрация: ${HEADER_ART_LABELS[theme]}` : `Текущая тема: ${getMemolyThemeConfig(theme).label}`} />
     <SettingsRow icon="help-circle" onClick={onHelp} title="Помощь и приватность" subtitle="Ответы, приватность и поддержка" />
     <SettingsRow icon="archive-box" onClick={onArchive} title="Семейный архив" subtitle="Использование приватного хранилища" />
     {canManageFamily ? <SettingsRow icon="pencil" onClick={onFamilySettings} title="Настройки семьи" subtitle="Название и часовой пояс" /> : null}
