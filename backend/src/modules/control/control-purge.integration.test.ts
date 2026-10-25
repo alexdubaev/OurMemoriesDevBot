@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPrisma } from '../../db'
+import { Prisma } from '../../generated/prisma/client'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { FilesystemPrivateStorage } from '../../storage/filesystem-storage'
 import type { PrivateStorage } from '../../storage/port'
@@ -310,7 +311,7 @@ describe('Control bounded deletion maintenance', () => {
     } })
     const failingDb = new Proxy(prisma, {
       get(target, property) {
-        if (property === '$transaction') return (callback: (tx: typeof prisma) => Promise<unknown>, options?: unknown) =>
+        if (property === '$transaction') return (callback: (tx: Prisma.TransactionClient) => Promise<unknown>, options?: unknown) =>
           target.$transaction(async (tx) => callback(new Proxy(tx, {
             get(transaction, transactionProperty) {
               if (transactionProperty === 'mediaAsset') return new Proxy(transaction.mediaAsset, {
