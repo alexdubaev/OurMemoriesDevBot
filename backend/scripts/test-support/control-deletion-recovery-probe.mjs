@@ -320,7 +320,7 @@ async function completeFirstFamilyChild(familyId, ownerId) {
 }
 
 async function ledgerSnapshot() {
-  return prisma.$queryRaw`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name, started_at, id`
+  return prisma.$queryRaw`SELECT migration_name, checksum, finished_at::text, rolled_back_at::text FROM _prisma_migrations ORDER BY migration_name, started_at, id`
 }
 
 async function assertObjectDigest(key, expected) {
