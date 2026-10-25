@@ -5,13 +5,15 @@ import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 
-const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/|webapp\/src\/(?:App|main)\.tsx$|webapp\/src\/platform\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
-const CRITICAL_UI = /(^|\/)(auth|session|invite|family|media|storage|cache|offline|service-worker)(\/|\.|-)/i
+const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
 const STANDARD = /(^|\/)(backend\/|webapp\/|website\/)/i
 const DOCS = /(^|\/)(docs\/|references\/|templates\/)|(^|\/)(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$/i
 const FAST_SAFE = /\.(css|scss|sass|less|md|mdx|txt)$/i
 const FRONTEND_ASSET = /^(webapp\/(?:public\/assets|src\/assets)\/|website\/public\/|assets\/)/i
 const RASTER_ASSET = /\.(webp|png|jpe?g|avif|ico)$/i
+const FRONTEND_SCOPE_CLI = 'deploy/selectel/frontend-scope.sh'
+const BASH_EXECUTABLE = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 
 function isFastSafe(path) {
   return FAST_SAFE.test(path) || (FRONTEND_ASSET.test(path) && RASTER_ASSET.test(path))
@@ -21,6 +23,106 @@ function git(args, options = {}) {
   const result = spawnSync('git', args, { encoding: 'utf8', ...options })
   if (result.status !== 0) throw new Error(result.stderr?.trim() || `git ${args.join(' ')} failed`)
   return result.stdout.trim()
+}
+
+function gitBytes(args) {
+  const result = spawnSync('git', args, { encoding: null, maxBuffer: 32 * 1024 * 1024 })
+  if (result.status !== 0) throw new Error(result.stderr?.toString().trim() || `git ${args.join(' ')} failed`)
+  return result.stdout
+}
+
+function nulPaths(args) {
+  const output = gitBytes(args)
+  if (output.length && output.at(-1) !== 0) throw new Error(`Git returned an ambiguous path list for ${args.join(' ')}.`)
+  const values = output.toString('utf8').split('\0')
+  values.pop()
+  if (values.some((path) => !path || path.includes('\n') || path.includes('\r') || path.includes('\ufffd'))) {
+    throw new Error('Changed paths contain an ambiguous or unsupported filename.')
+  }
+  return values
+}
+
+function changedNames(base) {
+  const committed = parseNameStatus(nulPaths(['diff', '--name-status', '-z', '--find-renames', base, 'HEAD', '--']))
+  const staged = parseNameStatus(nulPaths(['diff', '--cached', '--name-status', '-z', '--find-renames', 'HEAD', '--']))
+  const local = parseNameStatus(nulPaths(['diff', '--name-status', '-z', '--find-renames', 'HEAD', '--']))
+  const untracked = nulPaths(['ls-files', '--others', '--exclude-standard', '-z'])
+  return [...new Set([...committed, ...staged, ...local, ...untracked].map((path) => path.replaceAll('\\', '/')))].sort()
+}
+
+function parseNameStatus(values) {
+  const paths = []
+  for (let i = 0; i < values.length;) {
+    const status = values[i++]
+    const count = /^[RC]/.test(status) ? 2 : 1
+    if (!/^(?:A|C\d*|D|M|R\d*|T|U|X|B)$/.test(status) || i + count > values.length) {
+      throw new Error('Git returned an unsupported or malformed changed-path record.')
+    }
+    paths.push(...values.slice(i, i + count))
+    i += count
+  }
+  return paths
+}
+
+export function validateFrontendScope(paths, { repositoryRoot = process.cwd(), requireRuntime = true } = {}) {
+  if (!paths.length) throw new Error('Frontend verification requires a non-empty change set.')
+  const result = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...paths], { encoding: 'utf8', cwd: repositoryRoot })
+  if (result.status !== 0) throw new Error(result.stderr?.trim() || 'Frontend path classification failed closed.')
+  let runtime = false
+  for (const path of paths) {
+    const classification = result.stdout.split(/\r?\n/).find((line) => line.startsWith(`${path}\t`))?.split('\t')[1]
+    if (!['A', 'R'].includes(classification)) throw new Error(`Frontend verification refuses sensitive or unknown path: ${path}`)
+    if (/^webapp\/(?:src|public)\//.test(path)) runtime = true
+  }
+  if (requireRuntime && !runtime) throw new Error('Frontend verification requires at least one changed production frontend input.')
+  return { paths, runtime }
+}
+
+function validateFrontendLineage(base) {
+  if (!/^[0-9a-f]{40}$/.test(base)) throw new Error('--base must be the full deployed backend commit SHA.')
+  const resolved = git(['rev-parse', '--verify', `${base}^{commit}`])
+  if (resolved !== base) throw new Error('--base must resolve to the exact full commit SHA supplied.')
+  const remote = git(['rev-parse', '--verify', 'refs/remotes/origin/main'])
+  for (const [ancestor, descendant, message] of [
+    [base, remote, 'deployed backend base must be an ancestor of accepted origin/main.'],
+    [base, 'HEAD', 'candidate HEAD must descend from the deployed backend base.'],
+    [ACCEPTED_UI_V4_SHA, base, 'deployed backend base must contain accepted UI v4.'],
+    [ACCEPTED_UI_V4_SHA, 'HEAD', 'candidate must contain accepted UI v4.'],
+  ]) {
+    if (spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant]).status !== 0) throw new Error(message)
+  }
+  return { base, remote }
+}
+
+function validateFrontendModes(base) {
+  const summaries = [
+    git(['diff', '--summary', '--find-renames', base, 'HEAD', '--']),
+    git(['diff', '--summary', '--find-renames', 'HEAD', '--']),
+    git(['diff', '--cached', '--summary', '--find-renames', 'HEAD', '--']),
+  ].join('\n')
+  if (/mode change|create mode 12|create mode 16|type change/i.test(summaries)) {
+    throw new Error('Frontend verification refuses symlink, submodule, or executable mode changes.')
+  }
+}
+
+function frontendPlan(paths, base, journeys, journeyGreps, repositoryRoot = process.cwd()) {
+  const commands = [
+    ['Committed frontend diff whitespace validation', ['git', ['diff', '--check', base, 'HEAD', '--']]],
+    ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD', '--']]],
+    ['Web app typecheck', ['bun', ['run', 'typecheck:webapp']]],
+    ['Web app lint', ['bun', ['run', 'lint']]],
+    ['Web app production build', ['bun', ['run', 'build:webapp']]],
+  ]
+  const tests = relatedWebappTests(paths, repositoryRoot)
+  if (tests.length) commands.push(['Related web app unit tests', ['bun', ['test', ...tests]]])
+  for (const [index, journey] of journeys.entries()) {
+    const dedicatedConfig = journey.replace(/\.spec\.ts$/, '.playwright.config.ts')
+    const config = existsSync(resolve(repositoryRoot, dedicatedConfig)) ? dedicatedConfig : 'webapp/playwright.max.config.ts'
+    const args = ['run', '--cwd', 'webapp', 'e2e', `--config=${config.replace(/^webapp\//, '')}`, journey.replace(/^webapp\//, '')]
+    if (journeyGreps[index]) args.push(`--grep=${journeyGreps[index].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+    commands.push([`Browser journey ${journey}`, ['bun', args]])
+  }
+  return commands
 }
 
 export function executePlan(plan, runner = spawnSync) {
@@ -46,11 +148,11 @@ export function executePlan(plan, runner = spawnSync) {
 }
 
 function isTestStage(name) {
-  return /\btests?\b|\bintegration\b|\bjourneys\b/i.test(name)
+  return /\btests?\b|\bintegration\b|\bjourneys?\b/i.test(name)
 }
 
 function testEvidenceError(name, output) {
-  if (/journeys/i.test(name)) {
+  if (/journeys?/i.test(name)) {
     const passed = Number(output.match(/(\d+)\s+passed\b/i)?.[1] ?? 0)
     const skipped = Number(output.match(/(\d+)\s+skipped\b/i)?.[1] ?? 0)
     const notRun = Number(output.match(/(\d+)\s+(?:did not run|not run)\b/i)?.[1] ?? 0)
@@ -100,7 +202,15 @@ function bunSummary(output) {
 
 export function classifyChanges(paths) {
   if (!paths.length) return 'full'
-  if (paths.some((path) => !isFastSafe(path) && (CRITICAL.test(path) || (path.startsWith('webapp/') && CRITICAL_UI.test(path))))) return 'full'
+  const frontendPaths = paths.filter((path) => path.startsWith('webapp/'))
+  const scoped = frontendPaths.length
+    ? spawnSync(BASH_EXECUTABLE, [resolve(process.cwd(), FRONTEND_SCOPE_CLI), 'classify', ...frontendPaths], { encoding: 'utf8', cwd: process.cwd() })
+    : { status: 0, stdout: '' }
+  if (scoped.status === 0) {
+    const classes = scoped.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split('\t').at(-1))
+    if (classes.includes('D')) return 'full'
+  } else if (frontendPaths.length) return 'full'
+  if (paths.some((path) => CRITICAL.test(path) && !DOCS.test(path))) return 'full'
   if (paths.every((path) => DOCS.test(path) || isFastSafe(path))) return 'fast'
   if (paths.every((path) => DOCS.test(path) || isFastSafe(path) || STANDARD.test(path))) return 'standard'
   return 'full'
@@ -258,13 +368,32 @@ function collectBackendTests(directory, files, repositoryRoot) {
 }
 
 function parseArgs(args) {
-  const out = { profile: undefined, base: undefined, dryRun: false }
+  const out = { profile: undefined, base: undefined, frontendBase: undefined, frontendReview: undefined, journey: [], journeyGrep: [], dryRun: false }
   const seen = new Set()
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--dry-run') {
       if (seen.has('dry-run')) throw new Error('--dry-run may only be provided once.')
       seen.add('dry-run')
       out.dryRun = true
+    }
+    else if (args[i] === '--journey') {
+      const value = args[++i]
+      if (!value || value.startsWith('--')) throw new Error('--journey requires a value.')
+      if (out.journey.length >= 2) throw new Error('At most two --journey paths may be provided.')
+      out.journey.push(value.replaceAll('\\', '/'))
+    }
+    else if (args[i] === '--journey-grep') {
+      const value = args[++i]
+      if (!value || value.startsWith('--') || value.length > 160 || /[\r\n]/.test(value)) throw new Error('--journey-grep requires a short single-line test title.')
+      if (out.journeyGrep.length >= 2) throw new Error('At most two --journey-grep titles may be provided.')
+      out.journeyGrep.push(value)
+    }
+    else if (args[i] === '--frontend-base' || args[i] === '--frontend-review') {
+      const flag = args[i].slice(2)
+      const value = args[++i]
+      if (!value || value.startsWith('--')) throw new Error(`${args[i - 1]} requires a value.`)
+      if (flag === 'frontend-base') out.frontendBase = value
+      else out.frontendReview = value
     }
     else if (args[i] === '--profile' || args[i] === '--base') {
       const flag = args[i].slice(2)
@@ -277,7 +406,11 @@ function parseArgs(args) {
     }
     else throw new Error(`Unknown argument: ${args[i]}`)
   }
-  if (seen.has('profile')) assertProfile(out.profile)
+  if (seen.has('profile') && out.profile !== 'frontend') assertProfile(out.profile)
+  if (out.journey.length && out.profile !== 'frontend') throw new Error('--journey is only valid with --profile frontend.')
+  if (out.journeyGrep.length && (out.profile !== 'frontend' || out.journeyGrep.length !== out.journey.length)) {
+    throw new Error('Provide one --journey-grep title per --journey, only with --profile frontend.')
+  }
   return out
 }
 
@@ -301,6 +434,60 @@ function changedPaths(requestedBase) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
+  if (options.profile === 'frontend') {
+    if (!options.base) throw new Error('Frontend verification requires --base with the full deployed backend SHA.')
+    if (!options.frontendBase) throw new Error('Frontend verification requires --frontend-base with the full deployed frontend SHA.')
+    if (options.journey.length === 0) throw new Error('Frontend verification requires at least one --journey browser spec.')
+    const { base } = validateFrontendLineage(options.base)
+    const { base: frontendBase } = validateFrontendLineage(options.frontendBase)
+    const backendPaths = changedNames(base)
+    const frontendPaths = changedNames(frontendBase)
+    const paths = [...new Set([...backendPaths, ...frontendPaths])].sort()
+    validateFrontendScope(frontendPaths)
+    validateFrontendModes(base)
+    if (git(['status', '--porcelain']).length) throw new Error('Frontend review receipts require a clean committed candidate tree.')
+    const candidateSha = git(['rev-parse', 'HEAD'])
+    for (const reviewBase of [...new Set([base, frontendBase])]) {
+      const verifyArgs = [resolve(FRONTEND_SCOPE_CLI), 'verify', reviewBase, candidateSha, 'local']
+      if (options.frontendReview) verifyArgs.push(resolve(options.frontendReview))
+      const checked = spawnSync(BASH_EXECUTABLE, verifyArgs, { encoding: 'utf8', cwd: process.cwd() })
+      if (checked.status !== 0) throw new Error(checked.stderr?.trim() || `Frontend review failed for deployed base ${reviewBase}.`)
+      process.stdout.write(checked.stdout)
+    }
+    for (const journey of options.journey) {
+      if (!/^webapp\/e2e\/[^/]+\.spec\.ts$/.test(journey) || !existsSync(resolve(journey))) {
+        throw new Error(`Browser journey must be an existing webapp/e2e/*.spec.ts file: ${journey}`)
+      }
+    }
+    const plan = frontendPlan(paths, base, options.journey, options.journeyGrep)
+    const snapshot = sourceSnapshot()
+    console.log('Profile: frontend (explicit guarded static-release profile)')
+    console.log(`Source SHA: ${snapshot.sha}`)
+    console.log(`Comparison base SHA: ${base}`)
+    console.log(`Working tree: ${snapshot.dirty ? `dirty; SHA256 ${snapshot.treeHash}` : `clean; tree ${git(['rev-parse', 'HEAD^{tree}'])}`}`)
+    console.log(`Changed paths: ${paths.length}`)
+    for (const [name, [command, args]] of plan) console.log(`PLAN ${name}: ${command} ${args.join(' ')}`)
+    if (options.dryRun) {
+      console.log('DRY RUN: plan only; no checks ran and this is not a PASS.')
+      process.exitCode = 2
+      return
+    }
+    const started = performance.now()
+    const results = executePlan(plan)
+    const failure = results.find((result) => result.status !== 0 || result.error)
+    if (results.length !== plan.length || failure) {
+      process.exitCode = failure?.status || 1
+      return
+    }
+    const after = sourceSnapshot()
+    if (after.sha !== snapshot.sha || after.dirty !== snapshot.dirty || after.treeHash !== snapshot.treeHash) {
+      console.error('Source changed while verification was running; results do not apply to the final tree.')
+      process.exitCode = 1
+      return
+    }
+    console.log(`\nFRONTEND verification passed (${((performance.now() - started) / 1000).toFixed(1)}s).`)
+    return
+  }
   const { base, paths } = changedPaths(options.base)
   const selection = selectProfile({ paths, requested: options.profile })
   const snapshot = sourceSnapshot()

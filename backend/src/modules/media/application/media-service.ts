@@ -329,7 +329,8 @@ export class MediaService {
     const object = await this.repository.resolveContent(scope, mediaId, variant)
     if (!object) throw new MediaFailure('not_found', 'Медиа не найдено')
     const etag = object.etag ? quoteEtag(object.etag) : null
-    const cacheable = !rangeHeader && (variant === 'preview' || variant === 'display') && isPrivateImageMime(object.contentType) && Boolean(etag)
+    const cacheable = object.cachePolicy !== 'no-store' && !rangeHeader &&
+      (variant === 'preview' || variant === 'display') && isPrivateImageMime(object.contentType) && Boolean(etag)
     if (cacheable && etag && matchesIfNoneMatch(ifNoneMatch, etag)) {
       return { ...object, body: null, range: undefined, etag, cacheable: true, notModified: true }
     }

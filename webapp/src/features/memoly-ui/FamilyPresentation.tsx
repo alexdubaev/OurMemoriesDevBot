@@ -1,11 +1,13 @@
 /* eslint-disable typographyPolicy/use-typography-component -- faithful static HTML port keeps canonical semantic hierarchy. */
-import type { FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChildDto, FamilyInviteDto, FamilyMemberDto, FamilyResponse } from '@web-app-demo/contracts'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { ChildHeader } from '@/components/ChildHeader'
+import { FamilyHeaderV2 } from '@/components/ui-v2/FamilyHeaderV2'
+import { readUiVersion } from '@/features/ui-version'
 import { WebpIcon } from '@/components/WebpIcon'
 import { InlineError } from '@/features/feed'
-import { familyMemberName, feedChildSubtitle, InviteFlow, InviteReady, roleLabel } from '@/features/family'
+import { familyChildren, familyMemberName, feedChildSubtitle, InviteFlow, InviteReady, roleLabel } from '@/features/family'
 import { MemberAvatarImage } from '@/features/avatar'
 import { useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'
@@ -13,6 +15,7 @@ import { SettingsSheet } from './SettingsSheet'
 import { MemberProfile } from './MemberProfile'
 import { FamilySettingsPage } from './FamilySettingsPage'
 import { FamilyArchivePage } from './FamilyArchivePage'
+import { FamilyChildrenSection } from './FamilyChildrenSection'
 import { FamilyInvitesPage } from './FamilyInvitesPage'
 import { FamilyLeavePage } from './FamilyLeavePage'
 import type { FamilySettingsChange } from './family-settings-model'
@@ -22,12 +25,16 @@ import './family-management.css'
 export type FamilyMemberActions = { canEditAlias: boolean; canManageRole: boolean; canRemove: boolean }
 export type FamilyPresentationProps = {
   active?: boolean
-  familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null
+  familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   currentUserId: string
   maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void
   usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { url: string; expiresAt: string; inviteeDisplayName?: string } | null
   copyState: 'idle' | 'copied' | 'failed'; busy: boolean; hasError?: boolean; inviteError?: boolean; savedRefreshFailed?: boolean; canInvite: boolean; canEditChild: boolean; canLeaveFamily: boolean; canManageFamily: boolean
-  memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: () => void
+  memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: (childId: string) => void
+  /** Owner-only «Добавить ребёнка»; absent when the family is full or the viewer is not the owner. */
+  onAddChild?: () => void
+  /** Live avatar for one child row; letters are shown when the screen supplies none. */
+  renderChildAvatar?: (child: ChildDto) => ReactNode
   onCreateInvite: (input: { role: 'viewer' | 'full'; inviteeDisplayName?: string; idempotencyKey?: string }) => Promise<void>; onCopyInvite: () => Promise<void>; onShareInvite: () => Promise<void>
   onCloseInvite: () => void; onRevokeInvite: (invite: FamilyInviteDto) => Promise<void>; onUpdateMember: (member: FamilyMemberDto, input: { familyDisplayName?: string | null; role?: 'full' | 'viewer' }) => Promise<void>
   onAllFamilies?: () => void
@@ -39,7 +46,7 @@ export type FamilyPresentationProps = {
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'family-settings' | 'archive' | 'invites' | 'leave-confirm'
 
-export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, savedRefreshFailed = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall, settingsRequest, onSettingsRequestHandled }: FamilyPresentationProps) {
+export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, childAvatarStatus, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, savedRefreshFailed = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onAddChild, renderChildAvatar, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall, settingsRequest, onSettingsRequestHandled }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [inviteReturnView, setInviteReturnView] = useState<'overview' | 'invites'>('overview')
@@ -98,7 +105,7 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
     <h1 className="sr-only">Семья</h1>
     {savedRefreshFailed ? <div className="family-error" role="alert"><p>Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.</p><button onClick={onRefresh} type="button">Обновить данные</button></div> : null}
     <div className={view === 'overview' ? 'family-overview-host' : 'family-shell'}>
-      {view === 'overview' ? <FamilyOverview canInvite={canInvite} canManageMaxChannel={canManageMaxChannel} currentUserId={currentUserId} maxChannelError={maxChannelError} maxChannelLoading={maxChannelLoading} maxChannelStatus={maxChannelStatus} onRetryMaxChannel={onRetryMaxChannel} child={child} childAvatarUrl={childAvatarUrl} family={familyResponse.family} hasError={hasError} invites={invites} members={presentedMembers} onAllFamilies={onAllFamilies} onOpenChild={canEditChild && child ? onEditChild : undefined} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
+      {view === 'overview' ? <FamilyOverview canInvite={canInvite} canManageMaxChannel={canManageMaxChannel} currentUserId={currentUserId} maxChannelError={maxChannelError} maxChannelLoading={maxChannelLoading} maxChannelStatus={maxChannelStatus} onRetryMaxChannel={onRetryMaxChannel} child={child} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} family={familyResponse.family} childList={familyChildren(familyResponse)} canEditChild={canEditChild} hasError={hasError} invites={invites} members={presentedMembers} onAddChild={onAddChild} onAllFamilies={onAllFamilies} onEditChild={onEditChild} renderChildAvatar={renderChildAvatar} onOpenChild={canEditChild && child ? () => onEditChild(child.id) : undefined} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
       {view === 'member' && currentSelectedMember ? <MemberProfile key={`${currentSelectedMember.userId}:${currentSelectedMember.role}:${currentSelectedMember.familyDisplayName ?? ''}`} actions={memberActions[currentSelectedMember.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }} busy={busy} currentUserId={currentUserId} member={currentSelectedMember} onAccountNameSaved={(name) => setSelfNameOverride({ value: name, baseline: liveSelf?.displayName ?? null })} onBack={goOverview} onRefresh={onRefresh} onRemove={onRemoveMember} onSave={onUpdateMember} /> : null}
       {view === 'family-settings' && canManageFamily ? <FamilySettingsPage key={`${familyResponse.family.name}:${familyResponse.family.timezone}`} busy={busy} family={familyResponse.family} onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefresh} onSave={onUpdateFamily} /> : null}
       {view === 'archive' ? <FamilyArchivePage onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefreshUsage} usage={usage} usageFailed={usageFailed} /> : null}
@@ -112,11 +119,17 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
   </main>
 }
 
-function FamilyOverview({ family, child, childAvatarUrl, members, invites, usage, usageFailed, canInvite, hasError, theme, currentUserId, canManageMaxChannel, maxChannelStatus, maxChannelLoading, maxChannelError, onRetryMaxChannel, onAllFamilies, onOpenChild, onOpenSettings, onOpenInvites, onOpenMember, onInvite, onRefresh, onRefreshUsage }: { family: FamilyResponse['family']; child: FamilyResponse['child']; members: FamilyMemberDto[]; invites: FamilyInviteDto[]; currentUserId: string; usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; canInvite: boolean; hasError: boolean; theme: MemolyTheme; childAvatarUrl: string | null; maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void; onAllFamilies?: () => void; onOpenChild?: () => void; onOpenSettings: () => void; onOpenMember: (member: FamilyMemberDto) => void; onOpenInvites: () => void; onInvite: () => void; onRefresh: () => void; onRefreshUsage: () => void }) {
+function FamilyOverview({ family, child, childList, canEditChild, onAddChild, onEditChild, renderChildAvatar, childAvatarUrl, childAvatarStatus, members, invites, usage, usageFailed, canInvite, hasError, theme, currentUserId, canManageMaxChannel, maxChannelStatus, maxChannelLoading, maxChannelError, onRetryMaxChannel, onAllFamilies, onOpenChild, onOpenSettings, onOpenInvites, onOpenMember, onInvite, onRefresh, onRefreshUsage }: { family: FamilyResponse['family']; child: FamilyResponse['child']; members: FamilyMemberDto[]; invites: FamilyInviteDto[]; currentUserId: string; usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; canInvite: boolean; hasError: boolean; theme: MemolyTheme; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'; maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void; childList: ChildDto[]; canEditChild: boolean; onAddChild?: () => void; onEditChild: (childId: string) => void; renderChildAvatar?: (child: ChildDto) => ReactNode; onAllFamilies?: () => void; onOpenChild?: () => void; onOpenSettings: () => void; onOpenMember: (member: FamilyMemberDto) => void; onOpenInvites: () => void; onInvite: () => void; onRefresh: () => void; onRefreshUsage: () => void }) {
+  // R06: with two or more children the header represents the whole family.
+  const uiV2 = readUiVersion() === 'v2'
+  const familyHeader = uiV2 && childList.length >= 2
   return <>
-    <ChildHeader childAvatarCrop={child?.avatarCrop ?? null} childAvatarUrl={childAvatarUrl} childName={child?.name ?? 'Ребёнок'} childSubtitle={child ? feedChildSubtitle(child.birthDate, family.timezone) : 'Профиль ребёнка'} mode="family" onAllFamilies={onAllFamilies} onOpenChild={child ? onOpenChild : undefined} onOpenSettings={onOpenSettings} theme={theme} />
+    {familyHeader
+      ? <FamilyHeaderV2 childList={childList} familyName={family.name} mode="family" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={canEditChild ? onEditChild : undefined} renderChildAvatar={renderChildAvatar} selectChildLabel={(item) => `Редактировать профиль ребёнка: ${item.name}`} theme={theme} />
+      : <ChildHeader childAvatarCrop={child?.avatarCrop ?? null} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} childName={child?.name ?? 'Ребёнок'} childSubtitle={child ? feedChildSubtitle(child.birthDate, family.timezone) : 'Профиль ребёнка'} mode="family" onAllFamilies={onAllFamilies} onOpenChild={child ? onOpenChild : undefined} onOpenSettings={onOpenSettings} theme={theme} />}
     <div className="family-shell family-overview-body">
     {hasError ? <div className="family-error"><InlineError onRetry={onRefresh} /></div> : null}
+    {uiV2 ? <FamilyChildrenSection canEdit={canEditChild} childList={childList} onAddChild={onAddChild} onEditChild={onEditChild} renderAvatar={renderChildAvatar} timezone={family.timezone} /> : null}
     <div className="family-section-head"><h2>Ваши близкие</h2><span className="family-count">{formatMemberCount(members.length)}</span></div>
     <div className="family-list">{members.map((member) => <FamilyMemberRow key={member.userId} currentUserId={currentUserId} member={member} onOpen={onOpenMember} />)}</div>
     {canInvite ? <button className="family-invite-btn" onClick={onInvite} type="button"><span className="family-invite-plus">+</span><span>Пригласить родственника</span></button> : null}

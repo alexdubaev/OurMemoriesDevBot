@@ -744,9 +744,33 @@ rollback_source_compatibility_profile() {
 			# to the same full-attested dc320 source and applies only to target 33a.
 			# The diagnostic source pin is separately bound to an exact runtime and
 			# executable compatibility fingerprint.
+			# The exact Welcome CTA 6 production inputs have their own measured
+			# executable fingerprint; this binding remains limited to recovery to 33a.
+			# The once-zoom correction also freezes the accepted mixed-media viewer
+			# behavior and app-wide zoom guard; it remains limited to recovery to 33a.
 			exact_compatibility_attestations=("dc3201096998f366a88a296d13914abf6047604b:9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda:81b25c411661d27367a817ad8aaacebb1a777dca599867321c9480a5e4771b51:comments"
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:18d7cd0be088612c52c39ac101c97a81292d4da759bb92e679036b9604be65d5:comments"
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:98ec68669e8a64cac59ca55bd34e3585cc5fbf24d3c48d6976196118ae1a762a:comments") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:98ec68669e8a64cac59ca55bd34e3585cc5fbf24d3c48d6976196118ae1a762a:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65:comments"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1:albums"
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f:albums"
+				# Exact final wishlist production inputs from 5f0f854e; this permits only
+				# the established dc26 baseline paired with the measured executable tree.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8:wishlist"
+				# Exact gift URL metadata production inputs from ad7dabc; retains the same
+				# dc26 baseline, migration ledger and wishlist recovery profile.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4:wishlist"
+				# Exact album portal layering input from a33d220; retains the same
+				# dc26 baseline, migration ledger and wishlist recovery profile.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67:wishlist"
+				# Exact frozen linked-family production inputs; this remains
+				# limited to the measured dc26 runtime, migration ledger and wishlist profile.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -780,6 +804,7 @@ for (const line of (process.env.MEMOLY_EXPECTED_MIGRATION_CHECKSUMS ?? "").trim(
       expected.has(name)) process.exit(1);
   expected.set(name, new Set([lfChecksum, crlfChecksum]));
 }
+
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 try {
   if (expected.size === 0) throw new Error("empty expected migration catalog");
@@ -803,6 +828,172 @@ try {
   process.exit(1);
 }
 MEMOLY_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
+rollback_verify_albums_migration_history() {
+	local phase=$1 baseline_catalog candidate_catalog suffix expected_suffix
+	local baseline_count candidate_count baseline_names candidate_names
+	case "$phase" in pre-sql|complete) ;; *) return 1 ;; esac
+	baseline_catalog=$(rollback_migration_catalog_checksums dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92) || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
+	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
+	[ "$baseline_count" = 49 ] && { [ "$candidate_count" = 52 ] || [ "$candidate_count" = 53 ]; } || return 1
+	baseline_names=$(printf '%s\n' "$baseline_catalog" | cut -d: -f1)
+	candidate_names=$(printf '%s\n' "$candidate_catalog" | cut -d: -f1)
+	[ "$(printf '%s\n' "$candidate_names" | head -n 49)" = "$baseline_names" ] || return 1
+	if [ "$candidate_count" = 52 ]; then
+		suffix=$(printf '%s\n' "$candidate_names" | tail -n 3)
+		expected_suffix=$(printf '%s\n' \
+			20261023110000_memoly_albums \
+			20261023120000_album_entry_tombstones_year_uniqueness \
+			20261023130000_album_source_operation_receipts)
+	else
+		suffix=$(printf '%s\n' "$candidate_names" | tail -n 4)
+		expected_suffix=$(printf '%s\n' \
+			20261023110000_memoly_albums \
+			20261023120000_album_entry_tombstones_year_uniqueness \
+			20261023130000_album_source_operation_receipts \
+			20261023150000_album_private_photos)
+	fi
+	[ "$suffix" = "$expected_suffix" ] || return 1
+	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
+	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
+	MEMOLY_ALBUMS_LEDGER_PHASE="$phase" compose run --rm --no-deps \
+		-e "MEMOLY_EXPECTED_BASELINE_MIGRATIONS=$baseline_catalog" \
+		-e "MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS=$candidate_catalog" \
+		-e "MEMOLY_ALBUMS_LEDGER_PHASE=$phase" backend bun -e "$(cat <<'MEMOLY_ALBUM_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+function parse(value) {
+  const result = [];
+  const seen = new Set();
+  for (const line of (value ?? "").trim().split("\n")) {
+    const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+    if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+        !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") || seen.has(name))
+      throw new Error("invalid expected migration catalog");
+    seen.add(name);
+    result.push({ name, checksums: new Set([lfChecksum, crlfChecksum]) });
+  }
+  return result;
+}
+const baseline = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
+const candidate = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
+const phase = process.env.MEMOLY_ALBUMS_LEDGER_PHASE;
+if (baseline.length !== 49 || ![52, 53].includes(candidate.length) ||
+    candidate.slice(0, 49).some((row, index) => row.name !== baseline[index].name ||
+      ![...row.checksums].some(checksum => baseline[index].checksums.has(checksum))) ||
+    !["pre-sql", "complete"].includes(phase)) process.exit(1);
+const minimum = phase === "pre-sql" ? 49 : candidate.length;
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.length < minimum || rows.length > candidate.length || rows.some(row => !row.finished_at || row.rolled_back_at))
+    throw new Error("invalid album migration ledger state");
+  const seen = new Set();
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const expected = candidate[index];
+    if (!expected || typeof row.migration_name !== "string" || typeof row.checksum !== "string" ||
+        row.migration_name !== expected.name || !expected.checksums.has(row.checksum) || seen.has(row.migration_name))
+      throw new Error("migration ledger is not an exact catalog prefix");
+    seen.add(row.migration_name);
+  }
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_ALBUM_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
+rollback_verify_wishlist_migration_history() {
+	local phase=$1 baseline_revision=b4cdbbc49500d0850a64075d1bfba683a9bd22ad
+	local baseline_catalog candidate_catalog baseline_count candidate_count
+	case "$phase" in pre-sql|complete) ;; *) return 1 ;; esac
+	baseline_catalog=$(rollback_migration_catalog_checksums "$baseline_revision") || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
+	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
+	[ "$baseline_count" = 53 ] && { [ "$candidate_count" = 55 ] || [ "$candidate_count" = 56 ]; } || return 1
+	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
+	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
+	MEMOLY_WISHLIST_LEDGER_PHASE="$phase" compose run --rm --no-deps \
+		-e "MEMOLY_EXPECTED_BASELINE_MIGRATIONS=$baseline_catalog" \
+		-e "MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS=$candidate_catalog" \
+		-e "MEMOLY_WISHLIST_LEDGER_PHASE=$phase" backend bun -e "$(cat <<'MEMOLY_WISHLIST_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+function parse(value) {
+  const result = [];
+  const byName = new Map();
+  for (const line of (value ?? "").trim().split("\n")) {
+    const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+    if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+        !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") || byName.has(name))
+      throw new Error("invalid expected migration catalog");
+    const row = { name, checksums: new Set([lfChecksum, crlfChecksum]) };
+    result.push(row);
+    byName.set(name, row);
+  }
+  return { result, byName };
+}
+const { result: baseline, byName: baselineByName } = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
+const { result: candidate, byName: candidateByName } = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
+const phase = process.env.MEMOLY_WISHLIST_LEDGER_PHASE;
+const giftName = "20261023120000_gift_wishlist";
+const guardName = "20261024120000_gift_photo_recovery_guard";
+const childTagsName = "20261024100000_memory_child_tags";
+const childCandidate = candidate.length === 56;
+if (baseline.length !== 53 || ![55, 56].includes(candidate.length) || !["pre-sql", "complete"].includes(phase) ||
+    candidate.some(row => !baselineByName.has(row.name) && row.name !== giftName && row.name !== guardName && row.name !== childTagsName) ||
+    [...baselineByName.keys()].some(name => {
+      const base = baselineByName.get(name), next = candidateByName.get(name);
+      return !next || ![...next.checksums].some(checksum => base.checksums.has(checksum));
+    }) || !candidateByName.has(giftName) || !candidateByName.has(guardName) ||
+    candidateByName.has(childTagsName) !== childCandidate ||
+    candidateByName.get(giftName).name !== giftName || candidateByName.get(guardName).name !== guardName ||
+    (childCandidate && candidateByName.get(childTagsName).name !== childTagsName))
+  process.exit(1);
+const baselineNames = new Set(baselineByName.keys());
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.some(row => !row.finished_at || row.rolled_back_at))
+    throw new Error("unfinished or rolled-back wishlist migration");
+  const count = rows.length;
+  const permittedCount = childCandidate
+    ? (phase === "complete" ? [56] : [53, 54, 55, 56])
+    : (phase === "complete" ? [55] : [53, 54, 55]);
+  if (!permittedCount.includes(count)) throw new Error("wishlist migration count mismatch");
+  const includeGift = count >= 54;
+  const includeGuard = count >= 55;
+  const includeChildTags = childCandidate && count === 56;
+  const expectedNames = new Set([...baselineNames, ...(includeGift ? [giftName] : []),
+    ...(includeGuard ? [guardName] : []), ...(includeChildTags ? [childTagsName] : [])]);
+  if (expectedNames.size !== count) throw new Error("wishlist ledger has an unexpected migration set");
+  const seen = new Set();
+  for (const row of rows) {
+    if (typeof row.migration_name !== "string" || typeof row.checksum !== "string" || seen.has(row.migration_name) ||
+        !expectedNames.has(row.migration_name)) throw new Error("wishlist ledger contains an invalid or duplicate migration");
+    const expected = candidateByName.get(row.migration_name);
+    const base = baselineByName.get(row.migration_name);
+    const checksums = base ? base.checksums : expected?.checksums;
+    if (!checksums?.has(row.checksum)) throw new Error("wishlist ledger checksum differs from source SQL");
+    seen.add(row.migration_name);
+  }
+  if (seen.size !== expectedNames.size) throw new Error("wishlist ledger is incomplete");
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_WISHLIST_MIGRATION_HISTORY_JS
 )" >/dev/null 2>&1
 }
 
@@ -871,6 +1062,8 @@ rollback_auth_gate_for_verified_pair() {
 }
 
 verify_application_rollback() {
+	local migration_phase=${1:-complete}
+	case "$migration_phase" in complete|pre-sql) ;; *) die 'unknown application rollback verification phase' ;; esac
 	(
 	[ ! -e "$FORWARD_MARKER" ] && [ ! -L "$FORWARD_MARKER" ] || die 'B2 forward-only release is unfinished; rollback is forbidden'
 	[ ! -e "$MM0_FORWARD_MARKER" ] && [ ! -L "$MM0_FORWARD_MARKER" ] ||
@@ -937,7 +1130,7 @@ verify_application_rollback() {
 		die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = comments ]; then
+	if [ "$profile" = comments ] || [ "$profile" = albums ] || [ "$profile" = wishlist ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
@@ -985,7 +1178,13 @@ verify_application_rollback() {
 			die 'rollback image revision label mismatch'
 	done
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	migration_status >/dev/null 2>&1 || die 'rollback target cannot confirm completed migrations'
+	if { [ "$profile" = albums ] || [ "$profile" = wishlist ]; } && [ "$migration_phase" = pre-sql ]; then
+		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
+		# migrate status intentionally reports a pending reviewed additive suffix.
+		:
+	else
+		migration_status >/dev/null 2>&1 || die 'rollback target cannot confirm completed migrations'
+	fi
 	# Both capabilities are proven by the current -> old -> current PostgreSQL probe.
 	# Missing tables, unknown result types, unfinished migrations and read errors fail closed.
 	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
@@ -997,12 +1196,18 @@ verify_application_rollback() {
 		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
 		rollback_verify_migration_history "$expected_migration_checksums" ||
 			die 'comments rollback requires the exact completed migration history'
+	elif [ "$profile" = albums ]; then
+		rollback_verify_albums_migration_history "$migration_phase" ||
+			die 'albums rollback requires the exact reviewed migration history for this phase'
+	elif [ "$profile" = wishlist ]; then
+		rollback_verify_wishlist_migration_history "$migration_phase" ||
+			die 'wishlist rollback requires the exact reviewed migration history for this phase'
 	fi
 	)
 }
 
 rollback() {
-	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	verify_application_rollback complete || die 'application rollback compatibility could not be verified'
 	set -a
 	. "$ROLLBACK_ENV"
 	set +a
@@ -1189,7 +1394,22 @@ deploy() {
 }
 
 rollback_readiness() {
-	verify_application_rollback || die 'application rollback compatibility could not be verified'
+	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}
+	case "$requested_phase" in
+		complete) ;;
+		pre-sql)
+			[ "${SELECTEL_CI_RELEASE:-false}" = true ] || die 'pre-SQL migration readiness is restricted to the guarded CI release'
+			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || die 'pre-SQL album readiness requires the inherited deploy lock'
+			lock_path=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || die 'deployment lock path is unavailable'
+			fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
+			[ "$fd_target" = "$lock_path" ] || die 'pre-SQL migration readiness lock does not reference the expected lock file'
+			{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || die 'pre-SQL migration readiness lock is not open'
+			flock -n "$SELECTEL_DEPLOY_LOCK_FD" || die 'pre-SQL migration readiness lock is not held'
+			migration_phase=pre-sql
+			;;
+		*) die 'unknown migration ledger readiness phase' ;;
+	esac
+	verify_application_rollback "$migration_phase" || die 'application rollback compatibility could not be verified'
 	set -a
 	. "$ROLLBACK_ENV"
 	set +a

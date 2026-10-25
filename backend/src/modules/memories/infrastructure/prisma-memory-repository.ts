@@ -4,7 +4,9 @@ import type {
   MemoryReaction,
   ReactionResponse,
   MemoryDto,
+  MemoryChildTagsResponse,
   MemoryStatus,
+  ReplaceMemoryChildTagsRequest,
   SeenMemoriesRequest,
   UpdateMemoryRequest,
 } from '@web-app-demo/contracts'
@@ -23,6 +25,13 @@ import { MemoryFailure } from '../domain/errors'
 import type { MemoryCursorFilters, MemoryCursorPosition, UnreadMemoryCursorClaims } from '../domain/memory-cursor'
 import type { MemoryRepository } from '../application/ports'
 import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
+import {
+  assertLiveFamilyChildren,
+  type ChildTag,
+  insertPublicationChildTags,
+  normalizeChildTags,
+  resolveCreationChildTags,
+} from './child-tags'
 
 type MemberRole = 'full' | 'viewer'
 
@@ -92,6 +101,66 @@ export class PrismaMemoryRepository implements MemoryRepository {
     })
   }
 
+  async attachChildTags(scope: FamilyScope, memories: MemoryDto[]): Promise<MemoryDto[]> {
+    if (memories.length === 0) return memories
+    return this.db.$transaction(async (tx) => {
+      await lockMember(tx, scope, 'member')
+      const rows = await tx.memory.findMany({
+        where: { familyId: scope.familyId, id: { in: memories.map(({ id }) => id) } },
+        select: { id: true, childTagsVersion: true, childTags: { select: { childId: true, attachmentId: true } } },
+      })
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      return memories.map((memory) => {
+        const row = byId.get(memory.id)
+        return row ? { ...memory, childTags: sortChildTags(row.childTags), childTagsVersion: row.childTagsVersion } : memory
+      })
+    })
+  }
+
+  replaceChildTags(scope: FamilyScope, memoryId: string, input: ReplaceMemoryChildTagsRequest): Promise<MemoryChildTagsResponse> {
+    return this.db.$transaction(async (tx) => {
+      await lockMember(tx, scope, 'full')
+      // NO KEY UPDATE serializes tag editors without blocking likes, comments or seen rows that reference the memory.
+      const rows = await tx.$queryRaw<Array<{ childTagsVersion: number }>>`
+        SELECT child_tags_version AS "childTagsVersion" FROM memories
+         WHERE id = ${memoryId}::uuid AND family_id = ${scope.familyId}::uuid
+           AND deleted_at IS NULL AND status <> 'deleted'
+         FOR NO KEY UPDATE
+      `
+      const current = rows[0]
+      if (!current) throw new MemoryFailure('not_found', 'Воспоминание не найдено')
+      if (current.childTagsVersion !== input.expectedChildTagsVersion) {
+        throw new MemoryFailure('version_conflict', 'Отметки уже изменили, обновите')
+      }
+      const normalized = normalizeChildTags(input.tags, await memoryAttachments(tx, scope.familyId, memoryId))
+      await assertLiveFamilyChildren(tx, scope.familyId, input.tags.map(({ childId }) => childId))
+
+      const existing = await tx.memoryChildTag.findMany({
+        where: { familyId: scope.familyId, memoryId },
+        select: { id: true, childId: true, attachmentId: true },
+      })
+      const wanted = new Set(normalized.map(childTagKey))
+      const present = new Set(existing.map(childTagKey))
+      const removed = existing.filter((tag) => !wanted.has(childTagKey(tag)))
+      const added = normalized.filter((tag) => !present.has(childTagKey(tag)))
+      let childTagsVersion = current.childTagsVersion
+      if (removed.length > 0 || added.length > 0) {
+        if (removed.length > 0) await tx.memoryChildTag.deleteMany({ where: { id: { in: removed.map(({ id }) => id) } } })
+        if (added.length > 0) await tx.memoryChildTag.createMany({ data: added.map(({ childId, attachmentId }) => ({
+          familyId: scope.familyId, memoryId, childId, attachmentId, createdBy: scope.principal.userId,
+        })) })
+        // Raw update: `version`, `updated_at` and the unread order stay untouched by a tag edit.
+        const bumped = await tx.$queryRaw<Array<{ childTagsVersion: number }>>`
+          UPDATE memories SET child_tags_version = child_tags_version + 1
+           WHERE id = ${memoryId}::uuid AND family_id = ${scope.familyId}::uuid
+           RETURNING child_tags_version AS "childTagsVersion"
+        `
+        childTagsVersion = bumped[0]!.childTagsVersion
+      }
+      return { childTags: sortChildTags(normalized), childTagsVersion }
+    })
+  }
+
   async create(
     scope: FamilyScope,
     input: CreateMemoryRequest,
@@ -109,11 +178,10 @@ export class PrismaMemoryRepository implements MemoryRepository {
         await tx.$queryRaw`SELECT id FROM users WHERE id = ${scope.principal.userId}::uuid FOR UPDATE`
         const publication = await lockPublicationFamily(tx, scope.familyId)
         const role = await lockMember(tx, scope, 'full')
-        const child = await tx.child.findFirst({
-          where: { id: input.childId, familyId: scope.familyId },
-          select: { id: true },
-        })
-        if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
+        // Old clients still send their single `childId`; it must stay a live child of this family,
+        // but without `childIds` it no longer selects tags (the default rule applies).
+        if (input.childId) await assertLiveFamilyChildren(tx, scope.familyId, [input.childId])
+        const childTags = await resolveCreationChildTags(tx, scope.familyId, input.childIds)
 
         const author = await tx.user.findUnique({
           where: { id: scope.principal.userId },
@@ -134,7 +202,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
           await lockMediaAssets(tx, scope.familyId, mediaIds)
           const assetKinds = await tx.mediaAsset.findMany({ where: {
             id: { in: mediaIds }, familyId: scope.familyId, purpose: 'memory', originalStatus: 'stored', deletedAt: null,
-            memories: { none: {} },
+            memories: { none: {} }, albumPhoto: { is: null },
           }, select: { id: true, mediaKind: true } })
           assetKindById = new Map(assetKinds.map(({ id, mediaKind }) => [id, mediaKind]))
           const expected = input.kind === 'media' ? ['photo', 'video'] : [input.kind]
@@ -150,8 +218,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
           await tx.$queryRaw`SELECT id FROM max_video_upload_sessions WHERE id = ${sessionId}::uuid AND family_id = ${scope.familyId}::uuid FOR UPDATE`
         }
         const sessions = sessionIds.length ? await tx.maxVideoUploadSession.findMany({
+          // The session's own child is only a legacy upload target; tags come from this request.
           where: { id: { in: sessionIds }, familyId: scope.familyId, authorId: scope.principal.userId,
-            childId: input.childId, mode: 'attachment', state: 'finalized' },
+            mode: 'attachment', state: 'finalized' },
           include: { outboundSource: { include: { videoReference: true } } },
         }) : []
         if (sessions.length !== sessionIds.length || sessions.some((session) => !session.outboundSource || session.outboundSource.videoReference)) {
@@ -163,7 +232,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
         const created = await tx.memory.create({
           data: {
             familyId: scope.familyId,
-            childId: input.childId,
+            childId: childTags.anchorChildId,
             authorId: scope.principal.userId,
             kind: input.kind,
             body: input.body,
@@ -172,6 +241,9 @@ export class PrismaMemoryRepository implements MemoryRepository {
             firstPublishedAt,
           },
           include: memoryInclude(),
+        })
+        await insertPublicationChildTags(tx, {
+          familyId: scope.familyId, memoryId: created.id, createdBy: scope.principal.userId, childIds: childTags.childIds,
         })
         if (input.kind !== 'note') {
           if (mediaIds.length) await tx.memoryMedia.createMany({
@@ -505,12 +577,13 @@ async function findPage(
   before: MemoryCursorPosition | undefined,
   limit: number,
 ) {
+  await assertFilterChild(tx, scope.familyId, filters)
   const memories = await tx.memory.findMany({
     where: {
       familyId: scope.familyId,
       deletedAt: null,
       createdSequence: { lt: BigInt(snapshotWatermark) },
-      ...(filters.childId ? { childId: filters.childId } : {}),
+      ...childFilter(filters),
       ...(filters.kind ? { kind: filters.kind } : {}),
       status: { in: visibleStatuses(role) },
       ...(before ? { AND: [beforePosition(before)] } : {}),
@@ -556,13 +629,14 @@ async function lockUnreadContext(tx: PrismaTransactionClient, scope: FamilyScope
 async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, role: MemberRole,
   filters: MemoryCursorFilters, snapshotPublicationOrdinal: string, baselineOrdinal: string,
   membershipEpoch: number, before: MemoryCursorPosition | undefined, limit: number) {
+  await assertFilterChild(tx, scope.familyId, filters)
   const memories = await tx.memory.findMany({
     where: {
       familyId: scope.familyId, status: 'published', deletedAt: null,
       authorId: { not: scope.principal.userId },
       firstPublishedOrdinal: { gt: BigInt(baselineOrdinal), lte: BigInt(snapshotPublicationOrdinal) },
       seenByMembers: { none: { userId: scope.principal.userId, membershipEpoch } },
-      ...(filters.childId ? { childId: filters.childId } : {}),
+      ...childFilter(filters),
       ...(filters.kind ? { kind: filters.kind } : {}),
       ...(before ? { AND: [beforePosition(before)] } : {}),
     },
@@ -573,6 +647,44 @@ async function findUnreadPage(tx: PrismaTransactionClient, scope: FamilyScope, r
   const hasNext = memories.length > limit
   const page = hasNext ? memories.slice(0, limit) : memories
   return { items: page.map((memory) => dto(memory, scope.principal.userId, role)), hasNext }
+}
+
+/** A feed filter by a child of another family or a deleted child is 404, the same as albums. */
+async function assertFilterChild(tx: PrismaTransactionClient, familyId: string, filters: MemoryCursorFilters) {
+  if (!filters.childId) return
+  const child = await tx.child.findFirst({ where: { id: filters.childId, familyId, deletedAt: null }, select: { id: true } })
+  if (!child) throw new MemoryFailure('not_found', 'Профиль ребёнка не найден')
+}
+
+/** Child filters look at tags of any level: a child tagged on one photo selects the whole memory. */
+function childFilter(filters: MemoryCursorFilters) {
+  if (filters.childId) return { childTags: { some: { childId: filters.childId } } }
+  if (filters.untagged) return { childTags: { none: {} } }
+  return {}
+}
+
+/** Every attachment of the memory across all three sources, with the kind tags care about. */
+async function memoryAttachments(tx: PrismaTransactionClient, familyId: string, memoryId: string) {
+  const [media, maxVideos, telegramVideos] = await Promise.all([
+    tx.memoryMedia.findMany({ where: { memoryId, familyId }, select: { mediaId: true, asset: { select: { mediaKind: true } } } }),
+    tx.maxVideoReference.findMany({ where: { memoryId, familyId }, select: { id: true } }),
+    tx.telegramVideoReference.findMany({ where: { memoryId, familyId }, select: { id: true } }),
+  ])
+  return [
+    ...media.map(({ mediaId, asset }) => ({ id: mediaId, kind: asset.mediaKind })),
+    ...[...maxVideos, ...telegramVideos].map(({ id }) => ({ id, kind: 'video' as const })),
+  ]
+}
+
+function childTagKey(tag: ChildTag) {
+  return `${tag.attachmentId ?? ''}:${tag.childId}`
+}
+
+/** Stable order: whole-publication tags first, then by attachment and child. */
+function sortChildTags(tags: readonly ChildTag[]): ChildTag[] {
+  return [...tags]
+    .map(({ childId, attachmentId }) => ({ childId, attachmentId }))
+    .sort((left, right) => childTagKey(left).localeCompare(childTagKey(right)))
 }
 
 async function getMemory(

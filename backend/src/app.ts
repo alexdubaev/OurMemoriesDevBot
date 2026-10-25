@@ -22,6 +22,8 @@ import { createReadinessProbe } from './http/readiness'
 import { createAuthSecurity, createFixedWindowRateLimit } from './http/security'
 import { createAuthModule, type AuthHttpEnv } from './modules/auth'
 import { createFamiliesModule } from './modules/families'
+import { createGiftsModule, giftPrivacyMiddleware, type GiftMetadataProvider } from './modules/gifts'
+import { createAlbumsModule } from './modules/albums'
 import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModule } from './modules/memories'
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
@@ -48,6 +50,7 @@ type CreateAppOptions = {
   telegramRoutes?: import('hono').Hono | null
   maxRoutes?: import('hono').Hono | null
   maxVideoPlayback?: MaxVideoPlayback
+  giftMetadataProvider?: GiftMetadataProvider
 }
 
 export function createApp({
@@ -60,6 +63,7 @@ export function createApp({
   telegramRoutes = null,
   maxRoutes = null,
   maxVideoPlayback,
+  giftMetadataProvider,
 }: CreateAppOptions) {
   if (legacyPasswordAuthForTests && env.NODE_ENV === 'production') {
     throw new Error('Legacy password auth test routes cannot be mounted in production')
@@ -86,6 +90,15 @@ export function createApp({
     mediaCatalog: createMediaMemoryCatalog((scope, ids) => media.service.assertReadyForMemory(scope, ids)),
     telegramBotUsername: env.TELEGRAM_BOT_EXPECTED_USERNAME,
   })
+  const gifts = createGiftsModule({
+    db: prisma,
+    familyAccess: families.access,
+    idempotencyExecutor,
+    idempotencySecret: env.JWT_SECRET,
+    requireAuth: auth.requireAuth,
+    ...(giftMetadataProvider ? { metadataProvider: giftMetadataProvider } : {}),
+  })
+  const albums = createAlbumsModule({ db: prisma, idempotencyExecutor, idempotencySecret: env.JWT_SECRET, requireAuth: auth.requireAuth })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => c.var.user.id,
@@ -115,6 +128,7 @@ export function createApp({
 
   app.use('*', createRequestContext())
   app.use('*', commentPrivacyMiddleware)
+  app.use('*', giftPrivacyMiddleware)
   app.use(secureHeaders())
   app.use(
     '*',
@@ -197,6 +211,8 @@ export function createApp({
   app.route('/api/v1', families.routes)
   app.route('/api/v1', media.routes)
   app.route('/api/v1', memories.routes)
+  app.route('/api/v1', gifts.routes)
+  app.route('/api/v1', albums.routes)
   app.route('/api/users', users.userRoutes)
   app.route('/api/v1', users.v1UserRoutes)
   app.route('/api/admin', users.adminRoutes)

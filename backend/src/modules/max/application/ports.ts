@@ -237,4 +237,6 @@ export type MaxDirectUploadRepository = {
   findOutboundSource?(uploadSessionId: string, familyId: string): Promise<MaxOutboundSource | null>
   findRecipientId?(familyId: string, userId: string): Promise<string | null>
   assertChild?(familyId: string, childId: string): Promise<boolean>
+  /** Oldest live child by creation: the legacy session target when the client names none. */
+  findAnchorChildId?(familyId: string): Promise<string | null>
 }

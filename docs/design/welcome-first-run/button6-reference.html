@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>memoLy — одобренный стартовый экран, кнопка №6</title>
+<!-- Visual reference only. Production must self-host Comfortaa and use React onComplete. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#fcfaf6;--ink:#355b4b;--muted:#66776c;--green:#416d58;--ease:cubic-bezier(.22,1,.36,1);font-family:Comfortaa,ui-rounded,"Avenir Next",system-ui,sans-serif;color-scheme:light}
+*{box-sizing:border-box}
+html,body{margin:0;min-width:280px;min-height:100%}
+body{background:#e8ede5;color:var(--ink);-webkit-font-smoothing:antialiased}
+img{display:block;max-width:100%;user-select:none;-webkit-user-drag:none}
+button,a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.welcome{position:relative;isolation:isolate;margin:0 auto;width:min(100%,440px);height:100svh;min-height:530px;display:flex;flex-direction:column;background:var(--paper);overflow:hidden}
+.scene{position:relative;isolation:isolate;flex:1 1 auto;min-height:190px;overflow:hidden}
+.landscape{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 52%;z-index:-3;animation:landscape-in 1.8s var(--ease) both}
+.scene:after{content:"";position:absolute;inset:auto 0 -1px;height:22%;z-index:10;background:linear-gradient(transparent,var(--paper) 96%);pointer-events:none}
+.brand{position:absolute;top:max(16px,env(safe-area-inset-top,0px));left:23px;width:114px;z-index:30}
+.art{position:absolute;inset:48px 0 0;width:100%;max-width:440px;margin:auto}
+.layer{position:absolute}
+.layer>img{width:100%;height:auto}
+.ribbon{inset:-20% -7% -4%;width:114%;height:124%;max-width:none;object-fit:cover;opacity:.7;z-index:-1;animation:ribbon-arrive 1.5s var(--ease) .15s backwards}
+.book{width:82%;left:9%;bottom:4%;z-index:3;animation:book-arrive 1.35s var(--ease) .1s backwards}
+.book img{filter:drop-shadow(0 9px 10px #596c4c19)}
+.photo{width:29%;top:23%;left:3%;z-index:5;transform:rotate(-9deg);animation:photo-arrive 1.2s var(--ease) .22s backwards}
+.photo img{animation:drift-left 6.5s ease-in-out 1.5s infinite}
+.voice{width:35%;top:9%;left:33%;z-index:4;transform:rotate(2deg);animation:voice-arrive 1.25s var(--ease) .35s backwards}
+.voice img{animation:drift 7s ease-in-out 1.8s infinite}
+.video{width:28%;top:27%;right:0;z-index:6;transform:rotate(8deg);animation:video-arrive 1.15s var(--ease) .45s backwards}
+.video img{animation:drift 6s ease-in-out 1.9s infinite reverse}
+.note{width:26%;top:56%;right:1%;z-index:7;transform:rotate(7deg);animation:note-arrive 1.2s var(--ease) .55s backwards}
+.note img{animation:drift 7.5s ease-in-out 2s infinite}
+.star{width:27%;left:37%;top:36%;z-index:9;animation:star-arrive 1.4s var(--ease) .8s backwards}
+.star img{filter:drop-shadow(0 9px 12px #eab54a26);animation:star-drift 5.8s ease-in-out 2.2s infinite}
+.sparkle{position:absolute;z-index:8;width:7px;height:7px;background:#fff4be;border-radius:50%;opacity:.8;box-shadow:0 0 9px #ffd96585;animation:glimmer 5s ease-in-out 2s infinite}
+.sparkle.one{left:26%;top:20%}.sparkle.two{right:28%;top:25%;width:4px;height:4px;animation-delay:3s}
+.copy{flex:0 0 auto;padding:1px 22px 0;text-align:center;position:relative;z-index:20}
+h1{margin:0;font-size:clamp(25px,7.5vw,32px);line-height:1.34;font-weight:700;letter-spacing:-.065em;color:var(--ink)}
+h1>span{display:block}
+.story{position:relative;display:inline-block}
+.story:after{content:"";position:absolute;left:10%;right:8%;bottom:-.02em;height:4px;background:#eac3cf;border-radius:100%;transform:rotate(-1.6deg);z-index:-1}
+.description{font-size:13.5px;line-height:1.75;font-weight:400;letter-spacing:-.025em;color:var(--muted);margin:13px 0 0}
+.formats{margin:23px 24px 0;padding:12px 4px 11px;flex:0 0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:#f0f3eb;border:1px solid #e8ece2;border-radius:20px}
+.format{text-align:center;margin:0;position:relative}
+.format+.format:before{content:"";position:absolute;left:0;top:10px;bottom:5px;width:1px;background:#dce3d7}
+.format img{width:40px;height:37px;margin:0 auto 4px;object-fit:contain}
+.format figcaption{font-size:11.5px;line-height:1.4;letter-spacing:-.03em;font-weight:700;color:#536a59}
+.actions{flex:0 0 auto;padding:24px 24px max(20px,env(safe-area-inset-bottom,0px));text-align:center}
+/* Owner's approved CTA choice #6: raised outline pill with a dark-green arrow orb. */
+.continue{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 48px;align-items:center;gap:8px;width:100%;min-height:64px;padding:6px 7px 6px 23px;color:#28654f;text-decoration:none;background:linear-gradient(170deg,#fff 15%,#fffef9 58%,#f3f1e5 100%);border:1.5px solid #88ad8b;border-bottom-color:#4c8466;border-radius:999px;font-size:17px;line-height:1.4;letter-spacing:-.045em;font-weight:700;box-shadow:inset 0 1px 1px #fff,inset 0 -2px 4px #d8ddcc40,0 8px 18px #416d581a,0 2px 2px #416d5810;transition:transform .18s ease,box-shadow .18s ease}
+.continue-label{padding:2px 0}
+.continue-orb{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;color:#fffef9;background:radial-gradient(ellipse at 28% 12%,#ffffff18,transparent 58%),linear-gradient(145deg,#4c906c,#24644e);box-shadow:inset 0 1px 1px #ffffff26,inset 0 -2px 3px #143f301c,0 1px 2px #325b4920}
+.continue-orb svg{width:23px;height:23px}
+.continue:active{transform:translateY(1px);box-shadow:inset 0 1px 4px #416d580d,0 3px 8px #416d5817}
+.continue:focus-visible,.demo-back:focus-visible{outline:3px solid #c98398;outline-offset:4px}
+@media(hover:hover){.continue:hover{box-shadow:inset 0 1px 1px #fff,0 10px 22px #416d5825}}
+.motion-toggle{position:absolute;width:1px;height:1px;margin:-1px;opacity:0;overflow:hidden;clip-path:inset(50%)}
+.motion-control{position:absolute;right:17px;top:max(16px,env(safe-area-inset-top,0px));z-index:31;width:44px;height:44px;display:grid;place-items:center;cursor:pointer;color:#5a7965}
+.motion-control:before{content:"";position:absolute;width:32px;height:32px;border:1px solid #ffffffa6;background:#ffffff8a;border-radius:50%}
+.motion-control svg{z-index:1;width:13px;height:13px}
+.resume{display:none}
+#pause-motion:checked~.welcome .pause{display:none}
+#pause-motion:checked~.welcome .resume{display:block}
+#pause-motion:checked~.welcome .animated{animation-play-state:paused!important}
+#pause-motion:focus-visible~.welcome .motion-control{outline:2px solid var(--green);outline-offset:-2px;border-radius:50%}
+.demo{display:none;position:fixed;inset:0;z-index:100;background:#263d32aa;align-items:center;justify-content:center;padding:24px}
+.demo:target{display:flex}
+.demo-card{width:min(100%,350px);background:var(--paper);padding:30px 24px 24px;border-radius:24px;text-align:center}
+.demo-card h2{margin:0;font-size:22px;line-height:1.5}
+.demo-card p{font-size:13px;line-height:1.8;color:var(--muted);margin:14px 0 24px}
+.demo-back{display:block;padding:14px;border-radius:14px;background:var(--green);color:white;font-size:13px;text-decoration:none}
+@keyframes landscape-in{from{transform:scale(1.06)}to{transform:scale(1)}}
+@keyframes ribbon-arrive{from{opacity:0;transform:translateY(8px) rotate(-3deg)}to{opacity:.7;transform:none}}
+@keyframes book-arrive{from{opacity:0;transform:translateY(36px) scale(.92)}to{opacity:1;transform:none}}
+@keyframes photo-arrive{from{opacity:0;transform:translate(-28px,14px) rotate(-18deg)}to{opacity:1;transform:rotate(-9deg)}}
+@keyframes voice-arrive{from{opacity:0;transform:translateY(-20px) rotate(-4deg)}to{opacity:1;transform:rotate(2deg)}}
+@keyframes video-arrive{from{opacity:0;transform:translate(28px,5px) rotate(14deg)}to{opacity:1;transform:rotate(8deg)}}
+@keyframes note-arrive{from{opacity:0;transform:translate(22px,16px) rotate(14deg)}to{opacity:1;transform:rotate(7deg)}}
+@keyframes star-arrive{0%{opacity:0;transform:translateY(24px) scale(.8) rotate(-10deg)}70%{opacity:1;transform:translateY(-2px) scale(1.025) rotate(2deg)}100%{opacity:1;transform:none}}
+@keyframes drift{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes drift-left{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px) rotate(1deg)}}
+@keyframes star-drift{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-4px) rotate(2deg)}}
+@keyframes glimmer{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:.85;transform:scale(1)}}
+@media(min-height:850px){.copy{padding-top:4px}.description{margin-top:16px;font-size:14px}.formats{margin-top:28px;padding-top:14px;padding-bottom:14px}.actions{padding-top:28px;padding-bottom:max(25px,env(safe-area-inset-bottom,0px))}}
+@media(max-height:670px){.brand{top:12px;width:100px}.motion-control{top:10px}.art{top:40px}.book{width:73%;left:13.5%;bottom:5%}.photo{width:25%;top:12%;left:4%}.voice{width:28%;left:37%;top:0}.video{width:24%;right:1%;top:18%}.note{width:23%;top:48%}.star{width:24%;top:27%;left:39%}h1{font-size:clamp(24px,7vw,29px);line-height:1.33}.description{font-size:12.5px;margin-top:10px;line-height:1.7}.formats{margin-top:17px;padding-top:8px;padding-bottom:8px}.format img{width:35px;height:31px}.actions{padding-top:18px;padding-bottom:max(16px,env(safe-area-inset-bottom,0px))}.continue{min-height:58px;grid-template-columns:minmax(0,1fr) 44px;font-size:16px}.continue-orb{width:44px;height:44px}}
+@media(max-width:350px){.copy{padding-left:16px;padding-right:16px}.formats{margin-left:18px;margin-right:18px}.actions{padding-left:18px;padding-right:18px}}
+@media(prefers-reduced-motion:reduce){.animated,.animated img{animation:none!important}.motion-control{display:none}.continue{transition:none}}
+@media(max-height:529px){.welcome{height:auto;min-height:530px}.scene{height:210px;min-height:210px;flex:0 0 210px}}
+</style>
+</head>
+<body>
+<!-- Prototype only: CSS checkbox controls motion without JavaScript. Omit in React. -->
+<input class="motion-toggle" type="checkbox" id="pause-motion" aria-label="Пауза анимации">
+<main class="welcome" aria-label="Добро пожаловать в memoLy">
+<section class="scene" aria-label="Семейный альбом воспоминаний">
+<img class="landscape animated" src="../../../webapp/public/assets/welcome/bg.webp" alt="">
+<img class="brand" src="../../../webapp/public/assets/welcome/logo.webp" alt="memoLy">
+<label class="motion-control" for="pause-motion" title="Пауза или воспроизведение">
+<svg class="pause" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4v8M11 4v8"/></svg>
+<svg class="resume" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor"><path d="m5 3 8 5-8 5z"/></svg>
+</label>
+<div class="art" aria-hidden="true">
+<img class="layer ribbon animated" src="../../../webapp/public/assets/welcome/ribbon.webp" alt="">
+<div class="layer book animated"><img src="../../../webapp/public/assets/welcome/book.webp" alt=""></div>
+<div class="layer photo animated"><img class="animated" src="../../../webapp/public/assets/welcome/photo.webp" alt=""></div>
+<div class="layer voice animated"><img class="animated" src="../../../webapp/public/assets/welcome/voice.webp" alt=""></div>
+<div class="layer video animated"><img class="animated" src="../../../webapp/public/assets/welcome/video.webp" alt=""></div>
+<div class="layer note animated"><img class="animated" src="../../../webapp/public/assets/welcome/note.webp" alt=""></div>
+<div class="layer star animated"><img class="animated" src="../../../webapp/public/assets/welcome/star.webp" alt=""></div>
+<i class="sparkle one animated"></i><i class="sparkle two animated"></i>
+</div></section>
+<section class="copy" aria-labelledby="welcome-title">
+<h1 id="welcome-title"><span>Маленькие моменты.</span><span>Большая <span class="story">история.</span></span></h1>
+<p class="description">Сохраните детство в уютном альбоме<br>для всей семьи.</p>
+</section>
+<section class="formats" aria-label="Что можно сохранить">
+<figure class="format"><img src="../../../webapp/public/assets/welcome/photo.webp" alt=""><figcaption>Фото</figcaption></figure>
+<figure class="format"><img src="../../../webapp/public/assets/welcome/video.webp" alt=""><figcaption>Видео</figcaption></figure>
+<figure class="format"><img src="../../../webapp/public/assets/welcome/voice.webp" alt=""><figcaption>Голос</figcaption></figure>
+<figure class="format"><img src="../../../webapp/public/assets/welcome/note.webp" alt=""><figcaption>Заметки</figcaption></figure>
+</section>
+<footer class="actions"><a class="continue" href="#prototype-note"><span class="continue-label">Продолжить</span><span class="continue-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span></a></footer>
+</main>
+<aside class="demo" id="prototype-note" aria-labelledby="prototype-heading"><div class="demo-card"><h2 id="prototype-heading">Это макет приветствия</h2><p>В приложении эта кнопка вызывает существующий onComplete. Этот статический HTML не авторизует пользователя.</p><a class="demo-back" href="#">Вернуться к экрану</a></div></aside>
+</body>
+</html>

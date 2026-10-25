@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
 import { bashExecutable, gitBashPath } from './bash-runtime.mjs'
+import './selectel-frontend-release.test.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
@@ -321,6 +322,77 @@ const runtimeFingerprints = {
   comux: 'ae2c05a046080f4ea72c2ca70db131eaa866c05bf5444e50070f92273f7b0f87',
   feedPhoto: '9c848684f56ce26f57af81136d1dfc351d4a1c52776dcfc41d1291e8e46a6fda',
 }
+const reviewedAlbumsProductionBlobs = [
+  ['backend/prisma/migrations/20261023110000_memoly_albums/migration.sql', '300ed2e36f6974588a929dff34efe1234e0fb7c4'],
+  ['backend/prisma/migrations/20261023120000_album_entry_tombstones_year_uniqueness/migration.sql', '6219657f99482108fb99ce17cbabe848980e7e9d'],
+  ['backend/prisma/migrations/20261023130000_album_source_operation_receipts/migration.sql', 'acc9a6596e672bb134c31cc3c5451be1754f570b'],
+  ['backend/prisma/schema.prisma', '1f491f708ffc60ee727b814f0e2b2a1c5753c6bd'],
+  ['backend/src/app.ts', '0faaaeb230cf5d5a3c5629306548a54efdc09202'],
+  ['backend/src/modules/albums/application/album-repository.ts', '06682eb9e6a65c3d078712645fa2ab6747ac87f1'],
+  ['backend/src/modules/albums/application/album-service.ts', 'e8e77c9dc3526cfdb55c5f1a123dd6bc9f07064d'],
+  ['backend/src/modules/albums/application/album-types.ts', 'ca4263c7c9b166cdf1298ba41c136b12d76988e5'],
+  ['backend/src/modules/albums/domain/errors.ts', '28bf28f8634d04e04da771c4650b2dd072cf58f7'],
+  ['backend/src/modules/albums/index.ts', 'eb7a94f3ff17452bcfa533785409e9520226847d'],
+  ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', '5251b43df84173f51c1ff0275124a81d5faba5d2'],
+  ['backend/src/modules/albums/transport/routes.ts', '98f87dfe126fa2a60b7ea5886225a143eac770e3'],
+  ['backend/src/modules/memories/application/album-source-ports.ts', '446a0a1b9e89f265341f2fb8b2788666b0e9b1c9'],
+  ['backend/src/modules/memories/application/ports.ts', '96a47aaed4980874c89cc50236a7fec1166454d7'],
+  ['backend/src/modules/memories/index.ts', 'ff63cef6ff050f8f807e54c1384d8c51ec40576b'],
+  ['backend/src/modules/memories/infrastructure/album-memory-source-catalog.ts', '055968ffd6b7ff2a60835769265243f9ba0f79c7'],
+  ['bun.lock', '1e6ca895f4498c94b59ae1b4e9e97d5a99a59409'],
+  ['packages/contracts/src/albums.ts', '02728e7a37bf2ded770e086d8d7feecb7e28f1c8'],
+  ['packages/contracts/src/errors.ts', '27349f54b21299d8e71bcba7c4dba13ccffa5783'],
+  ['packages/contracts/src/index.ts', 'd9968474cd93fd32d5b91d5d1bb2177b314dd091'],
+  ['webapp/package.json', '1202c550eaa3a6cbd90fbd9f5a9c4b30080cec8a'],
+  ['webapp/public/assets/fonts/Comfortaa-OFL.txt', '1ecc8c6edc4c6624e40b073ea17d177a5641b9e3'],
+  ['webapp/src/App.tsx', 'cb7c21023d6d94033e996f7e2352948235506c5f'],
+  ['webapp/src/components/BottomNavigation.tsx', '57644cdc55cd16ca94ddf268e75efeca4c87ba5d'],
+  ['webapp/src/components/ChildHeader.tsx', '1f7078cbc38204f7ba296711a5f1d3661cbe83d5'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', '1161cc95a5c003d89d8ed432aac8a7c85c7735be'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', '4e88167ccdfe0c85e1807c52f265df2d6e17bf5f'],
+  ['webapp/src/components/ui-v2/shared-skin.css', '5388c7da8d0a37a16b82c28b694928aa1b1e5535'],
+  ['webapp/src/features/albums/AlbumEntryDetail.tsx', '7a7f0348913575fa85092ceea65e44c7b0ee3ff7'],
+  ['webapp/src/features/albums/AlbumForms.tsx', 'ad4104ae92ec26cb995f520b8194f348152c51f4'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', '225cfdd6fb9ccc0f2f722ec75702648b2d202ace'],
+  ['webapp/src/features/albums/ComposerHost.tsx', '68ab9a74544d32f8f1fb8ee5107b06789f0d399c'],
+  ['webapp/src/features/albums/EntryEditor.tsx', '673897347f8bd7543802618fdeda201d88cfb476'],
+  ['webapp/src/features/albums/SourcePicker.tsx', 'ad228d1c001a8bc9b9aeae1b1d48fc25b53182a9'],
+  ['webapp/src/features/albums/SourcePreview.tsx', '7b1f910379a897d52873143e72dc0e2a1c0d2bfd'],
+  ['webapp/src/features/albums/WorkshopGallery.tsx', 'e75c38888204279365dcac76c6a058a0ee5cac17'],
+  ['webapp/src/features/albums/albums.css', 'c78100e52d48c5d281f990fecd11194ef983f2e0'],
+  ['webapp/src/features/albums/api.ts', '16202ec4fe71ab829671ab30e08bc000a1d2fd3f'],
+  ['webapp/src/features/albums/index.ts', '3fa66040d4d7441fae38ab4dce5fa1851d32f5a5'],
+  ['webapp/src/features/albums/model.ts', '18a7ab1c13cf82c4d66be8ec52762a883104eda5'],
+  ['webapp/src/features/composer/ComposerForm.tsx', '1fbbebb92536122469d6ce3cb09d90161859175f'],
+  ['webapp/src/features/composer/NoteComposer.tsx', 'c534376687dafa8c008514b0e87106d26d6ea351'],
+  ['webapp/src/features/composer/PhotoComposer.tsx', 'ccddd7350dd472eec169347e6d3c968d9d48ccc4'],
+  ['webapp/src/features/family/ChildAvatar.tsx', '4ddf89fa7226a3a3ea000eceaa798e978361edf8'],
+  ['webapp/src/features/family/ChildProfile.css', '93e89a50d3a66673f023cfa541fa1dbaaa1342f0'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', '40964e4dfeaae1b7a5215fe3c55bdb2394332f73'],
+  ['webapp/src/features/family/FamilyOnboarding.tsx', '2ae2d0b6288ee446f884e134f2a22aefafac9bf1'],
+  ['webapp/src/features/family/FamilyScreen.tsx', '5367cb6da8f03fd7cb517053656be493e72f270a'],
+  ['webapp/src/features/family/family-hub.css', '50f6ccb272456209bd44fd48d7ba6f383980c7f0'],
+  ['webapp/src/features/family/useChildAvatar.ts', 'f2c3a017ed01ee2117493c2412edea0a219d0a6b'],
+  ['webapp/src/features/feed/FeedPage.tsx', '11e30b06060652703401123a77dccab4efe9a4f7'],
+  ['webapp/src/features/feed/index.ts', 'fdd3167bc180d873801926c893550dd4fb4db83a'],
+  ['webapp/src/features/feed/presentation/FeedPresentation.tsx', 'ad76a6f911d29afc310c3e954d62c9dce72f38a6'],
+  ['webapp/src/features/feed/presentation/MemoryCardPresentation.tsx', '146bef666016a7faf311bed861db798cf77af046'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', 'fee8d9ded865635455fe684c112f513134a6ca13'],
+  ['webapp/src/features/feed/use-memory-seen-observer.ts', 'abc81f827cba1224c4d4c76987be8a6d9c2394f1'],
+  ['webapp/src/features/feed/video-presentation.tsx', 'c3d3fd1f12bb7493d002448d61deae81d391b768'],
+  ['webapp/src/features/max-video-upload/VideoComposer.tsx', '7291ca902315bf27cd0bf117649b989814d556ce'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '86528665625ae140ed84652a3db73b3baad60b11'],
+  ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
+  ['webapp/src/features/welcome/WelcomeSplash.tsx', '60388d4b83e4b4fd46e9c82f7213a43ae2fa0a0d'],
+  ['webapp/src/features/welcome/welcome-splash.css', '18174a67d1aad32d10c509a93e576ccbfadf3936'],
+  ['webapp/src/index.css', '8d088751c71a08c43252f31fb1990db124657147'],
+  ['webapp/src/main.tsx', '5468ed089f85d2f243e2a893264f104d199687b3'],
+  ['webapp/src/platform/app-zoom.ts', '496ccf4476ec9f8794d965001d5801ed4ec96b29'],
+  ['webapp/src/platform/max/host-bridge.ts', '3fdcd8ad8759bf0fa3391f95f1c48d4d732d8fdd'],
+  ['webapp/src/platform/media/avatar-resource-pool.ts', '2e04a01ba8ead3c4e5e2c3985e654226f4b5243f'],
+  ['webapp/src/platform/media/use-private-image-url.ts', '73a376f7d919dbad664eec30ddfa903fe8b0313b'],
+  ['webapp/src/platform/persistence/private-cache.ts', '302b1f5a95b8ad092b255a936959e5d6e324180c'],
+]
 const reviewedAvatarTimerFixBlob = 'e97e72aebc8df97a90990a481de36fd78e77483e'
 const reviewedStorybookManifestBlob = '52a87894fbcc32b5ab0fa0e2c5217d85b3214cd2'
 const reviewedStorybookLockBlob = '67d34b3065b163092b09e4b91c42274405fe7823'
@@ -340,6 +412,227 @@ const reviewedMediaUiBlobs = [
   ['webapp/src/features/feed/use-memory-seen-observer.ts', 'abc81f827cba1224c4d4c76987be8a6d9c2394f1'],
   ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', 'a5784a62b4df8d4554fc99633ba3c060f62b8a52'],
   ['webapp/src/features/memoly-ui/MemberProfile.tsx', '95f7744ae73783c53fb5770fdd313063fb3b7abb'],
+]
+const reviewedPrivatePhotoProductionBlobs = [
+  ['bun.lock', '294e9b17d83b38fa6b14feeee949bcac7921ce4e'],
+  ['backend/prisma/migrations/20261023150000_album_private_photos/migration.sql', '1a3232d1ee4d53c23205580a5faa13ded2a524d2'],
+  ['backend/prisma/schema.prisma', '5e66d187c9b98165928acdd22548785777ee11c0'],
+  ['backend/src/jobs.ts', 'b4774dbb15c993fee4b9985dea185808ceb584f0'],
+  ['backend/src/modules/albums/index.ts', '8c8ae9e62b96eabdd7771e4b97d0363e3f068439'],
+  ['backend/src/modules/albums/infrastructure/composed-album-source-catalog.ts', '3ca86aa8b21e63813df360fd26d7dbf273b9d47b'],
+  ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', '382c809fa85efbd0d7c2b6db02c5e3bef7b39773'],
+  ['backend/src/modules/media/application/ports.ts', '01e0881e7ffbafde73dbc14d4472dd54bdb7b4ed'],
+  ['backend/src/modules/media/index.ts', '1e04ca12ded1ddca5cd0639a9700ea9cdff244a2'],
+  ['backend/src/modules/media/infrastructure/prisma-album-photo-source-catalog.ts', 'c1a4a71a12505e1a6ba0192cb38187f30674cc18'],
+  ['backend/src/modules/media/infrastructure/prisma-media-repository.ts', '3f36b7836601c228b0f01b0d87f4d11e667da8f7'],
+  ['backend/src/modules/memories/index.ts', '974276ac646c9038a1805b6a8f24c6422983bbfd'],
+  ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', '150072bdbb48a87f473e39a5dff55fcc03663586'],
+  ['backend/src/modules/memories/infrastructure/source-memory-publisher.ts', '9404465526d36838a52197a8f600cff7372119db'],
+  ['packages/contracts/src/albums.ts', '163dbe2fe344331fd21bc7481e003b56fbb3efbc'],
+  ['webapp/src/features/albums/AlbumEntryDetail.tsx', '0320fd50d15b4d68326e81beeeb23a806f064638'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', '240d12a4482033002ab1fb6e7e3b8dc3d5cf5211'],
+  ['webapp/src/features/albums/ComposerHost.tsx', '70f434256c7235dab2921dc7835b0d7e2887e407'],
+  ['webapp/src/features/albums/EntryEditor.tsx', '0668701c8f58e4a82c45def2ce8f4392f64c67cc'],
+  ['webapp/src/features/albums/model.ts', 'db14f185e628d83fc4ebbe05fa4b08b3dca446e4'],
+  ['webapp/src/features/composer/PhotoComposer.tsx', '1bba733803603e99bba84e80e6d89c0d60ee8470'],
+  ['webapp/src/features/feed/FeedPage.tsx', '5afb5b3b9280ca572f925eee76bc0f176d36dfcf'],
+  ['webapp/src/features/memoly-ui/AddSheetPresentation.tsx', '7187fbcdd05fa4f9e9ac46db7104d215fd301d06'],
+  ['webapp/src/platform/app-zoom.ts', 'c1bb21a6cb8bd072f779b662b5a5c628ccbb3af9'],
+]
+const reviewedWishlistProductionBlobs = [
+  ['backend/prisma/migrations/20261023120000_gift_wishlist/migration.sql', 'bd538f14b50266bff3ad939243ef974cbf2b6291'],
+  ['backend/prisma/migrations/20261024120000_gift_photo_recovery_guard/migration.sql', '01fbd39bed168dd7082c1eb3ce2a940e57c01f06'],
+  ['backend/prisma/schema.prisma', 'ea0ed15d90ba5c8a79b1b42d2ef6fa04ce34fcbe'],
+  ['backend/src/app.ts', '2793eab07c2131cae8d29f1b55a79e4ac8ad5033'],
+  ['backend/src/jobs.ts', '27ed3eec8a245dd81dbf99cc49ec83bb0bd0c504'],
+  ['backend/src/modules/families/application/family-service.ts', 'cde35b90bb7991e3d3b65df9cc009db766163490'],
+  ['backend/src/modules/gifts/application/gift-service.ts', '699500bcea287cf31f0f9068141f912f51b69c60'],
+  ['backend/src/modules/gifts/application/ports.ts', '9678165d143337e24f0423f1a80755f2ec1d3631'],
+  ['backend/src/modules/gifts/domain/errors.ts', '02a51793e602c362cf4fe9b27d4b5caddec0e60b'],
+  ['backend/src/modules/gifts/domain/gift-rules.ts', 'd85cab7d9c1d78c6db9afaf6c817b72fe8d57ae5'],
+  ['backend/src/modules/gifts/index.ts', '3592984c1b5e549afb9a726f50428bc3fe7c2566'],
+  ['backend/src/modules/gifts/infrastructure/prisma-gift-repository.ts', '964d78b903c82bf4eca5f8331f88e297a60af21e'],
+  ['backend/src/modules/gifts/transport/errors.ts', 'a15d325062fc30c553b49908e7ba5c1a7c5c3def'],
+  ['backend/src/modules/gifts/transport/routes.ts', '44500ad2258b02166bd90aa871c7289ab9267d8a'],
+  ['backend/src/modules/media/application/media-service.ts', '4a4199888c7976e26810c130335018c6f2138653'],
+  ['backend/src/modules/media/application/ports.ts', '5132bf16679ff17f2e59e11322d4d1955e4b1e2e'],
+  ['backend/src/modules/media/infrastructure/prisma-media-repository.ts', 'aa7e102090c686dc003229b49be090c14fa7f2f8'],
+  ['packages/contracts/src/gifts.ts', 'bef4a5c1452d9678d13a3f2f954c5e1ba8755c6a'],
+  ['packages/contracts/src/index.ts', '6a42045b46a434c5f95d550e8e5b38c863bb2fc3'],
+  ['packages/contracts/src/media.ts', '92c4a169515dea3d7dda0e387c74c1a7fae82190'],
+  ['webapp/public/assets/icons/gift-active@2x.webp', 'c94e7206795e8573761052f232052b2cacef1278'],
+  ['webapp/public/assets/icons/gift-active@3x.webp', 'c020942a472fb60660dffe96fda87a47ce49d239'],
+  ['webapp/public/assets/icons/gift-default@2x.webp', '2072d352de34e4f6b2b2d22edf068d237103d877'],
+  ['webapp/public/assets/icons/gift-default@3x.webp', '8720943beeb474ffdd7481d805a8c799fcee627c'],
+  ['webapp/public/assets/icons/gift-white@2x.webp', '73377ba98f5acbc93e78ce902bbf5221f04acb0c'],
+  ['webapp/public/assets/icons/gift-white@3x.webp', '6c7edaf9894f477889d2db26abb30df25cddc3e2'],
+  ['webapp/src/App.tsx', 'adb48eecf2ac766005f6d4672152bf4c5281556e'],
+  ['webapp/src/components/BottomNavigation.tsx', '88d36149b66d86116d3f22e8d1ae66508e7b0185'],
+  ['webapp/src/components/MemolyBottomSheet.tsx', '70c895652fd20465797adde164789d2ac1405993'],
+  ['webapp/src/components/ui-v2/shared-skin.css', 'deb25ae9424cdc3ec3b8d7a9a7cc62cbc997d84c'],
+  ['webapp/src/components/webp-icon-types.ts', 'aee2f4c65431ba7b6a6e1492db1027430440bc52'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', 'ab83274d4395749b65639a6b5b9ecb7b724b5a88'],
+  ['webapp/src/features/composer/index.ts', '910428c9617fc8aa5a79f9faa6e4002caf4efcfb'],
+  ['webapp/src/features/family/FamilyScreen.tsx', '40d127c38d3d476b1ca59f68bb35b660614806cd'],
+  ['webapp/src/features/family/api.ts', '5491a286b234e36d8f2501acf984e01c87143f00'],
+  ['webapp/src/features/feed/FeedPage.tsx', '5a8f552ea85f3021c4d9871c1974c75eff0cb881'],
+  ['webapp/src/features/feed/components/FeedShell.tsx', '35db262c02c906dc5d7f64b07a1ca171fff1950b'],
+  ['webapp/src/features/feed/presentation/FeedPresentation.tsx', '090f9758e2f20661031ea8f4abab9fb24d455842'],
+  ['webapp/src/features/gifts/GiftCard.tsx', 'ccbaaf29fa79dba4b0fdacebe54f813411df4300'],
+  ['webapp/src/features/gifts/GiftForm.tsx', '472d45785fa8a9121933bec75bf30ccb802205f5'],
+  ['webapp/src/features/gifts/GiftsPage.tsx', '9b0df56a7822140676e5bb0f17f0e49345053a4c'],
+  ['webapp/src/features/gifts/api.ts', '4c61f1d2d0a9bd2f148d0af7719221f36dc42b07'],
+  ['webapp/src/features/gifts/gifts.css', 'bc0a014dc870e862e22ece8074f1f4a336119d73'],
+  ['webapp/src/features/gifts/index.ts', 'c72f0cd25a7dc997dd046e38d7edf0cc6deac8d9'],
+  ['webapp/src/features/gifts/model.ts', 'cb2b048aec4d76b37ae90885577eb7b12417be65'],
+  ['webapp/src/features/gifts/queries.ts', '4ff5a8ea221db8ba81e289352ae7664df50f6eec'],
+  ['webapp/src/platform/external-link.ts', '91f8e1578be0ddb0b1b14d2a5fb57c7d367f58fa'],
+  ['webapp/src/platform/host-bridge.ts', '4fc26ca7eb1168589f0089d0c915b075a446e3f0'],
+  ['webapp/src/platform/max/host-bridge.ts', '5c96df647667e5af9ec74cd49980682268dc5664'],
+  ['webapp/src/platform/persistence/private-cache.ts', 'bba2bf1b469b2cec0831212a0daa2ef1891129d9'],
+  ['webapp/src/platform/telegram/host-bridge.ts', '9e31299f82c80ed24aaab51a7db42278a9c94089'],
+  ['webapp/src/styles/tokens.css', '717b7fbfabd767a0b7282ca6712ef30acac3dbe0'],
+]
+const reviewedChildrenProductionBlobs = [
+  ["backend/prisma/migrations/20261024100000_memory_child_tags/migration.sql", "dec80953c8d7b8b2e059f776693abd2ece52264b"],
+  ["backend/prisma/schema.prisma", "243e44d0eaa21b2fa8f3a80982a4858efaca105c"],
+  ["backend/src/bot-family-target.ts", "1e4aef273f1c76fa45bb54fb31b7de0333bd1a86"],
+  ["backend/src/modules/albums/application/album-repository.ts", "a3b990d4c2163f3f56dcfbcb726f7819dd9a12e9"],
+  ["backend/src/modules/albums/application/album-service.ts", "ef86488789fc5f6f837bdebdf889f252b4c0f245"],
+  ["backend/src/modules/albums/infrastructure/prisma-album-repository.ts", "67765c6e0e951b3d91dd1bed2610d404895bdb35"],
+  ["backend/src/modules/families/application/family-service.ts", "bb5edd09a8ac17a92dfd52b4800c1013a3a50ff4"],
+  ["backend/src/modules/families/transport/routes.ts", "020836c3cfdd0ae855a731cdb93f16233b1818c9"],
+  ["backend/src/modules/gifts/infrastructure/prisma-gift-repository.ts", "2ba35cd13993f18c063d98ba191b9f646186043f"],
+  ["backend/src/modules/max/application/direct-video-upload.ts", "f8d6239702fc6d2c0a958167637bd0bf782459cf"],
+  ["backend/src/modules/max/application/ports.ts", "4a0dadafd65a337e5ae9e7892575958d81f9cce4"],
+  ["backend/src/modules/max/infrastructure/prisma-max-direct-upload-repository.ts", "874f73b3617e4ba7759bc65d432c9c6d6aecc226"],
+  ["backend/src/modules/max/infrastructure/process-image.ts", "72654d2a3224ee10b0bcf018f7c1f890483c525f"],
+  ["backend/src/modules/max/infrastructure/process-task.ts", "63ba3f103f280d1cb6693bff16119d14a755f32c"],
+  ["backend/src/modules/max/infrastructure/process-video.ts", "943d78e6e9583c6b21d7ed53c8946b784e8a23b9"],
+  ["backend/src/modules/max/infrastructure/process-voice.ts", "1c9933b8f412b0161d1622c55d1b58ef3796bf7c"],
+  ["backend/src/modules/max/infrastructure/source-target.ts", "bed4b277b239f6c004ac3e963b3abaa98ef566a0"],
+  ["backend/src/modules/max/transport/direct-video-upload-routes.ts", "05356766bd2cdae61695972bdaf1f7e6d5a0a1d3"],
+  ["backend/src/modules/memories/application/memory-service.ts", "ea8fce2106513b4ee0290a673e1caa56bc0ff63e"],
+  ["backend/src/modules/memories/application/ports.ts", "da65c7682dc0639cf4d9a25a66d0e8da48559195"],
+  ["backend/src/modules/memories/domain/memory-cursor.ts", "fb0040779ce68c8138175323100a80c15b8720cd"],
+  ["backend/src/modules/memories/infrastructure/child-tags.ts", "ed42cb2532d25d0a294161d67e133d4d2efcf851"],
+  ["backend/src/modules/memories/infrastructure/prisma-memory-repository.ts", "263fa4dc0be5cfee246462f4e594d67ae937c894"],
+  ["backend/src/modules/memories/infrastructure/source-memory-publisher.ts", "2e65ce49640b132307800f866720b37a8a859de4"],
+  ["backend/src/modules/memories/transport/routes.ts", "aea3cd93a325d3a336b9f96ecb9207fd52658175"],
+  ["backend/src/storage/config.ts", "084a5524361a97d92aa6e919e08d589cbe9e744d"],
+  ["packages/contracts/src/albums.ts", "c4adfcafd433691c7b788285d0410b7fce78fac9"],
+  ["packages/contracts/src/children.ts", "5fdcb651c34420f116e861bbfa69c15711a470a4"],
+  ["packages/contracts/src/families.ts", "9d483ea47fd51ac49db9d3a638d7efdf117ce9cd"],
+  ["packages/contracts/src/index.ts", "6b26f609a2b262ddbf0ae4abd67a83e68900decc"],
+  ["packages/contracts/src/memories.ts", "58e54611a4cdfb6080e6b12bff2d6aaa02893737"],
+  ["webapp/src/App.tsx", "81c84fd5ad545b7175c78b0d90138b54dd1e666f"],
+  ["webapp/src/components/ui-v2/ChildTagPicker.css", "fe82d72c77980969888a085536af68a1bda1c592"],
+  ["webapp/src/components/ui-v2/ChildTagPicker.tsx", "0125e27316ba18d0318da78fc111d585749cac36"],
+  ["webapp/src/components/ui-v2/FamilyHeaderV2.css", "541f890fe0b9fccd57e86c75687363fb950e5ecf"],
+  ["webapp/src/components/ui-v2/FamilyHeaderV2.tsx", "1474e778b72823113ff4c06572e9b88e544d5b0c"],
+  ["webapp/src/components/ui-v2/child-count.ts", "e5682ed49adb617cbbbdbb152ca0801ce397b27c"],
+  ["webapp/src/components/ui-v2/child-tags.ts", "b805b9e88a0828c61b1b77a40d3251e0d94c5dc7"],
+  ["webapp/src/features/albums/AlbumForms.tsx", "60ffdc377c12c2ffbe863081b0e57460454ec4a9"],
+  ["webapp/src/features/albums/AlbumsPage.tsx", "5e1feb67eb9b72a79344b56f55aefe71fb9fd6ef"],
+  ["webapp/src/features/albums/ComposerHost.tsx", "8a4ff3bff973cb2b4a8c41198f6641756a0f8f63"],
+  ["webapp/src/features/albums/albums.css", "f1df0ce02eecb6389ed28fe4fe73b24262f834aa"],
+  ["webapp/src/features/albums/child-groups.ts", "7c66110fca705174e208fa58137018ef70362e0b"],
+  ["webapp/src/features/composer/ComposerForm.tsx", "dd5f76cb1922a1f04d1cc80a38a3cf7dbcb3247d"],
+  ["webapp/src/features/composer/NoteComposer.tsx", "2c119fa86b370e4ecf1aa28959747f7460368359"],
+  ["webapp/src/features/composer/PhotoComposer.tsx", "f44150dcd4d6c9b7d1953b4106787c100f26cebb"],
+  ["webapp/src/features/composer/api.ts", "bc5dc8591e1cd3cc9b56e6196b936e33f0076f2e"],
+  ["webapp/src/features/composer/index.ts", "4c6c334f09ff40d6c25184631449d9c6b7b696d1"],
+  ["webapp/src/features/family/ChildAvatar.tsx", "0bc6fda3ece33dffc20c0d8fb43a9efca3d4ca72"],
+  ["webapp/src/features/family/ChildProfile.css", "1d63b1d6e433673b94223be585755fad41f28ca0"],
+  ["webapp/src/features/family/FamilyChildAvatar.tsx", "78289e492e88678d5da83b139f5f1a6231a5eff4"],
+  ["webapp/src/features/family/FamilyOnboarding.tsx", "6d9eab41cb55e3909a5a76ae55e05839205ebf63"],
+  ["webapp/src/features/family/FamilyScreen.tsx", "c85ffd8d9a617fd448f30c19514c7121520c5be8"],
+  ["webapp/src/features/family/api.ts", "74aa7dea0d2c79194eb380c1606d200d1389f121"],
+  ["webapp/src/features/family/index.ts", "0b457c8bb21e0da01adc6d4857aa832cff43b28a"],
+  ["webapp/src/features/family/model.ts", "aaa46248a2aa437443add224c6b4eec7fadd851b"],
+  ["webapp/src/features/feed/ChildAlbumsStrip.tsx", "640daa15417bdd3ecc61694e45e9ffe19e24de2b"],
+  ["webapp/src/features/feed/FeedPage.tsx", "8b3cc3f47351b57a3c7f746155900562c7b668af"],
+  ["webapp/src/features/feed/MemoryChildTagsEditor.tsx", "0b4a0d69b68d86cf77c5a2f3564aa3a7cdce6e38"],
+  ["webapp/src/features/feed/api.ts", "cfbaeb3ddff98064ae6f244c80deec7f9200146c"],
+  ["webapp/src/features/feed/child-albums.ts", "2969f4b3eac0e0fe2eed2e2f3c6287fcd8c1ad9c"],
+  ["webapp/src/features/feed/child-filter.ts", "3c367b3bb45b07ebd9c000e60a5b5f34c1980909"],
+  ["webapp/src/features/feed/child-tag-editor.css", "2c561f94017797bb15994f6e04d05245b65acb5c"],
+  ["webapp/src/features/feed/child-tag-editor.ts", "c1c78c4bc1b71d25970b65a5e1a50939cf8fb491"],
+  ["webapp/src/features/feed/components/ChildFilterChips.tsx", "b111c64b1c5480b68d4a73c70e2ba169ba56eade"],
+  ["webapp/src/features/feed/components/index.ts", "be71e51c0088d6364c05afc46f30a28fdd62606a"],
+  ["webapp/src/features/feed/index.ts", "2cb323d09c9337a5c662a9cf73e8a04457ceb812"],
+  ["webapp/src/features/feed/presentation/FeedPresentation.tsx", "538ccc0fbd443ca3584e5a3739fbcec17c3163ec"],
+  ["webapp/src/features/feed/presentation/child-pages.css", "0c2e390ea2d864bc63ac1d15e635124f344abe64"],
+  ["webapp/src/features/feed/queries.ts", "3e16b480483bef0e066eadc64ed8c7189ec25b21"],
+  ["webapp/src/features/max-video-upload/VideoComposer.tsx", "af08c194484e2d525fa443fe8cb32eb36cacb7dd"],
+  ["webapp/src/features/max-video-upload/api.ts", "c767ab2a71bec6ea0db2231019d9c337936d9a2c"],
+  ["webapp/src/features/memoly-ui/FamilyChildrenSection.tsx", "5f97bb05c577d03cb9709794a27a5260445bd529"],
+  ["webapp/src/features/memoly-ui/FamilyPresentation.tsx", "ee4ac1d5b4ac68097a1da21188621c5f0253601f"],
+  ["webapp/src/features/memoly-ui/family-management.css", "75971390da6b023d234ddb1fe5bf32f3405624cf"],
+  ["webapp/src/platform/persistence/private-cache.ts", "4d0d3a7bc80e28e94c5d57e70bbf7d06cfe6f84f"],
+]
+const reviewedGiftUrlProductionBlobs = [
+  ['backend/package.json', 'fa5532cf516c37784cb39fe6add9c49ec51c5a91'],
+  ['backend/src/app.ts', 'a040659f173d212b3b4a7a302bec3c9d71231195'],
+  ['backend/src/modules/gifts/application/gift-service.ts', 'ca2258fd76ecbf22bb3c5d197532402f1f7a346a'],
+  ['backend/src/modules/gifts/application/ports.ts', '749489c5195fa84bef30d71e6759db6f9468cd2b'],
+  ['backend/src/modules/gifts/index.ts', '03454d9e69bff878ed47d993b33afb701da097dd'],
+  ['backend/src/modules/gifts/infrastructure/gift-metadata.ts', 'e9f89be56a858b511ee4f654aed3120f77d743a9'],
+  ['backend/src/modules/gifts/transport/routes.ts', 'c5c2125617e143369ebbb7cc7257d85687275389'],
+  ['bun.lock', '9667dc24e5aa1a711ddb7ad27ad377565a26802a'],
+  ['packages/contracts/src/gifts.ts', 'a8d39239af8aef964bd03c494929d46d38d8fc0f'],
+  ['webapp/src/features/gifts/GiftForm.tsx', '39e2f6b6cc3310f033954a6d439316122f68745c'],
+  ['webapp/src/features/gifts/api.ts', '25beaa70cf86a9b67d86b5fbbbe7031de87dc766'],
+  ['webapp/src/features/gifts/model.ts', '514aa6a16e2f388da6e796385623de5b9f38fb15'],
+]
+const reviewedFamilyNavigationBlobs = [
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', 'ffd55a9be7dee111148a48a6f7336e88c89ad387'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', 'd648a7ad8ca15553f78e3adca5a5ac08c2d641ff'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', 'ad70bd6401f76123dc052c638e919aef1e4b3e90'],
+  ['webapp/src/features/family/family-hub.css', '50f6ccb272456209bd44fd48d7ba6f383980c7f0'],
+]
+const reviewedSharedHeaderChildAvatarBlobs = [
+  ['webapp/src/App.tsx', '5cbce19d0bb8120fff799019475edff3263b009c'],
+  ['webapp/src/components/ChildHeader.tsx', '1f7078cbc38204f7ba296711a5f1d3661cbe83d5'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.css', '1161cc95a5c003d89d8ed432aac8a7c85c7735be'],
+  ['webapp/src/components/ui-v2/ChildHeaderV2.tsx', '4e88167ccdfe0c85e1807c52f265df2d6e17bf5f'],
+  ['webapp/src/features/family/ChildAvatar.tsx', '88275705aac27eed5b052af2a80bd26693a72f90'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', '0f5d771a42141fee67846a1983a747f63b6aa875'],
+  ['webapp/src/features/family/FamilyScreen.tsx', 'f54acce9477ba0426b8f7e266e88cfcbc99ba70c'],
+  ['webapp/src/features/family/useChildAvatar.ts', '23b230a2d1c148b2ac1a90fa2a69404225f606a1'],
+  ['webapp/src/features/feed/FeedPage.tsx', '83554b1a019d7d94f3c933eadeb6b5b489e35a8a'],
+  ['webapp/src/features/feed/presentation/FeedPresentation.tsx', '87794042c2afceebe7c4fa90027e26d55a7bef70'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', '982ba5c6ca0d4bd7ee6935ad0dd09117a752c4ea'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '86528665625ae140ed84652a3db73b3baad60b11'],
+  ['webapp/src/platform/media/use-private-image-url.ts', 'da84fe42067ff0f463b132fae5a509d88083a120'],
+]
+const reviewedSingleAvatarSourceBlobs = [
+  ['webapp/src/App.tsx', 'b8c1b8a75e66b735a49221ba7dc693e3a0efd3e8'],
+  ['webapp/src/features/family/ChildAvatar.tsx', '4ddf89fa7226a3a3ea000eceaa798e978361edf8'],
+  ['webapp/src/features/family/FamilyHubPage.tsx', '40964e4dfeaae1b7a5215fe3c55bdb2394332f73'],
+  ['webapp/src/features/family/useChildAvatar.ts', 'f2c3a017ed01ee2117493c2412edea0a219d0a6b'],
+  ['webapp/src/features/feed/FeedPage.tsx', '086f8ad4784b975830a4f581598edb3f15c987bc'],
+  ['webapp/src/features/feed/presentation/MemoryCardPresentation.tsx', '146bef666016a7faf311bed861db798cf77af046'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', '7d8d5b43278b26c23fabb07a2704d01d614d13b5'],
+  ['bun.lock', '64112c805296ec42b124d3c11f1cdc3e73228a60'],
+  ['webapp/src/platform/media/avatar-resource-pool.ts', '2e04a01ba8ead3c4e5e2c3985e654226f4b5243f'],
+  ['webapp/src/platform/media/use-private-image-url.ts', '73a376f7d919dbad664eec30ddfa903fe8b0313b'],
+  ['webapp/src/platform/persistence/private-cache.ts', '302b1f5a95b8ad092b255a936959e5d6e324180c'],
+]
+const reviewedWelcomeCta6Blobs = [
+  ['bun.lock', '1e6ca895f4498c94b59ae1b4e9e97d5a99a59409'],
+  ['webapp/package.json', '1202c550eaa3a6cbd90fbd9f5a9c4b30080cec8a'],
+  ['webapp/public/assets/fonts/Comfortaa-OFL.txt', '1ecc8c6edc4c6624e40b073ea17d177a5641b9e3'],
+  ['webapp/src/features/welcome/WelcomeSplash.tsx', '60388d4b83e4b4fd46e9c82f7213a43ae2fa0a0d'],
+  ['webapp/src/features/welcome/welcome-splash.css', '18174a67d1aad32d10c509a93e576ccbfadf3936'],
+]
+const reviewedWelcomeOnceZoomBlobs = [
+  ['webapp/src/features/feed/FeedPage.tsx', 'bc57fe068a43611efa80cc7fe5ffd29b3f3e6604'],
+  ['webapp/src/features/feed/presentation/memoly-feed.css', 'fee8d9ded865635455fe684c112f513134a6ca13'],
+  ['webapp/src/App.tsx', '648381db4d7aa5488a019254cf42d3cb436dbe1b'],
+  ['webapp/src/index.css', '8d088751c71a08c43252f31fb1990db124657147'],
+  ['webapp/src/main.tsx', '5468ed089f85d2f243e2a893264f104d199687b3'],
+  ['webapp/src/platform/app-zoom.ts', '4561b0c501136d38473905497643247ab688bb03'],
 ]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
@@ -376,6 +669,41 @@ function gitFixtureCommit(cwd, message) {
 function rollbackSource(role) {
 	if (role === 'candidate') role = 'comments'
 	if (fixtureSourceCache.has(role)) return fixtureSourceCache.get(role)
+	if (role === 'albums') {
+	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
+	  const expectedCompatibility = '5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1'
+	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
+	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-albums-worktree-'))
+	  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, anchor], { cwd: root, encoding: 'utf8' })
+	  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+	  fixtureWorktrees.push(directory)
+	  const source = commitFrozenSourceFiles({ root: directory, sha: anchor }, reviewedAlbumsProductionBlobs,
+	    'freeze reviewed album runtime production blobs')
+	  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+	  assert.equal(productionRuntimeFingerprint(source.root, anchor), anchorRuntime)
+	  fixtureSourceCache.set(role, source)
+	  return source
+	}
+	if (role === 'privatePhotos') {
+	  const anchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+	  const anchorRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
+	  const expectedCompatibility = 'f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f'
+	  assert.equal(productionRuntimeFingerprint(root, anchor), anchorRuntime)
+	  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+	  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-worktree-'))
+	  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, anchor], { cwd: root, encoding: 'utf8' })
+	  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+	  fixtureWorktrees.push(directory)
+	  const source = commitFrozenSourceFiles({ root: directory, sha: anchor },
+	    [...reviewedAlbumsProductionBlobs, ...reviewedPrivatePhotoProductionBlobs],
+	    'freeze reviewed private-photo runtime production blobs')
+	  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+	  assert.equal(productionRuntimeFingerprint(source.root, anchor), anchorRuntime)
+	  fixtureSourceCache.set(role, source)
+	  return source
+	}
   const expected = runtimeFingerprints[role]
   const fallback = role === 'selectel' ? '91f48719309e20456b1659092a1bf209c3aa3653'
     : role === 'comux' ? rollbackHealthy
@@ -436,7 +764,32 @@ function commitSourceFile(source, relativePath, contents, message) {
 function commitFrozenSourceFiles(source, files, message) {
   const paths = []
   for (const [relativePath, blob] of files) {
-    writeFileSync(resolve(source.root, relativePath), frozenGitBlob(blob, relativePath))
+    mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
+    writeFileSync(resolve(source.root, relativePath), frozenGitBlobBytes(blob, relativePath))
+    paths.push(relativePath)
+  }
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
+  const add = spawnSync('git', ['add', '--', ...paths], { cwd: source.root, env, encoding: 'utf8' })
+  if (add.status !== 0) throw new Error(add.stdout + add.stderr)
+  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '--quiet', '-m', message], { cwd: source.root, env, encoding: 'utf8' })
+  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
+  return { ...source, sha }
+}
+
+function commitFrozenSourceFilesFromHead(source, files, message) {
+  const paths = []
+  for (const [relativePath, expectedBlob] of files) {
+    const result = spawnSync('git', ['show', `HEAD:${relativePath}`], { cwd: root, encoding: null })
+    if (result.status !== 0) throw new Error(`frozen source ${relativePath} is unavailable: ${result.stderr.toString('utf8')}`)
+    const actualBlob = spawnSync('git', ['hash-object', '--stdin'], { cwd: root, input: result.stdout, encoding: 'utf8' })
+    if (actualBlob.status !== 0) throw new Error(`cannot hash frozen source ${relativePath}: ${actualBlob.stderr}`)
+    assert.equal(actualBlob.stdout.trim(), expectedBlob, `HEAD no longer contains the reviewed frozen blob for ${relativePath}`)
+    mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
+    writeFileSync(resolve(source.root, relativePath), result.stdout)
     paths.push(relativePath)
   }
   const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
@@ -454,6 +807,12 @@ function commitFrozenSourceFiles(source, files, message) {
 function frozenGitBlob(hash, description) {
   const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr}`)
+  return result.stdout
+}
+
+function frozenGitBlobBytes(hash, description) {
+  const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root })
+  if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr.toString('utf8')}`)
   return result.stdout
 }
 
@@ -506,8 +865,13 @@ function runApplicationRollback(options = {}) {
     SERVER_EDGE_CADDYFILE: resolve(server, 'gateway/Caddyfile'), SERVER_STATIC_CADDYFILE: resolve(server, 'Caddyfile.static'),
     FORWARD_MARKER: resolve(server, 'b2.marker'), MM0_FORWARD_MARKER: resolve(server, 'mm0.marker'),
     MEMOLY_PRODUCT_SHA: options.producer ?? source.sha,
+    SELECTEL_ALBUMS_LEDGER_PHASE: options.albumPhase ?? '',
+    SELECTEL_CI_RELEASE: String(options.ciRelease ?? false),
+    SELECTEL_DEPLOY_LOCK_FD: options.lockFd ?? '',
+    FIXTURE_ALBUMS_LEDGER_PHASE: options.fixtureAlbumPhase ?? 'complete',
     RUNNING_BACKEND_IMAGE_TAG: options.runningBackend ?? rollbackBaseline,
     RUNNING_WEBAPP_IMAGE_TAG: options.runningWebapp ?? rollbackBaseline,
+    RUN_MIGRATION: String(options.runMigration ?? false),
     MAX_BOT_TOKEN: '', MAX_WEBHOOK_SECRET: '', MAX_INBOX_ENCRYPTION_KEY: '',
     MEMOLY_PUBLIC_HOST: 'example.invalid', PUBLIC_URL: 'http://example.invalid',
     FIXTURE_EVENTS: events, FIXTURE_PENDING: String(options.pending ?? false),
@@ -542,6 +906,7 @@ function runApplicationRollback(options = {}) {
     ' if [[ "$*" == *"prisma migrate status"* ]]; then [ "$FIXTURE_PENDING" = false ]; return; fi',
     ' if [[ "$*" == *"bun -e"* && "$*" == *"Client"* ]]; then',
     '   if [[ "$*" == *"migration_name"* && "$*" == *"checksum"* ]]; then',
+    '     if [[ "$*" == *"MEMOLY_EXPECTED_BASELINE_MIGRATIONS="* ]]; then echo "ALBUM_HISTORY:${MEMOLY_ALBUMS_LEDGER_PHASE:-missing}" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ] && [ "$FIXTURE_MIGRATION_HISTORY_ERROR" = false ]; return; fi',
     '     if [[ "$*" == *"MEMOLY_EXPECTED_MIGRATION_CHECKSUMS="* ]]; then echo HISTORY_ATTESTATION:present >> "$FIXTURE_EVENTS"; else echo HISTORY_ATTESTATION:missing >> "$FIXTURE_EVENTS"; return 1; fi',
     '     [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ] && [ "$FIXTURE_MIGRATION_HISTORY_ERROR" = false ]; return',
     '   fi',
@@ -567,6 +932,12 @@ function runApplicationRollback(options = {}) {
       '}',
     ] : []),
   ].join('\n')
+  const lockSetup = options.syntheticLock ? [
+    'exec 9>"$SERVER_ROOT/.selectel-deploy.lock"',
+    'SELECTEL_CI_RELEASE=true; SELECTEL_DEPLOY_LOCK_FD=9; export SELECTEL_CI_RELEASE SELECTEL_DEPLOY_LOCK_FD',
+    'readlink() { case "$*" in "-f -- $SERVER_ROOT/.selectel-deploy.lock"|"/proc/self/fd/9") printf "%s\\n" "$SERVER_ROOT/.selectel-deploy.lock" ;; *) command readlink "$@" ;; esac; }',
+    'flock() { :; }',
+  ].join('\n') : ''
   const trigger = options.failure ? [
     'LEGACY_MEMBERSHIP_RUNTIME=false; LEGACY_MM0_RUNTIME=false; QUIESCE_STARTED=false; PROMOTION_STARTED=true',
     'bash() { if [ "$2" = rollback ]; then ( rollback ); else command bash "$@"; fi; }',
@@ -577,7 +948,7 @@ function runApplicationRollback(options = {}) {
   try {
     const result = spawnSync(bashExecutable, ['-s'], {
       input: [`. ${shellQuote(resolve(root, 'deploy/selectel/ci-release.sh'))}`,
-        redeployDefinitions, assignments, mocks, trigger].join('\n'), encoding: 'utf8', timeout: options.processTimeoutMs ?? 30_000,
+        redeployDefinitions, assignments, mocks, lockSetup, trigger].join('\n'), encoding: 'utf8', timeout: options.processTimeoutMs ?? 30_000,
     })
     return { ...result, output: result.stdout + result.stderr,
       events: existsSync(events) ? readFileSync(events, 'utf8') : '',
@@ -791,6 +1162,206 @@ slowTest('exact media UI source preserves the designated 33a recovery and reject
   assert.deepEqual(rejected.rollbackBackups, [])
 })
 
+slowTest('exact family navigation source preserves the designated 33a recovery and rejects drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/family/FamilyHubPage.tsx',
+    '\n// unmeasured family navigation source drift\n', 'mutate family navigation executable source')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact shared header and child avatar source preserves the designated 33a recovery and rejects drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
+    'apply exact shared header and child avatar source blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    'b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/family/ChildAvatar.tsx',
+    '\n// unmeasured child avatar source drift\n', 'mutate shared header and child avatar runtime')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact cropped-channel avatar source preserves designated 33a recovery and rejects drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
+    'apply exact shared header and child avatar source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSingleAvatarSourceBlobs,
+    'apply exact cropped-channel avatar production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    '0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness' })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  const drifted = commitSourceChange(source, 'webapp/src/features/family/ChildAvatar.tsx',
+    '\n// unmeasured single-source child avatar runtime drift\n', 'mutate single-source child avatar runtime')
+  const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+  assert.equal(rejected.rollbackEnv, [
+    `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+    `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+    'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+  ].join('\n'))
+  assert.deepEqual(rejected.rollbackBackups, [])
+})
+
+slowTest('exact Welcome CTA and once-zoom source preserves 33a recovery and rejects production drift before mutation', () => {
+  let source = createSourceWorktree('diagnostic')
+  source = commitFrozenSourceFiles(source, reviewedMediaUiBlobs, 'apply exact media UI source blobs')
+  source = commitFrozenSourceFiles(source, reviewedFamilyNavigationBlobs, 'apply exact family navigation source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSharedHeaderChildAvatarBlobs,
+    'apply exact shared header and child avatar source blobs')
+  source = commitFrozenSourceFiles(source, reviewedSingleAvatarSourceBlobs,
+    'apply exact cropped-channel avatar production blobs')
+  mkdirSync(resolve(source.root, 'webapp/public/assets/fonts'), { recursive: true })
+  source = commitFrozenSourceFiles(source, reviewedWelcomeCta6Blobs,
+    'apply exact Welcome CTA 6 production blobs')
+  source = commitFrozenSourceFiles(source, reviewedWelcomeOnceZoomBlobs,
+    'apply exact Welcome once-zoom production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root),
+    '66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65')
+
+  const runningPair = 'f6'.repeat(20)
+  const compatible = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'rollback_readiness', processTimeoutMs: 60_000 })
+  assert.equal(compatible.status, 0, compatible.output)
+  assert.match(compatible.output, /Application rollback readiness verified/)
+  assert.doesNotMatch(compatible.events, /UP:|GATE/)
+
+  const preserved = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+    runningBackend: runningPair, runningWebapp: runningPair,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
+  assert.equal(preserved.status, 0, preserved.output)
+  assert.match(preserved.output, /preserving the verified designated rollback pair/)
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.match(preserved.rollbackEnv, new RegExp(`^PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}$`, 'm'))
+  assert.equal(preserved.rollbackBackups.length, 1)
+  assert.doesNotMatch(preserved.events, /UP:|GATE/)
+
+  for (const [path, marker] of [
+    ['webapp/src/App.tsx', '\n// unreviewed app production drift\n'],
+    ['webapp/src/platform/app-zoom.ts', '\n// unreviewed zoom production drift\n'],
+  ]) {
+    const driftRoot = mkdtempSync(resolve(root, '.scratch', 'rollback-welcome-once-zoom-drift-'))
+    const driftCheckout = spawnSync('git', ['worktree', 'add', '--detach', driftRoot, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftCheckout.status !== 0) throw new Error(driftCheckout.stdout + driftCheckout.stderr)
+    fixtureWorktrees.push(driftRoot)
+    const drifted = commitSourceChange({ root: driftRoot, sha: source.sha }, path, marker,
+      `mutate ${path} production source`)
+    const rejected = runApplicationRollback({ target: rollbackHealthy, webappTarget: rollbackHealthy,
+      runningBackend: runningPair, runningWebapp: runningPair,
+      sourceRootOverride: drifted.root, sourceShaOverride: drifted.sha,
+      action: 'prepare_rollback', redeployFromScriptDir: true, processTimeoutMs: 60_000 })
+    assert.notEqual(rejected.status, 0, rejected.output)
+    assert.match(rejected.output, /application runtime differs from the verified rollback source/)
+    assert.doesNotMatch(rejected.events, /UP:|GATE/)
+    assert.equal(rejected.rollbackEnv, [
+      `PREVIOUS_BACKEND_IMAGE_TAG=${rollbackHealthy}`,
+      `PREVIOUS_WEBAPP_IMAGE_TAG=${rollbackHealthy}`,
+      'MEMOLY_DB_ROLLBACK_ALLOWED=false', '',
+    ].join('\n'))
+    assert.deepEqual(rejected.rollbackBackups, [])
+  }
+})
+
 test('the immutable Selectel source ref retains its comments compatibility profile', () => {
   const result = spawnSync(bashExecutable, ['-s'], {
     cwd: root,
@@ -835,6 +1406,135 @@ slowTest('comments rollback rejects unknown migration history and history query 
   }
 })
 
+test('albums recovery uses frozen production blobs and confines the pending-ledger phase to guarded readiness', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const source = rollbackSource('albums')
+  const profile = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(profile.status, 0, profile.stdout + profile.stderr)
+  assert.equal(profile.stdout.trim().split('\n').at(-1), 'albums')
+
+  const complete = runApplicationRollback({ sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    target: rollbackHealthy, webappTarget: rollbackHealthy, action: 'verify_application_rollback' })
+  assert.equal(complete.status, 0, complete.output)
+  assert.match(complete.events, /ALBUM_HISTORY:complete/)
+  assert.doesNotMatch(complete.events, /UP:|GATE/)
+
+  const unguardedPrefix = runApplicationRollback({ sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    target: rollbackHealthy, webappTarget: rollbackHealthy, action: 'rollback_readiness', albumPhase: 'pre-sql' })
+  assert.notEqual(unguardedPrefix.status, 0, unguardedPrefix.output)
+  assert.match(unguardedPrefix.output, /pre-SQL migration readiness is restricted to the guarded CI release/)
+  assert.doesNotMatch(unguardedPrefix.events, /ALBUM_HISTORY:|UP:|GATE/)
+
+  const rollbackIgnoresPrefix = runApplicationRollback({ sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    target: rollbackHealthy, webappTarget: rollbackHealthy, action: 'rollback', albumPhase: 'pre-sql' })
+  assert.equal(rollbackIgnoresPrefix.status, 0, rollbackIgnoresPrefix.output)
+  assert.match(rollbackIgnoresPrefix.events, /ALBUM_HISTORY:complete/)
+
+  const noMigrationClearsInheritedPhase = runApplicationRollback({ sourceRootOverride: source.root,
+    sourceShaOverride: source.sha, target: rollbackHealthy, webappTarget: rollbackHealthy,
+    action: 'prepare_rollback', albumPhase: 'pre-sql', redeployFromScriptDir: true })
+  assert.equal(noMigrationClearsInheritedPhase.status, 0, noMigrationClearsInheritedPhase.output)
+  assert.match(noMigrationClearsInheritedPhase.events, /ALBUM_HISTORY:complete/)
+  assert.doesNotMatch(noMigrationClearsInheritedPhase.events, /ALBUM_HISTORY:pre-sql/)
+
+  const migrationUsesLockedPrefixPhase = runApplicationRollback({ sourceRootOverride: source.root,
+    sourceShaOverride: source.sha, target: rollbackHealthy, webappTarget: rollbackHealthy,
+    action: 'prepare_rollback', runMigration: true, syntheticLock: true, redeployFromScriptDir: true,
+    processTimeoutMs: 60_000 })
+  assert.equal(migrationUsesLockedPrefixPhase.status, 0, migrationUsesLockedPrefixPhase.output)
+  assert.match(migrationUsesLockedPrefixPhase.events, /ALBUM_HISTORY:pre-sql/)
+})
+
+test('albums migration ledger accepts only exact reviewed prefixes and complete post-SQL state', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const { program, baseline, candidate } = albumsMigrationHistoryProgram()
+  const rowsFor = (count) => candidate.trim().split('\n').slice(0, count).map((line) => {
+    const [migration_name, checksum] = line.split(':')
+    return { migration_name, checksum, finished_at: '2026-10-23T00:00:00.000Z', rolled_back_at: null }
+  })
+  const verify = (phase, rows) => runAlbumsMigrationHistoryVerifier({ program, baseline, candidate, phase, rows })
+  for (const count of [49, 50, 51, 52]) assert.equal(verify('pre-sql', rowsFor(count)).status, 0, `pre-SQL prefix ${count}`)
+  assert.equal(verify('complete', rowsFor(52)).status, 0, 'post-SQL complete catalog')
+  assert.notEqual(verify('pre-sql', rowsFor(48)).status, 0, 'missing baseline migration')
+  assert.notEqual(verify('pre-sql', [...rowsFor(52), {
+    migration_name: '20990101000000_unrelated', checksum: 'a'.repeat(64), finished_at: 'done', rolled_back_at: null,
+  }]).status, 0, 'unrelated migration')
+  assert.notEqual(verify('pre-sql', rowsFor(51).filter((_, index) => index !== 10)).status, 0, 'interior hole')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(49)[0], checksum: 'f'.repeat(64) }, ...rowsFor(49).slice(1)]).status, 0, 'changed checksum')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(49)[0], finished_at: null }, ...rowsFor(49).slice(1)]).status, 0, 'unfinished migration')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(49)[0], rolled_back_at: '2026-10-23T00:00:00.000Z' }, ...rowsFor(49).slice(1)]).status, 0, 'rolled-back migration')
+  assert.notEqual(verify('pre-sql', [rowsFor(49)[0], rowsFor(49)[0], ...rowsFor(49).slice(2)]).status, 0, 'duplicate name')
+  assert.notEqual(verify('complete', rowsFor(51)).status, 0, 'incomplete post-SQL catalog')
+  assert.notEqual(verify('unknown', rowsFor(52)).status, 0, 'unknown phase')
+})
+
+test('private-photo recovery pins only its frozen source and accepts the exact 53-migration catalog', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const source = rollbackSource('privatePhotos')
+  const profile = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.equal(profile.status, 0, profile.stdout + profile.stderr)
+  assert.equal(profile.stdout.trim().split('\n').at(-1), 'albums')
+
+  const { program, baseline, candidate } = albumsMigrationHistoryProgram('privatePhotos')
+  const rowsFor = (count) => candidate.trim().split('\n').slice(0, count).map((line) => {
+    const [migration_name, checksum] = line.split(':')
+    return { migration_name, checksum, finished_at: '2026-10-23T00:00:00.000Z', rolled_back_at: null }
+  })
+  const verify = (phase, rows) => runAlbumsMigrationHistoryVerifier({ program, baseline, candidate, phase, rows })
+  for (const count of [49, 50, 51, 52, 53]) assert.equal(verify('pre-sql', rowsFor(count)).status, 0, `pre-SQL prefix ${count}`)
+  assert.equal(verify('complete', rowsFor(53)).status, 0, 'post-SQL complete private-photo catalog')
+  assert.notEqual(verify('complete', rowsFor(52)).status, 0, 'post-SQL catalog missing private-photo migration')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(53)[0], checksum: 'f'.repeat(64) }, ...rowsFor(53).slice(1)]).status, 0,
+    'changed baseline checksum')
+  assert.notEqual(verify('pre-sql', [...rowsFor(52), { ...rowsFor(53)[52], finished_at: null }]).status, 0,
+    'unfinished private-photo migration')
+  assert.notEqual(verify('pre-sql', [...rowsFor(52), { ...rowsFor(53)[52], rolled_back_at: '2026-10-23T00:00:00.000Z' }]).status, 0,
+    'rolled-back private-photo migration')
+  assert.notEqual(verify('pre-sql', [...rowsFor(53), rowsFor(53)[52]]).status, 0, 'duplicate private-photo migration')
+  assert.notEqual(verify('unknown', rowsFor(53)).status, 0, 'unknown phase')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-private-photos-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitFrozenSourceFiles({ root: driftDirectory, sha: source.sha },
+    [['backend/src/modules/media/infrastructure/prisma-media-repository.ts', '53b1e92e154dde778454061b5e40d60a6b081538']],
+    'restore the anchored media repository blob to simulate production drift')
+  const rejected = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(mutated.root)}\nMEMOLY_PRODUCT_SHA=${mutated.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${rollbackHealthy}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.notEqual(rejected.status, 0, 'production source mutation must invalidate the exact fingerprint')
+
+  const wrongName = spawnSync('git', ['mv', '--',
+    'backend/prisma/migrations/20261023150000_album_private_photos',
+    'backend/prisma/migrations/20261023150000_unknown_private_photos'],
+  { cwd: source.root, encoding: 'utf8' })
+  assert.equal(wrongName.status, 0, wrongName.stdout + wrongName.stderr)
+  const wrongNameCommit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
+    'commit', '--quiet', '-m', 'simulate an unreviewed migration suffix'], { cwd: source.root, encoding: 'utf8' })
+  assert.equal(wrongNameCommit.status, 0, wrongNameCommit.stdout + wrongNameCommit.stderr)
+  const unknownSuffixSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
+  const badCatalog = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${unknownSuffixSha}\nrollback_verify_albums_migration_history pre-sql\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  assert.notEqual(badCatalog.status, 0, 'unknown migration suffix must be rejected before invoking compose')
+})
+
 function migrationHistoryVerifierSource(expected) {
   const capture = resolve(root, '.scratch', `migration-ledger-program-${process.pid}.mjs`)
   const result = spawnSync(bashExecutable, ['-s'], {
@@ -873,6 +1573,54 @@ function runMigrationHistoryVerifier({ expected, rows }) {
       FIXTURE_MIGRATION_ROWS: JSON.stringify(rows),
     },
     timeout: 10_000,
+  })
+  rmSync(fixture, { recursive: true, force: true })
+  return result
+}
+
+function albumsMigrationHistoryProgram(sourceRole = 'albums') {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const source = rollbackSource(sourceRole)
+  const captureProgram = resolve(root, '.scratch', `albums-ledger-program-${process.pid}.mjs`)
+  const captureCatalog = resolve(root, '.scratch', `albums-ledger-catalog-${process.pid}.txt`)
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
+      `APP_ROOT=${shellQuote(root)}`,
+      `MEMOLY_PRODUCT_SHA=${source.sha}`,
+      'compose() { printf "%s" "${!#}" > "$CAPTURE_PROGRAM"; printf "%s\n%%CANDIDATE%%\n%s" "$MEMOLY_EXPECTED_BASELINE_MIGRATIONS" "$MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS" > "$CAPTURE_CATALOG"; }',
+      'rollback_verify_albums_migration_history pre-sql',
+    ].join('\n'),
+    encoding: 'utf8', env: { ...process.env, CAPTURE_PROGRAM: gitBashPath(captureProgram), CAPTURE_CATALOG: gitBashPath(captureCatalog) },
+    timeout: 120_000,
+  })
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const catalogs = readFileSync(captureCatalog, 'utf8').split('\n%CANDIDATE%\n')
+  const program = readFileSync(captureProgram, 'utf8')
+  rmSync(captureProgram, { force: true })
+  rmSync(captureCatalog, { force: true })
+  return { program, baseline: catalogs[0], candidate: catalogs[1] }
+}
+
+function runAlbumsMigrationHistoryVerifier({ program, baseline, candidate, phase, rows }) {
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'albums-migration-ledger-module-'))
+  const moduleDir = resolve(fixture, 'node_modules/pg')
+  mkdirSync(moduleDir, { recursive: true })
+  writeFileSync(resolve(moduleDir, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(moduleDir, 'index.js'), `export class Client {
+    async connect() {}
+    async query() { return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+    async end() {}
+  }\n`)
+  const result = spawnSync('node', ['--input-type=module', '--eval', program], {
+    cwd: fixture, encoding: 'utf8', env: { ...process.env,
+      MEMOLY_EXPECTED_BASELINE_MIGRATIONS: baseline,
+      MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS: candidate,
+      MEMOLY_ALBUMS_LEDGER_PHASE: phase,
+      FIXTURE_MIGRATION_ROWS: JSON.stringify(rows),
+    }, timeout: 10_000,
   })
   rmSync(fixture, { recursive: true, force: true })
   return result
@@ -1194,5 +1942,309 @@ test('normal promotion validates its prepared rollback UI before any mutation', 
         assert.doesNotMatch(output, /STEP:guard_membership_transition|STEP:backup_server_state|STEP:prepare_configuration/)
       }
     }
+  }
+})
+
+test('guarded full release forces complete album readiness after SQL and before promotion', () => {
+  const runRelease = (failure = 'none') => {
+    mkdirSync(resolve(root, '.scratch'), { recursive: true })
+    const fixture = mkdtempSync(resolve(root, '.scratch', 'albums-release-order-'))
+    const server = resolve(fixture, 'server')
+    mkdirSync(server, { recursive: true })
+    const events = resolve(fixture, 'events')
+    const source = [
+      `. ${shellQuote(resolve(root, 'deploy/selectel/ci-release.sh'))}`,
+      `SERVER_ROOT=${shellQuote(server)}; APP_ROOT=${shellQuote(root)}; SCRIPT_DIR=${shellQuote(resolve(root, 'deploy/selectel'))}`,
+      'PRODUCT_SHA=0000000000000000000000000000000000000000; RUN_MIGRATION=true; RELEASE_MODE=full; PREBUILT_IMAGES=true',
+      'LEGACY_MEMBERSHIP_RUNTIME=false; LEGACY_MM0_RUNTIME=false; RESUMING_FORWARD_ONLY=false; RESUMING_MM0=false',
+      'require_root() { :; }; require_command() { :; }; validate_inputs() { :; }; validate_frontend_recovery_path() { :; }',
+      'validate_repository() { :; }; validate_planned_source() { :; }; capture_frontend_recovery_artifact() { :; }',
+      'recover_forward_markers() { :; }; check_disk_space() { :; }; verify_rollback_file() { :; }; capture_running_images() { :; }',
+      'fetch_and_checkout() { :; }; verify_frontend_recovery_artifact_unchanged() { :; }; validate_prebuilt_images() { :; }',
+      'detect_membership_rollback_boundary() { :; }; detect_mm0_boundary() { :; }; prepare_rollback() { echo PREPARE >> "$FIXTURE_EVENTS"; [ "$FIXTURE_FAILURE" != pre ] || return 42; }',
+      'flock() { :; }; bash() { local action=${!#}; echo "$action:${SELECTEL_ALBUMS_LEDGER_PHASE:-unset}" >> "$FIXTURE_EVENTS"; if [ "$action" = migrate ]; then SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; fi; if [ "$action" = rollback-readiness ] && [ "${SELECTEL_ALBUMS_LEDGER_PHASE:-}" = complete ] && [ "$FIXTURE_FAILURE" = post ]; then return 42; fi; }',
+      'promote_runtime() { echo PROMOTE >> "$FIXTURE_EVENTS"; }; verify_promoted_revision() { :; }; public_smoke() { :; }',
+      'write_release_manifest() { :; }; clear_release_markers() { :; }; archive_frontend_recovery_artifact() { :; }',
+      'SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; FIXTURE_EVENTS=' + shellQuote(events) + '; FIXTURE_FAILURE=' + shellQuote(failure),
+      'main',
+    ].join('\n')
+    try {
+      const result = spawnSync(bashExecutable, ['-s'], { cwd: root, input: source, encoding: 'utf8', timeout: 30_000 })
+      const actual = existsSync(events) ? readFileSync(events, 'utf8').trim().split('\n').filter(Boolean) : []
+      return { result, actual }
+    } finally { rmSync(fixture, { recursive: true, force: true }) }
+  }
+
+  const success = runRelease()
+  assert.equal(success.result.status, 0, success.result.stdout + success.result.stderr)
+  const sequence = ['PREPARE', 'preflight:pre-sql', 'migrate:pre-sql', 'migration-status:pre-sql',
+    'rollback-readiness:complete', 'PROMOTE']
+  let cursor = -1
+  for (const expected of sequence) {
+    const next = success.actual.indexOf(expected, cursor + 1)
+    assert.notEqual(next, -1, `missing or out-of-order ${expected}: ${success.actual.join(', ')}`)
+    cursor = next
+  }
+
+  const postFailure = runRelease('post')
+  assert.notEqual(postFailure.result.status, 0, postFailure.result.stdout + postFailure.result.stderr)
+  assert.ok(postFailure.actual.includes('rollback-readiness:complete'), postFailure.actual.join(', '))
+  assert.ok(postFailure.actual.includes('migration-status:pre-sql'), postFailure.actual.join(', '))
+  assert.ok(!postFailure.actual.includes('PROMOTE'), postFailure.actual.join(', '))
+
+  const preFailure = runRelease('pre')
+  assert.notEqual(preFailure.result.status, 0, preFailure.result.stdout + preFailure.result.stderr)
+  assert.ok(preFailure.actual.includes('PREPARE'), preFailure.actual.join(', '))
+  assert.ok(!preFailure.actual.some((event) => event.startsWith('preflight:') || event.startsWith('migrate:') || event === 'PROMOTE'),
+    preFailure.actual.join(', '))
+})
+
+function wishlistMigrationHistoryProgram(includeChild = false) {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch/wishlist-ledger-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, 'b4cdbbc49500d0850a64075d1bfba683a9bd22ad'], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const migrations = [
+    '20261023120000_gift_wishlist',
+    '20261024120000_gift_photo_recovery_guard',
+    ...(includeChild ? ['20261024100000_memory_child_tags'] : []),
+  ]
+  for (const name of migrations) {
+    const target = resolve(directory, 'backend/prisma/migrations', name)
+    mkdirSync(target, { recursive: true })
+    writeFileSync(resolve(target, 'migration.sql'), readFileSync(resolve(root, 'backend/prisma/migrations', name, 'migration.sql')))
+  }
+  const staged = spawnSync('git', ['add', '--', ...migrations.map((name) => `backend/prisma/migrations/${name}/migration.sql`)], { cwd: directory, encoding: 'utf8' })
+  if (staged.status !== 0) throw new Error(staged.stdout + staged.stderr)
+  const committed = spawnSync('git', ['-c', 'user.name=Recovery Fixture', '-c', 'user.email=recovery-fixture@example.invalid', 'commit', '--quiet', '-m', 'create isolated wishlist migration catalog fixture'], { cwd: directory, encoding: 'utf8' })
+  if (committed.status !== 0) throw new Error(committed.stdout + committed.stderr)
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).stdout.trim()
+  const captureProgram = resolve(root, '.scratch', `wishlist-ledger-program-${process.pid}.mjs`)
+  const captureCatalog = resolve(root, '.scratch', `wishlist-ledger-catalog-${process.pid}.txt`)
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
+      `APP_ROOT=${shellQuote(directory)}`,
+      `MEMOLY_PRODUCT_SHA=${sha}`,
+      'compose() { printf "%s" "${!#}" > "$CAPTURE_SCRIPT"; printf "%s\n%%CANDIDATE%%\n%s" "$MEMOLY_EXPECTED_BASELINE_MIGRATIONS" "$MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS" > "$CAPTURE_CATALOG"; }',
+      'rollback_verify_wishlist_migration_history pre-sql',
+    ].join('\n'),
+    encoding: 'utf8',
+    env: { ...process.env, CAPTURE_SCRIPT: gitBashPath(captureProgram), CAPTURE_CATALOG: gitBashPath(captureCatalog) },
+    timeout: 120_000,
+  })
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const catalogs = readFileSync(captureCatalog, 'utf8').split('\n%CANDIDATE%\n')
+  const program = readFileSync(captureProgram, 'utf8')
+  rmSync(captureProgram, { force: true })
+  rmSync(captureCatalog, { force: true })
+  return { program, baseline: catalogs[0], candidate: catalogs[1], source: directory, sha }
+}
+
+function runWishlistMigrationHistoryVerifier({ program, baseline, candidate, phase, rows, queryError = false }) {
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'wishlist-migration-ledger-module-'))
+  const moduleDir = resolve(fixture, 'node_modules/pg')
+  mkdirSync(moduleDir, { recursive: true })
+  writeFileSync(resolve(moduleDir, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(moduleDir, 'index.js'), `export class Client {
+    async connect() {}
+    async query() { if (process.env.FIXTURE_MIGRATION_QUERY_ERROR === 'true') throw new Error('synthetic query failure'); return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+    async end() {}
+  }\n`)
+  const result = spawnSync('node', ['--input-type=module', '--eval', program], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: { ...process.env, MEMOLY_EXPECTED_BASELINE_MIGRATIONS: baseline,
+      MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS: candidate, MEMOLY_WISHLIST_LEDGER_PHASE: phase,
+      FIXTURE_MIGRATION_QUERY_ERROR: String(queryError),
+      FIXTURE_MIGRATION_ROWS: JSON.stringify(rows) },
+    timeout: 10_000,
+  })
+  rmSync(fixture, { recursive: true, force: true })
+  return result
+}
+
+test('wishlist recovery preserves exact 53/54/55 history semantics and child recovery accepts only exact 53/54/55/56 states', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const oldSource = wishlistMigrationHistoryProgram()
+  const childSource = wishlistMigrationHistoryProgram(true)
+  const { program, baseline } = childSource
+  const lines = (value) => value.trim().split('\n').map((line) => {
+    const [migration_name, checksum] = line.split(':')
+    return { migration_name, checksum, finished_at: '2026-10-24T00:00:00.000Z', rolled_back_at: null }
+  })
+  const baselineRows = lines(baseline)
+  const oldCandidateRows = lines(oldSource.candidate)
+  const candidateRows = lines(childSource.candidate)
+  const giftRow = candidateRows.find(({ migration_name }) => migration_name === '20261023120000_gift_wishlist')
+  const guardRow = candidateRows.find(({ migration_name }) => migration_name === '20261024120000_gift_photo_recovery_guard')
+  assert.equal(baselineRows.length, 53)
+  assert.equal(oldCandidateRows.length, 55)
+  assert.equal(candidateRows.length, 56)
+  assert.ok(giftRow)
+  assert.ok(guardRow)
+  const childRow = candidateRows.find(({ migration_name }) => migration_name === '20261024100000_memory_child_tags')
+  assert.ok(childRow)
+  const verify = (phase, rows, candidate = childSource.candidate) => runWishlistMigrationHistoryVerifier({ program, baseline, candidate, phase, rows })
+  const oldVerify = (phase, rows) => runWishlistMigrationHistoryVerifier({ program, baseline, candidate: oldSource.candidate, phase, rows })
+  const oldGift = oldCandidateRows.find(({ migration_name }) => migration_name === '20261023120000_gift_wishlist')
+  const oldGuard = oldCandidateRows.find(({ migration_name }) => migration_name === '20261024120000_gift_photo_recovery_guard')
+  assert.equal(oldVerify('pre-sql', baselineRows).status, 0, 'exact deployed baseline is accepted before SQL')
+  assert.equal(oldVerify('pre-sql', [...baselineRows, oldGift]).status, 0, 'exact gift migration prefix is accepted before SQL')
+  assert.equal(oldVerify('pre-sql', oldCandidateRows).status, 0, 'exact fully applied old candidate is accepted before SQL recovery')
+  assert.equal(oldVerify('complete', oldCandidateRows).status, 0, 'exact 55-migration old state is accepted after SQL')
+  assert.notEqual(oldVerify('complete', [...baselineRows, oldGift]).status, 0, 'old complete state missing recovery guard is rejected')
+  assert.equal(verify('pre-sql', baselineRows).status, 0, 'exact deployed baseline is accepted before child SQL')
+  assert.equal(verify('pre-sql', [...baselineRows, giftRow]).status, 0, 'exact 54 state is accepted before child SQL')
+  assert.equal(verify('pre-sql', [...baselineRows, oldGift, oldGuard]).status, 0, 'deployed 55 state with later guard is accepted despite timestamp ordering')
+  assert.equal(verify('pre-sql', candidateRows).status, 0, 'exact fully applied 56 candidate is accepted before SQL recovery')
+  assert.equal(verify('complete', candidateRows).status, 0, 'exact 56-migration state is accepted after SQL')
+  assert.notEqual(verify('complete', [...baselineRows, oldGift, oldGuard]).status, 0, 'complete child state missing child migration is rejected')
+  assert.notEqual(verify('pre-sql', [...baselineRows, giftRow, { ...guardRow, migration_name: '20990101000000_unrelated' }]).status, 0, 'arbitrary extra migration is rejected')
+  assert.notEqual(verify('pre-sql', [...baselineRows.slice(0, 9), ...baselineRows.slice(10), giftRow, guardRow, childRow]).status, 0, 'dropped baseline migration is rejected')
+  assert.notEqual(verify('pre-sql', [{ ...baselineRows[0], checksum: 'f'.repeat(64) }, ...baselineRows.slice(1)]).status, 0, 'baseline checksum mutation is rejected')
+  assert.notEqual(verify('pre-sql', candidateRows.map((row) => row.migration_name === childRow.migration_name
+    ? { ...row, checksum: 'f'.repeat(64) } : row)).status, 0, 'child migration checksum mutation is rejected')
+  assert.notEqual(verify('pre-sql', [baselineRows[0], baselineRows[0], ...baselineRows.slice(1, 51), giftRow, guardRow, childRow]).status, 0, 'duplicate migration is rejected')
+  assert.notEqual(verify('pre-sql', candidateRows.map((row) => row.migration_name === childRow.migration_name
+    ? { ...row, finished_at: null } : row)).status, 0, 'unfinished migration is rejected')
+  assert.notEqual(verify('pre-sql', candidateRows.map((row) => row.migration_name === childRow.migration_name
+    ? { ...row, rolled_back_at: '2026-10-24T00:01:00.000Z' } : row)).status, 0, 'rolled-back migration is rejected')
+  assert.notEqual(verify('unknown', candidateRows).status, 0, 'unknown phase is rejected')
+  assert.notEqual(runWishlistMigrationHistoryVerifier({ program, baseline, candidate: childSource.candidate, phase: 'complete', rows: candidateRows, queryError: true }).status, 0,
+    'migration query errors are rejected')
+
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'wishlist-pre-sql-lock-'))
+  try {
+    const serverRoot = resolve(fixture, 'server')
+    mkdirSync(serverRoot, { recursive: true })
+    const lockProbe = spawnSync(bashExecutable, ['-s'], {
+      cwd: root,
+      input: [
+        redeployDefinitions,
+        `SERVER_ROOT=${shellQuote(serverRoot)}`,
+        'SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql',
+        'SELECTEL_CI_RELEASE=true',
+        'SELECTEL_DEPLOY_LOCK_FD=9',
+        'verify_application_rollback() { echo VERIFY_MUST_NOT_RUN; }',
+        'rollback_readiness',
+      ].join('\n'),
+      encoding: 'utf8', timeout: 30_000,
+    })
+    assert.notEqual(lockProbe.status, 0, lockProbe.stdout + lockProbe.stderr)
+    assert.match(`${lockProbe.stdout}${lockProbe.stderr}`, /pre-SQL migration readiness lock/)
+    assert.doesNotMatch(`${lockProbe.stdout}${lockProbe.stderr}`, /VERIFY_MUST_NOT_RUN/)
+  } finally { rmSync(fixture, { recursive: true, force: true }) }
+})
+
+test('wishlist recovery profile is pinned to the exact executable inputs and dc26 target without producer reachability', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const baseline = 'b4cdbbc49500d0850a64075d1bfba683a9bd22ad'
+  const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedWishlistCompatibility = '9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8'
+  const expectedGiftUrlCompatibility = 'fbffd1ed775d360a0308b39dad80feb903d865c8588b41a5a03bddb4b9c4efc4'
+  const expectedAlbumPortalCompatibility = 'e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67'
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
+    '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-source-'))
+  const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const wishlistSource = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedWishlistProductionBlobs,
+    'materialize exact wishlist compatibility source from committed production blobs')
+  assert.equal(productionCompatibilityFingerprint(wishlistSource.root), expectedWishlistCompatibility)
+  assert.equal(spawnSync('git', ['rev-parse', `${wishlistSource.sha}^`], { cwd: wishlistSource.root, encoding: 'utf8' }).stdout.trim(), baseline)
+  const source = commitFrozenSourceFiles(wishlistSource, reviewedGiftUrlProductionBlobs,
+    'overlay exact gift URL metadata production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedGiftUrlCompatibility)
+  const albumPortalSource = commitFrozenSourceFiles(source,
+    [['webapp/src/features/albums/albums.css', '294d51e2f3a46d5e61c890c00c47601bd95dd268']],
+    'overlay exact album portal layering production blob')
+  assert.equal(productionCompatibilityFingerprint(albumPortalSource.root), expectedAlbumPortalCompatibility)
+
+  const profile = (source) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const acceptedAlbumPortal = profile(albumPortalSource)
+  assert.equal(acceptedAlbumPortal.status, 0, acceptedAlbumPortal.stdout + acceptedAlbumPortal.stderr)
+  assert.equal(acceptedAlbumPortal.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const existingWishlist = profile(wishlistSource)
+  assert.equal(existingWishlist.status, 0, existingWishlist.stdout + existingWishlist.stderr)
+  assert.equal(existingWishlist.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha },
+    'backend/src/modules/gifts/application/gift-service.ts',
+    '\n// synthetic release compatibility drift control\n', 'mutate a frozen gift production input')
+  const rejected = profile(mutated)
+  assert.notEqual(rejected.status, 0, 'changed production source must not inherit the wishlist recovery permission')
+
+  const albumDriftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-wishlist-album-drift-'))
+  const albumDriftAdded = spawnSync('git', ['worktree', 'add', '--detach', albumDriftDirectory, albumPortalSource.sha], { cwd: root, encoding: 'utf8' })
+  if (albumDriftAdded.status !== 0) throw new Error(albumDriftAdded.stdout + albumDriftAdded.stderr)
+  fixtureWorktrees.push(albumDriftDirectory)
+  const albumMutated = commitSourceChange({ root: albumDriftDirectory, sha: albumPortalSource.sha },
+    'webapp/src/features/albums/albums.css',
+    '\n/* synthetic album production compatibility drift control */\n', 'mutate a frozen album production input')
+  const albumRejected = profile(albumMutated)
+  assert.notEqual(albumRejected.status, 0, 'changed album production CSS must not inherit the wishlist recovery permission')
+})
+
+test('child linked-family recovery pins frozen production inputs to dc26 and rejects runtime or UI drift', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = '954640d34f73103a577b497ec237c7701fcfad56'
+  const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedCompatibility = 'cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05'
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
+    '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
+  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
+    'apply exact frozen child linked-family production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+
+  const profile = (candidate) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  for (const [relativePath, marker] of [
+    ['backend/src/modules/memories/infrastructure/child-tags.ts', '\n// synthetic frozen child-runtime drift\n'],
+    ['webapp/src/features/feed/child-filter.ts', '\n// synthetic frozen child-UI drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+      `mutate frozen child production input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `changed child production input must not inherit recovery permission: ${relativePath}`)
   }
 })

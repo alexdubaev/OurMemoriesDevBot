@@ -1,13 +1,17 @@
 import { createHash, createHmac } from 'node:crypto'
 
 import {
+  childResponseSchema,
   createInviteResponseSchema,
   familyResponseSchema,
+  MAX_FAMILY_CHILDREN,
 } from '@web-app-demo/contracts'
 import type {
   AcceptInviteResponse,
   AvatarCrop,
+  ChildResponse,
   CompleteChildProfileRequest,
+  CreateChildRequest,
   CreateFamilyRequest,
   CreateInviteRequest,
   CreateInviteResponse,
@@ -20,6 +24,7 @@ import type {
   FamilyUsage,
   FamilyResponse,
   InvitePreviewResponse,
+  UpdateChildRequest,
   UpdateFamilyRequest,
   UpdateMemberRoleRequest,
 } from '@web-app-demo/contracts'
@@ -121,7 +126,7 @@ export class FamilyService {
           family: {
             select: {
               id: true, name: true, ownerUserId: true, unreadTrackingActivatedAt: true,
-              children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 },
+              children: { ...oldestLiveChild, select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true } },
             },
           },
         },
@@ -290,7 +295,7 @@ export class FamilyService {
               unreadBaselineOrdinal: this.multiFamilyActivation === 'on' ? 0n : null,
             },
           })
-          const response = { family: familyDto(family), child: null }
+          const response: FamilyResponse = { family: familyDto(family), child: null }
           return {
             resourceId: family.id,
             response,
@@ -326,7 +331,7 @@ export class FamilyService {
       if (!locked[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
       const family = await tx.family.findFirst({
         where: { id: scope.familyId, status: 'active' },
-        include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+        include: { children: oldestLiveChild },
       })
       const child = family?.children[0]
       if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
@@ -470,7 +475,7 @@ export class FamilyService {
           },
           select: { id: true, width: true, height: true },
         }),
-        tx.child.findFirst({ where: { familyId: scope.familyId }, orderBy: { createdAt: 'asc' } }),
+        tx.child.findFirst({ where: { familyId: scope.familyId, ...oldestLiveChild.where }, orderBy: oldestLiveChild.orderBy }),
       ])
       if (!avatar) {
         throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
@@ -531,14 +536,148 @@ export class FamilyService {
     })
   }
 
-  async getFamily(scope: FamilyScope): Promise<FamilyResponse> {
+  /** `includeChildren` is the client's children opt-in; without it the legacy shape is kept. */
+  async getFamily(scope: FamilyScope, includeChildren = false): Promise<FamilyResponse> {
     await this.access.requireMember(scope)
     const family = await this.db.family.findFirst({
       where: { id: scope.familyId, status: 'active' },
-      include: { children: { take: 1, orderBy: { createdAt: 'asc' } } },
+      include: { children: oldestLiveChild },
     })
     if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
-    return { family: familyDto(family), child: family.children[0] ? childDto(family.children[0]) : null }
+    const response: FamilyResponse = { family: familyDto(family), child: family.children[0] ? childDto(family.children[0]) : null }
+    if (!includeChildren) return response
+    const children = await this.db.child.findMany({
+      where: { familyId: scope.familyId, deletedAt: null },
+      orderBy: childOrder,
+      take: MAX_FAMILY_CHILDREN,
+    })
+    return { ...response, children: children.map(childDto) }
+  }
+
+  async createChild(scope: FamilyScope, input: CreateChildRequest, idempotencyKey: string): Promise<ChildResponse> {
+    await this.access.requireOwner(scope)
+    return (await this.idempotency.run({
+      actorUserId: scope.principal.userId,
+      operation: `family.child.create:${scope.familyId}`,
+      key: idempotencyKey,
+      payloadHash: hashPayload(input),
+      now: this.now(),
+      execute: async (tx) => {
+        const family = await lockActiveFamily(tx, scope.familyId)
+        const liveChildren = await tx.child.count({ where: { familyId: scope.familyId, deletedAt: null } })
+        if (liveChildren >= MAX_FAMILY_CHILDREN) {
+          throw new FamilyFailure('conflict', `В семье уже ${MAX_FAMILY_CHILDREN} детей`)
+        }
+        if (!isBirthDateOnOrBeforeFamilyToday(input.birthDate, family.timezone, this.now())) {
+          throw new FamilyFailure('conflict', 'Дата рождения не может быть в будущем')
+        }
+        await requireUsableAvatar(tx, scope.familyId, input.avatarMediaId, input.avatarCrop, null)
+        const child = await tx.child.create({ data: {
+          familyId: scope.familyId,
+          displayName: input.name,
+          birthDate: new Date(`${input.birthDate}T00:00:00.000Z`),
+          sex: input.sex,
+          avatarMediaId: input.avatarMediaId,
+          avatarCrop: input.avatarCrop,
+        } })
+        const response: ChildResponse = { child: childDto(child) }
+        return { resourceId: child.id, response, responseSnapshot: response }
+      },
+      restore: (responseSnapshot) => {
+        const parsed = childResponseSchema.safeParse(responseSnapshot)
+        if (!parsed.success) unavailableIdempotencyResult()
+        return parsed.data
+      },
+      payloadConflict: () => new FamilyFailure(
+        'idempotency_conflict',
+        'Этот Idempotency-Key уже использован с другими данными',
+      ),
+    })).response
+  }
+
+  async updateChild(scope: FamilyScope, childId: string, input: UpdateChildRequest): Promise<ChildResponse> {
+    await this.access.requireOwner(scope)
+    const result = await this.db.$transaction(async (tx) => {
+      const family = await lockActiveFamily(tx, scope.familyId)
+      const child = await tx.child.findFirst({ where: { id: childId, familyId: scope.familyId, deletedAt: null } })
+      if (!child) throw childNotFound()
+      if (input.birthDate !== undefined && !isBirthDateOnOrBeforeFamilyToday(input.birthDate, family.timezone, this.now())) {
+        throw new FamilyFailure('conflict', 'Дата рождения не может быть в будущем')
+      }
+      if (input.avatarMediaId !== undefined && input.avatarCrop !== undefined) {
+        await requireUsableAvatar(tx, scope.familyId, input.avatarMediaId, input.avatarCrop, child.id)
+      }
+      const updated = await tx.child.updateMany({
+        where: { id: child.id, familyId: scope.familyId, deletedAt: null, version: input.expectedVersion },
+        data: {
+          ...(input.name === undefined ? {} : { displayName: input.name }),
+          ...(input.birthDate === undefined ? {} : { birthDate: new Date(`${input.birthDate}T00:00:00.000Z`) }),
+          ...(input.sex === undefined ? {} : { sex: input.sex }),
+          ...(input.avatarMediaId === undefined ? {} : { avatarMediaId: input.avatarMediaId, avatarCrop: input.avatarCrop }),
+          version: { increment: 1 },
+        },
+      })
+      if (updated.count === 0) {
+        const photoOnly = input.avatarMediaId !== undefined && input.name === undefined
+          && input.birthDate === undefined && input.sex === undefined
+        if (!photoOnly) throw childVersionConflict()
+        // Same as the legacy path: a photo uploaded only for this lost edit must not linger.
+        await retireUnreferencedUploadedAvatar(tx, {
+          familyId: scope.familyId, mediaId: input.avatarMediaId!, uploaderId: scope.principal.userId, now: this.now(),
+        })
+        return { kind: 'version_conflict' as const }
+      }
+      if (input.avatarMediaId !== undefined && child.avatarMediaId && child.avatarMediaId !== input.avatarMediaId) {
+        await retireReplacedAvatar(tx, scope.familyId, child.avatarMediaId, this.now())
+      }
+      return { kind: 'ok' as const, child: await tx.child.findUniqueOrThrow({ where: { id: child.id } }) }
+    })
+    if (result.kind === 'version_conflict') throw childVersionConflict()
+    return { child: childDto(result.child) }
+  }
+
+  /**
+   * Soft-deletes a profile created by mistake. Allowed only while nothing points at the child:
+   * no tags on live publications, no live albums or gifts, no unexpired MAX video upload in
+   * flight, and never the last live child. Writers lock the family/child rows, so the checks
+   * cannot race them.
+   */
+  async deleteChild(scope: FamilyScope, childId: string, expectedVersion: number): Promise<void> {
+    await this.access.requireOwner(scope)
+    await this.db.$transaction(async (tx) => {
+      await lockActiveFamily(tx, scope.familyId)
+      const rows = await tx.$queryRaw<Array<{ version: number; deletedAt: Date | null; avatarMediaId: string | null }>>`
+        SELECT version, deleted_at AS "deletedAt", avatar_media_id AS "avatarMediaId" FROM children
+         WHERE id = ${childId}::uuid AND family_id = ${scope.familyId}::uuid
+         FOR UPDATE
+      `
+      const child = rows[0]
+      if (!child) throw childNotFound()
+      if (child.deletedAt) {
+        if (child.version === expectedVersion + 1) return
+        throw childNotFound()
+      }
+      if (child.version !== expectedVersion) throw childVersionConflict()
+      const liveChildren = await tx.child.count({ where: { familyId: scope.familyId, deletedAt: null } })
+      if (liveChildren <= 1) throw new FamilyFailure('conflict', 'Нельзя удалить единственного ребёнка семьи')
+      const tag = await tx.memoryChildTag.findFirst({
+        where: { familyId: scope.familyId, childId, memory: { deletedAt: null } },
+        select: { id: true },
+      })
+      if (tag) throw new FamilyFailure('conflict', 'Ребёнок отмечен в публикациях. Сначала снимите отметки')
+      const album = await tx.album.findFirst({ where: { familyId: scope.familyId, childId, deletedAt: null }, select: { id: true } })
+      if (album) throw new FamilyFailure('conflict', 'У ребёнка есть альбомы. Сначала удалите их')
+      const gift = await tx.gift.findFirst({ where: { familyId: scope.familyId, childId }, select: { id: true } })
+      if (gift) throw new FamilyFailure('conflict', 'У ребёнка есть подарки в списке желаний. Сначала удалите их')
+      const at = this.now()
+      const upload = await tx.maxVideoUploadSession.findFirst({
+        where: { familyId: scope.familyId, childId, state: { in: [...activeUploadStates] }, expiresAt: { gt: at } },
+        select: { id: true },
+      })
+      if (upload) throw new FamilyFailure('conflict', 'Для ребёнка загружается видео. Дождитесь окончания загрузки')
+      await tx.child.update({ where: { id: childId }, data: { deletedAt: at, version: { increment: 1 } } })
+      if (child.avatarMediaId) await retireReplacedAvatar(tx, scope.familyId, child.avatarMediaId, at)
+    })
   }
 
   async listMembers(scope: FamilyScope): Promise<{ items: FamilyMemberDto[] }> {
@@ -594,7 +733,7 @@ export class FamilyService {
         )
         const family = await tx.family.findFirst({
           where: { id: scope.familyId, status: 'active' },
-          select: { id: true, children: { select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true }, take: 1 } },
+          select: { id: true, children: { ...oldestLiveChild, select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true } } },
         })
         if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')
         if (!family.children[0] || !isCompletedChild(family.children[0])) {
@@ -943,6 +1082,12 @@ export class FamilyService {
         where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
         data: { revokedAt: this.now() },
       })
+      // A removed member can no longer act on the wishlist: free their unbought reservations so
+      // others can take them. Bought gifts keep the holder's name in «Подарено».
+      await tx.gift.updateMany({
+        where: { familyId: scope.familyId, reservedByUserId: userId, boughtAt: null },
+        data: { reservedByUserId: null, reservedAt: null, version: { increment: 1 } },
+      })
     })
   }
 
@@ -984,6 +1129,63 @@ async function retireUnreferencedUploadedAvatar(
     payload: { mediaId: input.mediaId },
     scheduledFor: input.now,
   })
+}
+
+async function lockActiveFamily(tx: TransactionClient, familyId: string) {
+  const locked = await tx.$queryRaw<Array<{ timezone: string }>>`
+    SELECT timezone FROM families
+     WHERE id = ${familyId}::uuid AND status = 'active'
+     FOR UPDATE
+  `
+  if (!locked[0]) throw new FamilyFailure('not_found', 'Семья не найдена')
+  return locked[0]
+}
+
+/** A ready private `child_avatar` photo of this family, not used by another child, square crop. */
+async function requireUsableAvatar(
+  tx: TransactionClient,
+  familyId: string,
+  mediaId: string,
+  crop: { x: number; y: number; width: number; height: number },
+  ownChildId: string | null,
+) {
+  const avatar = await tx.mediaAsset.findFirst({
+    where: {
+      id: mediaId, familyId, purpose: 'child_avatar', mediaKind: 'photo',
+      originalStatus: 'stored', renditionStatus: 'ready', deletedAt: null,
+    },
+    select: { width: true, height: true, avatarForChildren: { select: { id: true } } },
+  })
+  if (!avatar) throw new FamilyFailure('conflict', 'Аватар ребёнка должен быть готовым private photo этой семьи')
+  if (avatar.avatarForChildren.some(({ id }) => id !== ownChildId)) {
+    throw new FamilyFailure('conflict', 'Эта фотография уже используется в профиле другого ребёнка')
+  }
+  if (!isSquarePixelCrop(crop, avatar.width, avatar.height)) {
+    throw new FamilyFailure('conflict', 'Кадрирование аватара должно быть квадратным')
+  }
+}
+
+async function retireReplacedAvatar(tx: TransactionClient, familyId: string, mediaId: string, now: Date) {
+  const retired = await tx.mediaAsset.updateMany({
+    where: { id: mediaId, familyId, purpose: 'child_avatar', deletedAt: null },
+    data: { deletedAt: now },
+  })
+  if (retired.count === 1) {
+    await insertTask(tx, {
+      type: 'media:delete',
+      dedupeKey: `media-delete:${mediaId}`,
+      payload: { mediaId },
+      scheduledFor: now,
+    })
+  }
+}
+
+function childNotFound() {
+  return new FamilyFailure('not_found', 'Профиль ребёнка не найден')
+}
+
+function childVersionConflict() {
+  return new FamilyFailure('version_conflict', 'Профиль ребёнка изменён другим участником')
 }
 
 function hashPayload(input: unknown) {
@@ -1056,6 +1258,23 @@ function familyDto(family: { id: string; name: string; timezone: string; ownerUs
     timezone: family.timezone,
     ownerUserId: family.ownerUserId,
   }
+}
+
+/** Order of children everywhere a list is shown: birth date (unknown last), then creation. */
+const childOrder = [
+  { birthDate: { sort: 'asc' as const, nulls: 'last' as const } },
+  { createdAt: 'asc' as const },
+  { id: 'asc' as const },
+]
+
+/** An upload in these states may still publish a video for the child. */
+const activeUploadStates = ['reserved', 'uploaded', 'processing', 'message_sent'] as const
+
+/** Legacy single-child views (home card, `child`, setup, invites) use the oldest live child. */
+const oldestLiveChild = {
+  where: { deletedAt: null },
+  orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+  take: 1,
 }
 
 function childDto(child: {

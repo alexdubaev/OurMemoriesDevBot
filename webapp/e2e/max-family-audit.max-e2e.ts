@@ -448,6 +448,14 @@ test('MAX-FULL: owner switches family data while an older feed response is pendi
   await selectFamilyFeed(invitePage, 'Family B child', 'B-only history')
   await expect(invitePage.getByText('A-only history')).toHaveCount(0)
   await invitePage.screenshot({ path: testInfo.outputPath('max-family-audit-same-name-family-b.png'), fullPage: true })
+  await expect(invitePage.locator('[data-navigation-surface="feed"]')).toBeVisible()
+  await invitePage.locator('[data-child-header-mode="feed"] .ui-v2-child-identity').click()
+  await expect(invitePage.locator('[data-navigation-surface="feed"]')).toBeVisible()
+  await expect(invitePage.getByRole('button', { name: 'Мои семьи' })).toBeVisible()
+  await invitePage.getByRole('button', { name: 'Мои семьи' }).click()
+  await expect(invitePage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
+  await expect(invitePage.getByText('Цифра рядом — новые воспоминания для вас')).toHaveCount(0)
+  await expect(invitePage.getByText('Близкие рядом, даже на расстоянии')).toHaveCount(0)
 
   await openFamilyChooser(invitePage)
   const familyACard = invitePage.getByRole('button', { name: /Family A child.*Владелец/ })
@@ -535,8 +543,12 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   const ownerToken = await signInMax(page, { id: ownerId, first_name: 'MAX revocation owner' })
   const familyB = await createAuditFamily(page, ownerToken, 'Revoked B family', 'B child', 'B retained history', true)
   await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerId, first_name: 'MAX revocation owner' }, randomUUID(), ''))
+  const retainedHomeResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/me/families') && response.ok())
   await page.reload()
-  await page.getByRole('button', { name: 'Продолжить' }).click()
+  const retainedHome = await retainedHomeResponse
+  const retainedHomeSnapshot = await retainedHome.json() as { items: Array<{ familyId: string }> }
+  expect(retainedHomeSnapshot.items.some((item) => item.familyId === familyB.id)).toBe(true)
+  await expect(page.getByRole('button', { name: /Revoked B family/ })).toBeVisible()
   await selectFamilyFeed(page, 'B child', 'B retained history')
   await page.getByRole('button', { name: 'Семья' }).click()
   await page.getByRole('button', { name: 'Редактировать профиль ребёнка: B child' }).click()
@@ -570,7 +582,9 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await selectFamilyFeed(viewerPage, 'B child updated', 'B retained history')
   await viewerPage.getByRole('button', { name: 'Семья' }).click()
   await expect(viewerPage.getByRole('button', { name: /Редактировать профиль ребёнка/ })).toHaveCount(0)
-  await expect(viewerPage.locator('.ui-v2-family-child-identity')).toHaveCount(1)
+  const childProfile = viewerPage.getByRole('region', { name: 'Профиль ребёнка' })
+  await expect(childProfile).toBeVisible()
+  await expect(childProfile.getByText('B child updated')).toBeVisible()
   await viewerPage.getByRole('button', { name: 'Лента' }).click()
   await expect(viewerPage.getByText('Synthetic retained photo')).toBeVisible()
   await expect(viewerPage.locator('[data-slot="voice-player"]')).toBeVisible()
@@ -618,13 +632,7 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
 
   const usedInviteContext = await browser.newContext()
   const usedInvitePage = await usedInviteContext.newPage()
-  await usedInvitePage.addInitScript((data: string) => {
-    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
-  }, signedMaxInitData({ id: viewerId, first_name: 'MAX revocation viewer' }, randomUUID(), `invite_${initialInvite}`))
-  const usedAuth = usedInvitePage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
-  await usedInvitePage.goto('/')
-  await usedInvitePage.getByRole('button', { name: 'Продолжить' }).click()
-  await usedAuth
+  await signInMax(usedInvitePage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${initialInvite}`)
   await expect(usedInvitePage.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible({ timeout: 15_000 })
 
   const nextInviteResponse = await page.request.post(`/api/v1/families/${familyB.id}/invites`, {
@@ -655,10 +663,18 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
   await page.addInitScript((data: string) => {
     Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
   }, signedMaxInitData(user, randomUUID(), startParam))
-  const authResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
+  const authResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max'))
   await page.goto('/')
-  await page.getByRole('button', { name: 'Продолжить' }).click()
-  const response = await authResponse
+  const continueButton = page.getByRole('button', { name: 'Продолжить' })
+  const ready = await Promise.race([
+    authResponse.then((response) => ({ response })),
+    continueButton.waitFor({ state: 'visible' }).then(() => ({ continue: true as const })),
+  ])
+  const response = 'response' in ready ? ready.response : await (async () => {
+    await continueButton.click()
+    return authResponse
+  })()
+  expect(response.ok(), `MAX auth failed with HTTP ${response.status()}`).toBe(true)
   const token = (await response.json() as { accessToken: string }).accessToken
   return token
 }
@@ -666,7 +682,7 @@ async function signInMax(page: import('@playwright/test').Page, user: { id: numb
 async function openFamilyChooser(page: import('@playwright/test').Page) {
   const heading = page.getByRole('heading', { name: 'Мои семьи' })
   if (await heading.isVisible().catch(() => false)) return
-  await page.getByRole('button', { name: /Сменить семью/ }).click()
+  await page.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ }).click()
   await expect(heading).toBeVisible()
 }
 

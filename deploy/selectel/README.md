@@ -13,6 +13,148 @@ Use this file as the single procedure for the existing host. It is safe for an a
 with no previous chat context because it names the host and server checkout, the
 access boundary, the build inputs, the migration gate, and the rollback contract.
 
+### Short frontend releases (owner policy 2026-10-22)
+
+Use this lane by default for proven client rendering, CSS, button, animation,
+gesture, carousel, modal and navigation changes. Client source paths marked R in
+`frontend-safe-paths.txt` require an independent semantic review bound to the
+exact range; A paths are mechanically eligible. It publishes **only the
+static/webapp image**. It does not run a
+backend build/promotion, restart workers/scheduler, activate gateway configuration,
+apply migrations, create a database dump or rewrite `rollback.env`.
+
+Eligibility is checked against **both actual running backend and webapp commits**,
+not only the last merged PR. One shared fail-closed interpreter classifies paths
+and reviews exact base-to-candidate ranges. Unknown paths, backend/schema/contracts,
+authentication/session/ACL, private media/lifecycle, API/platform/offline/cache,
+dependencies, build and deploy inputs require the normal full release. Every R
+range must have an independent report and receipt binding its base SHA, candidate
+tree, NUL-delimited no-rename Git diff hash (paths, modes and full old/new blob
+IDs) and policy hash. The candidate tree and blob IDs bind the complete contents.
+The report reviews changed
+hunks, imports/interfaces/contracts, auth/access/media/storage/lifecycle, API and
+business rules, and backend compatibility; uncertainty means FULL. Same-file
+sensitive hunks make that range ineligible. Do not add temporary policy exceptions
+to shorten one release. This lane's own implementation and policy changes require
+FULL and independent review.
+
+On the host, receipts are accepted only from `/opt/memoly/frontend-reviews`, a
+root-owned mode-0700 directory containing root-owned mode-0600 receipt and report
+files. An authorized release operator independently checks reviewer provenance
+and the full report, then installs both files under the exact fingerprint printed
+by `frontend-scope.sh inspect`. This uses the existing root release-operator trust
+boundary; the checker validates hashes and scope, not the reasoning behind a
+report. Never install a receipt supplied by the candidate checkout or create one
+from a candidate-declared approval. A receipt cannot override a D path.
+For an assigned task, its authorized lead may install the receipt after the
+independent review is complete under the existing release permission; this needs
+no additional owner approval or second review. The lead is registering that
+independent report, not substituting a self-review.
+
+1. Read actual deployed tags and verify image IDs and OCI revisions. Keep these
+   full SHAs in the task evidence. Do not infer them from the server checkout,
+   which can include unreleased documentation or tools.
+
+   ```sh
+   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+     'docker inspect --format "{{.Config.Image}} {{.Image}}" memoly-backend-1 memoly-static-1'
+   ```
+
+2. In the clean task checkout, verify the entire deployed-backend-to-candidate
+   diff. Choose a relevant existing short journey and inspect the changed screen.
+   For a header/family navigation change, the existing UI v4 journey is:
+
+   ```sh
+   bun run verify:local --profile frontend --base '<full deployed backend SHA>' \
+     --frontend-base '<full deployed webapp SHA>' [--frontend-review '<receipt directory>'] \
+     --journey webapp/e2e/memoly-v4.spec.ts \
+     --journey-grep 'feed and family navigation expose working controls'
+   ```
+
+   Up to two relevant journey specs may be supplied. The verifier uses an existing
+   dedicated Playwright config when available, otherwise the existing MAX config.
+   It requires executed passing cases and refuses skipped/unrun/empty results.
+   FRONTEND runs frontend typecheck, lint, production build and mapped narrow
+   tests; it does not run backend FULL. Document targeted visual/browser acceptance
+   and its limits. Use cached local tooling rather than rebuilding the test host.
+
+   For each R range, the independent reviewer supplies a report that addresses
+   the actual changed hunks, old/new imports and interfaces/contracts, auth/access,
+   media/storage/lifecycle, API/business rules, and compatibility with the deployed
+   backend. The reviewer recommends FRONTEND only when that range is client UI.
+   Generate the expected bindings from the immutable candidate and each deployed
+   base; the command only prints hashes and never creates approval:
+
+   ```sh
+   bash deploy/selectel/frontend-scope.sh inspect '<deployed backend SHA>' '<candidate SHA>'
+   bash deploy/selectel/frontend-scope.sh inspect '<deployed frontend SHA>' '<candidate SHA>'
+   ```
+
+   An authorized root release operator checks the reviewer provenance, report,
+   decision and displayed bindings, then installs the report and a receipt with
+   `MEMOLY_FRONTEND_REVIEW=1`, `BASE_SHA`, `CANDIDATE_TREE`, `DIFF_SHA256`,
+   `POLICY_SHA256`, `REVIEWER_ID`, `DECISION=FRONTEND`, `REPORT_SHA256`, and
+   `FINGERPRINT` under the matching `<fingerprint>.report` and
+   `<fingerprint>.receipt` names. Install both with owner root, group root and
+   mode 0600 in `/opt/memoly/frontend-reviews` (directory owner root, mode 0700).
+   If both deployed SHAs are identical, one receipt covers the deduplicated range.
+   Do not install a report or receipt from the candidate checkout. Hash validation
+   confirms exact bytes and range; the existing authorized operator is the trust
+   boundary for the independent provenance and semantic decision.
+
+3. Squash merge through the normal reviewed PR process. Verify the final main tree,
+   then run FRONTEND on that exact final SHA with the deployed backend base. Do not
+   run FULL merely because squash changed the commit SHA. New or broader source
+   changes require the appropriate new checks.
+
+4. From the accepted clean main checkout, invoke the **versioned** host entry point
+   with migration `false` and the explicit fifth argument `frontend`:
+
+   ```sh
+   SHA=$(git rev-parse HEAD)
+   git show "$SHA:deploy/selectel/ci-release.sh" |
+     ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
+       bash -s -- "$SHA" DEPLOY false id911018762027_bot frontend
+   ```
+
+   The host repeats source/current-main/scope/ownership, host-lock/disk/forward-marker,
+   accepted UI v4 and immutable artifact checks. It validates the unchanged migration
+   history read-only, captures exact prior webapp recovery identity before promotion,
+   and verifies retained backend/worker/scheduler and gateway/config identities.
+   Only static is recreated with `--no-deps`. Internal/public readiness and candidate
+   artifact checks precede the final protected manifest. Failures after promotion
+   restore only the exact prior frontend and keep a failed command status.
+
+5. Confirm the frontend manifest records distinct deployed backend/frontend SHAs,
+   exact image IDs, public smoke and frontend recovery readiness. The previously
+   designated full application recovery pair remains unchanged. This independent
+   frontend recovery proof is not a new exact-source application rollback attestation.
+   Do not report the backend at the frontend SHA or claim a newly attested full
+   application rollback source.
+
+For recovery after a failed or interrupted frontend promotion, use the same
+accepted entry point with `frontend-rollback` as the fifth argument. It restores
+only the exact prior image recorded in the protected frontend state after checking
+retained backend/config compatibility; it does not accept arbitrary target images
+or restore the database. Missing/corrupt state, unknown sources, changed backend or
+forward-only markers fail closed. Resolve such a failure through the normal guarded
+forward-fix process. The normal `rollback-static` action below retains its older
+contract and is not the recovery command for this new lane.
+
+After a successful normal FULL promotion, revision verification, public smoke and
+manifest creation, the entry point archives the previous frontend recovery file
+under `RELEASES_DIR`. It checks root ownership, mode 0600, regular-file identity and
+unchanged checksum, preserving its exact bytes as forensic evidence. FULL does not
+parse that payload or use it as recovery authorization; its independently verified
+new runtime supersedes even an interrupted frontend record. Failed FULL attempts
+leave the live file unchanged. Unsafe filesystem metadata or a changed file fail
+closed. This prevents a completed FULL from leaving stale frontend permissions that
+would block the next eligible short release.
+
+Documentation-only PRs have no runtime deployment. The initial installation of this
+release tooling uses the normal reviewed FULL release; future eligible UI commits
+then use the short lane. No product UI change is required merely to install tooling.
+
 ### Access and build inputs
 
 - Production is `app.memoly.ru`; run host commands from `/opt/memoly/app`.
@@ -167,7 +309,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before PR merge, run the risk-appropriate FAST, STANDARD, or FULL profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Before production deployment, run FULL on the exact final release SHA, including the combined state of all included PRs. This FULL check does not replace the guarded backup, migration, readiness, health, and rollback steps below. Production deployment remains a separate manual operation and requires an explicit owner request. With owner-provisioned SSH access, confirm the accepted clean SHA,
+Before PR merge, run the applicable risk profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the exact final release SHA, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh
@@ -454,6 +596,123 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   The source pin is content-bound and limited to this frontend-only runtime;
   the comments rollback profile still requires exact migration history and all
   existing ancestry, configuration, image-label, and database-state checks.
+- The exact album runtime fingerprint
+  `5ba8daeb5a1d8a3f538f9f24adff103f440afbd7de9fbe0e5b1eee1d772bd8b1` may use
+  only the healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its
+  existing pinned image pair. Its migration ledger check is anchored to the
+  exact 49-migration `dc26ad9` catalog plus the three reviewed additive album
+  migrations, for a total of 52. In the guarded `ci-release` path with
+  `RUN_MIGRATION=true`, pre-SQL readiness accepts only a fully completed exact
+  ordered prefix of that catalog, from 49 through 52 migrations. Unknown,
+  missing, duplicated, checksum-mismatched, unfinished, rolled-back, or
+  unrelated rows fail closed. This private phase requires the inherited held
+  Selectel deployment lock and is available only to rollback-readiness inside
+  that guarded release. Ordinary readiness and application rollback always
+  require all 52 migrations completed. After migration, the release clears the
+  private phase and reruns full recovery readiness before promotion. Releases
+  without migration use normal complete-ledger readiness; B2 and MM0 recovery
+  paths keep their existing checks. This exception does not permit database
+  rollback or change target, image, ancestry, configuration, backup, lock, or
+  data safeguards. The source fingerprint is content-bound across squash, not
+  a date or descendant allowlist, and still requires the real synthetic current
+  → 33a → current recovery probe.
+
+- The exact private-album-photo runtime fingerprint
+  `f4b2ef2d6df8ab0135c24102d56b7facbed4fc09eaf467eb93fef6b55781749f` may use
+  only the same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and
+  its existing pinned image pair. This executable compatibility fingerprint
+  is measured from frozen source `785458f911c2a5e45c830ebbfc4220ab155f27da`
+  and anchored to the unchanged full-attested `dc26ad9` reference; it is
+  independent of producer commit reachability.
+  The recovery catalog remains anchored to the exact 49-migration `dc26ad9`
+  baseline and recognizes only either the original three reviewed album
+  migrations (52 total) or those same three plus
+  `20261023150000_album_private_photos` (53 total). In the guarded
+  `ci-release` path with `RUN_MIGRATION=true`, pre-SQL readiness accepts only a
+  completed exact ordered prefix from 49 through the selected candidate's full
+  catalog. Ordinary readiness, rollback, and post-SQL readiness require all 52
+  or all 53 migrations for that exact catalog. Unknown suffixes and all
+  incomplete, duplicate, checksum-mismatched, unfinished, rolled-back, or
+  unrelated ledger rows fail closed. The existing deployment lock, backup,
+  ancestry, image, configuration, recovery, and data safeguards remain
+  required; this pin does not authorize database rollback.
+
+- The exact gift-wishlist runtime fingerprint
+  `9bc6fdc22b85fe68e04ab387c1d9ce3c4f8a01471c177f1b61d9ae07bbde13c8`, measured
+  from producer `5f0f854e0843e87bf7d5634114b641b61cbc98f9`, may use only the same
+  healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its existing
+  pinned image pair. The pin is anchored to the unchanged full-attested `dc26ad9`
+  source and authorizes only the exact executable input fingerprint. Its ledger
+  is the exact 53-migration `b4cdbbc` catalog plus
+  `20261023120000_gift_wishlist` and
+  `20261024120000_gift_photo_recovery_guard` (55 total). Guarded pre-SQL
+  readiness accepts only completed 53, 54, or 55 migration states; ordinary,
+  rollback, and post-SQL readiness require all 55. Unknown, missing, duplicate,
+  checksum-mismatched, unfinished, rolled-back, or unrelated rows fail closed.
+  Pre-SQL readiness remains restricted to the inherited deployment lock in the
+  guarded release path. This pin does not authorize database rollback and still
+  requires the synthetic current → 33a → current compatibility probe.
+  The probe was run with `bun test backend/scripts/wishlist-release-compatibility.integration.test.ts`
+  against a uniquely created `*_test` child database: 1 test passed with 45 assertions.
+  It verified the frozen cleanup leaves registered gift-photo metadata, bytes,
+  family accounting, and outbox unchanged with the guard, while the disposable
+  unprotected control reproduces a tombstone, an unavailable photo, and queued
+  `media:delete` work while the original storage bytes remain present.
+
+- The exact stage-1 several-children production fingerprint
+  `cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05` is anchored
+  to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime and may
+  use only the healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and its
+  existing pinned image pair. Its literal 76-blob source fixture is reconstructed
+  from the stable `954640d` production baseline; the measured compatibility hash
+  is checked against that fixture, and child-runtime or child-UI drift is rejected.
+  The exact child migration ledger is the 53-migration `b4cdbbc` baseline plus
+  `20261023120000_gift_wishlist`, `20261024120000_gift_photo_recovery_guard`,
+  and `20261024100000_memory_child_tags` (56 total). For this exact source,
+  guarded pre-SQL readiness accepts only the exact completed 53, 54, 55, or 56
+  migration states; ordinary, rollback, and post-SQL readiness require all 56.
+  The deployed 55-migration ledger remains valid despite its guard migration
+  sorting after the child migration in the candidate catalog. The legacy exact
+  55-migration source keeps its existing pre-SQL and complete-ledger rules.
+  Unknown, missing, duplicate, checksum-mismatched, unfinished, rolled-back, or
+  unrelated ledger rows fail closed. Pre-SQL readiness remains under the held
+  host lock in the guarded release path; the profile does not authorize database
+  rollback.
+
+  The synthetic current → frozen 33a → current PostgreSQL probe passed against
+  a uniquely created `*_test` child database: 1 test, 21 expectations, exit code
+  0 on source `9d7b1a0a648fc6069d4b5f9cc638594015381e35`. It ran with
+  `bun test backend/scripts/children-release-compatibility.integration.test.ts`
+  in an isolated Linux environment with Bun and `bunx` on PATH. The probe verifies the frozen runtime can read a
+  tagged multi-child photo with an attachment-level tag, create and read a legacy
+  child-linked note, and filter the feed without changing either new child tag.
+  Returning to current code preserves both tags, attachment, deleted-profile
+  timestamp, migration ledger and rollback-era memory, and a new current-runtime
+  write receives its expected child tag. This targeted compatibility probe is
+  evidence for the exact source pin, not a FULL release-profile result.
+
+- Candidate `a33d220a2edd5c5c883770f793e398fc30752a3d` has measured executable
+  compatibility fingerprint
+  `e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67` for the
+  same healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target, the unchanged
+  full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` anchor/runtime
+  fingerprint, and the existing `wishlist` recovery profile. The only
+  production-input difference from the running `ab6b9a55` source is the pinned
+  `webapp/src/features/albums/albums.css` blob
+  `294d51e2f3a46d5e61c890c00c47601bd95dd268`, which adds one album-local portal
+  layering rule; backend, dependencies, schema and contracts are unchanged.
+  The exact final candidate passed the FULL profile in 533.6 seconds after the
+  source passed FULL in 531.9 seconds. Each run passed safety (127 checks),
+  contracts (72), backend (166), web (142), site (4), PostgreSQL (412 tests),
+  and MAX/Web/PWA journeys (60); the database suite reported 41 suites and
+  3,632 assertions. The synthetic current → frozen 33a → current album probe
+  passed 31 assertions, alongside wishlist-photo (45) and comments (12) probes.
+  The first normal FULL deployment built candidate images but stopped before
+  promotion because this exact fingerprint was not yet registered. Production
+  remains on `ab6b9a5`, and `rollback.env` remains pinned to `33a0054`. This
+  registration permits only the measured fingerprint under the existing
+  target, image, ledger, configuration, ancestry, marker and recovery guards;
+  it does not change the recovery policy or authorize database rollback.
 
 The runtime fingerprint hashes deterministic NUL-delimited Git tree records
 for the backend, webapp, packages, root manifest, and Bun lock/config files,
@@ -521,6 +780,117 @@ That probe checks preserved data, family ACLs, comments and unread state,
 sessions, outbox, migrations and grants. This is technical recovery evidence;
 the exact UI image IDs, OCI labels, accepted-UI ancestry, migration and
 configuration checks remain required, and no database rollback is authorized.
+
+For source SHA `6a15a9ee19e59437de9c3863084c02a0437a8f69`, the measured runtime
+fingerprint is `fc6192f557002dfd54b1e22fa74bdd69f3ac52a21ef5c9b794c650fe0e2fc4b3`
+and the executable compatibility fingerprint is
+`a208551a5f5925445d71bedc322d669d04bf76196d90332cc0816e7c7c3a70c6`. The actual
+`current → frozen 33a → current` PostgreSQL proof passed 8/8 tests and 50/50
+expectations with exit code 0 in 31.35 s. The exact compatibility profile reuses
+the established `comments` recovery checks and remains scoped to the 33a target,
+the full-attested `dc26ad9` runtime, and the frozen media plus family-navigation
+source blobs.
+
+The shared-header and child-avatar production source frozen for candidate
+`b95786a7abad26fba2305ad4afae13f2bd0b0fe3` has executable compatibility
+fingerprint
+`b3efa841bf22d2703c462d3fcf58f039c55784a3dc0dd695f3e81ce14dcece04` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its 13 changed production Git blobs are pinned in
+`tests/selectel-release-exit.test.mjs`; the exact profile remains anchored to
+the full-attested `dc26ad9` diagnostic runtime. The focused guard regression
+checks readiness, designated-pair preservation, and drift rejection before
+service mutation. This source binding does not establish database compatibility:
+the documented synthetic PostgreSQL current → frozen 33a → current probe must
+also pass for the final source SHA before release.
+
+The final single-source child-avatar runtime frozen for candidate
+`e28bdfc605a1b3fd4d39b75f3f3fe3af7a56d274` has executable compatibility
+fingerprint
+`7509b439a678bba9bb7b74bfb9edd620623b8f238c2a9c256e1f1da187f9997e` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its exact production Git blobs, including the final `ChildAvatar.tsx` blob, are
+pinned in `tests/selectel-release-exit.test.mjs`; the executable profile remains
+anchored to full-attested source `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`.
+The focused regression checks read-only readiness, designated-pair preservation,
+and rejection of executable drift before service mutation. This source binding
+does not establish database compatibility. Run the synthetic PostgreSQL current
+→ frozen 33a → current compatibility probe against this exact candidate SHA
+before release; its result is not recorded by this source attestation.
+
+The cropped-channel avatar sizing source frozen for candidate
+`3559ff6e65fbb93804b882cd4a53b6d7717b140d` has executable compatibility
+fingerprint
+`0236c2944f1e4c978b4da387dbc6758b330cd1f6d36fe54cf84b65eefab3ace0` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its exact production Git blobs, including the scoped channel-avatar grid sizing
+in `memoly-feed.css` and pinned `bun.lock`, are pinned in
+`tests/selectel-release-exit.test.mjs`; the profile remains anchored to the
+full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime. Astro is
+pinned to `7.3.3` to address
+[GHSA-98hj-9722-w3j8](https://github.com/withastro/astro/security/advisories/GHSA-98hj-9722-w3j8)
+and
+[GHSA-mpr7-6m5w-76rw](https://github.com/withastro/astro/security/advisories/GHSA-mpr7-6m5w-76rw).
+The focused regression checks read-only readiness, designated-pair
+preservation, and rejection of executable drift before service mutation. This
+source binding does not establish database compatibility; run the synthetic
+PostgreSQL current → frozen 33a → current compatibility probe against the exact
+release SHA before release.
+
+The Welcome CTA 6 source frozen for release candidate
+`9c6d6071a2b614e073a5f765810d55281b723ef5` has executable compatibility
+fingerprint
+`b9d96400efdfebbfb0dffe3db83ee813b05012a42c3d15cd8f17d88f88ebfddc` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its five exact production Git blobs—the Bun lock, webapp manifest, Comfortaa
+OFL license, welcome component, and welcome CSS—are pinned in
+`tests/selectel-release-exit.test.mjs`. The profile is anchored to the
+full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime. Its focused
+guard regression verifies read-only readiness and designated-pair preservation,
+then rejects a welcome-source change before service mutation.
+
+Database compatibility was separately verified by the synthetic PostgreSQL
+current → frozen 33a → current probe: 1 selected test, 7 filtered, 12 assertions,
+exit code 0 in 36.02 seconds. It ran against a dedicated `*_test` database on
+loopback port 15489; the local `TEST_DATABASE_URL` value is not recorded here:
+
+```sh
+env NODE_ENV=test CHECKPOINT_DISABLE=1 DATABASE_URL="$TEST_DATABASE_URL" bun test backend/scripts/comments-release-compatibility.integration.test.ts --test-name-pattern 'current candidate and permitted rollback preserve comments and unread behavior' --timeout 360000
+```
+
+This is narrow recovery evidence, not a FULL test-suite result or a deployment
+approval. The guarded release stopped before promotion; the production services
+and database were not changed.
+
+The once-per-account welcome and page-zoom correction frozen for candidate
+`c93fc3e37bdcf98b7eab2fd47da8f554668edd17` has executable compatibility
+fingerprint
+`66c95074db67e743e0a96e9db65c758e13e7ae89de4cbc8cd5a64b67cca17d65` for the
+same designated `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` recovery target only.
+Its six exact production blobs—the accepted mixed-media viewer source and CSS,
+welcome gate, global touch policy, entrypoint, and zoom guard—are frozen in
+`tests/selectel-release-exit.test.mjs` and anchored to the full-attested
+`dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime. The focused regression
+checks read-only recovery readiness and preservation of the designated pair,
+then rejects app and zoom-guard drift before service mutation. It does not
+change the recovery target, service configuration, or database rules.
+The frozen viewer source includes the accepted reduced-motion fix from #220.
+
+The code fix follows the server's atomic account claim instead of forcing the
+welcome splash on every launch. It also restores startup gesture prevention and
+the root `pan-x pan-y` policy while preserving local media gestures. Historically,
+the app-wide gesture guard and root touch policy were removed in #185; their
+older tests had been deleted earlier in #157. Production-entry Playwright
+coverage now includes a trusted Chromium CDP touch pinch: after a 1.6× pinch,
+`visualViewport.scale` remains 1, while ordinary single-touch and wheel input
+remain uncanceled.
+
+Against an isolated synthetic PostgreSQL `*_test` database, the selected run
+passed 4/4 tests with 58 assertions and exit code 0 in 39.54 seconds: three
+welcome-account tests and one current → frozen 33a → current application
+roundtrip. The roundtrip completed in 34.98 seconds. The webapp production
+build passed. These checks are scoped recovery evidence; the full suite remains
+waived for this task, and no production deployment was performed.
 
 The PostgreSQL roundtrip probe runs the new, old, then new actual application
 modules on one synthetic `*_test` database and separate storage. It exercises

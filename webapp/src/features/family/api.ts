@@ -1,5 +1,9 @@
 import {
+  childResponseSchema,
   completeChildProfileRequestSchema,
+  createChildRequestSchema,
+  MEMOLY_CHILDREN_HEADER,
+  updateChildRequestSchema,
   acceptInviteRequestSchema,
   acceptInviteResponseSchema,
   familyInvitesResponseSchema,
@@ -12,6 +16,8 @@ import {
   reserveMediaUploadRequestSchema,
   reserveMediaUploadResponseSchema,
   type CompleteChildProfileRequest,
+  type CreateChildRequest,
+  type UpdateChildRequest,
   type CreateInviteRequest,
   type UpdateMemberRoleRequest,
   type UpdateFamilyRequest,
@@ -59,8 +65,12 @@ export function previewInvite(transport: AuthenticatedTransport, token: string) 
   })
 }
 
+/** Opts into the full children list; a stale client without the header keeps the single `child`. */
 export function loadFamily(transport: AuthenticatedTransport, familyId: string) {
-  return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema, startupRequest)
+  return transport.request(`/api/v1/families/${encodeURIComponent(familyId)}`, familyResponseSchema, {
+    ...startupRequest,
+    headers: { [MEMOLY_CHILDREN_HEADER]: '1' },
+  })
 }
 
 export function updateFamily(transport: AuthenticatedTransport, familyId: string, input: UpdateFamilyRequest) {
@@ -105,6 +115,42 @@ export function completeChildProfile(
   )
 }
 
+export function createChild(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  input: CreateChildRequest,
+  idempotencyKey: string = crypto.randomUUID(),
+) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/children`, childResponseSchema,
+    { method: 'POST', body: createChildRequestSchema.parse(input), headers: { 'Idempotency-Key': idempotencyKey } },
+  )
+}
+
+export function updateChild(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  childId: string,
+  input: UpdateChildRequest,
+) {
+  return transport.request(
+    `/api/v1/families/${encodeURIComponent(familyId)}/children/${encodeURIComponent(childId)}`, childResponseSchema,
+    { method: 'PATCH', body: updateChildRequestSchema.parse(input) },
+  )
+}
+
+export function deleteChild(
+  transport: AuthenticatedTransport,
+  familyId: string,
+  childId: string,
+  expectedVersion: number,
+) {
+  return transport.raw(
+    `/api/v1/families/${encodeURIComponent(familyId)}/children/${encodeURIComponent(childId)}`,
+    { method: 'DELETE', headers: { 'If-Match': String(expectedVersion) } },
+  )
+}
+
 export async function uploadChildAvatar(
   transport: AuthenticatedTransport,
   familyId: string,
@@ -119,7 +165,7 @@ export async function uploadFamilyPhoto(
   familyId: string,
   file: File,
   contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif',
-  purpose: 'child_avatar' | 'memory',
+  purpose: 'child_avatar' | 'memory' | 'gift',
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
   idempotencyKey?: string,
@@ -147,7 +193,7 @@ async function uploadFamilyMedia(
   file: File,
   kind: 'photo' | 'video',
   contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | 'image/heif' | 'video/mp4' | 'video/quicktime',
-  purpose: 'child_avatar' | 'memory',
+  purpose: 'child_avatar' | 'memory' | 'gift',
   signal?: AbortSignal,
   onStage?: (stage: 'reserve' | 'upload' | 'finalize') => void,
   idempotencyKey?: string,

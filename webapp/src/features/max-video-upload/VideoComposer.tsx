@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { ZodError } from 'zod'
+import { memoryDtoSchema, type ChildDto, type MemoryDto } from '@web-app-demo/contracts'
 
 import { Button } from '@/components/ui/button'
 import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
 import { familyCalendarDate } from '@/features/family'
+import { ChildTagPicker } from '@/components/ui-v2/ChildTagPicker'
+import { composerChildIds } from '@/components/ui-v2/child-tags'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { finalizeMaxVideo, reserveMaxVideo, validateVideoFile, type MaxVideoReservation } from './api'
 import { reservationOccurredAt } from './date'
@@ -13,10 +16,17 @@ import '@/styles/composer-skin.css'
 
 export type VideoComposerProps = {
   childId: string
+  /** The family's children; a picker appears when there are two or more. */
+  childOptions?: ChildDto[]
+  /** Preselected children (the child whose page the add started from). */
+  initialChildIds?: string[]
   familyId: string
   familyTimezone: string
   onCancel: () => void
   onSuccess: () => void | Promise<void>
+  onPublished?: (memory: MemoryDto | { id: string }) => void
+  onCancellationBlockedChange?: (blocked: boolean) => void
+  onCancelRequestChange?: (cancel: () => void) => void
   transport: AuthenticatedTransport
 }
 
@@ -35,9 +45,10 @@ function safeReserveApplicationCode(reason: unknown): string | null {
   return reason.code.toLowerCase()
 }
 
-export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onSuccess, transport }: VideoComposerProps) {
+export function VideoComposer({ childId, childOptions, initialChildIds = [], familyId, familyTimezone, onCancel, onSuccess, onPublished, onCancellationBlockedChange, onCancelRequestChange, transport }: VideoComposerProps) {
   const [file, setFile] = useState<File | null>(null)
   const [caption, setCaption] = useState('')
+  const [selectedChildIds, setSelectedChildIds] = useState<string[]>(initialChildIds)
   const [occurredAt, setOccurredAt] = useState(() => familyCalendarDate(familyTimezone))
   const maximumOccurredAt = familyCalendarDate(familyTimezone)
   const [capability, setCapability] = useState<Capability | null>(null)
@@ -145,6 +156,7 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
       return
     }
 
+    let published: MemoryDto | { id: string } | null = null
     setIsSaving(true)
     const controller = new AbortController()
     abortController.current = controller
@@ -176,7 +188,8 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
       }
       if (!finalizeCapability?.uploadToken) throw new Error('Не удалось подготовить загрузку видео')
       setStatus('saving')
-      const result = await finalizeMaxVideo(transport, familyId, finalizeCapability.sessionId, finalizeCapability.uploadToken, controller.signal)
+      // The picker is locked while a session exists, so a retried finalize sends the same children.
+      const result = await finalizeMaxVideo(transport, familyId, finalizeCapability.sessionId, finalizeCapability.uploadToken, controller.signal, composerChildIds(childOptions, selectedChildIds))
       if (result.state !== 'finalized') {
         if (result.state === 'expired' || result.state === 'failed') setCapability(null)
         setProgress(null)
@@ -188,6 +201,8 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
       setCapability(null)
       clearSelectedFile()
       setStatus('success')
+      const parsed = memoryDtoSchema.safeParse(result.memory)
+      published = parsed.success ? parsed.data : result.memoryId ? { id: result.memoryId } : null
     } catch (reason) {
       // An abort caused by Cancel/unmount is intentional. A provider-side XHR abort is
       // not: treating every AbortError as intentional would leave the composer stuck in
@@ -219,15 +234,18 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
       saving.current = false
       setIsSaving(false)
     }
+    if (published) try { onPublished?.(published) } catch { /* publication cannot be repeated for an attach failure */ }
   }
 
   const busy = isSaving || status === 'reserving' || status === 'uploading' || status === 'saving'
+  useEffect(() => { onCancellationBlockedChange?.(busy && status !== 'uploading') }, [busy, onCancellationBlockedChange, status])
   const returnToFeed = () => {
     const unsaved = status !== 'success' && (file !== null || caption.trim() !== '' || occurredAt !== maximumOccurredAt || capability !== null)
     if (unsaved && typeof window.confirm === 'function' && !window.confirm('Удалить несохранённые изменения?')) return
     clearEphemeral()
     onCancel()
   }
+  useEffect(() => { onCancelRequestChange?.(returnToFeed) })
   return <main className="memoly-video-v2" data-video-state={invalidFile ? 'invalid' : status}>
     <div className="memoly-video-v2-shell">
       {status !== 'success' ? <header className="memoly-video-v2-topbar">
@@ -256,6 +274,7 @@ export function VideoComposer({ childId, familyId, familyTimezone, onCancel, onS
           <textarea aria-label="Подпись к видео" className="memoly-video-v2-field memoly-video-v2-textarea" disabled={busy || Boolean(capability)} id="max-video-caption" onChange={(event) => setCaption(event.currentTarget.value)} placeholder="Добавьте подпись" value={caption} />
           <label className="memoly-video-v2-label" htmlFor="max-video-date"><Typography as="span" variant="memoryButton">Дата</Typography></label>
           <input aria-label="Дата видео" className="memoly-video-v2-field" disabled={busy || Boolean(capability)} id="max-video-date" max={maximumOccurredAt} onChange={(event) => setOccurredAt(event.currentTarget.value)} type="date" value={occurredAt} />
+          {childOptions && childOptions.length >= 2 ? <ChildTagPicker childOptions={childOptions} disabled={busy || Boolean(capability)} onChange={setSelectedChildIds} selected={selectedChildIds} /> : null}
         </section>
 
         {status === 'uploading' ? <section aria-label="Загрузка видео" className="memoly-video-v2-progress" role="status"><div><Typography as="strong" variant="memoryBodyMedium">Загружаем файл…</Typography><Typography aria-live="polite" as="span" variant="memoryMeta">{progress === null ? 'Идёт загрузка' : `${progress}%`}</Typography></div><ProgressBar value={progress} label="Загрузка видео" /></section> : null}

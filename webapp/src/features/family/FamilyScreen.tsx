@@ -6,8 +6,9 @@ import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
+import { FamilyChildAvatar } from './FamilyChildAvatar'
 import { createInviteResult } from './invite-result'
-import { useChildAvatar } from './useChildAvatar'
+import { canAddChild, familyChildren } from './model'
 import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamilyMaxChannelStatus'
 
 type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
@@ -15,6 +16,7 @@ type FamilyRefreshOptions = { failureMode?: 'global' | 'throw' }
 export function FamilyScreen({
   active = true,
   familyResponse,
+  childAvatar,
   invites,
   members,
   transport,
@@ -23,9 +25,14 @@ export function FamilyScreen({
   onAdd,
   onAllFamilies,
   onEditChild,
+  onAddChild,
+  childAvatarsEnabled = false,
+  membershipEpoch = null,
   settingsRequest,
   onSettingsRequestHandled,
   onFeed,
+  onGifts,
+  onAlbums,
   onRefresh,
   createInviteLink,
   canOpenInstall = false,
@@ -34,6 +41,7 @@ export function FamilyScreen({
 }: {
   active?: boolean
   familyResponse: FamilyResponse
+  childAvatar?: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' }
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
   transport: AuthenticatedTransport
@@ -41,10 +49,17 @@ export function FamilyScreen({
   currentUserId: string
   onAdd: () => void
   onAllFamilies?: () => void
-  onEditChild: () => void
+  onEditChild: (childId: string) => void
+  /** Opens the add-child form; offered to the owner only. */
+  onAddChild?: () => void
+  /** Per-child avatars load only once the selected family scope is confirmed. */
+  childAvatarsEnabled?: boolean
+  membershipEpoch?: number | null
   settingsRequest?: number
   onSettingsRequestHandled?: () => void
   onFeed: () => void
+  onGifts?: () => void
+  onAlbums?: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
   canOpenInstall?: boolean
@@ -63,10 +78,11 @@ export function FamilyScreen({
   const current = members.find((member) => member.userId === currentUserId)
   const isOwner = current?.isOwner === true
   const child = familyResponse.child
+  const displayedChildAvatar = childAvatar ?? { url: null, status: child?.avatarMediaId ? 'loading' as const : 'absent' as const }
+  const children = familyChildren(familyResponse)
   const canInvite = (isOwner || current?.role === 'full') && child?.isComplete === true
   const maxChannel = useFamilyMaxChannelStatus(transport, familyResponse.family.id, currentUserId, current?.role ?? null)
   const canManageMaxChannel = canManageFamilyMaxChannel(current?.role ?? null, maxChannel.status)
-  const avatarUrl = useChildAvatar(transport, familyResponse.family.id, child?.avatarMediaId ?? null)
   const activeInvites = useMemo(() => invites.filter((invite) => Date.parse(invite.expiresAt) > now), [invites, now])
 
   useEffect(() => {
@@ -138,7 +154,8 @@ export function FamilyScreen({
         canOpenInstall={canOpenInstall}
         installLabel={installLabel}
         onOpenInstall={onOpenInstall}
-          childAvatarUrl={avatarUrl}
+          childAvatarUrl={displayedChildAvatar.url}
+          childAvatarStatus={displayedChildAvatar.status}
           copyState={copyState}
           familyResponse={familyResponse}
           currentUserId={currentUserId}
@@ -197,6 +214,8 @@ export function FamilyScreen({
             }
           }}
           onEditChild={onEditChild}
+          onAddChild={onAddChild && canAddChild(isOwner, children) ? onAddChild : undefined}
+          renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyResponse.family.id} membershipEpoch={membershipEpoch} transport={transport} />}
           settingsRequest={settingsRequest}
           onSettingsRequestHandled={onSettingsRequestHandled}
           onLeaveFamily={async () => {
@@ -226,7 +245,10 @@ export function FamilyScreen({
           usage={usage}
           usageFailed={usageFailed}
       />
-      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onFamily={() => undefined} onFeed={onFeed} role={current?.role === 'full' ? 'full' : 'viewer'} />
+      <BottomNavigation appearance="memoly" active="family" onAdd={onAdd} onAlbums={onAlbums ?? noopGifts} onFamily={() => undefined} onFeed={onFeed} onGifts={onGifts ?? noopGifts} role={current?.role === 'full' ? 'full' : 'viewer'} />
     </div>
   )
 }
+
+// Screens rendered outside the app shell (fixtures, harnesses) have no gifts tab to open.
+const noopGifts = () => undefined

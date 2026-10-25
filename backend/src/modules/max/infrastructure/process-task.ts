@@ -328,7 +328,6 @@ export function createMaxTaskProcessor(options: {
     }
     const publish = () => publisher.publish(scope, {
       id: source.plannedMemoryId,
-      childId: admission.childId,
       kind: 'note',
       body: text,
       occurredAt: new Date(event.occurredAt),

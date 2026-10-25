@@ -1,29 +1,44 @@
-import type { MemoryDto, MemoryPage, MemoryReaction } from '@web-app-demo/contracts'
+import type { MemoryChildTagsResponse, MemoryDto, MemoryPage, MemoryReaction } from '@web-app-demo/contracts'
 import { QueryClient, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 
-import type { AuthenticatedTransport } from '@/platform/api'
+import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './presentation'
+import type { ChildFilter } from './child-filter'
 import { deleteMemory, loadFeed, loadMemory, setMemoryReaction } from './api'
 import { MemoryReactionQueue, reactionCountsAfterChange } from './reaction-queue'
 
 export const feedQueryKeys = {
   all: [...sessionQueryKeys.all, 'feed'] as const,
-  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0) =>
-    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle] as const,
+  /** The child filter is last so the positional reaction/persistence checks keep their indexes. */
+  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, childFilter: ChildFilter = null) =>
+    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter] as const,
 }
 
-export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true) {
+/** Feed list keys (any filter) under one family, as opposed to per-memory side queries. */
+export function isFeedListKey(key: readonly unknown[], familyId: string) {
+  return key[0] === 'session' && key[1] === 'feed' && key[2] === familyId && key.length === 9 && typeof key[4] === 'boolean'
+}
+
+export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true, childFilter: ChildFilter = null, enabled = true) {
   return useInfiniteQuery({
-    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle),
-    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly),
+    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter),
+    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly, childFilter),
+    enabled,
+    retry: shouldRetryFeedQuery,
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: unreadOnly ? Infinity : 20_000,
     refetchOnWindowFocus: active && !unreadOnly,
   })
+}
+
+/** Access and missing-child errors are terminal; network and server errors retain query retries. */
+export function shouldRetryFeedQuery(failureCount: number, error: unknown) {
+  if (error instanceof ApiRequestError && [403, 404].includes(error.status)) return false
+  return failureCount < 3
 }
 
 export function useMemoryReaction(transport: AuthenticatedTransport, familyId: string, accountId = '', membershipEpoch = 0) {
@@ -138,7 +153,8 @@ export function useMemoryDelete(
 export function removeMemoryFromCachedFeeds(queryClient: QueryClient, familyId: string, memoryId: string): FeedSnapshot {
   const matches = queryClient.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] })
   for (const [key, current] of matches) {
-    if (!current) continue
+    // Per-memory side queries (video renditions) share the family prefix but hold no pages.
+    if (!current || !Array.isArray(current.pages)) continue
     queryClient.setQueryData<FeedCache>(key, {
       ...current,
       pages: current.pages.map((page) => ({
@@ -148,6 +164,20 @@ export function removeMemoryFromCachedFeeds(queryClient: QueryClient, familyId: 
     })
   }
   return matches
+}
+
+/** Puts a memory's saved child tags (and their version) into every cached list that holds it. */
+export function applyChildTagsToCachedFeeds(queryClient: QueryClient, familyId: string, memoryId: string, saved: MemoryChildTagsResponse) {
+  for (const [key, current] of queryClient.getQueriesData<FeedCache>({ queryKey: [...feedQueryKeys.all, familyId] })) {
+    if (!current || !Array.isArray(current.pages)) continue
+    queryClient.setQueryData<FeedCache>(key, {
+      ...current,
+      pages: current.pages.map((page) => ({
+        ...page,
+        items: page.items.map((memory) => memory.id === memoryId ? { ...memory, childTags: saved.childTags, childTagsVersion: saved.childTagsVersion } : memory),
+      })),
+    })
+  }
 }
 
 function restoreMemoryFeedSnapshots(queryClient: QueryClient, snapshots: FeedSnapshot | undefined) {

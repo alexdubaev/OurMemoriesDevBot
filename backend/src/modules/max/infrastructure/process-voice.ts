@@ -58,7 +58,7 @@ export function createMaxVoiceProcessor(options: {
         current, maxBytes: options.runtime.env.MAX_FILE_MAX_BYTES, signal: input.signal,
       })
       await publisher.publish(scope, {
-        id: source.plannedMemoryId, childId: admission.childId, kind: 'voice', body: input.event.text ?? '',
+        id: source.plannedMemoryId, kind: 'voice', body: input.event.text ?? '',
         occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds: [mediaId],
       }, async (tx, memoryId) => {
         if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)

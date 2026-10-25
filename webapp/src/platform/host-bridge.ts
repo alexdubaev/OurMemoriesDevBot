@@ -31,6 +31,12 @@ export type HostBridge = {
   openInvite(rawToken: string): void
   /** Opens a caller-built HTTPS URL through the host's supported external-link surface. */
   openExternalUrl?(url: string): boolean
+  /**
+   * Opens a third-party http(s) link (a shop page) outside the app. Returns false when the
+   * link is not a plain http(s) link or the host cannot open it. Unlike `openExternalUrl`
+   * it is not limited to the app's own origin, so call it only from an explicit user tap.
+   */
+  openExternalLink?(url: string): boolean
   getInsets(): TelegramInsets
 }
 
@@ -69,3 +75,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export { createBrowserDevHostBridge, createTelegramHostBridge }
+export { isSafeExternalLink } from './external-link'

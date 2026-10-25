@@ -1,0 +1,29 @@
+/* Child filters, the child's album strip and filtered empty states (families with two or more children). */
+[data-memoly-feed] .feed-child-chips { display: flex; min-height: 44px; align-items: center; gap: 8px; margin: 12px calc(-1 * max(1rem, var(--host-inset-left, 0px))) 0; padding: 0 max(1rem, var(--host-inset-left, 0px)); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+[data-memoly-feed] .feed-child-chips::-webkit-scrollbar { display: none; }
+[data-memoly-feed] .feed-child-chip { display: inline-flex; min-height: 36px; flex: 0 0 auto; align-items: center; padding: 0 12px; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 999px; color: var(--ui-v2-color-muted, #596858); background: var(--ui-v2-color-surface, #fffefa); font: inherit; white-space: nowrap; cursor: pointer; }
+[data-memoly-feed] .feed-child-chip[aria-pressed='true'] { border-color: var(--ui-v2-color-accent-soft, #e6eee7); color: var(--ui-v2-color-accent, #416d58); background: var(--ui-v2-color-accent-soft, #e6eee7); font-weight: 600; }
+[data-memoly-feed] .feed-child-chip:focus-visible { outline: 2px solid var(--ui-v2-color-accent, #416d58); outline-offset: 2px; }
+
+[data-memoly-feed] .feed-child-albums { margin-top: 16px; }
+[data-memoly-feed] .feed-child-albums-title { display: block; margin: 0 0 8px; color: var(--ui-v2-color-text, #2b3934); }
+[data-memoly-feed] .feed-child-albums-row { display: flex; gap: 10px; margin: 0 calc(-1 * max(1rem, var(--host-inset-left, 0px))); padding: 2px max(1rem, var(--host-inset-left, 0px)) 4px; overflow-x: auto; list-style: none; scrollbar-width: none; overscroll-behavior-x: contain; }
+[data-memoly-feed] .feed-child-albums-row::-webkit-scrollbar { display: none; }
+[data-memoly-feed] .feed-child-albums-row > li { flex: 0 0 auto; }
+[data-memoly-feed] .feed-child-album { display: flex; width: 124px; min-height: 44px; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 0 4px; border: 0; color: var(--ui-v2-color-text, #2b3934); text-align: left; background: transparent; font: inherit; cursor: pointer; }
+[data-memoly-feed] .feed-child-album:disabled { cursor: default; opacity: .7; }
+[data-memoly-feed] .feed-child-album:focus-visible { outline: 2px solid var(--ui-v2-color-accent, #416d58); outline-offset: 2px; border-radius: 12px; }
+[data-memoly-feed] .feed-child-album-cover { display: grid; width: 100%; aspect-ratio: 1.25; margin-bottom: 6px; place-items: center; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 4px 12px 12px 4px; background: #e6ebdc; }
+[data-memoly-feed] .feed-child-album-workshop .feed-child-album-cover { background: #efe4d4; }
+[data-memoly-feed] .feed-child-album-events .feed-child-album-cover { background: #f0e5da; }
+[data-memoly-feed] .feed-child-album-invite .feed-child-album-cover { border-style: dashed; background: var(--ui-v2-color-surface, #fffefa); }
+[data-memoly-feed] .feed-child-album-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
+[data-memoly-feed] .feed-child-album-count { display: block; color: var(--ui-v2-color-muted, #596858); }
+[data-memoly-feed] .feed-child-album-invite .feed-child-album-count { color: var(--ui-v2-color-accent, #416d58); font-weight: 600; }
+[data-memoly-feed] .feed-child-albums-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--ui-v2-color-muted, #596858); }
+[data-memoly-feed] .feed-child-albums-retry { min-height: 44px; padding: 0 12px; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 999px; color: var(--ui-v2-color-accent, #416d58); background: var(--ui-v2-color-surface, #fffefa); font: inherit; }
+
+[data-memoly-feed] .feed-child-empty { display: flex; min-height: 320px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 8px; text-align: center; }
+[data-memoly-feed] .feed-child-empty-mark { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 50%; background: var(--ui-v2-color-accent-soft, #e6eee7); }
+[data-memoly-feed] .feed-child-empty p { max-width: 22rem; margin: 0; color: var(--ui-v2-color-muted, #596858); }
+[data-memoly-feed] .feed-child-empty button { min-height: 44px; }

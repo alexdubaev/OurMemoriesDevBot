@@ -4,7 +4,13 @@ import {
   apiErrorSchema,
   createFamilyRequestSchema,
   completeChildProfileRequestSchema,
+  childResponseSchema,
+  createChildRequestSchema,
   createInviteRequestSchema,
+  familyChildParamsSchema,
+  ifMatchVersionHeadersSchema,
+  MEMOLY_CHILDREN_HEADER,
+  updateChildRequestSchema,
   createInviteResponseSchema,
   familyInviteParamsSchema,
   familyHomeQuerySchema,
@@ -82,6 +88,28 @@ const completeChildProfileRoute = createRoute({
     body: { content: json(completeChildProfileRequestSchema) },
   },
   responses: { ...errors, 200: { content: json(familyResponseSchema), description: 'Completed child profile' } },
+})
+const createChildRoute = createRoute({
+  method: 'post', path: '/families/{familyId}/children', security: bearerSecurity,
+  request: {
+    params: familyParamsSchema,
+    headers: idempotencyKeyHeadersSchema,
+    body: { content: json(createChildRequestSchema) },
+  },
+  responses: { ...errors, 201: { content: json(childResponseSchema), description: 'Added child profile' } },
+})
+const updateChildRoute = createRoute({
+  method: 'patch', path: '/families/{familyId}/children/{childId}', security: bearerSecurity,
+  request: {
+    params: familyChildParamsSchema,
+    body: { content: json(updateChildRequestSchema) },
+  },
+  responses: { ...errors, 200: { content: json(childResponseSchema), description: 'Updated child profile' } },
+})
+const deleteChildRoute = createRoute({
+  method: 'delete', path: '/families/{familyId}/children/{childId}', security: bearerSecurity,
+  request: { params: familyChildParamsSchema, headers: ifMatchVersionHeadersSchema },
+  responses: { ...errors, 204: { description: 'Soft-deleted child profile' } },
 })
 const listMembersRoute = createRoute({
   method: 'get', path: '/families/{familyId}/members', security: bearerSecurity,
@@ -175,8 +203,31 @@ export function createFamilyRoutes({
     ),
   ), 201))
   routes.openapi(getFamilyRoute, async (c) => c.json(await executeFamily(() =>
-    service.getFamily(scope(c.var.user, c.req.valid('param').familyId)),
+    service.getFamily(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.header(MEMOLY_CHILDREN_HEADER) === '1',
+    ),
   ), 200))
+  routes.openapi(createChildRoute, async (c) => c.json(await executeFamily(() =>
+    service.createChild(
+      scope(c.var.user, c.req.valid('param').familyId),
+      c.req.valid('json'),
+      c.req.valid('header')['idempotency-key'],
+    ),
+  ), 201))
+  routes.openapi(updateChildRoute, async (c) => {
+    const params = c.req.valid('param')
+    return c.json(await executeFamily(() => service.updateChild(
+      scope(c.var.user, params.familyId), params.childId, c.req.valid('json'),
+    )), 200)
+  })
+  routes.openapi(deleteChildRoute, async (c) => {
+    const params = c.req.valid('param')
+    await executeFamily(() => service.deleteChild(
+      scope(c.var.user, params.familyId), params.childId, c.req.valid('header')['if-match'],
+    ))
+    return c.body(null, 204)
+  })
   routes.openapi(updateFamilyRoute, async (c) => c.json(await executeFamily(() =>
     service.updateFamily(
       scope(c.var.user, c.req.valid('param').familyId),

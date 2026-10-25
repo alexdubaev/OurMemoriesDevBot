@@ -1,0 +1,10 @@
+.memoly-child-tag-picker { min-width: 0; margin: 0; padding: 0; border: 0; }
+.memoly-child-tag-picker legend { display: block; margin-bottom: 8px; padding: 0; color: var(--ui-v2-color-text, #2b3934); }
+.memoly-child-tag-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.memoly-child-tag-option { display: inline-flex; min-height: 44px; max-width: 100%; align-items: center; gap: 6px; padding: 0 14px; border: 1px solid var(--ui-v2-color-line, #e5e6dd); border-radius: 999px; color: var(--ui-v2-color-muted, #596858); background: var(--ui-v2-color-surface, #fffefa); font: inherit; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.memoly-child-tag-option[aria-pressed='true'] { border-color: var(--ui-v2-color-accent, #416d58); color: var(--ui-v2-color-accent, #416d58); background: var(--ui-v2-color-accent-soft, #e6eee7); }
+.memoly-child-tag-option:focus-visible { outline: 2px solid var(--ui-v2-color-accent, #416d58); outline-offset: 2px; }
+.memoly-child-tag-option:disabled, .memoly-child-tag-picker:disabled .memoly-child-tag-option { cursor: default; opacity: .6; }
+.memoly-child-tag-mark { display: inline-grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; border: 1.5px solid currentColor; border-radius: 50%; font-size: 12px; line-height: 1; }
+.memoly-child-tag-hint { margin: 8px 0 0; color: var(--ui-v2-color-muted, #596858); }
+.memoly-child-tag-option[aria-pressed='true'] .memoly-child-tag-mark::after { content: '✓'; }

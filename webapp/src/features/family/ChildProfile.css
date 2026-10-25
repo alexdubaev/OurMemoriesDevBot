@@ -1060,3 +1060,12 @@
 .child-photo-saved-v2-screen .child-success h2{font-size:18px;font-weight:800;color:#173150;margin:24px 0 8px;}
 .child-photo-saved-v2-screen .child-success p{font-size:15px;line-height:1.45;color:#75848d;margin:0 0 28px;}
 .child-photo-saved-v2-screen .child-success .child-primary{width:calc(100% - 32px);min-height:50px;border-radius:22px;margin-top:auto;font-weight:760;}
+
+/* Owner-only delete of a mistaken child profile; offered once the family has two or more children. */
+.child-edit-v2-delete { display: grid; gap: 10px; margin-top: 12px; }
+.child-edit-v2-delete .child-edit-v2-delete-link { width: 100%; min-height: 44px; background: transparent; box-shadow: none; }
+.child-edit-v2-delete .child-edit-v2-delete-error { margin: 0; text-align: center; }
+.child-edit-v2-delete .child-edit-v2-delete-confirm { padding: 14px; border: 1px solid var(--ui-v2-color-line, #e8dfda); border-radius: 16px; }
+.child-edit-v2-delete .child-edit-v2-delete-confirm p { margin: 0; }
+.child-edit-v2-delete .child-edit-v2-delete-actions { display: flex; gap: 8px; margin-top: 12px; }
+.child-edit-v2-delete .child-edit-v2-delete-actions > button { flex: 1; min-height: 44px; }

@@ -1,0 +1,27 @@
+# Ordered Bash regular expressions; first matching rule wins.
+# A = mechanically eligible; R = exact-range independent semantic review;
+# D = always FULL. Keep sensitive boundaries ahead of broad client source.
+D	^webapp/src/platform/(api|media|persistence)/
+D	^webapp/src/platform/(auth|session|invite|storage|cache|offline|service-worker)(\.|/|-)
+D	^webapp/src/platform/max-invite-link\.ts$
+R	^webapp/src/features/auth/components/.+\.[cm]?[jt]sx?$
+R	^webapp/src/features/session/components/.+\.[cm]?[jt]sx?$
+D	^webapp/src/features/(auth|session)/
+D	^webapp/src/features/[^/]+/(api|queries)\.tsx?$
+D	^webapp/src/features/[^/]+/(contracts|api|services)/
+D	^webapp/src/features/[^/]+/(media|storage|cache|offline|service-worker|access|permission)(\.|/|-)
+D	^webapp/src/features/[^/]+/(private-[^/]+|[^/]*invite[^/]*)
+D	^webapp/src/features/family/bootstrap\.tsx?$
+D	^webapp/src/features/family/invite-[^/]+\.tsx?$
+D	^webapp/src/features/feed/(video-lifecycle|telegram-video-handoff|use-playback-registration|playback|max-video-[^/]+)\.tsx?$
+D	^webapp/src/features/max-video-upload/
+D	^webapp/public/(service-worker|sw\.)
+D	(^|/)(package\.json|bun\.lockb?|Dockerfile[^/]*|.*\.ya?ml|vite[^/]*\.config\.[cm]?[jt]s|playwright[^/]*\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|eslint[^/]*\.config\.[cm]?[jt]s)$
+D	^(deploy/|scripts/|backend/|packages/|website/|infra/|\.github/|\.githooks/)
+A	^webapp/src/.+\.(css|scss|sass|less)$
+A	^webapp/(src|public)/assets/.+\.(webp|png|jpe?g|avif|ico)$
+R	^webapp/src/.+\.[cm]?[jt]sx?$
+R	^webapp/tests/.+\.test\.[cm]?[jt]sx?$
+R	^webapp/e2e/[^/]+\.(spec|max-e2e)\.ts$
+A	^(docs|templates)/.+$
+A	^(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$

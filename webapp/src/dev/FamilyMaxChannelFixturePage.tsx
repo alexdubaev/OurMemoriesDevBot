@@ -57,6 +57,6 @@ export function FamilyMaxChannelFixturePage() {
       <button onClick={() => { controls.current.delayNextMs = 1_000; setTransportVersion((version) => version + 1) }} type="button"><Typography as="span" variant="memoryMeta">Задержать ответ</Typography></button>
       <button onClick={() => { controls.current.fail = !controls.current.fail; setFail(controls.current.fail); setTransportVersion((version) => version + 1) }} type="button"><Typography as="span" variant="memoryMeta">{fail ? 'Восстановить ответ' : 'Имитировать ошибку'}</Typography></button>
     </div>
-    <FamilyScreen familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userIds[userIndex]!} onAdd={() => undefined} onEditChild={() => undefined} onFeed={() => undefined} onRefresh={async () => undefined} createInviteLink={() => null} />
+    <FamilyScreen familyResponse={familyResponse} invites={[]} members={members} transport={transport} hostBridge={hostBridge} currentUserId={userIds[userIndex]!} onAdd={() => undefined} onEditChild={() => undefined} onFeed={() => undefined} onGifts={() => undefined} onRefresh={async () => undefined} createInviteLink={() => null} />
   </ThemeProvider>
 }
