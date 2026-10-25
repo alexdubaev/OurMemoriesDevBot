@@ -746,4 +746,5 @@ function isControlFenceError(error: unknown) {
   const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`.toLowerCase()
   return details.includes('active_control_user') || details.includes('active_control_owner')
     || details.includes('control_user') && details.includes('active')
+    || error.code === 'P2039' && error.meta?.modelName === 'AuthSession' && details.includes('active user')
 }
