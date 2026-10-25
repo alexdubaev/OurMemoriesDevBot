@@ -217,7 +217,6 @@ describe('Control account lifecycle', () => {
       deletionId: trashed.deletionId,
     })
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'active' })
-    expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'active' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleted' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'deleting' })
     await expect(Promise.resolve(prisma.$transaction(async (tx) => {
@@ -230,7 +229,7 @@ describe('Control account lifecycle', () => {
         data: { revokedAt: null },
       })
     }))).rejects.toBeDefined()
-    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: actorId } } })).toMatchObject({ role: 'viewer', revokedAt: null })
+    expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: actorId } } })).toMatchObject({ role: 'viewer', revokedAt: expect.any(Date) })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: formerMemberId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.authSession.count({ where: { userId: targetId, revokedAt: null } })).toBe(0)
