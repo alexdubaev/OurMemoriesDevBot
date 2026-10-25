@@ -274,7 +274,7 @@ describe('Control account lifecycle', () => {
     await locked
     const create = familyService.createInvite(
       { familyId: sharedFamilyId, principal: { userId: targetId, sessionId: 'synthetic-invite-session' } },
-      { role: 'viewer', inviteeDisplayName: 'Synthetic invitee' }, 'control-trash-invite-race',
+      { role: 'viewer', inviteeDisplayName: 'Synthetic invitee' }, '70000000-0000-4000-8000-000000000134',
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     const preview = await previewUserDeletion(prisma, targetId, protectedIds)
