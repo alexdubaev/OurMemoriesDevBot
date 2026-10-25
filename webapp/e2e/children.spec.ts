@@ -170,7 +170,7 @@ test('a one-child family keeps the plain feed: no filters, no child choice, no m
   const lilya = seeded.children[0]!
   const first = await createNote(page, seeded, 'Первая заметка', undefined)
   await page.reload()
-  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+  await reopenFamily(page, seeded.familyName)
   await page.getByRole('button', { name: 'Лента', exact: true }).click()
   await expect(card(page, first)).toBeVisible()
   await expect(page.locator('[data-family-header="true"][data-child-header-mode="feed"]')).toHaveCount(0)
@@ -362,7 +362,7 @@ async function expectAllFeed(page: Page, sharedNote: string, removedName: string
   await expect(page.locator('.family-hub-card')).toHaveCount(0)
 }
 
-type SeededFamily = { familyId: string; headers: Record<string, string>; children: Array<{ id: string; name: string }> }
+type SeededFamily = { familyId: string; familyName: string; headers: Record<string, string>; children: Array<{ id: string; name: string }> }
 
 function card(page: Page, memoryId: string) { return page.locator(`.memory-card[data-memory-id="${memoryId}"]`) }
 function chip(page: Page, name: string) { return page.getByRole('group', { name: 'Чьи воспоминания показать' }).getByRole('button', { name, exact: true }) }
@@ -404,12 +404,16 @@ async function startFamily(page: Page, childCount: 1 | 2 = 2): Promise<SeededFam
   expect(family.children.map((child) => child.name)).toEqual(childCount === 2 ? ['Лиля', 'Миша'] : ['Лиля'])
   // This setup tests family behavior, not whether the debounced presentation cache flushed before reload.
   await page.reload()
+  await reopenFamily(page, family.family.name)
+  return { familyId, familyName: family.family.name, headers, children: family.children }
+}
+
+async function reopenFamily(page: Page, familyName: string) {
   const bottomNavigation = page.getByTestId('bottom-navigation')
-  const seededFamilyCard = page.locator('.family-hub-card').filter({ has: page.getByText(family.family.name, { exact: true }) })
+  const seededFamilyCard = page.locator('.family-hub-card').filter({ has: page.getByText(familyName, { exact: true }) })
   await expect(bottomNavigation.or(seededFamilyCard).first()).toBeVisible()
   if (await seededFamilyCard.isVisible()) await seededFamilyCard.click()
   await expect(bottomNavigation).toBeVisible()
-  return { familyId, headers, children: family.children }
 }
 
 async function createNote(page: Page, seeded: SeededFamily, body: string, childIds: string[] | undefined) {
