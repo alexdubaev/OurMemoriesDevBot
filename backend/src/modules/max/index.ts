@@ -30,6 +30,7 @@ import { createMaxChannelAvatarRoutes } from './transport/channel-avatar-routes'
 import { createMaxPosterDownload } from './infrastructure/media-download'
 import type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
 import type { FamilyScope } from '../families'
+export { createMaxVideoLegacyMigration } from './infrastructure/legacy-video-migration'
 
 export { createMaxVideoPlayback }
 

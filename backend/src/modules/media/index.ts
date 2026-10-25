@@ -57,16 +57,13 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
   return {
     async deleteAsset({ mediaId }: { mediaId: string }) {
       const asset = await runtime.prisma.mediaAsset.findUnique({ where: { id: mediaId }, include: { variants: true } })
-      if (!asset || asset.storageDeletedAt || !asset.deletedAt) return
+      if (!asset || asset.storageDeletedAt || !asset.deletedAt || asset.legacyVideoRetainedAt) return
       const keys = [asset.originalKey, ...asset.variants.map(({ objectKey }) => objectKey)]
       if (asset.mediaKind === 'video') keys.push(videoPosterObjectKey(asset.originalKey))
       if (asset.mediaKind === 'photo') keys.push(
         asset.originalKey.replace('media-originals/', 'media-display/'),
         asset.originalKey.replace('media-originals/', 'media-preview/'),
       )
-      for (const key of new Set(keys)) {
-        await runtime.privateStorage.storage.deleteObject(key)
-      }
       await runtime.prisma.$transaction(async (tx) => {
         if (typeof tx.$queryRaw === 'function') {
           await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -81,12 +78,14 @@ export function createMediaTasks(runtime: { prisma: DbClient; privateStorage: { 
         const current = typeof tx.mediaAsset.findUnique === 'function'
           ? await tx.mediaAsset.findUnique({ where: { id: mediaId } })
           : asset
-        if (!current || current.storageDeletedAt || !current.deletedAt) return
-        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null, deletedAt: { not: null } }, data: { storageDeletedAt: new Date() } })
+        if (!current || current.storageDeletedAt || !current.deletedAt || current.legacyVideoRetainedAt) return
+        if (await tx.maxVideoLegacyRetention.findUnique({ where: { mediaId }, select: { mediaId: true } })) return
+        for (const key of new Set(keys)) await runtime.privateStorage.storage.deleteObject(key)
+        const marked = await tx.mediaAsset.updateMany({ where: { id: mediaId, storageDeletedAt: null, deletedAt: { not: null }, legacyVideoRetainedAt: null }, data: { storageDeletedAt: new Date() } })
         if (marked.count === 1 && current.originalStatus === 'stored') {
           await tx.family.update({ where: { id: current.familyId }, data: { storageUsedBytes: { decrement: current.byteSize } } })
         }
-      })
+      }, { maxWait: 5_000, timeout: 30_000 })
     },
     async prepareAsset({ mediaId, signal }: { mediaId: string; signal?: AbortSignal }) {
       const asset = await runtime.prisma.mediaAsset.findUnique({ where: { id: mediaId } })

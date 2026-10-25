@@ -254,6 +254,30 @@ model MaxVideoReference {
   @@map("max_video_references")
 }
 
+/// Durable proof that a legacy private video remains available while its MAX reference is active.
+/// referenceId/sourceId are intentionally plain values so recovery history survives reference deletion.
+model MaxVideoLegacyRetention {
+  mediaId                String     @id @map("media_id") @db.Uuid
+  familyId               String     @map("family_id") @db.Uuid
+  memoryId               String     @map("memory_id") @db.Uuid
+  referenceId            String     @unique(map: "max_video_legacy_retention_reference_id_key") @map("reference_id") @db.Uuid
+  sourceId               String     @map("source_id") @db.Uuid
+  position               Int
+  providerMessageId      String     @map("provider_message_id")
+  providerAttachmentId   String     @map("provider_attachment_id")
+  providerRecipientId    BigInt     @map("provider_recipient_id")
+  providerChannelId      BigInt?    @map("provider_channel_id")
+  snapshot               Json
+  createdAt              DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  recoveredAt            DateTime?  @map("recovered_at") @db.Timestamptz(6)
+  media                  MediaAsset @relation(fields: [mediaId, familyId], references: [id, familyId], onDelete: Restrict, map: "max_video_legacy_retention_media_id_family_id_fkey")
+
+  @@unique([memoryId, position], map: "max_video_legacy_retention_memory_position_key")
+  @@unique([mediaId, familyId], map: "max_video_legacy_retention_media_family_key")
+  @@index([familyId, recoveredAt], map: "max_video_legacy_retention_family_recovered_idx")
+  @@map("max_video_legacy_retention")
+}
+
 model MaxOutgoingResponse {
   id                 String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   inboxId            String                    @map("inbox_id") @db.Uuid
@@ -948,6 +972,7 @@ model MediaAsset {
   renditionStatus    MediaRenditionStatus @default(pending) @map("rendition_status")
   deletedAt          DateTime?            @map("deleted_at") @db.Timestamptz(6)
   storageDeletedAt   DateTime?            @map("storage_deleted_at") @db.Timestamptz(6)
+  legacyVideoRetainedAt DateTime?          @map("legacy_video_retained_at") @db.Timestamptz(6)
   createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
   family             Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "media_assets_family_id_fkey")
@@ -960,6 +985,7 @@ model MediaAsset {
   backupAttachments  MaxMemoryBackupAttachment[]
   telegramVideoThumbnailFor TelegramVideoReference? @relation("TelegramVideoThumbnail")
   maxVideoThumbnailFor MaxVideoReference? @relation("MaxVideoThumbnail")
+  maxVideoLegacyRetention MaxVideoLegacyRetention?
   avatarForChildren  Child[]              @relation("ChildAvatar")
   giftPhotoFor       Gift[]               @relation("GiftPhoto")
 
