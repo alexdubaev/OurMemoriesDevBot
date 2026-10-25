@@ -238,12 +238,14 @@ export async function trashControlUser(
     const lockedPreview = await userPreview(tx, input.targetId)
     if (lockedPreview.fingerprint !== input.fingerprint) throw new ControlLifecycleFailure('stale_preview', 'Impact changed; preview again')
     const actionNow = now ?? new Date()
-    const deletion = await tx.controlUserDeletion.create({ data: {
-      targetUserId: input.targetId,
-      actorUserId: input.actorId,
-      deletedAt: actionNow,
-      purgeAfter: new Date(actionNow.getTime() + USER_PURGE_GRACE_MS),
-    } })
+    const purgeAfter = new Date(actionNow.getTime() + USER_PURGE_GRACE_MS)
+    const [deletion] = await tx.$queryRaw<Array<{ id: string; purgeAfter: Date }>>`
+      INSERT INTO "control_user_deletions" ("target_user_id", "actor_user_id", "deleted_at", "purge_after")
+      VALUES (${input.targetId}::uuid, ${input.actorId}::uuid,
+        ${actionNow.toISOString()}::timestamptz, ${purgeAfter.toISOString()}::timestamptz)
+      RETURNING "id"::text AS "id", "purge_after" AS "purgeAfter"
+    `
+    if (!deletion) throw new ControlLifecycleFailure('conflict', 'Could not record the deletion cycle')
 
     for (const member of stable) {
       await tx.controlAccessSnapshot.upsert({
