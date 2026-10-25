@@ -29,20 +29,24 @@ No backend production changes, schema/migrations, new endpoints/dependencies, us
 
 Files: new webapp/src/features/avatar/member-avatar-directory.tsx; avatar/index.ts, member-avatar-query.ts; App.tsx; platform/persistence/private-cache.ts; focused tests under webapp/tests or existing avatar E2E harness.
 
-- [ ] Add a failing behavioral browser regression with two independent authenticated sessions: viewer remains open with no author image, author uploads a synthetic avatar via the real API, viewer Family/comment surfaces update without reload. Record RED assertion before implementation.
-- [ ] Add replacement, crop and removal coverage within the same short journey. Use existing max-family-audit server/config and synthetic upload helpers; avoid a new test infrastructure.
-- [ ] Implement the provider and query policy specified above; accept familyId, accountId, membershipEpoch, seed members and authenticated transport. Expose a user-ID resolver hook and shared-author resolution support. Consume abort signals, disable background/error retries, deduplicate focus bursts and remove private cache on access loss.
-- [ ] Wrap selected surfaces in App after confirmed membership; ensure portals inherit context and seed changes/local mutations update authoritative directory without stale responses.
-- [ ] Run the same regression and record GREEN.
+- [x] Add a failing behavioral browser regression with two independent authenticated sessions: viewer remains open with no author image, author uploads a synthetic avatar via the real API, viewer Family/comment surfaces update without reload. Record RED assertion before implementation.
+- [x] Add replacement, crop and removal coverage within the same short journey. Use existing max-family-audit server/config and synthetic upload helpers; avoid a new test infrastructure.
+- [x] Implement the provider and query policy specified above; accept familyId, accountId, membershipEpoch, seed members and authenticated transport. Expose a user-ID resolver hook and shared-author resolution support. Consume abort signals, disable background/error retries, deduplicate focus bursts and remove private cache on access loss.
+- [x] Wrap selected surfaces in App after confirmed membership; ensure portals inherit context and seed changes/local mutations update authoritative directory without stale responses.
+- [x] Run the same regression and record GREEN.
 
 ## Task 2: Wire avatar consumers and protect failure boundaries
 
 Files: avatar/member-avatar.tsx; feed/shared-author-avatars.tsx; feed/FeedPage.tsx; memoly-ui/MemoryCardPresentation.tsx (confirm actual path); memoly-ui/FamilyPresentation.tsx; comments/CommentItem.tsx; existing avatar E2E harness/test; .autopilot/PROGRESS.md.
 
-- [ ] Pass author user IDs through Family, feed cards, media viewer and comments. Shared loaders resolve current paths before deduplication. Preserve channel identity and provider-free fallback.
-- [ ] Prove HTTP/image failure stays bounded across rerenders/focus and navigation; prove scope changes and aborted late responses do not reveal previous identity resources. Reuse pool tests and shared-author-avatar scenario instead of duplicating them.
-- [ ] Record the fix under progress "Правки без автопилота" without claiming release completion.
-- [ ] Run bun test webapp/tests/avatar-resource-pool.test.ts and relevant new boundary tests; bun run typecheck:webapp; targeted browser config including independent-session journey and shared-author-avatar.
+- [x] Pass author user IDs through Family, feed cards, media viewer and comments. Shared loaders resolve current paths before deduplication. Preserve channel identity and provider-free fallback.
+- [x] Prove HTTP/image failure stays bounded across rerenders/focus and navigation; prove scope changes and aborted late responses do not reveal previous identity resources. Reuse pool tests and shared-author-avatar scenario instead of duplicating them.
+- [x] Record the fix under progress "Правки без автопилота" without claiming release completion.
+- [x] Run bun test webapp/tests/avatar-resource-pool.test.ts and relevant new boundary tests; bun run typecheck:webapp; targeted browser config including independent-session journey and shared-author-avatar.
+
+## Release prerequisite discovered
+
+The existing exact MAX recovery profile rejects the new frontend fingerprint. An additional literal fingerprint for the frozen avatar inputs is bound only to the same d299 runtime/image pair and max-video recovery procedure. Its regression reconstructs committed blobs and rejects frontend, backend and schema drift, and the older 33a target. No migration, installer, target, image or ledger policy is loosened.
 
 ## Integration and release (lead only)
 

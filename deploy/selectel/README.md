@@ -562,6 +562,15 @@ atomically designating it. The earlier 33a pair remains in its historical
 profile but is not a MAX recovery target because it would remove the accepted
 Android safe-area UI.
 
+The exact member-avatar frontend from source `991b726277d8c92a92dee8a34d1194a8cd482cbe`
+has measured executable compatibility fingerprint
+`311af152152c497f23e1acd75b884991de6094b065f41561bc4819129d01b1d9` for this same
+d299 pair and unchanged full-attested runtime fingerprint. This adds one frozen
+frontend-only avatar projection to the existing `max-video` recovery profile;
+the 33a target remains rejected. Backend, schema, dependencies and contracts
+remain pinned by the executable fingerprint, and all existing image, migration,
+ancestry, lock, configuration and readiness guards still apply.
+
 For a UI-only rollback, run `bash deploy/selectel/redeploy.sh rollback-static` on the
 host. The action uses the normal deployment lock and reads the previous webapp
 SHA from the root-owned mode-0600 `/opt/memoly/rollback.env`. It requires the
