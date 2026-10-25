@@ -11,8 +11,13 @@ B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
 MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
 MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 MM0_SPIKE_CONTAINER=memoly-spike-max-video-backend-1
-MAX_VIDEO_RECOVERY_BACKEND_SHA=0486e79947f6612d0eed05207c1cd30d0c4ace65
-MAX_VIDEO_RECOVERY_WEBAPP_SHA=0f2e8a432b5712d17b67d63f99439d16f33e7721
+MAX_VIDEO_RECOVERY_BACKEND_SHA=d2999cca6e4e5980cc2277de7453440353f5b392
+MAX_VIDEO_RECOVERY_WEBAPP_SHA=d2999cca6e4e5980cc2277de7453440353f5b392
+MAX_VIDEO_RECOVERY_BACKEND_IMAGE_ID=sha256:cb1f1e3aca79452701d7410e5bccef7e93a1eda08de5c36cfab19202f0632309
+MAX_VIDEO_RECOVERY_WEBAPP_IMAGE_ID=sha256:6d77034ed1be4f8fea0d86ee7f0fb8fdfebb5706c5c4358d8b608d7e32f1e62d
+MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT=b3afd175383307713f5a86470db755b621c9eec0ff93fcfff4e97e1150d41dc9
+MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
+MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
 ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
@@ -802,10 +807,9 @@ rollback_source_compatibility_profile() {
 				# Control recovery is limited to the exact measured candidate executable tree.
 				# keep the pinned Control profile; no MAX profile is bound to 33a.
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538:control") ;;
-		0486e79947f6612d0eed05207c1cd30d0c4ace65)
-			# Recovery uses the exact currently deployed pair: backend 0486 with
-			# the accepted frontend-only 0f2 release. Keep the Android UI fix.
-			exact_compatibility_attestations=("0f2e8a432b5712d17b67d63f99439d16f33e7721:74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026:ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4:max-video") ;;
+		d2999cca6e4e5980cc2277de7453440353f5b392)
+			# The exact accepted runtime supports the schema-59 composite key.
+			exact_compatibility_attestations=("d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:$MAX_VIDEO_COMPATIBILITY_FINGERPRINT:max-video") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -820,9 +824,10 @@ rollback_source_compatibility_profile() {
 		IFS=: read -r reference full_hash expected_hash profile <<< "$attestation"
 		[ "$(rollback_runtime_fingerprint "$reference")" = "$full_hash" ] || continue
 		if [ "$candidate_hash" = "$expected_hash" ]; then
-			if { [ "$profile" = control ] || [ "$profile" = max-video ]; } && ! rollback_control_host_inputs_match "$revision"; then
-				continue
-			fi
+		case "$profile" in
+			control) rollback_control_host_inputs_match "$revision" || continue ;;
+			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
+		esac
 			printf '%s\n' "$profile"
 			return 0
 		fi
@@ -839,6 +844,23 @@ rollback_control_host_inputs_match() {
 		"deploy/selectel/compose.yml.template:$CONTROL_PIN_COMPOSE_BLOB"
 		"deploy/selectel/Caddyfile.static.template:$CONTROL_PIN_CADDY_BLOB"
 		"deploy/selectel/ci-release.sh:$CONTROL_PIN_INSTALLER_BLOB"
+	)
+	for pin in "${pins[@]}"; do
+		IFS=: read -r path expected <<< "$pin"
+		[[ "$expected" =~ ^[0-9a-f]{40}$ ]] || return 1
+		[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse "$revision:$path" 2>/dev/null || true)" = "$expected" ] || return 1
+	done
+}
+
+rollback_max_video_host_inputs_match() {
+	local revision=$1 path expected
+	local -a pins=(
+		"deploy/selectel/control/sampler.py:$CONTROL_PIN_SAMPLER_BLOB"
+		"deploy/selectel/control/memoly-control-sampler.service:$CONTROL_PIN_SERVICE_BLOB"
+		"deploy/selectel/control/memoly-control-sampler.timer:$CONTROL_PIN_TIMER_BLOB"
+		"deploy/selectel/compose.yml.template:$CONTROL_PIN_COMPOSE_BLOB"
+		"deploy/selectel/Caddyfile.static.template:$CONTROL_PIN_CADDY_BLOB"
+		"deploy/selectel/ci-release.sh:$MAX_VIDEO_PIN_INSTALLER_BLOB"
 	)
 	for pin in "${pins[@]}"; do
 		IFS=: read -r path expected <<< "$pin"
@@ -1403,8 +1425,8 @@ verify_application_rollback() {
 		"$max_video_backend_target:$max_video_webapp_target")
 			target=$max_video_backend_target
 			target_runtime_revision=$max_video_webapp_target
-			expected_backend_target_runtime=66c335c5ae307509ef35e8efc1c43ec4c7c5f7728b30b69792e42e6903a18cd3
-			expected_target_runtime=74b5751cbcdb756387742fcfa95e30e81e6a70215f0cc07bb50ab56b94fcc026
+			expected_backend_target_runtime=$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT
+			expected_target_runtime=$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT
 			profile=max-video
 			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
@@ -1441,8 +1463,13 @@ verify_application_rollback() {
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
 			die 'control rollback schema, dependencies or unrelated service configuration are incompatible'
-		rollback_control_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
-			die 'control rollback host inputs differ from the exact reviewed blobs'
+		if [ "$profile" = control ]; then
+			rollback_control_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
+				die 'control rollback host inputs differ from the exact reviewed blobs'
+		else
+			rollback_max_video_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
+				die 'MAX video rollback installer and host inputs differ from the exact reviewed blobs'
+		fi
 		rollback_control_installed_inputs_match ||
 			die 'control rollback requires the exact protected installed sampler, systemd units and snapshot'
 	elif [ "$profile" = comments ] || [ "$profile" = albums ] || [ "$profile" = wishlist ]; then
@@ -1484,8 +1511,8 @@ verify_application_rollback() {
 			expected_webapp_id=sha256:63be673e1a57af5faaeafa6b3d3136314808b8826640873f5cafa4f4f9bebe74
 			;;
 		"$max_video_backend_target")
-			expected_backend_id=sha256:93279ad8f278a4d32f56dbbe7ce17921a8dc220054d6c7c54d8158dc71c9f094
-			expected_webapp_id=sha256:2de581b010ae7da347600cad4001f5f5a678b3dd343e43d79013df49397e0843
+			expected_backend_id=$MAX_VIDEO_RECOVERY_BACKEND_IMAGE_ID
+			expected_webapp_id=$MAX_VIDEO_RECOVERY_WEBAPP_IMAGE_ID
 			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
@@ -1726,7 +1753,7 @@ deploy() {
 }
 
 rollback_readiness() {
-	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_CONTROL_LEDGER_PHASE:-${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}}
+	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_MAX_VIDEO_LEDGER_PHASE:-${SELECTEL_CONTROL_LEDGER_PHASE:-${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}}}
 	case "$requested_phase" in
 		complete) ;;
 		pre-sql)

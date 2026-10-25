@@ -31,6 +31,10 @@ B2_RUNTIME_SHA=79d85d6456fd46c56d15ff2b6fccba9cedfd4c6c
 MM0_RUNTIME_SHA=0074d04c8e7f88b2327b56cea10ca38647d36190
 MM0_MIGRATION=20260928100000_mm0_domain_temporal_foundation
 ACCEPTED_UI_V4_SHA=afdb408f8bbf22b564c86bb8d33a83261f55cc48
+MAX_VIDEO_RECOVERY_BACKEND_SHA=d2999cca6e4e5980cc2277de7453440353f5b392
+MAX_VIDEO_RECOVERY_WEBAPP_SHA=d2999cca6e4e5980cc2277de7453440353f5b392
+MAX_VIDEO_PRE_SCHEMA59_BACKEND_SHA=0486e79947f6612d0eed05207c1cd30d0c4ace65
+MAX_VIDEO_PRE_SCHEMA59_WEBAPP_SHA=0f2e8a432b5712d17b67d63f99439d16f33e7721
 MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER
@@ -539,7 +543,7 @@ verify_rollback_file() {
 
 prepare_rollback() {
   verify_rollback_file
-  local timestamp backup temp verify_env candidate_valid=false
+  local timestamp backup temp verify_env candidate_valid=false max_video_recovery_selected=false
   if [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
     verify_env=$(mktemp)
     ROLLBACK_VERIFY_ENV=$verify_env
@@ -556,13 +560,42 @@ prepare_rollback() {
     ' "$ROLLBACK_ENV" > "$verify_env"
     chmod 0600 "$verify_env"
     if [ "$RUN_MIGRATION" = true ]; then
-      if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql \
+      if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql SELECTEL_MAX_VIDEO_LEDGER_PHASE=pre-sql \
         bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
         candidate_valid=true
       fi
     elif ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
-      SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+      SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete SELECTEL_MAX_VIDEO_LEDGER_PHASE=complete bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
       candidate_valid=true
+    fi
+    if [ "$candidate_valid" != true ]; then
+      if [ "$RUN_MIGRATION" = true ] &&
+        [ "$RUNNING_BACKEND_IMAGE_TAG" = "$MAX_VIDEO_PRE_SCHEMA59_BACKEND_SHA" ] &&
+        [ "$RUNNING_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_PRE_SCHEMA59_WEBAPP_SHA" ] &&
+        git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
+          "$PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
+        awk -v backend="$MAX_VIDEO_RECOVERY_BACKEND_SHA" -v webapp="$MAX_VIDEO_RECOVERY_WEBAPP_SHA" '
+          BEGIN { backend_seen = 0; webapp_seen = 0 }
+          /^PREVIOUS_BACKEND_IMAGE_TAG=/ { print "PREVIOUS_BACKEND_IMAGE_TAG=" backend; backend_seen = 1; next }
+          /^PREVIOUS_WEBAPP_IMAGE_TAG=/ { print "PREVIOUS_WEBAPP_IMAGE_TAG=" webapp; webapp_seen = 1; next }
+          { print }
+          END {
+            if (!backend_seen) print "PREVIOUS_BACKEND_IMAGE_TAG=" backend
+            if (!webapp_seen) print "PREVIOUS_WEBAPP_IMAGE_TAG=" webapp
+          }
+        ' "$ROLLBACK_ENV" > "$verify_env"
+        chmod 0600 "$verify_env"
+        if ROLLBACK_ENV="$verify_env" MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+          SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql \
+          SELECTEL_CONTROL_LEDGER_PHASE=pre-sql SELECTEL_MAX_VIDEO_LEDGER_PHASE=pre-sql \
+          bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness >/dev/null 2>&1; then
+          candidate_valid=true
+          max_video_recovery_selected=true
+          PREVIOUS_BACKEND_IMAGE_TAG=$MAX_VIDEO_RECOVERY_BACKEND_SHA
+          PREVIOUS_WEBAPP_IMAGE_TAG=$MAX_VIDEO_RECOVERY_WEBAPP_SHA
+          printf 'The running pair is not compatible with schema 59; the exact accepted MAX recovery pair passed readiness.\n'
+        fi
+      fi
     fi
     if [ "$candidate_valid" != true ]; then
       # The captured pair can be a healthy running release without being an
@@ -570,13 +603,13 @@ prepare_rollback() {
       # recovery only after the same full verifier accepts it against current
       # source and database state.
       if [ "$RUN_MIGRATION" = true ]; then
-        if ! SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+        if ! SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql SELECTEL_WISHLIST_LEDGER_PHASE=pre-sql SELECTEL_CONTROL_LEDGER_PHASE=pre-sql SELECTEL_MAX_VIDEO_LEDGER_PHASE=pre-sql MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
           bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
           rm -f -- "$verify_env"
           ROLLBACK_VERIFY_ENV=
           die 'neither the running images nor the designated rollback pair passed recovery verification'
         fi
-      elif ! SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+      elif ! SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete SELECTEL_MAX_VIDEO_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
         bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness; then
         rm -f -- "$verify_env"
         ROLLBACK_VERIFY_ENV=
@@ -592,7 +625,7 @@ prepare_rollback() {
     fi
     rm -f -- "$verify_env"
     ROLLBACK_VERIFY_ENV=
-    if [ "$candidate_valid" = true ]; then
+    if [ "$candidate_valid" = true ] && [ "$max_video_recovery_selected" != true ]; then
       PREVIOUS_BACKEND_IMAGE_TAG=$RUNNING_BACKEND_IMAGE_TAG
       PREVIOUS_WEBAPP_IMAGE_TAG=$RUNNING_WEBAPP_IMAGE_TAG
     fi
@@ -915,7 +948,7 @@ main() {
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
   if [ "$RUN_MIGRATION" = true ] && [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
-    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete SELECTEL_MAX_VIDEO_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
       bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness ||
       die 'complete post-migration recovery verification failed before promotion'
   fi
