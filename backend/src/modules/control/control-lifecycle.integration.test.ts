@@ -220,9 +220,9 @@ describe('Control account lifecycle', () => {
     })
     const gift = await prisma.gift.findFirstOrThrow({ where: { photoMediaId: giftPhotoId } })
     expect(gift).toMatchObject({ reservedByUserId: null, reservedAt: null })
-    await prisma.gift.update({ where: { id: gift.id }, data: { reservedByUserId: formerMemberId, reservedAt: new Date() } })
+    await prisma.gift.update({ where: { id: gift.id }, data: { reservedByUserId: overlappingUserId, reservedAt: new Date() } })
     await restoreControlUser(prisma, { actorId, targetId, protectedIds, key: '70000000-0000-4000-8000-000000000131', deletionId: trashed.deletionId })
-    expect(await prisma.gift.findUniqueOrThrow({ where: { id: gift.id } })).toMatchObject({ reservedByUserId: formerMemberId })
+    expect(await prisma.gift.findUniqueOrThrow({ where: { id: gift.id } })).toMatchObject({ reservedByUserId: overlappingUserId })
   })
 
   test('restores live snapshots but keeps prior revocations and independently purged family access closed', async () => {
