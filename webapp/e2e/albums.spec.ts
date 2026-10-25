@@ -487,7 +487,39 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
     await capture(`catalog-empty-cover-${width}`)
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.locator('.albums-card').filter({ hasText: 'Первый год Миши' }).click()
+  for (const album of [
+    { kind: 'workshop', title: 'Мастерская Лили' },
+    { kind: 'events', title: 'Первые открытия Лили' },
+    { kind: 'free', title: 'Семейная поездка' },
+  ]) {
+    await page.locator('.albums-card').filter({ hasText: album.title }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    await expect(page.locator('.albums-intro h1')).toHaveText(album.title)
+    await capture(`inner-${album.kind}-390`)
+    await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+    await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  }
+  const initialYearCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
+  const targetCatalogScroll = await page.evaluate(() => Math.max(0, Math.min(240, document.documentElement.scrollHeight - innerHeight)))
+  expect(targetCatalogScroll).toBeGreaterThan(0)
+  await page.evaluate((scrollY) => window.scrollTo(0, scrollY), targetCatalogScroll)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(targetCatalogScroll)
+  await initialYearCard.scrollIntoViewIfNeeded()
+  const catalogScrollBeforeYear = await page.evaluate(() => window.scrollY)
+  expect(catalogScrollBeforeYear).toBeGreaterThan(0)
+  await initialYearCard.click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  const catalogScrollAfterReturn = await page.evaluate(() => window.scrollY)
+  const catalogScrollDelta = Math.abs(catalogScrollAfterReturn - catalogScrollBeforeYear)
+  expect(catalogScrollDelta).toBeLessThanOrEqual(2)
+  const scrollEvidence = { name: 'catalog-scroll-return-390', requestedScrollY: targetCatalogScroll, scrollBeforeYear: catalogScrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta }
+  console.log('FIRST_YEAR_SCROLL_RESTORE', JSON.stringify(scrollEvidence))
+  const evidenceDir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
+  if (evidenceDir) appendFileSync(join(evidenceDir, 'geometry.jsonl'), `${JSON.stringify(scrollEvidence)}\n`)
+  await initialYearCard.scrollIntoViewIfNeeded()
+  await initialYearCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const yearIntro = page.locator('.albums-year-intro')
