@@ -146,4 +146,23 @@ describe('memory creation child tags', () => {
     expect(await fx.tags(input.id)).toEqual(whole(family.children[1]!.id))
     expect((await fx.db.memory.findUniqueOrThrow({ where: { id: input.id } })).childId).toBe(family.children[1]!.id)
   })
+
+  test('trusted MAX video positions must be contiguous and require the source publication callback', async () => {
+    const family = await fx.family(undefined, ['Лиля'])
+    const photo = await fx.db.mediaAsset.create({ data: {
+      familyId: family.id, uploaderId: family.owner.id, sourceKind: 'max', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/${family.id}/position-${randomUUID()}`, declaredMime: 'image/png', verifiedMime: 'image/png',
+      sha256: 'a'.repeat(64), byteSize: 10n, width: 64, height: 48, originalStatus: 'stored', renditionStatus: 'ready',
+    } })
+    const publisher = createSourceMemoryPublisher(fx.db, createPrismaFamilyAccess(fx.db))
+    const scope = { familyId: family.id, principal: { userId: family.owner.id, sessionId: 'synthetic-max-video-position' } }
+    const base = { kind: 'media' as const, body: '', occurredAt: new Date(), mediaIds: [photo.id], mediaPositions: [0], externalVideoPositions: [1] }
+    await expect(publisher.publish(scope, { ...base, id: randomUUID(), externalVideoPositions: [2] }))
+      .rejects.toMatchObject({ kind: 'invalid_input' })
+    await expect(publisher.publish(scope, { ...base, id: randomUUID() }))
+      .rejects.toMatchObject({ kind: 'invalid_input' })
+    await expect(publisher.publish(scope, { ...base, kind: 'photo', id: randomUUID() }))
+      .rejects.toMatchObject({ kind: 'invalid_input' })
+    expect(await fx.db.memory.count({ where: { familyId: family.id } })).toBe(0)
+  })
 })

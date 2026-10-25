@@ -495,7 +495,7 @@ function validForwardTimestamp(timestamp: number | undefined, now = Date.now()) 
 }
 
 async function completeForwardDuplicate(db: DbClient, media: ReturnType<typeof import('../../media').createMediaService> | undefined, source: MaxSource, actorId: string) {
-  const staged = await db.maxSourceAttachment.findMany({ where: { sourceId: source.id }, select: { plannedMediaId: true } })
+  const staged = await db.maxSourceAttachment.findMany({ where: { sourceId: source.id, providerKind: { not: 'video' } }, select: { plannedMediaId: true } })
   if (staged.length > 0) {
     if (!media) throw new MaxProviderError(undefined, true, 503, 'forward_duplicate_cleanup_pending')
     await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: staged.map((row) => row.plannedMediaId) })
@@ -536,7 +536,7 @@ async function retryTerminalSourceCleanup(
   source: MaxSource | null,
 ) {
   if (!source) return
-  const stored = await db.maxSource.findUnique({ where: { id: source.id }, include: { attachments: { select: { plannedMediaId: true } } } })
+  const stored = await db.maxSource.findUnique({ where: { id: source.id }, include: { attachments: { where: { providerKind: { not: 'video' } }, select: { plannedMediaId: true } } } })
   if (!stored || (stored.status !== 'denied' && stored.status !== 'unsupported_media')) return
   if (stored.attachments.length > 0 && media) {
     await media.discardTrustedSourceAssets({ sourceKind: 'max', assetIds: stored.attachments.map(({ plannedMediaId }) => plannedMediaId) })
