@@ -1,5 +1,7 @@
 ALTER TABLE "control_user_deletions" ADD COLUMN "last_attempt_at" TIMESTAMPTZ(6);
 ALTER TABLE "control_family_deletions" ADD COLUMN "last_attempt_at" TIMESTAMPTZ(6);
+ALTER TABLE "max_inbox" ADD COLUMN "control_redacted_at" TIMESTAMPTZ(6);
+ALTER TABLE "telegram_inbox" ADD COLUMN "control_redacted_at" TIMESTAMPTZ(6);
 CREATE INDEX "control_user_deletions_attempt_idx" ON "control_user_deletions"("last_attempt_at", "purge_after", "id") WHERE "purged_at" IS NULL;
 CREATE INDEX "control_family_deletions_attempt_idx" ON "control_family_deletions"("last_attempt_at", "requested_at", "id") WHERE "purged_at" IS NULL;
 
@@ -188,16 +190,16 @@ CREATE TRIGGER "max_channel_decisions_control_active_candidates"
 
 -- Old runtimes cannot turn a redacted processed inbox event back into content or a response.
 CREATE FUNCTION "control_reject_redacted_source_replay"() RETURNS trigger AS $$
-DECLARE payload_length INTEGER;
+DECLARE redacted_at TIMESTAMPTZ(6);
 BEGIN
   IF TG_OP = 'UPDATE' AND OLD."rejection_code" = 'control_archive_purged' THEN
     RAISE EXCEPTION 'redacted provider source is immutable'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
   IF TG_OP = 'UPDATE' THEN RETURN NEW; END IF;
-  SELECT octet_length("encrypted_payload") INTO payload_length
+  SELECT "control_redacted_at" INTO redacted_at
     FROM "telegram_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 THEN
+  IF redacted_at IS NOT NULL THEN
     RAISE EXCEPTION 'redacted provider event cannot recreate content'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
@@ -208,16 +210,16 @@ CREATE TRIGGER "telegram_sources_control_no_redacted_replay"
   BEFORE INSERT OR UPDATE ON "telegram_sources" FOR EACH ROW EXECUTE FUNCTION "control_reject_redacted_source_replay"();
 
 CREATE FUNCTION "control_reject_redacted_max_replay"() RETURNS trigger AS $$
-DECLARE payload_length INTEGER;
+DECLARE redacted_at TIMESTAMPTZ(6);
 BEGIN
   IF TG_OP = 'UPDATE' AND OLD."rejection_code" = 'control_archive_purged' THEN
     RAISE EXCEPTION 'redacted provider source is immutable'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
   IF TG_OP = 'UPDATE' THEN RETURN NEW; END IF;
-  SELECT octet_length("encrypted_payload") INTO payload_length
+  SELECT "control_redacted_at" INTO redacted_at
     FROM "max_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 THEN
+  IF redacted_at IS NOT NULL THEN
     RAISE EXCEPTION 'redacted provider event cannot recreate content'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_source_replay';
   END IF;
@@ -255,11 +257,11 @@ CREATE TRIGGER "max_source_attachments_control_active_family"
   FOR EACH ROW EXECUTE FUNCTION "control_require_active_max_source_attachment"();
 
 CREATE FUNCTION "control_reject_response_for_redacted_inbox"() RETURNS trigger AS $$
-DECLARE payload_length INTEGER;
+DECLARE redacted_at TIMESTAMPTZ(6);
 BEGIN
-  SELECT octet_length("encrypted_payload") INTO payload_length
+  SELECT "control_redacted_at" INTO redacted_at
     FROM "max_inbox" WHERE id = NEW."inbox_id";
-  IF payload_length = 0 THEN
+  IF redacted_at IS NOT NULL THEN
     RAISE EXCEPTION 'redacted provider event cannot create a response'
       USING ERRCODE = '23514', CONSTRAINT = 'control_redacted_response';
   END IF;
@@ -268,3 +270,20 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER "max_outgoing_responses_control_no_redacted_replay"
   BEFORE INSERT ON "max_outgoing_responses" FOR EACH ROW EXECUTE FUNCTION "control_reject_response_for_redacted_inbox"();
+
+CREATE FUNCTION "control_keep_inbox_redaction"() RETURNS trigger AS $$
+BEGIN
+  IF OLD."control_redacted_at" IS NOT NULL AND (
+    NEW."control_redacted_at" IS NULL OR octet_length(NEW."encrypted_payload") <> 0
+      OR octet_length(NEW."encryption_iv") <> 0 OR octet_length(NEW."encryption_auth_tag") <> 0
+  ) THEN
+    RAISE EXCEPTION 'provider inbox redaction is permanent'
+      USING ERRCODE = '23514', CONSTRAINT = 'control_inbox_redaction_immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER "max_inbox_control_redaction_immutable"
+  BEFORE UPDATE ON "max_inbox" FOR EACH ROW EXECUTE FUNCTION "control_keep_inbox_redaction"();
+CREATE TRIGGER "telegram_inbox_control_redaction_immutable"
+  BEFORE UPDATE ON "telegram_inbox" FOR EACH ROW EXECUTE FUNCTION "control_keep_inbox_redaction"();

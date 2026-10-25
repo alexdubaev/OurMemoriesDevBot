@@ -227,7 +227,8 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
         WHERE type = 'max:deliver-response' AND payload->>'responseId' = ANY(${responseIds}::text[])`
       if (maxInboxIds.length) {
         await tx.$executeRaw`UPDATE max_inbox SET encrypted_payload = ''::bytea, encryption_iv = ''::bytea,
-          encryption_auth_tag = ''::bytea, status = 'processed', processed_at = COALESCE(processed_at, ${now})
+          encryption_auth_tag = ''::bytea, status = 'processed', processed_at = COALESCE(processed_at, ${now}),
+          control_redacted_at = COALESCE(control_redacted_at, ${now})
           WHERE id = ANY(${maxInboxIds}::uuid[])`
         await tx.$executeRaw`UPDATE max_outgoing_responses SET text = '', buttons = NULL WHERE inbox_id = ANY(${maxInboxIds}::uuid[])`
         await tx.$executeRaw`UPDATE task_outbox SET payload = '{}'::jsonb, status = 'skipped', processing_token = NULL,
@@ -270,7 +271,8 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
             OR payload->>'albumId' = ANY(${telegramAlbumIds}::text[]))`
       }
       if (telegramInboxIds.length) await tx.$executeRaw`UPDATE telegram_inbox SET encrypted_payload = ''::bytea,
-        encryption_iv = ''::bytea, encryption_auth_tag = ''::bytea, processed_at = COALESCE(processed_at, ${now})
+        encryption_iv = ''::bytea, encryption_auth_tag = ''::bytea, processed_at = COALESCE(processed_at, ${now}),
+        control_redacted_at = COALESCE(control_redacted_at, ${now})
         WHERE id = ANY(${telegramInboxIds}::uuid[])`
       if (telegramAlbumIds.length) await tx.$executeRaw`DELETE FROM telegram_albums WHERE id = ANY(${telegramAlbumIds}::uuid[])`
       if (telegramIds.length) await tx.$executeRaw`UPDATE telegram_sources SET sender_subject = '', family_id = NULL, child_id = NULL,

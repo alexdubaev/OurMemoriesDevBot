@@ -356,6 +356,9 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.maxChannelDecision.findUnique({ where: { id: channelDecisionId } })).toBeNull()
     expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: channelInboxId } })).encryptedPayload).toHaveLength(0)
     expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: channelInboxId } })).toBe(0)
+    await expect(Promise.resolve(prisma.maxOutgoingResponse.create({ data: {
+      inboxId: channelInboxId, destinationUserId: 795n, kind: 'family_choice', text: 'stale response',
+    } }))).rejects.toBeDefined()
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await localStorage.headObject('media-originals/control-purge-test/retained.mp4')).toBeNull()
   })
