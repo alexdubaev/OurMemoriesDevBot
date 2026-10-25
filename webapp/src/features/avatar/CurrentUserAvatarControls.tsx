@@ -122,7 +122,7 @@ export function CurrentUserAvatarControls({ displayName, email, compact = false 
               <Button disabled={busy} onClick={() => remove.mutate()} type="button" variant="outline"><Typography variant="memoryButton">{remove.isPending ? 'Удаляем…' : 'Удалить фотографию'}</Typography></Button>
             </> : <Button disabled={busy} onClick={() => fileInput.current?.click()} type="button"><Typography variant="memoryButton">Добавить фотографию</Typography></Button>}
           </div>
-          <Typography variant="bodySm" tone="muted">{compact ? 'JPEG, PNG, WebP, HEIC или HEIF, до 5 МБ.' : 'Shown next to your name. Only you can see the original file.'}</Typography>
+          <Typography variant="bodySm" tone="muted">{compact ? 'Фото профиля общее для всех ваших семей. JPEG, PNG, WebP, HEIC или HEIF, до 5 МБ.' : 'Фото профиля общее для всех ваших семей. Отображается рядом с вашим именем.'}</Typography>
         </div>
         <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label="Выбрать фотографию" className="sr-only" data-testid="avatar-file-input" onChange={pick} ref={fileInput} tabIndex={-1} type="file" />
       </div>
