@@ -219,7 +219,7 @@ try {
       const completed = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
       const pendingObjects = await prisma.controlStorageDelete.findMany({ where: { operationId: operation.id, completedAt: null },
         select: { objectKey: true, notBefore: true, nextAttemptAt: true, lastErrorCode: true } })
-      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; pending=${JSON.stringify(pendingObjects)}`)
+      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; error=${completed.lastErrorCode}; notBefore=${completed.notBefore.toISOString()}; pending=${JSON.stringify(pendingObjects)}`)
       assert.equal(await prisma.mediaAsset.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
       assert.equal(await prisma.maxVideoReference.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
       assert.equal(await storage.headObject(state.purgeMedia.originalKey), null)
