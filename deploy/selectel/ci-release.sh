@@ -948,7 +948,7 @@ main() {
   fi
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" migration-status
   if [ "$RUN_MIGRATION" = true ] && [ "$LEGACY_MEMBERSHIP_RUNTIME" = false ] && [ "$LEGACY_MM0_RUNTIME" = false ]; then
-    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
+    SELECTEL_ALBUMS_LEDGER_PHASE=complete SELECTEL_WISHLIST_LEDGER_PHASE=complete SELECTEL_CONTROL_LEDGER_PHASE=complete SELECTEL_MAX_VIDEO_LEDGER_PHASE=complete MEMOLY_PRODUCT_SHA="$PRODUCT_SHA" \
       bash "$APP_ROOT/deploy/selectel/redeploy.sh" rollback-readiness ||
       die 'complete post-migration recovery verification failed before promotion'
   fi

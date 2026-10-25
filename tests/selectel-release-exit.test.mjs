@@ -2179,7 +2179,7 @@ test('normal promotion validates its prepared rollback UI before any mutation', 
   }
 })
 
-test('guarded full release forces complete album readiness after SQL and before promotion', () => {
+test('guarded full release forces complete ledger readiness after SQL and before promotion', () => {
   const runRelease = (failure = 'none') => {
     mkdirSync(resolve(root, '.scratch'), { recursive: true })
     const fixture = mkdtempSync(resolve(root, '.scratch', 'albums-release-order-'))
@@ -2196,11 +2196,11 @@ test('guarded full release forces complete album readiness after SQL and before 
       'recover_forward_markers() { :; }; check_disk_space() { :; }; verify_rollback_file() { :; }; capture_running_images() { :; }',
       'fetch_and_checkout() { :; }; verify_frontend_recovery_artifact_unchanged() { :; }; validate_prebuilt_images() { :; }',
       'detect_membership_rollback_boundary() { :; }; detect_mm0_boundary() { :; }; prepare_rollback() { echo PREPARE >> "$FIXTURE_EVENTS"; [ "$FIXTURE_FAILURE" != pre ] || return 42; }',
-      'flock() { :; }; bash() { local action=${!#}; echo "$action:${SELECTEL_ALBUMS_LEDGER_PHASE:-unset}" >> "$FIXTURE_EVENTS"; if [ "$action" = migrate ]; then SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; fi; if [ "$action" = rollback-readiness ] && [ "${SELECTEL_ALBUMS_LEDGER_PHASE:-}" = complete ] && [ "$FIXTURE_FAILURE" = post ]; then return 42; fi; }',
+      'flock() { :; }; bash() { local action=${!#}; echo "$action:${SELECTEL_ALBUMS_LEDGER_PHASE:-unset}:${SELECTEL_MAX_VIDEO_LEDGER_PHASE:-unset}" >> "$FIXTURE_EVENTS"; if [ "$action" = migrate ]; then SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; fi; if [ "$action" = rollback-readiness ] && [ "${SELECTEL_ALBUMS_LEDGER_PHASE:-}" = complete ] && [ "${SELECTEL_MAX_VIDEO_LEDGER_PHASE:-}" = complete ] && [ "$FIXTURE_FAILURE" = post ]; then return 42; fi; }',
       'promote_runtime() { echo PROMOTE >> "$FIXTURE_EVENTS"; }; verify_promoted_revision() { :; }; public_smoke() { :; }',
       'write_release_manifest() { :; }; write_control_release_receipt() { :; }; clear_release_markers() { :; }; archive_frontend_recovery_artifact() { :; }',
       'install_control_sampler() { echo CONTROL-SAMPLER-INSTALLED >> "$FIXTURE_EVENTS"; }',
-      'SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; FIXTURE_EVENTS=' + shellQuote(events) + '; FIXTURE_FAILURE=' + shellQuote(failure),
+      'SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; SELECTEL_MAX_VIDEO_LEDGER_PHASE=pre-sql; FIXTURE_EVENTS=' + shellQuote(events) + '; FIXTURE_FAILURE=' + shellQuote(failure),
       'main',
     ].join('\n')
     try {
@@ -2212,8 +2212,8 @@ test('guarded full release forces complete album readiness after SQL and before 
 
   const success = runRelease()
   assert.equal(success.result.status, 0, success.result.stdout + success.result.stderr)
-  const sequence = ['PREPARE', 'preflight:pre-sql', 'migrate:pre-sql', 'migration-status:pre-sql',
-    'rollback-readiness:complete', 'PROMOTE']
+  const sequence = ['PREPARE', 'preflight:pre-sql:pre-sql', 'migrate:pre-sql:pre-sql', 'migration-status:pre-sql:pre-sql',
+    'rollback-readiness:complete:complete', 'PROMOTE']
   let cursor = -1
   for (const expected of sequence) {
     const next = success.actual.indexOf(expected, cursor + 1)
@@ -2223,8 +2223,8 @@ test('guarded full release forces complete album readiness after SQL and before 
 
   const postFailure = runRelease('post')
   assert.notEqual(postFailure.result.status, 0, postFailure.result.stdout + postFailure.result.stderr)
-  assert.ok(postFailure.actual.includes('rollback-readiness:complete'), postFailure.actual.join(', '))
-  assert.ok(postFailure.actual.includes('migration-status:pre-sql'), postFailure.actual.join(', '))
+  assert.ok(postFailure.actual.includes('rollback-readiness:complete:complete'), postFailure.actual.join(', '))
+  assert.ok(postFailure.actual.includes('migration-status:pre-sql:pre-sql'), postFailure.actual.join(', '))
   assert.ok(!postFailure.actual.includes('PROMOTE'), postFailure.actual.join(', '))
 
   const preFailure = runRelease('pre')
