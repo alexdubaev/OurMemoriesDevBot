@@ -5,8 +5,10 @@ import { AvatarLetter } from '@/features/session'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import type { AvatarCrop } from './avatar-crop'
 import { AvatarPhoto } from './AvatarPhoto'
+import { useMemberAvatarDirectoryEntry } from './member-avatar-directory-context'
 
-export function MemberAvatarImage({ avatarPath, avatarCrop, className, name, size = 'lg', fallback }: {
+export function MemberAvatarImage({ userId, avatarPath, avatarCrop, className, name, size = 'lg', fallback }: {
+  userId?: string | null
   avatarPath: string | null | undefined
   avatarCrop?: AvatarCrop | null
   className: string
@@ -14,9 +16,12 @@ export function MemberAvatarImage({ avatarPath, avatarCrop, className, name, siz
   size?: 'default' | 'sm' | 'lg' | 'xl'
   fallback?: ReactNode
 }) {
+  const directoryEntry = useMemberAvatarDirectoryEntry(userId)
+  const resolvedPath = directoryEntry === undefined ? avatarPath : directoryEntry?.avatarPath ?? null
+  const resolvedCrop = directoryEntry === undefined ? avatarCrop : directoryEntry?.avatarCrop ?? null
   const initials = fallback ?? <AvatarLetter className={className} name={name} size={size} />
-  if (!avatarPath) return initials
-  return <ProtectedMemberImage avatarPath={avatarPath} avatarCrop={avatarCrop} className={className} fallback={initials} />
+  if (!resolvedPath) return initials
+  return <ProtectedMemberImage avatarPath={resolvedPath} avatarCrop={resolvedCrop} className={className} fallback={initials} />
 }
 
 function ProtectedMemberImage({ avatarPath, avatarCrop, className, fallback }: { avatarPath: string; avatarCrop?: AvatarCrop | null; className: string; fallback: ReactNode }) {

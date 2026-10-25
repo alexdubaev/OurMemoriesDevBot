@@ -84,6 +84,13 @@ test('private author avatars share requests and retire stale URLs across feed sc
   expect((await avatarRequests()).every((path) => path === missingPath || path === secondMissingPath)).toBe(true)
   await expect(page.locator('.memory-card .author-avatar img')).toHaveCount(0)
   await expect(page.locator('.author-initials').first()).toBeVisible()
+  const missingAvatarRequestCount = (await avatarRequests()).length
+  expect(missingAvatarRequestCount).toBe(2)
+  await configure({ mode: 'feed', userId: userA, familyId: familyA, membershipEpoch: 3, paths: [missingPath, secondMissingPath, sharedPaths[2]] })
+  await page.getByRole('button', { name: 'Семья' }).click()
+  await page.waitForTimeout(500)
+  expect((await avatarRequests()).length).toBe(missingAvatarRequestCount)
+  await expect(page.locator('.memory-card .author-avatar img')).toHaveCount(0)
 
   const stalePaths: [string, string, string] = [avatar(familyA, '90909090'), avatar(familyA, '80808080'), sharedPaths[2]]
   await page.evaluate(() => { window.__avatarProbe.metrics.holdDecode = true })

@@ -7,6 +7,10 @@ export { avatarCropStyle, avatarCropToPercentages, fullAvatarCrop, percentagesTo
 export type { AvatarCrop } from './avatar-crop'
 export { MemberAvatarImage } from './member-avatar'
 export { memberAvatarUpdatedEvent } from './member-avatar-query'
+export { MemberAvatarDirectoryProvider } from './member-avatar-directory'
+export { memberAvatarDirectoryQueryKeys } from './member-avatar-directory-query'
+export { useMemberAvatarDirectory, useMemberAvatarDirectoryEntry } from './member-avatar-directory-context'
+export type { MemberAvatarDirectoryEntry } from './member-avatar-directory-context'
 export { avatarQueryKeys, useAvatarImage, useAvatarQuery, useDeleteAvatarMutation, useUploadAvatarMutation, useUpdateAvatarCropMutation } from './queries'
 export {
   AvatarUploadError,

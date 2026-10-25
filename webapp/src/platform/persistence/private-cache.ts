@@ -221,7 +221,7 @@ export async function removePrivateFamilyCache(queryClient: QueryClient, userId:
 
 export async function removePrivateFamilyQueries(queryClient: QueryClient, familyId: string) {
   const matchesFamilyPrivateQuery = ({ queryKey }: { queryKey: readonly unknown[] }) => queryKey[0] === 'session' &&
-    ['feed', 'comments', 'child-albums', 'gifts'].includes(queryKey[1] as string) && queryKey[2] === familyId
+    (['feed', 'comments', 'child-albums', 'gifts'].includes(queryKey[1] as string) || queryKey[1] === 'member-avatar-directory') && queryKey[2] === familyId
   queryClient.removeQueries({ predicate: matchesFamilyPrivateQuery })
 }
 
