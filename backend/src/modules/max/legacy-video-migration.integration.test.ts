@@ -399,7 +399,9 @@ describe('MAX legacy video retention and recovery', () => {
     await fx.db.controlFamilyDeletion.update({ where: { id: purgeIntent.id }, data: { keysCapturedAt: new Date() } })
     await fx.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.control_family_purge_operation', ${purgeIntent.id}, true)`
-      await tx.mediaAsset.update({ where: { id: mediaId }, data: { deletedAt: new Date() } })
+      // Recovery exclusion is safe only after the irreversible fence covers every asset in the
+      // deleting family, not just the retained MAX video used by this assertion.
+      await tx.mediaAsset.updateMany({ where: { familyId: family.id }, data: { deletedAt: new Date() } })
     })
     await storage.deleteObject(originalKey)
     try {
