@@ -742,8 +742,8 @@ function isUniqueConstraintError(error: unknown) {
 
 function isControlFenceError(error: unknown) {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false
-  if (error.code !== 'P2004' && error.code !== 'P2010') return false
-  const details = JSON.stringify(error.meta ?? {}).toLowerCase()
+  if (error.code !== 'P2004' && error.code !== 'P2010' && error.code !== 'P2039') return false
+  const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`.toLowerCase()
   return details.includes('active_control_user') || details.includes('active_control_owner')
     || details.includes('control_user') && details.includes('active')
 }

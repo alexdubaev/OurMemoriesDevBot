@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createPrisma } from '../../db'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
-import { createPrismaAuthRepository, createPrismaBrowserLinkRepository } from '../auth/infrastructure/auth-repository'
+import { createPrismaAuthRepository, createPrismaBrowserLinkRepository, createPrismaMaxAuthRepository } from '../auth/infrastructure/auth-repository'
 import {
   previewFamilyDeletion,
   previewUserDeletion,
@@ -162,6 +162,18 @@ describe('Control account lifecycle', () => {
       createdAfter: new Date(0),
       reuseGraceAfter: new Date(0),
     })).toBeNull()
+    await expect(createPrismaMaxAuthRepository(prisma).exchangeMaxIdentity({
+      identity: { provider: 'max', subject: '987654321', displayName: 'Synthetic target' },
+      fingerprintHash: 'e'.repeat(64),
+      replayExpiresAt: new Date(Date.now() + 60_000),
+      now: new Date(),
+      session: {
+        refreshTokenHash: 'late-max-session-token',
+        refreshTokenFamilyHash: 'late-max-session-family-token',
+        expiresAt: new Date(Date.now() + 60_000),
+        metadata: { userAgent: null, ipAddress: null },
+      },
+    })).resolves.toEqual({ state: 'invalid_session' })
   })
 
   test('restores live snapshots but keeps prior revocations and independently purged family access closed', async () => {
@@ -237,16 +249,16 @@ describe('Control account lifecycle', () => {
       fingerprint: preview.fingerprint,
       confirmation: targetId,
     })
-    await expect(prisma.authSession.create({
+    await expect(Promise.resolve(prisma.authSession.create({
       data: { userId: targetId, refreshTokenHash: 'raw-old-runtime-session', expiresAt: new Date(Date.now() + 60_000) },
-    })).rejects.toBeDefined()
-    await expect(prisma.familyMember.update({
+    }))).rejects.toBeDefined()
+    await expect(Promise.resolve(prisma.familyMember.update({
       where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } },
       data: { revokedAt: null },
-    })).rejects.toBeDefined()
-    await expect(prisma.family.create({
+    }))).rejects.toBeDefined()
+    await expect(Promise.resolve(prisma.family.create({
       data: { ownerUserId: targetId, name: 'Old runtime create', timezone: 'UTC' },
-    })).rejects.toBeDefined()
+    }))).rejects.toBeDefined()
   })
 
   test('uses an exact 720-hour grace period across a DST boundary', async () => {
