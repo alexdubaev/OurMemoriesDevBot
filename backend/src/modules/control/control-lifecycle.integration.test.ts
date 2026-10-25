@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createPrisma } from '../../db'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
-import { createPrismaAuthRepository } from '../auth/infrastructure/auth-repository'
+import { createPrismaAuthRepository, createPrismaBrowserLinkRepository } from '../auth/infrastructure/auth-repository'
 import {
   previewFamilyDeletion,
   previewUserDeletion,
@@ -26,7 +26,7 @@ async function seed() {
     { id: formerMemberId, displayName: 'Synthetic former member' },
   ] })
   const identity = await prisma.externalIdentity.create({
-    data: { userId: targetId, provider: 'max', subject: 'synthetic-control-lifecycle-target' },
+    data: { userId: targetId, provider: 'max', subject: '987654321' },
   })
   await prisma.authSession.create({
     data: {
@@ -219,5 +219,55 @@ describe('Control account lifecycle', () => {
     await expect(prisma.family.create({
       data: { ownerUserId: targetId, name: 'Old runtime create', timezone: 'UTC' },
     })).rejects.toBeDefined()
+  })
+
+  test('uses an exact 720-hour grace period across a DST boundary', async () => {
+    const deletedAt = new Date('2026-03-28T12:00:00Z')
+    const purgeAfter = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000)
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('TimeZone', 'Europe/Berlin', true)`
+      const deletion = await tx.controlUserDeletion.create({
+        data: { targetUserId: targetId, actorUserId: actorId, deletedAt, purgeAfter },
+      })
+      expect(deletion.purgeAfter.getTime() - deletion.deletedAt.getTime()).toBe(720 * 60 * 60 * 1000)
+      await tx.controlUserDeletion.delete({ where: { id: deletion.id } })
+    })
+  })
+
+  test('serializes browser approval and redemption against account trash', async () => {
+    const now = new Date()
+    const challengeId = 'control-lifecycle-browser-challenge'
+    const verifierHash = 'c'.repeat(64)
+    const browser = createPrismaBrowserLinkRepository(prisma)
+    const identity = await prisma.externalIdentity.findFirstOrThrow({ where: { userId: targetId, provider: 'max' } })
+    await browser.createBrowserLoginChallenge({
+      id: challengeId,
+      verifierHash,
+      displayCodeHash: 'd'.repeat(64),
+      expiresAt: new Date(now.getTime() + 60_000),
+      now,
+    })
+    const preview = await previewUserDeletion(prisma, targetId, protectedIds)
+    const [approval] = await Promise.all([
+      browser.approveBrowserLoginChallenge({ id: challengeId, userId: targetId, externalIdentityId: identity.id, now }),
+      trashControlUser(prisma, {
+        actorId, targetId, protectedIds,
+        key: '70000000-0000-4000-8000-000000000111',
+        fingerprint: preview.fingerprint,
+        confirmation: targetId,
+      }),
+    ])
+    expect(['approved', 'missing']).toContain(approval)
+    const challenge = await prisma.browserLoginChallenge.findUniqueOrThrow({ where: { id: challengeId } })
+    expect(challenge.state).not.toBe('approved')
+    await expect(browser.redeemBrowserLoginChallenge({
+      id: challengeId,
+      verifierHash,
+      now,
+      refreshTokenHash: 'late-browser-session-token',
+      refreshTokenFamilyHash: 'late-browser-session-family-token',
+      expiresAt: new Date(now.getTime() + 60_000),
+      metadata: { userAgent: null, ipAddress: null },
+    })).resolves.toBeNull()
   })
 })

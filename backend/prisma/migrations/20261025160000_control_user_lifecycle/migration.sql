@@ -15,7 +15,7 @@ CREATE TABLE "control_user_deletions" (
   "restored_at" TIMESTAMPTZ(6),
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "control_user_deletions_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "control_user_deletions_purge_after_check" CHECK ("purge_after" = "deleted_at" + INTERVAL '30 days')
+  CONSTRAINT "control_user_deletions_purge_after_check" CHECK ("purge_after" = "deleted_at" + INTERVAL '720 hours')
 );
 CREATE INDEX "control_user_deletions_target_deleted_idx"
   ON "control_user_deletions"("target_user_id", "deleted_at" DESC);
