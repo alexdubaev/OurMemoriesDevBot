@@ -302,12 +302,12 @@ test('Control retries cookie refresh after a startup network failure', async ({ 
 })
 
 test('Control owner trashes and restores a synthetic account, then confirms only a separate family purge', async ({ browser, page, browserName }) => {
-  const ownerToken = await authenticateOwner(page, browser)
+  await authenticateOwner(page, browser)
   const apiOrigin = new URL(process.env.VITE_API_URL ?? 'http://127.0.0.1:56701').origin
   const maxContext = await browser.newContext()
   const targetSubject = browserName === 'webkit' ? 987655002 : 987655001
   const targetName = `Control Delete Target ${browserName}`
-  const familyName = `Control Delete Family ${browserName}`
+  const familyName = `${targetName} Family`
   try {
     const targetLogin = await maxContext.request.post(`${apiOrigin}/api/v1/auth/max`, {
       headers: { Origin: new URL(page.url()).origin },
@@ -317,16 +317,10 @@ test('Control owner trashes and restores a synthetic account, then confirms only
     const targetSession = await targetLogin.json() as { accessToken: string }
     const targetFamily = await maxContext.request.post(`${apiOrigin}/api/v1/families`, {
       headers: { Origin: new URL(page.url()).origin, Authorization: `Bearer ${targetSession.accessToken}`, 'idempotency-key': randomUUID() },
-      data: { name: `${targetName} Family`, timezone: 'UTC' },
+      data: { name: familyName, timezone: 'UTC' },
     })
     expect(targetFamily.status()).toBe(201)
     expect((await maxContext.request.get(`${apiOrigin}/api/v1/me/families`, { headers: { Authorization: `Bearer ${targetSession.accessToken}` } })).status()).toBe(200)
-
-    const ownerFamily = await maxContext.request.post(`${apiOrigin}/api/v1/families`, {
-      headers: { Origin: new URL(page.url()).origin, Authorization: `Bearer ${ownerToken}`, 'idempotency-key': randomUUID() },
-      data: { name: familyName, timezone: 'UTC' },
-    })
-    expect(ownerFamily.status()).toBe(201)
 
     await page.getByRole('button', { name: 'Пользователи', exact: true }).click()
     const usersSearch = page.getByPlaceholder('Поиск по имени')
