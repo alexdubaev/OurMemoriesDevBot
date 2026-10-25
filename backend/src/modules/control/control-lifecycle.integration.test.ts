@@ -169,7 +169,7 @@ describe('Control account lifecycle', () => {
       createdAfter: new Date(0),
       reuseGraceAfter: new Date(0),
     })).toBeNull()
-    await expect(createPrismaMaxAuthRepository(prisma).exchangeMaxIdentity({
+    await expect(createPrismaMaxAuthRepository(prisma, createPrismaAuthRepository(prisma)).exchangeMaxIdentity({
       identity: { provider: 'max', subject: '987654321', displayName: 'Synthetic target' },
       fingerprintHash: 'e'.repeat(64),
       replayExpiresAt: new Date(Date.now() + 60_000),
