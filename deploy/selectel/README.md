@@ -660,15 +660,14 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   `media:delete` work while the original storage bytes remain present.
 
 - The exact memoLy Control executable compatibility fingerprint
-  `258dd8bedcdf5108b96cf35feebfd710c43a4b9318ed4a1e54bf4294dd6a20fe` is
-  measured from the finalized backend source and is anchored to the unchanged
+  `7642cc877150a93657fb394e7d4e59bb28c9beb55eff166da697f5e7f120500a` is
+  measured from the finalized executable source reconstructed over accepted
+  source `a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4` and is anchored to the unchanged
   full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime fingerprint
-  `2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088`. It is
-  provisional for the source snapshot based on `ae133af`; a newer accepted
-  `main` now awaits synchronization, so this value must be recomputed and the
-  complete regression rerun before it can be used for a release. It is not the
-  final release attestation. Once refreshed, this profile is accepted only for
-  the designated healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1`
+  `2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088`. The
+  refreshed exact profile regression verifies this fingerprint against frozen
+  committed production blobs. This profile is accepted only for the designated
+  healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1`
   backend/webapp image pair. The exact candidate was reconstructed over the
   accepted source with committed production blobs, and source, migration SQL,
   Compose, and static Caddy changes each invalidate this permission. Recovery

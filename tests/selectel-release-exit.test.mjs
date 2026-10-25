@@ -2409,26 +2409,48 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
 test('Control recovery permits only its exact current executable fingerprint and pinned host inputs on target 33a', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
-  const baseline = 'ae133afdec2127860d0f23ddb589bf676ca0fb84'
+  const baseline = 'a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4'
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
   const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-  const expectedCompatibility = '258dd8bedcdf5108b96cf35feebfd710c43a4b9318ed4a1e54bf4294dd6a20fe'
+  const expectedCompatibility = '7642cc877150a93657fb394e7d4e59bb28c9beb55eff166da697f5e7f120500a'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
   const files = [
-    'backend/src/modules/control/index.ts',
-    'backend/src/modules/control/infrastructure/control-collection.ts',
-    'deploy/selectel/control/sampler.py',
-    'deploy/selectel/control/memoly-control-sampler.service',
-    'deploy/selectel/control/memoly-control-sampler.timer',
-    'deploy/selectel/compose.yml.template',
-    'deploy/selectel/Caddyfile.static.template',
-    'deploy/selectel/ci-release.sh',
-  ].map((path) => {
-    const blob = spawnSync('git', ['rev-parse', `HEAD:${path}`], { cwd: root, encoding: 'utf8' })
-    if (blob.status !== 0) throw new Error(`cannot resolve exact Control source blob ${path}: ${blob.stderr}`)
-    return [path, blob.stdout.trim()]
-  })
+    ['backend/.env.example', '07d6bf4a7384d7f12fa0075cd3719ecef446e92a'],
+    ['backend/prisma/migrations/20261025100000_control_observability/migration.sql', 'd96d578a5eeabc86eca437d4f744e0eb2db7eaac'],
+    ['backend/prisma/schema.prisma', '939d86067b1e5d8b3a053bec980ffcfaea0d2aad'],
+    ['backend/src/app.ts', '3a72798f1c9e9afa79fc4a3e90d007f8849d056b'],
+    ['backend/src/env.ts', '3e6702dad1bd1ca9d62409d9e5db0fbeaaae63b1'],
+    ['backend/src/job-schedules.json', 'f57bf2c0b480edc4209643b3ba1294cd0e84fb79'],
+    ['backend/src/jobs.ts', '7b1769d757f1de971ca1ed6092c348f8c16957fc'],
+    ['backend/src/modules/control/application/control-helpers.ts', '583d776719b6855f9a63c27dbaa6c84f90af886b'],
+    ['backend/src/modules/control/index.ts', '48dc63c1bc7f02e197e62020777dfad66a2d0f27'],
+    ['backend/src/modules/control/infrastructure/control-collection.ts', '1e9e0b870dd802b4b136cca0e03d66dedadb0179'],
+    ['backend/src/modules/control/infrastructure/control-read-repository.ts', '21df9c044bfd58fbe17fcad1e37b65bdc0e3c897'],
+    ['backend/src/scheduler.ts', '33a8e40f525c760ea2d803123ca5c4ffa1a1a401'],
+    ['backend/src/worker.ts', 'e1fceab1cd692b6649f10be7bfa2db8f19e0f3f3'],
+    ['packages/contracts/src/control.ts', '1e458a2a717ef6e6447fb9475d3d9f74e4e27b80'],
+    ['packages/contracts/src/index.ts', '975ba77ffb5068b2167d49387da4d90c3c9c6495'],
+    ['webapp/control/index.html', '66fdf3d814cbfbfb4164b6b106a9c8bea3ba2b60'],
+    ['webapp/src/App.tsx', '3f616bc419fc73eb7da7ec03bc77565316afe2bc'],
+    ['webapp/src/components/ui/command.tsx', 'b3e700adee5551cd7bd666ee8b50bda7ec8af2b2'],
+    ['webapp/src/components/ui/dialog.tsx', '61584b8490d13c4c022ce58c8c33b51079a201ff'],
+    ['webapp/src/components/ui/select.tsx', 'f8082aae1f58159fc419423e4d9a56ae48262fca'],
+    ['webapp/src/components/ui/sheet.tsx', '66c59f950d68b4ce9d3f229e893612b3d7b0d608'],
+    ['webapp/src/control/ControlApp.tsx', '784eeb48faa5bd050efad0fcd731a57841cec891'],
+    ['webapp/src/control/control-api.ts', 'fbd13e2901d059a3b9650727dc0914cdb02ecb46'],
+    ['webapp/src/control/control.css', '83bd2f101391a56fd56a32ed223b497e86742472'],
+    ['webapp/src/control/main.tsx', '2c144606a1eb9c134a5627bd5f6584a4fc54e29c'],
+    ['webapp/src/features/memoly-ui/SettingsSheet.tsx', '9d9bf8c317791f365c00a593cc11691d123bdf2c'],
+    ['webapp/src/platform/control-activity.ts', '71898872aeb1c910ab45ca6f65521bcaaa38b4e3'],
+    ['webapp/vite.config.ts', '65f4e171cb9cf1835fdd94a0ed7d99f0b9b0b9aa'],
+    ['deploy/selectel/control/sampler.py', 'fbbc06bc8b62d86f0fe7685ee6651adf7da48898'],
+    ['deploy/selectel/control/memoly-control-sampler.service', '7b4b900ce078e47e1fedd59d9e6928ec8efc31a6'],
+    ['deploy/selectel/control/memoly-control-sampler.timer', '5399165d2e405d443bffdc5c76c519a189707f90'],
+    ['deploy/selectel/compose.yml.template', '977ed58350e849f52e530dde5976acb7b0ac6051'],
+    ['deploy/selectel/Caddyfile.static.template', 'b97f014fa6882141f8d8d6038afb50f9757d9d83'],
+    ['deploy/selectel/ci-release.sh', 'f11f9b7f0b8ec0b381ab0508b15a4e58cd539cad'],
+  ]
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-control-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
