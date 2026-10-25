@@ -41,7 +41,7 @@ describe('control contracts', () => {
       deletionId: null, purgeAfter: null, operationStatus: null, errorCode: null,
       families: 2, activeFamilies: 1, members: 4, memories: 5, storageUsedBytes: '9007199254740993',
       fingerprint: 'a'.repeat(64), confirmation: '00000000-0000-4000-8000-000000000001',
-      protectedAccount: false, canTrash: true, canRestore: false, serverNow: new Date().toISOString(),
+      protectedAccount: false, retirementSupported: true, canTrash: true, canRestore: false, serverNow: new Date().toISOString(),
     }
     expect(controlUserDeletionPreviewSchema.safeParse(preview).success).toBe(true)
     expect(controlUserDeletionPreviewSchema.safeParse({ ...preview, providerSubject: 'private' }).success).toBe(false)

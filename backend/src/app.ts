@@ -112,7 +112,7 @@ export function createApp({
     requireAdmin: auth.requireAdmin,
     requireAuth: auth.requireAuth,
   })
-  const control = createControlModule({ db: prisma, env, requireAuth: auth.requireAuth, ownerReadRateLimit: adminUsersReadRateLimit })
+  const control = createControlModule({ db: prisma, env, storage: storage.storage, requireAuth: auth.requireAuth, ownerReadRateLimit: adminUsersReadRateLimit })
   const uploads = createUploadsModule({
     backgroundTasks,
     db: prisma,

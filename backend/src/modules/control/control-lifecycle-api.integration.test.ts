@@ -56,8 +56,13 @@ describe('Control lifecycle API', () => {
     return signAccessToken({ sub: id, sessionId: session.id }, { JWT_SECRET: jwtSecret, ACCESS_TOKEN_TTL_SECONDS: 900 })
   }
 
-  function app() {
-    return createApp({ env: loadEnv({ ...baseEnv, CONTROL_ENABLED: 'true', CONTROL_OWNER_USER_IDS: ownerId }), prisma })
+  function app(storageDriver: 'filesystem' | 's3' = 'filesystem') {
+    const s3 = storageDriver === 's3' ? {
+      PRIVATE_STORAGE_DRIVER: 's3', PRIVATE_STORAGE_REGION: 'test-region', PRIVATE_STORAGE_BUCKET: 'control-test',
+      PRIVATE_STORAGE_ENDPOINT: 'https://s3.example.test', PRIVATE_STORAGE_ACCESS_KEY_ID: 'synthetic-control-key',
+      PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'synthetic-control-secret', PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
+    } : {}
+    return createApp({ env: loadEnv({ ...baseEnv, ...s3, CONTROL_ENABLED: 'true', CONTROL_OWNER_USER_IDS: ownerId }), prisma })
   }
 
   test('exposes deletion previews only through the existing exact MAX owner gate', async () => {
@@ -79,6 +84,7 @@ describe('Control lifecycle API', () => {
     expect(preview.members).toBe(1)
     expect(preview.protectedAccount).toBe(false)
     expect(preview.canTrash).toBe(true)
+    expect(preview.retirementSupported).toBe(true)
     expect(preview.fingerprint).toMatch(/^[0-9a-f]{64}$/)
 
     const protectedPreview = await control.request(`/api/v1/control/users/${ownerId}/deletion-preview`, { headers: { Authorization: `Bearer ${await token(ownerId)}` } })
@@ -108,5 +114,23 @@ describe('Control lifecycle API', () => {
     const legacyFamily = await control.request(`/api/v1/control/families/${familyId}`, { headers: ownerHeaders })
     expect(legacyFamily.status).toBe(200)
     expect(await legacyFamily.json()).toMatchObject({ status: 'deleting', lifecycleState: 'inactive', deletionId: null, purgeAfter: null })
+  })
+
+  test('S3 reports irreversible retirement as unsupported and refuses lifecycle mutations', async () => {
+    const control = app('s3')
+    const headers = { Authorization: `Bearer ${await token(ownerId)}`, 'Content-Type': 'application/json' }
+    const userPreview = await control.request(`/api/v1/control/users/${targetId}/deletion-preview`, { headers })
+    expect(userPreview.status).toBe(200)
+    expect(await userPreview.json()).toMatchObject({ retirementSupported: false, canTrash: false })
+    const familyPreview = await control.request(`/api/v1/control/families/${familyId}/deletion-preview`, { headers })
+    expect(familyPreview.status).toBe(200)
+    expect(await familyPreview.json()).toMatchObject({ retirementSupported: false })
+
+    const trash = await control.request(`/api/v1/control/users/${targetId}/trash`, { method: 'POST', headers, body: '{}' })
+    const purge = await control.request(`/api/v1/control/families/${familyId}/purge`, { method: 'POST', headers, body: '{}' })
+    expect(trash.status).toBe(503)
+    expect(purge.status).toBe(503)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId }, select: { controlState: true } })).toEqual({ controlState: 'active' })
+    expect(await prisma.controlFamilyDeletion.count({ where: { familyId } })).toBe(0)
   })
 })

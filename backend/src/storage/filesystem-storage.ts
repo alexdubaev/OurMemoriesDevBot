@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { link, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -55,6 +55,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
 
   async createUploadUrl(input: CreateUploadUrlInput): Promise<PresignedUpload> {
     const key = assertSafeObjectKey(input.key)
+    if (await this.isRetired(key)) throw new StorageError('already_exists', 'Storage object key was retired')
     const contentType = assertContentType(input.contentType)
     const contentLength = assertByteSize(input.byteSize, this.config.uploadMaxBytes)
     const expiresIn = assertSignedUrlTtl(input.expiresInSeconds ?? this.config.uploadUrlTtlSeconds)
@@ -106,6 +107,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
 
   async writeObject(input: WriteObjectInput): Promise<StorageObjectHead> {
     const safeKey = assertSafeObjectKey(input.key)
+    if (await this.isRetired(safeKey)) throw new StorageError('already_exists', 'Storage object key was retired')
     const contentType = assertContentType(input.contentType)
     const contentLength = assertByteSize(input.contentLength, this.config.uploadMaxBytes)
     const objectPath = this.objectPath(safeKey)
@@ -180,6 +182,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
   async readRange(key: string, range: ReadRangeInput): Promise<Uint8Array | null> {
     const safeKey = assertSafeObjectKey(key)
     const { start, end } = assertReadRange(range)
+    if (await this.isRetired(safeKey)) return null
 
     let handle
     try {
@@ -201,10 +204,84 @@ export class FilesystemPrivateStorage implements PrivateStorage {
   async deleteObject(key: string) {
     const safeKey = assertSafeObjectKey(key)
 
+    if (await this.isRetired(safeKey)) {
+      await this.retireObject(safeKey)
+      return
+    }
+
     await Promise.all([
       unlinkIfPresent(this.objectPath(safeKey)),
       unlinkIfPresent(this.metadataPath(safeKey)),
     ])
+  }
+
+  /**
+   * Permanently fences a key before erasing it. The empty directory occupies the object path,
+   * so the archived filesystem writer's atomic link(temp, objectPath) cannot recreate it.
+   */
+  async retireObject(key: string) {
+    const safeKey = assertSafeObjectKey(key)
+    const markerRoot = join(this.config.root, 'retired-objects')
+    await ensureSafeDirectoryPath(markerRoot)
+    const markerPath = join(markerRoot, createHash('sha256').update(safeKey).digest('hex'))
+    let markerHandle
+    try {
+      markerHandle = await open(markerPath, 'wx', 0o600)
+      await markerHandle.sync()
+    } catch (error) {
+      if (!isExistingFile(error)) throw error
+      const markerInfo = await lstat(markerPath)
+      if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || markerInfo.size !== 0) throw new Error('retired_object_refuses_marker_path')
+    } finally {
+      await markerHandle?.close()
+    }
+    const markerDir = await open(markerRoot, 'r')
+    try { await markerDir.sync() } finally { await markerDir.close() }
+
+    const objectPath = this.objectPath(safeKey)
+    await ensureSafeParentDirectories(join(this.config.root, 'objects'), dirname(objectPath))
+    let barrierInstalled = false
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      try {
+        await mkdir(objectPath)
+        barrierInstalled = true
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | null)?.code === 'EEXIST') {
+          const info = await lstat(objectPath)
+          if (info.isSymbolicLink()) throw new Error('retired_object_refuses_symlink')
+          if (info.isDirectory()) {
+            const children = await readdir(objectPath)
+            if (children.length) throw new Error('retired_object_refuses_nonempty_directory')
+            barrierInstalled = true
+            break
+          }
+          if (!info.isFile()) throw new Error('retired_object_refuses_unknown_path')
+          await unlink(objectPath)
+          continue
+        }
+        if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+          await mkdir(dirname(objectPath), { recursive: true })
+          continue
+        }
+        throw error
+      }
+    }
+    if (!barrierInstalled) throw new Error('retired_object_barrier_retry_exhausted')
+
+    const metadataPath = this.metadataPath(safeKey)
+    await ensureSafeParentDirectories(join(this.config.root, 'metadata'), dirname(metadataPath))
+    await removeRegularFileIfPresent(metadataPath, 'retired_object_refuses_metadata_path')
+    const parent = dirname(objectPath)
+    const base = objectPath.slice(parent.length + 1)
+    for (const name of await readdir(parent)) {
+      if (!new RegExp(`^${escapeRegExp(base)}\\.[0-9a-f-]{36}\\.part$`, 'i').test(name)) continue
+      await removeRegularFileIfPresent(join(parent, name), 'retired_object_refuses_part_path')
+    }
+    const children = await readdir(objectPath)
+    if (children.length) throw new Error('retired_object_barrier_not_empty')
+    const parentHandle = await open(parent, 'r')
+    try { await parentHandle.sync() } finally { await parentHandle.close() }
   }
 
   /**
@@ -259,6 +336,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
   }
 
   async readMetadata(key: string): Promise<StoredObjectMetadata | null> {
+    if (await this.isRetired(key)) return null
     try {
       return JSON.parse(await readFile(this.metadataPath(key), 'utf8')) as StoredObjectMetadata
     } catch (error) {
@@ -273,6 +351,18 @@ export class FilesystemPrivateStorage implements PrivateStorage {
 
   private metadataPath(key: string) {
     return this.resolveWithin(join(this.config.root, 'metadata'), key)
+  }
+
+  private async isRetired(key: string) {
+    const markerPath = join(this.config.root, 'retired-objects', createHash('sha256').update(key).digest('hex'))
+    try {
+      const markerInfo = await lstat(markerPath)
+      if (!markerInfo.isFile() || markerInfo.isSymbolicLink() || markerInfo.size !== 0) throw new Error('retired_object_refuses_marker_path')
+      return true
+    } catch (error) {
+      if (isMissingFile(error)) return false
+      throw error
+    }
   }
 
   /**
@@ -303,6 +393,52 @@ async function unlinkIfPresent(path: string) {
   } catch (error) {
     if (!isMissingFile(error)) throw error
   }
+}
+
+async function ensureSafeParentDirectories(root: string, target: string) {
+  await ensureSafeDirectoryPath(root)
+  const relative = target.slice(root.length).split(sep).filter(Boolean)
+  let current = root
+  for (const component of relative) {
+    current = join(current, component)
+    try { await mkdir(current) } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'EEXIST') throw error
+    }
+    const info = await lstat(current)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('retired_object_refuses_parent_path')
+  }
+}
+
+async function ensureSafeDirectoryPath(target: string) {
+  const directories: string[] = []
+  let current = resolve(target)
+  for (;;) {
+    directories.push(current)
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  for (const directory of directories.reverse()) {
+    try { await mkdir(directory) } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'EEXIST') throw error
+    }
+    const info = await lstat(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('retired_object_refuses_directory_path')
+  }
+}
+
+async function removeRegularFileIfPresent(path: string, errorCode: string) {
+  try {
+    const info = await lstat(path)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error(errorCode)
+    await unlink(path)
+  } catch (error) {
+    if (!isMissingFile(error)) throw error
+  }
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function isMissingFile(error: unknown) {

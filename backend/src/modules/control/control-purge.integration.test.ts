@@ -196,7 +196,7 @@ describe('Control bounded deletion maintenance', () => {
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, purgeAfter, 10)
     const failedStorage = new Proxy(localStorage, {
       get(target, property) {
-        if (property === 'deleteObject') return async () => { throw new Error('synthetic object-store outage') }
+        if (property === 'retireObject') return async () => { throw new Error('synthetic object-store outage') }
         const value = Reflect.get(target, property, target)
         return typeof value === 'function' ? value.bind(target) : value
       },
@@ -236,6 +236,41 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.family.findUniqueOrThrow({ where: { id: familyId } })).toMatchObject({ storageUsedBytes: 0n, storageReservedBytes: 0n })
   })
 
+  test('fences every media asset before deletes and re-arms keys for a late worker PUT', async () => {
+    const purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000)
+    await seed({ purgeAfter })
+    const localStorage = storage()
+    const fenceAt = new Date(purgeAfter.getTime() + 17 * 60 * 1000)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, purgeAfter, 1)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, fenceAt, 1)
+    const operation = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })
+    expect(operation.purgeStage).toBe('capture_media')
+    const originalKey = 'media-originals/control-purge-test/original.jpg'
+    const queued = await prisma.controlStorageDelete.findFirstOrThrow({ where: { operationId: operation.id, objectKey: originalKey } })
+    await localStorage.deleteObject(originalKey)
+    await prisma.controlStorageDelete.update({ where: { id: queued.id }, data: { completedAt: fenceAt } })
+    await localStorage.writeObject({ key: originalKey, body: new Blob(['late worker bytes']).stream(), contentLength: 17, contentType: 'image/jpeg' })
+
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, fenceAt, 1)
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ purgeStage: 'fence_media' })
+    expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })).toMatchObject({ deletedAt: expect.any(Date) })
+    const rearmed = await prisma.controlStorageDelete.findUniqueOrThrow({ where: { id: queued.id } })
+    expect(rearmed.completedAt).toBeNull()
+    expect(rearmed.notBefore.getTime()).toBeGreaterThanOrEqual(fenceAt.getTime() + 16 * 60 * 1000)
+    expect(await localStorage.headObject(originalKey)).not.toBeNull()
+
+    for (let pass = 0; pass < 6; pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, fenceAt, 1)
+    }
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ purgeStage: 'objects' })
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(fenceAt.getTime() + 15 * 60 * 1000), 10)
+    expect(await localStorage.headObject(originalKey)).not.toBeNull()
+    for (let pass = 0; pass < 10 && await localStorage.headObject(originalKey); pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(fenceAt.getTime() + 17 * 60 * 1000), 10)
+    }
+    expect(await localStorage.headObject(originalKey)).toBeNull()
+  })
+
   test('serializes late private content and object-key writes behind family key capture', async () => {
     await seed()
     const localStorage = storage()
@@ -267,9 +302,9 @@ describe('Control bounded deletion maintenance', () => {
     }, epoch)
     const failingStorage = new Proxy(storage(), {
       get(target, property) {
-        if (property === 'deleteObject') return async (key: string) => {
+        if (property === 'retireObject') return async (key: string) => {
           if (key.includes('control-purge-test')) throw new Error('synthetic outage')
-          return target.deleteObject(key)
+          return target.retireObject!(key)
         }
         const value = Reflect.get(target, property, target)
         return typeof value === 'function' ? value.bind(target) : value
@@ -320,7 +355,7 @@ describe('Control bounded deletion maintenance', () => {
     } })
     const failingStorage = new Proxy(storage(), {
       get(target, property) {
-        if (property === 'deleteObject') return async () => { throw new Error('synthetic outage') }
+        if (property === 'retireObject') return async () => { throw new Error('synthetic outage') }
         const value = Reflect.get(target, property, target)
         return typeof value === 'function' ? value.bind(target) : value
       },
@@ -338,7 +373,7 @@ describe('Control bounded deletion maintenance', () => {
     } })
     const neverStorage = new Proxy(storage(), {
       get(target, property) {
-        if (property === 'deleteObject') return async () => new Promise<void>(() => {})
+        if (property === 'retireObject') return async () => new Promise<void>(() => {})
         const value = Reflect.get(target, property, target)
         return typeof value === 'function' ? value.bind(target) : value
       },
@@ -349,6 +384,55 @@ describe('Control bounded deletion maintenance', () => {
     expect(performance.now() - startedAt).toBeLessThan(1_000)
     expect(await prisma.controlStorageDelete.count({ where: { operationId: operation.id, completedAt: null } })).toBeGreaterThan(0)
     expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })).toMatchObject({ purgedAt: null })
+  })
+
+  test('completed retired keys remain scheduled across a recheck failure after the operation is already purged', async () => {
+    await seed()
+    const completedAt = new Date(epoch.getTime() - 60 * 60 * 1000)
+    const operation = await prisma.controlFamilyDeletion.create({ data: {
+      familyId, actorUserId: actorId, requestedAt: completedAt, notBefore: completedAt,
+      keysCapturedAt: completedAt, purgedAt: completedAt, purgeStage: 'purged',
+    } })
+    const row = await prisma.controlStorageDelete.create({ data: {
+      operationId: operation.id, familyId, objectKey: 'media-originals/control-purge-test/retired.jpg',
+      notBefore: completedAt, completedAt, nextAttemptAt: completedAt,
+    } })
+    const failingStorage = new Proxy(storage(), {
+      get(target, property) {
+        if (property === 'retireObject') return async () => { throw new Error('synthetic retirement recheck failure') }
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as PrivateStorage
+    const failedAt = new Date(epoch.getTime() + 60 * 60 * 1000)
+    await runControlDeletionMaintenance({ db: prisma, storage: failingStorage }, failedAt, 10)
+    const pendingRecheck = await prisma.controlStorageDelete.findUniqueOrThrow({ where: { id: row.id } })
+    expect(pendingRecheck.completedAt).toEqual(completedAt)
+    expect(pendingRecheck.nextAttemptAt.getTime()).toBeGreaterThan(failedAt.getTime())
+
+    const recoveredAt = pendingRecheck.nextAttemptAt
+    await runControlDeletionMaintenance({ db: prisma, storage: storage() }, recoveredAt, 10)
+    const retried = await prisma.controlStorageDelete.findUniqueOrThrow({ where: { id: row.id } })
+    expect(retried.completedAt).toEqual(recoveredAt)
+    expect(retried.nextAttemptAt.getTime()).toBeGreaterThan(recoveredAt.getTime())
+  })
+
+  test('maintenance refuses S3 before starting newly due irreversible deletion work', async () => {
+    await seed({ purgeAfter: epoch })
+    const localStorage = storage()
+    const unsupportedStorage = new Proxy(localStorage, {
+      get(target, property) {
+        if (property === 'driver') return 's3'
+        if (property === 'retireObject') return undefined
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as PrivateStorage
+    await expect(runControlDeletionMaintenance({ db: prisma, storage: unsupportedStorage }, epoch, 10))
+      .rejects.toThrow('control_irreversible_storage_retirement_unsupported')
+    expect(await prisma.controlFamilyDeletion.count({ where: { familyId } })).toBe(0)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId }, select: { controlState: true } }))
+      .toEqual({ controlState: 'active' })
   })
 
   test('a database cleanup error stores only a safe status code', async () => {

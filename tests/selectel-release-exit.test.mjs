@@ -200,6 +200,28 @@ printf 'PASS: changed bytes, writable mode, and symlink rejected\\n'
   assert.match(result.stdout, /changed bytes, writable mode, and symlink rejected/)
 })
 
+slowTest('MAX retirement profile requires one exact filesystem storage driver setting', () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+fixture=$(mktemp -d /root/max-retirement-driver.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+SERVER_ROOT="$fixture"
+mkdir -m 0755 "$SERVER_ROOT/env"
+rollback_max_video_host_inputs_match() { return 0; }
+printf 'PRIVATE_STORAGE_DRIVER=filesystem\\n' > "$SERVER_ROOT/env/backend.env"
+rollback_max_video_retirement_host_inputs_match HEAD
+printf 'PRIVATE_STORAGE_DRIVER=s3\\n' > "$SERVER_ROOT/env/backend.env"
+if rollback_max_video_retirement_host_inputs_match HEAD; then exit 61; fi
+printf 'PRIVATE_STORAGE_DRIVER=filesystem\\nPRIVATE_STORAGE_DRIVER=filesystem\\n' > "$SERVER_ROOT/env/backend.env"
+if rollback_max_video_retirement_host_inputs_match HEAD; then exit 62; fi
+printf 'PASS: exact filesystem driver accepted; S3 and duplicate settings rejected\\n'
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /exact filesystem driver accepted/)
+})
+
 test('nonzero release exit preserves forward-only quiesce handling', () => {
   const result = runHandler({
     legacy: true,
@@ -2949,7 +2971,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
       if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
       if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
-      if (sql.includes('to_regclass')) return { rows: [{ present: count === 59 }] }
+      if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false }] }
       if (sql.includes('SELECT EXISTS')) return { rows: [{ unread: false, multiple: false, unfinished: false }] }
       throw new Error('unexpected release-verification SQL')
     }
@@ -2958,8 +2980,8 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   const checksum = 'a'.repeat(64)
   const fixtureBaselineCatalog = Array.from({ length: 56 }, (_, index) =>
     `20200101000000_fixture_${String(index).padStart(2, '0')}:${checksum}:${checksum}`).join('\n')
-  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:${checksum}:${checksum}\n20261025110000_max_multivideo_references:${checksum}:${checksum}\n20261025120000_max_video_legacy_retention:${checksum}:${checksum}`
-  const run = (phase, variant = 'exact') => spawnSync(bashExecutable, ['-s'], {
+  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557\n20261025110000_max_multivideo_references:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90\n20261025120000_max_video_legacy_retention:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0}`
+  const run = (phase, variant = 'exact', ledgerCount = 57) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: [
       'set -euo pipefail', redeployDefinitions,
@@ -2971,7 +2993,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
       `FIXTURE_BASELINE_CATALOG=${shellQuote(fixtureBaselineCatalog)}`,
       `FIXTURE_CANDIDATE_CATALOG=${shellQuote(fixtureCandidateCatalog)}`,
-      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else printf "%s\\n" "$FIXTURE_CANDIDATE_CATALOG"; fi; }',
+      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else local catalog="$FIXTURE_CANDIDATE_CATALOG"; [ "$FIXTURE_LEDGER_VARIANT" != bad-catalog ] || catalog="${catalog/479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"; printf "%s\\n" "$catalog"; fi; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
       `rollback_runtime_fingerprint() { printf "%s\\n" "${maxVideoRecoveryRuntime}"; }`,
       'rollback_control_host_inputs_match() { return 0; }',
@@ -2988,10 +3010,10 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       `FIXTURE_EVENTS=${shellQuote(events)}`,
       `FIXTURE_PG_DIR=${shellQuote(gitBashPath(serverRoot))}`,
       `FIXTURE_LEDGER_VARIANT=${shellQuote(variant)}`,
-      'FIXTURE_LEDGER_COUNT=57',
+      `FIXTURE_LEDGER_COUNT=${ledgerCount}`,
       'if verify_application_rollback "$FIXTURE_PHASE"; then printf "accepted\\n"; else status=$?; printf "rejected:%s\\n" "$status"; fi',
     ].join('\n'),
-    encoding: 'utf8', env: { ...process.env, FIXTURE_PHASE: phase, FIXTURE_EVENTS: gitBashPath(events), FIXTURE_PG_DIR: gitBashPath(serverRoot), FIXTURE_LEDGER_COUNT: '57', FIXTURE_LEDGER_VARIANT: variant }, timeout: 30_000,
+    encoding: 'utf8', env: { ...process.env, FIXTURE_PHASE: phase, FIXTURE_EVENTS: gitBashPath(events), FIXTURE_PG_DIR: gitBashPath(serverRoot), FIXTURE_LEDGER_COUNT: String(ledgerCount), FIXTURE_LEDGER_VARIANT: variant }, timeout: 30_000,
   })
   try {
     const preSql = run('pre-sql')
@@ -3000,6 +3022,17 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
     const preEvents = existsSync(events) ? readFileSync(events, 'utf8') : ''
     assert.match(preEvents, /ledger-check/)
     assert.doesNotMatch(preEvents, /migration-status/)
+
+    writeFileSync(events, '')
+    const completeLegacy = run('complete', 'exact', 59)
+    assert.equal(completeLegacy.status, 0, completeLegacy.stdout + completeLegacy.stderr)
+    assert.match(completeLegacy.stdout, /accepted/)
+
+    writeFileSync(events, '')
+    const badCatalog = run('pre-sql', 'bad-catalog')
+    assert.equal(badCatalog.status, 0, badCatalog.stdout + badCatalog.stderr)
+    assert.match(badCatalog.stdout, /rejected:1/)
+    assert.doesNotMatch(existsSync(events) ? readFileSync(events, 'utf8') : '', /migration-status/)
 
     writeFileSync(events, '')
     const unreviewed = run('pre-sql', 'wrong')

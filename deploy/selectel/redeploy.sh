@@ -857,6 +857,7 @@ rollback_source_compatibility_profile() {
 		case "$profile" in
 			control) rollback_control_host_inputs_match "$revision" || continue ;;
 			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
+			max-video-retirement) rollback_max_video_retirement_host_inputs_match "$revision" || continue ;;
 		esac
 			printf '%s\n' "$profile"
 			return 0
@@ -897,6 +898,20 @@ rollback_max_video_host_inputs_match() {
 		[[ "$expected" =~ ^[0-9a-f]{40}$ ]] || return 1
 		[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse "$revision:$path" 2>/dev/null || true)" = "$expected" ] || return 1
 	done
+}
+
+rollback_max_video_retirement_host_inputs_match() {
+	local revision=$1 backend_env="$SERVER_ROOT/env/backend.env"
+	rollback_max_video_host_inputs_match "$revision" || return 1
+	[ -f "$backend_env" ] && [ ! -L "$backend_env" ] || return 1
+	awk -F= '
+		/^[[:space:]]*PRIVATE_STORAGE_DRIVER[[:space:]]*=/ {
+			count++
+			value=$2
+			gsub(/^[[:space:]"\047]+|[[:space:]"\047]+$/, "", value)
+		}
+		END { exit !(count == 1 && value == "filesystem") }
+	' "$backend_env" >/dev/null 2>&1
 }
 
 rollback_assert_root_owned_path() {
@@ -1225,25 +1240,41 @@ MEMOLY_CONTROL_MIGRATION_HISTORY_JS
 }
 
 rollback_verify_max_video_migration_history() {
-	local phase=$1 baseline_revision=ccd3b911222d00769a099b998d8eef2665acd9d4
-	local baseline_catalog candidate_catalog migration_state
+	local phase=$1 baseline_revision baseline_count candidate_count candidate_catalog baseline_catalog migration_state profile
 	case "$phase" in pre-sql|complete) ;; *) return 1 ;; esac
-	baseline_catalog=$(rollback_migration_catalog_checksums "$baseline_revision") || return 1
 	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
-	[ "$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')" = 56 ] || return 1
-	[ "$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')" = 59 ] || return 1
-	[ "$(printf '%s\n' "$candidate_catalog" | cut -d: -f1 | head -n 56)" = \
+	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
+	case "$candidate_count" in
+		59)
+			profile=legacy59
+			baseline_revision=ccd3b911222d00769a099b998d8eef2665acd9d4
+			baseline_count=56
+			[ "$(printf '%s\n' "$candidate_catalog" | tail -n 3 | cut -d: -f1)" = "$(printf '%s\n' \
+				20261025100000_control_observability \
+				20261025110000_max_multivideo_references \
+				20261025120000_max_video_legacy_retention)" ] || return 1 ;;
+		62)
+			profile=lifecycle62
+			baseline_revision=d2999cca6e4e5980cc2277de7453440353f5b392
+			baseline_count=59
+			[ "$(printf '%s\n' "$candidate_catalog" | tail -n 3 | cut -d: -f1)" = "$(printf '%s\n' \
+				20261025160000_control_user_lifecycle \
+				20261025170000_control_durable_purge \
+				20261025180000_control_purge_fences)" ] || return 1 ;;
+		*) return 1 ;;
+	esac
+	baseline_catalog=$(rollback_migration_catalog_checksums "$baseline_revision") || return 1
+	[ "$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')" = "$baseline_count" ] || return 1
+	[ "$(printf '%s\n' "$candidate_catalog" | cut -d: -f1 | head -n "$baseline_count")" = \
 		"$(printf '%s\n' "$baseline_catalog" | cut -d: -f1)" ] || return 1
-	[ "$(printf '%s\n' "$candidate_catalog" | tail -n 3 | cut -d: -f1)" = "$(printf '%s\n' \
-		20261025100000_control_observability \
-		20261025110000_max_multivideo_references \
-		20261025120000_max_video_legacy_retention)" ] || return 1
 	migration_state=$(MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
 	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
 	MEMOLY_MAX_VIDEO_LEDGER_PHASE="$phase" \
+	MEMOLY_MAX_VIDEO_LEDGER_PROFILE="$profile" \
 	compose run --rm --no-deps -e "MEMOLY_EXPECTED_BASELINE_MIGRATIONS=$baseline_catalog" \
 		-e "MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS=$candidate_catalog" \
 		-e "MEMOLY_MAX_VIDEO_LEDGER_PHASE=$phase" \
+		-e "MEMOLY_MAX_VIDEO_LEDGER_PROFILE=$profile" \
 		backend bun -e "$(cat <<'MEMOLY_MAX_VIDEO_MIGRATION_HISTORY_JS'
 import { Client } from "pg";
 function parse(value) {
@@ -1260,26 +1291,43 @@ function parse(value) {
 const baseline = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
 const candidate = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
 const phase = process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE;
-const suffix = ["20261025100000_control_observability", "20261025110000_max_multivideo_references", "20261025120000_max_video_legacy_retention"];
-if (baseline.length !== 56 || candidate.length !== 59 || !["pre-sql", "complete"].includes(phase) ||
-    candidate.slice(0, 56).some((row, index) => row.name !== baseline[index].name ||
+const profile = process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE;
+const legacy = [["20261025100000_control_observability", "479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557"], ["20261025110000_max_multivideo_references", "9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90"], ["20261025120000_max_video_legacy_retention", "7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0"]];
+const lifecycle = [["20261025160000_control_user_lifecycle", "910ee6aeda44457ae611a69994cd7f11eb6c1e0936ac33874cdcb8bd59f5df57"], ["20261025170000_control_durable_purge", "f9ff69a061afefeceaeda618c4aeaf424563b2fed850d6e17808e23554b2fa8d"], ["20261025180000_control_purge_fences", "eee2bddedbd167b1de111b16e8c0a75e054c9cf9c555752d73b8f02e3f2c3655"]];
+const expectedBaseline = profile === "legacy59" ? 56 : profile === "lifecycle62" ? 59 : -1;
+const expectedCount = profile === "legacy59" ? 59 : profile === "lifecycle62" ? 62 : -1;
+const expectedSuffix = profile === "legacy59" ? legacy : profile === "lifecycle62" ? lifecycle : [];
+if (baseline.length !== expectedBaseline || candidate.length !== expectedCount || expectedCount < 0 ||
+    !["pre-sql", "complete"].includes(phase) ||
+    candidate.slice(0, expectedBaseline).some((row, index) => row.name !== baseline[index].name ||
       ![...row.checksums].some(checksum => baseline[index].checksums.has(checksum))) ||
-    suffix.some((name, index) => candidate[56 + index]?.name !== name)) process.exit(1);
+    expectedSuffix.some(([name, checksum], index) => candidate[expectedBaseline + index]?.name !== name || !candidate[expectedBaseline + index].checksums.has(checksum))) process.exit(1);
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 try {
   await client.connect();
   const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
   if (!Array.isArray(rows) || rows.some(row => !row.finished_at || row.rolled_back_at)) throw new Error("unfinished or rolled-back MAX video migration");
   const count = rows.length;
-  if (phase === "complete" ? count !== 59 : ![56, 57, 58, 59].includes(count)) throw new Error("MAX video migration ledger count mismatch");
+  const minimum = profile === "legacy59" ? 56 : 59;
+  if (phase === "complete" ? count !== expectedCount : count < minimum || count > expectedCount)
+    throw new Error("MAX video migration ledger count mismatch");
   const expected = candidate.slice(0, count);
   if (rows.some((row, index) => row.migration_name !== expected[index]?.name || !expected[index].checksums.has(row.checksum)))
     throw new Error("MAX video migration ledger is not an exact reviewed prefix");
-  const table = await client.query("SELECT to_regclass('public.max_video_legacy_retention') IS NOT NULL AS present");
-  if (typeof table.rows[0]?.present !== "boolean" || table.rows[0].present !== (count === 59))
-    throw new Error("MAX video retention table disagrees with the exact migration prefix");
+  const schema = await client.query(`SELECT
+    to_regclass('public.max_video_legacy_retention') IS NOT NULL AS retention,
+    to_regclass('public.control_family_deletions') IS NOT NULL AS family_deletions,
+    to_regclass('public.control_storage_deletes') IS NOT NULL AS storage_deletes,
+    EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS purge_fences`);
+  const state = schema.rows[0];
+  const lifecycleProfile = profile === "lifecycle62";
+  if (typeof state?.retention !== "boolean" || state.retention !== (lifecycleProfile ? count >= 59 : count === 59) ||
+      typeof state.family_deletions !== "boolean" || state.family_deletions !== (lifecycleProfile && count >= 60) ||
+      typeof state.storage_deletes !== "boolean" || state.storage_deletes !== (lifecycleProfile && count >= 61) ||
+      typeof state.purge_fences !== "boolean" || state.purge_fences !== (lifecycleProfile && count === 62))
+    throw new Error("MAX video or Control lifecycle schema disagrees with the exact migration prefix");
   await client.end();
-  process.stdout.write(count === 59 ? "present\n" : "absent\n");
+  process.stdout.write(count >= 59 ? "present\n" : "absent\n");
 } catch {
   await client.end().catch(() => {});
   process.exit(1);
@@ -1288,7 +1336,6 @@ MEMOLY_MAX_VIDEO_MIGRATION_HISTORY_JS
 )" 2>/dev/null) || return 1
 	case "$migration_state" in absent|present) printf '%s\n' "$migration_state" ;; *) return 1 ;; esac
 }
-
 rollback_verify_max_video_recovery_readiness() {
 	local image_id image_revision
 	image_id=$(docker image inspect --format '{{.Id}}' "memoly-backend:$MEMOLY_PRODUCT_SHA") ||
@@ -1298,7 +1345,7 @@ rollback_verify_max_video_recovery_readiness() {
 		die 'cannot inspect MAX video recovery candidate backend image revision'
 	[ "$image_revision" = "$MEMOLY_PRODUCT_SHA" ] || die 'MAX video recovery candidate backend image revision does not match the current release SHA'
 	MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA" \
-	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client=new Client({connectionString:process.env.DATABASE_URL}); try { await client.connect(); const result=await client.query("SELECT count(*)::integer AS count FROM media_assets WHERE media_kind = '\''video'\'' AND legacy_video_retained_at IS NOT NULL AND deleted_at IS NOT NULL AND storage_deleted_at IS NULL"); await client.end(); if (result.rows[0]?.count !== 0) process.exit(1); } catch { await client.end().catch(()=>{}); process.exit(1); }' >/dev/null 2>&1 ||
+	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client=new Client({connectionString:process.env.DATABASE_URL}); try { await client.connect(); const schema=await client.query("SELECT to_regclass('\''public.control_family_deletions'\'') IS NOT NULL AS present"); if (typeof schema.rows[0]?.present !== "boolean") throw new Error(); const query=schema.rows[0].present ? "SELECT count(*)::integer AS count FROM media_assets asset WHERE asset.media_kind = '\''video'\'' AND asset.legacy_video_retained_at IS NOT NULL AND asset.deleted_at IS NOT NULL AND asset.storage_deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM control_family_deletions deletion JOIN families family ON family.id=deletion.family_id WHERE deletion.family_id=asset.family_id AND family.status <> '\''active'\''::family_status)" : "SELECT count(*)::integer AS count FROM media_assets WHERE media_kind = '\''video'\'' AND legacy_video_retained_at IS NOT NULL AND deleted_at IS NOT NULL AND storage_deleted_at IS NULL"; const result=await client.query(query); await client.end(); if (result.rows[0]?.count !== 0) process.exit(1); } catch { await client.end().catch(()=>{}); process.exit(1); }' >/dev/null 2>&1 ||
 		die 'MAX video rollback is unsafe while held legacy assets are already tombstoned for physical cleanup'
 	MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA" \
 	compose run --rm --no-deps backend bun scripts/migrate-max-legacy-videos.ts --recover-all >/dev/null 2>&1 ||
@@ -1328,7 +1375,7 @@ rollback_apply_max_video_recovery() {
 		return "$status"
 	fi
 	MEMOLY_BACKEND_IMAGE_TAG="$MEMOLY_PRODUCT_SHA" \
-	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client=new Client({connectionString:process.env.DATABASE_URL}); try { await client.connect(); const result=await client.query("SELECT count(*)::integer AS active FROM max_video_legacy_retention WHERE recovered_at IS NULL"); await client.end(); if (result.rows[0]?.active !== 0) process.exit(1); } catch { await client.end().catch(()=>{}); process.exit(1); }' >/dev/null 2>&1 ||
+	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client=new Client({connectionString:process.env.DATABASE_URL}); try { await client.connect(); const result=await client.query("SELECT count(*)::integer AS active FROM max_video_legacy_retention retention WHERE recovered_at IS NULL AND NOT EXISTS (SELECT 1 FROM control_family_deletions deletion JOIN families family ON family.id=deletion.family_id WHERE deletion.family_id=retention.family_id AND family.status <> '\''active'\''::family_status)"); await client.end(); if (result.rows[0]?.active !== 0) process.exit(1); } catch { await client.end().catch(()=>{}); process.exit(1); }' >/dev/null 2>&1 ||
 		die 'MAX video recovery left unhandled ledger references; old services were not promoted'
 	rollback_verify_max_video_recovery_readiness
 }

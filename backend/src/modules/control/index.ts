@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
+import type { PrivateStorage } from '../../storage'
 import type { AuthHttpEnv } from '../auth'
 import { AppError, errorResponse, requestIdFrom } from '../../http/errors'
 import type { ApiErrorCode } from '@web-app-demo/contracts'
@@ -21,12 +22,14 @@ import { CONTROL_STALE_AFTER_SECONDS, readControlMetric } from './infrastructure
 import { withControlReadTimeout } from './infrastructure/control-collection'
 import { ControlLifecycleFailure, previewFamilyDeletion, previewUserDeletion, purgeControlFamily, restoreControlUser, trashControlUser } from './infrastructure/control-lifecycle'
 
-export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }: {
+export function createControlModule({ db, env, storage, requireAuth, ownerReadRateLimit }: {
   db: DbClient
   env: AppEnv
+  storage?: PrivateStorage
   requireAuth: import('hono').MiddlewareHandler<AuthHttpEnv>
   ownerReadRateLimit: import('hono').MiddlewareHandler<AuthHttpEnv>
 }) {
+  const retirementSupported = typeof storage?.retireObject === 'function'
   const routes = new Hono<AuthHttpEnv>()
   const exportsByOwner = new Map<string, number[]>()
   const mutationRequestsByOwner = new Map<string, number[]>()
@@ -185,10 +188,11 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const id = uuidParam(c.req.param('familyId')).toLowerCase()
     try {
       const preview = await previewFamilyDeletion(db, id)
-      return c.json(controlFamilyDeletionPreviewSchema.parse({ ...preview, serverNow: new Date().toISOString() }))
+      return c.json(controlFamilyDeletionPreviewSchema.parse({ ...preview, retirementSupported, serverNow: new Date().toISOString() }))
     } catch (error) { throw lifecycleAppError(error) }
   })
   routes.post('/control/families/:familyId/purge', mutationRateLimit, async (c) => {
+    if (!retirementSupported) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Не поддерживается безопасное окончательное удаление файлов')
     const id = uuidParam(c.req.param('familyId')).toLowerCase()
     const body = await parseLifecycleBody(c, z.object({ key: z.string().uuid(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid() }).strict())
     try {
@@ -232,13 +236,14 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
         purgeAfter: lifecycleMatches ? lifecycle.purgeAfter : null,
         operationStatus: lifecycleMatches ? lifecycle.operationStatus : null,
         errorCode: lifecycleMatches ? lifecycle.errorCode : null,
-        protectedAccount, canTrash: preview.state === 'active' && !protectedAccount,
+        protectedAccount, retirementSupported, canTrash: retirementSupported && preview.state === 'active' && !protectedAccount,
         canRestore: lifecycleMatches && preview.state === 'trashed' && lifecycle.operationStatus === 'waiting' && Boolean(lifecycle.purgeAfter && Date.parse(lifecycle.purgeAfter) > Date.parse(serverNow)),
         serverNow,
       }))
     } catch (error) { throw lifecycleAppError(error) }
   })
   routes.post('/control/users/:userId/trash', mutationRateLimit, async (c) => {
+    if (!retirementSupported) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Не поддерживается безопасное окончательное удаление файлов')
     const id = uuidParam(c.req.param('userId')).toLowerCase()
     const body = await parseLifecycleBody(c, z.object({ key: z.string().uuid(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid() }).strict())
     try {

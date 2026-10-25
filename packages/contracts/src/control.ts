@@ -81,13 +81,13 @@ export const controlUserDeletionPreviewSchema = z.object({
   operationStatus: z.string().max(48).nullable(), errorCode: controlLifecycleErrorCodeSchema.nullable(),
   families: count, activeFamilies: count, members: count, memories: count, storageUsedBytes: bytes,
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid(),
-  protectedAccount: z.boolean(), canTrash: z.boolean(), canRestore: z.boolean(), serverNow: isoDate,
+  protectedAccount: z.boolean(), retirementSupported: z.boolean(), canTrash: z.boolean(), canRestore: z.boolean(), serverNow: isoDate,
 }).strict()
 
 export const controlFamilyDeletionPreviewSchema = z.object({
   familyId: z.string().uuid(), targetVersion: count, state: z.enum(['active','deleting','deleted']),
   members: count, memories: count, storageUsedBytes: bytes,
-  fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid(), serverNow: isoDate,
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid(), retirementSupported: z.boolean(), serverNow: isoDate,
 }).strict()
 
 export const controlLifecycleResultSchema = z.object({

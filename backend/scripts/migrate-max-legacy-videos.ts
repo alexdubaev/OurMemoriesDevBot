@@ -16,11 +16,11 @@ try {
   if (args.recoverAll) {
     if (args.apply) {
       const result = await migration.recoverAll({ apply: true, batchSize: args.batchSize })
-      console.log(JSON.stringify({ inspected: result.inspected, recovered: result.recovered, refused: result.refused, remaining: result.remaining, mode: 'recovery-apply' }))
+      console.log(JSON.stringify({ inspected: result.inspected, excluded: result.excluded, recovered: result.recovered, refused: result.refused, remaining: result.remaining, mode: 'recovery-apply' }))
       if (result.refused > 0 || result.remaining > 0) process.exitCode = 2
     } else {
       const readiness = await migration.recoveryReadiness()
-      console.log(JSON.stringify({ total: readiness.total, inspected: readiness.inspected, ready: readiness.ready, missingObjects: readiness.missingObjects, invalid: readiness.invalid.length, mode: 'recovery-readiness' }))
+      console.log(JSON.stringify({ total: readiness.total, excluded: readiness.excluded, inspected: readiness.inspected, ready: readiness.ready, missingObjects: readiness.missingObjects, invalid: readiness.invalid.length, mode: 'recovery-readiness' }))
       if (readiness.invalid.length || readiness.missingObjects > 0 || readiness.ready !== readiness.total) process.exitCode = 2
     }
   } else if (args.apply) {

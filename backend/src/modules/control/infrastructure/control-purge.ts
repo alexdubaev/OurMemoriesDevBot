@@ -14,6 +14,7 @@ const MAX_BATCH = 100
 const MAX_OPERATIONS_PER_PASS = 4
 const DEFAULT_PASS_BUDGET_MS = 45_000
 const DEFAULT_OBJECT_TIMEOUT_MS = 10_000
+const RETIREMENT_RECHECK_MS = 15 * 60 * 1000
 
 async function lifecycleLock(tx: Tx) {
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended('control-user-lifecycle', 0))`)
@@ -115,7 +116,50 @@ async function captureFamilyKeys(db: DbClient, operation: FamilyOperation, now: 
       await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { purgeCursor: assets.at(-1)!.id, lastErrorCode: null } })
       return
     }
-    await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { keysCapturedAt: now, purgeStage: 'objects', purgeCursor: null, lastErrorCode: null } })
+    await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { keysCapturedAt: now, purgeStage: 'fence_media', purgeCursor: null, lastErrorCode: null } })
+  }, { timeout: 15_000 })
+}
+
+async function fenceFamilyMedia(db: DbClient, operation: FamilyOperation, now: Date, batchSize: number) {
+  await db.$transaction(async (tx) => {
+    await lifecycleLock(tx)
+    const [family] = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+      SELECT id, status::text FROM families WHERE id = ${operation.familyId}::uuid FOR UPDATE
+    `
+    if (!family || family.status === 'active') return
+    const current = await tx.controlFamilyDeletion.findUnique({ where: { id: operation.id } })
+    if (!current || current.purgedAt || !current.keysCapturedAt || current.purgeStage !== 'fence_media') return
+    await tx.$queryRaw`SELECT set_config('app.control_family_purge_operation', ${operation.id}, true)`
+    const assets = await tx.mediaAsset.findMany({
+      where: { familyId: operation.familyId, ...(current.purgeCursor ? { id: { gt: current.purgeCursor } } : {}) },
+      orderBy: { id: 'asc' }, take: batchSize,
+      include: { variants: { select: { objectKey: true } }, reservation: { select: { expiresAt: true } } },
+    })
+    if (!assets.length) {
+      await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { purgeStage: 'objects', purgeCursor: null, lastErrorCode: null } })
+      return
+    }
+    for (const asset of assets) {
+      await tx.mediaAsset.updateMany({ where: { id: asset.id, familyId: operation.familyId, deletedAt: null }, data: { deletedAt: now } })
+      const keys = mediaPurgeObjectKeys({ originalKey: asset.originalKey, mediaKind: asset.mediaKind, variants: asset.variants })
+      const queued = await tx.controlStorageDelete.findMany({ where: { operationId: operation.id, objectKey: { in: keys } }, select: { id: true, objectKey: true, notBefore: true } })
+      if (queued.length !== keys.length || new Set(queued.map(({ objectKey }) => objectKey)).size !== keys.length) {
+        throw new Error('family_media_fence_missing_captured_storage_key')
+      }
+      const safeAt = new Date(now.getTime() + IN_FLIGHT_AND_PUT_SAFETY_MS)
+      const notBefore = asset.reservation?.expiresAt && asset.reservation.expiresAt > safeAt ? asset.reservation.expiresAt : safeAt
+      for (const row of queued) {
+        await tx.controlStorageDelete.update({ where: { id: row.id }, data: {
+          completedAt: null,
+          notBefore: row.notBefore > notBefore ? row.notBefore : notBefore,
+          lastErrorCode: null,
+        } })
+      }
+    }
+    await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: {
+      purgeCursor: assets.at(-1)!.id,
+      lastErrorCode: null,
+    } })
   }, { timeout: 15_000 })
 }
 
@@ -135,7 +179,7 @@ async function deleteOperationObjects(runtime: Runtime, operationId: string, now
     try {
       const requestBudget = Math.max(1, Math.min(objectTimeoutMs, deadline - performance.now()))
       await Promise.race([
-        runtime.storage.deleteObject(row.objectKey),
+        runtime.storage.retireObject!(row.objectKey),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('storage_timeout'), { code: 'timeout' })), requestBudget) }),
       ])
       await runtime.db.controlStorageDelete.updateMany({ where: { id: row.id, completedAt: null }, data: { completedAt: now, lastErrorCode: null } })
@@ -143,6 +187,32 @@ async function deleteOperationObjects(runtime: Runtime, operationId: string, now
       const safeCode = typeof error === 'object' && error !== null && 'code' in error && error.code === 'timeout'
         ? 'storage_timeout' : errorCode(error)
       await runtime.db.controlStorageDelete.updateMany({ where: { id: row.id, completedAt: null }, data: { lastErrorCode: safeCode } })
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+}
+
+async function recheckCompletedRetirements(runtime: Runtime, now: Date, batchSize: number, deadline: number, objectTimeoutMs: number) {
+  const cutoff = new Date(now.getTime() - RETIREMENT_RECHECK_MS)
+  const rows = await runtime.db.controlStorageDelete.findMany({
+    where: { completedAt: { lte: cutoff }, nextAttemptAt: { lte: now } },
+    orderBy: [{ completedAt: 'asc' }, { id: 'asc' }], take: batchSize,
+  })
+  for (const row of rows) {
+    if (performance.now() >= deadline) break
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const requestBudget = Math.max(1, Math.min(objectTimeoutMs, deadline - performance.now()))
+      await Promise.race([
+        runtime.storage.retireObject!(row.objectKey),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('storage_timeout'), { code: 'timeout' })), requestBudget) }),
+      ])
+      await runtime.db.controlStorageDelete.updateMany({ where: { id: row.id, completedAt: row.completedAt }, data: { completedAt: now, nextAttemptAt: new Date(now.getTime() + RETIREMENT_RECHECK_MS), attempts: { increment: 1 }, lastErrorCode: null } })
+    } catch (error) {
+      const safeCode = typeof error === 'object' && error !== null && 'code' in error && error.code === 'timeout'
+        ? 'storage_timeout' : errorCode(error)
+      await runtime.db.controlStorageDelete.updateMany({ where: { id: row.id, completedAt: row.completedAt }, data: { nextAttemptAt: retryAt(row.attempts + 1, now), attempts: { increment: 1 }, lastErrorCode: safeCode } })
     } finally {
       if (timer) clearTimeout(timer)
     }
@@ -161,7 +231,10 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
     if (!current || current.purgedAt || !current.keysCapturedAt || pending || current.notBefore > now) return
     await tx.$queryRaw`SELECT set_config('app.control_family_purge_operation', ${operation.id}, true)`
     if (current.purgeStage === 'capture_media') {
-      await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { purgeStage: 'objects' } })
+      await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { purgeStage: 'fence_media', purgeCursor: null } })
+      return
+    }
+    if (current.purgeStage === 'fence_media') {
       return
     }
     if (current.purgeStage === 'objects') {
@@ -468,6 +541,16 @@ export async function runControlDeletionMaintenance(runtime: Runtime, now = new 
   const budgetMs = Math.max(1, Math.min(DEFAULT_PASS_BUDGET_MS, Math.trunc(options.budgetMs ?? DEFAULT_PASS_BUDGET_MS)))
   const objectTimeoutMs = Math.max(1, Math.min(DEFAULT_OBJECT_TIMEOUT_MS, Math.trunc(options.objectTimeoutMs ?? DEFAULT_OBJECT_TIMEOUT_MS)))
   const deadline = performance.now() + budgetMs
+  if (typeof runtime.storage.retireObject !== 'function') {
+    const [families, users] = await Promise.all([
+      runtime.db.controlFamilyDeletion.count({ where: { purgedAt: null } }),
+      runtime.db.controlUserDeletion.count({ where: { restoredAt: null, purgeAfter: { lte: now }, purgeStage: { not: 'purged' } } }),
+    ])
+    if (families || users) throw new Error('control_irreversible_storage_retirement_unsupported')
+    return
+  }
+  const recheckDeadline = Math.min(deadline, performance.now() + Math.min(5_000, Math.floor(budgetMs / 4)))
+  await recheckCompletedRetirements(runtime, now, batchSize, recheckDeadline, objectTimeoutMs)
   await startExpiredUserOperations(runtime.db, now, Math.min(MAX_OPERATIONS_PER_PASS, batchSize), deadline)
   const familyOperations = await runtime.db.controlFamilyDeletion.findMany({
     where: { purgedAt: null }, orderBy: [{ lastAttemptAt: { sort: 'asc', nulls: 'first' } }, { requestedAt: 'asc' }, { id: 'asc' }], take: MAX_OPERATIONS_PER_PASS,
@@ -479,7 +562,14 @@ export async function runControlDeletionMaintenance(runtime: Runtime, now = new 
       const latest = await runtime.db.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id }, select: { purgeStage: true, purgeCursor: true, keysCapturedAt: true, lastAttemptAt: true } })
       await runtime.db.controlFamilyDeletion.update({ where: { id: operation.id }, data: { lastAttemptAt: attemptAt(now, latest.lastAttemptAt) } })
       if (latest.purgeStage === 'capture_media') await captureFamilyKeys(runtime.db, { ...operation, ...latest }, now, batchSize)
-      await deleteOperationObjects(runtime, operation.id, now, batchSize, deadline, objectTimeoutMs)
+      const afterCapture = await runtime.db.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id }, select: { purgeStage: true, purgeCursor: true, keysCapturedAt: true } })
+      if (afterCapture.purgeStage === 'fence_media') {
+        await fenceFamilyMedia(runtime.db, { ...operation, ...afterCapture }, now, batchSize)
+      }
+      const afterFence = await runtime.db.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id }, select: { purgeStage: true, purgeCursor: true, keysCapturedAt: true } })
+      if (afterFence.purgeStage !== 'fence_media' && afterFence.purgeStage !== 'capture_media') {
+        await deleteOperationObjects(runtime, operation.id, now, batchSize, deadline, objectTimeoutMs)
+      }
       const remaining = await runtime.db.controlStorageDelete.count({ where: { operationId: operation.id, completedAt: null } })
       const refreshed = await runtime.db.controlFamilyDeletion.findUnique({ where: { id: operation.id }, select: { keysCapturedAt: true } })
       if (refreshed?.keysCapturedAt && remaining === 0 && performance.now() < deadline) await eraseFamilyArchive(runtime.db, operation, now, batchSize)
