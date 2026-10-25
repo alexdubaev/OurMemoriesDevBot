@@ -2215,12 +2215,13 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
   const expectedCompatibility = 'cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
+  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
 
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
     'apply exact frozen child linked-family production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
