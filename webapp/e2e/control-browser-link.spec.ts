@@ -342,6 +342,7 @@ test('Control owner trashes and restores a synthetic account, then confirms only
     await page.getByRole('button', { name: 'Восстановить', exact: true }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Восстановить', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Удалить пользователя' })).toBeVisible()
+    await page.getByRole('button', { name: 'Закрыть' }).click()
 
     await page.getByRole('button', { name: 'Семьи', exact: true }).click()
     const familiesSearch = page.getByPlaceholder('Поиск по названию семьи')
@@ -355,10 +356,13 @@ test('Control owner trashes and restores a synthetic account, then confirms only
     await expect(purgeDialog.getByText('Действие необратимо')).toBeVisible()
     await purgeDialog.getByRole('button', { name: 'Отмена' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Закрыть' }).click()
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('button', { name: 'Переключить тему' }).click()
     await expect(page.locator('.memoly-control-root')).toHaveAttribute('data-theme', 'dark')
+    await familyRow.click()
+    await expect(page.getByRole('heading', { name: familyName })).toBeVisible()
     await page.getByRole('button', { name: 'Удалить семью навсегда' }).click()
     const confirmedPurgeDialog = page.getByRole('dialog')
     await confirmedPurgeDialog.getByLabel('Введите УДАЛИТЬ НАВСЕГДА').fill('УДАЛИТЬ НАВСЕГДА')
