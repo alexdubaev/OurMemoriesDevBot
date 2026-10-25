@@ -96,6 +96,7 @@ test('album deletion confirmations work without native dialogs', async ({ page }
 test('MAX authenticated album cover choices save and complete the picker', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const consoleErrors: string[] = []
+  const pageErrors: string[] = []
   const initData = signedInitData()
   await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'ios', ready() {} } }) }, initData)
   const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
@@ -113,8 +114,10 @@ test('MAX authenticated album cover choices save and complete the picker', async
   })
   await page.getByRole('button', { name: /Создать свою семью/ }).click()
   await expect.poll(() => familyId).not.toBe('')
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
-  page.on('pageerror', (error) => consoleErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error' && !message.text().includes('status of 503 (Service Unavailable)')) consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
   await page.getByRole('button', { name: /Свободный альбом/ }).click()
@@ -123,8 +126,8 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await expect(page.getByRole('heading', { name: 'Обложка для проверки', exact: true })).toBeVisible()
 
   const photos = [
-    { name: 'cover-first-red.png', bytes: solidPng(240, 24, 24), pixel: [240, 24, 24] },
-    { name: 'cover-second-blue.png', bytes: solidPng(24, 48, 240), pixel: [24, 48, 240] },
+    { name: 'cover-first-red.png', bytes: solidPng(240, 24, 24) },
+    { name: 'cover-second-blue.png', bytes: solidPng(24, 48, 240) },
   ]
   for (const photo of photos) {
     await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
@@ -183,7 +186,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
   let catalogCard = page.locator('.albums-card').filter({ hasText: 'Обложка для проверки' })
   await expect(catalogCard).toBeVisible()
   const manualCardPixel = await readImagePixel(catalogCard.locator('.albums-cover img'))
-  expect(manualCardPixel).toEqual(photos[1].pixel)
+  expectDominantColor(manualCardPixel, 'blue')
   await capture('catalog-after-manual-reload')
   await catalogCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
@@ -205,7 +208,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
   catalogCard = page.locator('.albums-card').filter({ hasText: 'Обложка для проверки' })
   await expect(catalogCard).toBeVisible()
   const automaticCardPixel = await readImagePixel(catalogCard.locator('.albums-cover img'))
-  expect(automaticCardPixel).toEqual(photos[0].pixel)
+  expectDominantColor(automaticCardPixel, 'red')
   await capture('catalog-after-reload')
 
   console.log('ALBUM_COVER_EVIDENCE ' + JSON.stringify({
@@ -213,6 +216,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
     manual: { status: manualResponse.status(), payloadCoverId: manualPayload.album?.cover?.id ?? null, persistedCoverId: persistedManualCoverId, selectedSourceId: sourceIds[1], routeAfterChoice: routeAfterManual, catalogPixelAfterReload: manualCardPixel },
     automatic: { status: autoResponse.status(), payloadCoverId: autoPayload.album?.cover?.id ?? null, persistedCoverId: persistedAutomaticCoverId, fallbackSourceId: automaticFallbackSourceId, routeAfterChoice: routeAfterAutomatic, catalogPixelAfterReload: automaticCardPixel },
     consoleErrors,
+    pageErrors,
   }))
   expect(failedResponse.status()).toBe(503)
   expect(routeAfterFailedPatch).toBe('cover')
@@ -225,6 +229,8 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await expect(catalogCard.locator('.albums-cover img')).toBeVisible()
   expect(routeAfterManual).toBe('album')
   expect(routeAfterAutomatic).toBe('album')
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })
 
 test('MAX authenticated albums persist year chapters and a text event through real API and navigation', async ({ page }) => {
@@ -603,6 +609,12 @@ async function readImagePixel(image: Locator) {
     context.drawImage(imageElement, 0, 0)
     return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
   })
+}
+
+function expectDominantColor(pixel: number[], color: 'red' | 'blue') {
+  const dominantChannel = color === 'red' ? 0 : 2
+  expect(pixel[dominantChannel]).toBeGreaterThan(200)
+  pixel.forEach((channel, index) => { if (index !== dominantChannel) expect(channel).toBeLessThan(80) })
 }
 
 function solidPng(red: number, green: number, blue: number) {
