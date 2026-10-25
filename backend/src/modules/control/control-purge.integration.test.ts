@@ -468,7 +468,7 @@ describe('Control bounded deletion maintenance', () => {
       .rejects.toThrow('control_irreversible_storage_retirement_unsupported')
     expect(await prisma.controlFamilyDeletion.count({ where: { familyId } })).toBe(0)
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId }, select: { controlState: true } }))
-      .toEqual({ controlState: 'active' })
+      .toEqual({ controlState: 'trashed' })
   })
 
   test('a database cleanup error stores only a safe status code', async () => {
