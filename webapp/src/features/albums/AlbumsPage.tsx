@@ -229,6 +229,17 @@ export function AlbumsPage(props: AlbumsPageProps) {
     } catch (reason) { fail(reason); return false }
     finally { pending.current = false; if (!scopeController.isAborted()) setBusy(false) }
   }
+  function selectCover(coverSourceId: string | null) {
+    if (!album) return
+    const albumId = album.id
+    void mutation(async () => {
+      const result = await api.update(albumId, { expectedVersion: album.version, coverSourceId })
+      if (scopeController.isAborted() || activeAlbumId.current !== albumId) return
+      setAlbum(result.album)
+    }).then((committed) => {
+      if (committed && !scopeController.isAborted() && activeAlbumId.current === albumId && routeRef.current === 'cover') navigate('album')
+    })
+  }
   function saved(version: number) {
     if (!album || scopeController.isAborted()) return
     setAlbum({ ...album, version }); setUpload(null); navigate('album')
@@ -293,7 +304,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
         </> : null}
         {route === 'create' ? <AlbumForm api={api} child={props.child} childProfiles={childList} defaultChildId={props.childFilter} onCancel={back} onSaved={(next) => { setAlbums((old) => [next, ...old]); void openAlbum(next) }} /> : null}
         {album && route === 'edit-album' ? <><AlbumForm album={album} api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbum(next); navigate('album') }} /><button className="albums-secondary" onClick={() => navigate('cover')} type="button">Выбрать обложку</button><button className="albums-danger" disabled={busy || conflict} onClick={askDeleteAlbum} type="button">Удалить альбом</button></> : null}
-        {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => void mutation(async () => { const result = await api.update(album.id, { expectedVersion: album.version, coverSourceId: null }); setAlbum(result.album) })} type="button">Автоматическая обложка</button><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => void mutation(async () => { const result = await api.update(album.id, { expectedVersion: album.version, coverSourceId: source.id }); setAlbum(result.album) })} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</> : null}
+        {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => selectCover(null)} type="button">Автоматическая обложка</button><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => selectCover(source.id)} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</> : null}
         {album && (route === 'album' || route === 'overview') ? <>
           <header className="albums-toolbar"><button onClick={back} type="button">‹ {route === 'overview' ? 'Альбом' : 'Альбомы'}</button><span>{kindNames[album.kind]}</span>{editable ? <button aria-label="Настройки альбома" onClick={() => navigate('edit-album')} type="button">•••</button> : null}</header>
           <section className={`albums-intro albums-kind-${album.kind}`}><div><p className="albums-kicker">{album.kind === 'free' ? 'Семейная история' : albumChild?.name}</p><h1>{album.title}</h1>{album.description ? <p>{album.description}</p> : <p>{album.kind === 'year' ? 'Двенадцать глав, которые останутся с вами' : album.kind === 'workshop' ? 'Маленькие руки создают целый мир' : album.kind === 'events' ? 'Важные открытия — в своём ритме' : 'Самое дорогое — рядом'}</p>}<small>{album.entryCount}{album.kind === 'year' ? ' из 12 месяцев заполнено' : album.kind === 'workshop' ? ' работ' : ' историй'}</small></div></section>
