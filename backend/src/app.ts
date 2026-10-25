@@ -28,6 +28,7 @@ import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModul
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
+import { createControlModule } from './modules/control'
 import {
   apiCorsAllowedHeaders,
   browserUploadExposedHeaders,
@@ -111,6 +112,7 @@ export function createApp({
     requireAdmin: auth.requireAdmin,
     requireAuth: auth.requireAuth,
   })
+  const control = createControlModule({ db: prisma, env, requireAuth: auth.requireAuth, ownerReadRateLimit: adminUsersReadRateLimit })
   const uploads = createUploadsModule({
     backgroundTasks,
     db: prisma,
@@ -207,6 +209,7 @@ export function createApp({
   })
 
   app.route('/api/v1', auth.routes)
+  app.route('/api/v1', control.routes)
   if (auth.legacyTestRoutes) app.route('/api/auth', auth.legacyTestRoutes)
   app.route('/api/v1', families.routes)
   app.route('/api/v1', media.routes)

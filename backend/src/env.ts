@@ -84,6 +84,15 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   ADMIN_USERS_READ_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  CONTROL_ENABLED: booleanStringSchema,
+  CONTROL_OWNER_USER_IDS: z.string().default('').transform((value, ctx) => {
+    const ids = value.split(',').map((part) => part.trim()).filter(Boolean)
+    if (ids.some((id) => !z.string().uuid().safeParse(id).success)) {
+      ctx.addIssue({ code: 'custom', message: 'CONTROL_OWNER_USER_IDS must be comma-separated UUIDs' })
+      return []
+    }
+    return [...new Set(ids)]
+  }),
   SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().positive().max(60).default(20),
   // Which email adapter createEmailDelivery builds. 'console' prints the message instead of
   // sending it, so password reset can be followed locally; production refuses it below.
