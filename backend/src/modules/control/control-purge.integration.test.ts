@@ -64,7 +64,8 @@ async function clean() {
   await prisma.user.deleteMany()
 }
 
-async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000), putExpiresAt }: { purgeAfter?: Date; putExpiresAt?: Date } = {}) {
+async function seed({ purgeAfter, deletedAt = epoch, putExpiresAt }: { purgeAfter?: Date; deletedAt?: Date; putExpiresAt?: Date } = {}) {
+  const purgeTime = purgeAfter ?? new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000)
   await prisma.user.createMany({ data: [
     { id: actorId, displayName: 'Synthetic operator' },
     { id: targetId, displayName: 'Synthetic account to purge', email: 'purge@example.test', passwordHash: 'synthetic-hash' },
@@ -126,7 +127,7 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
   } })
   await prisma.controlUserDeletion.create({ data: {
     id: '79300000-0000-4000-8000-000000000001', targetUserId: targetId, actorUserId: actorId,
-    deletedAt: epoch, purgeAfter,
+    deletedAt, purgeAfter: purgeTime,
     families: { create: [{ familyId, originalStatus: 'active', restoreEligible: true }] },
   } })
   await prisma.mediaAsset.create({ data: {
@@ -453,7 +454,7 @@ describe('Control bounded deletion maintenance', () => {
   })
 
   test('maintenance refuses S3 before starting newly due irreversible deletion work', async () => {
-    await seed({ purgeAfter: epoch })
+    await seed({ purgeAfter: epoch, deletedAt: new Date(epoch.getTime() - 30 * 24 * 60 * 60 * 1000) })
     const localStorage = storage()
     const unsupportedStorage = new Proxy(localStorage, {
       get(target, property) {
