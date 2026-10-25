@@ -2963,7 +2963,9 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   mkdirSync(pgFixture, { recursive: true })
   writeFileSync(resolve(pgFixture, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
   writeFileSync(resolve(pgFixture, 'index.js'), `import { appendFileSync } from 'node:fs'
-appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' baseline=' + (process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS ?? '').split('\\n').length + ' candidate=' + (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').split('\\n').length + '\\n')
+const expectedBase = (process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS ?? '').trim().split('\\n')
+const expectedCandidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n')
+appendFileSync(process.env.FIXTURE_EVENTS, 'pg-module profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' phase=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE + ' baseline=' + expectedBase.length + ' candidate=' + expectedCandidate.length + ' suffix=' + expectedCandidate.slice(-3).map(line => line.split(':')[0]).join(',') + ' checksums=' + expectedCandidate.slice(-3).map(line => line.split(':')[1]).join(',') + '\\n')
 export class Client {
     async connect() {}
     async end() {}
