@@ -2830,7 +2830,7 @@ test('MAX video retirement recovery accepts only the measured filesystem executa
   if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
   fixtureWorktrees.push(driftDirectory)
   const mutated = commitSourceChange({ root: driftDirectory, sha: candidate.sha },
-    'backend/src/modules/control/control-purge.ts', '\n// synthetic MAX retirement compatibility drift\n',
+    'backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement compatibility drift\n',
     'mutate control retirement recovery executable input')
   const rejected = profile(mutated)
   assert.notEqual(rejected.status, 0, 'MAX retirement recovery must reject changed executable input')
