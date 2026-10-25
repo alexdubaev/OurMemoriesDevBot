@@ -3066,6 +3066,8 @@ describe('MAX durable capture', () => {
   test('preserves a previously stored private video when publishing its MAX reference', async () => {
     const fixture = await imageFixture('77153', 'mixed-out-of-order')
     const video = await mp4VideoFixture()
+    let sourceId: string | undefined
+    let preStoredMediaId: string | undefined
     try {
       const event: Extract<MaxInboundEvent, { kind: 'message_created' }> = {
         kind: 'message_created', senderId: '77153', recipientId: '900', messageId: 'max-mixed-two',
@@ -3076,11 +3078,13 @@ describe('MAX durable capture', () => {
       }
       const accepted = await accept(event)
       const source = await prisma.maxSource.findFirstOrThrow({ where: { messageId: event.messageId }, include: { attachments: true } })
+      sourceId = source.id
       const later = source.attachments.find((item) => item.position === 1)!
       const preStored = await fixture.media.ingestTelegram({ familyId: fixture.familyId, principal: { userId: fixture.userId, sessionId: `max:${source.id}` } }, {
         assetId: later.plannedMediaId, sourceKind: 'max', kind: 'video', contentType: 'video/mp4', byteSize: video.bytes.byteLength,
         body: new Blob([video.bytes.slice().buffer as ArrayBuffer]).stream(),
       })
+      preStoredMediaId = preStored.asset.id
       let videoDownloads = 0
       const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
         api: { ...fixture.api(event), getVideo: async () => ({ width: 320, height: 240, durationMs: 1000,
@@ -3096,7 +3100,59 @@ describe('MAX durable capture', () => {
       expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: preStored.asset.id } })).toMatchObject({ deletedAt: null, originalStatus: 'stored' })
       expect(videoDownloads).toBe(0)
       expect(await prisma.memory.count()).toBe(1)
-    } finally { await video.cleanup(); await fixture.cleanup() }
+    } finally {
+      try {
+        await video.cleanup()
+        const mediaId = preStoredMediaId
+        const ownedSourceId = sourceId
+        if (mediaId && ownedSourceId) {
+          const databaseUrlObject = new URL(databaseUrl!)
+          const databaseName = decodeURIComponent(databaseUrlObject.pathname.slice(1))
+          if (!new Set(['localhost', '127.0.0.1', '::1', '[::1]']).has(databaseUrlObject.hostname) || !databaseName.endsWith('_test')) {
+            throw new Error('Refusing MAX video fixture cleanup outside a loopback *_test database')
+          }
+          await prisma.$transaction(async (tx) => {
+            const [identity] = await tx.$queryRaw<Array<{ database_name: string }>>`SELECT current_database() AS database_name`
+            if (identity?.database_name !== databaseName || !identity.database_name.endsWith('_test')) {
+              throw new Error('Refusing MAX video fixture cleanup after database identity mismatch')
+            }
+            const asset = await tx.mediaAsset.findUnique({ where: { id: mediaId }, select: {
+              familyId: true, sourceKind: true, mediaKind: true, legacyVideoRetainedAt: true,
+            } })
+            if (!asset) return
+            if (asset.familyId !== fixture.familyId || asset.sourceKind !== 'max' || asset.mediaKind !== 'video' || asset.legacyVideoRetainedAt === null) {
+              throw new Error('Refusing to clear a non-owned or unheld MAX video asset')
+            }
+            const attachment = await tx.maxSourceAttachment.findFirst({
+              where: { plannedMediaId: mediaId, sourceId: ownedSourceId }, select: { id: true },
+            })
+            if (!attachment) throw new Error('Refusing to clean up a MAX video outside its synthetic source fixture')
+            if (await tx.maxVideoLegacyRetention.findUnique({ where: { mediaId } })) {
+              throw new Error('Refusing to delete a MAX video with a retention ledger row')
+            }
+            await tx.maxVideoReference.deleteMany({ where: { sourceId: ownedSourceId, familyId: fixture.familyId } })
+            await tx.memoryMedia.deleteMany({ where: { mediaId, familyId: fixture.familyId } })
+            await tx.maxSourceAttachment.updateMany({
+              where: { plannedMediaId: mediaId, sourceId: ownedSourceId }, data: { mediaId: null },
+            })
+            await tx.$executeRawUnsafe('ALTER TABLE media_assets DISABLE TRIGGER media_assets_protect_retained_max_video')
+            try {
+              const cleared = await tx.mediaAsset.updateMany({
+                where: { id: mediaId, familyId: fixture.familyId, sourceKind: 'max', mediaKind: 'video', legacyVideoRetainedAt: { not: null } },
+                data: { legacyVideoRetainedAt: null },
+              })
+              if (cleared.count !== 1) throw new Error('Could not clear the owned synthetic MAX video hold')
+            } finally {
+              await tx.$executeRawUnsafe('ALTER TABLE media_assets ENABLE TRIGGER media_assets_protect_retained_max_video')
+            }
+            const removed = await tx.mediaAsset.deleteMany({
+              where: { id: mediaId, familyId: fixture.familyId, sourceKind: 'max', mediaKind: 'video', legacyVideoRetainedAt: null },
+            })
+            if (removed.count !== 1) throw new Error('Could not remove the owned synthetic MAX video asset')
+          })
+        }
+      } finally { await fixture.cleanup() }
+    }
   })
 
   test('retries transient MAX video metadata resolution without duplicating stored photos', async () => {

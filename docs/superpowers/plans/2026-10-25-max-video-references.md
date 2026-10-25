@@ -53,9 +53,11 @@ MV1 checkpoint: `30a50e2eab3dd56fcf36c9806f67d1d1ee1ac142`. Targeted capture, fo
 
 At 2026-10-25T12:03Z a parallel accepted release moved all four production services to `0486e79947f6612d0eed05207c1cd30d0c4ace65` with 57 completed migrations. Its only change from the starting main is a Control browser test; preserve it during reconciliation. The guarded recovery target remains the existing immutable `33a0054` pair. Release compatibility work must prove the registered-reference inverse, fail closed for held tombstoned assets, and quiesce old writers after validated backup before applying the new SQL.
 
+At 12:50Z the accepted Android safe-area release moved the frontend to `0f2e8a432b5712d17b67d63f99439d16f33e7721`, retaining backend/worker/scheduler `0486e799`. Both accepted main changes are merged into this task. The MAX release now attests the exact working mixed recovery pair `0486e799` backend plus `0f2e8a43` frontend, including each immutable image ID and revision label; it refuses the older 33a pair for this candidate. The real frozen-0486 database roundtrip and exact-pair release regressions pass. Independent implementation review and the focused recovery-pair review found no P0/P1/P2; subsequent changes only repair synthetic test fixtures exposed by the 59-migration catalog and retention guard.
+
 ## MV3 — verification and delivery
 
-- [ ] Inspect actual complete diff and targeted evidence; run one fresh scoped independent Luna High review and one bounded fix pass.
+- [x] Inspect actual complete diff and targeted evidence; run one fresh scoped independent Luna High review and one bounded fix pass.
 - [ ] Reconcile fresh origin/main using merge if necessary, then exact-source FULL and dependency/security checks; publish evidence in one PR and squash merge with expected HEAD.
 - [ ] Confirm final main tree/source, perform required exact-release FULL and guarded Selectel release, preserving all accumulated changes and applicable recovery requirements.
 - [ ] After compatible code deployment, create and validate protected DB backup, freeze inventory/mapping, dry-run, apply only reverified entries in small batches and verify each batch.
