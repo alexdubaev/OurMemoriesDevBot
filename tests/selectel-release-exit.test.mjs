@@ -1074,7 +1074,7 @@ function runApplicationRollback(options = {}) {
       'bash() {',
       ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
       '   shift',
-      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
+      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} ${options.albumHistoryMocks ? 'rollback_verify_albums_migration_history() { echo "ALBUM_HISTORY:$1" >> "$FIXTURE_EVENTS"; return 0; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
       ' else command bash "$@"; fi',
       '}',
     ] : []),
@@ -1584,7 +1584,7 @@ test('albums recovery uses frozen production blobs and confines the pending-ledg
 
   const noMigrationClearsInheritedPhase = runApplicationRollback({ sourceRootOverride: source.root,
     sourceShaOverride: source.sha, target: rollbackHealthy, webappTarget: rollbackHealthy,
-    action: 'prepare_rollback', albumPhase: 'pre-sql', redeployFromScriptDir: true })
+    action: 'prepare_rollback', albumPhase: 'pre-sql', redeployFromScriptDir: true, albumHistoryMocks: true })
   assert.equal(noMigrationClearsInheritedPhase.status, 0, noMigrationClearsInheritedPhase.output)
   assert.match(noMigrationClearsInheritedPhase.events, /ALBUM_HISTORY:complete/)
   assert.doesNotMatch(noMigrationClearsInheritedPhase.events, /ALBUM_HISTORY:pre-sql/)
@@ -1592,7 +1592,7 @@ test('albums recovery uses frozen production blobs and confines the pending-ledg
   const migrationUsesLockedPrefixPhase = runApplicationRollback({ sourceRootOverride: source.root,
     sourceShaOverride: source.sha, target: rollbackHealthy, webappTarget: rollbackHealthy,
     action: 'prepare_rollback', runMigration: true, syntheticLock: true, redeployFromScriptDir: true,
-    processTimeoutMs: 60_000 })
+    processTimeoutMs: 60_000, albumHistoryMocks: true })
   assert.equal(migrationUsesLockedPrefixPhase.status, 0, migrationUsesLockedPrefixPhase.output)
   assert.match(migrationUsesLockedPrefixPhase.events, /ALBUM_HISTORY:pre-sql/)
 })
@@ -1970,7 +1970,7 @@ slowTest('comments rollback rejects protected service configuration drift', () =
 for (const [name, options, rejection] of [
   ['refuses a different target runtime', { target: rollbackBaseline, webappTarget: rollbackBaseline }, /application runtime differs from the verified rollback source/],
   ['refuses a different immutable image ID', { badImage: true }, /rollback backend image differs from the verified production artifact/],
-  ['refuses a mismatched OCI revision label', { badLabel: true }, /rollback image revision label mismatch/],
+  ['refuses a mismatched OCI revision label', { badLabel: true }, /rollback backend image revision label mismatch/],
   ['refuses unfinished migration state', { pending: true }, /rollback target cannot confirm completed migrations/],
   ['refuses unknown compatibility state', { stateError: true }, /rollback data compatibility state is unknown or migration is unfinished/],
 ]) {
