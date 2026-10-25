@@ -2805,6 +2805,37 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
 })
 
+test('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
+  const target = maxVideoRecoveryBackend
+  const expectedCompatibility = 'df407cf52c8fa4a495a11019d1917943b939177ccc813c10d1d5ddd6704f19c4'
+  const currentShaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+  assert.equal(currentShaResult.status, 0, currentShaResult.stdout + currentShaResult.stderr)
+  const candidate = { root, sha: currentShaResult.stdout.trim() }
+  assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
+  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+
+  const profile = (source, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(candidate)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  const s3Rejected = profile(candidate, 's3')
+  assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, candidate.sha], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitSourceChange({ root: driftDirectory, sha: candidate.sha },
+    'backend/src/modules/control/control-purge.ts', '\n// synthetic MAX retirement compatibility drift\n',
+    'mutate control retirement recovery executable input')
+  const rejected = profile(mutated)
+  assert.notEqual(rejected.status, 0, 'MAX retirement recovery must reject changed executable input')
+})
+
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
   const run = (mode) => {
     const events = resolve(root, '.scratch', `max-video-readiness-${process.pid}-${mode}.log`)

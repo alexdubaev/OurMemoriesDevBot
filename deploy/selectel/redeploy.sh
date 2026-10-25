@@ -502,7 +502,7 @@ guard_membership_transition() {
 		return 0
 	fi
 	[ ! -e "$MM0_FORWARD_MARKER" ] || die 'MM0 forward-only release requires guarded forward recovery'
-	local service running image tag count stopped_count=0
+	local service running image tag count max_video_profile stopped_count=0
 	if [ "$context" = promotion ]; then
 		for service in backend worker scheduler; do
 			running=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
@@ -511,7 +511,9 @@ guard_membership_transition() {
 			[ "$count" -eq 0 ] && stopped_count=$((stopped_count + 1))
 		done
 		if [ "$stopped_count" -eq 3 ]; then
-			[ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA")" = max-video ] ||
+			max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
+				die 'stopped-writer promotion requires the exact MAX video recovery profile'
+			[ "$max_video_profile" = max-video ] || [ "$max_video_profile" = max-video-retirement ] ||
 				die 'stopped-writer promotion requires the exact MAX video recovery profile'
 			validate_rollback_file
 			set -a
@@ -669,7 +671,8 @@ migrate() {
 		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
 		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 			die 'MAX video migration requires the exact reviewed source compatibility profile'
-		[ "$max_video_profile" = max-video ] || die 'MAX video migration requires the exact MAX-only video compatibility profile'
+		[ "$max_video_profile" = max-video ] || [ "$max_video_profile" = max-video-retirement ] ||
+			die 'MAX video migration requires the exact MAX-only video compatibility profile'
 		rollback_verify_max_video_migration_history pre-sql >/dev/null ||
 			die 'MAX video release requires the exact reviewed pre-SQL migration prefix'
 		quiesce_all_writers
@@ -839,7 +842,11 @@ rollback_source_compatibility_profile() {
 			# The exact accepted runtime supports the schema-59 composite key.
 			exact_compatibility_attestations=("d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:$MAX_VIDEO_COMPATIBILITY_FINGERPRINT:max-video"
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:a4d194873593bc2c0770e8ee491e295075cf9f60a39550f3f7bbaaebb55b17f9:max-video"
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:$MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT:max-video") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:$MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT:max-video"
+				# Control user-deletion recovery: only the measured filesystem-retirement
+				# executable tree can return to d299; the retirement profile also pins
+				# its effective storage driver through loadEnv below.
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:df407cf52c8fa4a495a11019d1917943b939177ccc813c10d1d5ddd6704f19c4:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -1527,7 +1534,7 @@ verify_application_rollback() {
 	fi
 	target_runtime=$(rollback_runtime_fingerprint "$target_runtime_revision") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = control ] || [ "$profile" = max-video ]; then
+	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
@@ -1535,6 +1542,9 @@ verify_application_rollback() {
 		if [ "$profile" = control ]; then
 			rollback_control_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
 				die 'control rollback host inputs differ from the exact reviewed blobs'
+		elif [ "$profile" = max-video-retirement ]; then
+			rollback_max_video_retirement_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
+				die 'MAX video retirement rollback requires the exact filesystem-backed host inputs'
 		else
 			rollback_max_video_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
 				die 'MAX video rollback installer and host inputs differ from the exact reviewed blobs'
@@ -1593,7 +1603,7 @@ verify_application_rollback() {
 	[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG")" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] ||
 		die 'rollback webapp image revision label mismatch'
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ]; } && [ "$migration_phase" = pre-sql ]; then
+	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ]; } && [ "$migration_phase" = pre-sql ]; then
 		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
 		# migrate status intentionally reports a pending reviewed additive suffix.
 		:
@@ -1620,7 +1630,7 @@ verify_application_rollback() {
 	elif [ "$profile" = control ]; then
 		rollback_verify_control_migration_history "$migration_phase" ||
 			die 'control rollback requires the exact reviewed migration history for this phase'
-	elif [ "$profile" = max-video ]; then
+	elif [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ]; then
 		local max_video_migration_state
 		max_video_migration_state=$(rollback_verify_max_video_migration_history "$migration_phase") ||
 			die 'MAX video rollback requires the exact reviewed migration history'
@@ -1632,12 +1642,15 @@ verify_application_rollback() {
 }
 
 rollback() {
+	local rollback_profile
 	verify_application_rollback complete || die 'application rollback compatibility could not be verified'
 	# The application verifier loads secrets in a subshell. Initialize the parent
 	# Compose credential context before recovery history/readiness and inverse.
 	load_runtime_secrets
-	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA")" = max-video ]; then
-		rollback_apply_max_video_recovery
+	if rollback_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA"); then
+		if [ "$rollback_profile" = max-video ] || [ "$rollback_profile" = max-video-retirement ]; then
+			rollback_apply_max_video_recovery
+		fi
 	fi
 	set -a
 	. "$ROLLBACK_ENV"
@@ -1669,8 +1682,11 @@ rollback() {
 		[ "$backend_count" -le 1 ] || die 'running backend service identity is ambiguous before rollback routing'
 		if [ "$backend_count" -eq 0 ]; then
 			[ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
-				[ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] &&
-				[ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG")" = max-video ] ||
+				[ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] ||
+				die 'stopped-backend restoration requires the exact verified MAX recovery pair'
+			rollback_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$PREVIOUS_BACKEND_IMAGE_TAG") ||
+				die 'stopped-backend restoration requires the exact verified MAX recovery pair'
+			[ "$rollback_profile" = max-video ] || [ "$rollback_profile" = max-video-retirement ] ||
 				die 'stopped-backend restoration requires the exact verified MAX recovery pair'
 			compose up -d --no-deps --force-recreate backend || die 'compatible rollback backend promotion failed before auth routing verification'
 			wait_backend_internal
