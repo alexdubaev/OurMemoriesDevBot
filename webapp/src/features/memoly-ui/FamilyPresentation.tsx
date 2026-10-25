@@ -153,7 +153,7 @@ function FamilyMemberRow({ member, currentUserId, onOpen }: { member: FamilyMemb
   const displayName = familyMemberName(member)
   const isCurrentUser = member.userId === currentUserId
   const accountName = member.displayName && member.displayName !== displayName ? member.displayName : null
-  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><MemberAvatarImage avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{isCurrentUser ? <span>Вы</span> : accountName ? <span>{accountName}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></button>
+  return <button aria-label={`Открыть участника: ${displayName}`} className="family-member-row" onClick={() => onOpen(member)} type="button"><MemberAvatarImage userId={member.userId} avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="family-member-avatar" name={displayName} size="lg" /><span className="family-member-copy"><strong>{displayName}</strong>{isCurrentUser ? <span>Вы</span> : accountName ? <span>{accountName}</span> : null}</span><span className={`family-role${member.role === 'viewer' && !member.isOwner ? ' viewer' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></button>
 }
 
 function formatBytes(value: number) { if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`; return `${(value / 1024 / 1024).toFixed(1)} МБ` }

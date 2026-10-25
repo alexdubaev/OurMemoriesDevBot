@@ -402,7 +402,7 @@ export function FeedPage({
 
   return (
     <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
-    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
+    <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ id: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id, path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
       header={multiChild ? selectedChild
@@ -435,6 +435,7 @@ export function FeedPage({
           isDeleteSource={deleteTarget?.id === memory.id}
           authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
           authorName={memory.publicationAttribution?.name ?? memory.author.name}
+          authorUserId={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id}
           authorKind={memory.publicationAttribution?.kind ?? 'user'}
           authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath}
           authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}
@@ -861,7 +862,7 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
           <div className="memoly-viewer-author">
             {isChannelAuthor
               ? <span className="author-avatar publication-channel-avatar"><ChildAvatar avatarCrop={childAvatarCrop ?? null} avatarUrl={childAvatarUrl ?? null} name={childName} size="feed-author" status={childAvatarStatus} /></span>
-              : <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={authorAvatarFallback} />}
+              : <FeedAuthorAvatar userId={isChannelAuthor ? null : activeMemory.author.id} avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={authorAvatarFallback} />}
             <div className="memoly-viewer-author-copy">
               <Typography as="span" variant="memoryMeta">{authorName}</Typography>
               <Typography as="span" variant="memoryMeta">{presentation?.dateLabel ?? timeLabel(activeMemory.occurredAt, familyTimezone)}</Typography>
@@ -1005,6 +1006,7 @@ function MemoryDeletePreview({ childAvatarCrop, childAvatarStatus, childAvatarUr
       actions={null}
       authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
       authorName={memory.publicationAttribution?.name ?? memory.author.name}
+      authorUserId={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id}
       authorKind={memory.publicationAttribution?.kind ?? 'user'}
       authorAvatarPath={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath}
       authorAvatarCrop={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarCrop}

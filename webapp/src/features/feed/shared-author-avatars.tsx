@@ -1,19 +1,20 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { AvatarPhoto, MemberAvatarImage, type AvatarCrop } from '@/features/avatar'
+import { AvatarPhoto, MemberAvatarImage, type AvatarCrop, useMemberAvatarDirectory } from '@/features/avatar'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { eligiblePrivateImage, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import type { AuthenticatedTransport } from '@/platform/api'
 
-type AuthorAvatar = { path: string | null | undefined }
+type AuthorAvatar = { id?: string | null; path: string | null | undefined }
 type SharedAvatarContextValue = { scopeKey: string; familyId: string; urls: Map<string, string | null> }
 const SharedAuthorAvatarContext = createContext<SharedAvatarContextValue | null>(null)
 
-function uniqueEligibleAuthorAvatarPaths(authors: AuthorAvatar[], familyId: string) {
+function uniqueEligibleAuthorAvatarPaths(authors: AuthorAvatar[], familyId: string, resolvePath: (author: AuthorAvatar) => string | null) {
   const unique = new Set<string>()
   for (const author of authors) {
-    if (!author.path || eligiblePrivateImage(author.path)?.familyId !== familyId) continue
-    unique.add(author.path)
+    const path = resolvePath(author)
+    if (!path || eligiblePrivateImage(path)?.familyId !== familyId) continue
+    unique.add(path)
   }
   return [...unique]
 }
@@ -34,7 +35,13 @@ export function FeedSharedAuthorAvatars({ children, authors, userId, familyId, m
   const identityGeneration = privateCacheIdentityGeneration()
   const familyGeneration = privateFamilyCacheGeneration(userId, familyId)
   const scopeKey = sharedAuthorAvatarScopeKey(userId, familyId, membershipEpoch, identityGeneration, familyGeneration)
-  const eligiblePaths = useMemo(() => uniqueEligibleAuthorAvatarPaths(authors, familyId), [authors, familyId])
+  const directory = useMemberAvatarDirectory()
+  const resolvePath = useCallback((author: AuthorAvatar) => {
+    if (!directory) return author.path ?? null
+    if (!author.id) return null
+    return directory.resolve(author.id)?.avatarPath ?? null
+  }, [directory])
+  const eligiblePaths = useMemo(() => uniqueEligibleAuthorAvatarPaths(authors, familyId, resolvePath), [authors, familyId, resolvePath])
   const [urls, setUrls] = useState<Map<string, string | null>>(() => new Map())
   const setUrl = useCallback((key: string, url: string | null) => {
     setUrls((current) => {
@@ -73,7 +80,8 @@ function SharedAuthorAvatarLoader({ mapKey, path, transport, userId, onChange }:
   return null
 }
 
-export function FeedAuthorAvatar({ avatarPath, avatarCrop, className, name, fallback }: {
+export function FeedAuthorAvatar({ userId, avatarPath, avatarCrop, className, name, fallback }: {
+  userId?: string | null
   avatarPath: string | null | undefined
   avatarCrop?: AvatarCrop | null
   className: string
@@ -81,11 +89,15 @@ export function FeedAuthorAvatar({ avatarPath, avatarCrop, className, name, fall
   fallback: ReactNode
 }) {
   const avatarContext = useContext(SharedAuthorAvatarContext)
+  const directory = useMemberAvatarDirectory()
+  const directoryEntry = directory ? (userId ? directory.resolve(userId) : null) : undefined
+  const resolvedPath = directoryEntry === undefined ? avatarPath : directoryEntry?.avatarPath ?? null
+  const resolvedCrop = directoryEntry === undefined ? avatarCrop : directoryEntry?.avatarCrop ?? null
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
-  if (avatarContext === null) return <MemberAvatarImage avatarPath={avatarPath} avatarCrop={avatarCrop} className={className} name={name} fallback={fallback} />
-  if (!avatarPath || eligiblePrivateImage(avatarPath)?.familyId !== avatarContext.familyId) return <>{fallback}</>
-  const url = avatarContext.urls.get(`${avatarContext.scopeKey}:${avatarPath}`)
+  if (avatarContext === null) return <MemberAvatarImage userId={userId} avatarPath={avatarPath} avatarCrop={avatarCrop} className={className} name={name} fallback={fallback} />
+  if (!resolvedPath || eligiblePrivateImage(resolvedPath)?.familyId !== avatarContext.familyId) return <>{fallback}</>
+  const url = avatarContext.urls.get(`${avatarContext.scopeKey}:${resolvedPath}`)
   return url && failedUrl !== url
-    ? <AvatarPhoto alt="" className={className} crop={avatarCrop} onError={() => setFailedUrl(url)} src={url} />
+    ? <AvatarPhoto alt="" className={className} crop={resolvedCrop} onError={() => setFailedUrl(url)} src={url} />
     : <>{fallback}</>
 }

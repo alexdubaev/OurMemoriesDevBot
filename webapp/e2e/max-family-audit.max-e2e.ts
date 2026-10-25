@@ -139,6 +139,119 @@ test('MAX invited viewer sees existing note, photo album and voice history after
   await guestContext.close()
 })
 
+test('MAX-FULL: member avatar directory updates an already-open family and comment view', async ({ browser, page }, testInfo) => {
+  test.setTimeout(180_000)
+  const ownerId = 7_600_000 + Math.floor(Math.random() * 100_000)
+  const ownerToken = await signInMax(page, { id: ownerId, first_name: 'Avatar owner' })
+  const familyResponse = await page.request.post('/api/v1/families', {
+    headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { name: 'Avatar sync family', timezone: 'Europe/Moscow' },
+  })
+  expect(familyResponse.status()).toBe(201)
+  const family = (await familyResponse.json() as ApiFamily).family
+  const childAvatar = await uploadPng(page, ownerToken, family.id, 'child_avatar')
+  const childResponse = await page.request.put(`/api/v1/families/${family.id}/child`, {
+    headers: { Authorization: `Bearer ${ownerToken}` },
+    data: { name: 'Avatar child', birthDate: '2024-01-02', sex: 'girl', avatarMediaId: childAvatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
+  })
+  expect(childResponse.status()).toBe(200)
+  const childId = (await childResponse.json() as ApiChild).child.id
+  const memoryResponse = await page.request.post(`/api/v1/families/${family.id}/memories`, {
+    headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { kind: 'note', childId, body: 'Avatar sync note', occurredAt: '2026-01-02T10:00:00.000Z' },
+  })
+  expect(memoryResponse.status()).toBe(201)
+  const memoryId = (await memoryResponse.json() as ApiMemory).id
+  const commentResponse = await page.request.post(`/api/v1/families/${family.id}/memories/${memoryId}/comments`, {
+    headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { body: 'Avatar sync comment' },
+  })
+  expect(commentResponse.status()).toBe(201)
+  const inviteResponse = await page.request.post(`/api/v1/families/${family.id}/invites`, {
+    headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { role: 'viewer' },
+  })
+  expect(inviteResponse.status()).toBe(201)
+  const invite = (await inviteResponse.json() as { rawToken: string }).rawToken
+
+  const viewerContext = await browser.newContext()
+  const viewerPage = await viewerContext.newPage()
+  const avatarReads: string[] = []
+  const directoryReads: number[] = []
+  viewerPage.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (/\/media\/avatars\//.test(path)) avatarReads.push(path)
+    if (path === `/api/v1/families/${family.id}/members`) directoryReads.push(Date.now())
+  })
+  await viewerContext.addInitScript((data: string) => {
+    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
+  }, signedMaxInitData({ id: ownerId + 1, first_name: 'Avatar viewer' }, randomUUID(), `invite_${invite}`))
+  await viewerPage.goto('/')
+  await viewerPage.getByRole('button', { name: 'Продолжить' }).click()
+  await expect(viewerPage.getByRole('button', { name: 'Присоединиться' })).toBeVisible({ timeout: 15_000 })
+  await expect(viewerPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
+  await viewerPage.getByRole('button', { name: 'Присоединиться' }).click()
+  await expect(viewerPage.getByText('Avatar sync note', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await viewerPage.getByRole('button', { name: 'Семья' }).click()
+  const ownerRow = viewerPage.locator('.family-member-row').filter({ hasText: 'Avatar owner' })
+  await expect(ownerRow).toBeVisible()
+  await expect(ownerRow.locator('img')).toHaveCount(0)
+  await viewerPage.getByRole('button', { name: 'Лента' }).click()
+  const card = viewerPage.locator(`[data-memory-id="${memoryId}"]`)
+  const cardAvatar = card.locator('.author-avatar img')
+  await expect(cardAvatar).toHaveCount(0)
+  await card.locator('.comments-entry').click()
+  const comment = viewerPage.locator('.comments-item').filter({ hasText: 'Avatar sync comment' })
+  await expect(comment).toBeVisible()
+  const commentAvatar = comment.locator('.comments-avatar img')
+  await expect(commentAvatar).toHaveCount(0)
+
+  await uploadProfileAvatar(page, ownerToken, { x: 0, y: 0, width: 1, height: 1 })
+  await expect(commentAvatar).toBeVisible({ timeout: 45_000 })
+  await viewerPage.screenshot({ path: testInfo.outputPath('member-avatar-sync-comments-visible.png'), fullPage: true })
+  await expect(cardAvatar).toBeVisible({ timeout: 45_000 })
+  await viewerPage.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await viewerPage.getByRole('button', { name: 'Семья' }).click()
+  await expect(ownerRow.locator('img')).toBeVisible()
+  await viewerPage.screenshot({ path: testInfo.outputPath('member-avatar-sync-family-visible.png'), fullPage: true })
+  await ownerRow.click()
+  await expect(viewerPage.getByRole('region', { name: 'Профиль владельца' }).locator('.member-profile-avatar img')).toBeVisible()
+  await viewerPage.getByRole('button', { name: 'Назад к семье' }).click()
+
+  await viewerPage.getByRole('button', { name: 'Лента' }).click()
+  await card.locator('.comments-entry').click()
+  await expect(commentAvatar).toBeVisible()
+  const firstImageUrl = await commentAvatar.getAttribute('src')
+  expect(firstImageUrl).toBeTruthy()
+  await uploadProfileAvatar(page, ownerToken, { x: 0, y: 0, width: 1, height: 1 })
+  await expect(commentAvatar).toBeVisible({ timeout: 45_000 })
+  await expect.poll(() => commentAvatar.getAttribute('src'), { timeout: 45_000 }).not.toBe(firstImageUrl)
+  const replacementImageUrl = await commentAvatar.getAttribute('src')
+  expect(replacementImageUrl).toBeTruthy()
+
+  const current = await currentProfileAvatar(page, ownerToken)
+  if (!current.avatar) throw new Error('Uploaded avatar is missing before crop update')
+  const beforeCropStyle = await commentAvatar.getAttribute('style')
+  const cropResponse = await page.request.post('/api/uploads/avatar/crop', {
+    headers: { Authorization: `Bearer ${ownerToken}` },
+    data: { avatarId: current.avatar.id, expectedUpdatedAt: current.avatar.updatedAt, avatarCrop: { x: 0.25, y: 0.1, width: 0.5, height: 0.5 } },
+  })
+  expect(cropResponse.status()).toBe(200)
+  await expect.poll(() => commentAvatar.getAttribute('style'), { timeout: 45_000 }).not.toBe(beforeCropStyle)
+  expect(await commentAvatar.getAttribute('src')).toBe(replacementImageUrl)
+
+  const removed = await page.request.delete('/api/uploads/avatar', { headers: { Authorization: `Bearer ${ownerToken}` } })
+  expect(removed.status()).toBe(200)
+  await expect(comment.locator('.comments-avatar img')).toHaveCount(0, { timeout: 45_000 })
+  await viewerPage.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await viewerPage.getByRole('button', { name: 'Семья' }).click()
+  await expect(ownerRow.locator('img')).toHaveCount(0, { timeout: 45_000 })
+  expect(avatarReads.length).toBe(2)
+  expect(new Set(avatarReads).size).toBe(avatarReads.length)
+  expect(directoryReads.length).toBeLessThanOrEqual(14)
+  await viewerContext.close()
+})
+
 test('MAX owner retries a lost invite response with one idempotency key and invited viewer sees pre-join history', async ({ browser, page }, testInfo) => {
   const ownerMaxId = 7_500_000 + Math.floor(Math.random() * 100_000)
   const ownerInitData = signedMaxInitData({ id: ownerMaxId, first_name: 'Audit owner' }, randomUUID(), '')
@@ -759,6 +872,30 @@ async function uploadPng(page: import('@playwright/test').Page, token: string, f
   const finalize = await page.request.post(`/api/v1/families/${familyId}/uploads/${ticket.upload.uploadId}/finalize`, { headers: { Authorization: `Bearer ${token}` } })
   expect(finalize.status()).toBe(200)
   return ticket.assetId as string
+}
+
+async function uploadProfileAvatar(page: import('@playwright/test').Page, token: string, avatarCrop: { x: number; y: number; width: number; height: number }) {
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const reserve = await page.request.post('/api/uploads/avatar', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { contentType: 'image/png', byteSize: bytes.byteLength },
+  })
+  expect(reserve.status()).toBe(201)
+  const ticket = (await reserve.json() as { upload: { uploadId: string; url: string; headers: Record<string, string> } }).upload
+  const transfer = await page.request.put(ticket.url, { headers: ticket.headers, data: bytes })
+  expect(transfer.status()).toBe(200)
+  const finalized = await page.request.post(`/api/uploads/avatar/${ticket.uploadId}/finalize`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { avatarCrop },
+  })
+  expect(finalized.status()).toBe(200)
+  return await finalized.json() as { avatar: { id: string; updatedAt: string } }
+}
+
+async function currentProfileAvatar(page: import('@playwright/test').Page, token: string) {
+  const response = await page.request.get('/api/uploads/avatar', { headers: { Authorization: `Bearer ${token}` } })
+  expect(response.status()).toBe(200)
+  return await response.json() as { avatar: { id: string; updatedAt: string } | null }
 }
 
 async function uploadMedia(page: import('@playwright/test').Page, token: string, familyId: string, kind: 'voice', contentType: 'audio/ogg', bytes: Buffer) {

@@ -97,7 +97,7 @@ export function MemberProfile({ member, actions, busy, currentUserId, onBack, on
 }
 
 function MemberProfileHero({ displayName, member }: { displayName: string; member: FamilyMemberDto }) {
-  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><MemberAvatarImage avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
+  return <section className="member-profile-hero"><div className="member-profile-avatar-wrap"><MemberAvatarImage userId={member.userId} avatarPath={member.avatarPath} avatarCrop={member.avatarCrop} className="member-profile-avatar" name={displayName} size="xl" /></div><h2>{displayName}</h2><p>Имя профиля: {member.displayName ?? 'Участник семьи'}</p><span className={`member-profile-role-badge${member.isOwner ? ' owner' : ''}`}>{roleLabel(member.role, member.isOwner)}</span></section>
 }
 
 function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: boolean; displayName: string; member: FamilyMemberDto; onNameSaved: (name: string | null) => void }) {

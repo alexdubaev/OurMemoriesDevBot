@@ -43,6 +43,7 @@ export type MemoryCardPresentationProps = {
   actions: ReactNode
   authorInitials: string
   authorName: string
+  authorUserId?: string | null
   authorAvatarPath?: string | null
   authorAvatarCrop?: { x: number; y: number; width: number; height: number } | null
   authorKind?: 'channel' | 'user'
@@ -73,6 +74,7 @@ export function MemoryCardPresentation({
   actions,
   authorInitials,
   authorName,
+  authorUserId,
   authorAvatarPath,
   authorAvatarCrop,
   authorKind = 'user',
@@ -261,7 +263,7 @@ export function MemoryCardPresentation({
       <header className="memory-header" data-slot="memoly-author-row">
         {authorKind === 'channel'
           ? <span aria-hidden="true" className="author-avatar publication-channel-avatar"><ChildAvatar avatarCrop={childAvatarCrop ?? null} avatarUrl={childAvatarUrl ?? null} name={childName ?? ''} size="feed-author" status={childAvatarStatus} /></span>
-          : <FeedAuthorAvatar avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />}
+          : <FeedAuthorAvatar userId={authorUserId} avatarPath={authorAvatarPath} avatarCrop={authorAvatarCrop} className="author-avatar" name={authorName} fallback={<span aria-hidden="true" className="author-avatar"><Typography as="span" className="author-initials" variant="memoryMeta">{authorInitials}</Typography></span>} />}
         <div className="author-meta"><Typography as="div" className="author-name" variant="memoryMeta">{authorName}</Typography><Typography as="div" className="author-time" tone="muted" variant="memoryMeta">{occurredTime}</Typography></div>
         <MemoryActions>{mode === 'delete-preview' ? null : actions}</MemoryActions>
       </header>
