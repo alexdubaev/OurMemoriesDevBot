@@ -691,6 +691,21 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   write receives its expected child tag. This targeted compatibility probe is
   evidence for the exact source pin, not a FULL release-profile result.
 
+- The exact album-cover selection production fingerprint
+  `e240036fda08d2067eeeb9d233ede35fb4aebde8476b34f2bab67f2f442b0c1b` is
+  anchored to the unchanged full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92`
+  runtime and permits only the existing healthy
+  `33a0054c3c71372aa5509ee8ebfa4578ad512ea1` target and image pair. Its fixture
+  is reconstructed from deployed source `ccd3b911222d00769a099b998d8eef2665acd9d4`
+  plus the literal frozen `webapp/src/features/albums/AlbumsPage.tsx` blob
+  `53553102af69a4959cef2e89a30c269afbe1a72f`; no producer-commit reachability
+  is required. Backend, dependencies, schema, contracts and migration inputs are
+  unchanged, so the existing 56-migration wishlist ledger rules remain in force.
+  The pin records source-input compatibility only. Before promotion, this exact
+  candidate requires the current → frozen 33a → current PostgreSQL probe and the
+  required FULL profile; the source pin alone does not establish database
+  compatibility or a release-profile PASS.
+
 - Candidate `a33d220a2edd5c5c883770f793e398fc30752a3d` has measured executable
   compatibility fingerprint
   `e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67` for the

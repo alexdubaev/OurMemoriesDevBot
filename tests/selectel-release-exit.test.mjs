@@ -2215,13 +2215,12 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
   const expectedCompatibility = 'cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
-  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
 
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
     'apply exact frozen child linked-family production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
@@ -2246,5 +2245,50 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
       `mutate frozen child production input ${relativePath}`)
     const rejected = profile(mutated)
     assert.notEqual(rejected.status, 0, `changed child production input must not inherit recovery permission: ${relativePath}`)
+  }
+})
+
+test('album-cover selection recovery pin accepts only its frozen deployed-source fixture', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const baseline = 'ccd3b911222d00769a099b998d8eef2665acd9d4'
+  const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedCompatibility = 'e240036fda08d2067eeeb9d233ede35fb4aebde8476b34f2bab67f2f442b0c1b'
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
+    '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
+  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-album-cover-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, [
+    ['webapp/src/features/albums/AlbumsPage.tsx', '53553102af69a4959cef2e89a30c269afbe1a72f'],
+  ], 'overlay exact frozen album-cover selection production blob')
+  assert.equal(spawnSync('git', ['rev-parse', `${source.sha}^`], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), baseline)
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+
+  const profile = (candidate) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'wishlist')
+
+  for (const [relativePath, marker] of [
+    ['webapp/src/features/albums/AlbumsPage.tsx', '\n// synthetic frozen album-page drift\n'],
+    ['backend/src/modules/albums/application/album-service.ts', '\n// synthetic backend compatibility drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-album-cover-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+      `mutate frozen album-cover production input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `changed production input must not inherit recovery permission: ${relativePath}`)
   }
 })
