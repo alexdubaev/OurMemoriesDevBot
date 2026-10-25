@@ -40,12 +40,14 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  portalContainer?: HTMLElement | null
 }) {
   return (
     <Dialog {...props}>
@@ -59,6 +61,7 @@ function CommandDialog({
           className
         )}
         showCloseButton={showCloseButton}
+        portalContainer={portalContainer}
       >
         {children}
       </DialogContent>
@@ -68,8 +71,9 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  showSearchIcon = true,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & { showSearchIcon?: boolean }) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
       <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
@@ -81,9 +85,7 @@ function CommandInput({
           )}
           {...props}
         />
-        <InputGroupAddon>
-          <HugeiconsIcon icon={SearchIcon} strokeWidth={2} className="size-4 shrink-0 opacity-50" />
-        </InputGroupAddon>
+        {showSearchIcon && <InputGroupAddon><HugeiconsIcon icon={SearchIcon} strokeWidth={2} className="size-4 shrink-0 opacity-50" /></InputGroupAddon>}
       </InputGroup>
     </div>
   )
@@ -150,8 +152,9 @@ function CommandSeparator({
 function CommandItem({
   className,
   children,
+  hideCheckIcon = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Item>) {
+}: React.ComponentProps<typeof CommandPrimitive.Item> & { hideCheckIcon?: boolean }) {
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
@@ -162,7 +165,7 @@ function CommandItem({
       {...props}
     >
       {children}
-      <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+      {!hideCheckIcon && <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />}
     </CommandPrimitive.Item>
   )
 }

@@ -152,6 +152,12 @@ function isTestStage(name) {
 }
 
 function testEvidenceError(name, output) {
+  if (/host-sampler Python/i.test(name)) {
+    const ran = Number(output.match(/^Ran\s+(\d+)\s+tests?\s+in\s+/im)?.[1] ?? 0)
+    if (/\(skipped\s*=\s*\d+\)/i.test(output)) return `${name} reported skipped required Python test(s).`
+    if (ran === 0 || !/^OK\s*$/im.test(output)) return `${name} did not report a positive unittest run followed by OK.`
+    return null
+  }
   if (/journeys?/i.test(name)) {
     const passed = Number(output.match(/(\d+)\s+passed\b/i)?.[1] ?? 0)
     const skipped = Number(output.match(/(\d+)\s+skipped\b/i)?.[1] ?? 0)
@@ -299,7 +305,7 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
     commands.push(['Architecture boundaries', ['bun', ['run', 'architecture:check']]])
   }
   if (profile === 'full') {
-    return [
+    const full = [
       ['Committed diff whitespace validation', ['git', ['diff', '--check', `${base}...HEAD`]]],
       ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]],
       ['Architecture boundaries', ['bun', ['run', 'architecture:check']]],
@@ -318,7 +324,13 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
       ['Website boundary tests', ['bun', ['run', 'test:website']]],
       ['MAX auth/session PostgreSQL integration', ['bun', ['run', '--cwd', 'backend', 'test:integration', '--', '--max-only']]],
       ['MAX Web/PWA browser journeys', ['bun', ['run', 'e2e:webapp:max']]],
+      ['Control owner browser journeys', ['bun', ['run', '--cwd', 'webapp', 'e2e', '--config=playwright.control.config.ts']]],
     ]
+    if (paths.includes('deploy/selectel/control/sampler.py')) {
+      const python = process.platform === 'win32' ? 'python' : 'python3'
+      full.splice(full.length - 1, 0, ['Control host-sampler Python tests', [python, ['-B', '-m', 'unittest', 'discover', '-s', 'deploy/selectel/control', '-p', '*test*.py']]])
+    }
+    return full
   }
   if (commands.length === 1) throw new Error(`No mandatory STANDARD checks mapped for changed paths: ${paths.join(', ') || '(none)'}`)
   return dedupeCommands(commands)

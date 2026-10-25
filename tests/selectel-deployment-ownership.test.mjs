@@ -92,6 +92,11 @@ ${redeploySource}
 preflight() { :; }
 validate_database_target() { :; }
 migration_status() { :; }
+python3() {
+  [ "$#" -eq 3 ] && [ "$1" = /opt/memoly/control/sampler.py ] &&
+    [ "$2" = --write-backup-evidence ] && [[ "$3" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 97
+  printf 'BACKUP_EVIDENCE_WRITER:%s\n' "$3"
+}
 die() {
   cp -- "$job_log" "$JOB_LOG_CAPTURE"
   stat -c '%a' "$job_log" > "$JOB_LOG_MODE_CAPTURE"
@@ -126,4 +131,53 @@ migrate
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /synthetic-secret|do-not-print|DATABASE_URL/)
   assert.match(privateOutput, /synthetic-secret=do-not-print/)
   assert.equal(mode, '600')
+})
+
+test('database backup publishes protected evidence only after a validated archive and blocks migration if that write fails', () => {
+  const backupHarness = (receiptFailure) => `
+SERVER_ROOT=$(mktemp -d /tmp/memoly-selectel-backup-receipt.XXXXXX)
+${redeploySource}
+trap 'rm -rf -- "$SERVER_ROOT"' EXIT
+die() {
+  printf 'DIE:%s\\n' "$*" >&2
+  cat "$SERVER_ROOT/evidence-call" 2>/dev/null || :
+  printf 'ARCHIVES:%s\\n' "$(find "$SERVER_ROOT/backups" -maxdepth 1 -type f -name 'postgres-*.dump' | wc -l | tr -d ' ')"
+  exit 1
+}
+require_command() { [ "$1" = python3 ] || command -v "$1" >/dev/null; }
+python3() {
+  [ "$#" -eq 3 ] && [ "$1" = /opt/memoly/control/sampler.py ] &&
+    [ "$2" = --write-backup-evidence ] && [[ "$3" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 97
+  printf 'BACKUP_EVIDENCE_WRITER:%s\\n' "$3" > "$SERVER_ROOT/evidence-call"
+  [ '${receiptFailure}' != true ]
+}
+date() {
+  case "$*" in
+    '-u +%Y%m%dT%H%M%SZ'|'-u +%Y-%m-%dT%H:%M:%SZ') command date -u "$@" ;;
+    *) return 98 ;;
+  esac
+}
+compose() {
+  case "$*" in
+    *pg_dump*) printf 'PGDMP'; return 0 ;;
+    *pg_restore*) printf 'TOC\\n'; return 0 ;;
+    *deploy-selectel-database.ts*) printf 'MIGRATION_ATTEMPTED\\n'; return 42 ;;
+  esac
+  return 0
+}
+MEMOLY_PRODUCT_SHA=91735e8b1c52cdcd42c0051dad945d96aa9f0db2
+`
+
+  const accepted = runLinuxRoot(`${backupHarness(false)}backup_database\ncat "$SERVER_ROOT/evidence-call"\nprintf 'ARCHIVE_MODE:%s\\n' "$(stat -c '%a' "$SERVER_ROOT"/backups/postgres-*.dump)"`, { timeout: 30_000 })
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.match(accepted.stdout, /BACKUP_EVIDENCE_WRITER:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)
+  assert.match(accepted.stdout, /Database backup created and validated:/)
+  assert.match(accepted.stdout, /ARCHIVE_MODE:600/)
+
+  const rejected = runLinuxRoot(`${backupHarness(true)}preflight() { :; }\nvalidate_database_target() { :; }\nmigration_status() { :; }\nmigrate`, { timeout: 30_000 })
+  assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr)
+  assert.match(rejected.stdout, /BACKUP_EVIDENCE_WRITER:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)
+  assert.match(rejected.stderr, /database backup evidence could not be updated; the validated archive is preserved and migration was not attempted/)
+  assert.match(rejected.stdout, /ARCHIVES:1/)
+  assert.doesNotMatch(`${rejected.stdout}\n${rejected.stderr}`, /MIGRATION_ATTEMPTED/)
 })

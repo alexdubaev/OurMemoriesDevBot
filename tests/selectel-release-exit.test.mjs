@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
-import { bashExecutable, gitBashPath } from './bash-runtime.mjs'
+import { bashExecutable, gitBashPath, linuxPath, runLinuxRoot } from './bash-runtime.mjs'
 import './selectel-frontend-release.test.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -72,6 +72,121 @@ test('documented bash -s release entry reaches SHA validation before creating a 
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
+})
+
+slowTest('Control sampler installer path guard rejects symlink and writable ancestors before installation', () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/ci-release.sh'))
+  const repository = linuxPath(root)
+  const gitDirectory = linuxPath(spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: root, encoding: 'utf8' }).stdout.trim())
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+fixture=$(mktemp -d /root/control-path-guard.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+chmod 0755 "$fixture"
+mkdir -m 0755 "$fixture/safe"
+touch "$fixture/safe/sampler.py"
+assert_root_owned_path "$fixture/safe/sampler.py" file
+ln -s "$fixture/safe" "$fixture/link"
+if ( assert_root_owned_path "$fixture/link/sampler.py" file ) >/dev/null 2>&1; then
+  echo 'symlink ancestor was accepted' >&2
+  exit 31
+fi
+mkdir -m 0775 "$fixture/writable"
+touch "$fixture/writable/sampler.py"
+if ( assert_root_owned_path "$fixture/writable/sampler.py" file ) >/dev/null 2>&1; then
+  echo 'writable ancestor was accepted' >&2
+  exit 32
+fi
+mkdir -m 0755 "$fixture/bin"
+printf '#!/bin/sh\\nexit 0\\n' > "$fixture/bin/python3.12"
+chmod 0755 "$fixture/bin/python3.12"
+ln -s python3.12 "$fixture/bin/python3"
+assert_root_controlled_interpreter "$fixture/bin/python3"
+chmod 0664 "$fixture/bin/python3.12"
+if ( assert_root_controlled_interpreter "$fixture/bin/python3" ) >/dev/null 2>&1; then
+  echo 'unsafe resolved interpreter was accepted' >&2
+  exit 33
+fi
+printf 'PASS: root-owned non-writable path accepted; symlink and writable ancestors rejected\\n'
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /symlink and writable ancestors rejected/)
+  assert.match(release, /control_root=\/opt\/memoly\/control metrics_dir=\/opt\/memoly\/control\/metrics/)
+  assert.match(release, /install_pinned_control_host_inputs "\$control_root" "\$systemd_dir"/)
+  assert.match(release, /"deploy\/selectel\/control\/sampler\.py:\$control_root\/sampler\.py:0644"/)
+
+  const install = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+APP_ROOT='${repository}'
+export GIT_DIR='${gitDirectory}' GIT_WORK_TREE='${repository}'
+PRODUCT_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
+fixture=$(mktemp -d /root/control-installer-guard.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+mkdir -m 0755 "$fixture/control" "$fixture/systemd"
+install_pinned_control_host_inputs "$fixture/control" "$fixture/systemd"
+for path in "$fixture/control/sampler.py" "$fixture/systemd/memoly-control-sampler.service" "$fixture/systemd/memoly-control-sampler.timer"; do
+  [ "$(stat -c '%a' -- "$path")" = 644 ] || exit 34
+done
+printf 'PASS: all pinned host files copied with verified bytes and mode 0644\\n'
+`)
+  assert.equal(install.status, 0, install.stdout + install.stderr)
+  assert.match(install.stdout, /verified bytes and mode 0644/)
+})
+
+slowTest('Control rollback readiness requires root-owned installed artifacts with exact sampler and unit bytes', () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
+  const repository = linuxPath(root)
+  const gitDirectory = linuxPath(spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: root, encoding: 'utf8' }).stdout.trim())
+  const pins = Object.fromEntries([
+    ['sampler', 'deploy/selectel/control/sampler.py'],
+    ['service', 'deploy/selectel/control/memoly-control-sampler.service'],
+    ['timer', 'deploy/selectel/control/memoly-control-sampler.timer'],
+  ].map(([name, path]) => [name, spawnSync('git', ['hash-object', path], { cwd: root, encoding: 'utf8' }).stdout.trim()]))
+  assert.match(pins.sampler, /^[0-9a-f]{40}$/)
+  assert.match(pins.service, /^[0-9a-f]{40}$/)
+  assert.match(pins.timer, /^[0-9a-f]{40}$/)
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+APP_ROOT='${repository}'
+export GIT_DIR='${gitDirectory}' GIT_WORK_TREE='${repository}'
+CONTROL_PIN_SAMPLER_BLOB='${pins.sampler}'
+CONTROL_PIN_SERVICE_BLOB='${pins.service}'
+CONTROL_PIN_TIMER_BLOB='${pins.timer}'
+fixture=$(mktemp -d /root/control-installed-guard.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+mkdir -m 0755 "$fixture/control" "$fixture/control/metrics" "$fixture/systemd"
+install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
+install -m 0644 '${repository}/deploy/selectel/control/memoly-control-sampler.service' "$fixture/systemd/memoly-control-sampler.service"
+install -m 0644 '${repository}/deploy/selectel/control/memoly-control-sampler.timer' "$fixture/systemd/memoly-control-sampler.timer"
+printf '{}\\n' > "$fixture/control/metrics/snapshot.json"
+chmod 0644 "$fixture/control/metrics/snapshot.json"
+rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"
+printf 'PASS: exact protected installed chain accepted\\n'
+printf '# drift\\n' >> "$fixture/control/sampler.py"
+if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+  echo 'changed installed sampler was accepted' >&2; exit 41
+fi
+rm -f "$fixture/control/sampler.py"
+install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
+chmod 0664 "$fixture/control/sampler.py"
+if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+  echo 'writable installed sampler was accepted' >&2; exit 42
+fi
+rm -f "$fixture/control/sampler.py"
+install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
+mv "$fixture/control/sampler.py" "$fixture/control/sampler.expected"
+ln -s sampler.expected "$fixture/control/sampler.py"
+if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+  echo 'symlink installed sampler was accepted' >&2; exit 43
+fi
+printf 'PASS: changed bytes, writable mode, and symlink rejected\\n'
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /exact protected installed chain accepted/)
+  assert.match(result.stdout, /changed bytes, writable mode, and symlink rejected/)
 })
 
 test('nonzero release exit preserves forward-only quiesce handling', () => {
@@ -1626,6 +1741,91 @@ function runAlbumsMigrationHistoryVerifier({ program, baseline, candidate, phase
   return result
 }
 
+function controlMigrationHistoryProgram() {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const captureProgram = resolve(root, '.scratch', `control-ledger-program-${process.pid}.mjs`)
+  const captureCatalog = resolve(root, '.scratch', `control-ledger-catalog-${process.pid}.txt`)
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+  assert.equal(head.status, 0, head.stderr)
+  const result = spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: [
+      'set -euo pipefail',
+      `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
+      `APP_ROOT=${shellQuote(root)}`,
+      `MEMOLY_PRODUCT_SHA=${head.stdout.trim()}`,
+      'compose() { printf "%s" "${!#}" > "$CAPTURE_PROGRAM"; printf "%s\\n%%CANDIDATE%%\\n%s" "$MEMOLY_EXPECTED_BASELINE_MIGRATIONS" "$MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS" > "$CAPTURE_CATALOG"; }',
+      'rollback_verify_control_migration_history pre-sql',
+    ].join('\n'),
+    encoding: 'utf8', env: { ...process.env, CAPTURE_PROGRAM: gitBashPath(captureProgram), CAPTURE_CATALOG: gitBashPath(captureCatalog) },
+    timeout: 120_000,
+  })
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const catalogs = readFileSync(captureCatalog, 'utf8').split('\n%CANDIDATE%\n')
+  const program = readFileSync(captureProgram, 'utf8')
+  rmSync(captureProgram, { force: true })
+  rmSync(captureCatalog, { force: true })
+  return { program, baseline: catalogs[0], candidate: catalogs[1] }
+}
+
+function runControlMigrationHistoryVerifier({ program, baseline, candidate, phase, rows }) {
+  const fixture = mkdtempSync(resolve(root, '.scratch', 'control-migration-ledger-module-'))
+  const moduleDir = resolve(fixture, 'node_modules/pg')
+  mkdirSync(moduleDir, { recursive: true })
+  writeFileSync(resolve(moduleDir, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
+  writeFileSync(resolve(moduleDir, 'index.js'), `export class Client {
+    async connect() {}
+    async query() { return { rows: JSON.parse(process.env.FIXTURE_MIGRATION_ROWS) } }
+    async end() {}
+  }\n`)
+  const result = spawnSync('node', ['--input-type=module', '--eval', program], {
+    cwd: fixture, encoding: 'utf8', env: { ...process.env,
+      MEMOLY_EXPECTED_BASELINE_MIGRATIONS: baseline,
+      MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS: candidate,
+      MEMOLY_CONTROL_LEDGER_PHASE: phase,
+      FIXTURE_MIGRATION_ROWS: JSON.stringify(rows),
+    }, timeout: 10_000,
+  })
+  rmSync(fixture, { recursive: true, force: true })
+  return result
+}
+
+test('Control migration ledger accepts only the exact 56-to-57 catalog and complete state', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const { program, baseline, candidate } = controlMigrationHistoryProgram()
+  const names = (catalog) => catalog.trim().split('\n').map((line) => line.split(':'))
+  const baselineRows = names(baseline)
+  const candidateRows = names(candidate)
+  assert.equal(baselineRows.length, 56)
+  assert.equal(candidateRows.length, 57)
+  assert.deepEqual(candidateRows.slice(0, 56).map(([name]) => name), baselineRows.map(([name]) => name))
+  assert.equal(candidateRows[56][0], '20261025100000_control_observability')
+  const rowsFor = (catalog, count) => names(catalog).slice(0, count).map(([migration_name, checksum]) => ({
+    migration_name, checksum, finished_at: '2026-10-24T10:00:00.000Z', rolled_back_at: null,
+  }))
+  const verify = (phase, rows, expectedCandidate = candidate) => runControlMigrationHistoryVerifier({
+    program, baseline, candidate: expectedCandidate, phase, rows,
+  })
+  assert.equal(verify('pre-sql', rowsFor(candidate, 56)).status, 0, 'exact completed baseline prefix before SQL')
+  assert.equal(verify('pre-sql', rowsFor(candidate, 57)).status, 0, 'fully applied candidate before readiness')
+  assert.equal(verify('complete', rowsFor(candidate, 57)).status, 0, 'exact complete candidate')
+  assert.notEqual(verify('pre-sql', rowsFor(candidate, 55)).status, 0, 'short baseline')
+  assert.notEqual(verify('complete', rowsFor(candidate, 56)).status, 0, 'incomplete candidate')
+  assert.notEqual(verify('unknown', rowsFor(candidate, 57)).status, 0, 'unknown phase')
+  assert.notEqual(verify('pre-sql', [{ ...rowsFor(candidate, 56)[0], checksum: 'f'.repeat(64) }, ...rowsFor(candidate, 56).slice(1)]).status, 0,
+    'changed baseline checksum')
+  assert.notEqual(verify('complete', [...rowsFor(candidate, 57).slice(0, 56), { ...rowsFor(candidate, 57)[56], finished_at: null }]).status, 0,
+    'unfinished new migration')
+  assert.notEqual(verify('complete', [...rowsFor(candidate, 57).slice(0, 56), { ...rowsFor(candidate, 57)[56], rolled_back_at: '2026-10-24T11:00:00.000Z' }]).status, 0,
+    'rolled-back new migration')
+  assert.notEqual(verify('complete', [...rowsFor(candidate, 57), rowsFor(candidate, 57)[56]]).status, 0, 'duplicate migration')
+  const unknownSuffix = [...candidateRows]
+  unknownSuffix[56] = ['20261025100000_unreviewed_control', ...unknownSuffix[56].slice(1)]
+  assert.notEqual(verify('pre-sql', rowsFor(candidate, 57), unknownSuffix.map((row) => row.join(':')).join('\n') + '\n').status, 0,
+    'unknown 57th migration')
+})
+
 test('comments migration catalog derives both Prisma newline checksums from committed SQL', () => {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const fixture = mkdtempSync(resolve(root, '.scratch/migration-checksum-fixture-'))
@@ -1964,7 +2164,8 @@ test('guarded full release forces complete album readiness after SQL and before 
       'detect_membership_rollback_boundary() { :; }; detect_mm0_boundary() { :; }; prepare_rollback() { echo PREPARE >> "$FIXTURE_EVENTS"; [ "$FIXTURE_FAILURE" != pre ] || return 42; }',
       'flock() { :; }; bash() { local action=${!#}; echo "$action:${SELECTEL_ALBUMS_LEDGER_PHASE:-unset}" >> "$FIXTURE_EVENTS"; if [ "$action" = migrate ]; then SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; fi; if [ "$action" = rollback-readiness ] && [ "${SELECTEL_ALBUMS_LEDGER_PHASE:-}" = complete ] && [ "$FIXTURE_FAILURE" = post ]; then return 42; fi; }',
       'promote_runtime() { echo PROMOTE >> "$FIXTURE_EVENTS"; }; verify_promoted_revision() { :; }; public_smoke() { :; }',
-      'write_release_manifest() { :; }; clear_release_markers() { :; }; archive_frontend_recovery_artifact() { :; }',
+      'write_release_manifest() { :; }; write_control_release_receipt() { :; }; clear_release_markers() { :; }; archive_frontend_recovery_artifact() { :; }',
+      'install_control_sampler() { echo CONTROL-SAMPLER-INSTALLED >> "$FIXTURE_EVENTS"; }',
       'SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; FIXTURE_EVENTS=' + shellQuote(events) + '; FIXTURE_FAILURE=' + shellQuote(failure),
       'main',
     ].join('\n')
@@ -2206,6 +2407,88 @@ test('wishlist recovery profile is pinned to the exact executable inputs and dc2
   assert.notEqual(albumRejected.status, 0, 'changed album production CSS must not inherit the wishlist recovery permission')
 })
 
+test('Control recovery permits only its exact current executable fingerprint and pinned host inputs on target 33a', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = 'a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4'
+  const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
+  const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
+  const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
+  const expectedCompatibility = 'b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538'
+  assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
+  const files = [
+    ['backend/.env.example', '07d6bf4a7384d7f12fa0075cd3719ecef446e92a'],
+    ['backend/prisma/migrations/20261025100000_control_observability/migration.sql', 'd96d578a5eeabc86eca437d4f744e0eb2db7eaac'],
+    ['backend/prisma/schema.prisma', '939d86067b1e5d8b3a053bec980ffcfaea0d2aad'],
+    ['backend/src/app.ts', '3a72798f1c9e9afa79fc4a3e90d007f8849d056b'],
+    ['backend/src/env.ts', '3e6702dad1bd1ca9d62409d9e5db0fbeaaae63b1'],
+    ['backend/src/job-schedules.json', 'f57bf2c0b480edc4209643b3ba1294cd0e84fb79'],
+    ['backend/src/jobs.ts', '7b1769d757f1de971ca1ed6092c348f8c16957fc'],
+    ['backend/src/modules/control/application/control-helpers.ts', '583d776719b6855f9a63c27dbaa6c84f90af886b'],
+    ['backend/src/modules/control/index.ts', '6ac3d9371bb3d0d30ccb6ef4309fded5f1db0cf0'],
+    ['backend/src/modules/control/infrastructure/control-collection.ts', '1e9e0b870dd802b4b136cca0e03d66dedadb0179'],
+    ['backend/src/modules/control/infrastructure/control-read-repository.ts', '21df9c044bfd58fbe17fcad1e37b65bdc0e3c897'],
+    ['backend/src/scheduler.ts', '33a8e40f525c760ea2d803123ca5c4ffa1a1a401'],
+    ['backend/src/worker.ts', 'e1fceab1cd692b6649f10be7bfa2db8f19e0f3f3'],
+    ['packages/contracts/src/control.ts', '1e458a2a717ef6e6447fb9475d3d9f74e4e27b80'],
+    ['packages/contracts/src/index.ts', '975ba77ffb5068b2167d49387da4d90c3c9c6495'],
+    ['webapp/control/index.html', '66fdf3d814cbfbfb4164b6b106a9c8bea3ba2b60'],
+    ['webapp/src/App.tsx', '3f616bc419fc73eb7da7ec03bc77565316afe2bc'],
+    ['webapp/src/components/ui/command.tsx', 'b3e700adee5551cd7bd666ee8b50bda7ec8af2b2'],
+    ['webapp/src/components/ui/dialog.tsx', '61584b8490d13c4c022ce58c8c33b51079a201ff'],
+    ['webapp/src/components/ui/select.tsx', 'f8082aae1f58159fc419423e4d9a56ae48262fca'],
+    ['webapp/src/components/ui/sheet.tsx', '66c59f950d68b4ce9d3f229e893612b3d7b0d608'],
+    ['webapp/src/control/ControlApp.tsx', 'f06612f17e82e5cba042e6a9af91e9a7a48eda8a'],
+    ['webapp/src/control/control-api.ts', '9736c43b1d966c05bbbf4d20d83cafb89cbfa7a4'],
+    ['webapp/src/control/control.css', '83bd2f101391a56fd56a32ed223b497e86742472'],
+    ['webapp/src/control/main.tsx', '2c144606a1eb9c134a5627bd5f6584a4fc54e29c'],
+    ['webapp/src/features/memoly-ui/SettingsSheet.tsx', '9d9bf8c317791f365c00a593cc11691d123bdf2c'],
+    ['webapp/src/features/auth/index.ts', '9883ad57330b016a8b3fb3fc3a3d5fa575a4e81e'],
+    ['webapp/src/platform/control-activity.ts', '71898872aeb1c910ab45ca6f65521bcaaa38b4e3'],
+    ['webapp/vite.config.ts', '65f4e171cb9cf1835fdd94a0ed7d99f0b9b0b9aa'],
+    ['deploy/selectel/control/sampler.py', 'fbbc06bc8b62d86f0fe7685ee6651adf7da48898'],
+    ['deploy/selectel/control/memoly-control-sampler.service', '7b4b900ce078e47e1fedd59d9e6928ec8efc31a6'],
+    ['deploy/selectel/control/memoly-control-sampler.timer', '5399165d2e405d443bffdc5c76c519a189707f90'],
+    ['deploy/selectel/compose.yml.template', '977ed58350e849f52e530dde5976acb7b0ac6051'],
+    ['deploy/selectel/Caddyfile.static.template', 'b97f014fa6882141f8d8d6038afb50f9757d9d83'],
+    ['deploy/selectel/ci-release.sh', 'f11f9b7f0b8ec0b381ab0508b15a4e58cd539cad'],
+  ]
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-control-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, files,
+    'materialize exact Control recovery production and host-input blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+
+  const profile = (candidate) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nrollback_source_compatibility_profile ${candidate.sha} ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'control')
+
+  for (const [path, marker] of [
+    ['backend/src/modules/control/infrastructure/control-collection.ts', '\n// synthetic Control source drift\n'],
+    ['backend/prisma/migrations/20261025100000_control_observability/migration.sql', '\n-- synthetic migration drift\n'],
+    ['deploy/selectel/compose.yml.template', '\n# synthetic compose drift\n'],
+    ['deploy/selectel/Caddyfile.static.template', '\n# synthetic static Caddy drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-control-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, path, marker,
+      `mutate exact Control recovery input ${path}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `Control profile must reject changed source before any service mutation: ${path}`)
+    assert.doesNotMatch(`${rejected.stdout}${rejected.stderr}`, /UP:|GATE/)
+  }
+})
+
 test('child linked-family recovery pins frozen production inputs to dc26 and rejects runtime or UI drift', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
@@ -2215,13 +2498,11 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
   const expectedCompatibility = 'cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
-  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
-
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
     'apply exact frozen child linked-family production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 

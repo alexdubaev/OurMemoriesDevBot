@@ -28,6 +28,7 @@ import { commentPrivacyMiddleware, createMediaMemoryCatalog, createMemoriesModul
 import { createMediaModule, type MaxVideoPlayback } from './modules/media'
 import { createUploadsModule } from './modules/uploads'
 import { createUsersModule } from './modules/users'
+import { createControlModule } from './modules/control'
 import {
   apiCorsAllowedHeaders,
   browserUploadExposedHeaders,
@@ -111,6 +112,7 @@ export function createApp({
     requireAdmin: auth.requireAdmin,
     requireAuth: auth.requireAuth,
   })
+  const control = createControlModule({ db: prisma, env, requireAuth: auth.requireAuth, ownerReadRateLimit: adminUsersReadRateLimit })
   const uploads = createUploadsModule({
     backgroundTasks,
     db: prisma,
@@ -161,6 +163,16 @@ export function createApp({
   }
   for (const middleware of createAuthSecurity({
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
+    rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    trustProxy: env.TRUST_PROXY,
+    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
+    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
+  })) {
+    app.use('/api/v1/activity', middleware)
+  }
+  for (const middleware of createAuthSecurity({
+    bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
     bodyLimitExemptions: [{ method: 'POST', path: '/api/uploads/avatar/preview' }],
     rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
     rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
@@ -207,6 +219,7 @@ export function createApp({
   })
 
   app.route('/api/v1', auth.routes)
+  app.route('/api/v1', control.routes)
   if (auth.legacyTestRoutes) app.route('/api/auth', auth.legacyTestRoutes)
   app.route('/api/v1', families.routes)
   app.route('/api/v1', media.routes)

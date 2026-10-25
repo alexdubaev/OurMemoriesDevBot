@@ -34,6 +34,25 @@ export const backgroundJobs = {
     await prisma.$queryRaw`SELECT 1`
     console.log('Job db:ping completed.')
   },
+  'control:collect': async ({ env, prisma }) => {
+    if (!env.CONTROL_ENABLED) return
+    try {
+      const { collectControlMetrics } = await import('./modules/control')
+      await collectControlMetrics({ db: prisma, env })
+    } catch {
+      // A metrics outage must not reveal host details or fail unrelated scheduled work.
+      console.error('Job control:collect failed.')
+    }
+  },
+  'control:retention': async ({ env, prisma }) => {
+    if (!env.CONTROL_ENABLED) return
+    try {
+      const { pruneControlTelemetry } = await import('./modules/control')
+      await pruneControlTelemetry(prisma)
+    } catch {
+      console.error('Job control:retention failed.')
+    }
+  },
   'auth:sessions:cleanup': async ({ env, prisma }, now) => {
     const dayMs = 24 * 60 * 60 * 1000
     const retentionCutoff = new Date(

@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+.memoly-control-root {
+  --control-canvas: #f7f8fa;
+  --control-surface: #ffffff;
+  --control-surface-soft: #f8fafc;
+  --control-text: #1e293b;
+  --control-muted: #64748b;
+  --control-border: #e2e8f0;
+  --control-accent: #2563eb;
+  --control-accent-soft: #eff6ff;
+  --control-good-bg: #ecfdf3;
+  --control-good: #067647;
+  --control-warn-bg: #fffaeb;
+  --control-warn: #b54708;
+  --control-bad-bg: #fef3f2;
+  --control-bad: #b42318;
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  background: var(--control-canvas);
+  color: var(--control-text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+.memoly-control-root[data-theme="dark"] {
+  --control-canvas: #0b1220;
+  --control-surface: #111c2e;
+  --control-surface-soft: #172338;
+  --control-text: #e5edf8;
+  --control-muted: #94a3b8;
+  --control-border: #29384d;
+  --control-accent: #7aa7ff;
+  --control-accent-soft: #182e50;
+  --control-good-bg: #123527;
+  --control-good: #75d6a1;
+  --control-warn-bg: #3a2c16;
+  --control-warn: #fac36d;
+  --control-bad-bg: #3b2023;
+  --control-bad: #f2a3a8;
+  color-scheme: dark;
+}
+
+.memoly-control-root *, .memoly-control-root *::before, .memoly-control-root *::after { box-sizing: border-box; }
+.memoly-control-root button, .memoly-control-root input, .memoly-control-root select { font: inherit; }
+.memoly-control-root button { cursor: pointer; }
+.memoly-control-root .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
+.memoly-control-root .control-app-shell { display:flex; min-height:100vh; }
+.memoly-control-root .control-sidebar { width:240px; height:auto!important; min-height:100vh; align-self:stretch; flex:none; display:flex; flex-direction:column; border-right:1px solid var(--control-border); background:var(--control-surface); padding:24px 14px 16px; }
+.memoly-control-root .control-brand { display:flex; align-items:center; gap:11px; padding:0 10px; min-height:38px; color:var(--control-text); }
+.memoly-control-root .control-brand-mark { display:grid; place-items:center; width:34px;height:34px;border:1px solid var(--control-border);border-radius:10px;background:var(--control-surface-soft);font-size:20px;font-weight:700;letter-spacing:-.06em; }
+.memoly-control-root .control-brand strong { display:block;font-size:15px;line-height:18px;letter-spacing:-.02em; }
+.memoly-control-root .control-brand small { display:block;font-size:9px;line-height:13px;letter-spacing:.12em;color:var(--control-muted); }
+.memoly-control-root .control-nav { display:flex;flex-direction:column;gap:4px;margin-top:30px; }
+.memoly-control-root .control-nav button { display:flex;align-items:center;gap:12px;width:100%;min-height:42px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--control-muted);text-align:left;font-weight:500; }
+.memoly-control-root .control-nav button:hover { background:var(--control-surface-soft);color:var(--control-text); }
+.memoly-control-root .control-nav button.is-active { background:var(--control-accent-soft);color:var(--control-accent); }
+.memoly-control-root .control-nav [data-slot="webp-icon"] { flex:none; }
+.memoly-control-root .control-sidebar-bottom { margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--control-border);color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-sidebar-bottom p { margin:0 0 8px; }
+.memoly-control-root .control-theme-toggle,.memoly-control-root .control-link-button { border:0;background:transparent;color:var(--control-accent);padding:5px 0;font-weight:600; }
+.memoly-control-root .control-main-column { flex:1;min-width:0; }
+.memoly-control-root .control-topbar { position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:66px;padding:0 34px;border-bottom:1px solid var(--control-border);background:color-mix(in srgb,var(--control-surface) 94%,transparent);backdrop-filter:blur(12px); }
+.memoly-control-root .control-topbar [data-slot="breadcrumb-list"] { gap:9px;color:var(--control-muted); }
+.memoly-control-root .control-topbar [data-slot="breadcrumb-page"] { color:var(--control-text);font-weight:600; }
+.memoly-control-root .control-top-actions { display:flex;align-items:center;gap:12px; }
+.memoly-control-root .control-command-trigger { display:flex;align-items:center;gap:22px;padding:7px 9px;border:1px solid var(--control-border);border-radius:7px;background:var(--control-surface);color:var(--control-muted); }
+.memoly-control-root kbd { border:1px solid var(--control-border);border-radius:4px;padding:0 4px;font:11px/18px ui-monospace,monospace;color:var(--control-muted); }
+.memoly-control-root .control-mobile-menu { display:none; }
+.memoly-control-root .control-top-theme { display:none; }
+.memoly-control-root .control-page { width:min(100%,1440px);margin:0 auto;padding:30px 34px 56px; }
+.memoly-control-root .control-page-heading { display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:24px; }
+.memoly-control-root .control-page-heading h1 { margin:2px 0 4px;font-size:26px;line-height:1.25;letter-spacing:-.035em;font-weight:650; }
+.memoly-control-root .control-page-heading p:not(.control-eyebrow) { margin:0;color:var(--control-muted); }
+.memoly-control-root .control-eyebrow { margin:0;color:var(--control-muted);font-size:10px;line-height:16px;font-weight:650;letter-spacing:.1em; }
+.memoly-control-root [data-slot="button"] { color:var(--control-text);border-color:var(--control-border); }
+.memoly-control-root [data-slot="button"]:focus-visible,.memoly-control-root button:focus-visible,.memoly-control-root input:focus-visible,.memoly-control-root select:focus-visible,.memoly-control-root tr:focus-visible { outline:2px solid var(--control-accent);outline-offset:2px; }
+.memoly-control-root [data-slot="card"] { min-width:0;background:var(--control-surface);border-color:var(--control-border);border-radius:9px;box-shadow:none;color:var(--control-text); }
+.memoly-control-root [data-slot="card-header"] { padding:18px 18px 12px; }
+.memoly-control-root [data-slot="card-title"] { color:var(--control-text);font-size:14px;font-weight:600;line-height:1.35; }
+.memoly-control-root [data-slot="card-description"] { color:var(--control-muted);font-size:12px;line-height:1.5; }
+.memoly-control-root [data-slot="card-content"] { padding:0 18px 18px; }
+.memoly-control-root [data-slot="table"] { width:100%;font-size:13px; }
+.memoly-control-root [data-slot="table-head"] { height:40px;color:var(--control-muted);font-size:11px;font-weight:600;white-space:nowrap; }
+.memoly-control-root [data-slot="table-cell"] { padding:12px 13px;border-color:var(--control-border);vertical-align:middle; }
+.memoly-control-root [data-slot="table-row"] { border-color:var(--control-border); }
+.memoly-control-root [data-slot="table-body"] [data-slot="table-row"] { cursor:pointer; }
+.memoly-control-root [data-slot="table-body"] [data-slot="table-row"]:hover { background:var(--control-surface-soft); }
+.memoly-control-root [data-slot="badge"] { border:0; }
+.memoly-control-root .control-badge { display:inline-flex;align-items:center;min-height:22px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap; }
+.memoly-control-root .control-badge.good { background:var(--control-good-bg);color:var(--control-good); }
+.memoly-control-root .control-badge.warn { background:var(--control-warn-bg);color:var(--control-warn); }
+.memoly-control-root .control-badge.bad { background:var(--control-bad-bg);color:var(--control-bad); }
+.memoly-control-root .control-badge.quiet { background:var(--control-surface-soft);color:var(--control-muted); }
+.memoly-control-root .control-kpi-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px; }
+.memoly-control-root .control-kpi-grid > * { min-height:148px; }
+.memoly-control-root .control-metric-card [data-slot="card-title"] { margin-top:6px;font-size:24px;line-height:1.2;letter-spacing:-.035em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
+.memoly-control-root .control-metric-card [data-slot="card-header"] { padding-bottom:8px; }
+.memoly-control-root .control-metric-card [data-slot="card-content"] { padding-top:0; }
+.memoly-control-root .control-metric-card [data-slot="card-content"] p { margin:0;color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-kpi-select { display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0;padding:16px 18px;border:1px solid var(--control-border);border-radius:9px;background:var(--control-surface); }
+.memoly-control-root .control-kpi-select label { color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-kpi-select select { padding:3px 24px 3px 7px;border:1px solid var(--control-border);border-radius:5px;background:var(--control-surface);color:var(--control-text);font-size:12px; }
+.memoly-control-root .control-kpi-select strong { margin-top:4px;font-size:24px;line-height:1.2;letter-spacing:-.035em; }
+.memoly-control-root .control-kpi-select > span,.memoly-control-root .control-kpi-select small { color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-overview-secondary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:14px; }
+.memoly-control-root .control-overview-secondary .control-metric-card [data-slot="card-title"] { font-size:20px; }
+.memoly-control-root .control-two-columns { display:grid;grid-template-columns:minmax(0,1.45fr) minmax(270px,.8fr);align-items:start;gap:16px;margin-top:18px; }
+.memoly-control-root .control-chart { height:220px;width:100%; }.memoly-control-root .control-summary-stack { display:flex;flex-direction:column;gap:9px; }
+.memoly-control-root .control-summary-metric,.memoly-control-root .control-summary-source { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 8px;padding:0 0 8px;border-bottom:1px solid var(--control-border);font-size:11px; }
+.memoly-control-root .control-summary-metric > span,.memoly-control-root .control-summary-source > span { color:var(--control-muted); }
+.memoly-control-root .control-summary-metric > strong { grid-column:1;grid-row:2;color:var(--control-text);font-size:14px;font-variant-numeric:tabular-nums; }
+.memoly-control-root .control-summary-metric > [data-slot="badge"] { grid-column:2;grid-row:1 / span 2; }
+.memoly-control-root .control-summary-source:last-child { border-bottom:0; }
+.memoly-control-root .control-chart svg { overflow:visible; }
+.memoly-control-root .control-chart-table { margin-top:8px;border-top:1px solid var(--control-border);padding-top:10px;color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-chart-table summary { cursor:pointer; }
+.memoly-control-root .control-footnote { margin:12px 0 0;color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-event-list { display:flex;flex-direction:column; }
+.memoly-control-root .control-event-list > div { display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--control-border); }
+.memoly-control-root .control-event-list strong { font-size:12px; }
+.memoly-control-root .control-event-list p,.memoly-control-root .control-event-list small { display:block;margin:2px 0 0;color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-event-dot { width:7px;height:7px;margin-top:5px;border-radius:50%;background:var(--control-accent); }
+.memoly-control-root .control-muted { color:var(--control-muted); }
+.memoly-control-root .control-toolbar { display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-bottom:14px; }
+.memoly-control-root .control-search { flex:1 1 220px;max-width:440px; }
+.memoly-control-root .control-search [data-slot="input"] { height:38px;border-color:var(--control-border);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-select-label { display:flex;flex-direction:column;gap:4px;color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-select-label select { max-width:210px;height:38px;padding:0 28px 0 10px;border:1px solid var(--control-border);border-radius:6px;background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-table-scroll { width:100%;overflow-x:auto;border:1px solid var(--control-border);border-radius:8px;background:var(--control-surface);overscroll-behavior-inline:contain; }
+.memoly-control-root .control-table-scroll table { min-width:820px; }
+.memoly-control-root .control-table-scroll td strong { display:block;font-weight:600; }
+.memoly-control-root .control-cell-secondary { display:block;margin-top:3px;color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-pagination { display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-pagination > div { display:flex;gap:8px; }
+.memoly-control-root .control-resource-grid,.memoly-control-root .control-system-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px; }
+.memoly-control-root .control-card-title-line { display:flex;justify-content:space-between;align-items:flex-start;gap:10px; }
+.memoly-control-root .control-card-title-line [data-slot="card-title"] { flex:1; }
+.memoly-control-root .control-data-list { display:grid;gap:0;margin:0; }
+.memoly-control-root .control-data-list > div { display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--control-border); }
+.memoly-control-root .control-data-list dt { color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-data-list dd { margin:0;text-align:right;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
+.memoly-control-root .control-resource-meta { display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;margin-top:12px;color:var(--control-muted);font-size:10px; }
+.memoly-control-root .control-system-value { display:block;margin:2px 0 7px;font-size:20px;letter-spacing:-.02em; }
+.memoly-control-root .control-system-grid [data-slot="card-content"] p { min-height:36px;margin:0;color:var(--control-muted);font-size:12px; }
+.memoly-control-root .control-system-grid [data-slot="card-content"] small { display:block;margin-top:10px;color:var(--control-muted);font-size:10px; }
+.memoly-control-root .control-skeleton-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
+.memoly-control-root .control-empty { min-height:190px;color:var(--control-text); }
+.memoly-control-root .control-detail-sheet { width:min(600px,100vw);max-width:100vw;gap:0;border-color:var(--control-border);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-detail-sheet [data-slot="sheet-header"] { border-bottom:1px solid var(--control-border);padding:22px 24px 16px; }
+.memoly-control-root .control-detail-sheet [data-slot="sheet-title"] { font-size:20px;line-height:1.3;overflow-wrap:anywhere; }
+.memoly-control-root .control-detail-body { flex:1;overflow:auto;padding:16px 20px 28px; }
+.memoly-control-root .control-detail-grid { display:grid;grid-template-columns:1fr 1fr;gap:0 18px;margin:0 0 16px; }
+.memoly-control-root .control-detail-grid > div { display:flex;flex-direction:column;gap:2px;padding:9px 0;border-bottom:1px solid var(--control-border); }
+.memoly-control-root .control-detail-grid dt { color:var(--control-muted);font-size:11px; }
+.memoly-control-root .control-detail-grid dd { margin:0;font-weight:550;overflow-wrap:anywhere; }
+.memoly-control-root .control-detail-body [data-slot="card"] { margin-top:14px; }
+.memoly-control-root .control-detail-row { display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;padding:11px 0;border:0;border-bottom:1px solid var(--control-border);background:transparent;color:var(--control-text);text-align:left;font-size:12px; }
+.memoly-control-root .control-detail-row:last-child { border-bottom:0; }
+.memoly-control-root .control-detail-row span:first-child { min-width:0; }
+.memoly-control-root .control-detail-row strong,.memoly-control-root .control-detail-row small { display:block;overflow-wrap:anywhere; }
+.memoly-control-root .control-detail-row small { margin-top:2px;color:var(--control-muted);font-size:10px; }
+.memoly-control-root .control-command-sheet { top:8vh;left:50%;right:auto;width:min(620px,calc(100vw - 24px));height:min(620px,80vh);max-height:80vh;transform:translateX(-50%);border:1px solid var(--control-border);border-radius:12px;background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-command-body { padding:0 20px 20px; }
+.memoly-control-root .control-command-body input { height:44px;border-color:var(--control-border);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-command-results { max-height:calc(70vh - 100px);overflow-y:auto;padding-top:14px; }
+.memoly-control-root .control-command-results section { margin:0 0 12px; }
+.memoly-control-root .control-command-results section > p { margin:8px 0 4px; }
+.memoly-control-root .control-command-results button { display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:0;border-radius:6px;background:transparent;color:var(--control-text);text-align:left; }
+.memoly-control-root .control-command-results button:hover { background:var(--control-surface-soft); }
+.memoly-control-root .control-command-results button small { margin-left:auto;color:var(--control-muted); }
+.memoly-control-root .control-nav-sheet { width:min(280px,85vw);background:var(--control-surface);color:var(--control-text); }
+.memoly-control-root .control-login-shell,.memoly-control-root .control-boot,.memoly-control-root .control-fallback { min-height:100vh;display:grid;align-content:center;justify-items:center;padding:24px; }
+.memoly-control-root .control-login-card { display:flex;flex-direction:column;gap:22px;width:min(100%,440px);padding:28px;border:1px solid var(--control-border);border-radius:12px;background:var(--control-surface); }
+.memoly-control-root .control-login-card h1,.memoly-control-root .control-boot h1,.memoly-control-root .control-fallback h1 { margin:5px 0 6px;font-size:24px;line-height:1.25;letter-spacing:-.03em; }
+.memoly-control-root .control-login-card p:not(.control-eyebrow),.memoly-control-root .control-boot p,.memoly-control-root .control-fallback p { margin:0;color:var(--control-muted); }
+.memoly-control-root .control-login-card [data-slot="button"],.memoly-control-root .control-fallback button { min-height:42px; }
+.memoly-control-root .control-challenge { display:grid;gap:12px;padding:16px;border:1px solid var(--control-border);border-radius:8px;background:var(--control-surface-soft); }
+.memoly-control-root .control-challenge p { margin:0;color:var(--control-text);font-weight:600; }
+.memoly-control-root .control-primary-link { display:block;padding:10px 14px;border-radius:7px;background:var(--control-accent);color:#fff;text-align:center;text-decoration:none;font-weight:600; }
+.memoly-control-root .control-challenge > div { display:flex;justify-content:space-between;gap:12px;align-items:center; }
+.memoly-control-root .control-challenge strong { font-size:22px;letter-spacing:.18em;font-variant-numeric:tabular-nums; }
+.memoly-control-root .control-challenge small { color:var(--control-muted); }
+.memoly-control-root .control-challenge button { justify-self:start;border:0;background:transparent;color:var(--control-accent);padding:0; }
+.memoly-control-root .control-inline-error { color:var(--control-bad)!important;font-size:12px; }
+.memoly-control-root .control-login-card .control-link-button { align-self:flex-start; }
+.memoly-control-root .control-boot { gap:14px;text-align:center; }
+
+@media (max-width: 1000px) {
+  .memoly-control-root .control-page { padding:26px 24px 44px; }
+  .memoly-control-root .control-topbar { padding:0 24px; }
+  .memoly-control-root .control-kpi-grid,.memoly-control-root .control-overview-secondary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .memoly-control-root .control-two-columns { grid-template-columns:1fr; }
+}
+@media (max-width: 760px) {
+  .memoly-control-root .control-sidebar { display:none; }
+  .memoly-control-root .control-mobile-menu { display:inline-flex;min-height:36px; }
+  .memoly-control-root .control-topbar { min-height:58px;gap:8px;padding:0 14px; }
+  .memoly-control-root .control-topbar [data-slot="breadcrumb"] { display:none; }
+  .memoly-control-root .control-top-actions { margin-left:auto;gap:7px; }
+  .memoly-control-root .control-top-theme { display:inline-flex; }
+  .memoly-control-root .control-command-trigger { padding:7px;gap:8px;font-size:12px; }
+  .memoly-control-root .control-command-trigger kbd { display:none; }
+  .memoly-control-root .control-top-actions [data-slot="button"] { min-height:34px;padding:0 9px;font-size:12px; }
+  .memoly-control-root .control-refresh { padding:0 7px!important;font-size:11px!important; }
+  .memoly-control-root .control-page { padding:22px 14px 36px; }
+  .memoly-control-root .control-page-heading { align-items:flex-start;margin-bottom:18px; }
+  .memoly-control-root .control-page-heading h1 { font-size:23px; }
+  .memoly-control-root .control-page-heading > [data-slot="button"] { flex:none; }
+  .memoly-control-root .control-resource-grid,.memoly-control-root .control-system-grid { grid-template-columns:1fr; }
+  .memoly-control-root .control-table-scroll table { min-width:760px; }
+}
+@media (max-width: 420px) {
+  .memoly-control-root .control-page { padding:18px 12px 30px; }
+  .memoly-control-root .control-mobile-menu { padding:0 8px;font-size:11px; }
+  .memoly-control-root .control-top-actions { gap:5px; }
+  .memoly-control-root .control-command-trigger { font-size:11px; }
+  .memoly-control-root .control-kpi-grid,.memoly-control-root .control-overview-secondary { grid-template-columns:1fr 1fr;gap:8px; }
+  .memoly-control-root .control-metric-card [data-slot="card-header"],.memoly-control-root .control-kpi-select { padding:12px; }
+  .memoly-control-root .control-metric-card [data-slot="card-content"] { padding:0 12px 12px; }
+  .memoly-control-root .control-metric-card [data-slot="card-title"],.memoly-control-root .control-kpi-select strong { font-size:19px; }
+  .memoly-control-root .control-kpi-select { gap:4px; }
+  .memoly-control-root .control-kpi-select > span { font-size:10px; }
+  .memoly-control-root .control-toolbar { align-items:stretch; }
+  .memoly-control-root .control-select-label { flex:1 1 40%; }
+  .memoly-control-root .control-select-label select { max-width:none;width:100%; }
+  .memoly-control-root .control-pagination { align-items:flex-start;flex-direction:column; }
+  .memoly-control-root .control-detail-grid { grid-template-columns:1fr; }
+}
+
+@media (max-width: 360px) {
+  .memoly-control-root .control-topbar { flex-wrap:wrap;min-height:auto;padding:8px 10px; }
+  .memoly-control-root .control-top-actions { width:100%;margin-left:0;justify-content:space-between; }
+}
+
+.control-summary-row{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;padding:10px 0;text-align:left;border-bottom:1px solid var(--control-border)}.control-summary-row>span:first-child{display:grid;min-width:0;gap:4px}.control-summary-row>span:last-child{white-space:nowrap}.control-sheet-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.control-sheet-heading>div{min-width:0}

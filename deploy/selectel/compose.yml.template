@@ -41,6 +41,7 @@ services:
     restart: unless-stopped
     volumes:
       - /opt/memoly/data/storage:/data/storage
+      - /opt/memoly/control/metrics:/data/control:ro
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(r.ok ? 0 : 1)\""]
       interval: 15s
@@ -95,6 +96,7 @@ services:
         condition: service_healthy
     volumes:
       - /opt/memoly/data/storage:/data/storage
+      - /opt/memoly/control/metrics:/data/control:ro
     networks:
       - edge
     restart: unless-stopped

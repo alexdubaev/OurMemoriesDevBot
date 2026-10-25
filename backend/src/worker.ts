@@ -65,7 +65,15 @@ export function startWorkerLoops(
   async function runLoop(loop: WorkerLoop) {
     while (running) {
       try {
-        await runIteration(runtime, loop)
+        const completed = await runIteration(runtime, loop)
+        if (completed) {
+          try {
+            const { recordControlProgress } = await import('./modules/control')
+            await recordControlProgress(runtime.prisma, runtime.env.CONTROL_ENABLED, 'worker')
+          } catch {
+            console.error('Worker progress recording failed.')
+          }
+        }
       } catch (error) {
         // A failing iteration must not kill the loop; the next one tries again after the
         // usual pause.
@@ -91,7 +99,7 @@ export function startWorkerLoops(
 async function runIteration(runtime: BackendRuntime, loop: WorkerLoop) {
   if (!loop.singleInstance) {
     await runBackgroundJob(loop.job, runtime)
-    return
+    return true
   }
 
   const outcome = await runWithJobLock(
@@ -104,6 +112,7 @@ async function runIteration(runtime: BackendRuntime, loop: WorkerLoop) {
   if (!outcome.ranHere) {
     console.log(`Worker skipped ${loop.job}: its lock is held elsewhere.`)
   }
+  return outcome.ranHere
 }
 
 function reportIterationFailure(loop: WorkerLoop, error: unknown) {

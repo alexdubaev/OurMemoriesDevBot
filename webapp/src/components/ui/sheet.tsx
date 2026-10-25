@@ -24,12 +24,6 @@ function SheetClose({
   return <SheetPrimitive.Close data-slot="sheet-close" {...props} />
 }
 
-function SheetPortal({
-  ...props
-}: React.ComponentProps<typeof SheetPrimitive.Portal>) {
-  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
-}
-
 function SheetOverlay({
   className,
   ...props
@@ -51,13 +45,15 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  portalContainer?: HTMLElement | null
 }) {
   return (
-    <SheetPortal>
+    <SheetPrimitive.Portal container={portalContainer ?? undefined}>
       <SheetOverlay />
       <SheetPrimitive.Content
         data-slot="sheet-content"
@@ -82,7 +78,7 @@ function SheetContent({
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Content>
-    </SheetPortal>
+    </SheetPrimitive.Portal>
   )
 }
 

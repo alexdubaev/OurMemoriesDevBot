@@ -659,6 +659,45 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   unprotected control reproduces a tombstone, an unavailable photo, and queued
   `media:delete` work while the original storage bytes remain present.
 
+- The exact memoLy Control executable compatibility fingerprint
+  `b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538` is
+  measured from the finalized executable source reconstructed over accepted
+  source `a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4` and is anchored to the unchanged
+  full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime fingerprint
+  `2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088`. The
+  refreshed exact profile regression verifies this fingerprint against frozen
+  committed production blobs, including the Control UI's public auth entrypoint.
+  This profile is accepted only for the designated
+  healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1`
+  backend/webapp image pair. The exact candidate was reconstructed over the
+  accepted source with committed production blobs, and source, migration SQL,
+  Compose, and static Caddy changes each invalidate this permission. Recovery
+  readiness also verifies that the installed root-owned sampler, systemd unit,
+  and timer have their exact pinned bytes and protected modes; absent, changed,
+  symlinked, or writable artifacts fail before service mutation. The candidate
+  ledger is exactly the 56-migration baseline plus
+  `20261025100000_control_observability` (57 total). Only the inherited-lock
+  guarded pre-SQL phase accepts the exact completed 56 baseline or completed
+  57 candidate; ordinary readiness, rollback, and post-SQL readiness require
+  all 57. Unknown, missing, duplicate, checksum-mismatched, unfinished,
+  rolled-back, or unrelated rows fail closed. No recovery profile authorizes
+  database rollback.
+
+  The guarded release copies the accepted sampler blob to root-owned
+  `/opt/memoly/control/sampler.py` and installs the pinned service and timer
+  under `/etc/systemd/system` while holding the deployment lock. The service
+  runs `/usr/bin/python3 -B`; the literal interpreter link and resolved
+  executable must remain root-controlled. The root-owned Control directory and
+  metrics directory are mode 0755, and the snapshot is mode 0644. Backend and
+  scheduler receive only the metrics directory read-only. The sampler never
+  runs from the memoly-owned checkout and no container receives write access.
+  Its 0600 release receipt records the last successful release only. Backup
+  evidence records structural archive/TOC validation; `restoreTestAt` remains
+  null because no restore test is performed. The synthetic current → archived
+  33a → current PostgreSQL compatibility probe passed against the isolated
+  `*_test` database. This targeted evidence does not replace the separately
+  required FULL profile on the final release SHA.
+
 - The exact stage-1 several-children production fingerprint
   `cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05` is anchored
   to the full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime and may

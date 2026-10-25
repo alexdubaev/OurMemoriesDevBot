@@ -23,6 +23,12 @@ SERVER_STATIC_CADDYFILE=${SERVER_STATIC_CADDYFILE:-"$SERVER_ROOT/Caddyfile.stati
 CONFIG_BACKUP_MARKER=${CONFIG_BACKUP_MARKER:-"$SERVER_ROOT/.selectel-config-backup"}
 GATEWAY_CADDYFILE=${GATEWAY_CADDYFILE:-/etc/caddy/Caddyfile}
 GATEWAY_CADDY_CONFIG=${GATEWAY_CADDY_CONFIG:-/tmp/memoly-edge-candidate.Caddyfile}
+CONTROL_PIN_SAMPLER_BLOB=fbbc06bc8b62d86f0fe7685ee6651adf7da48898
+CONTROL_PIN_SERVICE_BLOB=7b4b900ce078e47e1fedd59d9e6928ec8efc31a6
+CONTROL_PIN_TIMER_BLOB=5399165d2e405d443bffdc5c76c519a189707f90
+CONTROL_PIN_COMPOSE_BLOB=977ed58350e849f52e530dde5976acb7b0ac6051
+CONTROL_PIN_CADDY_BLOB=b97f014fa6882141f8d8d6038afb50f9757d9d83
+CONTROL_PIN_INSTALLER_BLOB=f11f9b7f0b8ec0b381ab0508b15a4e58cd539cad
 MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-}
 MEMOLY_PRODUCT_SHA=${MEMOLY_PRODUCT_SHA:-}
 export MEMOLY_PRODUCT_SHA
@@ -561,6 +567,7 @@ validate_database_target() {
 
 backup_database() {
 	local timestamp dump_file temp_file toc_file magic
+	require_command python3
 	install -d -m 0700 "$SERVER_ROOT/backups" || die "cannot create database backup directory"
 	chmod 0700 "$SERVER_ROOT/backups" || die "cannot secure database backup directory"
 	timestamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -600,6 +607,11 @@ backup_database() {
 		rm -f -- "$temp_file"
 		die "cannot finalize database backup file; migration was not attempted"
 	}
+	local artifact_at
+	artifact_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	if ! python3 /opt/memoly/control/sampler.py --write-backup-evidence "$artifact_at" >/dev/null 2>&1; then
+		die "database backup evidence could not be updated; the validated archive is preserved and migration was not attempted"
+	fi
 	printf 'Database backup created and validated: %s\n' "$(basename "$dump_file")"
 }
 
@@ -770,7 +782,9 @@ rollback_source_compatibility_profile() {
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:e0654e5c48ee35800754e7d784ad3b0af1bd5ff5cb7a860e4f3a063ee8609b67:wishlist"
 				# Exact frozen linked-family production inputs; this remains
 				# limited to the measured dc26 runtime, migration ledger and wishlist profile.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist"
+				# Control recovery is limited to the exact measured candidate executable tree.
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538:control") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -785,11 +799,83 @@ rollback_source_compatibility_profile() {
 		IFS=: read -r reference full_hash expected_hash profile <<< "$attestation"
 		[ "$(rollback_runtime_fingerprint "$reference")" = "$full_hash" ] || continue
 		if [ "$candidate_hash" = "$expected_hash" ]; then
+			if [ "$profile" = control ] && ! rollback_control_host_inputs_match "$revision"; then
+				continue
+			fi
 			printf '%s\n' "$profile"
 			return 0
 		fi
 	done
 	return 1
+}
+
+rollback_control_host_inputs_match() {
+	local revision=$1 path expected
+	local -a pins=(
+		"deploy/selectel/control/sampler.py:$CONTROL_PIN_SAMPLER_BLOB"
+		"deploy/selectel/control/memoly-control-sampler.service:$CONTROL_PIN_SERVICE_BLOB"
+		"deploy/selectel/control/memoly-control-sampler.timer:$CONTROL_PIN_TIMER_BLOB"
+		"deploy/selectel/compose.yml.template:$CONTROL_PIN_COMPOSE_BLOB"
+		"deploy/selectel/Caddyfile.static.template:$CONTROL_PIN_CADDY_BLOB"
+		"deploy/selectel/ci-release.sh:$CONTROL_PIN_INSTALLER_BLOB"
+	)
+	for pin in "${pins[@]}"; do
+		IFS=: read -r path expected <<< "$pin"
+		[[ "$expected" =~ ^[0-9a-f]{40}$ ]] || return 1
+		[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse "$revision:$path" 2>/dev/null || true)" = "$expected" ] || return 1
+	done
+}
+
+rollback_assert_root_owned_path() {
+	local path=$1 kind=$2 expected_mode=${3:-} current=/ part mode write_bits index=0 count
+	local -a components=()
+	[[ "$path" = /* ]] || return 1
+	IFS='/' read -r -a components <<< "${path#/}"
+	count=${#components[@]}
+	for part in "${components[@]}"; do
+		[ -n "$part" ] || continue
+		current=${current%/}/$part
+		index=$((index + 1))
+		[ ! -L "$current" ] && [ -e "$current" ] || return 1
+		[ "$(stat -c '%u:%g' -- "$current" 2>/dev/null || true)" = 0:0 ] || return 1
+		mode=$(stat -c '%a' -- "$current" 2>/dev/null || true)
+		[[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+		write_bits=$((8#$mode & 022))
+		[ "$write_bits" -eq 0 ] || return 1
+		if [ "$index" -lt "$count" ]; then
+			[ -d "$current" ] || return 1
+		elif [ "$kind" = directory ]; then
+			[ -d "$current" ] || return 1
+		else
+			[ -f "$current" ] || return 1
+		fi
+		if [ -n "$expected_mode" ] && [ "$index" -eq "$count" ]; then
+			[ "$((8#$mode))" -eq "$((8#$expected_mode))" ] || return 1
+		fi
+	done
+}
+
+rollback_control_installed_inputs_match() {
+	local control_root=${1:-/opt/memoly/control} systemd_dir=${2:-/etc/systemd/system}
+	local path expected actual
+	local -a directories=("$control_root:0755" "$control_root/metrics:0755" "$systemd_dir:")
+	local -a files=(
+		"$control_root/sampler.py:$CONTROL_PIN_SAMPLER_BLOB"
+		"$systemd_dir/memoly-control-sampler.service:$CONTROL_PIN_SERVICE_BLOB"
+		"$systemd_dir/memoly-control-sampler.timer:$CONTROL_PIN_TIMER_BLOB"
+	)
+	for path in "${directories[@]}"; do
+		IFS=: read -r path expected <<< "$path"
+		rollback_assert_root_owned_path "$path" directory "$expected" || return 1
+	done
+	for path in "${files[@]}"; do
+		IFS=: read -r path expected <<< "$path"
+		[[ "$expected" =~ ^[0-9a-f]{40}$ ]] || return 1
+		rollback_assert_root_owned_path "$path" file 0644 || return 1
+		actual=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" hash-object -- "$path" 2>/dev/null || true)
+		[ "$actual" = "$expected" ] || return 1
+	done
+	rollback_assert_root_owned_path "$control_root/metrics/snapshot.json" file 0644 || return 1
 }
 
 rollback_verify_migration_history() {
@@ -997,6 +1083,74 @@ MEMOLY_WISHLIST_MIGRATION_HISTORY_JS
 )" >/dev/null 2>&1
 }
 
+rollback_verify_control_migration_history() {
+	local phase=$1 baseline_revision=ccd3b911222d00769a099b998d8eef2665acd9d4
+	local baseline_catalog candidate_catalog baseline_count candidate_count
+	case "$phase" in pre-sql|complete) ;; *) return 1 ;; esac
+	baseline_catalog=$(rollback_migration_catalog_checksums "$baseline_revision") || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	baseline_count=$(printf '%s\n' "$baseline_catalog" | awk 'NF { count++ } END { print count+0 }')
+	candidate_count=$(printf '%s\n' "$candidate_catalog" | awk 'NF { count++ } END { print count+0 }')
+	[ "$baseline_count" = 56 ] && [ "$candidate_count" = 57 ] || return 1
+	[ "$(printf '%s\n' "$candidate_catalog" | cut -d: -f1 | head -n 56)" = \
+		"$(printf '%s\n' "$baseline_catalog" | cut -d: -f1)" ] || return 1
+	[ "$(printf '%s\n' "$candidate_catalog" | tail -n 1 | cut -d: -f1)" = 20261025100000_control_observability ] || return 1
+	MEMOLY_EXPECTED_BASELINE_MIGRATIONS="$baseline_catalog" \
+	MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS="$candidate_catalog" \
+	MEMOLY_CONTROL_LEDGER_PHASE="$phase" compose run --rm --no-deps \
+		-e "MEMOLY_EXPECTED_BASELINE_MIGRATIONS=$baseline_catalog" \
+		-e "MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS=$candidate_catalog" \
+		-e "MEMOLY_CONTROL_LEDGER_PHASE=$phase" backend bun -e "$(cat <<'MEMOLY_CONTROL_MIGRATION_HISTORY_JS'
+import { Client } from "pg";
+function parse(value) {
+  const result = [];
+  const seen = new Set();
+  for (const line of (value ?? "").trim().split("\n")) {
+    const [name, lfChecksum, crlfChecksum, ...extra] = line.split(":");
+    if (!name || extra.length || !/^\d+_[a-z0-9_]+$/.test(name) ||
+        !/^[0-9a-f]{64}$/.test(lfChecksum ?? "") || !/^[0-9a-f]{64}$/.test(crlfChecksum ?? "") || seen.has(name))
+      throw new Error("invalid expected migration catalog");
+    seen.add(name);
+    result.push({ name, checksums: new Set([lfChecksum, crlfChecksum]) });
+  }
+  return result;
+}
+const baseline = parse(process.env.MEMOLY_EXPECTED_BASELINE_MIGRATIONS);
+const candidate = parse(process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS);
+const phase = process.env.MEMOLY_CONTROL_LEDGER_PHASE;
+if (baseline.length !== 56 || candidate.length !== 57 ||
+    candidate.slice(0, 56).some((row, index) => row.name !== baseline[index].name ||
+      ![...row.checksums].some(checksum => baseline[index].checksums.has(checksum))) ||
+    candidate[56]?.name !== "20261025100000_control_observability" ||
+    !["pre-sql", "complete"].includes(phase)) process.exit(1);
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await client.connect();
+  const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
+  if (!Array.isArray(rows) || rows.some(row => !row.finished_at || row.rolled_back_at))
+    throw new Error("unfinished or rolled-back control migration");
+  const count = rows.length;
+  if (phase === "complete" ? count !== 57 : ![56, 57].includes(count))
+    throw new Error("control migration ledger count mismatch");
+  const expected = count === 56 ? baseline : candidate;
+  const seen = new Set();
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const source = expected[index];
+    if (!source || row.migration_name !== source.name || !source.checksums.has(row.checksum) || seen.has(row.migration_name))
+      throw new Error("control migration ledger differs from exact source catalog");
+    seen.add(row.migration_name);
+  }
+  await client.end();
+  process.exit(0);
+} catch {
+  await client.end().catch(() => {});
+  process.exit(1);
+}
+MEMOLY_CONTROL_MIGRATION_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
 rollback_migration_catalog_checksums() {
 	local revision=$1 path name lf_checksum crlf_checksum records='' count=0
 	local -a migration_paths=()
@@ -1130,7 +1284,16 @@ verify_application_rollback() {
 		die 'application runtime differs from the verified rollback source'
 	target_runtime=$(rollback_runtime_fingerprint "$target") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = comments ] || [ "$profile" = albums ] || [ "$profile" = wishlist ]; then
+	if [ "$profile" = control ]; then
+		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
+			backend/Dockerfile bunfig.toml \
+			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
+			die 'control rollback schema, dependencies or unrelated service configuration are incompatible'
+		rollback_control_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
+			die 'control rollback host inputs differ from the exact reviewed blobs'
+		rollback_control_installed_inputs_match ||
+			die 'control rollback requires the exact protected installed sampler, systemd units and snapshot'
+	elif [ "$profile" = comments ] || [ "$profile" = albums ] || [ "$profile" = wishlist ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/compose.yml.template deploy/selectel/Dockerfile.webapp \
@@ -1178,7 +1341,7 @@ verify_application_rollback() {
 			die 'rollback image revision label mismatch'
 	done
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	if { [ "$profile" = albums ] || [ "$profile" = wishlist ]; } && [ "$migration_phase" = pre-sql ]; then
+	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ]; } && [ "$migration_phase" = pre-sql ]; then
 		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
 		# migrate status intentionally reports a pending reviewed additive suffix.
 		:
@@ -1202,6 +1365,9 @@ verify_application_rollback() {
 	elif [ "$profile" = wishlist ]; then
 		rollback_verify_wishlist_migration_history "$migration_phase" ||
 			die 'wishlist rollback requires the exact reviewed migration history for this phase'
+	elif [ "$profile" = control ]; then
+		rollback_verify_control_migration_history "$migration_phase" ||
+			die 'control rollback requires the exact reviewed migration history for this phase'
 	fi
 	)
 }
@@ -1394,12 +1560,12 @@ deploy() {
 }
 
 rollback_readiness() {
-	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}
+	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_CONTROL_LEDGER_PHASE:-${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}}
 	case "$requested_phase" in
 		complete) ;;
 		pre-sql)
 			[ "${SELECTEL_CI_RELEASE:-false}" = true ] || die 'pre-SQL migration readiness is restricted to the guarded CI release'
-			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || die 'pre-SQL album readiness requires the inherited deploy lock'
+			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || die 'pre-SQL migration readiness requires the inherited deploy lock'
 			lock_path=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || die 'deployment lock path is unavailable'
 			fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
 			[ "$fd_target" = "$lock_path" ] || die 'pre-SQL migration readiness lock does not reference the expected lock file'

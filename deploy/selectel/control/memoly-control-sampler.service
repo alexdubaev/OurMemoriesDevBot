@@ -1,0 +1,24 @@
+[Unit]
+Description=memoLy bounded control host sampler
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -B /opt/memoly/control/sampler.py
+UMask=0022
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/opt/memoly/data/storage /opt/memoly/backups
+ReadWritePaths=/opt/memoly/control/metrics
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryMax=128M
+CPUQuota=20%
+TimeoutStartSec=30s

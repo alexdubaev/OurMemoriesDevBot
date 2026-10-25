@@ -342,13 +342,36 @@ describe('risk based verification', () => {
     expect(unitArgs.some((path) => path.startsWith('./backend/'))).toBe(true)
   })
 
-  test('FULL plan includes MAX auth and excludes the Telegram smoke journey', () => {
+  test('FULL plan enrolls MAX then Control journeys and conditionally runs Python sampler coverage', () => {
     const plan = planFor('full', ['backend/src/modules/auth/session.ts'])
-    const commands = plan.map(([name, [, args]]) => `${name} ${args.join(' ')}`).join('\n')
+    const commands = plan.map(([name, [command, args]]) => `${name} ${command} ${args.join(' ')}`).join('\n')
     expect(commands).toContain('--max-only')
     expect(commands).toContain('e2e:webapp:max')
+    expect(commands).toContain('Control owner browser journeys bun run --cwd webapp e2e --config=playwright.control.config.ts')
     expect(commands).not.toContain('critical-smoke.spec.ts')
     expect(plan.map(([name]) => name)).toContain('Repository and Selectel safety tests')
+    expect(plan.map(([name]) => name)).not.toContain('Control host-sampler Python tests')
+    expect(plan.findIndex(([name]) => name === 'MAX Web/PWA browser journeys')).toBeLessThan(plan.findIndex(([name]) => name === 'Control owner browser journeys'))
+
+    const withSampler = planFor('full', ['deploy/selectel/control/sampler.py'])
+    const pythonStage = withSampler.find(([name]) => name === 'Control host-sampler Python tests')
+    expect(pythonStage?.[1][1]).toEqual(['-B', '-m', 'unittest', 'discover', '-s', 'deploy/selectel/control', '-p', '*test*.py'])
+    expect(withSampler.findIndex(([name]) => name === 'Control host-sampler Python tests')).toBeLessThan(withSampler.findIndex(([name]) => name === 'Control owner browser journeys'))
+  })
+
+  test('Control Python stage requires a real positive unittest summary without skips', () => {
+    const passed = executePlan([['Control host-sampler Python tests', ['python3', ['-B', '-m', 'unittest']]]], () => ({
+      status: 0, stdout: 'Ran 7 tests in 0.023s\n\nOK\n', stderr: '',
+    }))
+    expect(passed[0]?.status).toBe(0)
+    const empty = executePlan([['Control host-sampler Python tests', ['python3', ['-B', '-m', 'unittest']]]], () => ({
+      status: 0, stdout: 'Ran 0 tests in 0.001s\n\nOK\n', stderr: '',
+    }))
+    expect(empty[0]?.status).toBe(1)
+    const skipped = executePlan([['Control host-sampler Python tests', ['python3', ['-B', '-m', 'unittest']]]], () => ({
+      status: 0, stdout: 'Ran 7 tests in 0.023s\n\nOK (skipped=1)\n', stderr: '',
+    }))
+    expect(skipped[0]?.status).toBe(1)
   })
 
   test('mandatory command failure stops the plan and remains a failure', () => {
