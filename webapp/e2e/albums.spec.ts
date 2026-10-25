@@ -452,6 +452,12 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
     const dir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
     if (!dir) return
     mkdirSync(dir, { recursive: true })
+    if (name.startsWith('catalog-')) {
+      for (const group of await page.locator('[data-albums-group]').all()) {
+        await group.scrollIntoViewIfNeeded()
+        await expect.poll(() => group.locator('img').evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true)
+      }
+    }
     await page.evaluate(() => document.fonts.ready.then(() => undefined))
     await page.evaluate(() => window.scrollTo(0, 0))
     await expect.poll(() => page.locator('.albums-surface img').evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true)
