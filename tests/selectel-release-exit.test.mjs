@@ -2962,13 +2962,15 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   const pgFixture = resolve(serverRoot, 'node_modules/pg')
   mkdirSync(pgFixture, { recursive: true })
   writeFileSync(resolve(pgFixture, 'package.json'), '{"type":"module","exports":"./index.js"}\n')
-  writeFileSync(resolve(pgFixture, 'index.js'), `export class Client {
+  writeFileSync(resolve(pgFixture, 'index.js'), `import { appendFileSync } from 'node:fs'
+export class Client {
     async connect() {}
     async end() {}
     async query(sql) {
       const count = Number(process.env.FIXTURE_LEDGER_COUNT)
       const candidate = (process.env.MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS ?? '').trim().split('\\n').map((line) => line.split(':'))
       const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
+      appendFileSync(process.env.FIXTURE_EVENTS, 'pg-count=' + count + ' profile=' + process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE + ' sql=' + sql.replace(/\\s+/g, ' ').slice(0, 180) + '\\n')
       if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
       if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
       if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false }] }
