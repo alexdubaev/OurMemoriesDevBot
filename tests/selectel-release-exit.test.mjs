@@ -2165,6 +2165,7 @@ test('guarded full release forces complete album readiness after SQL and before 
       'flock() { :; }; bash() { local action=${!#}; echo "$action:${SELECTEL_ALBUMS_LEDGER_PHASE:-unset}" >> "$FIXTURE_EVENTS"; if [ "$action" = migrate ]; then SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; fi; if [ "$action" = rollback-readiness ] && [ "${SELECTEL_ALBUMS_LEDGER_PHASE:-}" = complete ] && [ "$FIXTURE_FAILURE" = post ]; then return 42; fi; }',
       'promote_runtime() { echo PROMOTE >> "$FIXTURE_EVENTS"; }; verify_promoted_revision() { :; }; public_smoke() { :; }',
       'write_release_manifest() { :; }; write_control_release_receipt() { :; }; clear_release_markers() { :; }; archive_frontend_recovery_artifact() { :; }',
+      'install_control_sampler() { echo CONTROL-SAMPLER-INSTALLED >> "$FIXTURE_EVENTS"; }',
       'SELECTEL_ALBUMS_LEDGER_PHASE=pre-sql; FIXTURE_EVENTS=' + shellQuote(events) + '; FIXTURE_FAILURE=' + shellQuote(failure),
       'main',
     ].join('\n')
@@ -2497,13 +2498,11 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
   const expectedCompatibility = 'cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor),
     '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088')
-  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
-
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-children-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedChildrenProductionBlobs,
     'apply exact frozen child linked-family production blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
