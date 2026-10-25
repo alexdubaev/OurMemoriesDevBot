@@ -242,12 +242,12 @@ describe('Control bounded deletion maintenance', () => {
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, expiredAt, 10)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(expiredAt.getTime() + 17 * 60 * 1000), 10)
     expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ keysCapturedAt: expect.any(Date) })
-    await expect(prisma.child.create({ data: { familyId, displayName: 'Late private child' } })).rejects.toBeDefined()
-    await expect(prisma.mediaAsset.create({ data: {
+    await expect(Promise.resolve(prisma.child.create({ data: { familyId, displayName: 'Late private child' } }))).rejects.toBeDefined()
+    await expect(Promise.resolve(prisma.mediaAsset.create({ data: {
       familyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
       originalKey: 'media-originals/control-purge-test/late.jpg', declaredMime: 'image/jpeg',
       verifiedMime: 'image/jpeg', sha256: 'c'.repeat(64), byteSize: 1n, originalStatus: 'stored', renditionStatus: 'ready',
-    } })).rejects.toBeDefined()
+    } }))).rejects.toBeDefined()
     const activeChild = await prisma.child.create({ data: { familyId: otherFamilyId, displayName: 'Active other-family child' } })
     expect(activeChild.familyId).toBe(otherFamilyId)
   })
