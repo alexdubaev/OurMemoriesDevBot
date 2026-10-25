@@ -26,14 +26,16 @@ const storage = () => new FilesystemPrivateStorage({
 })
 
 async function clean() {
-  const familyOps = await prisma.controlFamilyDeletion.findMany({ select: { id: true, familyId: true } })
-  for (const operation of familyOps) {
-    await prisma.$transaction(async (tx) => {
-      await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { keysCapturedAt: new Date() } })
-      await tx.$queryRaw`SELECT set_config('app.control_family_purge_operation', ${operation.id}, true)`
-      await tx.$executeRaw`DELETE FROM "media_assets" WHERE "family_id" = ${operation.familyId}::uuid`
-    })
-  }
+  const cleanupOperationId = '79900000-0000-4000-8000-000000000001'
+  const cleanupOperation = await prisma.controlFamilyDeletion.upsert({
+    where: { familyId },
+    create: { id: cleanupOperationId, familyId, actorUserId: actorId, requestedAt: new Date(), keysCapturedAt: new Date() },
+    update: { keysCapturedAt: new Date() },
+  })
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.control_family_purge_operation', ${cleanupOperation.id}, true)`
+    await tx.$executeRaw`DELETE FROM "media_assets" WHERE "family_id" = ${familyId}::uuid`
+  })
   await prisma.controlStorageDelete.deleteMany()
   await prisma.controlLifecycleCommand.deleteMany()
   await prisma.controlAccessSnapshot.deleteMany()
