@@ -118,13 +118,14 @@ describe('Control bounded deletion maintenance', () => {
   test('durably captures and removes originals and deterministic image derivatives after expiry', async () => {
     await seed({ purgeAfter: new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000) })
     const localStorage = storage()
-    await expect(prisma.mediaAsset.deleteMany({ where: { id: retainedMediaId } })).resolves.toMatchObject({ count: 0 })
+    expect(await prisma.mediaAsset.deleteMany({ where: { id: retainedMediaId } })).toMatchObject({ count: 0 })
     const expiredAt = new Date(epoch.getTime() + 31 * 24 * 60 * 60 * 1000)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, expiredAt, 10)
     const safePurgeAt = new Date(expiredAt.getTime() + 17 * 60 * 1000)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(safePurgeAt.getTime() + 17 * 60 * 1000), 10)
     for (const key of [
       'media-originals/control-purge-test/original.jpg',
       'media-display/control-purge-test/original.jpg',
@@ -155,9 +156,10 @@ describe('Control bounded deletion maintenance', () => {
     await runControlDeletionMaintenance({ db: prisma, storage: failedStorage }, retryAt, 10)
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purging' })
     expect(await prisma.controlStorageDelete.count({ where: { completedAt: null } })).toBeGreaterThan(0)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(retryAt.getTime() + 5_000), 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(retryAt.getTime() + 5_000), 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(retryAt.getTime() + 5_000), 10)
+    const profileSafeAt = new Date(retryAt.getTime() + 17 * 60 * 1000)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(profileSafeAt.getTime() + 17 * 60 * 1000), 10)
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purged' })
   })
@@ -168,6 +170,8 @@ describe('Control bounded deletion maintenance', () => {
 
   test('blocks a stale runtime from approving a browser login challenge during trash', async () => {
     await seed()
+    await prisma.controlUserDeletion.deleteMany({ where: { targetUserId: targetId } })
+    await prisma.user.update({ where: { id: targetId }, data: { controlState: 'active' } })
     await prisma.browserLoginChallenge.create({ data: {
       id: 'control-purge-pending-challenge', verifierHash: 'a'.repeat(64), displayCodeHash: 'b'.repeat(64),
       expiresAt: new Date(epoch.getTime() + 60_000),

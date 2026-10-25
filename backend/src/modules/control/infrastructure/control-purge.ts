@@ -187,7 +187,7 @@ async function captureUserAvatarKeys(db: DbClient, operation: UserOperation, now
     if (avatars.length) {
       await tx.controlStorageDelete.createMany({
         data: avatars.map((avatar) => ({ operationId: operation.id, userId: operation.targetUserId, objectKey: avatar.objectKey,
-          notBefore: avatar.expiresAt > notBeforeFloor ? avatar.expiresAt : notBeforeFloor })),
+          notBefore: avatar.state === 'pending' && avatar.expiresAt > notBeforeFloor ? avatar.expiresAt : notBeforeFloor })),
         skipDuplicates: true,
       })
       await tx.controlUserDeletion.update({ where: { id: operation.id }, data: { purgeCursor: avatars.at(-1)!.id, lastErrorCode: null } })
