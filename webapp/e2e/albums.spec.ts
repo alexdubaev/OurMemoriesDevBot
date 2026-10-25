@@ -485,6 +485,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('.albums-card').filter({ hasText: 'Первый год Миши' }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   await capture('year-empty-390')
   for (const width of [320, 430]) {
     await page.setViewportSize({ width, height: 844 })
