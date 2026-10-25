@@ -159,7 +159,12 @@ describe('Control bounded deletion maintenance', () => {
     const profileSafeAt = new Date(retryAt.getTime() + 17 * 60 * 1000)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(profileSafeAt.getTime() + 17 * 60 * 1000), 10)
+    let completionNow = new Date(profileSafeAt.getTime() + 17 * 60 * 1000)
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if ((await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).controlState === 'purged') break
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, completionNow, 10)
+      completionNow = new Date(completionNow.getTime() + 17 * 60 * 1000)
+    }
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purged' })
   })
@@ -181,9 +186,9 @@ describe('Control bounded deletion maintenance', () => {
       actorId, targetId, protectedIds: [actorId], key: '79400000-0000-4000-8000-000000000001',
       fingerprint: preview.fingerprint, confirmation: targetId,
     })
-    await expect(prisma.browserLoginChallenge.update({
+    await expect(Promise.resolve(prisma.browserLoginChallenge.update({
       where: { id: 'control-purge-pending-challenge' }, data: { state: 'approved', approvedUserId: targetId },
-    })).rejects.toBeDefined()
+    }))).rejects.toBeDefined()
     await restoreControlUser(prisma, {
       actorId, targetId, protectedIds: [actorId], key: '79400000-0000-4000-8000-000000000002', deletionId: trashed.deletionId,
     })

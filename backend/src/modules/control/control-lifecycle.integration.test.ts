@@ -17,6 +17,7 @@ const actorId = '70000000-0000-4000-8000-000000000001'
 const targetId = '70000000-0000-4000-8000-000000000002'
 const formerMemberId = '70000000-0000-4000-8000-000000000003'
 const overlappingUserId = '70000000-0000-4000-8000-000000000004'
+const protectedHexOwnerId = '70000000-0000-4000-8abc-000000000005'
 const ownedFamilyId = '71000000-0000-4000-8000-000000000001'
 const sharedFamilyId = '71000000-0000-4000-8000-000000000002'
 const legacyFamilyId = '71000000-0000-4000-8000-000000000003'
@@ -29,6 +30,7 @@ async function seed() {
     { id: targetId, displayName: 'Synthetic target' },
     { id: formerMemberId, displayName: 'Synthetic former member' },
     { id: overlappingUserId, displayName: 'Synthetic overlapping deletion target' },
+    { id: protectedHexOwnerId, displayName: 'Synthetic protected hex owner' },
   ] })
   const identity = await prisma.externalIdentity.create({
     data: { userId: targetId, provider: 'max', subject: '987654321' },
@@ -181,6 +183,20 @@ describe('Control account lifecycle', () => {
         metadata: {},
       },
     })).resolves.toEqual({ state: 'invalid_session' })
+  })
+
+  test('protects UUID owners when the submitted path and confirmation use uppercase hex', async () => {
+    const upperId = protectedHexOwnerId.toUpperCase()
+    const before = await previewUserDeletion(prisma, protectedHexOwnerId, [protectedHexOwnerId])
+    await expect(trashControlUser(prisma, {
+      actorId,
+      targetId: upperId,
+      protectedIds: [protectedHexOwnerId],
+      key: '70000000-0000-4000-8000-000000000129',
+      fingerprint: before.fingerprint,
+      confirmation: upperId,
+    })).rejects.toMatchObject({ code: 'protected_account' })
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: protectedHexOwnerId } })).toMatchObject({ controlState: 'active' })
   })
 
   test('restores live snapshots but keeps prior revocations and independently purged family access closed', async () => {

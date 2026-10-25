@@ -62,8 +62,11 @@ function assertConfirmation(value: string, targetId: string) {
   if (value !== targetId) throw new ControlLifecycleFailure('confirmation_mismatch', 'Confirmation does not match the target')
 }
 
-function protectTarget(targetId: string, protectedIds: readonly string[]) {
-  if (protectedIds.includes(targetId)) throw new ControlLifecycleFailure('protected_account', 'Configured Control owners cannot be deleted')
+function protectTarget(targetId: string, protectedIds: readonly string[], actorId?: string) {
+  const normalizedTarget = targetId.toLowerCase()
+  if (normalizedTarget === actorId?.toLowerCase() || protectedIds.some((id) => id.toLowerCase() === normalizedTarget)) {
+    throw new ControlLifecycleFailure('protected_account', 'Configured Control owners cannot be deleted')
+  }
 }
 
 function payloadHash(operation: string, targetId: string, fingerprint: string, confirmation: string) {
@@ -188,7 +191,7 @@ export async function trashControlUser(
   now?: Date,
 ): Promise<LifecycleResult & { deletionId: string; purgeAfter: string }> {
   assertUuid(input.actorId, 'actorId'); assertUuid(input.targetId, 'targetId'); assertUuid(input.key, 'key')
-  protectTarget(input.targetId, input.protectedIds); assertConfirmation(input.confirmation, input.targetId)
+  protectTarget(input.targetId, input.protectedIds, input.actorId); assertConfirmation(input.confirmation, input.targetId)
   const operation = 'user.trash'
   const hash = payloadHash(operation, input.targetId, input.fingerprint, input.confirmation)
   return db.$transaction(async (tx) => {
@@ -299,7 +302,7 @@ export async function restoreControlUser(
   now?: Date,
 ): Promise<LifecycleResult> {
   assertUuid(input.actorId, 'actorId'); assertUuid(input.targetId, 'targetId'); assertUuid(input.key, 'key'); assertUuid(input.deletionId, 'deletionId')
-  protectTarget(input.targetId, input.protectedIds)
+  protectTarget(input.targetId, input.protectedIds, input.actorId)
   const operation = 'user.restore'
   const hash = digest({ operation, targetId: input.targetId, deletionId: input.deletionId })
   return db.$transaction(async (tx) => {
