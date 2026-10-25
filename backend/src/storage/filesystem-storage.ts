@@ -30,7 +30,7 @@ import {
 } from './request-guards'
 
 export const filesystemStorageRoutePrefix = '/storage/objects'
-const retirementWritePollIntervalMs = 25
+const retirementWritePollIntervalMs = 250
 
 export type StoredObjectMetadata = {
   contentType: string
@@ -116,6 +116,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     const temporaryPath = `${objectPath}.${randomUUID()}.part`
     let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined
     let retirementPollTimer: ReturnType<typeof setTimeout> | undefined
+    let wakeRetirementMonitor: (() => void) | undefined
     let retirementMonitorFinished = false
     let retirementMonitor: Promise<void> | undefined
     let retirementError: unknown
@@ -146,9 +147,11 @@ export class FilesystemPrivateStorage implements PrivateStorage {
       retirementMonitor = (async () => {
         while (!retirementMonitorFinished && !retirementAbort.signal.aborted) {
           await new Promise<void>((resolve) => {
+            wakeRetirementMonitor = resolve
             retirementPollTimer = setTimeout(resolve, retirementWritePollIntervalMs)
           })
           retirementPollTimer = undefined
+          wakeRetirementMonitor = undefined
           if (retirementMonitorFinished || retirementAbort.signal.aborted) break
           try {
             if (await this.isRetired(safeKey)) {
@@ -201,6 +204,9 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     } finally {
       retirementMonitorFinished = true
       if (retirementPollTimer) clearTimeout(retirementPollTimer)
+      retirementPollTimer = undefined
+      wakeRetirementMonitor?.()
+      wakeRetirementMonitor = undefined
       retirementAbort.abort()
       try {
         await retirementMonitor
