@@ -221,12 +221,31 @@ test('Control fails closed on access loss, restores an owner session, and revali
 
   let releaseLateMe: () => void = () => undefined
   let markLateMeStarted: () => void = () => undefined
+  let markLateMeSettled: () => void = () => undefined
+  let releaseVisibleMe: () => void = () => undefined
+  let markVisibleMeStarted: () => void = () => undefined
+  let meRevalidationRequests = 0
   const lateMeGate = new Promise<void>((resolve) => { releaseLateMe = resolve })
   const lateMeStarted = new Promise<void>((resolve) => { markLateMeStarted = resolve })
+  const lateMeSettled = new Promise<void>((resolve) => { markLateMeSettled = resolve })
+  const visibleMeGate = new Promise<void>((resolve) => { releaseVisibleMe = resolve })
+  const visibleMeStarted = new Promise<void>((resolve) => { markVisibleMeStarted = resolve })
   await page.route('**/api/v1/control/me', async (route) => {
-    markLateMeStarted()
-    await lateMeGate
-    try { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ allowed: true, serverNow: new Date().toISOString(), features: ['read', 'csv_export'] }) }) } catch { /* The hidden-page request may already be aborted. */ }
+    meRevalidationRequests += 1
+    if (meRevalidationRequests === 1) {
+      markLateMeStarted()
+      await lateMeGate
+      try { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ allowed: true, serverNow: new Date().toISOString(), features: ['read', 'csv_export'] }) }) } catch { /* The hidden-page request may already be aborted. */ }
+      finally { markLateMeSettled() }
+      return
+    }
+    if (meRevalidationRequests === 2) {
+      markVisibleMeStarted()
+      await visibleMeGate
+      await route.continue()
+      return
+    }
+    await route.continue()
   })
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
   await lateMeStarted
@@ -238,15 +257,21 @@ test('Control fails closed on access loss, restores an owner session, and revali
   await expect(page.getByRole('heading', { name: 'Семьи' })).toHaveCount(0)
   await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
   releaseLateMe()
-  await page.waitForTimeout(100)
+  await lateMeSettled
   await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
-  await page.unroute('**/api/v1/control/me')
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
   })
+  await visibleMeStarted
   await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Семьи' })).toHaveCount(0)
+  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  const visibleMeResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/control/me') && response.status() === 200)
+  releaseVisibleMe()
+  expect((await visibleMeResponse).status()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Семьи' })).toBeVisible()
+  await page.unroute('**/api/v1/control/me')
 
   await page.route('**/api/v1/control/me', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'Synthetic owner access loss' }) }))
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
