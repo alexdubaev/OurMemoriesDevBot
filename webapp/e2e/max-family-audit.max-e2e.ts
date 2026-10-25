@@ -254,6 +254,13 @@ test('MAX-FULL: member avatar directory updates an already-open family and comme
 
 test('MAX-FULL: profile avatar uploaded in one family appears in another family and matches fallback styling', async ({ browser, page }, testInfo) => {
   test.setTimeout(180_000)
+  const waitForFamilyChooserReady = async (targetPage: import('@playwright/test').Page) => {
+    await expect.poll(async () => {
+      const heading = await targetPage.getByRole('heading', { name: 'Мои семьи' }).isVisible()
+      const switcher = await targetPage.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ }).isVisible()
+      return heading || switcher
+    }, { timeout: 15_000 }).toBe(true)
+  }
   const actorId = 7_700_000 + Math.floor(Math.random() * 100_000)
   const observerId = actorId + 1
   const actorToken = await signInMax(page, { id: actorId, first_name: 'Avatar actor' })
@@ -321,6 +328,7 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
     if (path === `/api/v1/families/${observerFamily.id}/members`) directoryReads.push(path)
   })
   await observerPage.reload()
+  await expect(observerPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
   await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
   await observerPage.getByRole('button', { name: 'Семья' }).click()
   const actorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
@@ -328,8 +336,9 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
   const familyFallback = actorRow.locator('[data-slot="avatar-fallback"]')
   await expect(familyFallback).toBeVisible()
   const familyFallbackColors = await familyFallback.evaluate((element) => {
-    const label = element.querySelector('[data-slot="typography"]') ?? element
-    return { background: getComputedStyle(element).backgroundColor, foreground: getComputedStyle(label).color }
+    const paintedFallback = element.querySelector('[data-slot="avatar-fallback"]') ?? element
+    const label = paintedFallback.querySelector('[data-slot="typography"]') ?? paintedFallback
+    return { background: getComputedStyle(paintedFallback).backgroundColor, foreground: getComputedStyle(label).color }
   })
   await observerPage.getByRole('button', { name: 'Лента' }).click()
   const observerCard = observerPage.locator(`[data-memory-id="${memoryId}"]`)
@@ -339,12 +348,14 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
   const commentFallback = observerComment.locator('.comments-avatar-fallback')
   await expect(commentFallback).toBeVisible()
   const commentFallbackColors = await commentFallback.evaluate((element) => {
-    const label = element.querySelector('[data-slot="typography"]') ?? element
-    return { background: getComputedStyle(element).backgroundColor, foreground: getComputedStyle(label).color }
+    const paintedFallback = element.querySelector('[data-slot="avatar-fallback"]') ?? element
+    const label = paintedFallback.querySelector('[data-slot="typography"]') ?? paintedFallback
+    return { background: getComputedStyle(paintedFallback).backgroundColor, foreground: getComputedStyle(label).color }
   })
   expect(commentFallbackColors).toEqual(familyFallbackColors)
   await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-fallbacks.png'), fullPage: true })
 
+  await waitForFamilyChooserReady(page)
   await selectFamilyFeed(page, 'Actor family child', 'Avatar actor own-family note')
   await page.getByRole('button', { name: 'Семья' }).click()
   const ownActorRow = page.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
@@ -366,6 +377,7 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
   await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-family-visible.png'), fullPage: true })
 
   await observerPage.reload()
+  await waitForFamilyChooserReady(observerPage)
   await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
   await observerPage.getByRole('button', { name: 'Семья' }).click()
   const reloadedActorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
