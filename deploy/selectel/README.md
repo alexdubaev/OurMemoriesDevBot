@@ -660,13 +660,14 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   `media:delete` work while the original storage bytes remain present.
 
 - The exact memoLy Control executable compatibility fingerprint
-  `7642cc877150a93657fb394e7d4e59bb28c9beb55eff166da697f5e7f120500a` is
+  `c8496850e920c9a3253949f2571366c7a6c38ce851bca4eb44b2c7b1c4fc2164` is
   measured from the finalized executable source reconstructed over accepted
   source `a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4` and is anchored to the unchanged
   full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime fingerprint
   `2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088`. The
   refreshed exact profile regression verifies this fingerprint against frozen
-  committed production blobs. This profile is accepted only for the designated
+  committed production blobs, including the Control UI's public auth entrypoint.
+  This profile is accepted only for the designated
   healthy `33a0054c3c71372aa5509ee8ebfa4578ad512ea1`
   backend/webapp image pair. The exact candidate was reconstructed over the
   accepted source with committed production blobs, and source, migration SQL,

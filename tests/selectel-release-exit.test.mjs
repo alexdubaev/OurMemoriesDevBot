@@ -2413,7 +2413,7 @@ test('Control recovery permits only its exact current executable fingerprint and
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
   const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-  const expectedCompatibility = '7642cc877150a93657fb394e7d4e59bb28c9beb55eff166da697f5e7f120500a'
+  const expectedCompatibility = 'c8496850e920c9a3253949f2571366c7a6c38ce851bca4eb44b2c7b1c4fc2164'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
   const files = [
     ['backend/.env.example', '07d6bf4a7384d7f12fa0075cd3719ecef446e92a'],
@@ -2437,11 +2437,12 @@ test('Control recovery permits only its exact current executable fingerprint and
     ['webapp/src/components/ui/dialog.tsx', '61584b8490d13c4c022ce58c8c33b51079a201ff'],
     ['webapp/src/components/ui/select.tsx', 'f8082aae1f58159fc419423e4d9a56ae48262fca'],
     ['webapp/src/components/ui/sheet.tsx', '66c59f950d68b4ce9d3f229e893612b3d7b0d608'],
-    ['webapp/src/control/ControlApp.tsx', '784eeb48faa5bd050efad0fcd731a57841cec891'],
-    ['webapp/src/control/control-api.ts', 'fbd13e2901d059a3b9650727dc0914cdb02ecb46'],
+    ['webapp/src/control/ControlApp.tsx', 'f06612f17e82e5cba042e6a9af91e9a7a48eda8a'],
+    ['webapp/src/control/control-api.ts', '9736c43b1d966c05bbbf4d20d83cafb89cbfa7a4'],
     ['webapp/src/control/control.css', '83bd2f101391a56fd56a32ed223b497e86742472'],
     ['webapp/src/control/main.tsx', '2c144606a1eb9c134a5627bd5f6584a4fc54e29c'],
     ['webapp/src/features/memoly-ui/SettingsSheet.tsx', '9d9bf8c317791f365c00a593cc11691d123bdf2c'],
+    ['webapp/src/features/auth/index.ts', '9883ad57330b016a8b3fb3fc3a3d5fa575a4e81e'],
     ['webapp/src/platform/control-activity.ts', '71898872aeb1c910ab45ca6f65521bcaaa38b4e3'],
     ['webapp/vite.config.ts', '65f4e171cb9cf1835fdd94a0ed7d99f0b9b0b9aa'],
     ['deploy/selectel/control/sampler.py', 'fbbc06bc8b62d86f0fe7685ee6651adf7da48898'],
