@@ -40,7 +40,7 @@ import { isMaxVideoUploadAcceptanceLaunch, readMaxRuntimeDiagnostic, shouldShowM
 import { createMaxBrowserLink, maxBrowserLinkChallengeId } from '@/platform/max/host-bridge'
 import { ThemeProvider } from '@/features/theme'
 import { claimWelcome, WelcomeSplash } from '@/features/welcome'
-import { MemberAvatarDirectoryProvider } from '@/features/avatar'
+import { memberAvatarUpdatedEvent, MemberAvatarDirectoryProvider } from '@/features/avatar'
 import { readPwaInstallIntent, setPwaInstallDismissed } from '@/platform/pwa-install'
 import { readUiVersion } from '@/features/ui-version'
 import { allowPrivateFamilyCache, persistentUiQueryKey, privateFamilyAccessRevokedEvent, removePrivateFamilyCache, type PersistentFamilyPresentation } from '@/platform/persistence/private-cache'
@@ -601,6 +601,16 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     seenQueueRef.current?.cancelFamily(familyId)
     returnHome('Доступ к этой семье изменился. Выберите её снова в списке.', familyId)
   }, [home, returnHome, selectedMembershipEpoch])
+
+  useEffect(() => {
+    const onAvatarUpdated = (event: Event) => {
+      if ((event as CustomEvent<{ accountId?: string }>).detail?.accountId !== currentUserId) return
+      setMembers((current) => current.map((member) => member.userId === currentUserId ? { ...member, avatarPath: null } : member))
+      void refreshSelected()
+    }
+    window.addEventListener(memberAvatarUpdatedEvent, onAvatarUpdated)
+    return () => window.removeEventListener(memberAvatarUpdatedEvent, onAvatarUpdated)
+  }, [currentUserId, refreshSelected])
 
   useEffect(() => {
     let cancelled = false

@@ -837,7 +837,7 @@ rollback_source_compatibility_profile() {
 		d2999cca6e4e5980cc2277de7453440353f5b392)
 			# The exact accepted runtime supports the schema-59 composite key.
 			exact_compatibility_attestations=("d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:$MAX_VIDEO_COMPATIBILITY_FINGERPRINT:max-video"
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:311af152152c497f23e1acd75b884991de6094b065f41561bc4819129d01b1d9:max-video") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:a4d194873593bc2c0770e8ee491e295075cf9f60a39550f3f7bbaaebb55b17f9:max-video") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

@@ -766,7 +766,7 @@ const reviewedWelcomeOnceZoomBlobs = [
   ['webapp/src/platform/app-zoom.ts', '4561b0c501136d38473905497643247ab688bb03'],
 ]
 const reviewedMemberAvatarProductionBlobs = [
-  ['webapp/src/App.tsx', 'e3d368804eebf0f2f2e6fbde8c973a947fc5c962'],
+  ['webapp/src/App.tsx', '3d6918955368efb06348bd7ff324bfd365e7f15d'],
   ['webapp/src/features/avatar/index.ts', 'a60d1edb610a7b889085c6bd3f6823814e5a6ce9'],
   ['webapp/src/features/avatar/member-avatar-directory-context.ts', '92efe6e33ae5d364a3708b5f18bc64fa1db75073'],
   ['webapp/src/features/avatar/member-avatar-directory-query.ts', '03e0b7ebccbde17487070d467971ac4fd2689591'],
@@ -2554,14 +2554,14 @@ test('member avatar frontend retains only the measured d299 MAX recovery pair', 
 }, () => {
   const baseline = maxVideoRecoveryBackend
   const target = maxVideoRecoveryBackend
-  const expectedCompatibility = '311af152152c497f23e1acd75b884991de6094b065f41561bc4819129d01b1d9'
+  const expectedCompatibility = 'a4d194873593bc2c0770e8ee491e295075cf9f60a39550f3f7bbaaebb55b17f9'
   assert.equal(productionRuntimeFingerprint(root, baseline), maxVideoRecoveryRuntime)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-member-avatar-source-'))
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'apply exact member-avatar production blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
     readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
