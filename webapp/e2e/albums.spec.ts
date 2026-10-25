@@ -433,6 +433,10 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
+  const consoleErrors: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
   const yearAlbum = ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: Array<{ id: string; childId: string | null; kind: string }> }).items.find((album) => album.kind === 'year')!
   expect(yearAlbum.childId).toBe(mishaId)
   for (const album of [
@@ -458,9 +462,9 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
         const box = element.getBoundingClientRect()
         return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }
       }
-      return { width: innerWidth, height: innerHeight, scrollY, fontsStatus: document.fonts.status, intro: rect('.albums-intro'), catalog: rect('.albums-catalog'), card: rect('.albums-card'), chips: rect('.albums-chips'), firstRow: rect('.albums-entry-card') }
+      return { width: innerWidth, height: innerHeight, scrollY, documentWidth: document.documentElement.scrollWidth, horizontalOverflow: document.documentElement.scrollWidth > innerWidth, fontsStatus: document.fonts.status, intro: rect('.albums-intro'), catalog: rect('.albums-catalog'), card: rect('.albums-card'), chips: rect('.albums-chips'), firstRow: rect('.albums-entry-card') }
     })
-    await page.screenshot({ path: join(dir, `${name}.png`), fullPage: false })
+    await page.screenshot({ path: join(dir, `${name}.png`), fullPage: name.startsWith('catalog-'), animations: 'disabled' })
     appendFileSync(join(dir, 'geometry.jsonl'), `${JSON.stringify({ name, ...geometry })}\n`)
   }
 
@@ -549,6 +553,8 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await clearConfirmation.getByRole('button', { name: 'Очистить главу', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(0)
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })
 
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
