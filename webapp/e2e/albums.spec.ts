@@ -418,19 +418,31 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { children: Array<{ id: string; name: string }> }
   expect(family.children.map((child) => child.name)).toEqual(['Лиля', 'Миша'])
   const lilyaId = family.children[0]!.id
+  const mishaId = family.children[1]!.id
 
   await page.reload()
+  await expect.poll(async () => (await page.getByTestId('bottom-navigation').count()) > 0 || (await page.locator('.family-hub-card').count()) > 0).toBe(true)
+  const familyHubCards = page.locator('.family-hub-card')
+  if (await familyHubCards.count()) await familyHubCards.first().click()
   await expect(page.getByTestId('bottom-navigation')).toBeVisible()
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
   await page.getByRole('button', { name: /Первый год/ }).click()
-  await expect(page.getByLabel('Для кого этот альбом')).toHaveValue(lilyaId)
-  await page.getByLabel('Название альбома').fill('Первый год Лили')
+  await page.getByLabel('Для кого этот альбом').selectOption(mishaId)
+  await page.getByLabel('Название альбома').fill('Первый год Миши')
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const yearAlbum = ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: Array<{ id: string; childId: string | null; kind: string }> }).items.find((album) => album.kind === 'year')!
-  expect(yearAlbum.childId).toBe(lilyaId)
+  expect(yearAlbum.childId).toBe(mishaId)
+  for (const album of [
+    { kind: 'workshop', title: 'Мастерская Лили', childId: lilyaId },
+    { kind: 'events', title: 'Первые открытия Лили', childId: lilyaId },
+    { kind: 'free', title: 'Семейная поездка', childId: null },
+  ]) {
+    const created = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { ...album, description: null } })
+    expect(created.status()).toBe(201)
+  }
 
   const capture = async (name: string) => {
     const dir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
@@ -454,13 +466,14 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
 
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
   await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  await expect(page.locator('[data-albums-group]')).toHaveCount(3)
   await capture('catalog-empty-cover-390')
   for (const width of [320, 430]) {
     await page.setViewportSize({ width, height: 844 })
     await capture(`catalog-empty-cover-${width}`)
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.locator('.albums-card').filter({ hasText: 'Первый год Лили' }).click()
+  await page.locator('.albums-card').filter({ hasText: 'Первый год Миши' }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await capture('year-empty-390')
   for (const width of [320, 430]) {
@@ -478,7 +491,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.locator('#photo-composer-files').setInputFiles({ name: 'first-year-blue.png', mimeType: 'image/png', buffer: photoBytes })
   await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-  await expect(page.locator('.albums-timeline .albums-entry-card.is-filled')).toHaveCount(1)
+  await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(1)
 
   await page.getByRole('button', { name: 'Настройки альбома' }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
@@ -490,24 +503,26 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.getByRole('button', { name: 'Все 12 месяцев', exact: true }).click()
   await expect(page.locator('.albums-month-overview .albums-entry-card')).toHaveCount(12)
   await capture('year-overview-390')
+  await page.getByRole('button', { name: 'Линия времени', exact: true }).click()
   for (const width of [320, 430]) {
     await page.setViewportSize({ width, height: 844 })
     await capture(`year-filled-${width}`)
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole('button', { name: 'Линия времени', exact: true }).click()
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
-  await expect(page.locator('[data-albums-group]')).toHaveCount(1)
-  await expect(page.locator('[data-albums-group]').first()).toHaveAttribute('data-albums-group', lilyaId)
-  await expect(page.locator('[data-albums-group]').first()).toContainText('Первый год Лили')
-  await expect(page.locator('.albums-card')).toHaveCount(1)
+  await expect(page.locator('[data-albums-group]')).toHaveCount(3)
+  await expect(page.locator(`[data-albums-group="${lilyaId}"]`)).toContainText('Мастерская Лили')
+  await expect(page.locator(`[data-albums-group="${lilyaId}"]`)).toContainText('Первые открытия Лили')
+  await expect(page.locator(`[data-albums-group="${mishaId}"]`)).toContainText('Первый год Миши')
+  await expect(page.locator('[data-albums-group="family"]')).toContainText('Семейная поездка')
+  await expect(page.locator('.albums-card')).toHaveCount(4)
   await capture('catalog-filled-cover-390')
   for (const width of [320, 430]) {
     await page.setViewportSize({ width, height: 844 })
     await capture(`catalog-filled-cover-${width}`)
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  const albumCard = page.locator('.albums-card').filter({ hasText: 'Первый год Лили' })
+  const albumCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
   await albumCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
@@ -533,7 +548,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(clearConfirmation).toContainText('Номер месяца и оригиналы сохранятся')
   await clearConfirmation.getByRole('button', { name: 'Очистить главу', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-  await expect(page.locator('.albums-timeline .albums-entry-card.is-filled')).toHaveCount(0)
+  await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(0)
 })
 
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
