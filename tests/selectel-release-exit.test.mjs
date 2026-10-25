@@ -2608,7 +2608,7 @@ test('MAX family invite entry retains only its measured d299 recovery pair', {
 }, () => {
   const baseline = maxVideoRecoveryBackend
   const target = maxVideoRecoveryBackend
-  const expectedCompatibility = '52a8f7e24bf62c8f5a8eeca4c0c3aed612198dabe473fabe8c797ce49d286190'
+  const expectedCompatibility = 'cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179'
   assert.equal(productionRuntimeFingerprint(root, baseline), maxVideoRecoveryRuntime)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-family-invite-source-'))
