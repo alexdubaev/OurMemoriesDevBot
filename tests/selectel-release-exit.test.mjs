@@ -2561,7 +2561,7 @@ test('member avatar frontend retains only the measured d299 MAX recovery pair', 
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
+  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'apply exact member-avatar production blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
     readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
