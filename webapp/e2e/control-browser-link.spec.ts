@@ -352,10 +352,10 @@ test('Control owner trashes and restores a synthetic account, then confirms only
     await familyRow.click()
     await expect(page.getByRole('heading', { name: familyName })).toBeVisible()
     await page.getByRole('button', { name: 'Удалить семью навсегда' }).click()
-    const purgeDialog = page.getByRole('dialog')
+    const purgeDialog = page.getByRole('dialog', { name: 'Удалить семью навсегда' })
     await expect(purgeDialog.getByText('Действие необратимо')).toBeVisible()
     await purgeDialog.getByRole('button', { name: 'Отмена' }).click()
-    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(purgeDialog).toHaveCount(0)
     await page.getByRole('button', { name: 'Закрыть' }).click()
 
     await page.setViewportSize({ width: 390, height: 844 })
