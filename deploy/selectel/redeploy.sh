@@ -1619,7 +1619,7 @@ rollback() {
 	gate_policy=$(rollback_auth_gate_for_verified_pair) || die 'application rollback gate policy could not be verified'
 	# Install and verify this exact pair's gateway policy before promoting application processes.
 	ROLLBACK_AUTH_GATE=$gate_policy render_edge_candidate
-	local running_backend backend_count backend_started=false
+	local running_backend backend_count backend_started=false running_backend_tag
 	if [ "$gate_policy" = false ]; then
 		running_backend=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
 			--filter 'label=com.docker.compose.service=backend') || die 'cannot enumerate running backend service before rollback routing'
@@ -1633,6 +1633,13 @@ rollback() {
 			compose up -d --no-deps --force-recreate backend || die 'compatible rollback backend promotion failed before auth routing verification'
 			wait_backend_internal
 			backend_started=true
+		elif [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
+			[ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ]; then
+			running_backend_tag=$(inspect_running_service_image backend memoly-backend) ||
+				die 'cannot verify the running backend before MAX rollback routing'
+			[ "$running_backend_tag" = "$PREVIOUS_BACKEND_IMAGE_TAG" ] ||
+				die 'running backend differs from the pinned MAX recovery target'
+			wait_backend_internal
 		fi
 	fi
 	activate_gateway

@@ -1024,6 +1024,7 @@ function runApplicationRollback(options = {}) {
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
     FIXTURE_BACKEND_STOPPED: String(options.stoppedBackend ?? false),
     FIXTURE_PARENT_SECRET_FAILURE: String(options.parentSecretFailure ?? false),
+    FIXTURE_RUNNING_BACKEND_TAG: options.runningBackend ?? (maxVideoPair ? maxVideoRecoveryBackend : rollbackBaseline),
     FIXTURE_PROMOTION_FAIL: String(options.promotionFail ?? false),
     ROLLBACK_AUTH_GATE: options.operatorGate ?? '',
   }
@@ -1041,6 +1042,7 @@ function runApplicationRollback(options = {}) {
     ' *"org.opencontainers.image.revision"*memoly-backend*) echo "$FIXTURE_BACKEND_LABEL" ;;',
     ' *"org.opencontainers.image.revision"*memoly-webapp*) echo "$FIXTURE_WEBAPP_LABEL" ;;',
     ' *"image inspect --format "*org.opencontainers.image.revision*) echo "$FIXTURE_LABEL" ;;',
+    ' *"inspect --format {{.Config.Image}}|{{.Image}}"*) echo "memoly-backend:$FIXTURE_RUNNING_BACKEND_TAG|$FIXTURE_BACKEND_ID" ;;',
     ' *"service=backend"*) [ "$FIXTURE_BACKEND_STOPPED" = true ] || echo backend-container ;;',
     ' *) return 0 ;;',
     ' esac',
@@ -2645,6 +2647,16 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.notEqual(missingParentSecrets.status, 0, missingParentSecrets.output)
   assert.match(missingParentSecrets.events, /PARENT_SECRET_INIT_FAILED/)
   assert.doesNotMatch(missingParentSecrets.events, /MAX_INVERSE|UP:|GATE/)
+
+  const exactRunningBackend = runApplicationRollback({ ...compatiblePair, trackRollbackOrder: true })
+  assert.equal(exactRunningBackend.status, 0, exactRunningBackend.output)
+  assert.match(exactRunningBackend.events, new RegExp(`BACKEND_INTERNAL_READY[\\s\\S]*GATE[\\s\\S]*AUTH_ROUTE_CHECK[\\s\\S]*UP:${maxVideoRecoveryBackend}:.*worker scheduler static`))
+
+  const unexpectedRunningBackend = runApplicationRollback({ ...compatiblePair,
+    runningBackend: 'a'.repeat(40), trackRollbackOrder: true })
+  assert.notEqual(unexpectedRunningBackend.status, 0, unexpectedRunningBackend.output)
+  assert.match(unexpectedRunningBackend.output, /running backend image revision label does not match its tag/)
+  assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
