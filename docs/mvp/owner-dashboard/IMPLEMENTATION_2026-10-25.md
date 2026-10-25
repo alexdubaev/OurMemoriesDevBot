@@ -1,0 +1,75 @@
+# MEMOLY-CONTROL — implementation and evidence ledger
+
+Task: MEMOLY-CONTROL. Lead owns architecture, common-file integration and release.
+Spec: SPEC.md, DESIGN_SHADCN.md, DATA_MAP.md, PLAN.md in this directory.
+Base: `80de803fc14266f878d3407a4ef2e1ec97b93199` (PR #207 integrated).
+Initial production backend/frontend: `ccd3b911222d00769a099b998d8eef2665acd9d4`.
+Branch: `feat/memoly-control`.
+Worktree: `D:/codex/TG_OurMemoriesDevBot/worktrees/memoly-control`.
+
+## Architecture rulings
+
+- Separate React19/Vite control entry and hash navigation, no family App/AuthProvider/private-cache mounting. Existing AuthApi and its coordinated browser-link/refresh/logout remain the auth transport. A control-only in-memory QueryClient is destroyed on access loss, pagehide, session replacement; restored/visible pages revalidate before showing data.
+- Server requireAuth first, then CONTROL_ENABLED and exact UUID allowlist and authenticated MAX external identity. Family owner/full and legacy admin grant nothing. No new privilege or password account. Owner provisioning requires confirmed MAX identity, never a guessed name/first user.
+- All control routes, including unknown subpaths and exports, set private,no-store and authenticate before any read/cache. Rate limits use existing security helpers. Validated DTOs choose metadata only; no sensitive bodies, birth dates, emails/subjects, tokens, addresses, endpoints or object keys.
+- Parameterized aggregate queries, one row per entity, stable keyset ordering with filter-bound versioned cursors; counts/BigInt serialization follow DATA_MAP. Detail children/member and invite/membership lists are bounded/paginated. Member alias is distinct from account display name.
+- One new additive telemetry migration. Proposed models are ControlUserActivity (userId,utcDay composite key; firstObservedAt,lastObservedAt,surface), ControlFamilyActivity (familyId,userId,utcDay composite key; firstObservedAt,lastObservedAt), ControlMetricSnapshot (sourceId,utcDay composite key; last successful JSON value, observedAt,lastAttemptAt,status,errorCode,attempts,successes), and ControlCollectionState (id,startedAt). Foreign keys to existing User/Family use cascade only on new telemetry; existing family data is never changed. UTC date indexes and lastObservedAt indexes support 100-day retention and listings. Daily facts coalesce <=1 update/5min, global distinct users are never summed across families/days. PostgreSQL conflict upsert and active-membership check serialize safely with revocation.
+- POST /api/v1/activity accepts strict surface enum and optional familyId only. Server derives actor/time, validates membership. No content/background polling, refresh or bot activity. Tiny visible-interaction signal adapter in family main after auth; 60sec client throttle; failures are ignored. Existing help/privacy text discloses purpose, fields and 100-day retention before enabling.
+- Metrics use control-owned ports rather than extending PrivateStorage. Scheduled collection every minute (bounded concurrency 2 and 10sec deadline), database counts 30sec cache, size 5min, host/probes 60sec. Filesystem media inventory is a host-side daily sample of current objects; no object content is read. S3 without configured metering is honestly unsupported. Never list/HEAD all objects during dashboard reads.
+- Host sampler reads fixed host disk, media root and backup directory, atomically writes a bounded JSON snapshot under /opt/memoly/diagnostics/control; directory is mounted read-only only into backend/scheduler. No docker.sock, SSH or host root access for app. It reports filesystem identity, logical current-object bytes, backup artifact metadata/check evidence and revision facts without paths/object keys. Physical allocated disk bytes and logical file sizes are labeled separately. Backup artifact existence does not claim restore-tested.
+- Worker progress is written only after successful actual loop iterations (throttled <=1/min), scheduler progress only after successful actual jobs. A container existing is never a healthy progress claim. Probes have fixed internal targets, no redirects, bounded body and cancellation. Snapshot failures preserve last good value as stale/error. Freshness derives from original observedAt. Missing collectors remain not_configured.
+- No frontend framework/dependency additions expected: use installed shadcn primitives, Radix/Base as actually implemented, Recharts with text alternative, project WebpIcon. Existing library icon slots may be added backward-compatibly to avoid rendering SVG in control. Scoped neutral light/dark tokens, including portals; no global family CSS changes.
+- FULL is required before merge and on final release SHA. Recovery must be proven against the actual designated accepted-v4 pair with new additive telemetry present, then frozen exact-source attestation with negative drift regression. Existing guards remain unchanged in strength.
+
+## Task 1 — owner read API and validated contracts
+
+Allow: packages/contracts/src/control*, packages/contracts/src/index.ts; backend/src/modules/control/**; backend/src/env.ts, backend/src/app.ts, backend/.env.example; related narrow tests. Worker is the sole delegated technical editor of these common integration files for this sequential task, subject to lead diff acceptance.
+
+- [ ] Add strict shared schemas for Sample, overview, family/user rows/details/pages, resources/sources/system/events and query inputs. Decimal-string byte fields; bounded strings and enums.
+- [ ] RED/GREEN real PostgreSQL endpoint integration: anonymous401; ordinary/full/family-owner/admin outside list403; exact MAX owner200; disabled/empty deny; revoked session and removed allowlist deny every endpoint including CSV; forged actor does nothing. In-memory cache is reached only after authorization.
+- [ ] Implement metadata-only owner repository and all required read endpoints. Activity/host/provider data may temporarily be explicit not_configured until task2 connects real collectors; product counts are real from first implementation.
+- [ ] Query tests use 4 accounts, 3 active families, multiple memberships, revoked membership and pending/expired/accepted/revoked invites. Verify distinct counts, no join multiplication, pagination/filter/sort boundary, malformed/foreign cursor400 and SQL-special q as data.
+- [ ] CSV same filters/ACL; safe BOM/escaping/formula neutralization, 2/min owner, <=10000rows and <=10MiB with explicit overflow failure. No raw rows.
+- [ ] Run contract tests, backend typecheck and precise new integration files. Record red and green execution, then commit explicit paths. No push/deploy.
+
+Interfaces: createControlModule({db,env,requireAuth}) returns routes and accepts collector/read ports if needed; shared exported schemas/types named consistently in control.ts. Telemetry joins arrive in task2; temporary null values are replaced rather than retained dead paths.
+
+## Task 2 — observed activity, bounded collectors and host evidence
+
+Allow: task1 control module/contracts, backend/prisma/schema.prisma and ONE new migration, backend/src/jobs.ts, job-schedules.json, worker.ts/scheduler.ts, backend/src/modules/control/**, backend/src/env.ts; webapp/src/platform/control-activity.ts and minimal main/App integration, SettingsSheet HelpPrivacy copy; deploy/selectel/control sampler and read-only compose mount. Sequential technical common-file ownership delegated to this worker only.
+
+- [ ] RED/GREEN activity PostgreSQL tests: duplicate/cross-family requests do not inflate distinct counts; revocation denies family signal; no client time/actor; calendar-day windows, partial coverage and retention.
+- [ ] Implement approved additive models and scheduled collection/retention with strict failure isolation. Use public module exports for integration.
+- [ ] Connect real DB counters/size, MAX binding freshness, outbox backlog, readiness/static, process progress and host/media/backup snapshots. Keep current-byte inventory distinct from disk used and from quota.
+- [ ] Test timeout/oversized/malformed snapshots, cancellation, 0 versus null, last-good preservation, freshness, unknown capacity, future/missing observations and fixed targets. No fabricated historical samples, percent or forecast.
+- [ ] Add host sampler/runbook and synthetic sampler fixture; do not install/run production mutations as worker.
+- [ ] Run narrow actual PostgreSQL/collector tests, typechecks, relevant family startup regression. Record actual query count/latency with synthetic 10000 accounts, no capacity claim. Commit explicit paths.
+
+## Task 3 — separate shadcn control application
+
+Allow: webapp/control/index.html, webapp/src/control/**, webapp/vite.config.ts, narrow backward-compatible icon/portal slots in used ui primitives, webapp/e2e/control* and synthetic fixtures, deploy/selectel/Caddyfile.static.template, associated build-routing checks. No family UI redesign or SDK/cache behavior edits.
+
+- [ ] Build six Russian sections with Sidebar/mobile Sheet, Breadcrumb, Ctrl/Cmd+K real server search, Card/Table/Sheet/Command, filters/sort/keyset pagination, safe CSV and Recharts registrations/activity with accessible table.
+- [ ] Direct AuthApi browser-link, refresh and logout; no localStorage bearer, family data hydration, persistent queries or worker registration. pagehide/401/403/session-replacement clears requests and private content. Revalidation gates BFCache and visibility restore.
+- [ ] Scoped light/dark neutral styles and themed portals, WebP icons, keyboard/focus, table-only horizontal scroll. Render safe static noJS/startup error/retry shell; user never sees blank body.
+- [ ] Register Vite multi-entry preserving strictExecutionOrder and vendor groups. Caddy /control redirect and exact entry; missing assets404, correct MIME, no cache/private API bypass.
+- [ ] Verify real API browser integration and synthetic display states: owner/nonowner; filter/search/details/CSV; logout and BFCache; error/empty/stale/loading; both themes and targeted 1440/768/390/320 and Chromium/WebKit. Physical iPhone/MAX untested unless actually exercised.
+- [ ] Verify family UI v4 smoke unchanged. Save only synthetic screenshots. Commit explicit paths.
+
+## Task 4 — release, independent review and recovery
+
+Lead owns final verification, scope/security adjudication and publication; bounded release-code changes may be delegated with an exact brief.
+
+- [ ] FULL source gate and additional focused control tests on exact committed source; inspect actual diff and secret scan.
+- [ ] One fresh independent Luna High read-only whole-change review; one bounded fix pass and narrow closure check. No repeated formality reviews.
+- [ ] Prove telemetry migration/current -> designated accepted-v4 -> current roundtrip, preserving family data/permissions/media. Register only exact frozen runtime compatibility; test source/config/schema drift rejection. Preserve images and recovery config.
+- [ ] Confirm main freshness; normal branch merge if changed, repeat affected checks. Create PR from template with exact evidence, squash expected HEAD, confirm final tree/main.
+- [ ] FULL final SHA against deployed base; confirmed owner UUID provisioning through protected server config. Owner identity must be confirmed before granting; no identity inferred from names.
+- [ ] Disk >=4GiB via individually proven safe recovery-artifact maintenance, fixed host sampler installation, host lock, immutable images, backup/migration/readiness guards, guarded full ci-release.
+- [ ] Production public/owner/nonowner smoke, API totals read-only parity, measured host/DB/storage, worker/scheduler, manifests, recovery-readiness. No claim of owner login until actual success.
+- [ ] Synchronize primary main without touching untracked work. Delete only own clean merged branch/worktree when safe; report git refusal rather than force-delete. Final Russian summary + copyable HANDOFF.
+
+## Execution evidence
+
+- PR #207: FAST PASS af3d0386 (2 patch checks, exit0); independent Luna High review, 2 P2 closed; squash80de803f confirmed. No runtime deployed for docs-only change.
+- Preflight: canonical origin confirmed, unrelated worktrees retained. Initial host free3.4GiB below4GiB release gate; no deletion attempted. SSH owner access available. CONTROL_ENABLED absent and owner allowlist unset; exact owner provisioning remains pending identity confirmation.
