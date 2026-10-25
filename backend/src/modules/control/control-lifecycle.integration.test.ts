@@ -178,7 +178,7 @@ describe('Control account lifecycle', () => {
         refreshTokenHash: 'late-max-session-token',
         refreshTokenFamilyHash: 'late-max-session-family-token',
         expiresAt: new Date(Date.now() + 60_000),
-        metadata: { userAgent: null, ipAddress: null },
+        metadata: {},
       },
     })).resolves.toEqual({ state: 'invalid_session' })
   })
@@ -564,7 +564,7 @@ describe('Control account lifecycle', () => {
       refreshTokenHash: 'late-browser-session-token',
       refreshTokenFamilyHash: 'late-browser-session-family-token',
       expiresAt: new Date(now.getTime() + 60_000),
-      metadata: { userAgent: null, ipAddress: null },
+      metadata: {},
     })).resolves.toBeNull()
   })
 })

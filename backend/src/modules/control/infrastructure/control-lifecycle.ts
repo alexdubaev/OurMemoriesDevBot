@@ -287,7 +287,7 @@ export async function trashControlUser(
     const result: LifecycleResult & { deletionId: string; purgeAfter: string } = {
       operation: 'user_trashed', targetId: input.targetId, deletionId: deletion.id, state: 'trashed', purgeAfter: deletion.purgeAfter.toISOString(),
     }
-    return recordCommand(tx, { actorId: input.actorId, key: input.key, operation, targetId: input.targetId, hash, result })
+    return recordCommand(tx, { actorId: input.actorId, key: input.key, operation, targetId: input.targetId, hash, result }) as Promise<LifecycleResult & { deletionId: string; purgeAfter: string }>
   }, userAuthorityTransitionTransactionOptions)
 }
 
