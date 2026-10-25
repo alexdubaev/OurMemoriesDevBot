@@ -518,7 +518,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   const catalogScrollAfterReturn = await page.evaluate(() => window.scrollY)
   const catalogScrollDelta = Math.abs(catalogScrollAfterReturn - catalogScrollBeforeYear)
   const returnedCatalogMetrics = await page.evaluate(() => ({ documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight), groupCount: document.querySelectorAll('.albums-group').length }))
-  const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta, ...returnedCatalogMetrics }
+  const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear: catalogScrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta, ...returnedCatalogMetrics }
   console.log('FIRST_YEAR_CATALOG_RETURN', JSON.stringify(scrollEvidence))
   expect(returnedCatalogMetrics.groupCount).toBe(3)
   expect(catalogScrollAfterReturn).toBeGreaterThan(0)
