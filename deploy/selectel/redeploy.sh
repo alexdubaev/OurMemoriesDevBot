@@ -901,17 +901,9 @@ rollback_max_video_host_inputs_match() {
 }
 
 rollback_max_video_retirement_host_inputs_match() {
-	local revision=$1 backend_env="$SERVER_ROOT/env/backend.env"
+	local revision=$1
 	rollback_max_video_host_inputs_match "$revision" || return 1
-	[ -f "$backend_env" ] && [ ! -L "$backend_env" ] || return 1
-	awk -F= '
-		/^[[:space:]]*PRIVATE_STORAGE_DRIVER[[:space:]]*=/ {
-			count++
-			value=$2
-			gsub(/^[[:space:]"\047]+|[[:space:]"\047]+$/, "", value)
-		}
-		END { exit !(count == 1 && value == "filesystem") }
-	' "$backend_env" >/dev/null 2>&1
+	compose run --rm --no-deps backend bun -e 'const { loadEnv } = await import("./src/env.ts"); const env = loadEnv(process.env); if (env.PRIVATE_STORAGE_DRIVER !== "filesystem") process.exit(1)' >/dev/null 2>&1
 }
 
 rollback_assert_root_owned_path() {

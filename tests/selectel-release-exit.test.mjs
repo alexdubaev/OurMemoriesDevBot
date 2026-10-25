@@ -200,26 +200,26 @@ printf 'PASS: changed bytes, writable mode, and symlink rejected\\n'
   assert.match(result.stdout, /changed bytes, writable mode, and symlink rejected/)
 })
 
-slowTest('MAX retirement profile requires one exact filesystem storage driver setting', () => {
+slowTest('MAX retirement profile requires the effective filesystem driver after loadEnv defaults', () => {
   const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
   const result = runLinuxRoot(`
 set -euo pipefail
 . '${script}'
 fixture=$(mktemp -d /root/max-retirement-driver.XXXXXX)
 trap 'rm -rf -- "$fixture"' EXIT
-SERVER_ROOT="$fixture"
-mkdir -m 0755 "$SERVER_ROOT/env"
 rollback_max_video_host_inputs_match() { return 0; }
-printf 'PRIVATE_STORAGE_DRIVER=filesystem\\n' > "$SERVER_ROOT/env/backend.env"
+compose() {
+  [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63
+  [ "$MOCK_EFFECTIVE_STORAGE_DRIVER" = filesystem ]
+}
+MOCK_EFFECTIVE_STORAGE_DRIVER=filesystem
 rollback_max_video_retirement_host_inputs_match HEAD
-printf 'PRIVATE_STORAGE_DRIVER=s3\\n' > "$SERVER_ROOT/env/backend.env"
+MOCK_EFFECTIVE_STORAGE_DRIVER=s3
 if rollback_max_video_retirement_host_inputs_match HEAD; then exit 61; fi
-printf 'PRIVATE_STORAGE_DRIVER=filesystem\\nPRIVATE_STORAGE_DRIVER=filesystem\\n' > "$SERVER_ROOT/env/backend.env"
-if rollback_max_video_retirement_host_inputs_match HEAD; then exit 62; fi
-printf 'PASS: exact filesystem driver accepted; S3 and duplicate settings rejected\\n'
+printf 'PASS: effective filesystem driver accepted; S3 rejected\\n'
 `)
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.match(result.stdout, /exact filesystem driver accepted/)
+  assert.match(result.stdout, /effective filesystem driver accepted/)
 })
 
 test('nonzero release exit preserves forward-only quiesce handling', () => {
