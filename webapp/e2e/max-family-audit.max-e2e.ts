@@ -252,6 +252,142 @@ test('MAX-FULL: member avatar directory updates an already-open family and comme
   await viewerContext.close()
 })
 
+test('MAX-FULL: profile avatar uploaded in one family appears in another family and matches fallback styling', async ({ browser, page }, testInfo) => {
+  test.setTimeout(180_000)
+  const waitForFamilyChooserReady = async (targetPage: import('@playwright/test').Page) => {
+    await expect.poll(async () => {
+      const heading = await targetPage.getByRole('heading', { name: 'Мои семьи' }).isVisible()
+      const switcher = await targetPage.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ }).isVisible()
+      return heading || switcher
+    }, { timeout: 15_000 }).toBe(true)
+  }
+  const actorId = 7_700_000 + Math.floor(Math.random() * 100_000)
+  const observerId = actorId + 1
+  const actorToken = await signInMax(page, { id: actorId, first_name: 'Avatar actor' })
+  const ownFamilyResponse = await page.request.post('/api/v1/families', {
+    headers: { Authorization: `Bearer ${actorToken}`, 'Idempotency-Key': randomUUID() },
+    data: { name: 'Avatar actor family', timezone: 'Europe/Moscow' },
+  })
+  expect(ownFamilyResponse.status()).toBe(201)
+  const ownFamily = (await ownFamilyResponse.json() as ApiFamily).family
+  const ownChildAvatar = await uploadPng(page, actorToken, ownFamily.id, 'child_avatar')
+  const ownChildResponse = await page.request.put(`/api/v1/families/${ownFamily.id}/child`, {
+    headers: { Authorization: `Bearer ${actorToken}` },
+    data: { name: 'Actor family child', birthDate: '2024-01-02', sex: 'girl', avatarMediaId: ownChildAvatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
+  })
+  expect(ownChildResponse.status()).toBe(200)
+  const ownChildId = (await ownChildResponse.json() as ApiChild).child.id
+  const ownNoteResponse = await page.request.post(`/api/v1/families/${ownFamily.id}/memories`, {
+    headers: { Authorization: `Bearer ${actorToken}`, 'Idempotency-Key': randomUUID() },
+    data: { kind: 'note', childId: ownChildId, body: 'Avatar actor own-family note', occurredAt: '2026-01-02T10:00:00.000Z' },
+  })
+  expect(ownNoteResponse.status()).toBe(201)
+
+  const observerContext = await browser.newContext()
+  const observerPage = await observerContext.newPage()
+  const observerToken = await signInMax(observerPage, { id: observerId, first_name: 'Avatar observer' })
+  const observerFamilyResponse = await observerPage.request.post('/api/v1/families', {
+    headers: { Authorization: `Bearer ${observerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { name: 'Avatar observer family', timezone: 'Europe/Moscow' },
+  })
+  expect(observerFamilyResponse.status()).toBe(201)
+  const observerFamily = (await observerFamilyResponse.json() as ApiFamily).family
+  const observerChildAvatar = await uploadPng(observerPage, observerToken, observerFamily.id, 'child_avatar')
+  const observerChildResponse = await observerPage.request.put(`/api/v1/families/${observerFamily.id}/child`, {
+    headers: { Authorization: `Bearer ${observerToken}` },
+    data: { name: 'Observer family child', birthDate: '2024-01-02', sex: 'boy', avatarMediaId: observerChildAvatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null },
+  })
+  expect(observerChildResponse.status()).toBe(200)
+  const observerChildId = (await observerChildResponse.json() as ApiChild).child.id
+  const memoryResponse = await observerPage.request.post(`/api/v1/families/${observerFamily.id}/memories`, {
+    headers: { Authorization: `Bearer ${observerToken}`, 'Idempotency-Key': randomUUID() },
+    data: { kind: 'note', childId: observerChildId, body: 'Cross-family avatar note', occurredAt: '2026-01-02T10:00:00.000Z' },
+  })
+  expect(memoryResponse.status()).toBe(201)
+  const memoryId = (await memoryResponse.json() as ApiMemory).id
+  const inviteResponse = await observerPage.request.post(`/api/v1/families/${observerFamily.id}/invites`, {
+    headers: { Authorization: `Bearer ${observerToken}`, 'Idempotency-Key': randomUUID() }, data: { role: 'viewer' },
+  })
+  expect(inviteResponse.status()).toBe(201)
+  const inviteToken = (await inviteResponse.json() as { rawToken: string }).rawToken
+  const joined = await page.request.post('/api/v1/invites/accept', {
+    headers: { Authorization: `Bearer ${actorToken}` }, data: { token: inviteToken },
+  })
+  expect(joined.status()).toBe(200)
+  const commentResponse = await page.request.post(`/api/v1/families/${observerFamily.id}/memories/${memoryId}/comments`, {
+    headers: { Authorization: `Bearer ${actorToken}`, 'Idempotency-Key': randomUUID() }, data: { body: 'Cross-family avatar comment' },
+  })
+  expect(commentResponse.status()).toBe(201)
+  await page.reload()
+
+  const avatarReads: string[] = []
+  const directoryReads: string[] = []
+  observerPage.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (/\/media\/avatars\//.test(path)) avatarReads.push(path)
+    if (path === `/api/v1/families/${observerFamily.id}/members`) directoryReads.push(path)
+  })
+  await observerPage.reload()
+  await expect(observerPage.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
+  await observerPage.getByRole('button', { name: 'Семья' }).click()
+  const actorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
+  await expect(actorRow).toBeVisible()
+  const familyFallback = actorRow.locator('[data-slot="avatar-fallback"]')
+  await expect(familyFallback).toBeVisible()
+  const familyFallbackColors = await familyFallback.evaluate((element) => {
+    const paintedFallback = element.querySelector('[data-slot="avatar-fallback"]') ?? element
+    const label = paintedFallback.querySelector('[data-slot="typography"]') ?? paintedFallback
+    return { background: getComputedStyle(paintedFallback).backgroundColor, foreground: getComputedStyle(label).color }
+  })
+  await observerPage.getByRole('button', { name: 'Лента' }).click()
+  const observerCard = observerPage.locator(`[data-memory-id="${memoryId}"]`)
+  await observerCard.locator('.comments-entry').click()
+  const observerComment = observerPage.locator('.comments-item').filter({ hasText: 'Cross-family avatar comment' })
+  await expect(observerComment).toBeVisible()
+  const commentFallback = observerComment.locator('.comments-avatar-fallback')
+  await expect(commentFallback).toBeVisible()
+  const commentFallbackColors = await commentFallback.evaluate((element) => {
+    const paintedFallback = element.querySelector('[data-slot="avatar-fallback"]') ?? element
+    const label = paintedFallback.querySelector('[data-slot="typography"]') ?? paintedFallback
+    return { background: getComputedStyle(paintedFallback).backgroundColor, foreground: getComputedStyle(label).color }
+  })
+  expect(commentFallbackColors).toEqual(familyFallbackColors)
+  await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-fallbacks.png'), fullPage: true })
+
+  await waitForFamilyChooserReady(page)
+  await selectFamilyFeed(page, 'Actor family child', 'Avatar actor own-family note')
+  await page.getByRole('button', { name: 'Семья' }).click()
+  const ownActorRow = page.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
+  await ownActorRow.click()
+  await expect(page.getByRole('region', { name: 'Профиль владельца' })).toBeVisible()
+  const avatarInput = page.getByTestId('avatar-file-input')
+  const profilePng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await avatarInput.setInputFiles({ name: 'synthetic-profile-avatar.png', mimeType: 'image/png', buffer: profilePng })
+  await page.getByRole('button', { name: 'Готово' }).click()
+  await expect.poll(async () => (await currentProfileAvatar(page, actorToken)).avatar?.id ?? null, { timeout: 45_000 }).not.toBeNull()
+
+  await page.getByRole('button', { name: 'Назад к семье' }).click()
+  const observerCommentImage = observerComment.locator('.comments-avatar img')
+  await expect(observerCommentImage).toBeVisible({ timeout: 45_000 })
+  await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-comments-visible.png'), fullPage: true })
+  await observerPage.getByRole('button', { name: 'Закрыть комментарии' }).click()
+  await observerPage.getByRole('button', { name: 'Семья' }).click()
+  await expect(actorRow.locator('img')).toBeVisible({ timeout: 45_000 })
+  await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-family-visible.png'), fullPage: true })
+
+  await observerPage.reload()
+  await waitForFamilyChooserReady(observerPage)
+  await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
+  await observerPage.getByRole('button', { name: 'Семья' }).click()
+  const reloadedActorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
+  await expect(reloadedActorRow.locator('img')).toBeVisible({ timeout: 45_000 })
+  await expect.poll(() => avatarReads.length).toBeLessThanOrEqual(4)
+  expect(directoryReads.length).toBeLessThanOrEqual(20)
+  await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-after-reload.png'), fullPage: true })
+  await observerContext.close()
+})
+
 test('MAX owner retries a lost invite response with one idempotency key and invited viewer sees pre-join history', async ({ browser, page }, testInfo) => {
   const ownerMaxId = 7_500_000 + Math.floor(Math.random() * 100_000)
   const ownerInitData = signedMaxInitData({ id: ownerMaxId, first_name: 'Audit owner' }, randomUUID(), '')
