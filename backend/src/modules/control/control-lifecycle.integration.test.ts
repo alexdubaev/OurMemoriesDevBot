@@ -513,22 +513,28 @@ describe('Control account lifecycle', () => {
 
   test('uses an exact 720-hour grace period across a DST boundary', async () => {
     const deletedAt = new Date('2026-03-28T12:00:00Z')
-    const purgeAfter = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000)
-    await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT set_config('TimeZone', 'Europe/Berlin', true)`
-      const inserted = await tx.$queryRaw<Array<{ id: string }>>`
-        INSERT INTO "control_user_deletions" ("target_user_id", "actor_user_id", "deleted_at", "purge_after")
-        VALUES (${targetId}::uuid, ${actorId}::uuid,
-          ${deletedAt.toISOString()}::timestamptz, ${purgeAfter.toISOString()}::timestamptz)
-        RETURNING "id"::text AS "id"
-      `
-      const persisted = await tx.$queryRaw<Array<{ elapsed: string }>>`
-        SELECT (extract(epoch FROM "purge_after") - extract(epoch FROM "deleted_at"))::text AS "elapsed"
-        FROM "control_user_deletions" WHERE "id" = ${inserted[0]!.id}::uuid
-      `
-      expect(Number(persisted[0]?.elapsed)).toBe(720 * 60 * 60)
-      await tx.$executeRaw`DELETE FROM "control_user_deletions" WHERE "id" = ${inserted[0]!.id}::uuid`
+    const berlinDb = new Proxy(prisma, {
+      get(target, property, receiver) {
+        if (property === '$transaction') {
+          return (callback: (tx: any) => Promise<unknown>, options?: unknown) => prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT set_config('TimeZone', 'Europe/Berlin', true)`
+            return callback(tx)
+          }, options as never)
+        }
+        return Reflect.get(target, property, receiver)
+      },
     })
+    const preview = await previewUserDeletion(berlinDb, targetId, protectedIds)
+    const result = await trashControlUser(berlinDb, {
+      actorId,
+      targetId,
+      protectedIds,
+      key: '70000000-0000-4000-8000-000000000112',
+      fingerprint: preview.fingerprint,
+      confirmation: targetId,
+    }, deletedAt)
+    const deletion = await prisma.controlUserDeletion.findUniqueOrThrow({ where: { id: result.deletionId } })
+    expect(deletion.purgeAfter.getTime() - deletion.deletedAt.getTime()).toBe(720 * 60 * 60 * 1000)
   })
 
   test('serializes browser approval and redemption against account trash', async () => {
