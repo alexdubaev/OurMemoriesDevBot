@@ -284,6 +284,49 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ purgedAt: null })
   })
 
+  test('a fresh fifth family is scheduled ahead of four older pending operations', async () => {
+    await seed()
+    const oldFamilyIds = [familyId, otherFamilyId,
+      '79100000-0000-4000-8000-000000000003', '79100000-0000-4000-8000-000000000004']
+    for (const extraFamilyId of oldFamilyIds.slice(2)) {
+      await prisma.family.create({ data: {
+        id: extraFamilyId, ownerUserId: actorId, name: 'Synthetic blocked archive', timezone: 'UTC',
+        members: { create: [{ userId: actorId, role: 'full' }] },
+      } })
+    }
+    await prisma.family.updateMany({ where: { id: { in: oldFamilyIds }, status: 'active' }, data: { status: 'deleting' } })
+    const oldAttempt = new Date(epoch.getTime() - 60 * 60 * 1000)
+    for (const [index, oldFamilyId] of oldFamilyIds.entries()) {
+      const operation = await prisma.controlFamilyDeletion.create({ data: {
+        familyId: oldFamilyId, actorUserId: actorId, requestedAt: oldAttempt, notBefore: epoch,
+        keysCapturedAt: epoch, lastAttemptAt: oldAttempt, purgeStage: 'objects',
+      } })
+      await prisma.controlStorageDelete.create({ data: {
+        operationId: operation.id, familyId: oldFamilyId, objectKey: `blocked/${index}.jpg`, notBefore: epoch,
+      } })
+    }
+    const freshFamilyId = '79100000-0000-4000-8000-000000000005'
+    await prisma.family.create({ data: {
+      id: freshFamilyId, ownerUserId: actorId, name: 'Synthetic fresh archive', timezone: 'UTC',
+      members: { create: [{ userId: actorId, role: 'full' }] },
+    } })
+    await prisma.family.update({ where: { id: freshFamilyId }, data: { status: 'deleting' } })
+    await prisma.controlFamilyDeletion.create({ data: {
+      familyId: freshFamilyId, actorUserId: actorId, requestedAt: epoch, notBefore: epoch,
+    } })
+    const failingStorage = new Proxy(storage(), {
+      get(target, property) {
+        if (property === 'deleteObject') return async () => { throw new Error('synthetic outage') }
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as PrivateStorage
+    await runControlDeletionMaintenance({ db: prisma, storage: failingStorage }, new Date(epoch.getTime() + 17 * 60 * 1000), 10)
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId: freshFamilyId } }))
+      .toMatchObject({ purgeStage: 'memories', keysCapturedAt: expect.any(Date) })
+    expect(await prisma.controlFamilyDeletion.count({ where: { familyId: { in: oldFamilyIds }, purgeStage: 'objects' } })).toBe(4)
+  })
+
   test('a hung object delete times out with durable pending work and no false completion', async () => {
     await seed()
     const operation = await prisma.controlFamilyDeletion.create({ data: {

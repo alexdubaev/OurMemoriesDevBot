@@ -48,7 +48,7 @@ async function enqueueStorageDeletes(tx: Tx, operationId: string, rows: Array<{ 
 async function startExpiredUserOperations(db: DbClient, now: Date, limit: number, deadline: number) {
   const due = await db.controlUserDeletion.findMany({
     where: { restoredAt: null, purgeAfter: { lte: now }, purgeStage: 'waiting' },
-    orderBy: [{ lastAttemptAt: 'asc' }, { purgeAfter: 'asc' }, { id: 'asc' }], take: limit,
+    orderBy: [{ lastAttemptAt: { sort: 'asc', nulls: 'first' } }, { purgeAfter: 'asc' }, { id: 'asc' }], take: limit,
     select: { id: true, targetUserId: true, lastAttemptAt: true },
   })
   for (const deletion of due) {
@@ -437,7 +437,7 @@ async function finalizeUser(db: DbClient, operation: UserOperation, now: Date) {
 async function processUserOperations(runtime: Runtime, now: Date, batchSize: number, deadline: number, objectTimeoutMs: number) {
   const operations = await runtime.db.controlUserDeletion.findMany({
     where: { restoredAt: null, purgeAfter: { lte: now }, purgeStage: { not: 'purged' } },
-    orderBy: [{ lastAttemptAt: 'asc' }, { purgeAfter: 'asc' }, { id: 'asc' }], take: MAX_OPERATIONS_PER_PASS,
+    orderBy: [{ lastAttemptAt: { sort: 'asc', nulls: 'first' } }, { purgeAfter: 'asc' }, { id: 'asc' }], take: MAX_OPERATIONS_PER_PASS,
     select: { id: true, targetUserId: true, purgeStage: true, purgeCursor: true, lastAttemptAt: true },
   })
   for (const operation of operations) {
@@ -470,7 +470,7 @@ export async function runControlDeletionMaintenance(runtime: Runtime, now = new 
   const deadline = performance.now() + budgetMs
   await startExpiredUserOperations(runtime.db, now, Math.min(MAX_OPERATIONS_PER_PASS, batchSize), deadline)
   const familyOperations = await runtime.db.controlFamilyDeletion.findMany({
-    where: { purgedAt: null }, orderBy: [{ lastAttemptAt: 'asc' }, { requestedAt: 'asc' }, { id: 'asc' }], take: MAX_OPERATIONS_PER_PASS,
+    where: { purgedAt: null }, orderBy: [{ lastAttemptAt: { sort: 'asc', nulls: 'first' } }, { requestedAt: 'asc' }, { id: 'asc' }], take: MAX_OPERATIONS_PER_PASS,
     select: { id: true, familyId: true, purgeStage: true, purgeCursor: true, keysCapturedAt: true, lastAttemptAt: true },
   })
   for (const operation of familyOperations) {
