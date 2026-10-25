@@ -220,7 +220,11 @@ export async function trashControlUser(
       SELECT id, status::text AS "originalStatus" FROM families WHERE owner_user_id = ${input.targetId}::uuid ORDER BY id
     `
     const ownedFamilyIds = familyIds.map(({ id }) => id)
-    const allFamilyIds = [...new Set([...ownedFamilyIds, ...affected.map(({ familyId }) => familyId)])].sort()
+    const pendingInviteFamilies = await tx.familyInvite.findMany({
+      where: { createdBy: input.targetId, acceptedAt: null, revokedAt: null, family: { status: 'active' } },
+      select: { familyId: true }, distinct: ['familyId'],
+    })
+    const allFamilyIds = [...new Set([...ownedFamilyIds, ...affected.map(({ familyId }) => familyId), ...pendingInviteFamilies.map(({ familyId }) => familyId)])].sort()
     if (allFamilyIds.length) await tx.$queryRaw`SELECT id FROM families WHERE id = ANY(${allFamilyIds}::uuid[]) ORDER BY id FOR UPDATE`
 
     const stable = await tx.$queryRaw<Array<{ familyId: string; userId: string; role: Role; version: number; epoch: number }>>`
@@ -271,8 +275,18 @@ export async function trashControlUser(
         data: { revokedAt: actionNow, version: { increment: 1 }, membershipEpoch: { increment: 1 } },
       })
     }
+    if (pendingInviteFamilies.length) {
+      await tx.familyInvite.updateMany({
+        where: {
+          createdBy: input.targetId, acceptedAt: null, revokedAt: null,
+          familyId: { in: pendingInviteFamilies.map(({ familyId }) => familyId) },
+          family: { status: 'active', ownerUserId: { not: input.targetId } },
+        },
+        data: { revokedAt: actionNow },
+      })
+    }
     await tx.gift.updateMany({
-      where: { reservedByUserId: input.targetId, boughtAt: null, family: { status: 'active' } },
+      where: { reservedByUserId: input.targetId, boughtAt: null, family: { status: 'active', ownerUserId: { not: input.targetId } } },
       data: { reservedByUserId: null, reservedAt: null, version: { increment: 1 } },
     })
     if (ownedFamilyIds.length) {

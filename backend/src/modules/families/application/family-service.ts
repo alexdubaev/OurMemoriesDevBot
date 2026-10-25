@@ -718,6 +718,14 @@ export class FamilyService {
       payloadHash,
       now: this.now(),
       execute: async (tx, idempotencyRecordId) => {
+        const [issuerAccount] = await tx.$queryRaw<Array<{ control_state: string }>>`
+          SELECT control_state::text FROM users WHERE id = ${scope.principal.userId}::uuid FOR NO KEY UPDATE
+        `
+        if (!issuerAccount || issuerAccount.control_state !== 'active') throw new FamilyFailure('not_found', 'Семья не найдена')
+        const activeFamily = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM families WHERE id = ${scope.familyId}::uuid AND status = 'active' FOR UPDATE
+        `
+        if (!activeFamily.length) throw new FamilyFailure('not_found', 'Семья не найдена')
         const issuer = await tx.$queryRaw<Array<{ role: 'full' | 'viewer' }>>`
           SELECT role::text AS role
             FROM family_members
@@ -738,7 +746,7 @@ export class FamilyService {
           payloadHash,
         )
         const family = await tx.family.findFirst({
-          where: { id: scope.familyId, status: 'active' },
+          where: { id: scope.familyId },
           select: { id: true, children: { ...oldestLiveChild, select: { displayName: true, birthDate: true, sex: true, avatarMediaId: true, avatarCrop: true } } },
         })
         if (!family) throw new FamilyFailure('not_found', 'Семья не найдена')

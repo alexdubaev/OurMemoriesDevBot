@@ -19,6 +19,9 @@ const familyId = '79100000-0000-4000-8000-000000000001'
 const otherFamilyId = '79100000-0000-4000-8000-000000000002'
 const mediaId = '79200000-0000-4000-8000-000000000001'
 const retainedMediaId = '79200000-0000-4000-8000-000000000002'
+const channelInboxId = '79500000-0000-4000-8000-000000000001'
+const channelDecisionId = '79500000-0000-4000-8000-000000000002'
+const channelChatId = 7950000001n
 const epoch = new Date('2030-01-01T00:00:00.000Z')
 let root = ''
 const storage = () => new FilesystemPrivateStorage({
@@ -43,13 +46,16 @@ async function clean() {
   await prisma.controlUserDeletionFamily.deleteMany()
   await prisma.controlUserDeletion.deleteMany()
   await prisma.controlFamilyDeletion.deleteMany()
+  await prisma.maxOutgoingResponse.deleteMany({ where: { inboxId: channelInboxId } })
+  await prisma.maxChannelDecision.deleteMany({ where: { id: channelDecisionId } })
+  await prisma.maxInbox.deleteMany({ where: { id: channelInboxId } })
   await prisma.userAvatar.deleteMany()
   await prisma.mediaAsset.deleteMany()
   await prisma.family.deleteMany()
   await prisma.user.deleteMany()
 }
 
-async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000) } = {}) {
+async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000), putExpiresAt }: { purgeAfter?: Date; putExpiresAt?: Date } = {}) {
   await prisma.user.createMany({ data: [
     { id: actorId, displayName: 'Synthetic operator' },
     { id: targetId, displayName: 'Synthetic account to purge', email: 'purge@example.test', passwordHash: 'synthetic-hash' },
@@ -62,6 +68,20 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
   await prisma.memory.create({ data: {
     familyId, childId: ownChild.id, authorId: targetId, kind: 'note', body: 'Private family memory',
     occurredAt: epoch, firstPublishedAt: epoch,
+  } })
+  await prisma.maxChannelBinding.create({ data: { chatId: channelChatId, familyId, state: 'connected' } })
+  await prisma.maxInbox.create({ data: {
+    id: channelInboxId, eventKey: 'control-purge-channel-event', botId: 795n, eventKind: 'family_choice',
+    encryptedPayload: Buffer.from('synthetic encrypted MAX event'), encryptionIv: Buffer.from('iv'),
+    encryptionAuthTag: Buffer.from('tag'),
+  } })
+  await prisma.maxChannelDecision.create({ data: {
+    id: channelDecisionId, originInboxId: channelInboxId, actorSubject: 'synthetic-subject', chatId: channelChatId,
+    candidateFamilyIds: [familyId], expectedActiveVersion: 1, expectedChannelVersion: 1,
+    expiresAt: new Date(epoch.getTime() + 60_000),
+  } })
+  await prisma.maxOutgoingResponse.create({ data: {
+    inboxId: channelInboxId, channelDecisionId, destinationUserId: 795n, kind: 'family_choice', text: 'Private choice',
   } })
   await prisma.family.create({ data: {
     id: otherFamilyId, ownerUserId: actorId, name: 'Other owner archive', timezone: 'UTC',
@@ -80,17 +100,19 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
     deletedAt: epoch, purgeAfter,
     families: { create: [{ familyId, originalStatus: 'active', restoreEligible: true }] },
   } })
-  await prisma.user.update({ where: { id: targetId }, data: { controlState: 'trashed' } })
-  await prisma.family.update({ where: { id: familyId }, data: { status: 'deleting' } })
   await prisma.mediaAsset.create({ data: {
     id: mediaId, familyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
     originalKey: 'media-originals/control-purge-test/original.jpg', declaredMime: 'image/jpeg',
     verifiedMime: 'image/jpeg', sha256: 'a'.repeat(64), byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
   } })
+  await prisma.child.update({ where: { id: ownChild.id }, data: { avatarMediaId: mediaId, avatarCrop: { x: 1, y: 2 } } })
   await prisma.mediaAsset.create({ data: {
     id: retainedMediaId, familyId, uploaderId: targetId, sourceKind: 'max', purpose: 'memory', mediaKind: 'video',
     originalKey: 'media-originals/control-purge-test/retained.mp4', declaredMime: 'video/mp4',
     verifiedMime: 'video/mp4', sha256: 'b'.repeat(64), byteSize: 7n, originalStatus: 'stored', renditionStatus: 'ready',
+  } })
+  if (putExpiresAt) await prisma.uploadReservation.create({ data: {
+    familyId, userId: targetId, mediaId, bytes: 7n, expiresAt: putExpiresAt, finalizedAt: epoch,
   } })
   await prisma.family.update({ where: { id: familyId }, data: { storageUsedBytes: 14n } })
   const localStorage = storage()
@@ -106,9 +128,11 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
   }
   await prisma.userAvatar.create({ data: {
     userId: targetId, state: 'ready', objectKey: 'avatars/control-purge-test/avatar.jpg', contentType: 'image/jpeg',
-    byteSize: 7, expiresAt: new Date(epoch.getTime() + 40 * 24 * 60 * 60 * 1000), readyAt: epoch,
+    byteSize: 7, expiresAt: new Date(epoch.getTime() + 30 * 24 * 60 * 60 * 1000), readyAt: epoch,
   } })
   await localStorage.writeObject({ key: 'avatars/control-purge-test/avatar.jpg', body: new Blob(['payload']).stream(), contentLength: 7, contentType: 'image/jpeg' })
+  await prisma.user.update({ where: { id: targetId }, data: { controlState: 'trashed' } })
+  await prisma.family.update({ where: { id: familyId }, data: { status: 'deleting' } })
 }
 
 describe('Control bounded deletion maintenance', () => {
@@ -139,11 +163,11 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.mediaAsset.deleteMany({ where: { id: retainedMediaId } })).toMatchObject({ count: 0 })
     const expiredAt = new Date(epoch.getTime() + 31 * 24 * 60 * 60 * 1000)
     await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, expiredAt, 10)
-    const safePurgeAt = new Date(expiredAt.getTime() + 17 * 60 * 1000)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, safePurgeAt, 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(safePurgeAt.getTime() + 17 * 60 * 1000), 10)
+    let maintenanceAt = expiredAt
+    for (let pass = 0; pass < 24 && (await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).controlState !== 'purged'; pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, maintenanceAt, 10)
+      maintenanceAt = new Date(maintenanceAt.getTime() + 17 * 60 * 1000)
+    }
     for (const key of [
       'media-originals/control-purge-test/original.jpg',
       'media-display/control-purge-test/original.jpg',
@@ -179,17 +203,35 @@ describe('Control bounded deletion maintenance', () => {
     await runControlDeletionMaintenance({ db: prisma, storage: failedStorage }, retryAt, 10)
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purging' })
     expect(await prisma.controlStorageDelete.count({ where: { completedAt: null } })).toBeGreaterThan(0)
-    const profileSafeAt = new Date(retryAt.getTime() + 17 * 60 * 1000)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
-    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, profileSafeAt, 10)
-    let completionNow = new Date(profileSafeAt.getTime() + 17 * 60 * 1000)
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    let completionNow = new Date(retryAt.getTime() + 17 * 60 * 1000)
+    for (let attempt = 0; attempt < 24; attempt += 1) {
       if ((await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).controlState === 'purged') break
       await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, completionNow, 10)
       completionNow = new Date(completionNow.getTime() + 17 * 60 * 1000)
     }
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purged' })
+  })
+
+  test('honors a completed upload PUT expiry before deleting its key and zeroes quota once', async () => {
+    const putExpiresAt = new Date(epoch.getTime() + 40 * 24 * 60 * 60 * 1000)
+    await seed({ putExpiresAt })
+    const localStorage = storage()
+    const purgeAt = new Date(epoch.getTime() + 31 * 24 * 60 * 60 * 1000)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, purgeAt, 10)
+    const queued = await prisma.controlStorageDelete.findFirstOrThrow({ where: { operationId: (await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).id, objectKey: 'media-originals/control-purge-test/original.jpg' } })
+    expect(queued.notBefore).toEqual(putExpiresAt)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(putExpiresAt.getTime() - 60_000), 10)
+    expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).not.toBeNull()
+    let maintenanceAt = new Date(putExpiresAt.getTime() + 17 * 60 * 1000)
+    for (let pass = 0; pass < 24 && (await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).controlState !== 'purged'; pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, maintenanceAt, 10)
+      maintenanceAt = new Date(maintenanceAt.getTime() + 17 * 60 * 1000)
+    }
+    expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: familyId } })).toMatchObject({ storageUsedBytes: 0n, storageReservedBytes: 0n })
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, maintenanceAt, 10)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: familyId } })).toMatchObject({ storageUsedBytes: 0n, storageReservedBytes: 0n })
   })
 
   test('serializes late private content and object-key writes behind family key capture', async () => {
@@ -218,14 +260,19 @@ describe('Control bounded deletion maintenance', () => {
       fingerprint: preview.fingerprint, confirmation: familyId,
     }, epoch)
     const operation = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })
-    const explicitPurgeAt = new Date(epoch.getTime() + 17 * 60 * 1000)
-    for (let pass = 0; pass < 12 && !((await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).purgedAt); pass += 1) {
+    let explicitPurgeAt = new Date(epoch.getTime() + 17 * 60 * 1000)
+    for (let pass = 0; pass < 24 && !((await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).purgedAt); pass += 1) {
       await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, explicitPurgeAt, 10)
+      explicitPurgeAt = new Date(explicitPurgeAt.getTime() + 17 * 60 * 1000)
     }
     expect(operation.actorUserId).toBe(actorId)
     expect(await prisma.family.findUniqueOrThrow({ where: { id: familyId } })).toMatchObject({ status: 'deleted', name: 'Удалённый архив' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: otherFamilyId } })).toMatchObject({ status: 'active', name: 'Other owner archive' })
     expect(await prisma.memory.count({ where: { familyId: otherFamilyId } })).toBe(1)
+    expect(await prisma.maxChannelBinding.count({ where: { familyId } })).toBe(0)
+    expect(await prisma.maxChannelDecision.findUnique({ where: { id: channelDecisionId } })).toBeNull()
+    expect((await prisma.maxInbox.findUniqueOrThrow({ where: { id: channelInboxId } })).encryptedPayload).toHaveLength(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: channelInboxId } })).toBe(0)
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await localStorage.headObject('media-originals/control-purge-test/retained.mp4')).toBeNull()
   })
