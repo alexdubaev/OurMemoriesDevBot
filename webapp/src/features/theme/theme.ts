@@ -10,7 +10,7 @@ export type MemolyThemeConfig = {
 }
 
 export const MEMOLY_THEME_CONFIG: Record<MemolyTheme, MemolyThemeConfig> = {
-  mint: { label: 'Мята', headerArtUrl: '/assets/theme-header/mint.webp' },
+  mint: { label: 'Луг', headerArtUrl: '/assets/ui-v2/headers/header-bunny-meadow.webp' },
   rose: { label: 'Роза', headerArtUrl: '/assets/theme-header/rose.webp' },
   sky: { label: 'Небо', headerArtUrl: '/assets/theme-header/sky.webp' },
   lavender: { label: 'Лаванда', headerArtUrl: '/assets/theme-header/lavender.webp' },

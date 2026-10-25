@@ -1,5 +1,5 @@
 .albums-surface{--albums-bg:var(--ui-v2-color-background,var(--theme-bg,#f8f6f1));--albums-surface:var(--ui-v2-color-surface,#fffefa);--albums-ink:var(--ui-v2-color-text,#2b3934);--albums-accent:var(--ui-v2-color-accent,#416d58);--albums-muted:var(--ui-v2-color-muted,#667166);--albums-line:var(--ui-v2-color-line,#e5e6dd);max-width:var(--layout-max-width,460px);min-height:100dvh;margin:0 auto;background:var(--albums-bg);color:var(--albums-ink)}
-.albums-main{padding:0 max(16px,var(--host-inset-left,0px)) calc(var(--layout-bottom-nav,50px) + max(var(--host-inset-bottom,0px),var(--ui-v2-browser-safe-area-bottom,0px)) + 24px) max(16px,var(--host-inset-right,0px));overflow-wrap:anywhere}
+.albums-main{--ui-v2-effective-bottom-inset:max(var(--host-inset-bottom,0px),var(--ui-v2-browser-safe-area-bottom,0px));padding:0 max(16px,var(--host-inset-left,0px)) calc(var(--layout-bottom-nav,50px) + var(--ui-v2-effective-bottom-inset) + 24px) max(16px,var(--host-inset-right,0px));overflow-wrap:anywhere}
 .albums-main h1,.albums-commit-receipt h1{font-size:1.55rem;font-weight:680;line-height:1.18;letter-spacing:-.035em;margin:0}
 .albums-main h2{font-size:.95rem;font-weight:650;line-height:1.4;margin:12px 0}
 .albums-main p,.albums-main small{font-size:.82rem;line-height:1.6}.albums-main p{margin:8px 0 14px}.albums-main small{font-size:.7rem}
