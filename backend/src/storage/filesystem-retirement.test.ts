@@ -111,7 +111,7 @@ describe('filesystem irreversible retirement', () => {
         controller.enqueue(new TextEncoder().encode('secret'))
         controller.close()
       },
-    })
+    }, { highWaterMark: 0 })
     const writeResult = files.writeObject({ key, body, contentLength: 6, contentType: 'application/octet-stream' })
       .then(() => ({ kind: 'resolved' as const }), (error: unknown) => ({ kind: 'rejected' as const, error }))
 
@@ -164,7 +164,7 @@ describe('filesystem irreversible retirement', () => {
         bodyCancelledFlag = true
         bodyCancelled.resolve()
       },
-    })
+    }, { highWaterMark: 0 })
     const writeResult = files.writeObject({ key, body, contentLength: 1_000_000, contentType: 'application/octet-stream' })
       .then(() => ({ kind: 'resolved' as const }), (error: unknown) => ({ kind: 'rejected' as const, error }))
 
