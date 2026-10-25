@@ -13,7 +13,7 @@ import {
   controlUserRowSchema,
 } from '@web-app-demo/contracts'
 import { z } from 'zod'
-import type { AuthApi } from '@/features/auth/api'
+import type { AuthApi } from '@/features/auth'
 
 export const familyPageSchema = controlPageSchema(controlFamilyRowSchema)
 export const userPageSchema = controlPageSchema(controlUserRowSchema)

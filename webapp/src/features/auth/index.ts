@@ -1,4 +1,5 @@
 export { AuthApi } from './api'
+export { currentBrowserSessionEpoch, subscribeToBrowserSessionChanges } from './session-coordinator'
 export { bootstrapAuthSession } from './bootstrap'
 export { AuthPageShell } from './components/AuthPageShell'
 export { ForgotPasswordForm } from './components/ForgotPasswordForm'
