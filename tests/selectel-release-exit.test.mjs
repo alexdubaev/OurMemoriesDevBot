@@ -138,48 +138,59 @@ printf 'PASS: all pinned host files copied with verified bytes and mode 0644\\n'
 slowTest('Control rollback readiness requires root-owned installed artifacts with exact sampler and unit bytes', () => {
   const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
   const repository = linuxPath(root)
-  const gitDirectory = linuxPath(spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: root, encoding: 'utf8' }).stdout.trim())
   const pins = Object.fromEntries([
     ['sampler', 'deploy/selectel/control/sampler.py'],
     ['service', 'deploy/selectel/control/memoly-control-sampler.service'],
     ['timer', 'deploy/selectel/control/memoly-control-sampler.timer'],
   ].map(([name, path]) => [name, spawnSync('git', ['hash-object', path], { cwd: root, encoding: 'utf8' }).stdout.trim()]))
+  const pinBytes = Object.fromEntries(Object.entries(pins).map(([name, hash]) => {
+    const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root })
+    assert.equal(result.status, 0, result.stderr?.toString('utf8'))
+    return [name, result.stdout.toString('base64')]
+  }))
   assert.match(pins.sampler, /^[0-9a-f]{40}$/)
   assert.match(pins.service, /^[0-9a-f]{40}$/)
   assert.match(pins.timer, /^[0-9a-f]{40}$/)
   const result = runLinuxRoot(`
 set -euo pipefail
 . '${script}'
-APP_ROOT='${repository}'
-export GIT_DIR='${gitDirectory}' GIT_WORK_TREE='${repository}'
+fixture=$(mktemp -d /root/control-installed-guard.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+APP_ROOT="$fixture/app"
+mkdir -m 0755 "$APP_ROOT"
+git -C "$APP_ROOT" init --quiet
 CONTROL_PIN_SAMPLER_BLOB='${pins.sampler}'
 CONTROL_PIN_SERVICE_BLOB='${pins.service}'
 CONTROL_PIN_TIMER_BLOB='${pins.timer}'
-fixture=$(mktemp -d /root/control-installed-guard.XXXXXX)
-trap 'rm -rf -- "$fixture"' EXIT
-mkdir -m 0755 "$fixture/control" "$fixture/control/metrics" "$fixture/systemd"
-install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
-install -m 0644 '${repository}/deploy/selectel/control/memoly-control-sampler.service' "$fixture/systemd/memoly-control-sampler.service"
-install -m 0644 '${repository}/deploy/selectel/control/memoly-control-sampler.timer' "$fixture/systemd/memoly-control-sampler.timer"
-printf '{}\\n' > "$fixture/control/metrics/snapshot.json"
-chmod 0644 "$fixture/control/metrics/snapshot.json"
-rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"
+PIN_SAMPLER_B64='${pinBytes.sampler}'
+PIN_SERVICE_B64='${pinBytes.service}'
+PIN_TIMER_B64='${pinBytes.timer}'
+mkdir -m 0755 "$APP_ROOT/control" "$APP_ROOT/control/metrics" "$APP_ROOT/systemd"
+printf '%s' "$PIN_SAMPLER_B64" | base64 -d > "$APP_ROOT/control/sampler.py"
+printf '%s' "$PIN_SERVICE_B64" | base64 -d > "$APP_ROOT/systemd/memoly-control-sampler.service"
+printf '%s' "$PIN_TIMER_B64" | base64 -d > "$APP_ROOT/systemd/memoly-control-sampler.timer"
+chmod 0644 "$APP_ROOT/control/sampler.py" "$APP_ROOT/systemd/memoly-control-sampler.service" "$APP_ROOT/systemd/memoly-control-sampler.timer"
+printf '{}\\n' > "$APP_ROOT/control/metrics/snapshot.json"
+chmod 0644 "$APP_ROOT/control/metrics/snapshot.json"
+rollback_control_installed_inputs_match "$APP_ROOT/control" "$APP_ROOT/systemd"
 printf 'PASS: exact protected installed chain accepted\\n'
-printf '# drift\\n' >> "$fixture/control/sampler.py"
-if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+printf '# drift\\n' >> "$APP_ROOT/control/sampler.py"
+if rollback_control_installed_inputs_match "$APP_ROOT/control" "$APP_ROOT/systemd"; then
   echo 'changed installed sampler was accepted' >&2; exit 41
 fi
-rm -f "$fixture/control/sampler.py"
-install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
-chmod 0664 "$fixture/control/sampler.py"
-if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+rm -f "$APP_ROOT/control/sampler.py"
+printf '%s' "$PIN_SAMPLER_B64" | base64 -d > "$APP_ROOT/control/sampler.py"
+chmod 0644 "$APP_ROOT/control/sampler.py"
+chmod 0664 "$APP_ROOT/control/sampler.py"
+if rollback_control_installed_inputs_match "$APP_ROOT/control" "$APP_ROOT/systemd"; then
   echo 'writable installed sampler was accepted' >&2; exit 42
 fi
-rm -f "$fixture/control/sampler.py"
-install -m 0644 '${repository}/deploy/selectel/control/sampler.py' "$fixture/control/sampler.py"
-mv "$fixture/control/sampler.py" "$fixture/control/sampler.expected"
-ln -s sampler.expected "$fixture/control/sampler.py"
-if rollback_control_installed_inputs_match "$fixture/control" "$fixture/systemd"; then
+rm -f "$APP_ROOT/control/sampler.py"
+printf '%s' "$PIN_SAMPLER_B64" | base64 -d > "$APP_ROOT/control/sampler.py"
+chmod 0644 "$APP_ROOT/control/sampler.py"
+mv "$APP_ROOT/control/sampler.py" "$APP_ROOT/control/sampler.expected"
+ln -s sampler.expected "$APP_ROOT/control/sampler.py"
+if rollback_control_installed_inputs_match "$APP_ROOT/control" "$APP_ROOT/systemd"; then
   echo 'symlink installed sampler was accepted' >&2; exit 43
 fi
 printf 'PASS: changed bytes, writable mode, and symlink rejected\\n'
@@ -751,6 +762,12 @@ const reviewedWelcomeOnceZoomBlobs = [
 ]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
+
+function currentGitHead() {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  return result.stdout.trim()
+}
 
 function productionRuntimeFingerprint(cwd, revision = 'HEAD') {
   const result = spawnSync(bashExecutable, ['-s'], {
@@ -1745,15 +1762,16 @@ function controlMigrationHistoryProgram() {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
   const captureProgram = resolve(root, '.scratch', `control-ledger-program-${process.pid}.mjs`)
   const captureCatalog = resolve(root, '.scratch', `control-ledger-catalog-${process.pid}.txt`)
-  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
-  assert.equal(head.status, 0, head.stderr)
+  const controlCandidate = '92a4fb7d732339927fb3ac0c38c8bbe18f655ad4'
+  assert.equal(spawnSync('git', ['cat-file', '-e', `${controlCandidate}^{commit}`], { cwd: root }).status, 0,
+    'the accepted Control migration catalog source must remain reachable')
   const result = spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: [
       'set -euo pipefail',
       `. '${gitBashPath(resolve(root, 'deploy/selectel/redeploy.sh'))}'`,
       `APP_ROOT=${shellQuote(root)}`,
-      `MEMOLY_PRODUCT_SHA=${head.stdout.trim()}`,
+      `MEMOLY_PRODUCT_SHA=${controlCandidate}`,
       'compose() { printf "%s" "${!#}" > "$CAPTURE_PROGRAM"; printf "%s\\n%%CANDIDATE%%\\n%s" "$MEMOLY_EXPECTED_BASELINE_MIGRATIONS" "$MEMOLY_EXPECTED_CANDIDATE_MIGRATIONS" > "$CAPTURE_CATALOG"; }',
       'rollback_verify_control_migration_history pre-sql',
     ].join('\n'),
@@ -2458,7 +2476,7 @@ test('Control recovery permits only its exact current executable fingerprint and
   const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFilesFromHead({ root: sourceDirectory, sha: baseline }, files,
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, files,
     'materialize exact Control recovery production and host-input blobs')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
@@ -2552,7 +2570,7 @@ test('MAX video readiness is read-only and blocks unsafe held tombstones before 
     const events = resolve(root, '.scratch', `max-video-readiness-${process.pid}-${mode}.log`)
     const script = [
       'set -euo pipefail', redeployDefinitions,
-      `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+      `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
       `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
       'docker() { if [ "$1" = image ]; then if [ "$4" = \'{{.Id}}\' ]; then echo sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; else echo "$MEMOLY_PRODUCT_SHA"; fi; return 0; fi; printf "docker:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; }',
       `compose() { printf "compose:%s\\n" "$*" >> "$MAX_VIDEO_EVENTS"; case "$*" in *legacy_video_retained_at*) [ "${mode}" != unsafe ] ;; *--recover-all*) [ "${mode}" != missing ] ;; *) return 0 ;; esac; }`,
@@ -2584,7 +2602,7 @@ test('MAX video apply uses the candidate image and preserves the recovery exit c
   const events = resolve(root, '.scratch', `max-video-apply-${process.pid}.log`)
   const script = [
     'set -euo pipefail', redeployDefinitions,
-    `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
     'rollback_verify_max_video_migration_history() { echo present; }',
     'docker() { if [ "$1" = image ]; then if [ "$4" = \'{{.Id}}\' ]; then echo sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; else echo "$MEMOLY_PRODUCT_SHA"; fi; return 0; fi; if [ "$1" = ps ]; then case "$*" in *service=backend*) [ "${STOPPED_backend:-false}" = true ] || echo backend-id ;; *service=worker*) [ "${STOPPED_worker:-false}" = true ] || echo worker-id ;; *service=scheduler*) [ "${STOPPED_scheduler:-false}" = true ] || echo scheduler-id ;; esac; return 0; fi; if [ "$1" = stop ]; then case "$4" in backend-id) STOPPED_backend=true ;; worker-id) STOPPED_worker=true ;; scheduler-id) STOPPED_scheduler=true ;; esac; printf "stop:%s\\n" "$4" >> "$MAX_VIDEO_EVENTS"; return 0; fi; }',
@@ -2605,7 +2623,7 @@ test('MAX video apply accepts silent candidate recovery only after readiness and
   const events = resolve(root, '.scratch', `max-video-apply-success-${process.pid}.log`)
   const script = [
     'set -euo pipefail', redeployDefinitions,
-    `MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01`,
+    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
     'rollback_verify_max_video_migration_history() { echo present; }',
     'rollback_verify_max_video_recovery_readiness() { printf "readiness\\n" >> "$MAX_VIDEO_EVENTS"; }',
@@ -2649,7 +2667,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
       `ROLLBACK_ENV=${shellQuote(rollbackEnv)}`, `FORWARD_MARKER=${shellQuote(resolve(serverRoot, 'no-b2-marker'))}`,
       `MM0_FORWARD_MARKER=${shellQuote(resolve(serverRoot, 'no-mm0-marker'))}`,
-      'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+      `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
       'validate_rollback_file() { :; }',
       'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
@@ -2704,7 +2722,7 @@ test('MAX video migration stops all old writers after backup and before migratio
     'set -euo pipefail', redeployDefinitions,
     `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
-    'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
     'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
     'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
     'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',
@@ -2735,7 +2753,7 @@ test('MAX retention migration refuses to run when its exact candidate fingerprin
     'set -euo pipefail', redeployDefinitions,
     `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
-    'MEMOLY_PRODUCT_SHA=797ef4b96f0e2017b235f3fad2e02d762e4cdb01',
+    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
     'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
     'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
     'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',
