@@ -6,6 +6,7 @@ export type AuthUserRecord = {
   passwordHash: string | null
   displayName: string | null
   role: UserRole
+  controlState?: 'active' | 'trashed' | 'purging' | 'purged'
   uiTheme?: string
   createdAt: Date
 }

@@ -248,6 +248,12 @@ export class FamilyService {
           await tx.$queryRaw`
             SELECT id FROM users WHERE id = ${principal.userId}::uuid FOR UPDATE
           `
+          const [account] = await tx.$queryRaw<Array<{ state: string }>>`
+            SELECT control_state::text AS state FROM users WHERE id = ${principal.userId}::uuid
+          `
+          if (!account || account.state !== 'active') {
+            throw new FamilyFailure('forbidden', 'Удалённый аккаунт не может создавать семью')
+          }
           if (this.multiFamilyActivation === 'off') {
             const admitted = principal.externalIdentity && await tx.pilotAdmission.findFirst({
               where: {
@@ -845,6 +851,12 @@ export class FamilyService {
         await tx.$queryRaw`
           SELECT id FROM users WHERE id = ${principal.userId}::uuid FOR UPDATE
         `
+        const [account] = await tx.$queryRaw<Array<{ state: string }>>`
+          SELECT control_state::text AS state FROM users WHERE id = ${principal.userId}::uuid
+        `
+        if (!account || account.state !== 'active') {
+          throw new FamilyFailure('forbidden', 'Удалённый аккаунт не может вступать в семью')
+        }
         const families = await tx.$queryRaw<Array<{
           status: 'active' | 'deleting' | 'deleted'
           publicationOrdinal: bigint
@@ -1038,7 +1050,10 @@ export class FamilyService {
         throw new FamilyFailure('not_found', 'Семья не найдена')
       }
       if (ownMembership.revokedAt) {
-        if (ownMembership.version === expectedVersion + 1) return
+        if (ownMembership.version === expectedVersion + 1) {
+          await this.cancelControlAccessSnapshot(scope.familyId, userId)
+          return
+        }
         throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
       }
       await this.access.requireMember(scope)
@@ -1060,12 +1075,20 @@ export class FamilyService {
     })
     if (!member) throw new FamilyFailure('not_found', 'Участник не найден')
     if (member.revokedAt) {
-      if (member.version === expectedVersion + 1) return
+      if (member.version === expectedVersion + 1) {
+        await this.cancelControlAccessSnapshot(scope.familyId, userId)
+        return
+      }
       throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
     }
 
     const revokedAt = this.now()
     const revoked = await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`
+      const [lockedFamily] = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status::text AS status FROM families WHERE id = ${scope.familyId}::uuid FOR UPDATE
+      `
+      if (!lockedFamily || lockedFamily.status !== 'active') throw new FamilyFailure('not_found', 'Семья не найдена')
       const revoked = await tx.familyMember.updateMany({
         where: { familyId: scope.familyId, userId, revokedAt: null, version: expectedVersion },
         data: { revokedAt, version: { increment: 1 } },
@@ -1076,9 +1099,19 @@ export class FamilyService {
           select: { revokedAt: true, version: true },
         })
         if (!currentMember) throw new FamilyFailure('not_found', 'Участник не найден')
-        if (currentMember.revokedAt && currentMember.version === expectedVersion + 1) return false
+        if (currentMember.revokedAt && currentMember.version === expectedVersion + 1) {
+          await tx.controlAccessSnapshot.updateMany({
+            where: { familyId: scope.familyId, userId, cancelledAt: null },
+            data: { cancelledAt: revokedAt },
+          })
+          return false
+        }
         throw new FamilyFailure('version_conflict', 'Данные участника изменены другим пользователем')
       }
+      await tx.controlAccessSnapshot.updateMany({
+        where: { familyId: scope.familyId, userId, cancelledAt: null },
+        data: { cancelledAt: revokedAt },
+      })
       await tx.familyInvite.updateMany({
         where: { familyId: scope.familyId, createdBy: userId, acceptedAt: null, revokedAt: null },
         data: { revokedAt: this.now() },
@@ -1106,6 +1139,17 @@ export class FamilyService {
         // Diagnostic logging must not change a committed access revocation.
       }
     }
+  }
+
+  private async cancelControlAccessSnapshot(familyId: string, userId: string) {
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${familyId}::uuid FOR UPDATE`
+      await tx.controlAccessSnapshot.updateMany({
+        where: { familyId, userId, cancelledAt: null },
+        data: { cancelledAt: this.now() },
+      })
+    })
   }
 
 }

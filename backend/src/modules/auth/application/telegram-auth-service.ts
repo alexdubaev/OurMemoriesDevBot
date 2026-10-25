@@ -60,6 +60,10 @@ export class TelegramAuthService {
       )
     }
 
+    if (exchanged.state === 'invalid_account') {
+      throw new AuthFailure('session_invalid', 'Session is invalid or expired')
+    }
+
     return {
       user: await this.dependencies.projectUser(exchanged.user),
       accessToken: await this.dependencies.accessTokens.sign({

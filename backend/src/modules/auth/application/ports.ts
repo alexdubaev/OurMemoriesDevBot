@@ -130,6 +130,7 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
     }
   }): Promise<
     | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
+    | { state: 'invalid_account' }
     | { state: 'replayed' }
   >
 }
