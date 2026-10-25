@@ -2993,7 +2993,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
       `FIXTURE_BASELINE_CATALOG=${shellQuote(fixtureBaselineCatalog)}`,
       `FIXTURE_CANDIDATE_CATALOG=${shellQuote(fixtureCandidateCatalog)}`,
-      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else local catalog="$FIXTURE_CANDIDATE_CATALOG"; [ "$FIXTURE_LEDGER_VARIANT" != bad-catalog ] || catalog="${catalog/479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"; printf "%s\\n" "$catalog"; fi; }',
+      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else local catalog="$FIXTURE_CANDIDATE_CATALOG"; [ "$FIXTURE_LEDGER_VARIANT" != bad-catalog ] || catalog="${catalog//479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"; printf "%s\\n" "$catalog"; fi; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
       `rollback_runtime_fingerprint() { printf "%s\\n" "${maxVideoRecoveryRuntime}"; }`,
       'rollback_control_host_inputs_match() { return 0; }',
