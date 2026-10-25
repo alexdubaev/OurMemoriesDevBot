@@ -117,6 +117,7 @@ async function clean() {
   await prisma.controlFamilyDeletion.deleteMany()
   await prisma.taskOutbox.deleteMany()
   await prisma.gift.deleteMany()
+  await prisma.$executeRaw`UPDATE children SET avatar_media_id = NULL, avatar_crop = NULL WHERE family_id = ANY(${[ownedFamilyId, sharedFamilyId, legacyFamilyId]}::uuid[])`
   await prisma.mediaAsset.deleteMany()
   await prisma.memory.deleteMany()
   await prisma.child.deleteMany()
