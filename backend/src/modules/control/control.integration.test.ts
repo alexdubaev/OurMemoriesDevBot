@@ -26,6 +26,12 @@ const baseEnv = {
 
 describe('control owner read API authorization', () => {
   beforeEach(async () => {
+    await prisma.controlLifecycleCommand.deleteMany()
+    await prisma.controlAccessSnapshot.deleteMany()
+    await prisma.controlUserDeletionFamily.deleteMany()
+    await prisma.controlFamilyDeletion.deleteMany()
+    await prisma.controlStorageDelete.deleteMany()
+    await prisma.controlUserDeletion.deleteMany()
     await prisma.controlFamilyActivity.deleteMany()
     await prisma.controlUserActivity.deleteMany()
     await prisma.controlMetricSnapshot.deleteMany()
@@ -68,6 +74,12 @@ describe('control owner read API authorization', () => {
   })
 
   afterAll(async () => {
+    await prisma.controlLifecycleCommand.deleteMany()
+    await prisma.controlAccessSnapshot.deleteMany()
+    await prisma.controlUserDeletionFamily.deleteMany()
+    await prisma.controlFamilyDeletion.deleteMany()
+    await prisma.controlStorageDelete.deleteMany()
+    await prisma.controlUserDeletion.deleteMany()
     await prisma.taskOutbox.deleteMany()
     await prisma.authSession.deleteMany()
     await prisma.externalIdentity.deleteMany()
@@ -95,6 +107,7 @@ describe('control owner read API authorization', () => {
     const control = app('true', ownerId)
     const paths = ['/api/v1/control/me', '/api/v1/control/overview', '/api/v1/control/families',
       '/api/v1/control/families/20000000-0000-4000-8000-000000000001', '/api/v1/control/users',
+      `/api/v1/control/users/${ordinaryId}/deletion-preview`, '/api/v1/control/families/20000000-0000-4000-8000-000000000001/deletion-preview',
       '/api/v1/control/families/20000000-0000-4000-8000-000000000001/members', '/api/v1/control/families/20000000-0000-4000-8000-000000000001/invites',
       `/api/v1/control/users/${ordinaryId}`, `/api/v1/control/users/${ordinaryId}/memberships`,
       '/api/v1/control/storage', '/api/v1/control/sources', '/api/v1/control/system', '/api/v1/control/events',
@@ -111,6 +124,84 @@ describe('control owner read API authorization', () => {
       expect(allowed.status).toBe(path.endsWith('/unknown') ? 404 : 200)
       expect(allowed.headers.get('cache-control')).toContain('no-store')
     }
+  })
+
+  test('deletion API enforces owner protection, strict commands, current previews, and idempotent restore cycles', async () => {
+    const control = app('true', ownerId)
+    const ownerHeaders = { Authorization: `Bearer ${await token(ownerId)}`, 'Content-Type': 'application/json' }
+    const restricted = [
+      { path: `/api/v1/control/users/${ordinaryId}/deletion-preview`, method: 'GET' as const },
+      { path: `/api/v1/control/users/${ordinaryId}/trash`, method: 'POST' as const },
+      { path: `/api/v1/control/users/${ordinaryId}/restore`, method: 'POST' as const },
+      { path: '/api/v1/control/families/20000000-0000-4000-8000-000000000001/deletion-preview', method: 'GET' as const },
+      { path: '/api/v1/control/families/20000000-0000-4000-8000-000000000001/purge', method: 'POST' as const },
+    ]
+    for (const { path, method } of restricted) {
+      const options = (headers?: Record<string, string>) => ({ method, headers, ...(method === 'POST' ? { body: '{}' } : {}) })
+      const anonymous = await control.request(path, options())
+      expect(anonymous.status).toBe(401)
+      expect(anonymous.headers.get('cache-control')).toContain('no-store')
+      for (const id of [ordinaryId, familyOwnerId, adminId]) {
+        const denied = await control.request(path, options({ Authorization: `Bearer ${await token(id)}`, 'Content-Type': 'application/json' }))
+        expect(denied.status).toBe(403)
+      }
+    }
+
+    const previewResponse = await control.request(`/api/v1/control/users/${ordinaryId}/deletion-preview`, { headers: ownerHeaders })
+    expect(previewResponse.status).toBe(200)
+    expect(previewResponse.headers.get('cache-control')).toContain('no-store')
+    const preview = await previewResponse.json() as { targetId: string; fingerprint: string; confirmation: string; canTrash: boolean; state: string; members: number }
+    expect(preview.targetId).toBe(ordinaryId)
+    expect(preview.canTrash).toBe(true)
+    expect(preview.state).toBe('active')
+    expect(preview.members).toBeGreaterThan(0)
+
+    const operatorPreviewResponse = await control.request(`/api/v1/control/users/${ownerId}/deletion-preview`, { headers: ownerHeaders })
+    const operatorPreview = await operatorPreviewResponse.json() as { canTrash: boolean; protectedAccount: boolean; fingerprint: string; confirmation: string }
+    expect(operatorPreviewResponse.status).toBe(200)
+    expect(operatorPreview.canTrash).toBe(false)
+    expect(operatorPreview.protectedAccount).toBe(true)
+    const operatorDelete = await control.request(`/api/v1/control/users/${ownerId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: operatorPreview.fingerprint, confirmation: operatorPreview.confirmation }) })
+    expect(operatorDelete.status).toBe(409)
+
+    const malformed = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: preview.fingerprint, confirmation: ordinaryId, actorId: ownerId }) })
+    expect(malformed.status).toBe(400)
+    const wrongTarget = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: preview.fingerprint, confirmation: ownerId }) })
+    expect(wrongTarget.status).toBe(400)
+    const oversized = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ oversized: 'x'.repeat(1_100_000) }) })
+    expect(oversized.status).toBe(413)
+
+    await prisma.$executeRaw`UPDATE families SET control_version=control_version+1 WHERE id='20000000-0000-4000-8000-000000000002'::uuid`
+    const stale = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: preview.fingerprint, confirmation: preview.confirmation }) })
+    expect(stale.status).toBe(409)
+
+    const current = await (await control.request(`/api/v1/control/users/${ordinaryId}/deletion-preview`, { headers: ownerHeaders })).json() as typeof preview
+    const trashBody = { key: crypto.randomUUID(), fingerprint: current.fingerprint, confirmation: current.confirmation }
+    const trashed = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify(trashBody) })
+    expect(trashed.status).toBe(200)
+    const trashResult = await trashed.json() as { deletionId: string; purgeAfter: string; state: string }
+    expect(trashResult.state).toBe('trashed')
+    expect(Date.parse(trashResult.purgeAfter) - Date.now()).toBeGreaterThan(29 * 86_400_000)
+    const retry = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify(trashBody) })
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toEqual(trashResult)
+    expect(await prisma.controlUserDeletion.count({ where: { targetUserId: ordinaryId } })).toBe(1)
+    const trashedList = await (await control.request('/api/v1/control/users?userState=trashed', { headers: ownerHeaders })).json() as { items: Array<{ id: string; lifecycleState: string }> }
+    expect(trashedList.items.some((row) => row.id === ordinaryId && row.lifecycleState === 'trashed')).toBe(true)
+
+    const restoreBody = { key: crypto.randomUUID(), deletionId: trashResult.deletionId }
+    const restored = await control.request(`/api/v1/control/users/${ordinaryId}/restore`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify(restoreBody) })
+    expect(restored.status).toBe(200)
+    expect((await restored.json() as { state: string }).state).toBe('active')
+    const activeList = await (await control.request('/api/v1/control/users?userState=active', { headers: ownerHeaders })).json() as { items: Array<{ id: string; lifecycleState: string }> }
+    expect(activeList.items.some((row) => row.id === ordinaryId && row.lifecycleState === 'active')).toBe(true)
+
+    const nextPreview = await (await control.request(`/api/v1/control/users/${ordinaryId}/deletion-preview`, { headers: ownerHeaders })).json() as typeof preview
+    const secondTrash = await control.request(`/api/v1/control/users/${ordinaryId}/trash`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), fingerprint: nextPreview.fingerprint, confirmation: nextPreview.confirmation }) })
+    const secondCycle = await secondTrash.json() as { deletionId: string }
+    await prisma.controlUserDeletion.update({ where: { id: secondCycle.deletionId }, data: { purgeAfter: new Date(Date.now() - 1) } })
+    const expiredRestore = await control.request(`/api/v1/control/users/${ordinaryId}/restore`, { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ key: crypto.randomUUID(), deletionId: secondCycle.deletionId }) })
+    expect(expiredRestore.status).toBe(409)
   })
 
   test('is closed when disabled or allowlist is empty', async () => {
