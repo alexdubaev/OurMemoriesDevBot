@@ -157,6 +157,7 @@ BEGIN
        WHERE link."deletion_id" = restore_cycle
          AND link."family_id" = NEW."id"
          AND link."restore_eligible"
+         AND NEW."owner_user_id" = deletion."target_user_id"
          AND deletion."restored_at" IS NOT NULL
          AND deletion."purge_after" > CURRENT_TIMESTAMP
          AND owner."control_state" = 'active'

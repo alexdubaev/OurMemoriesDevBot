@@ -40,6 +40,28 @@ async function seed() {
   })
   await prisma.family.create({
     data: {
+      id: legacyFamilyId,
+      ownerUserId: targetId,
+      name: 'Synthetic inactive legacy archive',
+      timezone: 'UTC',
+      members: { create: [{ userId: targetId, role: 'full' }] },
+    },
+  })
+  const legacyChild = await prisma.child.create({ data: { familyId: legacyFamilyId, displayName: 'Synthetic legacy child' } })
+  await prisma.memory.create({
+    data: {
+      familyId: legacyFamilyId,
+      childId: legacyChild.id,
+      authorId: targetId,
+      kind: 'note',
+      body: 'Synthetic legacy archive payload',
+      occurredAt: new Date('2026-10-22T12:00:00Z'),
+      firstPublishedAt: new Date('2026-10-22T12:00:00Z'),
+    },
+  })
+  await prisma.family.update({ where: { id: legacyFamilyId }, data: { status: 'deleted' } })
+  await prisma.family.create({
+    data: {
       id: ownedFamilyId,
       ownerUserId: targetId,
       name: 'Synthetic lifecycle archive',
@@ -63,17 +85,7 @@ async function seed() {
       ] },
     },
   })
-  await prisma.family.create({
-    data: {
-      id: legacyFamilyId,
-      ownerUserId: targetId,
-      name: 'Synthetic inactive legacy archive',
-      timezone: 'UTC',
-      members: { create: [{ userId: targetId, role: 'full' }] },
-    },
-  })
   const child = await prisma.child.create({ data: { familyId: ownedFamilyId, displayName: 'Synthetic child' } })
-  const legacyChild = await prisma.child.create({ data: { familyId: legacyFamilyId, displayName: 'Synthetic legacy child' } })
   await prisma.memory.create({
     data: {
       familyId: ownedFamilyId,
@@ -85,18 +97,6 @@ async function seed() {
       firstPublishedAt: new Date('2026-10-24T12:00:00Z'),
     },
   })
-  await prisma.memory.create({
-    data: {
-      familyId: legacyFamilyId,
-      childId: legacyChild.id,
-      authorId: targetId,
-      kind: 'note',
-      body: 'Synthetic legacy archive payload',
-      occurredAt: new Date('2026-10-22T12:00:00Z'),
-      firstPublishedAt: new Date('2026-10-22T12:00:00Z'),
-    },
-  })
-  await prisma.family.update({ where: { id: legacyFamilyId }, data: { status: 'deleting' } })
 }
 
 async function clean() {
@@ -150,7 +150,7 @@ describe('Control account lifecycle', () => {
     expect(trashed.state).toBe('trashed')
     expect(await prisma.memory.count({ where: { familyId: ownedFamilyId, deletedAt: null } })).toBe(1)
     expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'deleting' })
-    expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleting' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleted' })
     expect(await prisma.memory.count({ where: { familyId: legacyFamilyId, deletedAt: null } })).toBe(1)
     expect(await prisma.authSession.count({ where: { userId: targetId, revokedAt: null } })).toBe(0)
     expect(await prisma.familyMember.count({ where: { familyId: ownedFamilyId, revokedAt: null } })).toBe(0)
@@ -190,7 +190,7 @@ describe('Control account lifecycle', () => {
     })
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'active' })
     expect(await prisma.family.findUniqueOrThrow({ where: { id: ownedFamilyId } })).toMatchObject({ status: 'active' })
-    expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleting' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: legacyFamilyId } })).toMatchObject({ status: 'deleted' })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: actorId } } })).toMatchObject({ role: 'viewer', revokedAt: null })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: ownedFamilyId, userId: formerMemberId } } })).toMatchObject({ revokedAt: expect.any(Date) })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } } })).toMatchObject({ revokedAt: expect.any(Date) })
