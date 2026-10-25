@@ -209,18 +209,9 @@ try {
       assert.deepEqual(await ledgerSnapshot(), state.migrationLedger)
       const operation = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: state.familyPurgeId } })
       const maintenance = await load('modules/control/infrastructure/control-purge.ts')
-      const transactionDiagnostics = { failures: [] }
-      const diagnosticDb = new Proxy(prisma, { get(target, property) {
-        if (property === '$transaction') return (...args) => target.$transaction(...args).catch((error) => {
-          transactionDiagnostics.failures.push({ code: error?.code ?? null, message: String(error?.message ?? error) })
-          throw error
-        })
-        const value = Reflect.get(target, property, target)
-        return typeof value === 'function' ? value.bind(target) : value
-      } })
       let at = new Date(Date.now() + 2 * 60 * 60 * 1000)
       for (let pass = 0; pass < 40 && !operation.purgedAt; pass++) {
-        await maintenance.runControlDeletionMaintenance({ db: diagnosticDb, storage }, at, 10)
+        await maintenance.runControlDeletionMaintenance({ db: prisma, storage }, at, 10)
         const latest = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
         if (latest.purgedAt) break
         at = new Date(at.getTime() + 10 * 60 * 1000)
@@ -228,9 +219,14 @@ try {
       const completed = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
       const pendingObjects = await prisma.controlStorageDelete.findMany({ where: { operationId: operation.id, completedAt: null },
         select: { objectKey: true, notBefore: true, nextAttemptAt: true, lastErrorCode: true } })
-      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; error=${completed.lastErrorCode}; notBefore=${completed.notBefore.toISOString()}; pending=${JSON.stringify(pendingObjects)}; transaction=${JSON.stringify(transactionDiagnostics.failures)}`)
+      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; error=${completed.lastErrorCode}; notBefore=${completed.notBefore.toISOString()}; pending=${JSON.stringify(pendingObjects)}`)
       assert.equal(await prisma.mediaAsset.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
       assert.equal(await prisma.maxVideoReference.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
+      assert.equal(await prisma.maxSource.findUnique({ where: { id: state.purgeMedia.sourceId } }), null)
+      const redactedReceipt = await prisma.maxInbox.findUniqueOrThrow({ where: { id: state.purgeMedia.inboxId } })
+      assert.equal(redactedReceipt.eventKey, state.purgeMedia.eventKey)
+      assert.ok(redactedReceipt.controlRedactedAt instanceof Date)
+      assert.equal(redactedReceipt.encryptedPayload.byteLength, 0)
       assert.equal(await storage.headObject(state.purgeMedia.originalKey), null)
       await assertObjectDigest(state.activeMedia.originalKey, state.activeMedia.originalSha)
       const targetAfter = await prisma.maxVideoLegacyRetention.findUnique({ where: { mediaId: state.targetMedia.mediaId } })
@@ -312,7 +308,8 @@ async function seedRetainedVideo({ familyId, ownerId, subject, label }) {
   await prisma.maxVideoLegacyRetention.create({ data: { mediaId, familyId, memoryId: memory.id, referenceId: mediaId, sourceId: source.id,
     position: 0, providerMessageId: source.messageId, providerAttachmentId: attachmentId, providerRecipientId: 1n,
     providerChannelId: null, snapshot: snapshot[0].snapshot } })
-  return { mediaId, familyId, memoryId: memory.id, originalKey, previewKey, playbackKey, originalSha }
+  return { mediaId, familyId, memoryId: memory.id, sourceId: source.id, inboxId: inbox.id, eventKey: inbox.eventKey,
+    originalKey, previewKey, playbackKey, originalSha }
 }
 
 async function completeFirstFamilyChild(familyId, ownerId) {

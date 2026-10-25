@@ -315,11 +315,9 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
       if (decisionIds.length) await tx.maxOutgoingResponse.deleteMany({ where: { channelDecisionId: { in: decisionIds } } })
       if (decisionIds.length) await tx.maxChannelDecision.deleteMany({ where: { id: { in: decisionIds } } })
       await tx.maxChannelBinding.deleteMany({ where: { familyId: operation.familyId } })
-      if (sources.length) await tx.$executeRaw`DELETE FROM max_source_attachments WHERE source_id = ANY(${sources.map(({ id }) => id)}::uuid[])`
-      await tx.$executeRaw`UPDATE max_sources SET sender_subject = '', user_id = NULL, family_id = NULL, child_id = NULL,
-        choice_candidates = NULL, choice_expires_at = NULL, memory_id = NULL,
-        planned_memory_id = '00000000-0000-0000-0000-000000000000', original_message_id = NULL, original_channel_id = NULL,
-        rejection_code = 'control_archive_purged', status = 'denied' WHERE family_id = ${operation.familyId}::uuid`
+      // The durable redacted inbox row retains the provider-event dedupe key and rejects source
+      // replay. Delete the family-owned source itself: its selected target is immutable by design.
+      if (sources.length) await tx.$executeRaw`DELETE FROM max_sources WHERE id = ANY(${sources.map(({ id }) => id)}::uuid[])`
       await tx.$executeRaw`DELETE FROM max_outbound_sources WHERE family_id = ${operation.familyId}::uuid`
 
       const telegram = await tx.$queryRaw<Array<{ id: string; inbox_id: string; bot_id: bigint; chat_id: bigint; media_group_id: string | null }>>`
@@ -348,10 +346,9 @@ async function eraseFamilyArchive(db: DbClient, operation: FamilyOperation, now:
         control_redacted_at = COALESCE(control_redacted_at, ${now})
         WHERE id = ANY(${telegramInboxIds}::uuid[])`
       if (telegramAlbumIds.length) await tx.$executeRaw`DELETE FROM telegram_albums WHERE id = ANY(${telegramAlbumIds}::uuid[])`
-      if (telegramIds.length) await tx.$executeRaw`UPDATE telegram_sources SET sender_subject = '', family_id = NULL, child_id = NULL,
-        user_id = '00000000-0000-0000-0000-000000000000', choice_candidates = NULL, choice_expires_at = NULL, memory_id = NULL, media_id = NULL, planned_media_id = NULL,
-        planned_memory_id = '00000000-0000-0000-0000-000000000000', rejection_code = 'control_archive_purged', status = 'denied'
-        WHERE id = ANY(${telegramIds}::uuid[])`
+      // Telegram inbox identity (bot_id, update_id) remains redacted as the replay fence.
+      // Its owned source has no independent retention purpose once the family archive is erased.
+      if (telegramIds.length) await tx.$executeRaw`DELETE FROM telegram_sources WHERE id = ANY(${telegramIds}::uuid[])`
 
       await tx.controlFamilyDeletion.update({ where: { id: operation.id }, data: { purgeStage: 'memories', purgeCursor: null, lastErrorCode: null } })
       return

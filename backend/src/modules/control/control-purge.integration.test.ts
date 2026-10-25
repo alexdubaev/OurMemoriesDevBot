@@ -22,6 +22,9 @@ const mediaId = '79200000-0000-4000-8000-000000000001'
 const retainedMediaId = '79200000-0000-4000-8000-000000000002'
 const channelInboxId = '79500000-0000-4000-8000-000000000001'
 const channelDecisionId = '79500000-0000-4000-8000-000000000002'
+const maxSourceInboxId = '79500000-0000-4000-8000-000000000003'
+const telegramInboxId = '79500000-0000-4000-8000-000000000004'
+const maxSourceEventKey = 'control-purge-owned-max-source-event'
 const channelChatId = 7950000001n
 const epoch = new Date('2030-01-01T00:00:00.000Z')
 let root = ''
@@ -42,6 +45,10 @@ async function clean() {
     await tx.$executeRaw`UPDATE children SET avatar_media_id = NULL, avatar_crop = NULL WHERE family_id = ${familyId}::uuid`
     await tx.$executeRaw`DELETE FROM "media_assets" WHERE "family_id" = ${familyId}::uuid`
   })
+  await prisma.maxSource.deleteMany({ where: { inboxId: maxSourceInboxId } })
+  await prisma.maxInbox.deleteMany({ where: { id: maxSourceInboxId } })
+  await prisma.telegramSource.deleteMany({ where: { inboxId: telegramInboxId } })
+  await prisma.telegramInbox.deleteMany({ where: { id: telegramInboxId } })
   await prisma.controlStorageDelete.deleteMany()
   await prisma.controlLifecycleCommand.deleteMany()
   await prisma.controlAccessSnapshot.deleteMany()
@@ -67,9 +74,29 @@ async function seed({ purgeAfter = new Date(epoch.getTime() + 30 * 24 * 60 * 60 
     members: { create: [{ userId: targetId, role: 'full' }] },
   } })
   const ownChild = await prisma.child.create({ data: { familyId, displayName: 'Private child name' } })
-  await prisma.memory.create({ data: {
+  const ownMemory = await prisma.memory.create({ data: {
     familyId, childId: ownChild.id, authorId: targetId, kind: 'note', body: 'Private family memory',
     occurredAt: epoch, firstPublishedAt: epoch,
+  } })
+  const maxInbox = await prisma.maxInbox.create({ data: {
+    id: maxSourceInboxId, eventKey: maxSourceEventKey, botId: 795n, eventKind: 'message_created',
+    encryptedPayload: Buffer.from('synthetic MAX source payload'), encryptionIv: Buffer.from('iv'),
+    encryptionAuthTag: Buffer.from('tag'), status: 'processed',
+  } })
+  await prisma.maxSource.create({ data: {
+    inboxId: maxInbox.id, botId: 795n, senderSubject: 'synthetic-max-subject', recipientId: 795n,
+    messageId: 'control-purge-owned-source', status: 'published', plannedMemoryId: ownMemory.id,
+    memoryId: ownMemory.id, userId: targetId, familyId, childId: ownChild.id,
+  } })
+  const telegramInbox = await prisma.telegramInbox.create({ data: {
+    id: telegramInboxId, botId: 796n, updateId: 796n, eventKind: 'content',
+    encryptedPayload: Buffer.from('synthetic Telegram source payload'), encryptionIv: Buffer.from('iv'),
+    encryptionAuthTag: Buffer.from('tag'),
+  } })
+  await prisma.telegramSource.create({ data: {
+    inboxId: telegramInbox.id, botId: 796n, chatId: 796n, messageId: 796n,
+    senderSubject: 'synthetic-telegram-subject', userId: targetId, familyId, childId: ownChild.id,
+    kind: 'note', status: 'published', plannedMemoryId: ownMemory.id, memoryId: ownMemory.id,
   } })
   await prisma.maxChannelBinding.create({ data: { chatId: channelChatId, familyId, state: 'connected' } })
   await prisma.maxInbox.create({ data: {
@@ -184,6 +211,14 @@ describe('Control bounded deletion maintenance', () => {
     expect(await prisma.mediaAsset.findUnique({ where: { id: retainedMediaId } })).toBeNull()
     expect(await prisma.memory.count({ where: { familyId } })).toBe(0)
     expect(await prisma.child.count({ where: { familyId } })).toBe(0)
+    expect(await prisma.maxSource.findUnique({ where: { inboxId: maxSourceInboxId } })).toBeNull()
+    const maxReceipt = await prisma.maxInbox.findUniqueOrThrow({ where: { id: maxSourceInboxId } })
+    expect(maxReceipt).toMatchObject({ eventKey: maxSourceEventKey, controlRedactedAt: expect.any(Date) })
+    expect(maxReceipt.encryptedPayload.byteLength).toBe(0)
+    expect(await prisma.telegramSource.findUnique({ where: { inboxId: telegramInboxId } })).toBeNull()
+    const telegramReceipt = await prisma.telegramInbox.findUniqueOrThrow({ where: { id: telegramInboxId } })
+    expect(telegramReceipt).toMatchObject({ botId: 796n, updateId: 796n, controlRedactedAt: expect.any(Date) })
+    expect(telegramReceipt.encryptedPayload.byteLength).toBe(0)
     expect(await prisma.memory.count({ where: { familyId: otherFamilyId, body: 'Other owner memory' } })).toBe(1)
     expect(await prisma.family.findUniqueOrThrow({ where: { id: otherFamilyId } })).toMatchObject({ name: 'Other owner archive', status: 'active' })
     expect(await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId: otherFamilyId, userId: targetId } } })).toMatchObject({ familyDisplayName: null, revokedAt: epoch })
