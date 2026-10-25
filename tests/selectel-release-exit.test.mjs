@@ -3018,8 +3018,8 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   try {
     const preSql = run('pre-sql')
     assert.equal(preSql.status, 0, preSql.stdout + preSql.stderr)
-    assert.match(preSql.stdout, /accepted/, `${preSql.stdout}${preSql.stderr}`)
     const preEvents = existsSync(events) ? readFileSync(events, 'utf8') : ''
+    assert.match(preSql.stdout, /accepted/, `${preSql.stdout}${preSql.stderr}\nevents=${preEvents}`)
     assert.match(preEvents, /ledger-check/)
     assert.doesNotMatch(preEvents, /migration-status/)
 
