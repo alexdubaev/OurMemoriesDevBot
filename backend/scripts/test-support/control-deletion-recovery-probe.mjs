@@ -209,9 +209,18 @@ try {
       assert.deepEqual(await ledgerSnapshot(), state.migrationLedger)
       const operation = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: state.familyPurgeId } })
       const maintenance = await load('modules/control/infrastructure/control-purge.ts')
+      const transactionDiagnostics = { failures: [] }
+      const diagnosticDb = new Proxy(prisma, { get(target, property) {
+        if (property === '$transaction') return (...args) => target.$transaction(...args).catch((error) => {
+          transactionDiagnostics.failures.push({ code: error?.code ?? null, message: String(error?.message ?? error) })
+          throw error
+        })
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      } })
       let at = new Date(Date.now() + 2 * 60 * 60 * 1000)
       for (let pass = 0; pass < 40 && !operation.purgedAt; pass++) {
-        await maintenance.runControlDeletionMaintenance({ db: prisma, storage }, at, 10)
+        await maintenance.runControlDeletionMaintenance({ db: diagnosticDb, storage }, at, 10)
         const latest = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
         if (latest.purgedAt) break
         at = new Date(at.getTime() + 10 * 60 * 1000)
@@ -219,7 +228,7 @@ try {
       const completed = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
       const pendingObjects = await prisma.controlStorageDelete.findMany({ where: { operationId: operation.id, completedAt: null },
         select: { objectKey: true, notBefore: true, nextAttemptAt: true, lastErrorCode: true } })
-      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; error=${completed.lastErrorCode}; notBefore=${completed.notBefore.toISOString()}; pending=${JSON.stringify(pendingObjects)}`)
+      assert.ok(completed.purgedAt, `current cleanup did not resume from stage ${completed.purgeStage}; error=${completed.lastErrorCode}; notBefore=${completed.notBefore.toISOString()}; pending=${JSON.stringify(pendingObjects)}; transaction=${JSON.stringify(transactionDiagnostics.failures)}`)
       assert.equal(await prisma.mediaAsset.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
       assert.equal(await prisma.maxVideoReference.findUnique({ where: { id: state.purgeMedia.mediaId } }), null)
       assert.equal(await storage.headObject(state.purgeMedia.originalKey), null)
