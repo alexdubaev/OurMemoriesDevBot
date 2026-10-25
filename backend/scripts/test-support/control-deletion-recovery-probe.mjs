@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { readdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-const [root, phase, statePath, storageRoot] = process.argv.slice(2)
+const [root, phase, statePath, storageRoot, currentRoot] = process.argv.slice(2)
 const load = (path) => import(pathToFileURL(resolve(root, 'backend/src', path)).href)
 const [{ createApp }, { createPrisma }, { loadEnv }, { createPrivateStorage }] = await Promise.all([
   load('app.ts'), load('db.ts'), load('env.ts'), load('storage/index.ts'),
@@ -146,6 +146,8 @@ try {
       const ledgerBefore = await ledgerSnapshot()
       const oldStorageModule = await load('storage/index.ts')
       const oldStorage = oldStorageModule.createPrivateStorage(envFor()).storage
+      const currentStorageModule = await import(pathToFileURL(resolve(currentRoot, 'backend/src/storage/index.ts')).href)
+      const currentStorage = currentStorageModule.createPrivateStorage(envFor()).storage
       for (const [label, token] of [['trashed JWT', state.target.token]]) {
         const response = await request('/auth/me', token)
         assert.equal(response.status, 401, `${label} stayed live on archived runtime`)
@@ -185,7 +187,7 @@ try {
       const pausedWrite = oldStorage.writeObject({ key: state.purgeMedia.playbackKey, body: pausedBody, contentLength: 4, contentType: 'video/mp4' })
       await streamReady
       await waitForTemporaryPart(oldStorage.objectPath(state.purgeMedia.playbackKey))
-      await storage.retireObject(state.purgeMedia.playbackKey)
+      await currentStorage.retireObject(state.purgeMedia.playbackKey)
       resumeStream()
       await assert.rejects(pausedWrite)
       assert.equal(await storage.headObject(state.purgeMedia.playbackKey), null)

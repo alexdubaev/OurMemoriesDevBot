@@ -67,18 +67,18 @@ test('current → pinned d299 → current preserves deletion fences, media bytes
 
     checked('apply current additive lifecycle migrations', 'bun', ['run', 'prisma:deploy'], backendRoot)
     checked('seed lifecycle, grace archive, durable partial purge and MAX retention', 'bun', [
-      'scripts/test-support/control-deletion-recovery-probe.mjs', root, 'seed-current', statePath, storageRoot,
+      'scripts/test-support/control-deletion-recovery-probe.mjs', root, 'seed-current', statePath, storageRoot, root,
     ], backendRoot)
     const before = await ledgerSnapshot(ownUrl.toString())
     const candidateRecovery = checked('candidate recovery inverse', 'bun', ['scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply'], backendRoot)
     expect(JSON.parse(candidateRecovery.trim().split('\n').at(-1)!)).toMatchObject({ inspected: 2, excluded: 1, recovered: 2, refused: 0, remaining: 0 })
 
     const archivedOutput = checked('actual archived d299 auth, MAX, browser-link, family and cleanup paths', 'bun', [
-      'scripts/test-support/control-deletion-recovery-probe.mjs', archiveRoot, 'd299-runtime', statePath, storageRoot,
+      'scripts/test-support/control-deletion-recovery-probe.mjs', archiveRoot, 'd299-runtime', statePath, storageRoot, root,
     ], backendRoot)
     expect(JSON.parse(archivedOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'd299-runtime', success: true })
     const currentOutput = checked('current maintenance resumes durable purge', 'bun', [
-      'scripts/test-support/control-deletion-recovery-probe.mjs', root, 'current-after', statePath, storageRoot,
+      'scripts/test-support/control-deletion-recovery-probe.mjs', root, 'current-after', statePath, storageRoot, root,
     ], backendRoot)
     expect(JSON.parse(currentOutput.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'current-after', success: true })
     expect(await ledgerSnapshot(ownUrl.toString())).toEqual(before)
