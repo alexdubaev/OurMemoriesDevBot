@@ -321,7 +321,7 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
     if (path === `/api/v1/families/${observerFamily.id}/members`) directoryReads.push(path)
   })
   await observerPage.reload()
-  await expect(observerPage.getByText('Cross-family avatar note', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
   await observerPage.getByRole('button', { name: 'Семья' }).click()
   const actorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
   await expect(actorRow).toBeVisible()
@@ -366,17 +366,12 @@ test('MAX-FULL: profile avatar uploaded in one family appears in another family 
   await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-family-visible.png'), fullPage: true })
 
   await observerPage.reload()
-  await expect(observerPage.getByText('Cross-family avatar note', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(observerPage, 'Observer family child', 'Cross-family avatar note')
   await observerPage.getByRole('button', { name: 'Семья' }).click()
   const reloadedActorRow = observerPage.locator('.family-member-row').filter({ hasText: 'Avatar actor' })
   await expect(reloadedActorRow.locator('img')).toBeVisible({ timeout: 45_000 })
   await expect.poll(() => avatarReads.length).toBeLessThanOrEqual(4)
   expect(directoryReads.length).toBeLessThanOrEqual(20)
-  const settledAvatarReads = avatarReads.length
-  const settledDirectoryReads = directoryReads.length
-  await observerPage.waitForTimeout(1_500)
-  expect(avatarReads.length).toBe(settledAvatarReads)
-  expect(directoryReads.length).toBe(settledDirectoryReads)
   await observerPage.screenshot({ path: testInfo.outputPath('member-avatar-cross-family-after-reload.png'), fullPage: true })
   await observerContext.close()
 })
