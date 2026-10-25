@@ -113,6 +113,7 @@ model MaxInbox {
   status            MaxInboxStatus     @default(accepted)
   receivedAt        DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
+  controlRedactedAt DateTime?          @map("control_redacted_at") @db.Timestamptz(6)
   source            MaxSource?
   responses         MaxOutgoingResponse[]
   channelDecision   MaxChannelDecision?
@@ -312,6 +313,7 @@ model TelegramInbox {
   encryptionAuthTag Bytes               @map("encryption_auth_tag")
   receivedAt        DateTime            @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt       DateTime?           @map("processed_at") @db.Timestamptz(6)
+  controlRedactedAt DateTime?            @map("control_redacted_at") @db.Timestamptz(6)
   source            TelegramSource?
 
   @@unique([botId, updateId], map: "telegram_inbox_bot_update_key")
@@ -488,6 +490,7 @@ model ControlUserDeletion {
 
   @@index([targetUserId, deletedAt(sort: Desc)], map: "control_user_deletions_target_deleted_idx")
   @@index([purgeAfter, restoredAt], map: "control_user_deletions_purge_idx")
+  @@index([lastAttemptAt, purgeAfter, id], map: "control_user_deletions_attempt_idx")
   @@map("control_user_deletions")
 }
 
@@ -518,6 +521,7 @@ model ControlFamilyDeletion {
   lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(6)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  @@index([lastAttemptAt, requestedAt, id], map: "control_family_deletions_attempt_idx")
   @@map("control_family_deletions")
 }
 

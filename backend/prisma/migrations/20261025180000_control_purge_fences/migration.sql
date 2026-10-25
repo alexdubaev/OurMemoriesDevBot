@@ -2,8 +2,8 @@ ALTER TABLE "control_user_deletions" ADD COLUMN "last_attempt_at" TIMESTAMPTZ(6)
 ALTER TABLE "control_family_deletions" ADD COLUMN "last_attempt_at" TIMESTAMPTZ(6);
 ALTER TABLE "max_inbox" ADD COLUMN "control_redacted_at" TIMESTAMPTZ(6);
 ALTER TABLE "telegram_inbox" ADD COLUMN "control_redacted_at" TIMESTAMPTZ(6);
-CREATE INDEX "control_user_deletions_attempt_idx" ON "control_user_deletions"("last_attempt_at", "purge_after", "id") WHERE "purged_at" IS NULL;
-CREATE INDEX "control_family_deletions_attempt_idx" ON "control_family_deletions"("last_attempt_at", "requested_at", "id") WHERE "purged_at" IS NULL;
+CREATE INDEX "control_user_deletions_attempt_idx" ON "control_user_deletions"("last_attempt_at", "purge_after", "id");
+CREATE INDEX "control_family_deletions_attempt_idx" ON "control_family_deletions"("last_attempt_at", "requested_at", "id");
 
 -- Business rows cannot be inserted into, or reparented across, a family while it is inactive.
 -- The row lock serializes content creation with lifecycle's Family FOR UPDATE boundary.
