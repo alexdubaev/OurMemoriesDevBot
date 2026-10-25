@@ -660,7 +660,7 @@ The guarded rollback supports these exact measured backend + webapp target pairs
   `media:delete` work while the original storage bytes remain present.
 
 - The exact memoLy Control executable compatibility fingerprint
-  `c8496850e920c9a3253949f2571366c7a6c38ce851bca4eb44b2c7b1c4fc2164` is
+  `b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538` is
   measured from the finalized executable source reconstructed over accepted
   source `a7e1e0781d51ceb58fb1f7784c1a69f9c066fca4` and is anchored to the unchanged
   full-attested `dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92` runtime fingerprint

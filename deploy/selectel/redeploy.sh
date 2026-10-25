@@ -784,7 +784,7 @@ rollback_source_compatibility_profile() {
 				# limited to the measured dc26 runtime, migration ledger and wishlist profile.
 				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:cb65bc32b8265b0dc431b1a115ff1e192299f41812232773a2194f8fc894bc05:wishlist"
 				# Control recovery is limited to the exact measured candidate executable tree.
-				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:c8496850e920c9a3253949f2571366c7a6c38ce851bca4eb44b2c7b1c4fc2164:control") ;;
+				"dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92:2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088:b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538:control") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

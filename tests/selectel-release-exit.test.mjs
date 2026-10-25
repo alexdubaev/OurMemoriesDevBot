@@ -2414,7 +2414,7 @@ test('Control recovery permits only its exact current executable fingerprint and
   const target = '33a0054c3c71372aa5509ee8ebfa4578ad512ea1'
   const expectedAnchor = 'dc26ad9bb5ebcfe64643414fad90d53fcb3b1c92'
   const expectedRuntime = '2be6fc2b96f4731c4ea3821b50f112c01d8e9a62da57eeb6675f8513fd26b088'
-  const expectedCompatibility = 'c8496850e920c9a3253949f2571366c7a6c38ce851bca4eb44b2c7b1c4fc2164'
+  const expectedCompatibility = 'b975c2a1a84bffe4a431408ac10da4cdabfbe343135d237abc2f5a6e4f0ec538'
   assert.equal(productionRuntimeFingerprint(root, expectedAnchor), expectedRuntime)
   const files = [
     ['backend/.env.example', '07d6bf4a7384d7f12fa0075cd3719ecef446e92a'],
@@ -2425,7 +2425,7 @@ test('Control recovery permits only its exact current executable fingerprint and
     ['backend/src/job-schedules.json', 'f57bf2c0b480edc4209643b3ba1294cd0e84fb79'],
     ['backend/src/jobs.ts', '7b1769d757f1de971ca1ed6092c348f8c16957fc'],
     ['backend/src/modules/control/application/control-helpers.ts', '583d776719b6855f9a63c27dbaa6c84f90af886b'],
-    ['backend/src/modules/control/index.ts', '48dc63c1bc7f02e197e62020777dfad66a2d0f27'],
+    ['backend/src/modules/control/index.ts', '6ac3d9371bb3d0d30ccb6ef4309fded5f1db0cf0'],
     ['backend/src/modules/control/infrastructure/control-collection.ts', '1e9e0b870dd802b4b136cca0e03d66dedadb0179'],
     ['backend/src/modules/control/infrastructure/control-read-repository.ts', '21df9c044bfd58fbe17fcad1e37b65bdc0e3c897'],
     ['backend/src/scheduler.ts', '33a8e40f525c760ea2d803123ca5c4ffa1a1a401'],
