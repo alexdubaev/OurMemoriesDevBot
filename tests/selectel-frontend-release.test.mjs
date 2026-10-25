@@ -128,6 +128,8 @@ validate_planned_source() { :; }
 check_disk_space() { :; }
 fetch_and_checkout() { printf 'CHECKOUT\\n'; }
 capture_running_images() { printf 'IMAGE-CAPTURE\\n'; }
+install_control_sampler() { :; }
+write_control_release_receipt() { :; }
 recover_forward_markers() { printf 'FORWARD-RECOVERY\\n'; }
 main
 `
@@ -248,6 +250,8 @@ validate_planned_source() { :; }
 check_disk_space() { :; }
 fetch_and_checkout() { :; }
 capture_running_images() { printf 'FULL-CAPTURE\\n'; }
+write_control_release_receipt() { :; }
+install_control_sampler() { printf 'CONTROL-SAMPLER-INSTALLED\\n' >> "$SERVER_ROOT/events"; }
 ( main )
 printf 'EVENTS-BEGIN\\n'
 cat "$server/docker-events"
@@ -401,6 +405,8 @@ validate_planned_source() { :; }
 check_disk_space() { :; }
 fetch_and_checkout() { :; }
 capture_running_images() { printf 'FULL-CAPTURE\\n'; }
+install_control_sampler() { :; }
+write_control_release_receipt() { :; }
 bash() { if [[ "$1" == */build-images.sh ]]; then printf 'BUILD:%s\\n' "$*" >> "$SERVER_ROOT/build-events"; else command bash "$@"; fi; }
 ( main )
 PRODUCT_SHA=$t2
@@ -423,7 +429,7 @@ printf 'STATE-BEGIN\\n'
 cat "$SERVER_ROOT/frontend-recovery.env"
 printf 'STATIC-BEGIN\\n'
 cat "$SERVER_ROOT/current-static"
-`, 60_000)
+`, 90_000)
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
   assert.match(result.stdout, /MANIFESTS=2/)
   assert.match(result.stdout, /PHASE=restored/)
@@ -586,6 +592,7 @@ recover_forward_markers() { printf 'FORWARD\\n' >> "$SERVER_ROOT/events"; }
 check_disk_space() { :; }
 verify_rollback_file() { :; }
 capture_running_images() { :; }
+install_control_sampler() { printf 'CONTROL-SAMPLER-INSTALLED\\n' >> "$SERVER_ROOT/events"; }
 fetch_and_checkout() { :; }
 validate_prebuilt_images() { :; }
 detect_membership_rollback_boundary() { :; }
@@ -599,7 +606,8 @@ public_smoke() {
   printf 'SMOKE\\n' >> "$SERVER_ROOT/events"
   ${failSmoke ? "die 'synthetic smoke failure'" : 'return 0'}
 }
-write_release_manifest() { printf 'MANIFEST\\n' >> "$SERVER_ROOT/events"; }
+write_release_manifest() { printf 'MANIFEST\\n' >> "$SERVER_ROOT/events"; write_control_release_receipt; }
+write_control_release_receipt() { printf 'CONTROL-RECEIPT\\n' >> "$SERVER_ROOT/events"; }
 clear_release_markers() { printf 'CLEAR\\n' >> "$SERVER_ROOT/events"; PROMOTION_STARTED=false; }
 bash() { printf 'COMMAND:%s\\n' "$*" >> "$SERVER_ROOT/events"; }
 if ( main ); then
@@ -614,7 +622,7 @@ cat "$SERVER_ROOT/events"
 `
 }
 
-test('full ci-release archives frontend state only after all full-release success gates', () => {
+test('full ci-release archives frontend state only after all full-release success gates', { timeout: 90_000 }, () => {
   const success = runLinuxRoot(fullEntryScript())
   assert.equal(success.status, 0, `${success.stdout}${success.stderr}`)
   for (const line of ['ENTRY=success', 'LIVE=absent', 'ARCHIVES=1']) {
@@ -623,7 +631,9 @@ test('full ci-release archives frontend state only after all full-release succes
   assert.ok(success.stdout.indexOf('REVISION') < success.stdout.indexOf('SMOKE'))
   assert.ok(success.stdout.indexOf('SMOKE') < success.stdout.indexOf('MANIFEST'))
   assert.ok(success.stdout.indexOf('MANIFEST') < success.stdout.indexOf('CLEAR'))
+  assert.ok(success.stdout.indexOf('MANIFEST') < success.stdout.indexOf('CONTROL-RECEIPT'))
   const successEvents = success.stdout.split(/\r?\n/)
+  assert.ok(successEvents.indexOf('CONTROL-SAMPLER-INSTALLED') < successEvents.indexOf('REVISION'))
   assert.ok(successEvents.indexOf('CLEAR') < successEvents.indexOf('ARCHIVE'))
 
   const failed = runLinuxRoot(fullEntryScript({ failSmoke: true }))
@@ -632,6 +642,7 @@ test('full ci-release archives frontend state only after all full-release succes
     assert.ok(failed.stdout.split(/\r?\n/).includes(line), `${failed.stdout}${failed.stderr}`)
   }
   assert.doesNotMatch(failed.stdout, /MANIFEST|Frontend recovery artifact archived/)
+  assert.doesNotMatch(failed.stdout, /CONTROL-RECEIPT/)
 
   const unsafe = runLinuxRoot(fullEntryScript({ unsafeMode: true }))
   assert.equal(unsafe.status, 0, `${unsafe.stdout}${unsafe.stderr}`)
