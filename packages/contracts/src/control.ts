@@ -21,7 +21,7 @@ export const controlCursorQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().max(2048).optional(),
   q: z.string().trim().max(100).optional(),
-  sort: z.enum(['createdAt','name','activeMembers','storageUsedBytes']).optional(),
+  sort: z.enum(['createdAt','name','activeMembers','storageUsedBytes','lastObservedAt']).optional(),
   status: z.enum(['active','deleting','deleted']).optional(),
   maxState: z.enum(['configured','disconnected','unconfigured']).optional(),
 }).strict()
@@ -34,6 +34,7 @@ export const controlOverviewSchema = z.object({
   familiesActive: count,
   activeMemberships: count,
   invitePending: count,
+  validSessions: count,
   accountsWithoutFamily: count,
   familyStorageUsedBytes: bytes,
   activeUsers: controlSampleSchema(count),
@@ -48,24 +49,26 @@ export const controlFamilyRowSchema = z.object({
   activeMembers: count, storageUsedBytes: bytes, storageReservedBytes: bytes,
   quotaBytes: bytes.nullable(), publishedMemories: count, mediaAttachments: count,
   maxState: z.enum(['configured','disconnected','unconfigured']).nullable(), lastObservedAt: isoDate.nullable(),
+  maxLastCheckedAt: isoDate.nullable(), maxVerificationAgeSeconds: count.nullable(),
 }).strict()
 
 export const controlUserRowSchema = z.object({
   id: z.string().uuid(), displayName: boundedText.nullable(), createdAt: isoDate,
   activeFamilies: count, familyNames: z.array(boundedText).max(5), moreFamilies: count,
   lastSessionCreatedAt: isoDate.nullable(), lastActivityAt: isoDate.nullable(),
+  lastActivitySurface:z.enum(['max_mini_app','pwa','browser']).nullable(),
 }).strict()
 
-export const controlFamilyMemberSchema = z.object({ userId:z.string().uuid(), displayName:boundedText.nullable(), alias:boundedText.nullable(), role:z.enum(['full','viewer']), joinedAt:isoDate }).strict()
+export const controlFamilyMemberSchema = z.object({ userId:z.string().uuid(), displayName:boundedText.nullable(), alias:boundedText.nullable(), role:z.enum(['full','viewer']), isOwner:z.boolean(), joinedAt:isoDate }).strict()
 export const controlInviteSchema = z.object({ id:z.string().uuid(), state:z.enum(['pending','accepted','expired','revoked']), createdAt:isoDate, expiresAt:isoDate }).strict()
-export const controlMembershipSchema = z.object({ familyId:z.string().uuid(), familyName:boundedText.nullable(), alias:boundedText.nullable(), role:z.enum(['full','viewer']), joinedAt:isoDate }).strict()
+export const controlMembershipSchema = z.object({ familyId:z.string().uuid(), familyName:boundedText.nullable(), alias:boundedText.nullable(), role:z.enum(['full','viewer']), isOwner:z.boolean(), joinedAt:isoDate }).strict()
 
 export const controlPageSchema = <T extends z.ZodType>(item: T) => z.object({
   items: z.array(item), nextCursor: z.string().max(2048).nullable(),
 }).strict()
 
 export const controlSourceSchema = z.object({
-  id: z.enum(['product_db','postgres_size','media_storage','host_filesystem','service_probes','max_binding_state','release_evidence']), kind: z.enum(['product_db','postgres_size','media_storage','host_filesystem','service_probes','max_binding_state','release_evidence']), status: z.enum(['ok', 'stale', 'error', 'not_configured', 'unsupported', 'insufficient_history']),
+  id: z.enum(['product_db','postgres_size','media_storage','backup_storage','host_filesystem','service_probes','max_binding_state','release_evidence']), kind: z.enum(['product_db','postgres_size','media_storage','backup_storage','host_filesystem','service_probes','max_binding_state','release_evidence']), status: z.enum(['ok', 'stale', 'error', 'not_configured', 'unsupported', 'insufficient_history']),
   observedAt: isoDate.nullable(), lastAttemptAt: isoDate.nullable(), errorCode: z.enum(['timeout','unavailable','invalid_payload','permission_denied','unknown']).nullable(),
 }).strict()
 
@@ -76,19 +79,21 @@ export const controlEventSchema = z.object({
 
 export const controlSystemSchema = z.object({
   serverNow: isoDate,
-  backend: controlSampleSchema(z.object({ live: z.boolean(), ready: z.boolean() }).strict()),
+  backend: controlSampleSchema(z.object({ live: z.boolean(), ready: z.boolean(), readinessProbeLatencyMs:count.nullable() }).strict()),
   postgresSizeBytes: controlSampleSchema(bytes),
-  staticEntry: controlSampleSchema(z.boolean()),
+  staticEntry: controlSampleSchema(z.object({ available:z.boolean(), probeLatencyMs:count.nullable() }).strict()),
   worker: controlSampleSchema(z.object({ progressAt: isoDate.nullable() }).strict()),
   scheduler: controlSampleSchema(z.object({ progressAt: isoDate.nullable() }).strict()),
   outbox: controlSampleSchema(z.object({ pending: count, oldestDueAgeSeconds: count.nullable() }).strict()),
+  release: controlSampleSchema(z.object({ backendSha:z.string().regex(/^[0-9a-f]{40}$/), staticSha:z.string().regex(/^[0-9a-f]{40}$/), migrationCatalogCount:count, migrationStatus:z.literal('up_to_date'), lastSuccessfulReleaseAt:isoDate }).strict()),
 }).strict()
 
 export const controlStorageSchema = z.object({
-  familyAccounting: controlSampleSchema(z.object({ usedBytes: bytes, reservedBytes: bytes, quotaBytes: bytes.nullable() }).strict()),
-  mediaStorage: controlSampleSchema(z.object({ usedBytes: bytes }).strict()),
-  hostFilesystem: controlSampleSchema(z.object({ usedBytes: bytes, availableBytes: bytes.nullable() }).strict()),
-  postgres: controlSampleSchema(z.object({ usedBytes: bytes }).strict()),
+  familyAccounting: controlSampleSchema(z.object({ resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), scopeLabel:boundedText, accountingBasis:boundedText, capacityKind:z.enum(['physical','configured_budget','unknown']), usedBytes: bytes, reservedBytes:bytes, quotaBytes: bytes.nullable(), capacityBytes:bytes.nullable(), availableBytes:bytes.nullable() }).strict()),
+  mediaStorage: controlSampleSchema(z.object({ resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), scopeLabel:boundedText, accountingBasis:boundedText, capacityKind:z.enum(['physical','configured_budget','unknown']), usedBytes: bytes, capacityBytes:bytes.nullable(), availableBytes:bytes.nullable() }).strict()),
+  hostFilesystem: controlSampleSchema(z.object({ resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), scopeLabel:boundedText, accountingBasis:boundedText, capacityKind:z.enum(['physical','configured_budget','unknown']), usedBytes: bytes, capacityBytes:bytes.nullable(), availableBytes: bytes.nullable() }).strict()),
+  postgres: controlSampleSchema(z.object({ resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), scopeLabel:boundedText, accountingBasis:boundedText, capacityKind:z.enum(['physical','configured_budget','unknown']), usedBytes: bytes, capacityBytes:bytes.nullable(), availableBytes:bytes.nullable() }).strict()),
+  backup: controlSampleSchema(z.object({ resourceId:z.string().max(80), parentResourceId:z.string().max(80).nullable(), scopeLabel:boundedText, accountingBasis:boundedText, capacityKind:z.enum(['physical','configured_budget','unknown']), usedBytes:bytes, entries:count, capacityBytes:bytes.nullable(), availableBytes:bytes.nullable(), artifactAt:isoDate.nullable(), validation:z.enum(['valid','invalid','unknown']), restoreTestAt:isoDate.nullable() }).strict()),
 }).strict()
 
 export const controlFamilyDetailSchema = controlFamilyRowSchema.extend({

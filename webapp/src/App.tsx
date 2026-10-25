@@ -45,6 +45,7 @@ import { readPwaInstallIntent, setPwaInstallDismissed } from '@/platform/pwa-ins
 import { readUiVersion } from '@/features/ui-version'
 import { allowPrivateFamilyCache, persistentUiQueryKey, privateFamilyAccessRevokedEvent, removePrivateFamilyCache, type PersistentFamilyPresentation } from '@/platform/persistence/private-cache'
 import { invalidatePrivateChildAvatar } from '@/platform/media/use-private-image-url'
+import { attachControlActivity } from '@/platform/control-activity'
 
 export type AppProps = { hostBridge: HostBridge }
 
@@ -208,6 +209,10 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
   const [childEditor, setChildEditor] = useState<{ kind: 'add' } | { kind: 'edit'; childId: string } | null>(null)
   const [familySettingsRequest, setFamilySettingsRequest] = useState(0)
   const [screen, setScreen] = useState<'hub' | 'family' | 'feed' | 'albums' | 'gifts'>(() => savedPresentation?.screen ?? 'hub')
+  useEffect(() => attachControlActivity({
+    transport, hostBridge, userId: currentUserId,
+    familyId: homeAccessConfirmed ? familyResponse?.family.id ?? null : null,
+  }), [currentUserId, familyResponse?.family.id, homeAccessConfirmed, hostBridge, screen, transport])
   const [visitedSurfaces, setVisitedSurfaces] = useState<Set<'family' | 'feed' | 'albums' | 'gifts'>>(() => new Set(
     savedPresentation?.screen === 'feed' ? ['feed'] : savedPresentation?.screen === 'family' ? ['family'] : savedPresentation?.screen === 'gifts' ? ['gifts'] : [],
   ))

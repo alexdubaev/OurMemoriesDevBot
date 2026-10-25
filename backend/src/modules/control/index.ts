@@ -10,8 +10,11 @@ import {
   controlSystemSchema, controlUserDetailSchema, controlUserRowSchema,
 } from '@web-app-demo/contracts'
 import { decodeEventCursor, eventCursor, exportCsv, familyCsvRow, notFound, parseListQuery, sample, userCsvRow, uuidParam, validateChildListQuery, validateUserSort } from './application/control-helpers'
-import { familyWhere, listChildren, listFamilies, listUsers, queryEvents, queryFamilyById, queryOverview, queryStorage, querySystem, queryUserById, queryFamilies, queryUsers, userWhere } from './infrastructure/control-read-repository'
+import { familyWhere, listChildren, listFamilies, listUsers, queryEvents, queryFamilyById, queryOverview, queryStorage, queryUserById, queryFamilies, queryUsers, userWhere } from './infrastructure/control-read-repository'
 import { z } from 'zod'
+export { collectControlMetrics, createControlCollection, pruneControlTelemetry, readControlMetric, recordControlProgress, withControlReadTimeout } from './infrastructure/control-collection'
+import { readControlMetric } from './infrastructure/control-collection'
+import { withControlReadTimeout } from './infrastructure/control-collection'
 
 export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }: {
   db: DbClient
@@ -22,6 +25,58 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   const routes = new Hono<AuthHttpEnv>()
   const exportsByOwner = new Map<string, number[]>()
   const ownerSet = new Set(env.CONTROL_OWNER_USER_IDS)
+
+  routes.post('/activity', requireAuth, async (c) => {
+    if (!env.CONTROL_ENABLED || c.var.user.externalIdentity?.provider !== 'max') {
+      throw new AppError(404, 'NOT_FOUND', 'Запись не найдена')
+    }
+    let body: unknown
+    try { body = await c.req.json() } catch { throw new AppError(400, 'INVALID_INPUT', 'Некорректное тело запроса') }
+    const parsed = z.object({
+      surface: z.enum(['max_mini_app', 'pwa', 'browser']),
+      familyId: z.string().uuid().optional(),
+    }).strict().safeParse(body)
+    if (!parsed.success) throw new AppError(400, 'INVALID_INPUT', 'Некорректное тело запроса')
+
+    const now = new Date()
+    const utcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL statement_timeout = '5000ms'`
+      if (parsed.data.familyId) {
+        const families = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM families WHERE id = ${parsed.data.familyId}::uuid AND status = 'active' FOR UPDATE
+        `
+        if (!families.length) throw new AppError(404, 'NOT_FOUND', 'Запись не найдена')
+        const memberships = await tx.$queryRaw<Array<{ user_id: string }>>`
+          SELECT user_id FROM family_members
+          WHERE family_id = ${parsed.data.familyId}::uuid AND user_id = ${c.var.user.id}::uuid AND revoked_at IS NULL
+          FOR SHARE
+        `
+        if (!memberships.length) throw new AppError(404, 'NOT_FOUND', 'Запись не найдена')
+      }
+      await tx.$executeRaw`
+        INSERT INTO control_user_activity (user_id, utc_day, first_observed_at, last_observed_at, surface)
+        VALUES (${c.var.user.id}::uuid, ${utcDay}::date, ${now}::timestamptz, ${now}::timestamptz, ${parsed.data.surface})
+        ON CONFLICT (user_id, utc_day) DO UPDATE SET
+          last_observed_at = EXCLUDED.last_observed_at, surface = EXCLUDED.surface
+        WHERE EXCLUDED.last_observed_at >= control_user_activity.last_observed_at + INTERVAL '5 minutes'
+      `
+      if (parsed.data.familyId) {
+        await tx.$executeRaw`
+          INSERT INTO control_family_activity (family_id, user_id, utc_day, first_observed_at, last_observed_at)
+          VALUES (${parsed.data.familyId}::uuid, ${c.var.user.id}::uuid, ${utcDay}::date, ${now}::timestamptz, ${now}::timestamptz)
+          ON CONFLICT (family_id, user_id, utc_day) DO UPDATE SET last_observed_at = EXCLUDED.last_observed_at
+          WHERE EXCLUDED.last_observed_at >= control_family_activity.last_observed_at + INTERVAL '5 minutes'
+        `
+      }
+      await tx.controlCollectionState.upsert({
+        where: { id: 'user_activity' },
+        create: { id: 'user_activity', startedAt: now },
+        update: {},
+      })
+    }, { timeout: 5_000 })
+    return c.body(null, 204)
+  })
 
   routes.use('/control/*', async (c, next) => {
     c.header('Cache-Control', 'private, no-store, max-age=0')
@@ -45,16 +100,39 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const now = new Date()
     const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days + 1))
     const { totals, registrations } = await queryOverview(db, from, now)
-    const activity: Array<{ day: Date; count: bigint | null }> = []
-    const activeUsers = sample(null, 'not_configured', 'user_activity', 60, null)
+    const { activityRows, coverage, activeCount } = await withControlReadTimeout(db, async (tx) => {
+      const [activityRows, coverage, activeCount] = await Promise.all([
+      tx.$queryRaw<Array<{ day: Date; count: bigint }>>`
+        SELECT utc_day AS day, COUNT(DISTINCT user_id)::bigint AS count
+        FROM control_user_activity WHERE utc_day >= ${from}::date AND utc_day <= ${now}::date
+        GROUP BY utc_day ORDER BY utc_day
+      `,
+      tx.controlCollectionState.findUnique({ where: { id: 'user_activity' }, select: { startedAt: true } }),
+      tx.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(DISTINCT user_id)::bigint AS count FROM control_user_activity WHERE utc_day >= ${from}::date AND utc_day <= ${now}::date AND last_observed_at >= coalesce((SELECT started_at FROM control_collection_state WHERE id='user_activity'),${now}::timestamptz)`,
+      ])
+      return { activityRows, coverage, activeCount }
+    })
+    const byDay = new Map(activityRows.map((row) => [row.day.toISOString().slice(0, 10), Number(row.count)]))
+    const activity = Array.from({ length: days }, (_, offset) => {
+      const day = new Date(from.getTime() + offset * 86_400_000)
+      const label = day.toISOString().slice(0, 10)
+      return { day: label, count: coverage && day >= new Date(Date.UTC(coverage.startedAt.getUTCFullYear(), coverage.startedAt.getUTCMonth(), coverage.startedAt.getUTCDate())) ? byDay.get(label) ?? 0 : null }
+    })
+    const coverageFrom = coverage?.startedAt.toISOString() ?? null
+    const coverageStart = coverage ? Math.max(from.getTime(), coverage.startedAt.getTime()) : now.getTime()
+    const coverageRatio = coverage ? Math.max(0, Math.min(1, (now.getTime() - coverageStart) / Math.max(1, now.getTime() - from.getTime()))) : null
+    const activeUsers = coverage
+      ? { ...sample(Number(activeCount[0]?.count ?? 0), 'ok', 'user_activity', 86_400, now.toISOString(), now.toISOString(), coverageFrom), coverageRatio }
+      : sample(null, 'not_configured', 'user_activity', 86_400, null)
     const result = {
       serverNow: now.toISOString(), days,
       accountsTotal: Number(totals.accounts_total), accountsWithFamily: Number(totals.accounts_with_family),
       familiesActive: Number(totals.families_active), activeMemberships: Number(totals.active_memberships),
       invitePending: Number(totals.invite_pending), accountsWithoutFamily: Number(totals.accounts_total) - Number(totals.accounts_with_family),
+      validSessions: Number(totals.valid_sessions),
       familyStorageUsedBytes: String(totals.storage_bytes), activeUsers,
       registrations: registrations.map(({ day, count }) => ({ day: day.toISOString().slice(0, 10), count: Number(count) })),
-      activity: activity.map(({ day, count }) => ({ day: day.toISOString().slice(0, 10), count: count === null ? null : Number(count) })),
+      activity,
     }
     return c.json(controlOverviewSchema.parse(result))
   })
@@ -99,39 +177,60 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     return c.json(controlPageSchema(controlMembershipSchema).parse(await listChildren(db, id, query, 'memberships')))
   })
   routes.get('/control/storage', async (c) => {
-    const { totals, databaseSize } = await queryStorage(db)
-    const now = new Date().toISOString()
+    const nowDate = new Date()
+    const [totals, pg, host, media, backup] = await Promise.all([
+      queryStorage(db), readControlMetric(db, 'postgres_size', 300, nowDate), readControlMetric(db, 'host_filesystem', 60, nowDate), readControlMetric(db, 'media_storage', 86_400, nowDate), readControlMetric(db, 'backup_storage', 86_400, nowDate),
+    ])
+    const now = nowDate.toISOString()
+    const hostValue = host.value as { filesystems?: Array<{ id:string; scope:'host'|'media'|'backups'; usedBytes:string; availableBytes:string; capacityBytes:string; parentResourceId:string|null }> } | null
+    const hostFs = hostValue?.filesystems?.find((entry) => entry.scope === 'host')
+    const mediaValue = media.value as { usedBytes:string; resourceId:string; parentResourceId:string|null } | null
     const result = {
-      familyAccounting: sample({ usedBytes: String(totals.used), reservedBytes: String(totals.reserved), quotaBytes: String(env.MEDIA_FAMILY_QUOTA_BYTES) }, 'ok', 'product_db', 30, now),
-      mediaStorage: sample(null, 'not_configured', 'media_storage', 300, null),
-      hostFilesystem: sample(null, 'not_configured', 'host_filesystem', 60, null),
-      postgres: sample({ usedBytes: String(databaseSize) }, 'ok', 'postgres_size', 300, now),
+      familyAccounting: sample({ resourceId:'family-quota-total', parentResourceId:null, scopeLabel:'Учёт квоты семей', accountingBasis:'Сумма счётчиков хранилища активных и сохранённых семей', capacityKind:'configured_budget' as const, usedBytes: String(totals.totals.used), reservedBytes: String(totals.totals.reserved), quotaBytes: String(env.MEDIA_FAMILY_QUOTA_BYTES), capacityBytes: null, availableBytes:null }, 'ok', 'product_db', 30, now),
+      mediaStorage: sample(mediaValue ? { resourceId:mediaValue.resourceId, parentResourceId:mediaValue.parentResourceId, scopeLabel:'Логические байты текущих файлов', accountingBasis:'Ограниченный обход хоста: размеры файлов без выделенных блоков диска', capacityKind:'unknown' as const, usedBytes:mediaValue.usedBytes, capacityBytes:null, availableBytes:null } : null, media.status, 'media_storage', 86_400, media.observedAt, media.lastAttemptAt, media.coverageFrom, media.errorCode),
+      hostFilesystem: sample(hostFs ? { resourceId:hostFs.id, parentResourceId:hostFs.parentResourceId, scopeLabel:'Файловая система хоста', accountingBasis:'statvfs для разрешённого пути', capacityKind:'physical' as const, usedBytes:hostFs.usedBytes, capacityBytes:hostFs.capacityBytes, availableBytes:hostFs.availableBytes } : null, host.status, 'host_filesystem', 60, host.observedAt, host.lastAttemptAt, host.coverageFrom, host.errorCode),
+      postgres: sample(pg.value ? { resourceId:'postgres-database', parentResourceId:null, scopeLabel:'База данных PostgreSQL', accountingBasis:'pg_database_size(current_database()); входит в диск хоста, если размещена там же', capacityKind:'unknown' as const, usedBytes:String((pg.value as {usedBytes:string}).usedBytes), capacityBytes:null, availableBytes:null } : null, pg.status, 'postgres_size', 300, pg.observedAt, pg.lastAttemptAt, pg.coverageFrom, pg.errorCode),
+      backup: sample(backup.value ? { ...(backup.value as {resourceId:string;parentResourceId:string|null;usedBytes:string;entries:number;artifactAt:string|null;validation:'valid'|'invalid'|'unknown';restoreTestAt:string|null}), scopeLabel:'Логические байты файлов резервных копий', accountingBasis:'Ограниченный обход регулярных файлов; отдельно от statvfs файловой системы', capacityKind:'unknown' as const, capacityBytes:null, availableBytes:null } : null, backup.status, 'backup_storage', 86_400, backup.observedAt, backup.lastAttemptAt, backup.coverageFrom, backup.errorCode),
     }
     return c.json(controlStorageSchema.parse(result))
   })
   routes.get('/control/sources', async (c) => {
     const now = new Date().toISOString()
+    const ids = ['product_db','postgres_size','media_storage','backup_storage','host_filesystem','service_probes','max_binding_state','release_evidence'] as const
+    const samples = await Promise.all(ids.map(async (id) => ({ id, ...(await readControlMetric(db, id, id === 'postgres_size' ? 300 : id === 'media_storage' || id === 'backup_storage' ? 86_400 : 60)) })))
     return c.json(z.array(controlSourceSchema).parse([
-      { id: 'product_db', kind: 'product_db', status: 'ok', observedAt: now, lastAttemptAt: now, errorCode: null },
-      { id: 'postgres_size', kind: 'postgres_size', status: 'ok', observedAt: now, lastAttemptAt: now, errorCode: null },
-      ...['media_storage','host_filesystem','service_probes','max_binding_state','release_evidence'].map((id) => ({ id, kind: id, status: 'not_configured', observedAt: null, lastAttemptAt: null, errorCode: null })),
+      ...samples.map(({id, status, observedAt, lastAttemptAt, errorCode}) => ({ id, kind:id, status, observedAt, lastAttemptAt, errorCode })),
     ]))
   })
   routes.get('/control/system', async (c) => {
-    const { databaseSize, pending } = await querySystem(db)
-    const now = new Date().toISOString()
+    const nowDate = new Date(); const now = nowDate.toISOString()
+    const [database, product, probes, progress] = await Promise.all([
+      readControlMetric(db, 'postgres_size', 300, nowDate), readControlMetric(db, 'product_db', 30, nowDate),
+      readControlMetric(db, 'service_probes', 60, nowDate),
+      withControlReadTimeout(db, async (tx) => Promise.all([
+        tx.controlCollectionState.findUnique({ where:{id:'worker_progress'}, select:{startedAt:true} }),
+        tx.controlCollectionState.findUnique({ where:{id:'scheduler_progress'}, select:{startedAt:true} }),
+      ])),
+    ])
+    const [workerProgress, schedulerProgress] = progress
+    const productValue = product.value as { outbox_pending?: number; oldest_due_age_seconds?: number | null } | null
+    const probeValue = probes.value as { backend?: {ok:boolean;latencyMs:number}; static?: {ok:boolean;latencyMs:number} } | null
+    const probeStatus = (value: unknown) => value ? probes.status : probes.status === 'ok' ? 'error' as const : probes.status
+    const probeError = (value: unknown) => value ? probes.errorCode : probes.status === 'ok' ? 'unavailable' as const : probes.errorCode
     const result = {
-      serverNow: now, backend: sample(null, 'not_configured', 'backend_probe', 60, null),
-      postgresSizeBytes: sample(String(databaseSize), 'ok', 'postgres_size', 300, now),
-      staticEntry: sample(null, 'not_configured', 'static_entry', 60, null),
-      worker: sample(null, 'not_configured', 'worker_progress', 60, null),
-      scheduler: sample(null, 'not_configured', 'scheduler_progress', 60, null),
-      outbox: sample({ pending: Number(pending.pending), oldestDueAgeSeconds: pending.age === null ? null : Number(pending.age) }, 'ok', 'product_db', 30, now),
+      serverNow: now,
+      backend: sample(probeValue?.backend ? {live:true,ready:probeValue.backend.ok,readinessProbeLatencyMs:probeValue.backend.latencyMs} : null, probeStatus(probeValue?.backend), 'service_probes', 60, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.backend)),
+      postgresSizeBytes: sample(database.value ? String((database.value as {usedBytes:string}).usedBytes) : null, database.status, 'postgres_size', 300, database.observedAt, database.lastAttemptAt, database.coverageFrom, database.errorCode),
+      staticEntry: sample(probeValue?.static ? {available:probeValue.static.ok,probeLatencyMs:probeValue.static.latencyMs} : null, probeStatus(probeValue?.static), 'service_probes', 60, probes.observedAt, probes.lastAttemptAt, probes.coverageFrom, probeError(probeValue?.static)),
+      worker: sample(workerProgress ? {progressAt:workerProgress.startedAt.toISOString()} : null, workerProgress ? nowDate.getTime()-workerProgress.startedAt.getTime() <= 60_000 ? 'ok' : 'stale' : 'not_configured', 'worker_progress', 60, workerProgress?.startedAt.toISOString() ?? null),
+      scheduler: sample(schedulerProgress ? {progressAt:schedulerProgress.startedAt.toISOString()} : null, schedulerProgress ? nowDate.getTime()-schedulerProgress.startedAt.getTime() <= 120_000 ? 'ok' : 'stale' : 'not_configured', 'scheduler_progress', 120, schedulerProgress?.startedAt.toISOString() ?? null),
+      outbox: sample(productValue ? { pending: Number(productValue.outbox_pending ?? 0), oldestDueAgeSeconds: productValue.oldest_due_age_seconds === null || productValue.oldest_due_age_seconds === undefined ? null : Number(productValue.oldest_due_age_seconds) } : null, product.status, 'product_db', 30, product.observedAt, product.lastAttemptAt, product.coverageFrom, product.errorCode),
+      release: sample(null, 'not_configured', 'release_evidence', 86_400, null),
     }
     return c.json(controlSystemSchema.parse(result))
   })
   routes.get('/control/events', async (c) => {
-    const query = parseListQuery(c.req.query())
+    const query = parseListQuery(c.req.query(), { compositeCursor:true })
     if (query.sort !== 'createdAt' || query.status || query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр событий')
     const cursor = query.cursor ? decodeEventCursor(query.cursor, query) : null
     const events = await queryEvents(db, query, cursor)
@@ -141,7 +240,7 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     return c.json({ items: items.map((item) => controlEventSchema.parse(item)), nextCursor })
   })
   routes.get('/control/exports/families.csv', async (c) => { const query=parseListQuery(c.req.query()); return exportCsv(c, exportsByOwner, ['id','name','childName','ownerName','status','createdAt','activeMembers','storageUsedBytes','storageReservedBytes','quotaBytes','publishedMemories','mediaAttachments','maxState','lastObservedAt'], async () => (await queryFamilies(db, familyWhere(query), 10_001, env.MEDIA_FAMILY_QUOTA_BYTES, query.sort)).map(familyCsvRow)) })
-  routes.get('/control/exports/users.csv', async (c) => { const query=parseListQuery(c.req.query()); validateUserSort(query); return exportCsv(c, exportsByOwner, ['id','displayName','createdAt','activeFamilies','familyNames','moreFamilies','lastSessionCreatedAt','lastActivityAt'], async () => (await queryUsers(db, userWhere(query), 10_001, query.sort)).map(userCsvRow)) })
+  routes.get('/control/exports/users.csv', async (c) => { const query=parseListQuery(c.req.query()); validateUserSort(query); return exportCsv(c, exportsByOwner, ['id','displayName','createdAt','activeFamilies','familyNames','moreFamilies','lastSessionCreatedAt','lastActivityAt','lastActivitySurface'], async () => (await queryUsers(db, userWhere(query), 10_001, query.sort)).map(userCsvRow)) })
 
   return { routes }
 }

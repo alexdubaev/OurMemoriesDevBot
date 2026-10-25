@@ -99,6 +99,7 @@ export async function runLockedBackgroundJob(
   if (!outcome.ranHere) {
     console.log(`Scheduler skipped ${entry.job}: its lock is held elsewhere.`)
   }
+  return outcome.ranHere
 }
 
 export async function runScheduledJob(
@@ -106,7 +107,15 @@ export async function runScheduledJob(
   entry: ScheduleEntry,
 ) {
   try {
-    await runLockedBackgroundJob(runtime, entry)
+    const completed = await runLockedBackgroundJob(runtime, entry)
+    if (completed) {
+      try {
+        const { recordControlProgress } = await import('./modules/control')
+        await recordControlProgress(runtime.prisma, runtime.env.CONTROL_ENABLED, 'scheduler')
+      } catch {
+        console.error('Scheduler progress recording failed.')
+      }
+    }
   } catch (error) {
     // One failing job must not take the scheduler down; the next tick tries again.
     if (isJobLockExpiry(error)) {

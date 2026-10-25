@@ -8,6 +8,22 @@
     "yandexExecutionTimeoutSeconds": 180
   },
   {
+    "key": "control-collect",
+    "job": "control:collect",
+    "expression": "* * * * *",
+    "yandexExpression": "* * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
+  },
+  {
+    "key": "control-retention",
+    "job": "control:retention",
+    "expression": "* * * * *",
+    "yandexExpression": "* * ? * * *",
+    "lockTimeoutMs": 240000,
+    "yandexExecutionTimeoutSeconds": 180
+  },
+  {
     "key": "uploads",
     "job": "uploads:pending:cleanup",
     "expression": "15 * * * *",

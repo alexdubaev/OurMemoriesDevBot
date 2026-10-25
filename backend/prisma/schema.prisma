@@ -34,6 +34,8 @@ model User {
   maxVideoUploadSessions      MaxVideoUploadSession[]        @relation("MaxVideoUploadAuthor")
   browserLoginChallenges      BrowserLoginChallenge[]        @relation("BrowserLoginApprovedUser")
   maxChannelDecisions        MaxChannelDecision[]
+  controlActivity            ControlUserActivity[]
+  controlFamilyActivity      ControlFamilyActivity[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -418,10 +420,63 @@ model Family {
   albumEntrySources    AlbumEntrySource[]
   albumPhotos          AlbumPhoto[]
   albumSourceOperations AlbumSourceOperation[]
+  controlActivity       ControlFamilyActivity[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
   @@map("families")
+}
+
+model ControlUserActivity {
+  userId          String   @map("user_id") @db.Uuid
+  utcDay          DateTime @map("utc_day") @db.Date
+  firstObservedAt DateTime @map("first_observed_at") @db.Timestamptz(6)
+  lastObservedAt  DateTime @map("last_observed_at") @db.Timestamptz(6)
+  surface         String   @db.VarChar(16)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "control_user_activity_user_id_fkey")
+
+  @@id([userId, utcDay], map: "control_user_activity_pkey")
+  @@index([utcDay], map: "control_user_activity_utc_day_idx")
+  @@index([lastObservedAt], map: "control_user_activity_last_observed_at_idx")
+  @@map("control_user_activity")
+}
+
+model ControlFamilyActivity {
+  familyId        String   @map("family_id") @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  utcDay          DateTime @map("utc_day") @db.Date
+  firstObservedAt DateTime @map("first_observed_at") @db.Timestamptz(6)
+  lastObservedAt  DateTime @map("last_observed_at") @db.Timestamptz(6)
+  family          Family   @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "control_family_activity_family_id_fkey")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "control_family_activity_user_id_fkey")
+
+  @@id([familyId, userId, utcDay], map: "control_family_activity_pkey")
+  @@index([utcDay], map: "control_family_activity_utc_day_idx")
+  @@index([lastObservedAt], map: "control_family_activity_last_observed_at_idx")
+  @@map("control_family_activity")
+}
+
+model ControlMetricSnapshot {
+  sourceId       String   @map("source_id") @db.VarChar(80)
+  utcDay         DateTime @map("utc_day") @db.Date
+  value          Json?
+  observedAt     DateTime? @map("observed_at") @db.Timestamptz(6)
+  lastAttemptAt  DateTime? @map("last_attempt_at") @db.Timestamptz(6)
+  status         String   @db.VarChar(32)
+  errorCode      String?  @map("error_code") @db.VarChar(32)
+  attempts       Int      @default(0)
+  successes      Int      @default(0)
+
+  @@id([sourceId, utcDay], map: "control_metric_snapshot_pkey")
+  @@index([utcDay], map: "control_metric_snapshot_utc_day_idx")
+  @@map("control_metric_snapshot")
+}
+
+model ControlCollectionState {
+  id        String   @id @db.VarChar(80)
+  startedAt DateTime @map("started_at") @db.Timestamptz(6)
+
+  @@map("control_collection_state")
 }
 
 model FamilyMember {

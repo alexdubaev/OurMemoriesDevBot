@@ -163,6 +163,16 @@ export function createApp({
   }
   for (const middleware of createAuthSecurity({
     bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
+    rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    trustProxy: env.TRUST_PROXY,
+    trustedProxyClientIpHeader: env.TRUSTED_PROXY_CLIENT_IP_HEADER,
+    trustedProxyClientIpPosition: env.TRUSTED_PROXY_CLIENT_IP_POSITION,
+  })) {
+    app.use('/api/v1/activity', middleware)
+  }
+  for (const middleware of createAuthSecurity({
+    bodyLimitBytes: env.AUTH_BODY_LIMIT_BYTES,
     bodyLimitExemptions: [{ method: 'POST', path: '/api/uploads/avatar/preview' }],
     rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
     rateLimitWindowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,

@@ -4,51 +4,52 @@ import { z } from 'zod'
 
 export type ControlListQuery = { limit: number; cursor?: string; q?: string; sort: string; status?: string; maxState?: string }
 
-export function sample<T>(value: T | null, status: 'ok'|'not_configured', sourceId: string, staleAfterSeconds: number, observedAt: string | null) {
-  return { value, status, sourceId, observedAt, lastAttemptAt: observedAt, staleAfterSeconds, coverageFrom: null, coverageRatio: null, errorCode: null }
+export function sample<T>(value: T | null, status: 'ok'|'stale'|'error'|'not_configured'|'unsupported'|'insufficient_history', sourceId: string, staleAfterSeconds: number, observedAt: string | null, lastAttemptAt: string | null = observedAt, coverageFrom: string | null = null, errorCode: 'timeout'|'unavailable'|'invalid_payload'|'permission_denied'|'unknown'|null = null) {
+  return { value, status, sourceId, observedAt, lastAttemptAt, staleAfterSeconds, coverageFrom, coverageRatio: null, errorCode }
 }
 export function notFound() { return new AppError(404, 'NOT_FOUND', 'Запись не найдена') }
 export function uuidParam(value: string) { const parsed = z.string().uuid().safeParse(value); if (!parsed.success) throw new AppError(400, 'INVALID_INPUT', 'Некорректный идентификатор'); return value }
 
-export function parseListQuery(raw: Record<string, string | undefined>): ControlListQuery {
+export function parseListQuery(raw: Record<string, string | undefined>, { compositeCursor = false }: { compositeCursor?: boolean } = {}): ControlListQuery {
   const parsed = controlCursorQuerySchema.safeParse(raw)
   if (!parsed.success) throw new AppError(400, 'INVALID_INPUT', 'Некорректные параметры списка')
   const { limit, cursor, q, status, maxState } = parsed.data
   const result = { limit, cursor, q, sort: parsed.data.sort ?? 'createdAt', status, maxState }
-  if (cursor) decodeCursor(cursor, result)
+  if (cursor) compositeCursor ? decodeEventCursor(cursor, result) : decodeCursor(cursor, result)
   return result
 }
-export function validateUserSort(query: ControlListQuery) { if (!['createdAt','name'].includes(query.sort)) throw new AppError(400,'INVALID_INPUT','Недопустимая сортировка для пользователей') }
+export function validateUserSort(query: ControlListQuery) { if (!['createdAt','name'].includes(query.sort) || query.status || query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимая сортировка или фильтр для пользователей') }
 export function validateChildListQuery(query:ControlListQuery) { if(query.sort!=='createdAt'||query.status||query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр списка') }
 export function filterHash(query:ControlListQuery) { return JSON.stringify({q:query.q ?? '',sort:query.sort,status:query.status ?? '',maxState:query.maxState ?? ''}) }
 export function encodeCursor(value:unknown) { return Buffer.from(JSON.stringify(value)).toString('base64url') }
-export function decodeCursor(value:string,query:ControlListQuery):{v:number;filter:string;id:string;value:string} {
+export function decodeCursor(value:string,query:ControlListQuery,scope?:string):{v:number;filter:string;scope:string;id:string;value:string} {
   try {
     const decoded=Buffer.from(value,'base64url').toString('utf8')
     if(Buffer.from(decoded).toString('base64url')!==value) throw new Error('encoding')
-    const valueSchema=query.sort==='createdAt'
+    const valueSchema=query.sort==='createdAt' || query.sort==='lastObservedAt'
       ? z.string().datetime({offset:true})
       : ['activeMembers','storageUsedBytes'].includes(query.sort)
         ? z.string().regex(/^(0|[1-9][0-9]*)$/)
         : z.string().max(500)
-    const parsed=z.object({v:z.literal(1),filter:z.string(),id:z.string().uuid(),value:valueSchema}).strict().parse(JSON.parse(decoded))
-    if(parsed.filter!==filterHash(query)) throw new Error('filter')
+    const parsed=z.object({v:z.literal(1),filter:z.string(),scope:z.string().min(1).max(200),id:z.string().uuid(),value:valueSchema}).strict().parse(JSON.parse(decoded))
+    if(parsed.filter!==filterHash(query) || (scope !== undefined && parsed.scope!==scope)) throw new Error('filter')
+    if(['activeMembers','storageUsedBytes'].includes(query.sort) && BigInt(parsed.value) > 9_223_372_036_854_775_807n) throw new Error('range')
     return parsed
   } catch { throw new AppError(400,'INVALID_INPUT','Некорректный курсор списка') }
 }
-export function decodeEventCursor(value:string,query:ControlListQuery):{v:number;filter:string;id:string;value:string} {
+export function decodeEventCursor(value:string,query:ControlListQuery):{v:number;filter:string;scope:string;id:string;value:string} {
   try {
     const decoded=Buffer.from(value,'base64url').toString('utf8')
     if(Buffer.from(decoded).toString('base64url')!==value) throw new Error('encoding')
-    const parsed=z.object({v:z.literal(1),filter:z.string(),id:z.string().min(1).max(100),value:z.string().datetime({offset:true})}).strict().parse(JSON.parse(decoded))
+    const parsed=z.object({v:z.literal(1),filter:z.string(),scope:z.literal('events'),id:z.string().min(1).max(100),value:z.string().datetime({offset:true})}).strict().parse(JSON.parse(decoded))
     if(parsed.filter!==filterHash(query)) throw new Error('filter')
     return parsed
   } catch { throw new AppError(400,'INVALID_INPUT','Некорректный курсор списка') }
 }
-export function eventCursor(query:ControlListQuery,id:string,value:string) { return encodeCursor({v:1,filter:filterHash(query),id,value}) }
+export function eventCursor(query:ControlListQuery,id:string,value:string) { return encodeCursor({v:1,filter:filterHash(query),scope:'events',id,value}) }
 
 export function familyCsvRow(r:Record<string,unknown>) { return [r.id,r.name,r.childName,r.ownerName,r.status,r.createdAt,r.activeMembers,r.storageUsedBytes,r.storageReservedBytes,r.quotaBytes,r.publishedMemories,r.mediaAttachments,r.maxState,r.lastObservedAt] }
-export function userCsvRow(r:Record<string,unknown>) { return [r.id,r.displayName,r.createdAt,r.activeFamilies,(r.familyNames as string[]).join('; '),r.moreFamilies,r.lastSessionCreatedAt,r.lastActivityAt] }
+export function userCsvRow(r:Record<string,unknown>) { return [r.id,r.displayName,r.createdAt,r.activeFamilies,(r.familyNames as string[]).join('; '),r.moreFamilies,r.lastSessionCreatedAt,r.lastActivityAt,r.lastActivitySurface] }
 export async function exportCsv(c:{var:{user:{id:string}};body:(body:string,status:200,headers:Record<string,string>)=>Response},limits:Map<string,number[]>,headers:string[],rowsFn:()=>Promise<unknown[][]>) {
   const owner=c.var.user.id; const now=Date.now(); const recent=(limits.get(owner)??[]).filter((time)=>now-time<60_000)
   if(recent.length>=2) throw new AppError(429,'RATE_LIMITED','Экспорт доступен не чаще двух раз в минуту')

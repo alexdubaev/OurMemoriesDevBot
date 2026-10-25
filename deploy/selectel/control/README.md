@@ -1,0 +1,9 @@
+# Control host evidence sampler
+
+`sampler.py` measures only fixed paths on the Selectel host: `/opt/memoly`, its durable media directory, and its backup directory. It reports statvfs measurements and once-per-UTC-day bounded walks of current regular-file lengths. Each inventory skips symlinks and fails atomically on any scan/stat error, after 125,000 entries or 12 seconds; the two walks together remain under the service's 30-second deadline. Values are logical file bytes and are not family quota, database, or allocated disk estimates.
+
+The sampler atomically writes `/opt/memoly/diagnostics/control/snapshot.json`. The directory is metadata-only, root-owned mode 0755; the file is root-owned mode 0644 so the `bun` container user can read it. Never mount the separate owner-proof directory here. The backend and scheduler receive the directory read-only; worker does not. The app has no host root or docker socket access. Telemetry retention deletes at most 1,000 rows per table per minute, allowing 100-day retention to keep pace with activity while every cleanup remains bounded.
+
+Install this service and timer only through the separately guarded release procedure. The implementation worker must not install or start them on production. `control-evidence.json` is an optional fixed, reviewed metadata file with only `artifactAt`, `validation` (`valid`, `invalid`, or `unknown`), and `restoreTestAt`; artifact presence alone is not validation or restore evidence. No paths or artifact names are emitted.
+
+The Python unittest uses temporary synthetic directories. Run locally with `python -m unittest discover -s deploy/selectel/control -p '*test*.py'`.

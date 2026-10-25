@@ -85,6 +85,7 @@ const envSchema = z.object({
   ADMIN_USERS_READ_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   ADMIN_USERS_READ_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   CONTROL_ENABLED: booleanStringSchema,
+  CONTROL_HOST_SNAPSHOT_PATH: stringWithDefault('/data/control/snapshot.json'),
   CONTROL_OWNER_USER_IDS: z.string().default('').transform((value, ctx) => {
     const ids = value.split(',').map((part) => part.trim()).filter(Boolean)
     if (ids.some((id) => !z.string().uuid().safeParse(id).success)) {
