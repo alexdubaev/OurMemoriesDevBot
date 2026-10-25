@@ -10,7 +10,7 @@ import { schedules } from '../../scheduler'
 import { backgroundJobs } from '../../jobs'
 import type { BackendRuntime } from '../../runtime'
 import { runControlDeletionMaintenance } from './infrastructure/control-purge'
-import { previewUserDeletion, restoreControlUser, trashControlUser } from './infrastructure/control-lifecycle'
+import { previewFamilyDeletion, previewUserDeletion, purgeControlFamily, restoreControlUser, trashControlUser } from './infrastructure/control-lifecycle'
 
 const prisma = createPrisma(requireIntegrationDatabaseUrl())
 const actorId = '79000000-0000-4000-8000-000000000001'
@@ -190,6 +190,44 @@ describe('Control bounded deletion maintenance', () => {
     }
     expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId } })).toMatchObject({ controlState: 'purged' })
+  })
+
+  test('serializes late private content and object-key writes behind family key capture', async () => {
+    await seed()
+    const localStorage = storage()
+    const expiredAt = new Date(epoch.getTime() + 31 * 24 * 60 * 60 * 1000)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, expiredAt, 10)
+    await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, new Date(expiredAt.getTime() + 17 * 60 * 1000), 10)
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ keysCapturedAt: expect.any(Date) })
+    await expect(prisma.child.create({ data: { familyId, displayName: 'Late private child' } })).rejects.toBeDefined()
+    await expect(prisma.mediaAsset.create({ data: {
+      familyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: 'media-originals/control-purge-test/late.jpg', declaredMime: 'image/jpeg',
+      verifiedMime: 'image/jpeg', sha256: 'c'.repeat(64), byteSize: 1n, originalStatus: 'stored', renditionStatus: 'ready',
+    } })).rejects.toBeDefined()
+    const activeChild = await prisma.child.create({ data: { familyId: otherFamilyId, displayName: 'Active other-family child' } })
+    expect(activeChild.familyId).toBe(otherFamilyId)
+  })
+
+  test('standalone family purge removes its MAX bindings and preserves another active archive', async () => {
+    await seed()
+    const localStorage = storage()
+    const preview = await previewFamilyDeletion(prisma, familyId)
+    await purgeControlFamily(prisma, {
+      actorId, targetId: familyId, protectedIds: [actorId], key: '79400000-0000-4000-8000-000000000003',
+      fingerprint: preview.fingerprint, confirmation: familyId,
+    }, epoch)
+    const operation = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })
+    const explicitPurgeAt = new Date(epoch.getTime() + 17 * 60 * 1000)
+    for (let pass = 0; pass < 12 && !((await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).purgedAt); pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: localStorage }, explicitPurgeAt, 10)
+    }
+    expect(operation.actorUserId).toBe(actorId)
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: familyId } })).toMatchObject({ status: 'deleted', name: 'Удалённый архив' })
+    expect(await prisma.family.findUniqueOrThrow({ where: { id: otherFamilyId } })).toMatchObject({ status: 'active', name: 'Other owner archive' })
+    expect(await prisma.memory.count({ where: { familyId: otherFamilyId } })).toBe(1)
+    expect(await localStorage.headObject('media-originals/control-purge-test/original.jpg')).toBeNull()
+    expect(await localStorage.headObject('media-originals/control-purge-test/retained.mp4')).toBeNull()
   })
 
   test('registers lifecycle cleanup in the recurring scheduler', () => {
