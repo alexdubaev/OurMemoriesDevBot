@@ -63,12 +63,14 @@
 - Create `backend/src/modules/control/infrastructure/control-purge.ts` and `control-purge.integration.test.ts`.
 - Add durable storage-delete model/migration in task-owned schema if not already included in Task 1.
 - Modify `backend/src/modules/control/index.ts`, `backend/src/jobs.ts` and existing schedule registration only to expose/schedule lifecycle job.
+- Modify `backend/src/job-schedules.json`; narrowly adjust `backend/src/modules/media/index.ts`, the relevant MAX infrastructure task entry points or `backend/src/outbox/` only where lifecycle task fencing requires it; add focused integration coverage for those changes.
 - Scoped family purge exception in a new retention migration; never disable ordinary retention protection.
 
 **Interfaces:**
 - Export `runControlDeletionMaintenance({ db, storage }, now?, batchSize?)` from Control public entry point.
 - Process expired trash → purging atomically; explicitly purging families run immediately, without extending parent account deadline.
 - Persistent object-delete rows independent of source record retain each key until confirmed deletion; storage requests outside DB transaction, idempotent retries.
+- Previously initiated maintenance continues if CONTROL_ENABLED is subsequently disabled; the feature flag blocks new owner commands, not approved cleanup obligations.
 - Do not finalize account until all its relevant owned families and private profile storage are purged.
 - Keep minimal anonymous User/Family/owner membership tombstones if required by RESTRICT integrity; purge all private content and names from own-family subtree.
 
