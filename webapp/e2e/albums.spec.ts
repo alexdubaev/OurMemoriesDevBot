@@ -1,4 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { deflateSync } from 'node:zlib'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
@@ -384,6 +386,247 @@ test('MAX authenticated albums persist year chapters and a text event through re
   const stories = await (await page.request.get(`/api/v1/families/${familyId}/albums/${events.id}/entries`, { headers })).json()
   expect(stories.items[0].date).toEqual({ precision: 'month', value: '2024-03' })
   expect(stories.items[0].sources).toEqual([])
+})
+
+test('MAX first-year mobile baseline: two-child catalog, empty and filled months, edit, viewer, and clear', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const initData = signedInitData()
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'android', ready() {} } }) }, initData)
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const auth = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${auth.accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  let familyId = ''
+  await page.route('**/api/v1/families', async (route) => {
+    if (route.request().method() !== 'POST' || familyId) return route.continue()
+    const response = await route.fetch()
+    expect(response.status()).toBe(201)
+    familyId = ((await response.json()) as { family: { id: string } }).family.id
+    await route.fulfill({ response })
+  })
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect.poll(() => familyId).not.toBe('')
+
+  const firstAvatar = await uploadAvatar(page, headers, familyId)
+  const firstProfile = await page.request.put(`/api/v1/families/${familyId}/child`, { headers, data: { name: 'Лиля', birthDate: '2024-01-02', sex: 'girl', avatarMediaId: firstAvatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null } })
+  expect(firstProfile.status()).toBe(200)
+  const secondAvatar = await uploadAvatar(page, headers, familyId)
+  const secondProfile = await page.request.post(`/api/v1/families/${familyId}/children`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { name: 'Миша', birthDate: '2025-03-04', sex: 'boy', avatarMediaId: secondAvatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 } } })
+  expect(secondProfile.status()).toBe(201)
+  const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { children: Array<{ id: string; name: string }> }
+  expect(family.children.map((child) => child.name)).toEqual(['Лиля', 'Миша'])
+  const lilyaId = family.children[0]!.id
+  const mishaId = family.children[1]!.id
+
+  await page.reload()
+  await expect.poll(async () => (await page.getByTestId('bottom-navigation').count()) > 0 || (await page.locator('.family-hub-card').count()) > 0).toBe(true)
+  const familyHubCards = page.locator('.family-hub-card')
+  if (await familyHubCards.count()) await familyHubCards.first().click()
+  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.getByRole('button', { name: /Первый год/ }).click()
+  await page.getByLabel('Для кого этот альбом').selectOption(mishaId)
+  await page.getByLabel('Название альбома').fill('Первый год Миши')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
+  const consoleErrors: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  const yearAlbum = ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: Array<{ id: string; childId: string | null; kind: string }> }).items.find((album) => album.kind === 'year')!
+  expect(yearAlbum.childId).toBe(mishaId)
+  for (const album of [
+    { kind: 'workshop', title: 'Мастерская Лили', childId: lilyaId },
+    { kind: 'events', title: 'Первые открытия Лили', childId: lilyaId },
+    { kind: 'free', title: 'Семейная поездка', childId: null },
+  ]) {
+    const created = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { ...album, description: null } })
+    expect(created.status()).toBe(201)
+  }
+
+  const capture = async (name: string) => {
+    const dir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
+    if (!dir) return
+    mkdirSync(dir, { recursive: true })
+    if (name.startsWith('catalog-')) {
+      for (const group of await page.locator('[data-albums-group]').all()) {
+        await group.scrollIntoViewIfNeeded()
+        await expect.poll(() => group.locator('img').evaluateAll((images) => images.every((element) => { const image = element as HTMLImageElement; return image.complete && image.naturalWidth > 0 }))).toBe(true)
+      }
+    }
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await expect.poll(() => page.locator('.albums-surface img').evaluateAll((images) => images.every((element) => { const image = element as HTMLImageElement; return image.complete && image.naturalWidth > 0 }))).toBe(true)
+    const geometry = await page.evaluate(() => {
+      const rect = (selector: string) => {
+        const element = document.querySelector(selector)
+        if (!element) return null
+        const box = element.getBoundingClientRect()
+        return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }
+      }
+      const computed = (selector: string, property: 'fontSize' | 'flexBasis') => {
+        const element = document.querySelector(selector)
+        return element ? getComputedStyle(element)[property] : null
+      }
+      return { width: innerWidth, height: innerHeight, scrollY, documentWidth: document.documentElement.scrollWidth, horizontalOverflow: document.documentElement.scrollWidth > innerWidth, fontsStatus: document.fonts.status, rootFontSize: getComputedStyle(document.documentElement).fontSize, yearTitleFontSize: computed('.albums-year-copy h1', 'fontSize'), yearModesFontSize: computed('.albums-year-modes button', 'fontSize'), yearCopyFlexBasis: computed('.albums-year-copy', 'flexBasis'), intro: rect('.albums-year-intro, .albums-intro'), cover: rect('.albums-year-cover'), yearCopy: rect('.albums-year-copy'), yearTitle: rect('.albums-year-copy h1'), progress: rect('.albums-year-progress progress'), modes: rect('.albums-year-modes'), catalog: rect('.albums-catalog'), card: rect('.albums-card'), chips: rect('.albums-chips'), yearAddBadge: rect('.albums-year-add'), firstRow: rect('.albums-entry-card') }
+    })
+    await page.screenshot({ path: join(dir, `${name}.png`), fullPage: name.startsWith('catalog-'), animations: 'disabled' })
+    appendFileSync(join(dir, 'geometry.jsonl'), `${JSON.stringify({ name, ...geometry })}\n`)
+  }
+
+  await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  await expect(page.locator('[data-albums-group]')).toHaveCount(3)
+  await capture('catalog-empty-cover-390')
+  for (const width of [320, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`catalog-empty-cover-${width}`)
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const album of [
+    { kind: 'workshop', title: 'Мастерская Лили' },
+    { kind: 'events', title: 'Первые открытия Лили' },
+    { kind: 'free', title: 'Семейная поездка' },
+  ]) {
+    await page.locator('.albums-card').filter({ hasText: album.title }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    await expect(page.locator('.albums-intro h1')).toHaveText(album.title)
+    await capture(`inner-${album.kind}-390`)
+    await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+    await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  }
+  const initialYearCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
+  await page.setViewportSize({ width: 390, height: 400 })
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  const catalogMetrics = await page.evaluate(() => ({ viewportHeight: innerHeight, documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight) }))
+  const targetCatalogScroll = Math.min(240, catalogMetrics.maxScrollY)
+  expect(targetCatalogScroll).toBeGreaterThan(0)
+  await page.evaluate((scrollY) => window.scrollTo(0, scrollY), targetCatalogScroll)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(targetCatalogScroll)
+  await initialYearCard.scrollIntoViewIfNeeded()
+  const catalogScrollBeforeYear = await page.evaluate(() => window.scrollY)
+  expect(catalogScrollBeforeYear).toBeGreaterThan(0)
+  await initialYearCard.click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
+  await expect(page.locator('.albums-card')).toHaveCount(4)
+  const catalogScrollAfterReturn = await page.evaluate(() => window.scrollY)
+  const catalogScrollDelta = Math.abs(catalogScrollAfterReturn - catalogScrollBeforeYear)
+  const returnedCatalogMetrics = await page.evaluate(() => ({ documentHeight: document.documentElement.scrollHeight, maxScrollY: Math.max(0, document.documentElement.scrollHeight - innerHeight), groupCount: document.querySelectorAll('.albums-group').length }))
+  const scrollEvidence = { name: 'catalog-scroll-return-390', ...catalogMetrics, requestedScrollY: targetCatalogScroll, scrollBeforeYear: catalogScrollBeforeYear, scrollAfterReturn: catalogScrollAfterReturn, restorationDelta: catalogScrollDelta, ...returnedCatalogMetrics }
+  console.log('FIRST_YEAR_CATALOG_RETURN', JSON.stringify(scrollEvidence))
+  expect(returnedCatalogMetrics.groupCount).toBe(3)
+  expect(catalogScrollAfterReturn).toBeGreaterThan(0)
+  expect(catalogScrollAfterReturn).toBeLessThanOrEqual(returnedCatalogMetrics.maxScrollY)
+  const evidenceDir = process.env.MEMOLY_FIRST_YEAR_EVIDENCE_DIR
+  if (evidenceDir) appendFileSync(join(evidenceDir, 'geometry.jsonl'), `${JSON.stringify(scrollEvidence)}\n`)
+  await initialYearCard.scrollIntoViewIfNeeded()
+  await expect(initialYearCard).toBeInViewport()
+  await initialYearCard.click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
+  const yearIntro = page.locator('.albums-year-intro')
+  await expect(yearIntro).toContainText('Миша')
+  await expect(yearIntro).toContainText('Первый год Миши')
+  await expect(yearIntro).toContainText('0 из 12 месяцев заполнено')
+  await expect(yearIntro.locator('progress')).toHaveJSProperty('value', 0)
+  await capture('year-empty-390')
+  for (const width of [320, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`year-empty-${width}`)
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
+  await expect(page.locator('[data-albums-route="edit-entry"]')).toBeVisible()
+  await page.getByLabel('История').fill('Первый синтетический момент')
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом' })).toBeVisible()
+  const photoBytes = solidPng(24, 48, 240)
+  await page.locator('#photo-composer-files').setInputFiles({ name: 'first-year-blue.png', mimeType: 'image/png', buffer: photoBytes })
+  await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'Настройки альбома' }).click()
+  await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
+  await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой' })).toBeVisible()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой' }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(yearIntro).toContainText('1 из 12 месяцев заполнено')
+  await expect(yearIntro.locator('progress')).toHaveJSProperty('value', 1)
+  await expect(yearIntro.locator('.albums-year-cover img')).toBeVisible()
+  await expect.poll(() => yearIntro.locator('.albums-year-cover img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await capture('year-filled-390')
+  await page.getByRole('button', { name: 'Все 12 месяцев', exact: true }).click()
+  await expect(page.locator('.albums-month-overview .albums-entry-card')).toHaveCount(12)
+  await capture('year-overview-390')
+  await page.getByRole('button', { name: 'Линия времени', exact: true }).click()
+  for (const width of [320, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`year-filled-${width}`)
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await expect(page.locator('[data-albums-group]')).toHaveCount(3)
+  await expect(page.locator(`[data-albums-group="${lilyaId}"]`)).toContainText('Мастерская Лили')
+  await expect(page.locator(`[data-albums-group="${lilyaId}"]`)).toContainText('Первые открытия Лили')
+  await expect(page.locator(`[data-albums-group="${mishaId}"]`)).toContainText('Первый год Миши')
+  await expect(page.locator('[data-albums-group="family"]')).toContainText('Семейная поездка')
+  await expect(page.locator('.albums-card')).toHaveCount(4)
+  await capture('catalog-filled-cover-390')
+  for (const width of [320, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`catalog-filled-cover-${width}`)
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  const albumCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
+  await albumCard.click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Настройки альбома' }).click()
+  await page.getByLabel('Название альбома').fill('Первый год Миши: первые двенадцать месяцев нашей семейной истории')
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(yearIntro).toContainText('Первый год Миши: первые двенадцать месяцев нашей семейной истории')
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.evaluate(() => document.documentElement.style.setProperty('font-size', '32px', 'important'))
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await capture('year-long-title-320-text-200')
+  await page.evaluate(() => document.documentElement.style.removeProperty('font-size'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
+  await expect(page.locator('[data-albums-route="entry"]')).toBeVisible()
+  await expect(page.locator('.albums-entry-detail')).toContainText('Первый синтетический момент')
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Отредактированный синтетический момент')
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
+  await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  await expect.poll(() => page.locator('[data-mixed-viewer] img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const openMaterial = page.getByRole('button', { name: 'Открыть материал 1', exact: true })
+  await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+  await expect(openMaterial).toBeFocused()
+  await page.getByRole('button', { name: 'Очистить главу', exact: true }).click()
+  const clearConfirmation = page.getByRole('alertdialog')
+  await expect(clearConfirmation).toContainText('Номер месяца и оригиналы сохранятся')
+  await clearConfirmation.getByRole('button', { name: 'Очистить главу', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(0)
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })
 
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
