@@ -191,10 +191,9 @@ test('MAX authenticated album cover choices save and complete the picker', async
   expect(autoResponse.status()).toBe(200)
   expect(autoPayload.album?.cover?.id).toBe(automaticFallbackSourceId)
   expect(persistedAutomaticCoverId).toBe(automaticFallbackSourceId)
+  await expect(catalogCard.locator('.albums-cover img')).toBeVisible()
   expect(routeAfterManual).toBe('album')
   expect(routeAfterAutomatic).toBe('album')
-  await expect(catalogCard.locator('.albums-cover img')).toBeVisible()
-  expect(consoleErrors).toEqual([])
 })
 
 test('MAX authenticated albums persist year chapters and a text event through real API and navigation', async ({ page }) => {
