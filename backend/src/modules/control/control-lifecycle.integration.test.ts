@@ -3,6 +3,7 @@ import { createPrisma } from '../../db'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { createPrismaAuthRepository, createPrismaBrowserLinkRepository, createPrismaMaxAuthRepository } from '../auth/infrastructure/auth-repository'
 import { FamilyService } from '../families/application/family-service'
+import { createPrismaIdempotencyExecutor } from '../../idempotency'
 import {
   previewFamilyDeletion,
   previewUserDeletion,
@@ -236,6 +237,61 @@ describe('Control account lifecycle', () => {
     await restoreControlUser(prisma, { actorId, targetId, protectedIds, key: '70000000-0000-4000-8000-000000000131', deletionId: trashed.deletionId })
     expect(await prisma.gift.findUniqueOrThrow({ where: { id: gift.id } })).toMatchObject({ reservedByUserId: overlappingUserId })
     expect(await prisma.gift.findFirstOrThrow({ where: { photoMediaId: ownGiftPhotoId } })).toMatchObject({ reservedByUserId: targetId, reservedAt })
+  })
+
+  test('serializes invite creation with trash and never leaves a created invite redeemable', async () => {
+    await prisma.familyMember.update({
+      where: { familyId_userId: { familyId: sharedFamilyId, userId: targetId } }, data: { role: 'full' },
+    })
+    const avatarMediaId = '73300000-0000-4000-8000-000000000003'
+    await prisma.mediaAsset.create({ data: {
+      id: avatarMediaId, familyId: sharedFamilyId, uploaderId: targetId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: 'media-originals/control-lifecycle-invite/child.jpg', declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+      sha256: 'e'.repeat(64), byteSize: 7n, originalStatus: 'stored',
+    } })
+    await prisma.child.update({ where: { id: sharedChildId }, data: {
+      birthDate: new Date('2020-01-01T00:00:00Z'), sex: 'boy', avatarMediaId,
+      avatarCrop: { x: 0, y: 0, width: 1, height: 1 },
+    } })
+    const familyService = new FamilyService(
+      prisma,
+      { requireFull: async () => undefined } as never,
+      { isUniqueConstraint: () => false },
+      createPrismaIdempotencyExecutor(prisma),
+      'synthetic-idempotency-secret',
+      1_000_000,
+    )
+    let releaseFamilyLock!: () => void
+    let familyLockReady!: () => void
+    const locked = new Promise<void>((resolve) => { familyLockReady = resolve })
+    const released = new Promise<void>((resolve) => { releaseFamilyLock = resolve })
+    const lockTransaction = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM families WHERE id = ${sharedFamilyId}::uuid FOR UPDATE`
+      familyLockReady()
+      await released
+    })
+    await locked
+    const create = familyService.createInvite(
+      { familyId: sharedFamilyId, principal: { userId: targetId, sessionId: 'synthetic-invite-session' } },
+      { role: 'viewer', inviteeDisplayName: 'Synthetic invitee' }, 'control-trash-invite-race',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const preview = await previewUserDeletion(prisma, targetId, protectedIds)
+    const trash = trashControlUser(prisma, {
+      actorId, targetId, protectedIds, key: '70000000-0000-4000-8000-000000000132',
+      fingerprint: preview.fingerprint, confirmation: targetId,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    releaseFamilyLock()
+    await lockTransaction
+    const [inviteResult, trashResult] = await Promise.allSettled([create, trash])
+    expect(trashResult.status).toBe('fulfilled')
+    const pending = await prisma.familyInvite.findMany({ where: { createdBy: targetId, acceptedAt: null, revokedAt: null } })
+    expect(pending).toHaveLength(0)
+    if (inviteResult.status === 'fulfilled') {
+      await expect(familyService.acceptInvite({ userId: formerMemberId, sessionId: 'synthetic-former-session' }, inviteResult.value.rawToken))
+        .rejects.toMatchObject({ kind: 'invite_revoked' })
+    }
   })
 
   test('restores live snapshots but keeps prior revocations and independently purged family access closed', async () => {
