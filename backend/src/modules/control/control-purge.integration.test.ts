@@ -252,6 +252,88 @@ describe('Control bounded deletion maintenance', () => {
     expect(activeChild.familyId).toBe(otherFamilyId)
   })
 
+  test('one failed oldest key does not starve a later family operation', async () => {
+    await seed()
+    const ownPreview = await previewFamilyDeletion(prisma, familyId)
+    await purgeControlFamily(prisma, {
+      actorId, targetId: familyId, protectedIds: [actorId], key: '79400000-0000-4000-8000-000000000004',
+      fingerprint: ownPreview.fingerprint, confirmation: familyId,
+    }, epoch)
+    const otherPreview = await previewFamilyDeletion(prisma, otherFamilyId)
+    await purgeControlFamily(prisma, {
+      actorId, targetId: otherFamilyId, protectedIds: [], key: '79400000-0000-4000-8000-000000000005',
+      fingerprint: otherPreview.fingerprint, confirmation: otherFamilyId,
+    }, epoch)
+    const failingStorage = new Proxy(storage(), {
+      get(target, property) {
+        if (property === 'deleteObject') return async (key: string) => {
+          if (key.includes('control-purge-test')) throw new Error('synthetic outage')
+          return target.deleteObject(key)
+        }
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as PrivateStorage
+    let maintenanceAt = epoch
+    for (let pass = 0; pass < 12 && (await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId: otherFamilyId } })).purgedAt === null; pass += 1) {
+      await runControlDeletionMaintenance({ db: prisma, storage: failingStorage }, maintenanceAt, 10)
+      maintenanceAt = new Date(maintenanceAt.getTime() + 17 * 60 * 1000)
+    }
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId: otherFamilyId } })).toMatchObject({ purgedAt: expect.any(Date) })
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { familyId } })).toMatchObject({ purgedAt: null })
+  })
+
+  test('a hung object delete times out with durable pending work and no false completion', async () => {
+    await seed()
+    const operation = await prisma.controlFamilyDeletion.create({ data: {
+      familyId, actorUserId: actorId, requestedAt: epoch, notBefore: epoch,
+    } })
+    const neverStorage = new Proxy(storage(), {
+      get(target, property) {
+        if (property === 'deleteObject') return async () => new Promise<void>(() => {})
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as PrivateStorage
+    const startedAt = performance.now()
+    await runControlDeletionMaintenance({ db: prisma, storage: neverStorage }, new Date(epoch.getTime() + 17 * 60 * 1000), 10,
+      { budgetMs: 200, objectTimeoutMs: 50 })
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
+    expect(await prisma.controlStorageDelete.count({ where: { operationId: operation.id, completedAt: null } })).toBeGreaterThan(0)
+    expect(await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })).toMatchObject({ purgedAt: null })
+  })
+
+  test('a database cleanup error stores only a safe status code', async () => {
+    await seed()
+    const operation = await prisma.controlFamilyDeletion.create({ data: {
+      familyId, actorUserId: actorId, requestedAt: epoch, notBefore: epoch,
+    } })
+    const failingDb = new Proxy(prisma, {
+      get(target, property) {
+        if (property === '$transaction') return (callback: (tx: typeof prisma) => Promise<unknown>, options?: unknown) =>
+          target.$transaction(async (tx) => callback(new Proxy(tx, {
+            get(transaction, transactionProperty) {
+              if (transactionProperty === 'mediaAsset') return new Proxy(transaction.mediaAsset, {
+                get(delegate, method) {
+                  if (method === 'findMany') return async () => { throw new Error('private database diagnostic') }
+                  const value = Reflect.get(delegate, method, delegate)
+                  return typeof value === 'function' ? value.bind(delegate) : value
+                },
+              })
+              const value = Reflect.get(transaction, transactionProperty, transaction)
+              return typeof value === 'function' ? value.bind(transaction) : value
+            },
+          })), options as never)
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as typeof prisma
+    await runControlDeletionMaintenance({ db: failingDb, storage: storage() }, new Date(epoch.getTime() + 17 * 60 * 1000), 10)
+    const failed = await prisma.controlFamilyDeletion.findUniqueOrThrow({ where: { id: operation.id } })
+    expect(failed.lastErrorCode).toBe('archive_cleanup_failed')
+    expect(JSON.stringify(failed)).not.toContain('private database diagnostic')
+  })
+
   test('standalone family purge removes its MAX bindings and preserves another active archive', async () => {
     await seed()
     const localStorage = storage()
