@@ -508,10 +508,12 @@ describe('Memories API', () => {
       where: { familyId_userId: { familyId: family.body.family.id, userId: full.userId } },
     })
     const blocker = await beginDatabaseBlock('LOCK TABLE memories IN ACCESS EXCLUSIVE MODE')
+    const startedRequests: Promise<unknown>[] = []
 
     try {
       const creation = createNote(full.token, family.body.family.id, family.body.child.id, 'Гонка создания')
-      await waitForLockedQuery(blocker)
+      startedRequests.push(creation)
+      const creationPid = await waitForLockedQuery(blocker)
       const revocation = requestThrough(
         lifecycleApp,
         `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
@@ -519,13 +521,15 @@ describe('Memories API', () => {
         'DELETE',
         { expectedVersion: fullMembership.version },
       )
-      await waitForLockedQuery(blocker, 'family_members')
+      startedRequests.push(revocation)
+      await waitForLockedQuery(blocker, undefined, creationPid)
       await blocker.query('COMMIT')
 
       expect((await creation).response.status).toBe(201)
       expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
+      await Promise.allSettled(startedRequests)
     }
   })
 
@@ -609,6 +613,7 @@ describe('Memories API', () => {
       'SELECT id FROM memories WHERE id = $1 FOR UPDATE',
       [created.body.id],
     )
+    const startedRequests: Promise<unknown>[] = []
 
     try {
       const deletion = request(
@@ -619,7 +624,8 @@ describe('Memories API', () => {
         undefined,
         { 'If-Match': '1' },
       )
-      await waitForLockedQuery(blocker)
+      startedRequests.push(deletion)
+      const deletionPid = await waitForLockedQuery(blocker)
       const revocation = requestThrough(
         lifecycleApp,
         `/api/v1/families/${family.body.family.id}/members/${full.userId}`,
@@ -627,13 +633,15 @@ describe('Memories API', () => {
         'DELETE',
         { expectedVersion: fullMembership.version },
       )
-      await waitForLockedQuery(blocker, 'family_members')
+      startedRequests.push(revocation)
+      await waitForLockedQuery(blocker, undefined, deletionPid)
       await blocker.query('COMMIT')
 
       expect((await deletion).response.status).toBe(204)
       expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
+      await Promise.allSettled(startedRequests)
     }
   })
 
@@ -651,6 +659,7 @@ describe('Memories API', () => {
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
       [lockName],
     )
+    const startedRequests: Promise<unknown>[] = []
 
     try {
       const like = request(
@@ -659,7 +668,8 @@ describe('Memories API', () => {
         'PUT',
         { liked: true },
       )
-      await waitForLockedQuery(blocker)
+      startedRequests.push(like)
+      const likePid = await waitForLockedQuery(blocker)
       const revocation = requestThrough(
         lifecycleApp,
         `/api/v1/families/${family.body.family.id}/members/${viewer.userId}`,
@@ -667,13 +677,15 @@ describe('Memories API', () => {
         'DELETE',
         { expectedVersion: viewerMembership.version },
       )
-      await waitForLockedQuery(blocker, 'family_members')
+      startedRequests.push(revocation)
+      await waitForLockedQuery(blocker, undefined, likePid)
       await blocker.query('COMMIT')
 
       expect((await like).response.status).toBe(200)
       expect((await revocation).response.status).toBe(204)
     } finally {
       await rollbackAndClose(blocker)
+      await Promise.allSettled(startedRequests)
     }
   })
 
@@ -1071,24 +1083,25 @@ describe('Memories API', () => {
     return client
   }
 
-  async function waitForLockedQuery(client: Client, queryFragment?: string) {
+  async function waitForLockedQuery(client: Client, queryFragment?: string, excludedPid?: number) {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       // PostgreSQL caches cumulative-statistics snapshots for the duration of a transaction.
       // The blocker deliberately stays in one transaction, so refresh before observing a second
       // connection that may have begun waiting after the previous poll.
       await client.query('SELECT pg_stat_clear_snapshot()')
-      const result = await client.query<{ waiting: boolean }>(
-        `SELECT EXISTS (
-           SELECT 1
-             FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND pid <> pg_backend_pid()
-              AND wait_event_type = 'Lock'
-              AND ($1::text IS NULL OR query ILIKE $1)
-         ) AS waiting`,
-        [queryFragment ? `%${queryFragment}%` : null],
+      const result = await client.query<{ pid: number }>(
+        `SELECT pid
+           FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock'
+            AND ($1::text IS NULL OR query ILIKE $1)
+            AND ($2::int IS NULL OR pid <> $2)
+          ORDER BY pid
+          LIMIT 1`,
+        [queryFragment ? `%${queryFragment}%` : null, excludedPid ?? null],
       )
-      if (result.rows[0]?.waiting) return
+      if (result.rows[0]) return result.rows[0].pid
       await Bun.sleep(50)
     }
     await client.query('SELECT pg_stat_clear_snapshot()')
@@ -1105,7 +1118,7 @@ describe('Memories API', () => {
        ORDER BY pid
     `)
     throw new Error(
-      `Timed out waiting for a blocked PostgreSQL query${queryFragment ? ` containing ${queryFragment}` : ''}: ${JSON.stringify(activity.rows)}`,
+      `Timed out waiting for a blocked PostgreSQL query${queryFragment ? ` containing ${queryFragment}` : ''}${excludedPid ? ` excluding PID ${excludedPid}` : ''}: ${JSON.stringify(activity.rows)}`,
     )
   }
 
