@@ -1,0 +1,50 @@
+metric,unit,conservative,base,upside,formula_or_interpretation
+snapshot_period,months,12,12,12,Month-12 end-state; cohort size is held constant for twelve months for storage calculation
+active_families,families,400,1500,15000,Assumed families active in monthly snapshot
+paid_conversion,percent,4%,8%,12%,Paid families / active families; hypothesis
+paying_families,families,16,120,1800,active_families * paid_conversion
+free_families,families,384,1380,13200,active_families - paying_families
+monthly_subscription_price,RUB/family/month,299,399,499,Test prices only; not validated willingness to pay
+monthly_churn_paid,percent,8%,5%,3%,Monthly paying-family churn assumption
+monthly_new_payers_to_replace_churn,families/month,1.28,6,54,paying_families * monthly_churn_paid; fractional expected value
+CAC_per_new_paying_family,RUB,1500,1000,800,All acquisition spend / new paying families; scenario assumption
+payment_fee_rate,percent,3.5%,3.5%,3.5%,Assumed processor/platform blended fee; verify actual terms
+turnover_tax_rate,percent,6%,6%,6%,Illustrative tax on turnover; confirm entity/jurisdiction/tax regime
+combined_tax_and_fee_rate,percent,9.5%,9.5%,9.5%,payment_fee_rate + turnover_tax_rate; simple approximation
+net_revenue_per_payer,RUB/month,270.595,361.095,451.595,monthly_subscription_price * (1 - combined_tax_and_fee_rate)
+paid_family_variable_service_cost,RUB/family/month,60,70,95,Non-storage egress support and operations per payer; month-12 storage is added separately below
+free_family_variable_service_cost,RUB/family/month,15,18,12,Non-storage egress and support per free family; month-12 storage is added separately below
+month_12_storage_cost_per_family,RUB/family/month,3.84,7.68,14.4,monthly_media_growth_per_active_family * 12 * storage_unit_cost; linear accumulation and all families active for twelve months
+monthly_subscription_net_revenue,RUB/month,4329.52,43331.4,812871,net_revenue_per_payer * paying_families
+paid_family_variable_service_cost_total,RUB/month,1021.44,9321.6,196920,(paid_family_variable_service_cost + month_12_storage_cost_per_family) * paying_families
+free_family_variable_service_cost_total,RUB/month,7234.56,35438.4,348480,(free_family_variable_service_cost + month_12_storage_cost_per_family) * free_families
+monthly_fixed_operating_cost,RUB/month,450000,650000,1200000,Assumed product operations support and compliance baseline; exclude 90-day pilot budget
+monthly_churn_replacement_acquisition_cost,RUB/month,1920,6000,43200,monthly_new_payers_to_replace_churn * CAC_per_new_paying_family
+monthly_operating_result_after_tax_fees_and_costs,RUB/month,-455846.48,-657428.6,-975729,monthly_subscription_net_revenue - paid_family_variable_service_cost_total - free_family_variable_service_cost_total - monthly_fixed_operating_cost - monthly_churn_replacement_acquisition_cost
+contribution_per_payer_before_free_families_and_fixed,RUB/month,206.755,283.415,342.195,net_revenue_per_payer - paid_family_variable_service_cost - month_12_storage_cost_per_family
+CAC_payback_months,months,7.255,3.528,2.338,CAC_per_new_paying_family / contribution_per_payer_before_free_families_and_fixed
+contribution_LTV_simple,RUB,2584.438,5668.3,11406.5,contribution_per_payer_before_free_families_and_fixed / monthly_churn_paid; undiscounted and excludes free-family overhead
+contribution_LTV_to_CAC,ratio,1.723,5.668,14.258,contribution_LTV_simple / CAC_per_new_paying_family; illustrative only
+free_families_per_payer,families,24,11.5,7.333333,free_families / paying_families; affects break-even burden
+replacement_CAC_per_payer_per_month,RUB/month,120,50,24,CAC_per_new_paying_family * monthly_churn_paid
+net_break_even_contribution_per_payer_after_free_load,RUB/month,-365.405,-61.905,124.595,contribution_per_payer_before_free_families_and_fixed - (free_families_per_payer * (free_family_variable_service_cost + month_12_storage_cost_per_family)) - replacement_CAC_per_payer_per_month
+break_even_paid_families,families,,,9632,ceil(monthly_fixed_operating_cost / net_break_even_contribution_per_payer_after_free_load); blank where denominator <=0
+break_even_active_families,families,,,80267,ceil(break_even_paid_families / paid_conversion); blank where denominator <=0
+monthly_media_growth_per_active_family,GB/family/month,0.4,0.8,1.5,Assumed original plus derived media growth; validate in pilot
+storage_unit_cost,RUB/GB-month,0.8,0.8,0.8,Placeholder rate not vendor quote; storage included once in month-12 variable service costs
+new_media_after_12_months,GB,1920,14400,270000,active_families * monthly_media_growth_per_active_family * 12; constant active cohort assumption
+average_stored_media_during_12_months,GB,960,7200,135000,new_media_after_12_months / 2 under linear accumulation
+average_monthly_storage_cost_during_12_months,RUB/month,768,5760,108000,average_stored_media_during_12_months * storage_unit_cost; annual average; context only; not added again
+end_of_month_12_storage_cost_run_rate,RUB/month,1536,11520,216000,new_media_after_12_months * storage_unit_cost; included in month-12 variable service costs above
+90_day_lean_pilot_budget_low,RUB,0,0,0,Lean low cash scenario: own channels interviews permitted posts demo content; excludes salaries legal and infrastructure
+90_day_lean_pilot_budget_high,RUB,25000,25000,25000,Lean upper bound from growth work; not approved spending
+90_day_optional_paid_test_cap,RUB,0,0,75000,Additional cap only after basic demand evidence for 1-2 opt-in placements; not approved spending
+90_day_total_cash_budget_cap,RUB,25000,25000,100000,Lean upper bound plus optional paid test cap; excludes founder/team time legal product development infrastructure and tax
+lean_sensitivity_conversion,percent,,,12%,Higher-conversion case used for founder-led break-even sensitivity; base price churn and variable costs retained
+lean_sensitivity_net_contribution_per_payer,RUB/month,,,45.095,At 12% conversion: paid contribution less free-family service burden and monthly replacement CAC
+base_founder_plus_infrastructure_fixed_cost_low,RUB/month,,,30000,Founder plus infrastructure only; founder time unpaid and legal/support baseline excluded
+base_break_even_payers_founder_plus_infra_low,families,,,666,ceil(fixed cost / lean_sensitivity_net_contribution_per_payer)
+base_break_even_active_families_founder_plus_infra_low,families,,,5550,ceil(base_break_even_payers_founder_plus_infra_low / lean_sensitivity_conversion)
+base_founder_plus_infrastructure_fixed_cost_high,RUB/month,,,80000,Founder plus infrastructure only; founder time unpaid and legal/support baseline excluded
+base_break_even_payers_founder_plus_infra_high,families,,,1774,ceil(fixed cost / lean_sensitivity_net_contribution_per_payer)
+base_break_even_active_families_founder_plus_infra_high,families,,,14784,ceil(base_break_even_payers_founder_plus_infra_high / lean_sensitivity_conversion)
